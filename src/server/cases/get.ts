@@ -65,32 +65,30 @@ export async function getCaseDetail(
 
   const caseRow = caseData as CaseRow;
 
-  // ── 2. Fetch extracted fields ──────────────────────────────────────────────
-   
-  const { data: extractedData } = await (supabase as any)
-    .from("extracted_fields")
-    .select("*")
-    .eq("case_id", caseId)
-    .order("extracted_at", { ascending: true });
-
-  // ── 3. Fetch missing docs ──────────────────────────────────────────────────
-   
-  const { data: missingDocsData } = await (supabase as any)
-    .from("missing_docs")
-    .select("*")
-    .eq("case_id", caseId)
-    .order("requested_at", { ascending: true });
-
-  // ── 4. Fetch last 20 audit log entries for this case ─────────────────────
-  // Sorted descending by created_at (most recent first).
-   
-  const { data: auditData } = await (supabase as any)
-    .from("audit_log")
-    .select("*")
-    .eq("target_type", "case")
-    .eq("target_id", caseId)
-    .order("created_at", { ascending: false })
-    .limit(20);
+  // ── 2-4. Fetch related data in parallel (was 3 sequential round-trips) ───
+  const [
+    { data: extractedData },
+    { data: missingDocsData },
+    { data: auditData },
+  ] = await Promise.all([
+    (supabase as any)
+      .from("extracted_fields")
+      .select("*")
+      .eq("case_id", caseId)
+      .order("extracted_at", { ascending: true }),
+    (supabase as any)
+      .from("missing_docs")
+      .select("*")
+      .eq("case_id", caseId)
+      .order("requested_at", { ascending: true }),
+    (supabase as any)
+      .from("audit_log")
+      .select("*")
+      .eq("target_type", "case")
+      .eq("target_id", caseId)
+      .order("created_at", { ascending: false })
+      .limit(20),
+  ]);
 
   return {
     case: caseRow,

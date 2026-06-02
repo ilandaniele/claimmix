@@ -66,26 +66,26 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     order: "desc",
   });
 
-  // Fetch counts for all statuses (without status filter) for tab badges.
-   
+  // Fetch counts for all statuses in parallel (was 6 sequential round-trips).
   const supabaseAny = supabase as any;
-  const allStatusCounts: { status: CaseStatus | "todos"; count: number }[] = [];
 
-  // Total count
-  const { count: totalCount } = await supabaseAny
-    .from("cases")
-    .select("id", { count: "exact", head: true });
+  const [totalResult, ...statusResults] = await Promise.all([
+    supabaseAny.from("cases").select("id", { count: "exact", head: true }),
+    ...VALID_STATUSES.map((s) =>
+      supabaseAny
+        .from("cases")
+        .select("id", { count: "exact", head: true })
+        .eq("status", s)
+    ),
+  ]);
 
-  allStatusCounts.push({ status: "todos", count: totalCount ?? 0 });
-
-  // Per-status counts
-  for (const s of VALID_STATUSES) {
-    const { count } = await supabaseAny
-      .from("cases")
-      .select("id", { count: "exact", head: true })
-      .eq("status", s);
-    allStatusCounts.push({ status: s, count: count ?? 0 });
-  }
+  const allStatusCounts: { status: CaseStatus | "todos"; count: number }[] = [
+    { status: "todos", count: totalResult.count ?? 0 },
+    ...VALID_STATUSES.map((s, i) => ({
+      status: s,
+      count: statusResults[i].count ?? 0,
+    })),
+  ];
 
   return (
     <DashboardClient

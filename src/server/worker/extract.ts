@@ -46,6 +46,7 @@ import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-class
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/server/cases/fsm";
+import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
 
@@ -669,6 +670,25 @@ export async function runEmailExtractionWorker(
         },
       });
     }
+
+    // ── n2) Post-extraction orchestration — W4 ────────────────────────────────
+    // Decides what confirmation/missing-info/specialist emails to send and
+    // what final status to apply, based on the extraction result.
+    // AC7, AC9, AC10, AC11, AC12.
+    await orchestratePostExtraction(
+      supabase,
+      caseId,
+      tenantId,
+      {
+        extractedClaim,
+        senderEmail,
+        // inReplyToMessageId: not available here; looked up by dispatch from
+        // the raw_messages row if needed. Passed as undefined — dispatch
+        // degrades gracefully (no In-Reply-To header on first send).
+        inReplyToMessageId: undefined,
+      },
+      customerMatches
+    );
 
     // ── o) Extraction complete audit log ──────────────────────────────────────
     await writeAuditLog({

@@ -20,6 +20,10 @@ import { ExtractedFieldsTable } from "./components/ExtractedFieldsTable";
 import { MissingDocsList } from "./components/MissingDocsList";
 import { AuditTimeline } from "./components/AuditTimeline";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
+import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
+import { FieldConfirmationsPanel } from "./_components/FieldConfirmationsPanel";
+import { AttachmentsPanel } from "./_components/AttachmentsPanel";
+import { CoreSyncButton } from "./_components/CoreSyncButton";
 import { formatAge, formatDate } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
@@ -60,6 +64,49 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
   }
 
   const { case: caseRow, extracted_fields, missing_docs, audit_log } = detail;
+
+  // Fetch email-specific data in parallel when case is from the email channel
+  const isEmailCase =
+    (caseRow as any).channel === "email" ||
+    (caseRow as any).channel === "email_sim";
+
+  const [confirmationsResult, attachmentsResult] = await Promise.all([
+    isEmailCase
+      ? (supabase as any)
+          .from("claim_field_confirmations")
+          .select(
+            "id,field_key,proposed_value,conflict_with_value,confidence,status,resolved_at"
+          )
+          .eq("case_id", id)
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] }),
+    isEmailCase
+      ? (supabase as any)
+          .from("claim_attachments")
+          .select("id,filename,content_type,size_bytes,external_url,uploaded_at")
+          .eq("case_id", id)
+          .order("uploaded_at", { ascending: true })
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const confirmations: Array<{
+    id: string;
+    field_key: string;
+    proposed_value: string | null;
+    conflict_with_value: string | null;
+    confidence: number;
+    status: "pending" | "confirmed" | "rejected" | "corrected";
+    resolved_at: string | null;
+  }> = confirmationsResult.data ?? [];
+
+  const attachments: Array<{
+    id: string;
+    filename: string;
+    content_type: string;
+    size_bytes: number;
+    external_url: string;
+    uploaded_at: string | null;
+  }> = attachmentsResult.data ?? [];
 
   const caseNumber = formatCaseNumber(caseRow.id);
 
@@ -205,6 +252,133 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
             </h2>
             <RawEmailAccordion caseId={caseRow.id} />
           </section>
+
+          {/* Email-specific sections — only shown for email channel cases */}
+          {isEmailCase && (
+            <>
+              {/* Section A: Parsed email data */}
+              <section
+                aria-labelledby="parsed-email-heading"
+                className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+              >
+                <h2
+                  id="parsed-email-heading"
+                  className="text-sm font-semibold text-slate-900 mb-4"
+                >
+                  {t("case.detail.parsedEmail")}
+                </h2>
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                  <div>
+                    <dt className="text-slate-500">{t("case.detail.isClaim")}</dt>
+                    <dd className="mt-0.5 font-medium text-slate-900">
+                      {(caseRow as any).is_claim === true
+                        ? "Sí"
+                        : (caseRow as any).is_claim === false
+                        ? "No"
+                        : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">{t("case.detail.severity")}</dt>
+                    <dd className="mt-0.5">
+                      {(caseRow as any).severity ? (
+                        <SeverityBadge severity={(caseRow as any).severity} />
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </dd>
+                  </div>
+                  {(caseRow as any).customer_id && (
+                    <div>
+                      <dt className="text-slate-500">{t("case.detail.customer")}</dt>
+                      <dd className="mt-0.5">
+                        <Link
+                          href={`/clientes/${(caseRow as any).customer_id}`}
+                          className="text-blue-600 hover:underline font-medium text-sm"
+                        >
+                          Ver cliente
+                        </Link>
+                      </dd>
+                    </div>
+                  )}
+                  {(caseRow as any).policy_id && (
+                    <div>
+                      <dt className="text-slate-500">{t("case.detail.policy")}</dt>
+                      <dd className="mt-0.5 font-mono text-slate-800">
+                        {caseRow.policy_number ?? "Vinculada"}
+                      </dd>
+                    </div>
+                  )}
+                  {attachments.length > 0 && (
+                    <div>
+                      <dt className="text-slate-500">{t("case.detail.attachments")}</dt>
+                      <dd className="mt-0.5 font-medium text-slate-900">
+                        {attachments.length} {t("case.detail.attachmentCount")}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </section>
+
+              {/* Section B: Field confirmations panel (AC21) */}
+              <section
+                aria-labelledby="field-confirmations-heading"
+                className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+              >
+                <h2
+                  id="field-confirmations-heading"
+                  className="text-sm font-semibold text-slate-900 mb-4"
+                >
+                  {t("case.detail.fieldConfirmations")}
+                  {confirmations.filter((c) => c.status === "pending").length > 0 && (
+                    <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                      {confirmations.filter((c) => c.status === "pending").length} pendiente(s)
+                    </span>
+                  )}
+                </h2>
+                <FieldConfirmationsPanel
+                  caseId={caseRow.id}
+                  initialConfirmations={confirmations}
+                />
+              </section>
+
+              {/* Section C: Attachments panel (AC23) */}
+              <section
+                aria-labelledby="attachments-heading"
+                className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+              >
+                <h2
+                  id="attachments-heading"
+                  className="text-sm font-semibold text-slate-900 mb-4"
+                >
+                  {t("case.detail.attachments")}
+                </h2>
+                <AttachmentsPanel attachments={attachments} />
+              </section>
+
+              {/* Section D: Core sync action (AC17) */}
+              {((caseRow as any).status === "listo_para_core") && (
+                <section
+                  aria-labelledby="core-sync-heading"
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm"
+                >
+                  <h2
+                    id="core-sync-heading"
+                    className="text-sm font-semibold text-emerald-900 mb-4"
+                  >
+                    {t("case.detail.coreSyncAction")}
+                  </h2>
+                  <p className="text-sm text-emerald-700 mb-4">
+                    Este caso está listo para ser enviado al sistema central. Revisá los campos confirmados antes de proceder.
+                  </p>
+                  <CoreSyncButton
+                    caseId={caseRow.id}
+                    currentStatus={(caseRow as any).status}
+                  />
+                </section>
+              )}
+            </>
+          )}
         </div>
 
         {/* Right column — 1/3 width */}

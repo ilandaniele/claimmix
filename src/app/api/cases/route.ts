@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
 
   // ── 3. Parse and validate query params ────────────────────────────────────
   const searchParams = request.nextUrl.searchParams;
+  // AC18: Extended with email-intake filters (severity, customer_id, policy_id, channel, is_claim)
   const rawQuery = {
     status: searchParams.get("status") ?? undefined,
     type: searchParams.get("type") ?? undefined,
@@ -58,6 +59,12 @@ export async function GET(request: NextRequest) {
     per_page: searchParams.get("per_page") ?? undefined,
     sort: searchParams.get("sort") ?? undefined,
     order: searchParams.get("order") ?? undefined,
+    // Email-intake filters (AC18)
+    severity: searchParams.get("severity") ?? undefined,
+    customer_id: searchParams.get("customer_id") ?? undefined,
+    policy_id: searchParams.get("policy_id") ?? undefined,
+    channel: searchParams.get("channel") ?? undefined,
+    is_claim: searchParams.get("is_claim") ?? undefined,
   };
 
   const parsed = CaseQuerySchema.safeParse(rawQuery);

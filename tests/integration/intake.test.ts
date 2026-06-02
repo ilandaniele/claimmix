@@ -287,15 +287,25 @@ describe("POST /api/intake/simulate", () => {
     expect(res.headers.get("Retry-After")).toBe("30");
   });
 
-  // ── Email intake stub ─────────────────────────────────────────────────────────
-
-  it("POST /api/intake/email returns 501", async () => {
+  // ── Email intake (W2: replaced stub — now requires valid HMAC + payload) ─────
+  // The 501 stub has been replaced by the real Postmark webhook handler.
+  // A call without POSTMARK_WEBHOOK_SECRET configured returns 500 (config error).
+  // A call without a valid HMAC returns 401 INVALID_WEBHOOK_SIGNATURE.
+  // Full happy-path integration tests live in tests/unit/verify-postmark-signature.test.ts
+  // and the route handler unit tests.
+  it("POST /api/intake/email without HMAC returns 500 when secret not configured", async () => {
+    delete process.env.POSTMARK_WEBHOOK_SECRET;
     const { POST: emailPOST } = await import("@/app/api/intake/email/route");
-    const res = await emailPOST();
-    expect(res.status).toBe(501);
+    const req = new Request("http://localhost/api/intake/email", {
+      method: "POST",
+      body: JSON.stringify({ MessageID: "test" }),
+      headers: { "Content-Type": "application/json" },
+    }) as any;
+    const res = await emailPOST(req);
+    // Without POSTMARK_WEBHOOK_SECRET configured, the route returns 500.
+    expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error.code).toBe("NOT_IMPLEMENTED");
-    expect(res.headers.get("Retry-After")).toBe("86400");
+    expect(body.error.code).toBe("INTERNAL_ERROR");
   });
 });
 

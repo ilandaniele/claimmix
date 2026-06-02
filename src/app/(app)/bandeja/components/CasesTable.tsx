@@ -20,10 +20,11 @@ import {
 } from "@tanstack/react-table";
 import type { CaseRow } from "@/server/cases/list";
 import { StatusBadge } from "./StatusBadge";
+import { SeverityBadge } from "./SeverityBadge";
 import { ConfidenceBar } from "./ConfidenceBar";
 import { formatAge } from "@/lib/utils";
 import { t } from "@/lib/i18n";
-import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
+import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 
 /** Map claim type to display label */
 const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
@@ -109,6 +110,18 @@ export function CasesTable({ cases }: CasesTableProps) {
             Hace {formatAge(getValue<string>())}
           </span>
         ),
+      },
+      {
+        accessorKey: "severity",
+        header: t("case.detail.severity"),
+        cell: ({ getValue }) => {
+          const severity = getValue<Severity | null>();
+          return severity ? (
+            <SeverityBadge severity={severity} />
+          ) : (
+            <span className="text-slate-300 text-xs">—</span>
+          );
+        },
       },
       {
         accessorKey: "assigned_to",

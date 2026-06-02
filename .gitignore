@@ -49,3 +49,9 @@ next-env.d.ts
 
 # pnpm
 .pnpm-store/
+
+.vercel
+
+# Local example/test emails with real PII — never commit
+examplemail*.txt
+example-email*.txt

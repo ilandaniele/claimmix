@@ -20,6 +20,29 @@ import {
 
 export { resetRateLimit, clearAllRateLimits };
 
+/**
+ * Simple in-memory rate limiter — thin wrapper around the memory implementation.
+ * Exported for direct use by /api/intake/email without needing the full rateLimit()
+ * async wrapper (which handles Upstash fallback).
+ *
+ * @param identifier - Unique key (e.g. IP address for webhook endpoint)
+ * @param maxRequests - Maximum requests allowed within the window
+ * @param windowMs    - Window duration in milliseconds
+ * @returns { allowed, retryAfter? } where retryAfter is seconds until reset
+ */
+export function checkRateLimit(
+  identifier: string,
+  maxRequests: number,
+  windowMs: number
+): { allowed: boolean; retryAfter?: number } {
+  const result = checkMemory(identifier, maxRequests, windowMs);
+  if (result.allowed) {
+    return { allowed: true };
+  }
+  const retryAfter = Math.ceil(Math.max(0, result.resetAt - Date.now()) / 1000);
+  return { allowed: false, retryAfter };
+}
+
 /** Rate-limit configuration profiles */
 export const RATE_LIMIT_CONFIGS = {
   /** Sign-in: 5 attempts per 10 seconds per IP+email */
@@ -28,6 +51,27 @@ export const RATE_LIMIT_CONFIGS = {
   INTAKE_SIMULATE: { limit: 30, windowMs: 60_000 },
   /** Cases API: 100 per minute per user */
   CASES_API: { limit: 100, windowMs: 60_000 },
+
+  // ── Email-intake rate limits (spec §Security posture) ─────────────────────
+
+  /**
+   * EMAIL_INTAKE_WEBHOOK: 100 requests per 10 seconds per IP.
+   * Protects /api/intake/email from flood attacks without blocking
+   * legitimate Postmark delivery bursts. AC20.
+   */
+  EMAIL_INTAKE_WEBHOOK: { limit: 100, windowMs: 10_000 },
+
+  /**
+   * CONFIRM_FIELD: 30 requests per minute per user.
+   * Protects /api/cases/:id/confirm-field from rapid-fire submissions.
+   */
+  CONFIRM_FIELD: { limit: 30, windowMs: 60_000 },
+
+  /**
+   * SYNC_TO_CORE: 5 requests per minute per user.
+   * Protects /api/cases/:id/sync-to-core from accidental repeated sends.
+   */
+  SYNC_TO_CORE: { limit: 5, windowMs: 60_000 },
 } as const;
 
 export interface RateLimitResult {

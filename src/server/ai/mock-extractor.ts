@@ -1,8 +1,9 @@
 /**
  * Mock AI extractor — deterministic local extraction, no OpenAI calls.
  *
- * AC9: MOCK_AI=true or missing OPENAI_API_KEY → uses this extractor.
- * AC8: Extraction completes in < 500ms deterministically.
+ * AC9:  MOCK_AI=true or missing OPENAI_API_KEY → uses this extractor.
+ * AC8:  Extraction completes in < 500ms deterministically.
+ * W3:   extractEmailClaimMock() added for unit testing the email claim pipeline.
  *
  * Extraction strategy:
  *   - Date: regex for DD/MM/YYYY or YYYY-MM-DD patterns in the text.
@@ -45,26 +46,32 @@ const PLATE_PATTERN = /\b([A-Z]{2,3}\s?\d{3}\s?[A-Z]{0,2})\b/g;
 const POLICE_REPORT_PATTERN =
   /(?:n[úu]mero(?:\s+de)?\s+(?:denuncia|expediente|exp\.?)|bajo\s+el\s+n[úu]mero\s+de\s+denuncia|denuncia\s+(?:n[°º]|nro\.?|número)\s*\.?\s*|denuncia\s*:\s*)\s*([A-Z0-9][A-Z0-9\-\/]{2,})/i;
 
+// ── Field helper ──────────────────────────────────────────────────────────────
+
+/**
+ * Build an ExtractedField with source='ai' (default for mock extractor).
+ * All mock-extracted fields originate from regex/keyword matching, not memory.
+ */
+function field(
+  field_key: string,
+  field_value: string,
+  confidence: number
+): ExtractedField {
+  return { field_key, field_value, confidence, source: "ai" };
+}
+
 // ── Field extractors ───────────────────────────────────────────────────────────
 
 function extractDate(text: string): ExtractedField | null {
   const match = DATE_PATTERN.exec(text);
   if (!match) return null;
-  return {
-    field_key: "incident_date",
-    field_value: match[1] ?? match[0],
-    confidence: 0.85,
-  };
+  return field("incident_date", match[1] ?? match[0], 0.85);
 }
 
 function extractLocation(text: string): ExtractedField | null {
   const match = LOCATION_PATTERN.exec(text);
   if (!match) return null;
-  return {
-    field_key: "incident_location",
-    field_value: match[0].trim().slice(0, 200),
-    confidence: 0.75,
-  };
+  return field("incident_location", match[0].trim().slice(0, 200), 0.75);
 }
 
 function extractPlates(text: string): ExtractedField[] {
@@ -73,24 +80,12 @@ function extractPlates(text: string): ExtractedField[] {
   const unique = [...new Set(matches.map((m) => m[1]?.toUpperCase() ?? ""))];
 
   if (unique[0]) {
-    results.push({
-      field_key: "party_a_plate",
-      field_value: unique[0],
-      confidence: 0.90,
-    });
+    results.push(field("party_a_plate", unique[0], 0.90));
     // Also add as vehicle_plate for non-choque types.
-    results.push({
-      field_key: "vehicle_plate",
-      field_value: unique[0],
-      confidence: 0.90,
-    });
+    results.push(field("vehicle_plate", unique[0], 0.90));
   }
   if (unique[1]) {
-    results.push({
-      field_key: "party_b_plate",
-      field_value: unique[1],
-      confidence: 0.88,
-    });
+    results.push(field("party_b_plate", unique[1], 0.88));
   }
   return results;
 }
@@ -103,21 +98,13 @@ function extractBoolean(
 ): ExtractedField {
   const lower = text.toLowerCase();
   const found = keywords.some((kw) => lower.includes(kw.toLowerCase()));
-  return {
-    field_key: fieldKey,
-    field_value: found ? "si" : "no",
-    confidence: found ? confidence : 0.60,
-  };
+  return field(fieldKey, found ? "si" : "no", found ? confidence : 0.60);
 }
 
 function extractPoliceReportNumber(text: string): ExtractedField | null {
   const match = POLICE_REPORT_PATTERN.exec(text);
   if (!match || !match[1]) return null;
-  return {
-    field_key: "police_report_number",
-    field_value: match[1].trim(),
-    confidence: 0.88,
-  };
+  return field("police_report_number", match[1].trim(), 0.88);
 }
 
 function extractDeclaredDamage(text: string, claimType: ClaimType): ExtractedField {
@@ -135,11 +122,7 @@ function extractDeclaredDamage(text: string, claimType: ClaimType): ExtractedFie
   );
 
   if (hits.length === 0) {
-    return {
-      field_key: "declared_damage",
-      field_value: "No especificado",
-      confidence: 0.50,
-    };
+    return field("declared_damage", "No especificado", 0.50);
   }
 
   // Attempt to extract the sentence containing damage keywords.
@@ -148,11 +131,11 @@ function extractDeclaredDamage(text: string, claimType: ClaimType): ExtractedFie
     hits.some((kw) => s.toLowerCase().includes(kw.toLowerCase()))
   );
 
-  return {
-    field_key: "declared_damage",
-    field_value: (damageSentence ?? hits.join(", ")).trim().slice(0, 300),
-    confidence: Math.min(0.50 + hits.length * 0.10, 0.80),
-  };
+  return field(
+    "declared_damage",
+    (damageSentence ?? hits.join(", ")).trim().slice(0, 300),
+    Math.min(0.50 + hits.length * 0.10, 0.80)
+  );
 }
 
 // ── Per-claim-type extraction ──────────────────────────────────────────────────
@@ -318,10 +301,10 @@ export function runMockExtractor(
 
   // Deduplicate: if the same field_key appears multiple times, keep highest-confidence.
   const fieldMap = new Map<string, ExtractedField>();
-  for (const field of rawFields) {
-    const existing = fieldMap.get(field.field_key);
-    if (!existing || field.confidence > existing.confidence) {
-      fieldMap.set(field.field_key, field);
+  for (const f of rawFields) {
+    const existing = fieldMap.get(f.field_key);
+    if (!existing || f.confidence > existing.confidence) {
+      fieldMap.set(f.field_key, f);
     }
   }
 
@@ -331,5 +314,109 @@ export function runMockExtractor(
     prompt_tokens: 0,
     completion_tokens: 0,
     cost_usd: 0,
+    // Email-intake extensions — defaults for mock extractor
+    is_claim: true,
+    confidence: 0.90,
+    extracted_fields: undefined,
+    field_confidences: {},
+    missing_fields: [],
+    fields_pending_confirmation: [],
+    possible_customer_matches: [],
+    possible_policy_matches: [],
+    severity: null,
+    requires_specialist: false,
+    not_relevant_reason: undefined,
+    summary: "",
+    suggested_reply: "",
+  };
+}
+
+/**
+ * Mock extractor for the email claim extraction pipeline (W3).
+ *
+ * Used when AI_MOCK=true env var is set or when OPENAI_API_KEY is absent.
+ * Accepts overrides to simulate specific test scenarios without real LLM calls.
+ *
+ * Returned output:
+ *   - is_claim: true (default; override to test non-claim path)
+ *   - severity: 'medium' (default)
+ *   - All standard claim fields populated at high confidence (≥ 0.85)
+ *   - missing_fields: [] by default
+ *   - fields_pending_confirmation: [] by default
+ *
+ * AC5:  Set { is_claim: false } to test no_relevante path.
+ * AC8:  Set { missing_fields: ['dni'] } to test missing doc path.
+ * AC11: Set { severity: 'critical', requires_specialist: true } to test escalation.
+ * AC25: Prompt injection tests pass overrides — mock output is not affected by input text.
+ *
+ * @param overrides - Partial<ExtractedClaim> to merge into the default mock output.
+ */
+export function extractEmailClaimMock(
+  overrides?: Partial<ExtractedClaim>
+): ExtractedClaim {
+  const base: ExtractedClaim = {
+    extraction_model: "mock-email-v1",
+    fields: [
+      { field_key: "full_name",            field_value: "Juan Pérez",          confidence: 0.92, source: "ai" },
+      { field_key: "email",                field_value: "juan@example.com",    confidence: 0.95, source: "ai" },
+      { field_key: "phone",                field_value: "+54 11 1234-5678",    confidence: 0.88, source: "ai" },
+      { field_key: "policy_number",        field_value: "POL-1234",            confidence: 0.90, source: "ai" },
+      { field_key: "accident_date",        field_value: "2024-03-15",          confidence: 0.90, source: "ai" },
+      { field_key: "accident_location",    field_value: "Av. Corrientes 1234", confidence: 0.85, source: "ai" },
+      { field_key: "accident_description", field_value: "Choque en intersección", confidence: 0.87, source: "ai" },
+      { field_key: "claim_type",           field_value: "choque",              confidence: 0.88, source: "ai" },
+    ],
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    cost_usd: 0,
+    is_claim: true,
+    confidence: 0.92,
+    extracted_fields: {
+      full_name: "Juan Pérez",
+      email: "juan@example.com",
+      phone: "+54 11 1234-5678",
+      policy_number: "POL-1234",
+      accident_date: "2024-03-15",
+      accident_location: "Av. Corrientes 1234",
+      accident_description: "Choque en intersección",
+      claim_type: "choque",
+    },
+    field_confidences: {
+      full_name: 0.92,
+      email: 0.95,
+      phone: 0.88,
+      policy_number: 0.90,
+      accident_date: 0.90,
+      accident_location: 0.85,
+      accident_description: 0.87,
+      claim_type: 0.88,
+    },
+    missing_fields: [],
+    fields_pending_confirmation: [],
+    possible_customer_matches: [],
+    possible_policy_matches: [],
+    severity: "medium",
+    requires_specialist: false,
+    not_relevant_reason: undefined,
+    summary: "Siniestro de choque reportado por Juan Pérez el 15/03/2024 en Av. Corrientes 1234.",
+    suggested_reply: "",
+  };
+
+  if (!overrides) return base;
+
+  // Deep-merge overrides (shallow merge fields array — caller replaces entirely).
+  return {
+    ...base,
+    ...overrides,
+    // Merge extracted_fields if both provided.
+    extracted_fields:
+      overrides.extracted_fields !== undefined
+        ? overrides.extracted_fields
+        : base.extracted_fields,
+    // Merge field_confidences.
+    field_confidences:
+      overrides.field_confidences !== undefined
+        ? { ...base.field_confidences, ...overrides.field_confidences }
+        : base.field_confidences,
   };
 }

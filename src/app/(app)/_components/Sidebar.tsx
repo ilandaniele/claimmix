@@ -35,6 +35,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: t("nav.bandeja"), href: "/bandeja" },
       { label: t("nav.escalados"), href: "/escalados" },
+      { label: t("nav.clientes"), href: "/clientes" },
     ],
   },
 ];

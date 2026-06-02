@@ -83,3 +83,71 @@ The scaffold already uses Tailwind v4 with `@import "tailwindcss"` in `globals.c
 - `AGENTS.md` and `CLAUDE.md` from create-next-app scaffold: left in place (not removed)
 - `next-env.d.ts`: gitignored per scaffold default (regenerated on next build)
 - Tailwind `@theme inline` block in globals.css: preserved from scaffold
+
+---
+
+# Implementation Notes — ClaimMix W2
+
+## Architecture decisions
+
+### RLS strategy — tenant isolation via current_tenant_id() helper
+The spec offers two patterns: `auth.uid()` (simpler) or `tenant_id = current_tenant_id()` (correct
+multi-tenant isolation). W2 implements the full `current_tenant_id()` helper function that
+queries `public.users WHERE id = auth.uid()` to return the authenticated user's tenant_id.
+This is correct for the multi-tenant-ready schema even if only one tenant exists in MVP.
+
+### Migration file naming — 0001_init, 0002_rls, 0003_seed_required_docs
+Numbered migrations follow Supabase CLI convention. Each file is idempotent where possible
+(IF NOT EXISTS, ON CONFLICT DO NOTHING). RLS and indexes are in separate files for clarity.
+
+### audit_log — append-only enforced at RLS level
+The `audit_log` table has INSERT and SELECT policies but no UPDATE/DELETE policies. This
+means authenticated users cannot modify audit records via the Supabase client. The service
+role client (used only in the worker) can write system events without a tenant context.
+
+### Rate limiting — in-memory LRU, Upstash upgrade path documented
+Default provider is `RATE_LIMIT_PROVIDER=memory` using a module-level Map capped at 10,000
+keys. Cold starts reset the counter — acceptable for MVP (attacker gets at most 5 attempts
+per cold start). The Upstash adapter is in `src/lib/rate-limit/upstash.ts` and activates
+when `RATE_LIMIT_PROVIDER=upstash` + `UPSTASH_REDIS_REST_URL/TOKEN` are set.
+
+### Supabase TypeScript types — explicit casts for `never` issue
+Supabase @supabase/supabase-js v2 TypeScript types resolve `.from("users").select("*")`
+to `never` in some call paths when the column selection inference is ambiguous. Fixed by
+using explicit `as UserRow` casts after the guard. The `audit_log` insert uses `any` cast
+because `Update: never` in the Database type causes `.insert()` to resolve as `never[]`.
+Both are documented with inline comments.
+
+### Login page — `/login` canonical, `/sign-in` redirects
+The canonical login URL is `/login` (matches proxy.ts PUBLIC_PREFIXES and the spec route
+table). The `(auth)/sign-in` route group exists per the plan.md file map and redirects to
+`/login`. This keeps the URL consistent and avoids a duplicate form implementation.
+
+### Auth API routes — `/api/auth/sign-in` and `/api/auth/sign-out` are PUBLIC
+Both auth endpoints are in `PUBLIC_PREFIXES` in proxy.ts. This is intentional — they need
+to be accessible without authentication (sign-in is how you get a session; sign-out needs
+to work even if the session is stale).
+
+## Seed data structure
+- 1 tenant: Seguros del Sur S.A. (UUID: 10000000-...)
+- 2 analysts: Lucía Ramallo (analyst), Carlos Medina (admin)
+- 20 cases: 5 per claim type (choque/robo/granizo/incendio), spread across all 5 statuses
+- Raw email bodies: realistic Argentine Spanish narratives for 10 cases
+- Extracted fields: for listo and escalado cases
+- Missing docs: for all 4 esperando cases (correct doc type per claim type)
+- Audit log: representative sample entries
+
+## Human steps for seed data
+The `supabase/seed.sql` inserts into `auth.users` using `crypt()`. This works with:
+  - `supabase start` (local Docker) + `supabase db reset --local`
+  - A Supabase project with the pgcrypto extension enabled
+For a remote Supabase project without direct auth.users access, use the Supabase Auth UI
+to create users manually, then link them via the SQL in `supabase/seed.sql` section 3.
+
+## Coverage exclusions
+The vitest.config.ts coverage `exclude` list was updated to exclude infrastructure files
+that require Next.js runtime or external services:
+- `src/lib/supabase/{browser,server,service}.ts` — require Next.js cookies() API
+- `src/lib/observability/**` — require Sentry DSN + pino at module init
+- `src/lib/rate-limit/upstash.ts` — requires UPSTASH_* env vars
+These are tested via integration tests (auth.test.ts, rls.test.ts) and E2E (auth.spec.ts).

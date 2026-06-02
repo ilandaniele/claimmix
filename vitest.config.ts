@@ -8,8 +8,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./tests/setup.ts"],
-    include: ["tests/unit/**/*.test.ts", "tests/unit/**/*.test.tsx"],
-    exclude: ["tests/e2e/**", "tests/integration/**", "tests/stress/**"],
+    include: ["tests/unit/**/*.test.ts", "tests/unit/**/*.test.tsx", "tests/integration/**/*.test.ts"],
+    exclude: ["tests/e2e/**", "tests/stress/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "json-summary"],
@@ -41,6 +41,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": resolve(__dirname, "./src"),
+      // Mock 'server-only' in test environment — it's a Next.js-only guard
+      // that prevents server modules from being imported client-side.
+      // In tests, we can safely bypass it.
+      "server-only": resolve(__dirname, "./tests/mocks/server-only.ts"),
     },
   },
 });

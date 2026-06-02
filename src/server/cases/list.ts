@@ -41,10 +41,24 @@ export async function listCases(
   supabase: AnySupabaseClient,
   query: CaseQuery
 ): Promise<CaseListResult> {
-  const { status, type, q, page, per_page, sort, order } = query;
+  const {
+    status,
+    type,
+    q,
+    page,
+    per_page,
+    sort,
+    order,
+    // AC18: New email-intake filters
+    severity,
+    customer_id,
+    policy_id,
+    channel,
+    is_claim,
+  } = query;
 
   // ── Count query ────────────────────────────────────────────────────────────
-   
+
   let countQ = (supabase as any)
     .from("cases")
     .select("id", { count: "exact", head: true });
@@ -58,6 +72,12 @@ export async function listCases(
       `policyholder_name.ilike.%${q}%,policy_number.ilike.%${q}%`
     );
   }
+  // AC18: Email-intake filters
+  if (severity) countQ = countQ.eq("severity", severity);
+  if (customer_id) countQ = countQ.eq("customer_id", customer_id);
+  if (policy_id) countQ = countQ.eq("policy_id", policy_id);
+  if (channel) countQ = countQ.eq("channel", channel);
+  if (is_claim !== undefined) countQ = countQ.eq("is_claim", is_claim);
 
   const { count, error: countError } = await countQ;
   if (countError) {
@@ -67,8 +87,7 @@ export async function listCases(
   const total = count ?? 0;
 
   // ── Data query ─────────────────────────────────────────────────────────────
-  // Omit raw_intake_text (not in schema yet — field belongs to raw_messages).
-  // Select all case columns except large blob fields.
+  // Select core case columns + email-intake columns added in 0005/0006.
   const selectColumns = [
     "id",
     "tenant_id",
@@ -82,9 +101,21 @@ export async function listCases(
     "created_at",
     "updated_at",
     "closed_at",
+    // Email-intake columns (0005, 0006)
+    "severity",
+    "customer_id",
+    "policy_id",
+    "email_message_id",
+    "email_thread_id",
+    "is_claim",
+    "not_relevant_reason",
+    "requires_specialist",
+    "core_external_id",
+    "core_error_message",
+    "core_sent_at",
   ].join(", ");
 
-   
+
   let dataQ = (supabase as any)
     .from("cases")
     .select(selectColumns)
@@ -97,8 +128,14 @@ export async function listCases(
       `policyholder_name.ilike.%${q}%,policy_number.ilike.%${q}%`
     );
   }
+  // AC18: Email-intake filters
+  if (severity) dataQ = dataQ.eq("severity", severity);
+  if (customer_id) dataQ = dataQ.eq("customer_id", customer_id);
+  if (policy_id) dataQ = dataQ.eq("policy_id", policy_id);
+  if (channel) dataQ = dataQ.eq("channel", channel);
+  if (is_claim !== undefined) dataQ = dataQ.eq("is_claim", is_claim);
 
-  // Pagination
+  // Pagination — max 100 per page (enforced in CaseQuerySchema)
   const from = (page - 1) * per_page;
   const to = from + per_page - 1;
   dataQ = dataQ.range(from, to);

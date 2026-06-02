@@ -2,7 +2,7 @@
  * Integration tests for POST /api/intake/simulate.
  *
  * AC4:  202 response with case_id and status=procesando.
- * AC10: Budget exceeded → 402.
+ * LLM10: Budget exceeded → 429 (fail-closed per spec).
  * AC8:  MOCK_AI=true path exercised via worker mock.
  * AC17: Prompt injection in body doesn't escape to case.status.
  */
@@ -249,16 +249,16 @@ describe("POST /api/intake/simulate", () => {
     expect(body.error.code).toBe("VALIDATION_FAILED");
   });
 
-  // ── AC10: Budget guard ───────────────────────────────────────────────────────
+  // ── LLM10: Budget guard (fail-closed: 429) ──────────────────────────────────
 
-  it("returns 402 when monthly budget exceeded", async () => {
+  it("returns 429 when monthly budget exceeded (LLM10: fail-closed)", async () => {
     mockCheckBudget.mockResolvedValue({
       exceeded: true,
       reason: "Presupuesto mensual de IA agotado ($200.00 / $200).",
     });
     const req = makeRequest({ scenario_id: "choque-01" });
     const res = await POST(req);
-    expect(res.status).toBe(402);
+    expect(res.status).toBe(429);
     const body = await res.json();
     expect(body.error.code).toBe("AI_BUDGET_EXCEEDED");
     expect(body.error.message).toBe("Presupuesto de IA agotado para este mes.");

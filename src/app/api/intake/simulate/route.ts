@@ -3,8 +3,8 @@
  *
  * AC4: Returns 202 immediately with {case_id, status: "procesando"}.
  *       Creates case + raw_messages row. Triggers AI extraction worker async.
- * AC10 (budget guard): Returns 402 → spec says 402 but error contract maps to 429
- *       with code AI_BUDGET_EXCEEDED (spec error contract supersedes AC10 description).
+ * LLM10 (budget guard): Returns 429 with code AI_BUDGET_EXCEEDED when any budget
+ *       cap (per-user, per-tenant, or monthly) is exceeded. Fail-closed per spec.
  * AC17: LLM prompt injection contained via XML sentinels in prompt.ts.
  *
  * Rate limit: 30/min per user (INTAKE_SIMULATE config).
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           details: { reason: budgetResult.reason },
         },
       }),
-      { status: 402, headers: { "Content-Type": "application/json" } }
+      { status: 429, headers: { "Content-Type": "application/json" } }
     );
   }
 

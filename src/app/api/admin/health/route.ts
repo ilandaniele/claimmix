@@ -47,6 +47,14 @@ export async function GET() {
   // ── Response ──────────────────────────────────────────────────────────────────
   const status = dbStatus === "connected" ? "ok" : "degraded";
 
+  // env: boolean presence checks — NEVER expose actual key values (AC16)
+  const env = {
+    supabase_url: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+    supabase_anon_key: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    openai_api_key: !!process.env.OPENAI_API_KEY,
+    sentry_dsn: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
+  };
+
   return NextResponse.json(
     {
       status,
@@ -54,6 +62,8 @@ export async function GET() {
       ai: aiMode,
       version: packageJson.version,
       region: process.env.VERCEL_REGION ?? "local",
+      timestamp: new Date().toISOString(),
+      env,
       ...(dbError ? { db_error: dbError } : {}),
     },
     { status: 200 }

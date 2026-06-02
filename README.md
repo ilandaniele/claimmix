@@ -86,6 +86,63 @@ Seed creates:
 | `CONFIDENCE_THRESHOLD` | NO | Min confidence to avoid escalation. Default: `0.70`. |
 | `NEXT_PUBLIC_SITE_URL` | NO | Deployed URL for CORS and absolute links. Default: `http://localhost:3000`. |
 | `LOG_LEVEL` | NO | Structured log level: `debug` / `info` / `warn` / `error`. Default: `info`. |
+| `POSTMARK_WEBHOOK_SECRET` | YES (email intake) | HMAC-SHA256 secret for Postmark inbound webhook signature verification. |
+| `RESEND_API_KEY` | YES (email intake) | Resend API key for outbound email sending. Get from resend.com. |
+| `RESEND_FROM_ADDRESS` | YES (email intake) | Verified Resend sender address (e.g. `claims@claimmix.example.com`). |
+| `CORE_SYNC_MODE` | NO | `mock` (default) or `real`. Controls CoreSyncService. |
+| `EMAIL_REPLY_BASE_URL` | NO | Base URL for links in outbound emails (e.g. `https://app.claimmix.com`). |
+
+---
+
+## Email Claims Intake Workflow
+
+ClaimMix can receive inbound insurance claim emails via Postmark and process them automatically.
+
+### Architecture
+
+```
+Postmark inbound webhook → POST /api/intake/email
+  ↓ HMAC signature verification
+  ↓ Idempotency check (email_message_id)
+  ↓ Thread lookup (In-Reply-To / References headers)
+  ↓ Create/update cases row (channel='email')
+  ↓ Write raw_messages row
+  ↓ Dispatch runExtractionWorker (async, fire-and-forget)
+      ↓ AI extraction (GPT-4o-mini or MOCK_AI=true)
+      ↓ is_claim classifier → severity classifier
+      ↓ Customer/policy matching
+      ↓ Gap analysis → FSM transition
+      ↓ Outbound email via Resend (confirmation_received, missing_information_request, etc.)
+```
+
+### Setup Steps (human actions required)
+
+1. **Postmark**: Sign up at [postmark.com](https://postmarkapp.com), create an Inbound Server, configure the HMAC secret, and point the inbound webhook URL to `https://<your-domain>/api/intake/email`.
+2. **Resend**: Sign up at [resend.com](https://resend.com), verify your sending domain (or use `onboarding@resend.dev` for sandbox), and create an API key.
+3. **Environment variables**: Set in Vercel dashboard (or `.env.local` locally):
+   - `POSTMARK_WEBHOOK_SECRET` — from Postmark inbound server settings
+   - `RESEND_API_KEY` — from Resend dashboard
+   - `RESEND_FROM_ADDRESS` — your verified sender address
+   - `CORE_SYNC_MODE=mock` — keep as mock until a real core system is connected
+4. **DB Migration**: Run `supabase db push` to apply migrations 0005–0008 (email intake tables + seed patterns).
+5. **Preview URL**: For testing inbound webhooks on Vercel preview deployments, re-point the Postmark inbound webhook to the preview URL manually.
+
+### Attachment Expiry Note
+
+Postmark attachment URLs expire after approximately 7 days. The system stores the URL and a content hash + filename for audit purposes. In a follow-up iteration, attachments should be downloaded and re-hosted to Supabase Storage for permanent access.
+
+### FSM Statuses (email intake)
+
+| Status | Description |
+|---|---|
+| `recibido` | Email received, extraction pending or complete |
+| `info_faltante` | Missing required fields — auto-reply sent to claimant |
+| `confirmacion_pendiente` | Medium-confidence field awaiting analyst confirmation |
+| `requiere_especialista` | High severity — specialist must review |
+| `listo_para_core` | All fields confirmed — ready for core system sync |
+| `enviado_a_core` | Successfully sent to the core system |
+| `error_core` | Core sync failed — may retry |
+| `no_relevante` | Email classified as non-claim — no further action |
 
 ---
 

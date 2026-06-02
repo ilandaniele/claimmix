@@ -18,6 +18,11 @@ import { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { FilterTabs } from "./components/FilterTabs";
 import { TypeFilterChips } from "./components/TypeFilterChips";
+import {
+  ChannelFilterChips,
+  SeverityFilterChips,
+  IsClaimFilterChips,
+} from "./components/EmailFilterChips";
 import { CasesTable } from "./components/CasesTable";
 import { SimulateModal } from "./components/SimulateModal";
 import { ToastContainer, useToast } from "./components/Toast";
@@ -29,7 +34,7 @@ import {
 } from "./components/useCasesRealtime";
 import type { CaseRow, CaseListResult } from "@/server/cases/list";
 import type { SimulationScenario } from "@/server/intake/scenarios";
-import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
+import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 import { t } from "@/lib/i18n";
 
 interface PaginationProps {
@@ -89,6 +94,12 @@ export function DashboardClient({
   const activeStatus = (searchParams.get("status") as CaseStatus) || undefined;
   const activeType = (searchParams.get("type") as ClaimType) || undefined;
   const activePage = parseInt(searchParams.get("page") ?? "1", 10) || 1;
+  // Email-intake filters (AC18)
+  const activeChannel =
+    (searchParams.get("channel") as "email" | "email_sim") || undefined;
+  const activeSeverity = (searchParams.get("severity") as Severity) || undefined;
+  const activeIsClaimRaw = searchParams.get("is_claim") as "true" | "false" | null;
+  const activeIsClaim = activeIsClaimRaw ?? undefined;
 
   // Local cases state — starts from server-fetched data, updated by realtime.
   const [cases, setCases] = useState<CaseRow[]>(initialData.data);
@@ -160,6 +171,11 @@ export function DashboardClient({
   const filteredCases = cases.filter((c) => {
     if (activeStatus && c.status !== activeStatus) return false;
     if (activeType && c.claim_type !== activeType) return false;
+    // Email-intake filters (AC18)
+    if (activeChannel && (c as any).channel !== activeChannel) return false;
+    if (activeSeverity && (c as any).severity !== activeSeverity) return false;
+    if (activeIsClaim === "true" && (c as any).is_claim !== true) return false;
+    if (activeIsClaim === "false" && (c as any).is_claim !== false) return false;
     return true;
   });
 
@@ -231,6 +247,13 @@ export function DashboardClient({
         {/* Type filter chips */}
         <div className="border-b border-slate-100 bg-white px-6 py-3">
           <TypeFilterChips activeType={activeType} />
+        </div>
+
+        {/* Email-intake filter chips — channel, severity, is_claim (AC18) */}
+        <div className="border-b border-slate-100 bg-white px-6 py-2 flex flex-wrap items-center gap-x-6 gap-y-2">
+          <ChannelFilterChips activeChannel={activeChannel} />
+          <SeverityFilterChips activeSeverity={activeSeverity} />
+          <IsClaimFilterChips activeIsClaim={activeIsClaim} />
         </div>
 
         {/* Cases table */}

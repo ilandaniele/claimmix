@@ -1,4 +1,43 @@
-# Implementation Notes — ClaimMix W1
+# Implementation Notes — ClaimMix W1–W6
+
+## W6 Completion Notes (Admin Dashboard UI + Tests + CI)
+
+### Admin dashboard extensions (W6)
+
+**Bandeja page** — Extended with email-intake filter chips (channel, severity, is_claim) rendered in `DashboardClient.tsx`. New `EmailFilterChips.tsx` Client Component handles channel/severity/is_claim URL param updates. `CasesTable.tsx` extended with a severity badge column (only shows when severity is set). `bandeja/page.tsx` extended to parse and pass new filter params to `listCases()`.
+
+**Caso detail page** — Extended for email channel cases. Added four new sections:
+- Section A: Parsed email data (is_claim badge, severity badge, customer/policy links)
+- Section B: `FieldConfirmationsPanel.tsx` — lists pending/resolved confirmations; calls `PATCH /api/cases/:id/confirm-field`; optimistic UI updates; no PII in console
+- Section C: `AttachmentsPanel.tsx` — lists claim_attachments; external_url rendered as href only, never logged (AC23)
+- Section D: `CoreSyncButton.tsx` — shown only when status=listo_para_core; calls `POST /api/cases/:id/sync-to-core`
+
+**Customers page** — New `src/app/(app)/clientes/page.tsx` Server Component with search (full_name ILIKE), paginated table, links to detail. New `src/app/(app)/clientes/[id]/page.tsx` with personal info, policies table, cases table. Both RLS-scoped via user-scoped Supabase client.
+
+**Sidebar** — Added "Clientes" nav item pointing to `/clientes`.
+
+### Known limitations / tradeoffs
+
+- `CoreSyncButton` only shows when `status === 'listo_para_core'`. After sync, the page needs a reload to see the new status from the DB — this is acceptable for MVP (fire-and-forget optimistic UI would require Realtime subscription).
+- Postmark attachment URLs expire ~7 days. Stored for audit trail; re-hosting to Supabase Storage is deferred.
+- `CoreSyncService` is mock-only (`CORE_SYNC_MODE=mock`). Real integration deferred.
+- Integration tests (`tests/integration/intake-email.test.ts`, `rls-email.test.ts`, `llm-email-probes.test.ts`) use mocked Supabase clients. True DB isolation tests require `RLS_INTEGRATION_ENABLED=true` + live Supabase.
+
+### AC24 (PII masking) status
+
+PII masking was implemented in W2 (`src/server/email/render.ts` + template files). W6 adds the `llm-email-probes.test.ts` integration test that explicitly verifies DNI and policy_number are masked in rendered templates. AC24 is confirmed tested.
+
+### CI additions
+
+- New `integration-tests-email` job (job 9): runs email integration tests in mock-only mode on every PR.
+- New `license-audit` job (job 10): runs `license-checker-rseidelsohn` to deny GPL/AGPL/LGPL/SSPL packages. `continue-on-error: true` since this is informational.
+- New `.github/workflows/codeql.yml`: CodeQL for JavaScript/TypeScript with `security-extended` queries; runs on push/PR to main + weekly schedule.
+
+### Out of scope (noticed but not changed)
+
+- E2E tests for `/clientes` pages — Playwright E2E requires a live Supabase instance; added to `tests/e2e/` skeleton is deferred.
+- Realtime subscription on caso detail for live status updates — deferred to follow-up.
+- Bulk customer import UI — API endpoint exists (`POST /api/customers`), UI deferred.
 
 ## Architecture decisions
 

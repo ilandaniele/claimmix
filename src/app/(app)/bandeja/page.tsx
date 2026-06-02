@@ -17,7 +17,7 @@ import { createServerClient } from "@/lib/supabase/server";
 import { listCases } from "@/server/cases/list";
 import { SCENARIOS } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
-import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
+import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 
 const VALID_STATUSES: CaseStatus[] = [
   "procesando",
@@ -25,8 +25,18 @@ const VALID_STATUSES: CaseStatus[] = [
   "esperando",
   "escalado",
   "cerrado",
+  "recibido",
+  "info_faltante",
+  "confirmacion_pendiente",
+  "requiere_especialista",
+  "listo_para_core",
+  "enviado_a_core",
+  "error_core",
+  "no_relevante",
 ];
 const VALID_TYPES: ClaimType[] = ["choque", "robo", "granizo", "incendio"];
+const VALID_SEVERITIES: Severity[] = ["low", "medium", "high", "critical"];
+const VALID_CHANNELS = ["email_sim", "email", "whatsapp_sim", "whatsapp"] as const;
 
 interface BandejaPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -38,6 +48,9 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const statusParam = params["status"];
   const typeParam = params["type"];
   const pageParam = params["page"];
+  const channelParam = params["channel"];
+  const severityParam = params["severity"];
+  const isClaimParam = params["is_claim"];
 
   const status =
     typeof statusParam === "string" &&
@@ -54,6 +67,21 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const page =
     typeof pageParam === "string" ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
 
+  const channel =
+    typeof channelParam === "string" &&
+    (VALID_CHANNELS as readonly string[]).includes(channelParam)
+      ? (channelParam as typeof VALID_CHANNELS[number])
+      : undefined;
+
+  const severity =
+    typeof severityParam === "string" &&
+    VALID_SEVERITIES.includes(severityParam as Severity)
+      ? (severityParam as Severity)
+      : undefined;
+
+  const is_claim =
+    isClaimParam === "true" ? true : isClaimParam === "false" ? false : undefined;
+
   const supabase = await createServerClient();
 
   // Fetch cases matching the current filter.
@@ -64,6 +92,10 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     per_page: 20,
     sort: "created_at",
     order: "desc",
+    // Email-intake filters (AC18)
+    channel,
+    severity,
+    is_claim,
   });
 
   // Fetch counts for all statuses in parallel (was 6 sequential round-trips).

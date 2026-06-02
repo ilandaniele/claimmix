@@ -222,3 +222,95 @@ provide per-endpoint isolation without requiring a separate bucket per endpoint.
 W3 achieves 96.75% statement coverage, 83.91% branch coverage — above the 80% threshold.
 The uncovered branches are edge cases in the rate-limit upstash adapter (integration-only)
 and the CSP nonce fallback path.
+
+---
+
+# Implementation Notes — ClaimMix W5
+
+## Architecture decisions
+
+### (app) route group layout — app shell
+All authenticated pages are under `src/app/(app)/` route group. This allows a shared
+layout (`layout.tsx`) that wraps pages with the Sidebar + TopBar without affecting auth
+routes (`/login`) or API routes. The old `src/app/bandeja/page.tsx` placeholder was removed
+and replaced by the full implementation at `src/app/(app)/bandeja/page.tsx`.
+
+### Server Component (page.tsx) + Client Component (DashboardClient.tsx) split
+`page.tsx` is a Server Component that fetches:
+  1. Initial case data (`listCases()`) for the current filter/page
+  2. Per-status counts (6 parallel Supabase queries) for the tab badges
+  3. The `SCENARIOS` array (static import, no DB query)
+
+`DashboardClient.tsx` is a Client Component that handles:
+  - Local state merging realtime updates into the initial server data
+  - FilterTabs, TypeFilterChips, CasesTable, Pagination, SimulateModal, Toast
+  - Supabase Realtime subscription via `useCasesRealtime`
+
+This pattern keeps the initial HTML server-rendered (good for LCP) while supporting
+live updates without full page reloads.
+
+### casesRealtimeUtils.ts — pure utility separation
+The pure functions `mergeCaseUpdate`, `computeStatusCounts`, and `formatCaseNumber` are
+extracted from `useCasesRealtime.ts` into `casesRealtimeUtils.ts`. This allows unit testing
+without importing the Supabase browser client (which requires `NEXT_PUBLIC_SUPABASE_URL`
+at module init time and throws in the test environment). The hook re-exports these for
+backward compatibility.
+
+### URL search params for filter state (deep linking)
+Status filter, type filter, and page number are stored in URL search params via Next.js
+`useSearchParams` and `router.push()`. This enables deep linking and browser back button
+support. The server fetches data based on these params on every navigation.
+
+### Local pagination with realtime merge
+When realtime events arrive, new cases are merged into the local state array. The
+pagination is then applied client-side to the merged array. This avoids a full server
+refetch on every realtime event while keeping the data fresh. The server-fetched initial
+data is synced when the URL params change (navigation triggers page re-render).
+
+### SimulateModal — scenario picker + custom text
+Two modes: scenario picker (dropdown of all 20 SCENARIOS) and custom text textarea + type
+selector. On submit, calls `POST /api/intake/simulate`. The modal itself doesn't handle
+realtime — it just submits and closes; the realtime subscription picks up the new case
+as a Postgres INSERT event within ~1-2 seconds.
+
+### Toast notifications
+The `useToast` hook manages a queue of `ToastMessage` items with auto-dismiss after 4s.
+Each realtime INSERT creates a "Nuevo siniestro recibido: SIN-XXXX-XXXX" toast.
+Each UPDATE with status change creates a "Siniestro SIN-... actualizado: X → Y" toast.
+
+## Server vs Client component split
+
+| Component | Type | Reason |
+|---|---|---|
+| `(app)/layout.tsx` | Server | Fetches user profile, renders shell |
+| `(app)/bandeja/page.tsx` | Server | Fetches initial cases data, counts |
+| `DashboardClient.tsx` | Client | Realtime, state, filters, modal |
+| `Sidebar.tsx` | Client | usePathname for active link styling |
+| `TopBar.tsx` | Client | Sign-out action, router |
+| `FilterTabs.tsx` | Client | useRouter, useSearchParams |
+| `TypeFilterChips.tsx` | Client | useRouter, useSearchParams |
+| `CasesTable.tsx` | Client | @tanstack/react-table, useRouter |
+| `StatusBadge.tsx` | Server | Pure display, no interactivity |
+| `ConfidenceBar.tsx` | Server | Pure display, no interactivity |
+| `SimulateModal.tsx` | Client | useState, fetch |
+| `Toast.tsx` | Client | useState, useEffect |
+
+## Design decisions
+
+- Table design: horizontal rules only (border-b border-slate-100), no vertical borders
+- Status color palette: green-100/800 (listo), yellow-100/800 (esperando), red-100/800 (escalado), slate-100/800 (cerrado), blue-100/800 (procesando)
+- Confidence threshold display: green >= 70%, yellow 50-69%, red < 50%, dash for null
+- Case ID display: last 8 hex chars of UUID formatted as SIN-XXXX-XXXX
+- Sidebar: slate-50 background, 224px width, active link bg-slate-200
+- Top bar: white background, user initials avatar (slate-800 circle), sign-out button
+
+## New tests (W5)
+
+| File | Tests | What it covers |
+|---|---|---|
+| `tests/unit/status-badge.test.tsx` | 15 | All 5 statuses × label + CSS class + data-status |
+| `tests/unit/simulate-modal.test.tsx` | 9 | Render, submit, cancel, 429, 500, network error, validation, loading state |
+| `tests/unit/cases-realtime.test.ts` | 14 | formatCaseNumber, mergeCaseUpdate (insert+update), computeStatusCounts |
+| `tests/e2e/dashboard.spec.ts` | 14 | Redirect guard, API auth, login page, security headers |
+
+Total: 380 unit tests passing (up from 342 before W5).

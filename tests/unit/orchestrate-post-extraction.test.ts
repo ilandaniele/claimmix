@@ -730,3 +730,140 @@ describe("orchestratePostExtraction — confirmation_received (AC12)", () => {
     expect(dataStr).not.toMatch(/\b\d{7,8}\b/); // no raw DNI
   });
 });
+
+// ── Test suite: checkConfirmationAlreadySent error branches ───────────────────
+// These tests cover lines 357-358 (DB error) and 363 (catch block) in orchestrate.ts
+// by providing a Supabase mock that returns an error or throws for outbound_messages.
+
+describe("orchestratePostExtraction — checkConfirmationAlreadySent error paths", () => {
+  it("sends confirmation_received when outbound_messages DB check returns error (fail open)", async () => {
+    // When the idempotency check errors, we fail open and send the email
+    const claim = extractEmailClaimMock();
+
+    const supabase = {
+      from: (table: string) => {
+        if (table === "outbound_messages") {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  limit: () =>
+                    Promise.resolve({ data: null, error: { code: "PGRST001" } }),
+                }),
+              }),
+            }),
+          };
+        }
+        // No other tables needed for this path
+        return {
+          update: () => ({ eq: () => Promise.resolve({ error: null }) }),
+          upsert: () => Promise.resolve({ error: null }),
+          select: () => ({ eq: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }) }) }),
+        };
+      },
+    };
+
+    await orchestratePostExtraction(
+      supabase as any,
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    // Fail open: confirmation_received should still be dispatched
+    const confirmationCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
+      (call) => call[0].template === "confirmation_received"
+    );
+    expect(confirmationCall).toBeDefined();
+  });
+
+  it("sends confirmation_received when outbound_messages check throws exception (catch branch)", async () => {
+    const claim = extractEmailClaimMock();
+
+    const supabase = {
+      from: (table: string) => {
+        if (table === "outbound_messages") {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  limit: () => Promise.reject(new Error("DB connection lost")),
+                }),
+              }),
+            }),
+          };
+        }
+        return {
+          update: () => ({ eq: () => Promise.resolve({ error: null }) }),
+          upsert: () => Promise.resolve({ error: null }),
+          select: () => ({ eq: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }) }) }),
+        };
+      },
+    };
+
+    // Should not throw — catch block returns false (fail open)
+    await expect(
+      orchestratePostExtraction(
+        supabase as any,
+        CASE_ID,
+        TENANT_ID,
+        { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+        NO_MATCHES
+      )
+    ).resolves.toBeUndefined();
+
+    // Fail open: confirmation_received dispatched
+    const confirmationCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
+      (call) => call[0].template === "confirmation_received"
+    );
+    expect(confirmationCall).toBeDefined();
+  });
+});
+
+// ── Test suite: getStoredFieldValue non-full_name branch ──────────────────────
+// Line 387: when fieldKey is NOT "full_name", getStoredFieldValue returns "".
+// This is exercised when a conflict is detected on a non-full_name field (e.g. "email").
+
+describe("orchestratePostExtraction — getStoredFieldValue non-full_name field", () => {
+  it("handles email field conflict without conflict_with_value (non-full_name → '')", async () => {
+    const claim = extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "email"),
+        { field_key: "email", field_value: "other@example.com", confidence: 0.92, source: "ai" as const },
+      ],
+    });
+
+    const conflictOnEmail: CustomerMatch = {
+      customerId: "cust-004",
+      matchType: "email",
+      confidence: 0.75,
+      customerName: "Ana García",
+      conflictsWithExtracted: ["email"], // non-full_name conflict
+    };
+
+    const confirmationUpsertSpy = vi.fn().mockResolvedValue({ error: null });
+    const supabase = buildMockSupabase({ confirmationUpsertSpy });
+
+    await orchestratePostExtraction(
+      supabase as any,
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [conflictOnEmail]
+    );
+
+    // Confirm that a confirmation row was upserted for the email field
+    const emailConflictUpsert = confirmationUpsertSpy.mock.calls.find((call) => {
+      const data = call[0];
+      const row = Array.isArray(data) ? data[0] : data;
+      return row?.field_key === "email";
+    });
+    expect(emailConflictUpsert).toBeDefined();
+    // conflict_with_value should be "" for non-full_name fields (getStoredFieldValue fallback)
+    const row = Array.isArray(emailConflictUpsert?.[0])
+      ? emailConflictUpsert[0][0]
+      : emailConflictUpsert?.[0];
+    expect(row?.conflict_with_value ?? "").toBe("");
+  });
+});

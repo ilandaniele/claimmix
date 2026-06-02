@@ -10,21 +10,6 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =============================================================================
--- Helper function: current_tenant_id()
--- Returns the tenant_id for the currently authenticated user.
--- Used by RLS policies to scope all queries to the user's tenant.
--- =============================================================================
-CREATE OR REPLACE FUNCTION public.current_tenant_id()
-RETURNS uuid
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT tenant_id FROM public.users WHERE id = auth.uid() LIMIT 1;
-$$;
-
--- =============================================================================
 -- tenants
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS public.tenants (
@@ -46,6 +31,22 @@ CREATE TABLE IF NOT EXISTS public.users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_tenant_role ON public.users(tenant_id, role);
+
+-- =============================================================================
+-- Helper function: current_tenant_id()
+-- Returns the tenant_id for the currently authenticated user.
+-- Must be defined AFTER public.users exists (SQL functions validate at creation).
+-- Used by RLS policies in 0002_rls.sql.
+-- =============================================================================
+CREATE OR REPLACE FUNCTION public.current_tenant_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT tenant_id FROM public.users WHERE id = auth.uid() LIMIT 1;
+$$;
 
 -- =============================================================================
 -- cases

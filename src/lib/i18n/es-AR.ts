@@ -39,6 +39,15 @@ export const esAR = {
   "status.esperando": "Esperando",
   "status.escalado": "Escalado",
   "status.cerrado": "Cerrado",
+  // Email-intake statuses (new in email-claims-intake workflow)
+  "status.recibido": "Recibido",
+  "status.info_faltante": "Info faltante",
+  "status.confirmacion_pendiente": "Confirmación pendiente",
+  "status.requiere_especialista": "Requiere especialista",
+  "status.listo_para_core": "Listo para Core",
+  "status.enviado_a_core": "Enviado a Core",
+  "status.error_core": "Error Core",
+  "status.no_relevante": "No relevante",
 
   // ── Claim type labels ──────────────────────────────────────────────────────
   "type.todos": "Todos",

@@ -71,17 +71,117 @@ export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
 
 /** Common event type constants — prevents typo drift across the codebase. */
 export const AuditEvent = {
+  // ── Authentication ─────────────────────────────────────────────────────────
   AUTH_SUCCESS: "auth.success",
   AUTH_FAILURE: "auth.failure",
   AUTH_SIGN_OUT: "auth.sign_out",
   AUTH_RATE_LIMITED: "auth.rate_limited",
+
+  // ── Case lifecycle ─────────────────────────────────────────────────────────
   CASE_CREATED: "case.created",
   CASE_STATUS_CHANGED: "case.status_changed",
   CASE_CLOSED: "case.closed",
   CASE_ASSIGNED: "case.assigned",
+
+  // ── AI extraction ──────────────────────────────────────────────────────────
   AI_EXTRACTED: "ai.extracted",
   AI_BUDGET_EXCEEDED: "ai.budget_exceeded",
+
+  // ── Document / gap analysis ────────────────────────────────────────────────
   DOC_RECEIVED: "doc.received",
+
+  // ── Email intake (new in W1 — email claims intake workflow) ───────────────
+
+  /**
+   * EMAIL_RECEIVED: inbound email webhook processed successfully.
+   * Emitted when a new email creates a case or appends to an existing thread.
+   * AC1, AC4.
+   */
+  EMAIL_RECEIVED: "email.received",
+
+  /**
+   * WEBHOOK_REJECTED: HMAC signature verification failed.
+   * Emitted before any DB write — no PII in payload.
+   * AC2.
+   */
+  WEBHOOK_REJECTED: "email.webhook_rejected",
+
+  /**
+   * EMAIL_DEDUPLICATED: duplicate MessageID detected; request idempotently ignored.
+   * Emitted when a case already exists for this (tenant_id, email_message_id) pair.
+   * AC3.
+   */
+  EMAIL_DEDUPLICATED: "email.deduplicated",
+
+  /**
+   * EXTRACTION_STARTED: AI extraction worker has been dispatched.
+   * Payload: { case_id, message_id } — no body text.
+   * AC1.
+   */
+  EXTRACTION_STARTED: "ai.extraction_started",
+
+  /**
+   * EXTRACTION_COMPLETE: AI extraction worker finished successfully.
+   * Payload: { case_id, is_claim, severity, missing_fields[] }.
+   * AC1, AC5, AC6.
+   */
+  EXTRACTION_COMPLETE: "ai.extraction_complete",
+
+  /**
+   * CONFIRMATION_REQUESTED: analyst must confirm a medium-confidence or conflicting field.
+   * Payload: { case_id, field_key } — value NOT included (PII).
+   * AC7, AC9.
+   */
+  CONFIRMATION_REQUESTED: "claim.confirmation_requested",
+
+  /**
+   * MISSING_INFO_REQUESTED: auto-reply sent listing missing required fields.
+   * Payload: { case_id, missing_fields[] }.
+   * AC10.
+   */
+  MISSING_INFO_REQUESTED: "claim.missing_info_requested",
+
+  /**
+   * SPECIALIST_REQUIRED: case escalated to specialist due to high severity.
+   * Payload: { case_id, severity }.
+   * AC11.
+   */
+  SPECIALIST_REQUIRED: "claim.specialist_required",
+
+  /**
+   * FIELD_CONFIRMED: analyst confirmed or corrected an extracted field.
+   * Payload: { case_id, field_key, action, old_value_redacted, new_value_redacted }.
+   * AC21.
+   */
+  FIELD_CONFIRMED: "claim.field_confirmed",
+
+  /**
+   * FIELD_REJECTED: analyst rejected a proposed field value.
+   * Payload: { case_id, field_key }.
+   * AC21.
+   */
+  FIELD_REJECTED: "claim.field_rejected",
+
+  /**
+   * MEMORY_APPLIED: claim_memory hints injected into extraction prompt.
+   * Payload: { case_id, sender_email_redacted, fields_applied[] }.
+   * AC13.
+   */
+  MEMORY_APPLIED: "memory.applied",
+
+  /**
+   * CORE_SYNC_SUCCESS: CoreSyncService.send() completed successfully.
+   * Payload: { case_id, core_external_id }.
+   * AC17.
+   */
+  CORE_SYNC_SUCCESS: "core.sync_success",
+
+  /**
+   * CORE_SYNC_FAILED: CoreSyncService.send() returned an error.
+   * Payload: { case_id, error_code }.
+   * AC17.
+   */
+  CORE_SYNC_FAILED: "core.sync_failed",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

@@ -45,26 +45,32 @@ const PLATE_PATTERN = /\b([A-Z]{2,3}\s?\d{3}\s?[A-Z]{0,2})\b/g;
 const POLICE_REPORT_PATTERN =
   /(?:n[úu]mero(?:\s+de)?\s+(?:denuncia|expediente|exp\.?)|bajo\s+el\s+n[úu]mero\s+de\s+denuncia|denuncia\s+(?:n[°º]|nro\.?|número)\s*\.?\s*|denuncia\s*:\s*)\s*([A-Z0-9][A-Z0-9\-\/]{2,})/i;
 
+// ── Field helper ──────────────────────────────────────────────────────────────
+
+/**
+ * Build an ExtractedField with source='ai' (default for mock extractor).
+ * All mock-extracted fields originate from regex/keyword matching, not memory.
+ */
+function field(
+  field_key: string,
+  field_value: string,
+  confidence: number
+): ExtractedField {
+  return { field_key, field_value, confidence, source: "ai" };
+}
+
 // ── Field extractors ───────────────────────────────────────────────────────────
 
 function extractDate(text: string): ExtractedField | null {
   const match = DATE_PATTERN.exec(text);
   if (!match) return null;
-  return {
-    field_key: "incident_date",
-    field_value: match[1] ?? match[0],
-    confidence: 0.85,
-  };
+  return field("incident_date", match[1] ?? match[0], 0.85);
 }
 
 function extractLocation(text: string): ExtractedField | null {
   const match = LOCATION_PATTERN.exec(text);
   if (!match) return null;
-  return {
-    field_key: "incident_location",
-    field_value: match[0].trim().slice(0, 200),
-    confidence: 0.75,
-  };
+  return field("incident_location", match[0].trim().slice(0, 200), 0.75);
 }
 
 function extractPlates(text: string): ExtractedField[] {
@@ -73,24 +79,12 @@ function extractPlates(text: string): ExtractedField[] {
   const unique = [...new Set(matches.map((m) => m[1]?.toUpperCase() ?? ""))];
 
   if (unique[0]) {
-    results.push({
-      field_key: "party_a_plate",
-      field_value: unique[0],
-      confidence: 0.90,
-    });
+    results.push(field("party_a_plate", unique[0], 0.90));
     // Also add as vehicle_plate for non-choque types.
-    results.push({
-      field_key: "vehicle_plate",
-      field_value: unique[0],
-      confidence: 0.90,
-    });
+    results.push(field("vehicle_plate", unique[0], 0.90));
   }
   if (unique[1]) {
-    results.push({
-      field_key: "party_b_plate",
-      field_value: unique[1],
-      confidence: 0.88,
-    });
+    results.push(field("party_b_plate", unique[1], 0.88));
   }
   return results;
 }
@@ -103,21 +97,13 @@ function extractBoolean(
 ): ExtractedField {
   const lower = text.toLowerCase();
   const found = keywords.some((kw) => lower.includes(kw.toLowerCase()));
-  return {
-    field_key: fieldKey,
-    field_value: found ? "si" : "no",
-    confidence: found ? confidence : 0.60,
-  };
+  return field(fieldKey, found ? "si" : "no", found ? confidence : 0.60);
 }
 
 function extractPoliceReportNumber(text: string): ExtractedField | null {
   const match = POLICE_REPORT_PATTERN.exec(text);
   if (!match || !match[1]) return null;
-  return {
-    field_key: "police_report_number",
-    field_value: match[1].trim(),
-    confidence: 0.88,
-  };
+  return field("police_report_number", match[1].trim(), 0.88);
 }
 
 function extractDeclaredDamage(text: string, claimType: ClaimType): ExtractedField {
@@ -135,11 +121,7 @@ function extractDeclaredDamage(text: string, claimType: ClaimType): ExtractedFie
   );
 
   if (hits.length === 0) {
-    return {
-      field_key: "declared_damage",
-      field_value: "No especificado",
-      confidence: 0.50,
-    };
+    return field("declared_damage", "No especificado", 0.50);
   }
 
   // Attempt to extract the sentence containing damage keywords.
@@ -148,11 +130,11 @@ function extractDeclaredDamage(text: string, claimType: ClaimType): ExtractedFie
     hits.some((kw) => s.toLowerCase().includes(kw.toLowerCase()))
   );
 
-  return {
-    field_key: "declared_damage",
-    field_value: (damageSentence ?? hits.join(", ")).trim().slice(0, 300),
-    confidence: Math.min(0.50 + hits.length * 0.10, 0.80),
-  };
+  return field(
+    "declared_damage",
+    (damageSentence ?? hits.join(", ")).trim().slice(0, 300),
+    Math.min(0.50 + hits.length * 0.10, 0.80)
+  );
 }
 
 // ── Per-claim-type extraction ──────────────────────────────────────────────────
@@ -331,5 +313,19 @@ export function runMockExtractor(
     prompt_tokens: 0,
     completion_tokens: 0,
     cost_usd: 0,
+    // Email-intake extensions — defaults for mock extractor
+    is_claim: true,
+    confidence: 0.90,
+    extracted_fields: undefined,
+    field_confidences: {},
+    missing_fields: [],
+    fields_pending_confirmation: [],
+    possible_customer_matches: [],
+    possible_policy_matches: [],
+    severity: null,
+    requires_specialist: false,
+    not_relevant_reason: undefined,
+    summary: "",
+    suggested_reply: "",
   };
 }

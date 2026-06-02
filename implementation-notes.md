@@ -151,3 +151,74 @@ that require Next.js runtime or external services:
 - `src/lib/observability/**` — require Sentry DSN + pino at module init
 - `src/lib/rate-limit/upstash.ts` — requires UPSTASH_* env vars
 These are tested via integration tests (auth.test.ts, rls.test.ts) and E2E (auth.spec.ts).
+
+---
+
+# Implementation Notes — ClaimMix W3
+
+## Architecture decisions
+
+### Cases API route structure — `export.csv` as a route segment
+The spec and plan.md use `export.csv` as the URL (per Next.js App Router convention where the
+file at `src/app/api/cases/export.csv/route.ts` maps to `GET /api/cases/export.csv`).
+This is a static path segment, not dynamic, so it does not conflict with `[id]`.
+
+### Supabase client typing — `any` cast for query builders
+`@supabase/supabase-js` v2's TypeScript types use a complex generic signature
+(`SupabaseClient<Database, "public", ...>`) that doesn't match the return type of
+`createServerClient()` from `@supabase/ssr`. Rather than fight the type system with
+complex generic wiring, the query builder functions accept `any` for the Supabase client
+parameter. The correctness is enforced by: (a) all callers pass the user-scoped client
+(never service-role), and (b) RLS at the DB level enforces tenant isolation regardless.
+
+### FSM — pure function, no external dependencies
+`src/server/cases/fsm.ts` is a pure function module with no Supabase or network calls.
+It has 100% unit test coverage. The FSM prevents both invalid status transitions and
+LLM08 (AI cannot directly write `cerrado` status — it can only write `listo`, `esperando`,
+`escalado` from `procesando`).
+
+### CSV export — RFC 4180 compliant, formula-injection safe
+`src/lib/csv/safe-encode.ts` prefixes cells starting with `=`, `+`, `-`, `@` with a
+single quote per OWASP CSV injection mitigation. CRLF line endings are used per RFC 4180.
+Max 1000 rows per export is enforced in `listCasesForExport` via `.range(0, 999)`.
+
+### IDOR pattern — consistent 404 for all access-control failures
+Every case-scoped endpoint returns 404 (not 403) when a case is not found OR belongs to
+another tenant. This prevents information disclosure via status code enumeration. The pattern
+is: RLS returns no rows → application returns 404 → client cannot distinguish "not found"
+from "wrong tenant". This is consistent with AC10.
+
+### Ownership check for PATCH — analyst/admin split
+Analysts can only PATCH cases where `assigned_to = auth.uid()`. Admins can PATCH any case
+in their tenant. Wrong-tenant cases are caught by RLS before the ownership check runs.
+In both cases, the error is 404 (not 403) to prevent tenant enumeration.
+
+### Rate limiting — CASES_API bucket (100/min/user)
+All cases endpoints (list, get, patch, export) share the `CASES_API` rate limit bucket
+(100 requests/minute per user). The rate limit key uses `user.id` + endpoint name to
+provide per-endpoint isolation without requiring a separate bucket per endpoint.
+
+## New files (W3)
+
+| File | Purpose |
+|---|---|
+| `src/server/cases/fsm.ts` | FSM: valid transitions map + validation functions |
+| `src/server/cases/list.ts` | Supabase query builders for list + export |
+| `src/server/cases/get.ts` | Supabase query builder for case detail |
+| `src/server/cases/patch.ts` | Case patch with FSM + ownership + audit log |
+| `src/lib/csv/safe-encode.ts` | CSV generation with formula-injection guard |
+| `src/app/api/cases/route.ts` | GET /api/cases |
+| `src/app/api/cases/[id]/route.ts` | GET + PATCH /api/cases/:id |
+| `src/app/api/cases/export.csv/route.ts` | GET /api/cases/export.csv |
+| `tests/unit/fsm.test.ts` | 36 FSM unit tests (all valid + invalid transitions) |
+| `tests/unit/csv-safe-encode.test.ts` | 25 CSV unit tests (injection guard + RFC 4180) |
+| `tests/unit/cases-list.test.ts` | 8 list query builder unit tests |
+| `tests/unit/cases-get.test.ts` | 6 get query builder unit tests |
+| `tests/unit/cases-patch.test.ts` | 10 patch logic unit tests |
+| `tests/integration/cases.test.ts` | Integration tests (skipped without INTEGRATION_ENABLED) |
+
+## Coverage
+
+W3 achieves 96.75% statement coverage, 83.91% branch coverage — above the 80% threshold.
+The uncovered branches are edge cases in the rate-limit upstash adapter (integration-only)
+and the CSP nonce fallback path.

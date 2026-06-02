@@ -1,36 +1,203 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ClaimMix
 
-## Getting Started
+## Que es ClaimMix / What is ClaimMix
 
-First, run the development server:
+**Espanol:** ClaimMix es un sistema de gestion de siniestros FNOL (First Notice of Loss) potenciado por IA, disenado para companias aseguradoras de Latinoamerica. Permite a los analistas recibir, clasificar y resolver avisos de siniestros de forma automatica: el sistema extrae datos estructurados (fecha, lugar, partes involucradas, danos declarados) de emails o WhatsApp usando GPT-4o-mini, detecta documentacion faltante segun el tipo de siniestro (choque, robo, granizo, incendio) y enruta los casos de baja confianza al equipo de escalados para revision humana — todo en menos de 60 segundos desde el primer aviso.
+
+**English:** ClaimMix is an AI-powered First Notice of Loss (FNOL) claims management system for Latin American insurance companies. Analysts receive a fully-classified, structured case — claim type, involved parties, damages, missing-document checklist, confidence scores — in under 60 seconds of a simulated or real inbound claim notice. The system uses GPT-4o-mini for extraction, enforces a finite-state machine for case lifecycle, and provides a real-time analyst dashboard in Argentine Spanish (es-AR).
+
+---
+
+## Quick Start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+# 1. Clone the repository
+git clone https://github.com/ilandaniele/claimmix.git
+cd claimmix
+
+# 2. Install dependencies
+pnpm install
+
+# 3. Set up environment variables
+cp .env.example .env.local
+# Edit .env.local — at minimum set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
+# Set MOCK_AI=true to skip OpenAI calls (recommended for local development)
+
+# 4. Start the development server
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) and sign in with the seed credentials (after running migrations + seed).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Running Migrations
 
-## Learn More
+```bash
+# Prerequisites: Supabase CLI installed (https://supabase.com/docs/guides/cli)
+# and a Supabase project created (or local Docker via `supabase start`)
 
-To learn more about Next.js, take a look at the following resources:
+# Apply migrations to a local Supabase instance
+supabase db push --local
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+# Apply migrations to a remote Supabase project
+supabase db push
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Migrations are in `supabase/migrations/`:
+| File | Purpose |
+|---|---|
+| `0001_init.sql` | All tables + indexes |
+| `0002_rls.sql` | Row Level Security policies |
+| `0003_seed_required_docs.sql` | Required docs config per claim type |
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Running Seed Data
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+# Local only — resets the local DB and applies seed data
+supabase db reset --local
+```
+
+Seed creates:
+- 1 tenant: Seguros del Sur S.A.
+- 2 analysts: Lucia Ramallo (analyst, lucia@dev.local / DevPass1234!) and Carlos Medina (admin, carlos@dev.local / DevPass1234!)
+- 20 sample cases across all statuses and claim types
+
+---
+
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | YES | Supabase project URL (from Project Settings → API) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | YES | Supabase anon key (public, safe for browser) |
+| `SUPABASE_SERVICE_ROLE_KEY` | YES (prod) | Service role key — server-only, bypasses RLS. Used for admin user creation and AI worker. |
+| `OPENAI_API_KEY` | NO | OpenAI API key. Leave empty to use mock AI. |
+| `MOCK_AI` | NO | Set to `true` to use the deterministic mock extractor (no OpenAI calls). Default: `false`. |
+| `SENTRY_DSN` | NO | Sentry DSN for server-side error tracking. |
+| `NEXT_PUBLIC_SENTRY_DSN` | NO | Sentry DSN for client-side error tracking. |
+| `UPSTASH_REDIS_REST_URL` | NO | Upstash Redis URL for durable rate limiting. Falls back to in-memory LRU. |
+| `UPSTASH_REDIS_REST_TOKEN` | NO | Upstash Redis token. |
+| `RATE_LIMIT_PROVIDER` | NO | `memory` (default) or `upstash`. |
+| `AI_USER_DAILY_TOKEN_CAP` | NO | Per-user daily token cap. Default: `100000`. |
+| `AI_TENANT_DAILY_TOKEN_CAP` | NO | Per-tenant daily token cap. Default: `5000000`. |
+| `CONFIDENCE_THRESHOLD` | NO | Min confidence to avoid escalation. Default: `0.70`. |
+| `NEXT_PUBLIC_SITE_URL` | NO | Deployed URL for CORS and absolute links. Default: `http://localhost:3000`. |
+| `LOG_LEVEL` | NO | Structured log level: `debug` / `info` / `warn` / `error`. Default: `info`. |
+
+---
+
+## Architecture
+
+```
+                  Browser (React 19 + Tailwind)
+                           |
+            Next.js 16 App Router (Node 22)
+            ┌──────────────────────────────────┐
+            │  proxy.ts    (CSP nonce, HSTS)   │
+            │  /app/(app)/ (authenticated UI)   │
+            │    /bandeja  /casos/[id]          │
+            │    /metricas /analisis            │
+            │    /admin/users /configuracion    │
+            │  /app/api/   (Route Handlers)    │
+            │    /auth/sign-in /sign-out /me    │
+            │    /cases /cases/[id]             │
+            │    /intake/simulate               │
+            │    /admin/users /admin/health     │
+            │    /metricas                      │
+            │  /server/worker/extract.ts        │
+            │    (async AI extraction worker)   │
+            └──────────────────────────────────┘
+                    |              |
+           Supabase (Postgres 17)  OpenAI API
+           - Auth (email+pw)       gpt-4o-mini
+           - RLS on all tables     (or MOCK_AI=true)
+           - Realtime channels
+           - Storage (phase 2)
+
+Data flow:
+  Analyst → "Simular email" → POST /api/intake/simulate (202)
+    → case row (status=procesando) → Supabase Realtime → dashboard
+    → worker/extract.ts (async) → OpenAI extraction
+    → extracted_fields + missing_docs + audit_log
+    → case status: listo | esperando | escalado
+    → Supabase Realtime → dashboard update (< 2s)
+```
+
+---
+
+## Running Tests
+
+```bash
+# Unit tests (no external services needed)
+pnpm test:unit
+
+# Unit tests with coverage
+pnpm test:unit:coverage
+
+# Integration tests (requires INTEGRATION_ENABLED=true and Supabase credentials)
+INTEGRATION_ENABLED=true pnpm test:integration
+
+# E2E tests (requires a running dev server + Supabase)
+pnpm test:e2e
+
+# E2E with Playwright UI
+pnpm test:e2e:ui
+```
+
+---
+
+## Human Setup Steps (project owner — one-time)
+
+1. **Create Supabase project** at [supabase.com](https://supabase.com). Copy `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` into Vercel env vars.
+2. **Run migrations**: `supabase db push` against the production project.
+3. **Create OpenAI API key** at [platform.openai.com](https://platform.openai.com) → API Keys. Set `OPENAI_API_KEY` in Vercel. Sign the Zero Data Retention addendum if available for production insurer use.
+4. **Create Sentry project** at [sentry.io](https://sentry.io). Set `SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_DSN` in Vercel.
+5. **Create first admin user**: sign up via the app's `/login` page (or Supabase Auth UI), then run:
+   ```sql
+   UPDATE public.users SET role = 'admin' WHERE id = '<your-auth-uid>';
+   ```
+6. **Deploy**: connect the GitHub repo to Vercel. Set all required env vars in the Vercel dashboard. Vercel auto-deploys on push to `main`.
+
+---
+
+## Deploy Checklist
+
+- [ ] Supabase project created and migrations applied
+- [ ] All required env vars set in Vercel (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
+- [ ] MOCK_AI=false in production (set OPENAI_API_KEY instead)
+- [ ] First admin user created and role set to 'admin'
+- [ ] Sentry project configured (optional but recommended)
+- [ ] UptimeRobot ping configured for GET /api/admin/health (prevents Supabase free-tier pause)
+- [ ] CI passing on main branch
+
+---
+
+## Contributing
+
+1. Fork the repository and create a feature branch: `git checkout -b feat/your-feature`
+2. Install dependencies: `pnpm install`
+3. Make your changes. Run `pnpm lint && pnpm type-check && pnpm test:unit` before pushing.
+4. Open a pull request against `main`. CI must pass.
+5. All UI strings must be added to `src/lib/i18n/es-AR.ts` (no English strings in user-facing components).
+6. Security: every new API route must validate input with Zod and return the unified error format `{ error: { code, message } }`.
+
+---
+
+## ADRs (Architecture Decision Records)
+
+| # | Decision | File |
+|---|---|---|
+| 0001 | In-process AI worker (not a queue) | `docs/adr/0001-in-process-worker.md` |
+| 0002 | Single-tenant deploy, multi-tenant-ready schema | `docs/adr/0002-single-tenant-deploy.md` |
+| 0003 | Finite-state machine for case status | `docs/adr/0003-fsm.md` |
+| 0004 | Prompt injection containment strategy | `docs/adr/0004-prompt-injection-containment.md` |
+
+---
+
+## License
+
+Private — all rights reserved. Not licensed for commercial use or redistribution.
+See deployment notes: Vercel Hobby tier is non-commercial TOS; upgrade to Pro before commercial launch.

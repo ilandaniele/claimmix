@@ -182,6 +182,20 @@ export const AuditEvent = {
    * AC17.
    */
   CORE_SYNC_FAILED: "core.sync_failed",
+
+  /**
+   * OUTBOUND_EMAIL_SENT: Resend successfully delivered an outbound email.
+   * Payload: { case_id, subject_prefix } — no To address (PII).
+   * AC12.
+   */
+  OUTBOUND_EMAIL_SENT: "email.outbound_sent",
+
+  /**
+   * OUTBOUND_EMAIL_FAILED: Resend failed to deliver an outbound email.
+   * Payload: { case_id, error } — no To address (PII).
+   * AC12.
+   */
+  OUTBOUND_EMAIL_FAILED: "email.outbound_failed",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

@@ -396,3 +396,124 @@ The `source` field was added to `ExtractedFieldSchema` to distinguish AI-extract
 | `tests/unit/postmark-inbound.test.ts` | 19 | Valid/invalid Postmark payload parsing, extractEmailBody priority logic, extractThreadId normalization |
 
 Total unit tests after W1: 549 passing (up from 380 before W1 — includes all pre-existing tests).
+
+---
+
+# Implementation Notes — Email Claims Intake (W2)
+
+## New dependencies
+
+| Package | Version | Justification |
+|---|---|---|
+| `resend` | ^6.12.4 | Official Resend SDK for outbound transactional email (AC12, AC10, AC7, AC11) |
+
+No Postmark SDK needed — inbound email is a raw HTTP webhook; only `crypto.timingSafeEqual` (Node built-in) is used for HMAC verification.
+
+## New env vars (already added to .env.example in W1 — confirmed present)
+
+| Variable | Purpose |
+|---|---|
+| `POSTMARK_WEBHOOK_SECRET` | HMAC-SHA256 secret from Postmark UI for webhook signature verification |
+| `RESEND_API_KEY` | Resend API key for outbound emails |
+| `RESEND_FROM_ADDRESS` | Verified sender address (e.g. `claims@claimmix.com` or `onboarding@resend.dev` for sandbox) |
+| `EMAIL_REPLY_BASE_URL` | Base URL for links in outbound email templates |
+| `DEFAULT_TENANT_ID` | Single-tenant MVP: tenant UUID derived from env for webhook routing |
+
+## Architecture decisions
+
+### HMAC verification — raw body must precede JSON parsing
+
+The Postmark webhook signature is computed over the exact raw bytes of the HTTP body.
+If the body is parsed to JSON and re-serialized before HMAC verification, key ordering or
+whitespace normalization may change the bytes and break verification. The route handler reads
+`await request.text()` first, converts to `Buffer.from(rawBodyText, "utf-8")` for HMAC,
+and only calls `JSON.parse(rawBodyText)` after verification passes.
+
+### Timing-safe comparison — `crypto.timingSafeEqual`
+
+`Buffer.from(expectedHex) !== Buffer.from(actualHex)` is a standard equality check that
+short-circuits on the first differing byte. An attacker could use response timing to infer
+how many bytes matched (timing oracle attack). `crypto.timingSafeEqual` compares all 32
+bytes in constant time regardless of where the first mismatch occurs.
+
+### Fire-and-forget extraction worker dispatch
+
+The webhook must respond in < 500ms p95. The AI extraction pipeline (LLM call + DB writes)
+takes up to 8s p95. The solution: dispatch the worker as a fire-and-forget Promise.
+
+Pattern used (matching the existing `/api/intake/simulate` route):
+1. Dynamic import of `runExtractionWorker` from `@/server/worker/extract`.
+2. On Vercel: `waitUntil(workerPromise)` keeps the serverless function alive until the
+   promise resolves even after the HTTP response has been sent.
+3. Local dev: the promise runs independently in the Node.js event loop. The 202 response
+   is returned immediately; the worker resolves ~3-8s later without blocking.
+
+This is documented as an MVP approach. A real job queue (BullMQ, Inngest, Vercel Cron)
+would be the production upgrade path.
+
+### Tenant resolution — DEFAULT_TENANT_ID env var
+
+For single-tenant MVP, the webhook cannot know which tenant an incoming email belongs to
+from the HTTP request alone (Postmark doesn't include tenant context). The route reads
+`DEFAULT_TENANT_ID` from the environment. In a multi-tenant future, a `tenant_inbound_addresses`
+lookup table would map `OriginalRecipient` (the inbound Postmark email address) to a tenant UUID.
+
+### outbound_messages.status — optimistic 'sent' update
+
+The `dispatch.ts` module calls `sendEmail()` which writes OUTBOUND_EMAIL_SENT / OUTBOUND_EMAIL_FAILED
+audit events. However, `dispatch.ts` cannot distinguish success from failure after the call
+(it doesn't return a status). For MVP, the outbound_messages row is optimistically updated to
+`status='sent'`. The true delivery status is available in the audit_log. A future improvement
+would return the Resend message ID and store it for delivery confirmation polling.
+
+### resend-sender.ts — never throws
+
+Email delivery failure must not crash the intake flow. The `sendEmail()` function wraps the
+Resend SDK call in try/catch and returns void in both success and failure paths. Failures are
+logged (error name only, no PII) and written to the audit log. This ensures:
+- The webhook route always returns 202 even if Resend is down.
+- Audit log always records the failure for retry investigation.
+
+### PII masking in templates (AC24)
+
+`maskDni(dni)` and `maskPolicyNumber(policyNumber)` are exported from `render.ts` and called
+by each individual template before rendering. The mask functions:
+- `maskDni`: strips non-numeric chars, returns `****` + last 4 digits.
+- `maskPolicyNumber`: preserves non-numeric prefix (e.g. "POL-"), replaces numeric suffix
+  with `****` + last 4 digits of the suffix.
+
+Templates with sensitive inputs (data_confirmation_request, confirmation_received) call these
+masks unconditionally. The AC24 test suite runs a regex probe against all 4 templates to
+confirm no raw DNI or policy_number appears in the rendered output.
+
+## New files created in W2
+
+| File | Purpose |
+|---|---|
+| `src/server/email/verify-postmark-signature.ts` | HMAC-SHA256 signature verification for Postmark inbound webhooks |
+| `src/server/email/dedupe.ts` | Idempotency check: query cases by (tenant_id, email_message_id) |
+| `src/server/email/thread-lookup.ts` | Thread detection: query cases by email_thread_id matching In-Reply-To / References |
+| `src/server/email/render.ts` | Template dispatcher + PII masking utilities (maskDni, maskPolicyNumber) |
+| `src/server/email/templates/confirmation-received.ts` | confirmation_received template (es-AR, masked policy_number) |
+| `src/server/email/templates/missing-information-request.ts` | missing_information_request template (per-field es-AR instructions) |
+| `src/server/email/templates/data-confirmation-request.ts` | data_confirmation_request template (masked DNI/policy, conflict display) |
+| `src/server/email/templates/specialist-escalation.ts` | specialist_escalation template (severity-aware urgency language) |
+| `src/server/email/resend-sender.ts` | Resend SDK wrapper; never throws; logs audit events on success/failure |
+| `src/server/email/dispatch.ts` | Orchestrates: render → insert outbound_messages → sendEmail → update status |
+| `src/app/api/intake/email/route.ts` | Replaces 501 stub with full Postmark webhook handler (AC1-AC4, AC12, AC20) |
+
+## Tests added in W2
+
+| File | Tests | What it covers |
+|---|---|---|
+| `tests/unit/verify-postmark-signature.test.ts` | 9 | Valid HMAC, wrong HMAC, missing header, empty header, whitespace header, missing secret (throws), non-hex encoding, different body, prefix-only match |
+| `tests/unit/template-render.test.ts` | 37 | maskDni (5), maskPolicyNumber (5), confirmation_received (6), missing_information_request (4), data_confirmation_request (5), specialist_escalation (4), AC24 regex probes across all 4 templates (8) |
+
+Total: 46 new unit tests. Total passing after W2: 595.
+
+## Modification to existing files
+
+| File | Change |
+|---|---|
+| `src/lib/audit/log.ts` | Added OUTBOUND_EMAIL_SENT and OUTBOUND_EMAIL_FAILED audit event constants |
+| `tests/integration/intake.test.ts` | Updated the "POST /api/intake/email returns 501" test to reflect the replaced stub behavior (now returns 500 when POSTMARK_WEBHOOK_SECRET not configured) |

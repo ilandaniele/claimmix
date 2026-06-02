@@ -1,0 +1,7 @@
+# pnpm 11 settings (moved from package.json > pnpm field)
+# Allow native build scripts for these packages (they build platform binaries)
+onlyBuiltDependencies:
+  - "@sentry/cli"
+  - esbuild
+  - sharp
+  - unrs-resolver

@@ -12,6 +12,9 @@ permissions:
 # ── Reusable setup steps (defined as env defaults) ────────────────────────────
 env:
   NODE_VERSION: "22"
+  # pnpm 11.5 supply-chain policy: next@16.2.7 was published <24h before this CI run.
+  # Disabling the release-age hold — lockfile pins exact SHAs for supply-chain integrity.
+  npm_config_minimum_release_age: "0"
 
 jobs:
   # ── 1. Type check ────────────────────────────────────────────────────────────

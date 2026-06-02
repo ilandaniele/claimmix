@@ -67,7 +67,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   });
 
   // Fetch counts for all statuses (without status filter) for tab badges.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const supabaseAny = supabase as any;
   const allStatusCounts: { status: CaseStatus | "todos"; count: number }[] = [];
 

@@ -53,7 +53,7 @@ export async function POST(
 
   if (!user) return err(new AppError("MISSING_SESSION"));
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: userRowRaw } = await (supabase as any)
     .from("users")
     .select("*")
@@ -80,7 +80,7 @@ export async function POST(
   }
 
   // ── Verify case belongs to tenant (IDOR) ─────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: caseRow } = await (supabase as any)
     .from("cases")
     .select("id,status,tenant_id")
@@ -100,7 +100,7 @@ export async function POST(
 
   // ── Reset case to procesando ──────────────────────────────────────────────────
   const serviceSupabase = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { error: resetError } = await (serviceSupabase as any)
     .from("cases")
     .update({ status: "procesando", updated_at: new Date().toISOString() })

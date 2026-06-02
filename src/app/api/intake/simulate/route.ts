@@ -46,7 +46,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     return err(new AppError("MISSING_SESSION"));
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: userRowRaw } = await (supabase as any)
     .from("users")
     .select("*")
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   // ── 6. Create case + raw_message in DB (service role for reliability) ────────
   const serviceSupabase = createServiceClient();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: newCase, error: caseError } = await (serviceSupabase as any)
     .from("cases")
     .insert({
@@ -179,7 +179,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   const caseId = (newCase as { id: string }).id;
 
   // Create raw_message row (stores full email body verbatim — PII stored, never logged).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { error: rawMsgError } = await (serviceSupabase as any).from("raw_messages").insert({
     case_id: caseId,
     tenant_id: userRow.tenant_id,
@@ -215,7 +215,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   // ADR: in-process worker for MVP — documented in docs/adr/0001-in-process-worker.md.
   const workerPromise = runExtractionWorker(caseId, userRow.tenant_id, userRow.id);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const context = (globalThis as any)[Symbol.for("__vercel_runtime__")] as
     | { waitUntil?: (p: Promise<unknown>) => void }
     | undefined;

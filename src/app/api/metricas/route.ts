@@ -42,7 +42,7 @@ export async function GET() {
     const [casesMonthResult, byStatusResult, byTypeResult, escalatedResult, topAnalystsResult] =
       await Promise.all([
         // Total cases created this month
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (supabase as any)
           .from("cases")
           .select("id, status, created_at, closed_at, confidence_min", {
@@ -52,19 +52,19 @@ export async function GET() {
           .lt("created_at", monthEnd),
 
         // Cases by status (all time — to show distribution)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (supabase as any)
           .from("cases")
           .select("status"),
 
         // Cases by type (all time)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (supabase as any)
           .from("cases")
           .select("claim_type"),
 
         // Escalated this month
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (supabase as any)
           .from("cases")
           .select("id", { count: "exact" })
@@ -73,7 +73,7 @@ export async function GET() {
           .lt("created_at", monthEnd),
 
         // Top 5 analysts by cases closed this month
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (supabase as any)
           .from("cases")
           .select("assigned_to, users!cases_assigned_to_fkey(full_name)")

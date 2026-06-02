@@ -41,7 +41,7 @@ export async function POST(
 
   if (!user) return err(new AppError("MISSING_SESSION"));
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: userRowRaw } = await (supabase as any)
     .from("users")
     .select("*")
@@ -52,7 +52,7 @@ export async function POST(
   if (!userRow) return err(new AppError("MISSING_SESSION"));
 
   // ── Case detail with RLS scoping ─────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: caseRow } = await (supabase as any)
     .from("cases")
     .select("*")
@@ -62,14 +62,14 @@ export async function POST(
   if (!caseRow) return err(new AppError("NOT_FOUND"));
 
   // ── Extracted fields ──────────────────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: fields } = await (supabase as any)
     .from("extracted_fields")
     .select("field_key,field_value,confidence")
     .eq("case_id", caseId);
 
   // ── Missing docs ──────────────────────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: missingDocs } = await (supabase as any)
     .from("missing_docs")
     .select("doc_key,requested_at,satisfied_at")

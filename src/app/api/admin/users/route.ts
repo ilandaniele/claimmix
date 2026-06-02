@@ -30,7 +30,7 @@ async function requireAdmin() {
     throw new AppError("MISSING_SESSION");
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: userRow } = await (supabase as any)
     .from("users")
     .select("id, tenant_id, role")
@@ -49,7 +49,7 @@ export async function GET() {
   try {
     const { supabase, userRow } = await requireAdmin();
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const { data, error } = await (supabase as any)
       .from("users")
       .select("id, full_name, role, created_at")

@@ -15,7 +15,7 @@
  * AC10: Wrong-tenant case returns null (caller returns 404 NOT_FOUND).
  */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type AnySupabaseClient = any;
 import type { Database } from "@/lib/supabase/types";
 
@@ -50,7 +50,7 @@ export async function getCaseDetail(
   caseId: string
 ): Promise<CaseDetail | null> {
   // ── 1. Fetch the case row (RLS-scoped to current tenant) ──────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: caseData, error: caseError } = await (supabase as any)
     .from("cases")
     .select("*")
@@ -66,7 +66,7 @@ export async function getCaseDetail(
   const caseRow = caseData as CaseRow;
 
   // ── 2. Fetch extracted fields ──────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: extractedData } = await (supabase as any)
     .from("extracted_fields")
     .select("*")
@@ -74,7 +74,7 @@ export async function getCaseDetail(
     .order("extracted_at", { ascending: true });
 
   // ── 3. Fetch missing docs ──────────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: missingDocsData } = await (supabase as any)
     .from("missing_docs")
     .select("*")
@@ -83,7 +83,7 @@ export async function getCaseDetail(
 
   // ── 4. Fetch last 20 audit log entries for this case ─────────────────────
   // Sorted descending by created_at (most recent first).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: auditData } = await (supabase as any)
     .from("audit_log")
     .select("*")

@@ -58,7 +58,7 @@ export async function runExtractionWorker(
   const supabase = createServiceClient();
 
   // ── 0. Fetch case + raw message ──────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: caseRow, error: caseError } = await (supabase as any)
     .from("cases")
     .select("id,status,claim_type,tenant_id")
@@ -87,7 +87,7 @@ export async function runExtractionWorker(
   const claimType = caseRow.claim_type as ClaimType;
 
   // Fetch raw message body.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: rawMsg, error: rawError } = await (supabase as any)
     .from("raw_messages")
     .select("body")
@@ -178,7 +178,7 @@ export async function runExtractionWorker(
       confidence: parseFloat(f.confidence.toFixed(2)),
     }));
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const { error: fieldsError } = await (supabase as any)
       .from("extracted_fields")
       .upsert(fieldInserts, { onConflict: "case_id,field_key" });
@@ -199,7 +199,7 @@ export async function runExtractionWorker(
       satisfied_at: null,
     }));
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const { error: missingError } = await (supabase as any)
       .from("missing_docs")
       .upsert(missingInserts, { onConflict: "case_id,doc_key" });
@@ -209,7 +209,7 @@ export async function runExtractionWorker(
     }
 
     // Create outbound_messages stub (AC6).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const { error: outboundError } = await (supabase as any).from("outbound_messages").insert({
       case_id: caseId,
       tenant_id: tenantId,
@@ -306,7 +306,7 @@ async function updateCaseStatus(
     updatePayload.confidence_min = confidenceMin;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { error } = await (supabase as any)
     .from("cases")
     .update(updatePayload)

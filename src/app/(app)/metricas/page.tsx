@@ -47,24 +47,24 @@ async function fetchMetricas(): Promise<MetricasData | null> {
 
     const [casesMonthRes, byStatusRes, byTypeRes, escalatedRes, topAnalystsRes] =
       await Promise.all([
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (supabase as any)
           .from("cases")
           .select("id, status, created_at, closed_at")
           .gte("created_at", monthStart)
           .lt("created_at", monthEnd),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (supabase as any).from("cases").select("status"),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (supabase as any).from("cases").select("claim_type"),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (supabase as any)
           .from("cases")
           .select("id", { count: "exact" })
           .eq("status", "escalado")
           .gte("created_at", monthStart)
           .lt("created_at", monthEnd),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (supabase as any)
           .from("cases")
           .select("assigned_to, users!cases_assigned_to_fkey(full_name)")

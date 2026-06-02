@@ -82,7 +82,7 @@ export default async function ConfiguracionPage() {
   }
 
   // Fetch public.users row for full_name + role
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: userRow } = await (supabase as any)
     .from("users")
     .select("full_name, role")

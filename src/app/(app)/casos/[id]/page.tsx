@@ -250,7 +250,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
  */
 async function RawEmailAccordion({ caseId }: { caseId: string }) {
   const supabase = await createServerClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: messages } = await (supabase as any)
     .from("raw_messages")
     .select("body, subject, received_at")

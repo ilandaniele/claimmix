@@ -53,16 +53,16 @@ async function fetchAnalisis(): Promise<AnalisisData | null> {
     const day30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     const [allCasesRes, recent7Res, recent30Res] = await Promise.all([
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (supabase as any)
         .from("cases")
         .select("status, claim_type, confidence_min"),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (supabase as any)
         .from("cases")
         .select("id", { count: "exact" })
         .gte("created_at", day7),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (supabase as any)
         .from("cases")
         .select("id", { count: "exact" })

@@ -98,8 +98,11 @@ export function DashboardClient({
   const [statusCountsBase, setStatusCountsBase] = useState(allStatusCounts);
 
   // Sync cases whenever server re-fetches (URL param changes trigger page.tsx re-render).
+  // Sync cases when server re-fetches (URL param changes trigger page.tsx re-render).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- server-driven state sync, not a cascade risk
     setCases(initialData.data);
+     
     setTotal(initialData.meta.total);
   }, [initialData]);
 

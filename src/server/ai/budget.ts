@@ -72,7 +72,7 @@ export async function checkBudget(
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: monthlyData, error: monthlyError } = await (supabase as any)
     .from("ai_usage")
     .select("cost_usd")
@@ -100,7 +100,7 @@ export async function checkBudget(
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: tenantDayData, error: tenantDayError } = await (supabase as any)
     .from("ai_usage")
     .select("prompt_tokens,completion_tokens")
@@ -127,7 +127,7 @@ export async function checkBudget(
 
   // ── 3. Per-user daily token cap ───────────────────────────────────────────────
   if (userId) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const { data: userDayData, error: userDayError } = await (supabase as any)
       .from("ai_usage")
       .select("prompt_tokens,completion_tokens")
@@ -177,7 +177,7 @@ export async function recordUsage(
 ): Promise<void> {
   try {
     const supabase = createServiceClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const { error } = await (supabase as any).from("ai_usage").insert({
       tenant_id: tenantId,
       user_id: userId,

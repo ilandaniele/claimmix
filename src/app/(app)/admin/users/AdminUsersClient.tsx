@@ -245,6 +245,7 @@ export function AdminUsersClient({ initialUsers }: Props) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount, not a cascading re-render risk
     refreshUsers();
   }, [refreshUsers]);
 

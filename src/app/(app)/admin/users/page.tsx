@@ -37,7 +37,7 @@ async function fetchUsers(): Promise<{
   if (!user || authErr) return null;
 
   // Get current analyst's role
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: currentUser } = await (supabase as any)
     .from("users")
     .select("role, tenant_id")
@@ -52,7 +52,7 @@ async function fetchUsers(): Promise<{
   }
 
   // Fetch all analysts in the tenant
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: usersData } = await (supabase as any)
     .from("users")
     .select("id, full_name, role, created_at")

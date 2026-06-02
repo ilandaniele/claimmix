@@ -11,7 +11,7 @@
  * AC12: Pagination per_page is capped at 100.
  */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type AnySupabaseClient = any;
 import type { Database } from "@/lib/supabase/types";
 import type { CaseQuery } from "@/lib/schemas/cases";
@@ -44,7 +44,7 @@ export async function listCases(
   const { status, type, q, page, per_page, sort, order } = query;
 
   // ── Count query ────────────────────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let countQ = (supabase as any)
     .from("cases")
     .select("id", { count: "exact", head: true });
@@ -84,7 +84,7 @@ export async function listCases(
     "closed_at",
   ].join(", ");
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let dataQ = (supabase as any)
     .from("cases")
     .select(selectColumns)
@@ -144,7 +144,7 @@ export async function listCasesForExport(
   ].join(", ");
 
   // Max 1000 rows per export — range 0..999
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let q2 = (supabase as any)
     .from("cases")
     .select(selectColumns)

@@ -21,9 +21,9 @@ export async function checkRateLimitUpstash(
   // The dynamic import path prevents Turbopack from attempting to resolve
   // optional peer dependencies at build time.
   //
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let Ratelimit: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let Redis: any;
 
   try {
@@ -31,9 +31,9 @@ export async function checkRateLimitUpstash(
     // failing the build when optional packages are not installed.
     const pkgRl = "@upstash/ratelimit";
     const pkgRedis = "@upstash/redis";
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     ({ Ratelimit } = (await import(/* webpackIgnore: true */ pkgRl as any)) as any);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     ({ Redis } = (await import(/* webpackIgnore: true */ pkgRedis as any)) as any);
   } catch {
     throw new Error(

@@ -34,7 +34,7 @@ async function resolveUser(supabase: Awaited<ReturnType<typeof createServerClien
 
   if (!user) return null;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: userRowRaw } = await (supabase as any)
     .from("users")
     .select("*")

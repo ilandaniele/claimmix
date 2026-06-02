@@ -56,7 +56,7 @@ export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
     };
     // The Supabase typed client resolves insert() as 'never[]' when Update: never.
     // Casting to any to bypass the type bug — the insert shape is verified by AuditLogInsert above.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const { error } = await (supabase.from("audit_log") as any).insert(insertRow);
 
     if (error) {

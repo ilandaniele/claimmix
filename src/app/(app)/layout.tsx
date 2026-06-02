@@ -26,7 +26,7 @@ export default async function AppLayout({
   } = await supabase.auth.getUser();
 
   // Fetch analyst row to get full_name and role.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: userRow } = await (supabase as any)
     .from("users")
     .select("full_name, role")

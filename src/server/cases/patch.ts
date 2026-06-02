@@ -13,7 +13,7 @@
  * AC15: Wrong-tenant PATCH returns 404 (RLS hides the row → no rows updated).
  */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type AnySupabaseClient = any;
 import type { Database } from "@/lib/supabase/types";
 import type { CasePatch } from "@/lib/schemas/cases";
@@ -53,7 +53,7 @@ export async function patchCase(
   ua: string | null
 ): Promise<PatchResult> {
   // ── 1. Fetch current case (RLS-scoped — wrong tenant → null) ──────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: currentData, error: fetchError } = await (supabase as any)
     .from("cases")
     .select("*")
@@ -103,7 +103,7 @@ export async function patchCase(
   }
 
   // ── 5. Apply update (RLS ensures only tenant-matching rows are updated) ────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const { data: updatedData, error: updateError } = await (supabase as any)
     .from("cases")
     .update(updateData)

@@ -304,6 +304,33 @@ export async function POST(request: NextRequest): Promise<Response> {
     // Non-fatal — case created; worker will still run and may re-read the payload.
   }
 
+  // AC23: Insert claim_attachments rows for each attachment in the payload.
+  // Attachment URLs are NOT logged to stdout (PII protection — AC23).
+  const attachments = payload.Attachments ?? [];
+  if (attachments.length > 0) {
+    const attachmentInserts = attachments.map((a) => ({
+      case_id: newCaseId,
+      tenant_id: tenantId,
+      file_name: a.Name,
+      content_type: a.ContentType,
+      size_bytes: a.ContentLength,
+      // ContentURL is Postmark's CDN link; ContentID is for inline attachments.
+      // Use ContentURL as the external URL when present; fall back to null.
+      external_url: a.ContentURL || null,
+      source_message_id: messageId,
+    }));
+
+    const { error: attachmentsError } = await (supabase as any)
+      .from("claim_attachments")
+      .insert(attachmentInserts);
+
+    if (attachmentsError) {
+      console.error("[intake/email] claim_attachments insert:", attachmentsError.code);
+      // Non-fatal — case and raw_message are already persisted; attachments
+      // may be retried by re-sending the email. Log the error code only (no URL).
+    }
+  }
+
   // Audit log.
   await writeAuditLog({
     tenant_id: tenantId,

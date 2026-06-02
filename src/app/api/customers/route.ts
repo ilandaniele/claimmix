@@ -46,6 +46,25 @@ export async function GET(request: NextRequest) {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
 
+  // ── 1b. Role check — admin or specialist only (API5) ─────────────────────
+  // Customer data contains PII (DNI, email, phone). Only privileged roles may
+  // enumerate this endpoint. Analysts may not access it.
+  const { data: userRow } = await (supabase as any)
+    .from("users")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  const role: string = userRow?.role ?? "analyst";
+  if (!["admin", "specialist"].includes(role)) {
+    return err(
+      new AppError(
+        "FORBIDDEN_ROLE",
+        "Solo administradores o especialistas pueden listar clientes."
+      )
+    );
+  }
+
   // ── 2. Rate limit ─────────────────────────────────────────────────────────
   const rlKey = buildUserKey(user.id, "customers-list");
   const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CASES_API);

@@ -27,6 +27,8 @@ import { buildCsp, generateNonce } from "@/lib/security/csp";
 /** Public paths that do not require authentication. */
 const PUBLIC_PREFIXES = [
   "/login",
+  "/api/auth/sign-in",
+  "/api/auth/sign-out",
   "/api/auth/callback",
   "/api/admin/health",
   "/_next",

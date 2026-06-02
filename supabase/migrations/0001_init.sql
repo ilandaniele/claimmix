@@ -11,20 +11,9 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =============================================================================
 -- Helper function: current_tenant_id()
--- Returns the tenant_id from the authenticated user's JWT claim.
--- Used by RLS policies to scope queries to the user's tenant.
+-- Returns the tenant_id for the currently authenticated user.
+-- Used by RLS policies to scope all queries to the user's tenant.
 -- =============================================================================
-CREATE OR REPLACE FUNCTION public.current_tenant_id()
-RETURNS uuid
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-AS $$
-  SELECT id FROM public.users WHERE id = auth.uid()
-  RETURNING tenant_id
-$$;
-
--- Simpler and more reliable implementation:
 CREATE OR REPLACE FUNCTION public.current_tenant_id()
 RETURNS uuid
 LANGUAGE sql

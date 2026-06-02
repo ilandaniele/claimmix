@@ -15,7 +15,21 @@ export default defineConfig({
       reporter: ["text", "lcov", "json-summary"],
       reportsDirectory: "./coverage",
       include: ["src/lib/**", "src/server/**"],
-      exclude: ["src/lib/supabase/types.ts", "**/*.d.ts"],
+      exclude: [
+        // Type definition files
+        "src/lib/supabase/types.ts",
+        "**/*.d.ts",
+        // Supabase client factories — require Next.js runtime (cookies(), etc.)
+        // Covered by integration tests, not unit tests.
+        "src/lib/supabase/browser.ts",
+        "src/lib/supabase/server.ts",
+        "src/lib/supabase/service.ts",
+        // Observability — require Sentry DSN and pino runtime at module init.
+        // Covered by manual/integration testing.
+        "src/lib/observability/**",
+        // Upstash rate-limit adapter — requires UPSTASH_* env vars at runtime.
+        "src/lib/rate-limit/upstash.ts",
+      ],
       thresholds: {
         lines: 80,
         functions: 80,

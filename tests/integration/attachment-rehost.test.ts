@@ -20,12 +20,27 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createHash } from "crypto";
+import type { RehostAttachmentsOpts } from "@/server/email/rehost-attachments";
 
 // ── Top-level mocks (hoisted before any import) ───────────────────────────────
 
 vi.mock("@/server/email/verify-postmark-signature", () => ({
   verifyPostmarkSignature: vi.fn().mockReturnValue({ valid: true }),
 }));
+
+// Declare at module level so Vitest hoists it correctly.
+// Default behaviour (AC7–AC10): delegate to the real implementation.
+// AC11 overrides this in the individual test via vi.mocked().mockImplementation().
+vi.mock("@/server/email/rehost-attachments", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/server/email/rehost-attachments")>();
+  return {
+    ...actual,
+    rehostAttachments: vi.fn((opts: RehostAttachmentsOpts) =>
+      actual.rehostAttachments(opts)
+    ),
+  };
+});
 
 vi.mock("@/server/email/dedupe", () => ({
   dedupe: vi.fn().mockResolvedValue({ isDuplicate: false, existingCaseId: null }),
@@ -214,6 +229,16 @@ describe("attachment rehost integration", () => {
     // Wire the supabase mock fresh each test.
     const { createServiceClient } = await import("@/lib/supabase/service");
     vi.mocked(createServiceClient).mockImplementation(() => buildSupabaseMock(db) as any);
+
+    // Restore the default rehostAttachments behaviour (real implementation passthrough).
+    // This ensures AC11's per-test override does not leak into subsequent tests.
+    const { rehostAttachments } = await import("@/server/email/rehost-attachments");
+    const actual = await vi.importActual<typeof import("@/server/email/rehost-attachments")>(
+      "@/server/email/rehost-attachments"
+    );
+    vi.mocked(rehostAttachments).mockImplementation((opts: RehostAttachmentsOpts) =>
+      actual.rehostAttachments(opts)
+    );
   });
 
   afterEach(() => {
@@ -348,7 +373,6 @@ describe("attachment rehost integration", () => {
 
   it("AC11: budget exhausted → webhook still 202, timed-out attachments get rejected_reason='rehost_timeout'", async () => {
     // Use two attachments with a very short budget (1 ms) so at least the second times out.
-    // We mock rehostAttachments directly to simulate budget enforcement without real timers.
     const raw1 = Buffer.from("first attachment");
     const raw2 = Buffer.from("second attachment");
 
@@ -367,16 +391,16 @@ describe("attachment rehost integration", () => {
       );
     });
 
-    // Override rehostAttachments to use budgetMs=1 so the second attachment times out.
-    vi.mock("@/server/email/rehost-attachments", async (importOriginal) => {
-      const actual =
-        await importOriginal<typeof import("@/server/email/rehost-attachments")>();
-      return {
-        ...actual,
-        rehostAttachments: (opts: any) =>
-          actual.rehostAttachments({ ...opts, budgetMs: 1 }),
-      };
-    });
+    // Override rehostAttachments for this test only — force budgetMs=1 so the second
+    // attachment times out. vi.mocked() works because the top-level vi.mock() above
+    // replaced the export with a vi.fn() wrapping the real implementation.
+    const actual = await vi.importActual<typeof import("@/server/email/rehost-attachments")>(
+      "@/server/email/rehost-attachments"
+    );
+    const { rehostAttachments } = await import("@/server/email/rehost-attachments");
+    vi.mocked(rehostAttachments).mockImplementation((opts: RehostAttachmentsOpts) =>
+      actual.rehostAttachments({ ...opts, budgetMs: 1 })
+    );
 
     const { POST } = await import("@/app/api/intake/email/route");
     const req = buildRequest([

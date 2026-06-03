@@ -76,7 +76,7 @@ export class PostmarkSender implements EmailProvider {
       from = opts.from || this.getFromAddress();
     } catch (configErr) {
       const name = configErr instanceof Error ? configErr.name : "ConfigError";
-      console.error("[postmark-sender] Configuration error:", name);
+      console.error("[postmark-sender] Configuration error:", name); // crew-debug-ok
       return { errorCode: "POSTMARK_SEND_FAILED" };
     }
 
@@ -104,7 +104,7 @@ export class PostmarkSender implements EmailProvider {
           ? String((err as { ErrorCode: number }).ErrorCode)
           : name;
 
-      console.error("[postmark-sender] Postmark API error code:", code);
+      console.error("[postmark-sender] Postmark API error code:", code); // crew-debug-ok
       return { errorCode: "POSTMARK_SEND_FAILED" };
     }
   }

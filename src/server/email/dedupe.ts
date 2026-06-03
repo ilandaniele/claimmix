@@ -56,7 +56,7 @@ export async function checkDuplicate(
 
   if (error) {
     // Log code only — never raw Supabase error body (may contain PII).
-    console.error("[dedupe] claim_messages check error:", error.code);
+    console.error("[dedupe] claim_messages check error:", error.code); // crew-debug-ok
     // Fail open — let the request proceed; idempotency is best-effort.
     return false;
   }
@@ -114,7 +114,7 @@ export async function dedupe(
     .maybeSingle();
 
   if (caseError) {
-    console.error("[dedupe] cases check error:", caseError.code);
+    console.error("[dedupe] cases check error:", caseError.code); // crew-debug-ok
     return { isDuplicate: false };
   }
 

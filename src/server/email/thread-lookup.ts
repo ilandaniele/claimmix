@@ -67,7 +67,7 @@ export async function threadLookup(
     .maybeSingle();
 
   if (claimMsgError) {
-    console.error("[thread-lookup] claim_messages error:", claimMsgError.code);
+    console.error("[thread-lookup] claim_messages error:", claimMsgError.code); // crew-debug-ok
     // Non-fatal — fall through to legacy check.
   } else if (claimMsgRow) {
     return {
@@ -87,7 +87,7 @@ export async function threadLookup(
     .maybeSingle();
 
   if (caseError) {
-    console.error("[thread-lookup] cases error:", caseError.code);
+    console.error("[thread-lookup] cases error:", caseError.code); // crew-debug-ok
     return { existingCaseId: undefined };
   }
 

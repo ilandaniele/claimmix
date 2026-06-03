@@ -158,7 +158,7 @@ async function insertClaimMessage(
 
   if (error) {
     // Log error code only — body may contain PII.
-    console.error("[intake/email] claim_messages insert error:", error.code);
+    console.error("[intake/email] claim_messages insert error:", error.code); // crew-debug-ok
     return null;
   }
 
@@ -229,7 +229,7 @@ async function processAttachments(
       .insert(attachmentRow);
 
     if (attachErr) {
-      console.error("[intake/email] claim_attachments insert:", attachErr.code);
+      console.error("[intake/email] claim_attachments insert:", attachErr.code); // crew-debug-ok
     }
 
     // Emit audit events (non-fatal).

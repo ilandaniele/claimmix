@@ -62,7 +62,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     rendered = renderTemplate(template, data);
   } catch (err) {
     const name = err instanceof Error ? err.name : "RenderError";
-    console.error("[dispatch] Template render error:", name);
+    console.error("[dispatch] Template render error:", name); // crew-debug-ok
     return { error: "RENDER_FAILED" };
   }
 
@@ -95,13 +95,13 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
       .single();
 
     if (insertError) {
-      console.error("[dispatch] Failed to insert claim_messages:", insertError.code);
+      console.error("[dispatch] Failed to insert claim_messages:", insertError.code); // crew-debug-ok
     } else if (inserted) {
       claimMessageId = (inserted as { id: string }).id;
     }
   } catch (err) {
     const name = err instanceof Error ? err.name : "DBError";
-    console.error("[dispatch] claim_messages insert exception:", name);
+    console.error("[dispatch] claim_messages insert exception:", name); // crew-debug-ok
   }
 
   // ── 3. INSERT outbound_messages row (status='queued') — dual-write window ─
@@ -121,13 +121,13 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
       .single();
 
     if (insertError) {
-      console.error("[dispatch] Failed to insert outbound_messages:", insertError.code);
+      console.error("[dispatch] Failed to insert outbound_messages:", insertError.code); // crew-debug-ok
     } else if (inserted) {
       outboundMsgId = (inserted as { id: string }).id;
     }
   } catch (err) {
     const name = err instanceof Error ? err.name : "DBError";
-    console.error("[dispatch] DB insert exception:", name);
+    console.error("[dispatch] DB insert exception:", name); // crew-debug-ok
   }
 
   // ── 4. Send via EmailProvider (Postmark) ───────────────────────────────────
@@ -166,7 +166,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
           .eq("id", claimMessageId);
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
-        console.error("[dispatch] Failed to update claim_messages status (sent):", name);
+        console.error("[dispatch] Failed to update claim_messages status (sent):", name); // crew-debug-ok
       }
     }
 
@@ -179,7 +179,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
           .eq("id", outboundMsgId);
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
-        console.error("[dispatch] Failed to update outbound_messages status (sent):", name);
+        console.error("[dispatch] Failed to update outbound_messages status (sent):", name); // crew-debug-ok
       }
     }
 
@@ -199,7 +199,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   } else {
     // Provider returned an error — AC5: must not throw.
     const { errorCode } = sendResult;
-    console.error("[dispatch] Email send failed, error code:", errorCode);
+    console.error("[dispatch] Email send failed, error code:", errorCode); // crew-debug-ok
 
     // Update claim_messages — set status='failed' + error_code
     if (claimMessageId) {
@@ -210,7 +210,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
           .eq("id", claimMessageId);
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
-        console.error("[dispatch] Failed to update claim_messages status (failed):", name);
+        console.error("[dispatch] Failed to update claim_messages status (failed):", name); // crew-debug-ok
       }
     }
 
@@ -223,7 +223,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
           .eq("id", outboundMsgId);
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
-        console.error("[dispatch] Failed to update outbound_messages status (failed):", name);
+        console.error("[dispatch] Failed to update outbound_messages status (failed):", name); // crew-debug-ok
       }
     }
 

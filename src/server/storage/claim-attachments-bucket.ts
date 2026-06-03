@@ -91,7 +91,7 @@ export async function uploadAttachment(
 
   if (error) {
     // Log storage error code only — path may contain tenant/case IDs but not PII.
-    console.error("[claim-attachments-bucket] Upload failed:", (error as any).statusCode ?? "unknown");
+    console.error("[claim-attachments-bucket] Upload failed:", (error as any).statusCode ?? "unknown"); // crew-debug-ok
     return { error: "STORAGE_UPLOAD_FAILED" };
   }
 

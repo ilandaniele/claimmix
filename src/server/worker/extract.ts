@@ -378,7 +378,12 @@ export async function runEmailExtractionWorker(
       return;
     }
 
-    // Fetch the most recent raw_messages row (email body + sender info).
+    // Fetch message body — try raw_messages (simulate flow) first, then
+    // claim_messages (Gmail intake flow). Gmail cases write to claim_messages only.
+
+    let emailBody = "";
+    let emailSubject = "";
+    let senderEmail = "";
 
     const { data: rawMsg, error: rawError } = await (supabase as any)
       .from("raw_messages")
@@ -388,14 +393,30 @@ export async function runEmailExtractionWorker(
       .limit(1)
       .single();
 
-    if (rawError || !rawMsg) {
-      console.error("[email-worker] Raw message not found:", caseId, rawError?.code);
-      return;
-    }
+    if (rawMsg && !rawError) {
+      emailBody = rawMsg.body ?? "";
+      emailSubject = rawMsg.subject ?? "";
+      senderEmail = rawMsg.from_addr ?? "";
+    } else {
+      // Fallback: Gmail intake cases store messages in claim_messages.
+      const { data: claimMsg, error: claimError } = await (supabase as any)
+        .from("claim_messages")
+        .select("body_text,subject,from_addr")
+        .eq("case_id", caseId)
+        .eq("direction", "inbound")
+        .order("received_at", { ascending: false })
+        .limit(1)
+        .single();
 
-    const emailBody: string = rawMsg.body ?? "";
-    const emailSubject: string = rawMsg.subject ?? "";
-    const senderEmail: string = rawMsg.from_addr ?? "";
+      if (claimError || !claimMsg) {
+        console.error("[email-worker] Raw message not found:", caseId, claimError?.code); // crew-debug-ok
+        return;
+      }
+
+      emailBody = claimMsg.body_text ?? "";
+      emailSubject = claimMsg.subject ?? "";
+      senderEmail = claimMsg.from_addr ?? "";
+    }
 
     // ── b) Load memory hints from claim_memory ───────────────────────────────
     const memoryHints = await loadMemoryHints(supabase, tenantId, senderEmail);

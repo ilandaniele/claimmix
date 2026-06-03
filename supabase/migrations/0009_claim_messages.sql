@@ -142,33 +142,33 @@ CREATE TABLE IF NOT EXISTS public.claim_messages (
 -- =============================================================================
 -- SECTION 2: Indexes on claim_messages
 --
--- All indexes use CONCURRENTLY to avoid table-level locks on live traffic.
--- CONCURRENTLY cannot run inside a transaction block — this file must NOT be
--- wrapped in BEGIN/COMMIT by the migration runner.
+-- Note: CONCURRENTLY is omitted here because Supabase's migration runner
+-- executes statements in a pipeline context, which forbids CONCURRENTLY.
+-- Safe to omit: the table is new in this migration, so no live traffic hits it.
 -- =============================================================================
 
 -- Deduplication index (both directions):
--- Prevents double-processing of the same Postmark MessageID per tenant.
+-- Prevents double-processing of the same provider MessageID per tenant.
 -- Partial index (WHERE NOT NULL) avoids blocking outbound queued rows.
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_claim_messages_tenant_provider_msgid
+CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_messages_tenant_provider_msgid
   ON public.claim_messages (tenant_id, provider_message_id)
   WHERE provider_message_id IS NOT NULL;
 
 -- Case timeline index:
 -- Efficient retrieval of all messages for a case sorted by arrival time.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_claim_messages_case_received
+CREATE INDEX IF NOT EXISTS idx_claim_messages_case_received
   ON public.claim_messages (case_id, received_at DESC);
 
 -- Thread lookup index:
 -- Used by threadLookup() to find the case for a reply.
 -- Partial index (WHERE NOT NULL) skips rows without a thread_id.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_claim_messages_tenant_thread
+CREATE INDEX IF NOT EXISTS idx_claim_messages_tenant_thread
   ON public.claim_messages (tenant_id, thread_id)
   WHERE thread_id IS NOT NULL;
 
 -- Operational query index:
 -- Used to query all queued outbound messages or all failed inbound messages.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_claim_messages_direction_status
+CREATE INDEX IF NOT EXISTS idx_claim_messages_direction_status
   ON public.claim_messages (direction, status);
 
 -- =============================================================================
@@ -221,7 +221,7 @@ ALTER TABLE public.claim_attachments
   ADD COLUMN IF NOT EXISTS rejected_reason text;
 
 -- Index for looking up all attachments belonging to a specific message.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_claim_attachments_claim_message_id
+CREATE INDEX IF NOT EXISTS idx_claim_attachments_claim_message_id
   ON public.claim_attachments (claim_message_id)
   WHERE claim_message_id IS NOT NULL;
 

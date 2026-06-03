@@ -147,6 +147,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     htmlBody: rendered.html,
     textBody: rendered.text,
     headers: threadingHeaders.length > 0 ? threadingHeaders : undefined,
+    threadId: threadId ?? undefined,
   });
 
   // ── 5. Update claim_messages + outbound_messages + write audit log ─────────

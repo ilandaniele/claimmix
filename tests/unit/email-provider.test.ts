@@ -37,11 +37,12 @@ describe("getEmailProvider()", () => {
     resetEmailProvider();
   });
 
-  it("throws when no provider has been initialized (W2 GmailSender not yet wired)", () => {
-    // No setEmailProvider() call — factory should throw until W2 wires GmailSender.
-    expect(() => getEmailProvider()).toThrow(
-      "EmailProvider not initialized"
-    );
+  it("returns a GmailSender (lazy-init) when no provider has been injected (W2)", () => {
+    // W2: getEmailProvider() now lazy-inits GmailSender instead of throwing.
+    // GmailSender.name must be 'gmail' (AC9).
+    const provider = getEmailProvider();
+    expect(provider).toBeDefined();
+    expect(provider.name).toBe("gmail");
   });
 
   it("returns injected provider after setEmailProvider()", () => {
@@ -100,13 +101,19 @@ describe("setEmailProvider()", () => {
 });
 
 describe("resetEmailProvider()", () => {
-  it("clears the singleton so next call throws (until W2 wires GmailSender)", () => {
+  it("clears the singleton; next call lazy-inits a fresh GmailSender (W2)", () => {
+    // W2: after reset, getEmailProvider() lazy-inits a new GmailSender.
     const mock = makeMockProvider();
     setEmailProvider(mock);
 
     resetEmailProvider();
 
-    expect(() => getEmailProvider()).toThrow("EmailProvider not initialized");
+    // Should no longer throw — returns a new GmailSender.
+    const provider = getEmailProvider();
+    expect(provider).toBeDefined();
+    expect(provider.name).toBe("gmail");
+    // Not the same object as the mock that was set before reset.
+    expect(provider).not.toBe(mock);
   });
 
   it("after reset, setEmailProvider injection works again", () => {

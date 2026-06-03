@@ -33,9 +33,9 @@ export default defineConfig({
         // client at runtime. Covered by integration tests with mocked clients, not unit tests.
         "src/server/email/dispatch.ts",
         "src/server/email/thread-lookup.ts",
-        // Postmark sender — requires POSTMARK_SERVER_TOKEN at runtime (lazy-init).
-        // Unit-tested via mocked ServerClient in postmark-sender.test.ts.
-        "src/server/email/postmark/postmark-sender.ts",
+        // Gmail client factory — requires GMAIL_* env vars at runtime (lazy-init).
+        // Unit-tested via mocked googleapis in gmail-sender.test.ts.
+        // "src/server/email/gmail/gmail-client.ts",  // covered; kept for reference
         // Idempotency check — Supabase service-role query, no testable branch logic beyond DB call.
         // Covered via integration tests (intake-email.test.ts AC3 path).
         "src/server/email/dedupe.ts",

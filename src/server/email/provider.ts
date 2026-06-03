@@ -23,6 +23,11 @@ export interface SendEmailOptions {
   /** Postmark Headers array — used for In-Reply-To, References threading. */
   headers?: Array<{ Name: string; Value: string }>;
   tag?: string;
+  /**
+   * Gmail thread ID — when provided, GmailSender passes this as threadId in
+   * users.messages.send so the reply lands in the same Gmail thread (AC5).
+   */
+  threadId?: string;
 }
 
 export type SendResult =

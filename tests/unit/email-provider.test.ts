@@ -1,11 +1,14 @@
 /**
  * Unit tests for the EmailProvider factory (getEmailProvider / setEmailProvider / resetEmailProvider).
  *
+ * Tests the gmail/index.ts factory — the active provider factory as of W1.
+ * GmailSender is not yet implemented (W2), so getEmailProvider() throws unless
+ * a provider is injected via setEmailProvider(). Tests use mock injection only.
+ *
  * Tests that:
- * - getEmailProvider() returns an instance satisfying the EmailProvider interface.
- * - Repeated calls return the same singleton.
+ * - getEmailProvider() throws when no provider has been set (no GmailSender yet).
  * - setEmailProvider() overrides the singleton.
- * - resetEmailProvider() clears the singleton so the next call creates a new one.
+ * - resetEmailProvider() clears the singleton.
  * - isSendSuccess() type guard works correctly.
  */
 
@@ -13,21 +16,14 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import type { EmailProvider, SendEmailOptions, SendResult } from "../../src/server/email/provider";
 import { isSendSuccess } from "../../src/server/email/provider";
 
-// Mock postmark so PostmarkSender can be constructed without a real server token.
-vi.mock("postmark", () => ({
-  ServerClient: vi.fn().mockImplementation(() => ({
-    sendEmail: vi.fn().mockResolvedValue({ MessageID: "mock-id" }),
-  })),
-}));
-
 const {
   getEmailProvider,
   setEmailProvider,
   resetEmailProvider,
-} = await import("../../src/server/email/postmark/index");
+} = await import("../../src/server/email/gmail/index");
 
 // A simple mock provider for DI tests.
-function makeMockProvider(name: "postmark" = "postmark"): EmailProvider {
+function makeMockProvider(name: "gmail" | "postmark" = "gmail"): EmailProvider {
   return {
     name,
     send: vi.fn<[SendEmailOptions], Promise<SendResult>>().mockResolvedValue({
@@ -41,29 +37,32 @@ describe("getEmailProvider()", () => {
     resetEmailProvider();
   });
 
-  it("returns an EmailProvider instance with name='postmark'", () => {
-    process.env.POSTMARK_SERVER_TOKEN = "test-token";
-    process.env.POSTMARK_FROM_ADDRESS = "test@example.com";
-
+  it("returns a GmailSender (lazy-init) when no provider has been injected (W2)", () => {
+    // W2: getEmailProvider() now lazy-inits GmailSender instead of throwing.
+    // GmailSender.name must be 'gmail' (AC9).
     const provider = getEmailProvider();
-
     expect(provider).toBeDefined();
-    expect(provider.name).toBe("postmark");
-    expect(typeof provider.send).toBe("function");
-
-    delete process.env.POSTMARK_SERVER_TOKEN;
-    delete process.env.POSTMARK_FROM_ADDRESS;
+    expect(provider.name).toBe("gmail");
   });
 
-  it("returns the same singleton on repeated calls", () => {
-    process.env.POSTMARK_SERVER_TOKEN = "test-token";
+  it("returns injected provider after setEmailProvider()", () => {
+    const mock = makeMockProvider("gmail");
+    setEmailProvider(mock);
+
+    const provider = getEmailProvider();
+    expect(provider).toBeDefined();
+    expect(provider.name).toBe("gmail");
+    expect(typeof provider.send).toBe("function");
+  });
+
+  it("returns the same singleton on repeated calls after injection", () => {
+    const mock = makeMockProvider("gmail");
+    setEmailProvider(mock);
 
     const a = getEmailProvider();
     const b = getEmailProvider();
 
     expect(a).toBe(b);
-
-    delete process.env.POSTMARK_SERVER_TOKEN;
   });
 });
 
@@ -92,20 +91,29 @@ describe("setEmailProvider()", () => {
 
     expect(result).toEqual({ providerMessageId: "mock-provider-id" });
   });
+
+  it("accepts a provider with name='postmark' (interface allows both names)", () => {
+    const mock = makeMockProvider("postmark");
+    setEmailProvider(mock);
+
+    expect(getEmailProvider().name).toBe("postmark");
+  });
 });
 
 describe("resetEmailProvider()", () => {
-  it("clears the singleton so next call creates a new instance", () => {
-    process.env.POSTMARK_SERVER_TOKEN = "test-token";
-
-    const first = getEmailProvider();
-    resetEmailProvider();
-    const second = getEmailProvider();
-
-    expect(first).not.toBe(second);
+  it("clears the singleton; next call lazy-inits a fresh GmailSender (W2)", () => {
+    // W2: after reset, getEmailProvider() lazy-inits a new GmailSender.
+    const mock = makeMockProvider();
+    setEmailProvider(mock);
 
     resetEmailProvider();
-    delete process.env.POSTMARK_SERVER_TOKEN;
+
+    // Should no longer throw — returns a new GmailSender.
+    const provider = getEmailProvider();
+    expect(provider).toBeDefined();
+    expect(provider.name).toBe("gmail");
+    // Not the same object as the mock that was set before reset.
+    expect(provider).not.toBe(mock);
   });
 
   it("after reset, setEmailProvider injection works again", () => {
@@ -128,7 +136,7 @@ describe("isSendSuccess()", () => {
   });
 
   it("returns false when result has errorCode", () => {
-    const result: SendResult = { errorCode: "POSTMARK_SEND_FAILED" };
+    const result: SendResult = { errorCode: "GMAIL_SEND_FAILED" };
     expect(isSendSuccess(result)).toBe(false);
   });
 });

@@ -1,13 +1,15 @@
 /**
  * EmailProvider interface for ClaimMix outbound email.
  *
- * All provider-specific code lives under src/server/email/postmark/.
- * Callers (dispatch.ts, orchestrate.ts) import from here — never from postmark directly.
+ * Provider-specific code lives under src/server/email/postmark/ (legacy) or
+ * src/server/email/gmail/ (MVP active provider).
+ * Callers (dispatch.ts, orchestrate.ts) import from here — never from postmark/gmail directly.
  *
  * IC8: Interface focuses on the outbound seam (send). Inbound HMAC + Zod parsing
  * are provider-aware but not part of this interface (they run before provider selection).
  *
- * AC12: Confirmation receipt always sent via this interface — no direct Postmark imports
+ * AC9:  EmailProvider.name is widened to 'postmark' | 'gmail'.
+ * AC12: Confirmation receipt always sent via this interface — no direct provider imports
  * in src/server/confirmations/** or src/server/email/dispatch.ts.
  */
 
@@ -21,6 +23,11 @@ export interface SendEmailOptions {
   /** Postmark Headers array — used for In-Reply-To, References threading. */
   headers?: Array<{ Name: string; Value: string }>;
   tag?: string;
+  /**
+   * Gmail thread ID — when provided, GmailSender passes this as threadId in
+   * users.messages.send so the reply lands in the same Gmail thread (AC5).
+   */
+  threadId?: string;
 }
 
 export type SendResult =
@@ -28,7 +35,7 @@ export type SendResult =
   | { errorCode: string };
 
 export interface EmailProvider {
-  readonly name: "postmark";
+  readonly name: "postmark" | "gmail";
   send(opts: SendEmailOptions): Promise<SendResult>;
 }
 

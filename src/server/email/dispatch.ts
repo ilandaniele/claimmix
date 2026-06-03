@@ -16,14 +16,14 @@
  * AC4:  claim_messages row updated with provider_message_id='out-*' after send.
  * AC5:  Function never throws — resolves with { error } on failure.
  * AC12: Confirmation receipt always sent for valid claims.
- * AC13: No Resend imports — only getEmailProvider() from postmark/index.ts.
+ * AC12: No direct provider imports — only getEmailProvider() from gmail/index.ts (W1).
  * AC16: In-Reply-To and References headers forwarded when inReplyToMessageId is set.
  */
 
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
 import { renderTemplate, type EmailTemplate } from "./render";
-import { getEmailProvider } from "./postmark/index";
+import { getEmailProvider } from "./gmail/index";
 import { isSendSuccess } from "./provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
@@ -67,7 +67,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   }
 
   const supabase = createServiceClient();
-  const fromAddress = process.env.POSTMARK_FROM_ADDRESS ?? "";
+  const fromAddress = process.env.GMAIL_FROM_ADDRESS ?? "";
 
   // ── 2. INSERT claim_messages row (status='queued') — AC4/AC5 ──────────────
   let claimMessageId: string | undefined;
@@ -78,7 +78,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
         tenant_id: tenantId,
         case_id: caseId,
         direction: "outbound",
-        provider: "postmark",
+        provider: "gmail",
         provider_message_id: null, // set after send
         thread_id: threadId ?? null,
         in_reply_to: inReplyToMessageId ?? null,
@@ -130,7 +130,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     console.error("[dispatch] DB insert exception:", name); // crew-debug-ok
   }
 
-  // ── 4. Send via EmailProvider (Postmark) ───────────────────────────────────
+  // ── 4. Send via EmailProvider (Gmail) ─────────────────────────────────────
   // AC16: Build In-Reply-To / References headers when threading.
   const threadingHeaders: Array<{ Name: string; Value: string }> = [];
   if (inReplyToMessageId) {
@@ -147,6 +147,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     htmlBody: rendered.html,
     textBody: rendered.text,
     headers: threadingHeaders.length > 0 ? threadingHeaders : undefined,
+    threadId: threadId ?? undefined,
   });
 
   // ── 5. Update claim_messages + outbound_messages + write audit log ─────────

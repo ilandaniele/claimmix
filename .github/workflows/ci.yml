@@ -357,10 +357,11 @@ jobs:
             pnpm exec size-limit || true
           fi
 
-  # ── 9. Integration tests (email intake) ─────────────────────────────────────
-  # Runs when INTEGRATION_ENABLED secret is set; mock-only when not set.
+  # ── 9. Integration tests (Gmail polling) ────────────────────────────────────
+  # Replaces the old Postmark intake integration tests (W5: Postmark removed).
+  # Tests Gmail polling, 410 stub, and route auth — all mock-only (no real Gmail creds).
   integration-tests-email:
-    name: Integration tests (email intake)
+    name: Integration tests (Gmail polling)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -388,8 +389,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run email intake integration tests (mock-only)
-        run: pnpm vitest run tests/integration/intake-email.test.ts tests/integration/rls-email.test.ts tests/integration/llm-email-probes.test.ts
+      - name: Run Gmail polling integration tests (mock-only)
+        # intake-email.test.ts and intake-email-claim-messages.test.ts deleted in W5.
+        # intake-email-gone.test.ts verifies the 410 stub (AC11).
+        # gmail-poll.test.ts covers the full polling pipeline (AC1-AC4, AC7, AC8, AC13-AC14).
+        run: pnpm vitest run tests/integration/intake-email-gone.test.ts tests/integration/gmail-poll.test.ts tests/integration/rls-email.test.ts tests/integration/llm-email-probes.test.ts
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key

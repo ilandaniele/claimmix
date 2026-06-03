@@ -287,14 +287,10 @@ describe("POST /api/intake/simulate", () => {
     expect(res.headers.get("Retry-After")).toBe("30");
   });
 
-  // ── Email intake (W2: replaced stub — now requires valid HMAC + payload) ─────
-  // The 501 stub has been replaced by the real Postmark webhook handler.
-  // A call without POSTMARK_WEBHOOK_SECRET configured returns 500 (config error).
-  // A call without a valid HMAC returns 401 INVALID_WEBHOOK_SIGNATURE.
-  // Full happy-path integration tests live in tests/unit/verify-postmark-signature.test.ts
-  // and the route handler unit tests.
-  it("POST /api/intake/email without HMAC returns 500 when secret not configured", async () => {
-    delete process.env.POSTMARK_WEBHOOK_SECRET;
+  // ── Email intake (W5: replaced with 410 Gone stub) ───────────────────────────
+  // The Postmark webhook handler is now a 410 Gone stub (AC11).
+  // All calls to POST /api/intake/email return 410 regardless of payload/headers.
+  it("POST /api/intake/email returns 410 Gone (Postmark webhook disabled — W5/AC11)", async () => {
     const { POST: emailPOST } = await import("@/app/api/intake/email/route");
     const req = new Request("http://localhost/api/intake/email", {
       method: "POST",
@@ -302,10 +298,9 @@ describe("POST /api/intake/simulate", () => {
       headers: { "Content-Type": "application/json" },
     }) as any;
     const res = await emailPOST(req);
-    // Without POSTMARK_WEBHOOK_SECRET configured, the route returns 500.
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(410);
     const body = await res.json();
-    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.code).toBe("GONE");
   });
 });
 

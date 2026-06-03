@@ -21,8 +21,10 @@ vi.mock("@/server/email/verify-postmark-signature", () => ({
 }));
 
 // Mock deduplication to always return fresh (no duplicate).
+// Also export normalizeMessageId since route.ts imports it from the same module.
 vi.mock("@/server/email/dedupe", () => ({
   dedupe: vi.fn().mockResolvedValue({ isDuplicate: false, existingCaseId: null }),
+  normalizeMessageId: (s: string) => s.trim().replace(/^<+/, "").replace(/>+$/, "").trim(),
 }));
 
 // Mock thread lookup to return no existing thread (new case path).
@@ -94,6 +96,26 @@ function buildMockServiceClient({
       if (table === "audit_log") {
         return {
           insert: (_data: any) => Promise.resolve({ error: null }),
+        };
+      }
+      // claim_messages: dual-write path — must support .insert().select().single()
+      if (table === "claim_messages") {
+        return {
+          insert: (_data: any) => ({
+            select: () => ({
+              single: () =>
+                Promise.resolve({ data: { id: "claim-msg-uuid-001" }, error: null }),
+            }),
+          }),
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                limit: () => ({
+                  maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                }),
+              }),
+            }),
+          }),
         };
       }
       return {

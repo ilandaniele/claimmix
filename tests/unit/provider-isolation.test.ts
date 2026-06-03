@@ -6,9 +6,11 @@
  *   - src/server/confirmations/orchestrate.ts
  *   - all files under src/server/confirmations/
  *
- * And asserts that NONE of them contain a direct import of 'postmark' or 'resend'.
+ * And asserts that NONE of them contain a direct import of 'postmark', 'resend',
+ * or 'googleapis'.
  *
  * Only files under src/server/email/postmark/** are allowed to import the postmark package.
+ * Only files under src/server/email/gmail/** are allowed to import googleapis.
  */
 
 import { describe, it, expect } from "vitest";
@@ -55,13 +57,28 @@ function hasDirectProviderImport(content: string): boolean {
   return importRegex.test(content) || requireRegex.test(content);
 }
 
-describe("AC12 — provider isolation (no direct postmark/resend imports outside src/server/email/postmark/)", () => {
+/** Check a file's content for direct googleapis imports. */
+function hasGoogleapisImport(content: string): boolean {
+  const importRegex = /from\s+["']googleapis["']/;
+  const requireRegex = /require\s*\(\s*["']googleapis["']\s*\)/;
+  return importRegex.test(content) || requireRegex.test(content);
+}
+
+describe("AC12 — provider isolation (no direct postmark/resend/googleapis imports outside allowed dirs)", () => {
   it("dispatch.ts does not import postmark or resend directly", () => {
     const filePath = join(ROOT, "src/server/email/dispatch.ts");
     const content = readFile(filePath);
 
     expect(content.length).toBeGreaterThan(0); // file must exist
     expect(hasDirectProviderImport(content)).toBe(false);
+  });
+
+  it("dispatch.ts does not import googleapis directly", () => {
+    const filePath = join(ROOT, "src/server/email/dispatch.ts");
+    const content = readFile(filePath);
+
+    expect(content.length).toBeGreaterThan(0);
+    expect(hasGoogleapisImport(content)).toBe(false);
   });
 
   it("src/server/confirmations/ files do not import postmark or resend directly", () => {
@@ -77,6 +94,20 @@ describe("AC12 — provider isolation (no direct postmark/resend imports outside
       expect(
         hasDirectProviderImport(content),
         `Found direct provider import in ${relativePath}`
+      ).toBe(false);
+    }
+  });
+
+  it("src/server/confirmations/ files do not import googleapis directly", () => {
+    const dir = join(ROOT, "src/server/confirmations");
+    const files = collectTsFiles(dir);
+
+    for (const file of files) {
+      const content = readFile(file);
+      const relativePath = file.replace(ROOT, "");
+      expect(
+        hasGoogleapisImport(content),
+        `Found googleapis import in ${relativePath}`
       ).toBe(false);
     }
   });
@@ -102,6 +133,25 @@ describe("AC12 — provider isolation (no direct postmark/resend imports outside
     }
   });
 
+  it("only src/server/email/gmail/** files may import googleapis", () => {
+    // Collect all server-side files EXCEPT the gmail directory.
+    const serverDir = join(ROOT, "src/server");
+    const gmailDir = join(ROOT, "src/server/email/gmail");
+
+    const allFiles = collectTsFiles(serverDir).filter(
+      (f) => !f.startsWith(gmailDir)
+    );
+
+    for (const file of allFiles) {
+      const content = readFile(file);
+      const relativePath = file.replace(ROOT, "");
+      expect(
+        hasGoogleapisImport(content),
+        `Unexpected 'googleapis' import in ${relativePath} — only src/server/email/gmail/** may import googleapis`
+      ).toBe(false);
+    }
+  });
+
   it("postmark/ files DO import postmark (sanity check that postmark-sender.ts uses the package)", () => {
     const senderPath = join(ROOT, "src/server/email/postmark/postmark-sender.ts");
     const content = readFile(senderPath);
@@ -120,7 +170,7 @@ describe("AC12 — provider isolation (no direct postmark/resend imports outside
       const hasResendImport = /from\s+["']resend["']/.test(content);
       expect(
         hasResendImport,
-        `Found 'resend' import in ${relativePath} — Resend must be fully removed (AC13)`
+        `Found 'resend' import in ${relativePath} — Resend must be fully removed (AC12)`
       ).toBe(false);
     }
   });

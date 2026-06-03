@@ -138,18 +138,18 @@ function buildServiceMock() {
 describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.POSTMARK_FROM_ADDRESS = FROM_ADDR;
+    process.env.GMAIL_FROM_ADDRESS = FROM_ADDR;
     process.env.POSTMARK_WEBHOOK_SECRET = "test-secret-12345";
     process.env.DEFAULT_TENANT_ID = TENANT_ID;
   });
 
   afterEach(async () => {
-    delete process.env.POSTMARK_FROM_ADDRESS;
+    delete process.env.GMAIL_FROM_ADDRESS;
     delete process.env.POSTMARK_WEBHOOK_SECRET;
     delete process.env.DEFAULT_TENANT_ID;
 
     // Reset provider singleton so mock doesn't bleed between tests.
-    const { resetEmailProvider } = await import("@/server/email/postmark/index");
+    const { resetEmailProvider } = await import("@/server/email/gmail/index");
     resetEmailProvider();
   });
 
@@ -157,8 +157,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("AC4: inserts claim_messages row with direction=outbound, status=queued before send", async () => {
     const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -179,7 +179,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const row = cmInserts[0] as Record<string, unknown>;
     expect(row.direction).toBe("outbound");
-    expect(row.provider).toBe("postmark");
+    expect(row.provider).toBe("gmail");
     expect(row.status).toBe("queued");
     expect(row.provider_message_id).toBeNull();
     expect(row.in_reply_to).toBe("in-1");
@@ -192,8 +192,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("AC4: updates claim_messages with provider_message_id=out-1 and status=sent on success", async () => {
     const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -221,8 +221,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("AC4: audit_log contains OUTBOUND_EMAIL_SENT with provider_message_id=out-1", async () => {
     const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -249,8 +249,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("AC4: dispatch returns { providerMessageId: 'out-1' } on success", async () => {
     const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -273,8 +273,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("AC5: promise resolves (does not throw) when provider.send returns errorCode", async () => {
     const mockSend = vi.fn().mockResolvedValue({ errorCode: "POSTMARK_SEND_FAILED" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -296,8 +296,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("AC5: returns { error: 'POSTMARK_SEND_FAILED' } on failure", async () => {
     const mockSend = vi.fn().mockResolvedValue({ errorCode: "POSTMARK_SEND_FAILED" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -317,8 +317,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("AC5: claim_messages row has status=failed and error_code=POSTMARK_SEND_FAILED", async () => {
     const mockSend = vi.fn().mockResolvedValue({ errorCode: "POSTMARK_SEND_FAILED" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -344,8 +344,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("AC5: audit_log contains OUTBOUND_EMAIL_FAILED with payload.error=POSTMARK_SEND_FAILED", async () => {
     const mockSend = vi.fn().mockResolvedValue({ errorCode: "POSTMARK_SEND_FAILED" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -373,8 +373,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("AC16: provider.send receives In-Reply-To and References headers when inReplyToMessageId is set", async () => {
     const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -401,8 +401,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("AC16: provider.send receives no headers array when inReplyToMessageId is not set", async () => {
     const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-2" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -428,8 +428,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("outbound_messages row is also inserted (dual-write window preserved)", async () => {
     const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -455,8 +455,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("outbound_messages row updated to status=sent on provider success", async () => {
     const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");
@@ -481,8 +481,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
   it("outbound_messages row updated to status=failed on provider error", async () => {
     const mockSend = vi.fn().mockResolvedValue({ errorCode: "POSTMARK_SEND_FAILED" });
-    const { setEmailProvider } = await import("@/server/email/postmark/index");
-    setEmailProvider({ name: "postmark", send: mockSend });
+    const { setEmailProvider } = await import("@/server/email/gmail/index");
+    setEmailProvider({ name: "gmail", send: mockSend });
 
     const dbMock = buildServiceMock();
     const { createServiceClient } = await import("@/lib/supabase/service");

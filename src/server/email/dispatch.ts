@@ -4,20 +4,24 @@
  * Coordinates the full outbound email pipeline:
  *   1. Render the template
  *   2. Insert an outbound_messages row (status='queued')
- *   3. Call sendEmail via Resend
+ *   3. Call EmailProvider.send() — provider-agnostic (IC8, AC12)
  *   4. Update outbound_messages row (status='sent' or 'failed')
  *   5. Write audit log
  *
  * Uses the service-role client for DB writes (system actor — no user context).
- * Import from here — do not call sendEmail or renderTemplate directly from routes.
+ * Import from here — do not call the provider or renderTemplate directly from routes.
  *
  * AC12: Confirmation receipt always sent for valid claims.
+ * AC13: No Resend imports — only getEmailProvider() from postmark/index.ts.
+ * AC16: In-Reply-To and References headers forwarded when inReplyToMessageId is set.
  */
 
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
 import { renderTemplate, type EmailTemplate } from "./render";
-import { sendEmail } from "./resend-sender";
+import { getEmailProvider } from "./postmark/index";
+import { isSendSuccess } from "./provider";
+import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 export interface DispatchOptions {
   caseId: string;
@@ -77,32 +81,75 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<v
     console.error("[dispatch] DB insert exception:", name);
   }
 
-  // ── 3. Send via Resend ─────────────────────────────────────────────────────
-  // sendEmail never throws — it logs failures and writes audit events internally.
-  await sendEmail({
+  // ── 3. Send via EmailProvider (Postmark) ───────────────────────────────────
+  // AC16: Build In-Reply-To / References headers when threading.
+  const threadingHeaders: Array<{ Name: string; Value: string }> = [];
+  if (inReplyToMessageId) {
+    threadingHeaders.push({ Name: "In-Reply-To", Value: inReplyToMessageId });
+    threadingHeaders.push({ Name: "References", Value: inReplyToMessageId });
+  }
+
+  const provider = getEmailProvider();
+  const fromAddress = process.env.POSTMARK_FROM_ADDRESS ?? "";
+
+  const sendResult = await provider.send({
     to,
+    from: fromAddress,
     subject: rendered.subject,
-    html: rendered.html,
-    text: rendered.text,
-    replyToMessageId: inReplyToMessageId,
-    tenantId,
-    caseId,
+    htmlBody: rendered.html,
+    textBody: rendered.text,
+    headers: threadingHeaders.length > 0 ? threadingHeaders : undefined,
   });
 
-  // ── 4. Update outbound_messages row ───────────────────────────────────────
-  if (outboundMsgId) {
-    try {
-      // We don't have a direct way to know if Resend succeeded from here (sendEmail
-      // doesn't return a status). For MVP, we optimistically mark as 'sent' and rely
-      // on the audit log events (OUTBOUND_EMAIL_SENT / OUTBOUND_EMAIL_FAILED) for
-      // the true delivery status.
-      await (supabase as any)
-        .from("outbound_messages")
-        .update({ status: "sent" })
-        .eq("id", outboundMsgId);
-    } catch (err) {
-      const name = err instanceof Error ? err.name : "DBError";
-      console.error("[dispatch] Failed to update outbound_messages status:", name);
+  // ── 4. Update outbound_messages row + write audit log ─────────────────────
+  if (isSendSuccess(sendResult)) {
+    // Postmark accepted the message.
+    if (outboundMsgId) {
+      try {
+        await (supabase as any)
+          .from("outbound_messages")
+          .update({ status: "sent" })
+          .eq("id", outboundMsgId);
+      } catch (err) {
+        const name = err instanceof Error ? err.name : "DBError";
+        console.error("[dispatch] Failed to update outbound_messages status (sent):", name);
+      }
     }
+
+    await writeAuditLog({
+      tenant_id: tenantId,
+      actor_id: null,
+      event_type: AuditEvent.OUTBOUND_EMAIL_SENT,
+      target_type: "case",
+      target_id: caseId,
+      payload: {
+        subject_prefix: rendered.subject.slice(0, 40), // partial subject — no PII
+        provider_message_id: sendResult.providerMessageId,
+      },
+    });
+  } else {
+    // Provider returned an error.
+    console.error("[dispatch] Email send failed, error code:", sendResult.errorCode);
+
+    if (outboundMsgId) {
+      try {
+        await (supabase as any)
+          .from("outbound_messages")
+          .update({ status: "failed" })
+          .eq("id", outboundMsgId);
+      } catch (err) {
+        const name = err instanceof Error ? err.name : "DBError";
+        console.error("[dispatch] Failed to update outbound_messages status (failed):", name);
+      }
+    }
+
+    await writeAuditLog({
+      tenant_id: tenantId,
+      actor_id: null,
+      event_type: AuditEvent.OUTBOUND_EMAIL_FAILED,
+      target_type: "case",
+      target_id: caseId,
+      payload: { error: sendResult.errorCode },
+    });
   }
 }

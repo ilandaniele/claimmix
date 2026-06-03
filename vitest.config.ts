@@ -29,11 +29,13 @@ export default defineConfig({
         "src/lib/observability/**",
         // Upstash rate-limit adapter — requires UPSTASH_* env vars at runtime.
         "src/lib/rate-limit/upstash.ts",
-        // Email infrastructure — require Resend SDK API key and/or Supabase service-role
+        // Email infrastructure — require provider API key and/or Supabase service-role
         // client at runtime. Covered by integration tests with mocked clients, not unit tests.
         "src/server/email/dispatch.ts",
-        "src/server/email/resend-sender.ts",
         "src/server/email/thread-lookup.ts",
+        // Postmark sender — requires POSTMARK_SERVER_TOKEN at runtime (lazy-init).
+        // Unit-tested via mocked ServerClient in postmark-sender.test.ts.
+        "src/server/email/postmark/postmark-sender.ts",
         // Idempotency check — Supabase service-role query, no testable branch logic beyond DB call.
         // Covered via integration tests (intake-email.test.ts AC3 path).
         "src/server/email/dedupe.ts",

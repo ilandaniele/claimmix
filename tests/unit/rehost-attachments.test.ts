@@ -301,6 +301,58 @@ describe("rehostAttachments", () => {
     }
   });
 
+  // ── Aggregate 25 MB cap ────────────────────────────────────────────────────────
+
+  it("rejects remaining attachments when aggregate size exceeds 25 MB", async () => {
+    // Three attachments each ~9 MB (all under the 10 MB per-attachment cap).
+    // Running totals: 9 MB → 18 MB → 27 MB.
+    // At 27 MB the aggregate cap (25 MB) is exceeded on the third attachment.
+    // Expected: first two stored:true, third stored:false reason=aggregate_size_exceeded.
+    const MB = 1024 * 1024;
+
+    const makeAttachment = (name: string, sizeBytes: number): PostmarkAttachment => {
+      const buf = Buffer.alloc(sizeBytes, 0x41);
+      return {
+        Name: name,
+        Content: buf.toString("base64"),
+        ContentType: "application/pdf",
+        ContentLength: sizeBytes,
+      };
+    };
+
+    const first  = makeAttachment("chunk1.pdf", 9 * MB);  // running: 9 MB — ok
+    const second = makeAttachment("chunk2.pdf", 9 * MB);  // running: 18 MB — ok
+    const third  = makeAttachment("chunk3.pdf", 9 * MB);  // running: 27 MB — exceeds 25 MB cap
+
+    const supabase = buildSupabaseMock(null);
+    // Each successful upload returns a unique path.
+    mockUploadAttachment
+      .mockResolvedValueOnce({ storagePath: "tenant-1/case-1/msg-1/abc-chunk1.pdf" })
+      .mockResolvedValueOnce({ storagePath: "tenant-1/case-1/msg-1/abc-chunk2.pdf" });
+
+    const results = await rehostAttachments({
+      ...BASE_OPTS,
+      supabase,
+      attachments: [first, second, third],
+      budgetMs: 30_000,  // generous budget — timeout must not fire here
+    });
+
+    expect(results).toHaveLength(3);
+
+    // First two attachments are each under 10 MB and running total ≤ 25 MB → stored
+    expect(results[0].stored).toBe(true);
+    expect(results[1].stored).toBe(true);
+
+    // Third attachment: running total crosses 25 MB → rejected with aggregate reason
+    expect(results[2].stored).toBe(false);
+    if (!results[2].stored) {
+      expect(results[2].reason).toBe("aggregate_size_exceeded");
+    }
+
+    // Upload should have been called only for the first two attachments
+    expect(mockUploadAttachment).toHaveBeenCalledTimes(2);
+  });
+
   // ── Empty attachments list ────────────────────────────────────────────────────
 
   it("empty attachments list → returns empty array", async () => {

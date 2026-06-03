@@ -18,7 +18,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { computeContentHash, uploadAttachment } from "@/server/storage/claim-attachments-bucket";
-import { validateAttachment } from "@/server/email/attachment-validator";
+import { validateAttachment, MAX_AGGREGATE_SIZE_BYTES } from "@/server/email/attachment-validator";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -112,6 +112,7 @@ export async function rehostAttachments(
 
   const deadline = Date.now() + budgetMs;
   const results: RehostResult[] = [];
+  let runningBytes = 0;
 
   for (const attachment of attachments) {
     const remaining = deadline - Date.now();
@@ -128,6 +129,16 @@ export async function rehostAttachments(
       data = Buffer.from(attachment.Content, "base64");
     } catch {
       results.push({ stored: false, reason: "decode_failed" });
+      continue;
+    }
+
+    // ── Aggregate size cap (25 MB across all attachments in one email) ─────────
+    // Checked AFTER decoding so we know the real byte count, but BEFORE the
+    // per-attachment size check — the running total may cross 25 MB even when
+    // each individual file is under the 10 MB per-attachment cap.
+    runningBytes += data.length;
+    if (runningBytes > MAX_AGGREGATE_SIZE_BYTES) {
+      results.push({ stored: false, reason: "aggregate_size_exceeded" });
       continue;
     }
 

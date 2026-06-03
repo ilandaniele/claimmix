@@ -299,6 +299,126 @@ export type Database = {
           required?: boolean;
         };
       };
+      gmail_poll_state: {
+        Row: {
+          id: string;
+          gmail_account_email: string;
+          history_id: string;
+          last_polled_at: string | null;
+          last_error: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          gmail_account_email: string;
+          history_id?: string;
+          last_polled_at?: string | null;
+          last_error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          gmail_account_email?: string;
+          history_id?: string;
+          last_polled_at?: string | null;
+          last_error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      claim_messages: {
+        Row: {
+          id: string;
+          case_id: string;
+          tenant_id: string;
+          direction: "inbound" | "outbound";
+          provider: string;
+          provider_message_id: string | null;
+          thread_id: string | null;
+          from_addr: string;
+          subject: string | null;
+          body_text: string | null;
+          body_html: string | null;
+          headers: Record<string, unknown> | null;
+          raw_payload: Record<string, unknown> | null;
+          status: string;
+          received_at: string;
+        };
+        Insert: {
+          id?: string;
+          case_id: string;
+          tenant_id: string;
+          direction: "inbound" | "outbound";
+          provider: string;
+          provider_message_id?: string | null;
+          thread_id?: string | null;
+          from_addr: string;
+          subject?: string | null;
+          body_text?: string | null;
+          body_html?: string | null;
+          headers?: Record<string, unknown> | null;
+          raw_payload?: Record<string, unknown> | null;
+          status?: string;
+          received_at?: string;
+        };
+        Update: {
+          id?: string;
+          case_id?: string;
+          tenant_id?: string;
+          direction?: "inbound" | "outbound";
+          provider?: string;
+          provider_message_id?: string | null;
+          thread_id?: string | null;
+          from_addr?: string;
+          subject?: string | null;
+          body_text?: string | null;
+          body_html?: string | null;
+          headers?: Record<string, unknown> | null;
+          raw_payload?: Record<string, unknown> | null;
+          status?: string;
+          received_at?: string;
+        };
+      };
+      claim_attachments: {
+        Row: {
+          id: string;
+          case_id: string;
+          claim_message_id: string | null;
+          tenant_id: string;
+          storage_path: string;
+          original_filename: string | null;
+          content_type: string | null;
+          size_bytes: number | null;
+          rejected_reason: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          case_id: string;
+          claim_message_id?: string | null;
+          tenant_id: string;
+          storage_path: string;
+          original_filename?: string | null;
+          content_type?: string | null;
+          size_bytes?: number | null;
+          rejected_reason?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          case_id?: string;
+          claim_message_id?: string | null;
+          tenant_id?: string;
+          storage_path?: string;
+          original_filename?: string | null;
+          content_type?: string | null;
+          size_bytes?: number | null;
+          rejected_reason?: string | null;
+          created_at?: string;
+        };
+      };
     };
     Views: Record<string, never>;
     Functions: {

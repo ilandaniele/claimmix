@@ -23,6 +23,7 @@ import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
 import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
 import { FieldConfirmationsPanel } from "./_components/FieldConfirmationsPanel";
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
+import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
 import { formatAge, formatDate } from "@/lib/utils";
 import { t } from "@/lib/i18n";
@@ -252,6 +253,22 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
             </h2>
             <RawEmailAccordion caseId={caseRow.id} />
           </section>
+
+          {/* Messages thread — only shown for email channel cases (AC11, AC12) */}
+          {isEmailCase && (
+            <section
+              aria-labelledby="messages-thread-heading"
+              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
+              <h2
+                id="messages-thread-heading"
+                className="text-sm font-semibold text-slate-900 mb-4"
+              >
+                {t("messages.thread.title")}
+              </h2>
+              <MessagesThread caseId={caseRow.id} />
+            </section>
+          )}
 
           {/* Email-specific sections — only shown for email channel cases */}
           {isEmailCase && (

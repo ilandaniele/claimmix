@@ -196,6 +196,20 @@ export const AuditEvent = {
    * AC12.
    */
   OUTBOUND_EMAIL_FAILED: "email.outbound_failed",
+
+  /**
+   * ATTACHMENT_REHOSTED: Attachment successfully uploaded to Supabase Storage.
+   * Payload: { storage_path, size_bytes, content_hash_prefix } — first 12 hex chars only.
+   * AC7.
+   */
+  ATTACHMENT_REHOSTED: "attachment.rehosted",
+
+  /**
+   * ATTACHMENT_REJECTED: Attachment rejected due to content-type, size, or other validation failure.
+   * Payload: { reason, size_bytes }.
+   * AC8, AC9.
+   */
+  ATTACHMENT_REJECTED: "attachment.rejected",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

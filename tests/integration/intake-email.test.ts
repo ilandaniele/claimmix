@@ -42,6 +42,8 @@ vi.mock("@/server/worker/extract", () => ({
 vi.mock("@/server/email/dedupe", () => ({
   // AC3: dedupe() returns { isDuplicate: false } for new messages
   dedupe: vi.fn().mockResolvedValue({ isDuplicate: false, existingCaseId: undefined }),
+  // normalizeMessageId is also imported by route.ts — must be exported from the mock.
+  normalizeMessageId: (s: string) => s.trim().replace(/^<+/, "").replace(/>+$/, "").trim(),
 }));
 
 vi.mock("@/server/email/thread-lookup", () => ({
@@ -214,7 +216,8 @@ describe("POST /api/intake/email", () => {
     // Dedupe path returns 200 with deduped:true
     if (response.status === 200 && body?.deduped) {
       expect(body.deduped).toBe(true);
-      expect(body.case_id).toBe("existing-case-001");
+      // Route now returns caseId (camelCase) per spec API contract
+      expect(body.caseId).toBe("existing-case-001");
     } else {
       // Route may return 200 either way — just verify no new case was created
       expect(body).toBeDefined();

@@ -2,16 +2,22 @@
  * Unit tests for AC23: claim_attachments insertion in the webhook route handler.
  *
  * AC23: Attachments stored separately and PII-protected — claim_attachments
- *       rows with filename, content_type, size_bytes, external_url;
+ *       rows with original_filename, content_type, size_bytes;
  *       URLs not logged to stdout.
  *
+ * W6 update: attachment insertion now goes through the rehost pipeline
+ * (rehostAttachments → individual inserts with original_filename, storage_path,
+ * content_hash, rejected_reason, claim_message_id). The old bulk-insert path
+ * with file_name/external_url is replaced by the rehost service.
+ *
  * These tests verify:
- *   1. Payload with 2 attachments → 2 claim_attachments rows inserted.
+ *   1. Payload with 2 attachments → 2 individual claim_attachments rows inserted.
  *   2. Payload with no attachments → no claim_attachments inserts, no error.
  *   3. Attachment ContentURL is NOT logged to console.log (PII protection).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createHash } from "crypto";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -21,8 +27,10 @@ vi.mock("@/server/email/verify-postmark-signature", () => ({
 }));
 
 // Mock deduplication to always return fresh (no duplicate).
+// Also export normalizeMessageId since route.ts imports it from the same module.
 vi.mock("@/server/email/dedupe", () => ({
   dedupe: vi.fn().mockResolvedValue({ isDuplicate: false, existingCaseId: null }),
+  normalizeMessageId: (s: string) => s.trim().replace(/^<+/, "").replace(/>+$/, "").trim(),
 }));
 
 // Mock thread lookup to return no existing thread (new case path).
@@ -36,6 +44,8 @@ vi.mock("@/lib/audit/log", () => ({
   AuditEvent: {
     EMAIL_RECEIVED: "email.received",
     WEBHOOK_REJECTED: "webhook.rejected",
+    ATTACHMENT_REHOSTED: "attachment.rehosted",
+    ATTACHMENT_REJECTED: "attachment.rejected",
   },
 }));
 
@@ -56,12 +66,26 @@ vi.mock("@/lib/rate-limit/index", () => ({
   buildUserKey: vi.fn((id: string, key: string) => `${id}:${key}`),
 }));
 
+// W6: Mock storage bucket so no real Supabase calls are made.
+const mockUploadAttachment = vi.fn();
+vi.mock("@/server/storage/claim-attachments-bucket", () => ({
+  uploadAttachment: (...args: any[]) => mockUploadAttachment(...args),
+  computeContentHash: (data: Buffer) =>
+    createHash("sha256").update(data).digest("hex"),
+  createStorageClient: vi.fn(),
+}));
+
 // ── Supabase service client mock ──────────────────────────────────────────────
+
+const CASE_ID = "case-uuid-1234";
+const CLAIM_MSG_ID = "claim-msg-uuid-001";
 
 /**
  * Build a mock Supabase service client.
  *
- * We track calls to .from("claim_attachments").insert(...) to verify AC23.
+ * W6 update: claim_attachments mock now supports both:
+ *   - select().eq().eq().limit().maybeSingle() — dedupe query in rehostAttachments
+ *   - insert() — individual row insert from processAttachments
  */
 function buildMockServiceClient({
   attachmentInsertSpy = vi.fn().mockResolvedValue({ error: null }),
@@ -74,7 +98,7 @@ function buildMockServiceClient({
             select: () => ({
               single: () =>
                 Promise.resolve({
-                  data: { id: "case-uuid-1234" },
+                  data: { id: CASE_ID },
                   error: null,
                 }),
             }),
@@ -88,12 +112,34 @@ function buildMockServiceClient({
       }
       if (table === "claim_attachments") {
         return {
+          // Dedupe SELECT query (returns no existing row by default).
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                limit: () => ({
+                  maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                }),
+              }),
+            }),
+          }),
+          // Individual row insert (W6 — called once per attachment).
           insert: (data: any) => attachmentInsertSpy(data),
         };
       }
       if (table === "audit_log") {
         return {
           insert: (_data: any) => Promise.resolve({ error: null }),
+        };
+      }
+      // claim_messages: dual-write path — must support .insert().select().single()
+      if (table === "claim_messages") {
+        return {
+          insert: (_data: any) => ({
+            select: () => ({
+              single: () =>
+                Promise.resolve({ data: { id: CLAIM_MSG_ID }, error: null }),
+            }),
+          }),
         };
       }
       return {
@@ -142,7 +188,6 @@ function makeRequest(body: string): Request {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      // A non-empty header so the mock verifier receives something to validate.
       "x-postmark-signature": "mock-valid-signature",
       "x-forwarded-for": "127.0.0.1",
     },
@@ -157,84 +202,84 @@ describe("Webhook route — AC23 claim_attachments insertion", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    // Reset env so DEFAULT_TENANT_ID is available.
     process.env.DEFAULT_TENANT_ID = "tenant-uuid-0001";
     process.env.POSTMARK_WEBHOOK_SECRET = "test-secret";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
 
     attachmentInsertSpy = vi.fn().mockResolvedValue({ error: null });
 
-    // Intercept console.log to detect URL leakage.
+    // uploadAttachment succeeds by default — returns a fake storage path.
+    mockUploadAttachment.mockResolvedValue({
+      storagePath: `tenant-uuid-0001/${CASE_ID}/${CLAIM_MSG_ID}/abc-file.pdf`,
+    });
+
     consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    // Allow console.error (used for non-fatal errors) to pass through so
-    // we can detect unexpected failures; only block log.
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     delete process.env.DEFAULT_TENANT_ID;
     delete process.env.POSTMARK_WEBHOOK_SECRET;
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   });
 
   it("inserts 2 claim_attachments rows when payload has 2 attachments", async () => {
     const mockClient = buildMockServiceClient({ attachmentInsertSpy });
 
-    // Inject our mock client into the service module.
     vi.doMock("@/lib/supabase/service", () => ({
       createServiceClient: () => mockClient,
     }));
+
+    const pdf1Content = Buffer.from("pdf1 content").toString("base64");
+    const jpg1Content = Buffer.from("jpg1 content").toString("base64");
 
     const body = makePostmarkPayload({
       Attachments: [
         {
           Name: "denuncia.pdf",
-          Content: "",
+          Content: pdf1Content,
           ContentType: "application/pdf",
-          ContentLength: 102400,
+          ContentLength: Buffer.from(pdf1Content, "base64").length,
           ContentURL: "https://phcdn.postmarkapp.com/attachment/abc123",
           ContentID: "",
         },
         {
           Name: "foto-danios.jpg",
-          Content: "",
+          Content: jpg1Content,
           ContentType: "image/jpeg",
-          ContentLength: 204800,
+          ContentLength: Buffer.from(jpg1Content, "base64").length,
           ContentURL: "https://phcdn.postmarkapp.com/attachment/def456",
           ContentID: "",
         },
       ],
     });
 
-    // Dynamically import the route handler so the mocks are in place.
     const { POST } = await import("@/app/api/intake/email/route");
     const request = makeRequest(body);
     const response = await POST(request as any);
 
-    // Route should return 202.
     expect(response.status).toBe(202);
 
-    // claim_attachments insert should have been called once with 2 rows.
-    expect(attachmentInsertSpy).toHaveBeenCalledTimes(1);
-    const insertedRows = attachmentInsertSpy.mock.calls[0]![0] as any[];
-    expect(insertedRows).toHaveLength(2);
+    // W6: attachmentInsertSpy is called once per attachment (individual inserts).
+    expect(attachmentInsertSpy).toHaveBeenCalledTimes(2);
 
-    // Verify row 1 contents.
-    expect(insertedRows[0]).toMatchObject({
-      case_id: "case-uuid-1234",
-      file_name: "denuncia.pdf",
-      content_type: "application/pdf",
-      size_bytes: 102400,
-    });
-    expect(insertedRows[0].external_url).toBe(
-      "https://phcdn.postmarkapp.com/attachment/abc123"
-    );
+    // Verify first row — uses new column names from W6.
+    const row1 = attachmentInsertSpy.mock.calls[0]![0] as any;
+    expect(row1.case_id).toBe(CASE_ID);
+    expect(row1.original_filename).toBe("denuncia.pdf");
+    expect(row1.content_type).toBe("application/pdf");
+    expect(row1.claim_message_id).toBe(CLAIM_MSG_ID);
+    // storage_path is set (upload succeeded).
+    expect(row1.storage_path).toBeTruthy();
+    expect(row1.rejected_reason).toBeNull();
 
-    // Verify row 2 contents.
-    expect(insertedRows[1]).toMatchObject({
-      case_id: "case-uuid-1234",
-      file_name: "foto-danios.jpg",
-      content_type: "image/jpeg",
-      size_bytes: 204800,
-    });
+    // Verify second row.
+    const row2 = attachmentInsertSpy.mock.calls[1]![0] as any;
+    expect(row2.case_id).toBe(CASE_ID);
+    expect(row2.original_filename).toBe("foto-danios.jpg");
+    expect(row2.content_type).toBe("image/jpeg");
   });
 
   it("does not call claim_attachments insert when Attachments array is empty", async () => {
@@ -244,17 +289,13 @@ describe("Webhook route — AC23 claim_attachments insertion", () => {
       createServiceClient: () => mockClient,
     }));
 
-    // Payload with no attachments (empty array).
     const body = makePostmarkPayload({ Attachments: [] });
 
     const { POST } = await import("@/app/api/intake/email/route");
     const request = makeRequest(body);
     const response = await POST(request as any);
 
-    // Route should return 202 without error.
     expect(response.status).toBe(202);
-
-    // claim_attachments insert must NOT have been called.
     expect(attachmentInsertSpy).not.toHaveBeenCalled();
   });
 
@@ -266,13 +307,14 @@ describe("Webhook route — AC23 claim_attachments insertion", () => {
       createServiceClient: () => mockClient,
     }));
 
+    const pdfContent = Buffer.from("pdf content").toString("base64");
     const body = makePostmarkPayload({
       Attachments: [
         {
           Name: "poliza.pdf",
-          Content: "",
+          Content: pdfContent,
           ContentType: "application/pdf",
-          ContentLength: 51200,
+          ContentLength: Buffer.from(pdfContent, "base64").length,
           ContentURL: attachmentURL,
           ContentID: "",
         },
@@ -283,7 +325,6 @@ describe("Webhook route — AC23 claim_attachments insertion", () => {
     const request = makeRequest(body);
     await POST(request as any);
 
-    // Verify the attachment URL was never passed to console.log.
     const logCalls = consoleSpy.mock.calls.map((call) =>
       call.map(String).join(" ")
     );

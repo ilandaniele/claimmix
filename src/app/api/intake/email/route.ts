@@ -6,11 +6,15 @@
  *   b) HMAC-SHA256 verification against X-Postmark-Signature header (AC2)
  *   c) Parse + validate with PostmarkInboundSchema (Zod)
  *   d) Rate limit: 100/10s per IP (AC20)
- *   e) Idempotency check by (tenant_id, MessageID) (AC3)
- *   f) Thread-reply detection via In-Reply-To / References headers (AC4)
- *   g) Thread reply → append raw_message to existing case, re-dispatch worker
- *   h) New email → create case (channel=email, status=recibido) + raw_message,
+ *   e) Idempotency check by (tenant_id, provider_message_id) in claim_messages (AC2)
+ *   f) Thread-reply detection via In-Reply-To / References headers (AC4/AC6)
+ *   g) Thread reply → insert claim_messages row + raw_messages row, re-dispatch worker
+ *   h) New email → create case + insert claim_messages row + raw_messages row,
  *      dispatch extraction worker (fire-and-forget)
+ *
+ * W4: Dual-write — every inbound now inserts into BOTH claim_messages (new) and
+ * raw_messages (legacy).  The raw_messages insert is retained until migration 0010
+ * backfills and the legacy tables are confirmed equivalent and dropped.
  *
  * Auth: No session auth — this is a server-to-server Postmark webhook.
  *       Authentication is via HMAC signature only.
@@ -20,9 +24,13 @@
  */
 
 import { type NextRequest } from "next/server";
-import { PostmarkInboundSchema } from "@/lib/schemas/postmark-inbound";
+import {
+  PostmarkInboundSchema,
+  extractEmailBody,
+  extractThreadId,
+} from "@/lib/schemas/postmark-inbound";
 import { verifyPostmarkSignature } from "@/server/email/verify-postmark-signature";
-import { dedupe } from "@/server/email/dedupe";
+import { dedupe, normalizeMessageId } from "@/server/email/dedupe";
 import { threadLookup } from "@/server/email/thread-lookup";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -31,6 +39,7 @@ import {
   RATE_LIMIT_CONFIGS,
   getClientIp,
 } from "@/lib/rate-limit/index";
+import { rehostAttachments } from "@/server/email/rehost-attachments";
 
 /**
  * Resolve the tenant_id for the webhook.
@@ -84,6 +93,174 @@ function dispatchExtractionWorker(caseId: string, tenantId: string): void {
     context.waitUntil(workerPromise);
   }
   // Local dev: fire-and-forget (Promise runs independently after response is sent).
+}
+
+/**
+ * Insert a claim_messages row for an inbound email.
+ *
+ * Returns the inserted row id, or null if the insert failed (non-fatal during
+ * the dual-write window — raw_messages is the source of truth until 0010).
+ */
+async function insertClaimMessage(
+  supabase: ReturnType<typeof createServiceClient>,
+  opts: {
+    caseId: string;
+    tenantId: string;
+    providerMessageId: string;
+    threadId: string | null;
+    inReplyTo: string | null;
+    fromAddr: string;
+    toAddr: string;
+    subject: string;
+    bodyText: string;
+    bodyHtml: string;
+    headers: Array<{ Name: string; Value: string }>;
+    rawPayload: unknown;
+  }
+): Promise<string | null> {
+  const {
+    caseId,
+    tenantId,
+    providerMessageId,
+    threadId,
+    inReplyTo,
+    fromAddr,
+    toAddr,
+    subject,
+    bodyText,
+    bodyHtml,
+    headers,
+    rawPayload,
+  } = opts;
+
+  const { data, error } = await (supabase as any)
+    .from("claim_messages")
+    .insert({
+      case_id: caseId,
+      tenant_id: tenantId,
+      direction: "inbound",
+      provider: "postmark",
+      provider_message_id: providerMessageId,
+      thread_id: threadId,
+      in_reply_to: inReplyTo,
+      from_addr: fromAddr,
+      to_addr: toAddr,
+      subject,
+      body_text: bodyText,
+      body_html: bodyHtml,
+      headers,        // jsonb — full Postmark Headers array
+      raw_payload: rawPayload,  // jsonb — verbatim parsed webhook JSON
+      status: "received",
+      received_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    // Log error code only — body may contain PII.
+    console.error("[intake/email] claim_messages insert error:", error.code); // crew-debug-ok
+    return null;
+  }
+
+  return (data as { id: string }).id;
+}
+
+/**
+ * W6: Rehost attachments to Supabase Storage and write claim_attachments rows.
+ *
+ * Called after claim_messages is committed. Non-fatal — webhook returns 202
+ * regardless of individual attachment outcomes (IC6).
+ *
+ * AC7:  Valid attachment → storage_path + content_hash set, ATTACHMENT_REHOSTED audit.
+ * AC8:  Bad content-type → rejected_reason set, no upload, ATTACHMENT_REJECTED audit.
+ * AC9:  Oversize → rejected_reason='size_exceeded', no upload.
+ * AC10: Duplicate content_hash in case → reuse existing storage_path.
+ * AC11: Budget exhausted → remaining get rejected_reason='rehost_timeout'.
+ */
+async function processAttachments(
+  supabase: ReturnType<typeof createServiceClient>,
+  opts: {
+    tenantId: string;
+    caseId: string;
+    claimMessageId: string;
+    attachments: Array<{
+      Name: string;
+      Content: string;
+      ContentType: string;
+      ContentLength: number;
+    }>;
+  }
+): Promise<void> {
+  const { tenantId, caseId, claimMessageId, attachments } = opts;
+
+  if (!attachments || attachments.length === 0) return;
+
+  // Rehost all attachments with a 5-second aggregate budget.
+  const results = await rehostAttachments({
+    supabase: supabase as any,
+    attachments,
+    tenantId,
+    caseId,
+    messageId: claimMessageId,
+    budgetMs: 5_000,
+  });
+
+  for (let i = 0; i < attachments.length; i++) {
+    const attachment = attachments[i];
+    const result = results[i];
+
+    if (!result) continue;
+
+    // Insert the claim_attachments row.
+    const attachmentRow: Record<string, unknown> = {
+      case_id: caseId,
+      tenant_id: tenantId,
+      claim_message_id: claimMessageId,
+      original_filename: attachment.Name,
+      content_type: attachment.ContentType,
+      size_bytes: attachment.ContentLength,
+      storage_path: result.stored ? result.storagePath : null,
+      content_hash: result.stored ? result.contentHash : null,
+      rejected_reason: result.stored ? null : result.reason,
+    };
+
+    const { error: attachErr } = await (supabase as any)
+      .from("claim_attachments")
+      .insert(attachmentRow);
+
+    if (attachErr) {
+      console.error("[intake/email] claim_attachments insert:", attachErr.code); // crew-debug-ok
+    }
+
+    // Emit audit events (non-fatal).
+    if (result.stored) {
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.ATTACHMENT_REHOSTED,
+        target_type: "case",
+        target_id: caseId,
+        payload: {
+          storage_path: result.storagePath,
+          size_bytes: attachment.ContentLength,
+          content_hash_prefix: result.contentHash.slice(0, 12),
+        },
+      });
+    } else if (result.reason !== "rehost_timeout") {
+      // Don't emit ATTACHMENT_REJECTED for timeouts — those are operational, not security events.
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.ATTACHMENT_REJECTED,
+        target_type: "case",
+        target_id: caseId,
+        payload: {
+          reason: result.reason,
+          size_bytes: attachment.ContentLength,
+        },
+      });
+    }
+  }
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
@@ -198,20 +375,39 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  const messageId = payload.MessageID;
+  // AC15: Normalize the provider_message_id — strip angle brackets at the boundary.
+  // Postmark's MessageID field does NOT include angle brackets, but we normalise
+  // defensively here so storage is always angle-bracket-free.
+  const providerMessageId = normalizeMessageId(payload.MessageID);
+
   const fromEmail = payload.FromFull.Email;
   const subject = payload.Subject;
-  const body = payload.TextBody || payload.StrippedTextReply || "";
+  const body = extractEmailBody(payload);
 
-  // ── f) Idempotency check ──────────────────────────────────────────────────────
+  // In-Reply-To normalisation: strip angle brackets before storage and comparison.
+  const inReplyToRaw = payload.InReplyTo || "";
+  const inReplyTo = inReplyToRaw ? normalizeMessageId(inReplyToRaw) : null;
+
+  // thread_id: follows cases.email_thread_id semantics (first message in chain).
+  // For a new email this is the MessageID itself; for a reply it resolves to the
+  // thread root via extractThreadId() which also strips angle brackets.
+  const threadId = extractThreadId(payload) ?? providerMessageId;
+
+  // to_addr: the intake inbox address.
+  const toAddr =
+    payload.OriginalRecipient ||
+    payload.ToFull[0]?.Email ||
+    "";
+
+  // ── f) Idempotency check against claim_messages ───────────────────────────────
   const { isDuplicate, existingCaseId: dedupedCaseId } = await dedupe(
-    messageId,
+    providerMessageId,
     tenantId
   );
 
   if (isDuplicate && dedupedCaseId) {
     return new Response(
-      JSON.stringify({ case_id: dedupedCaseId, deduped: true }),
+      JSON.stringify({ caseId: dedupedCaseId, deduped: true }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -225,11 +421,35 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const supabase = createServiceClient();
 
-  // ── h) Thread reply: append raw_message, re-dispatch worker ──────────────────
+  // ── h) Thread reply: insert claim_messages + raw_messages, re-dispatch worker ─
   if (threadCaseId) {
-    // Insert a new raw_messages row linked to the existing case.
-    // Note: raw_messages stores the payload body and metadata.
-    // email_message_id / email_thread_id are on the cases table, not raw_messages.
+    // W4: Insert claim_messages row (new — dual-write).
+    const threadClaimMessageId = await insertClaimMessage(supabase, {
+      caseId: threadCaseId,
+      tenantId,
+      providerMessageId,
+      threadId,
+      inReplyTo,
+      fromAddr: fromEmail,
+      toAddr,
+      subject,
+      bodyText: body,
+      bodyHtml: payload.HtmlBody,
+      headers: payload.Headers,
+      rawPayload: rawJson,
+    });
+
+    // W6: Rehost attachments for thread replies too.
+    if (threadClaimMessageId) {
+      await processAttachments(supabase, {
+        tenantId,
+        caseId: threadCaseId,
+        claimMessageId: threadClaimMessageId,
+        attachments: payload.Attachments ?? [],
+      });
+    }
+
+    // Insert a new raw_messages row linked to the existing case (dual-write — keep legacy).
     const { error: rawMsgError } = await (supabase as any).from("raw_messages").insert({
       case_id: threadCaseId,
       tenant_id: tenantId,
@@ -250,27 +470,27 @@ export async function POST(request: NextRequest): Promise<Response> {
       event_type: AuditEvent.EMAIL_RECEIVED,
       target_type: "case",
       target_id: threadCaseId,
-      payload: { action: "thread_update", message_id: messageId },
+      payload: { action: "thread_update", message_id: providerMessageId },
     });
 
     // Re-dispatch extraction worker in memory-aware mode.
     dispatchExtractionWorker(threadCaseId, tenantId);
 
     return new Response(
-      JSON.stringify({ case_id: threadCaseId, action: "thread_update" }),
+      JSON.stringify({ caseId: threadCaseId, deduped: false }),
       { status: 202, headers: { "Content-Type": "application/json" } }
     );
   }
 
-  // ── i) New email: create case + raw_message, dispatch worker ─────────────────
+  // ── i) New email: create case + claim_messages + raw_messages, dispatch worker ─
   const { data: newCase, error: caseError } = await (supabase as any)
     .from("cases")
     .insert({
       tenant_id: tenantId,
       channel: "email",
       status: "recibido",
-      email_message_id: messageId,
-      email_thread_id: messageId, // first message in thread = its own thread ID
+      email_message_id: providerMessageId,
+      email_thread_id: providerMessageId, // first message in thread = its own thread ID
       is_claim: true, // optimistic — worker may set to false after extraction
       claim_type: "choque", // default — worker will update after extraction
     })
@@ -287,7 +507,36 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const newCaseId = (newCase as { id: string }).id;
 
-  // Insert raw_messages row.
+  // W4: Insert claim_messages row (new — dual-write).
+  const newClaimMessageId = await insertClaimMessage(supabase, {
+    caseId: newCaseId,
+    tenantId,
+    providerMessageId,
+    threadId,
+    inReplyTo,
+    fromAddr: fromEmail,
+    toAddr,
+    subject,
+    bodyText: body,
+    bodyHtml: payload.HtmlBody,
+    headers: payload.Headers,
+    rawPayload: rawJson,
+  });
+
+  // W6: Rehost attachments to Supabase Storage (AC7-AC11).
+  // Runs synchronously within the request, bounded by a 5s aggregate budget (IC6).
+  // Non-fatal — webhook still returns 202 regardless of attachment outcomes.
+  // Attachment URLs are NOT logged to stdout (PII protection).
+  if (newClaimMessageId) {
+    await processAttachments(supabase, {
+      tenantId,
+      caseId: newCaseId,
+      claimMessageId: newClaimMessageId,
+      attachments: payload.Attachments ?? [],
+    });
+  }
+
+  // Insert raw_messages row (dual-write — keep legacy table during transition).
   // email_message_id / email_thread_id are stored on the cases table.
   // raw_messages stores the body and sender metadata only.
   const { error: rawMsgError } = await (supabase as any).from("raw_messages").insert({
@@ -304,33 +553,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     // Non-fatal — case created; worker will still run and may re-read the payload.
   }
 
-  // AC23: Insert claim_attachments rows for each attachment in the payload.
-  // Attachment URLs are NOT logged to stdout (PII protection — AC23).
-  const attachments = payload.Attachments ?? [];
-  if (attachments.length > 0) {
-    const attachmentInserts = attachments.map((a) => ({
-      case_id: newCaseId,
-      tenant_id: tenantId,
-      file_name: a.Name,
-      content_type: a.ContentType,
-      size_bytes: a.ContentLength,
-      // ContentURL is Postmark's CDN link; ContentID is for inline attachments.
-      // Use ContentURL as the external URL when present; fall back to null.
-      external_url: a.ContentURL || null,
-      source_message_id: messageId,
-    }));
-
-    const { error: attachmentsError } = await (supabase as any)
-      .from("claim_attachments")
-      .insert(attachmentInserts);
-
-    if (attachmentsError) {
-      console.error("[intake/email] claim_attachments insert:", attachmentsError.code);
-      // Non-fatal — case and raw_message are already persisted; attachments
-      // may be retried by re-sending the email. Log the error code only (no URL).
-    }
-  }
-
   // Audit log.
   await writeAuditLog({
     tenant_id: tenantId,
@@ -338,7 +560,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     event_type: AuditEvent.EMAIL_RECEIVED,
     target_type: "case",
     target_id: newCaseId,
-    payload: { action: "new_case", message_id: messageId },
+    payload: { action: "new_case", message_id: providerMessageId },
     ip,
   });
 
@@ -346,7 +568,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   dispatchExtractionWorker(newCaseId, tenantId);
 
   return new Response(
-    JSON.stringify({ case_id: newCaseId, status: "recibido" }),
+    JSON.stringify({ caseId: newCaseId, deduped: false }),
     { status: 202, headers: { "Content-Type": "application/json" } }
   );
 }

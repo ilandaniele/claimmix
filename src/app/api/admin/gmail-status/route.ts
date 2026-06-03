@@ -77,7 +77,7 @@ export async function GET() {
 
     if (dbError) {
       // Log only the error code — never the row data or PII.
-      console.error("[admin/gmail-status GET]", dbError.code);
+      console.error("[admin/gmail-status GET]", dbError.code); // crew-debug-ok
       return err(new AppError("INTERNAL_ERROR"));
     }
 

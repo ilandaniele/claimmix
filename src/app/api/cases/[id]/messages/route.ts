@@ -80,7 +80,7 @@ export async function GET(
       .maybeSingle();
 
     if (caseError) {
-      console.error("[GET /api/cases/:id/messages] case lookup error:", caseError.code);
+      console.error("[GET /api/cases/:id/messages] case lookup error:", caseError.code); // crew-debug-ok
       return err(new AppError("INTERNAL_ERROR"));
     }
 
@@ -112,7 +112,7 @@ export async function GET(
       .limit(MESSAGES_LIMIT);
 
     if (msgError) {
-      console.error("[GET /api/cases/:id/messages] messages query error:", msgError.code);
+      console.error("[GET /api/cases/:id/messages] messages query error:", msgError.code); // crew-debug-ok
       return err(new AppError("INTERNAL_ERROR"));
     }
 
@@ -149,7 +149,7 @@ export async function GET(
     return ok({ messages: result });
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
-    console.error("[GET /api/cases/:id/messages] unhandled error:", errName);
+    console.error("[GET /api/cases/:id/messages] unhandled error:", errName); // crew-debug-ok
     return err(new AppError("INTERNAL_ERROR"));
   }
 }

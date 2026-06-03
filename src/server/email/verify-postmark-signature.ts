@@ -49,22 +49,21 @@ export function verifyPostmarkSignature(
   }
 
   // Compute expected HMAC-SHA256 over the raw body using the webhook secret.
-  const expected = crypto
+  // Postmark encodes the signature as base64 (not hex).
+  const expectedBuf = crypto
     .createHmac("sha256", secret)
     .update(rawBody)
-    .digest("hex");
+    .digest();
 
-  // Decode the provided signature from hex.
-  // If it's not valid hex or a different length, timingSafeEqual would throw —
+  // Decode the provided signature from base64.
+  // If it's not valid base64 or a different length, timingSafeEqual would throw —
   // catch and return invalid.
   let actual: Buffer;
   try {
-    actual = Buffer.from(signatureHeader.trim(), "hex");
+    actual = Buffer.from(signatureHeader.trim(), "base64");
   } catch {
     return { valid: false, reason: "invalid_signature_encoding" };
   }
-
-  const expectedBuf = Buffer.from(expected, "hex");
 
   // Lengths must match for timingSafeEqual — different lengths reveal nothing
   // about the HMAC content but we still want to avoid the RangeError it would throw.

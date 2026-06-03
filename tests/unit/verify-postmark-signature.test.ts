@@ -1,17 +1,24 @@
 /**
  * Unit tests for HMAC-SHA256 Postmark webhook signature verification.
  *
- * AC2: Invalid or missing HMAC returns { valid: false } — route returns 401.
+ * AC3: verifyPostmarkSignature accepts base64-encoded HMAC-SHA256 (Postmark's
+ *      actual format) and rejects the old hex-encoded format.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as crypto from "crypto";
 
 // We import the module under test dynamically so we can control env vars.
 // The module reads POSTMARK_WEBHOOK_SECRET at call time, not at import time.
 const MODULE_PATH = "../../src/server/email/verify-postmark-signature";
 
+/** Produce a base64-encoded HMAC-SHA256 — matches Postmark's wire format. */
 function computeExpectedSignature(rawBody: Buffer, secret: string): string {
+  return crypto.createHmac("sha256", secret).update(rawBody).digest("base64");
+}
+
+/** Produce a hex-encoded HMAC-SHA256 — the old (wrong) format, should be rejected. */
+function computeHexSignature(rawBody: Buffer, secret: string): string {
   return crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
 }
 
@@ -85,12 +92,24 @@ describe("verifyPostmarkSignature", () => {
     );
   });
 
-  it("returns { valid: false } for a non-hex signature string (length mismatch)", async () => {
+  it("returns { valid: false } for a string that is not valid base64 (length mismatch)", async () => {
     const { verifyPostmarkSignature } = await import(MODULE_PATH);
 
-    // "xyz" is not valid hex — Buffer.from("xyz", "hex") produces a Buffer of
-    // length 1 (skips invalid hex chars), which won't match the 32-byte HMAC.
-    const result = verifyPostmarkSignature(rawBody, "xyz");
+    // "!!!" is not valid base64 — Buffer.from("!!!", "base64") produces an
+    // empty Buffer, which won't match the 32-byte HMAC (length mismatch).
+    const result = verifyPostmarkSignature(rawBody, "!!!");
+
+    expect(result.valid).toBe(false);
+  });
+
+  it("returns { valid: false } for a hex-encoded signature (AC3 — old format rejected)", async () => {
+    const { verifyPostmarkSignature } = await import(MODULE_PATH);
+
+    // A hex-encoded HMAC is 64 characters and decodes to 32 bytes when treated
+    // as base64, which will not equal the correct 32-byte HMAC value.
+    const hexSignature = computeHexSignature(rawBody, SECRET);
+
+    const result = verifyPostmarkSignature(rawBody, hexSignature);
 
     expect(result.valid).toBe(false);
   });
@@ -110,11 +129,12 @@ describe("verifyPostmarkSignature", () => {
     const { verifyPostmarkSignature } = await import(MODULE_PATH);
     // The attacker knows the first few bytes of the HMAC but not all 32.
     // timingSafeEqual ensures we compare all 32 bytes regardless.
+    // Build a tampered signature by decoding the correct base64, flipping the
+    // last byte, then re-encoding — this keeps the length identical.
     const correctSig = computeExpectedSignature(rawBody, SECRET);
-    // Tamper just the last 2 hex chars (1 byte).
-    const tamperedSig =
-      correctSig.slice(0, -2) +
-      (correctSig.slice(-2) === "00" ? "ff" : "00");
+    const correctBytes = Buffer.from(correctSig, "base64");
+    correctBytes[correctBytes.length - 1] ^= 0xff; // flip last byte
+    const tamperedSig = correctBytes.toString("base64");
 
     const result = verifyPostmarkSignature(rawBody, tamperedSig);
 

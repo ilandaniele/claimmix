@@ -153,7 +153,7 @@ export function GmailStatusSection() {
       {/* Status pill row */}
       <div className="flex items-center gap-4 py-1.5">
         <span className="w-44 flex-none text-xs text-slate-500">
-          Estado
+          {t("gmail.status.label")}
         </span>
         <div className="text-sm text-slate-800">
           <StatusPill variant={pillVariant} label={pillLabel} />

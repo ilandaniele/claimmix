@@ -274,6 +274,7 @@ export const esAR = {
 
   // ── Gmail status panel (W1) ─────────────────────────────────────────────────
   "gmail.status.title": "Bandeja de entrada Gmail",
+  "gmail.status.label": "Estado",
   "gmail.status.connected": "Conectado",
   "gmail.status.error": "Error",
   "gmail.status.not_configured": "Sin configurar",
@@ -294,6 +295,8 @@ export const esAR = {
   "messages.thread.received_at": "Recibido",
   "messages.thread.attachments": "adjunto(s)",
   "messages.thread.no_subject": "(sin asunto)",
+  "messages.thread.expand": "Ver más",
+  "messages.thread.collapse": "Ver menos",
 
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clientes",

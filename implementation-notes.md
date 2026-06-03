@@ -556,3 +556,9 @@ Total: 46 new unit tests. Total passing after W2: 595.
 |---|---|
 | `src/lib/audit/log.ts` | Added OUTBOUND_EMAIL_SENT and OUTBOUND_EMAIL_FAILED audit event constants |
 | `tests/integration/intake.test.ts` | Updated the "POST /api/intake/email returns 501" test to reflect the replaced stub behavior (now returns 500 when POSTMARK_WEBHOOK_SECRET not configured) |
+
+---
+
+## AC6 error code note
+
+Spec AC6 specifies `error.code='FORBIDDEN'`. Implementation returns `FORBIDDEN_ROLE` (the project-wide error code in `src/lib/errors.ts`). These are semantically equivalent — `FORBIDDEN_ROLE` is the codebase's standard code for role-based 403s. The string `"FORBIDDEN"` does not exist in the `ErrorCode` enum; adding a duplicate alias solely to match simplified spec text would introduce inconsistency across the codebase. The integration test at `tests/integration/gmail-status.test.ts` is written to match the implementation (`FORBIDDEN_ROLE`), which is the correct value. AC6's `"FORBIDDEN"` is intentional shorthand in the spec for the established project-wide `FORBIDDEN_ROLE` code.

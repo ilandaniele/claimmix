@@ -199,7 +199,7 @@ function MessageCard({ message }: MessageCardProps) {
                 className="mt-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
                 aria-expanded={expanded}
               >
-                {expanded ? "Ver menos" : "Ver más"}
+                {expanded ? t("messages.thread.collapse") : t("messages.thread.expand")}
               </button>
             )}
           </div>

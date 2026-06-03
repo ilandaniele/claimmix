@@ -531,8 +531,15 @@ export async function pollGmail(
   let latestHistoryId = pollState.historyId;
   let usedFallback = false;
 
-  // ── Incremental sync via history.list ──────────────────────────────────────
-  try {
+  // ── First-run detection ────────────────────────────────────────────────────
+  // history_id "1" is the sentinel stored by getOrCreatePollState for brand-new
+  // rows. Passing "1" to Gmail history.list returns a non-404 error (invalid ID),
+  // which would abort the poll instead of triggering the fallback path. Skip
+  // straight to messages.list on first run.
+  const isFirstRun = pollState.historyId === "1";
+
+  // ── Incremental sync via history.list (skipped on first run) ──────────────
+  if (!isFirstRun) try {
     const historyResponse = await gmail.users.history.list({
       userId: "me",
       startHistoryId: pollState.historyId,
@@ -613,6 +620,46 @@ export async function pollGmail(
         skipped: 0,
         errors: 1,
         fallback: false,
+        history_id: latestHistoryId,
+      };
+    }
+  }
+
+  // ── First-run: messages.list(newer_than:1d) ────────────────────────────────
+  // Mirrors the historyNotFound fallback path. Runs only when isFirstRun=true.
+  if (isFirstRun) {
+    usedFallback = true;
+    try {
+      const listResponse = await gmail.users.messages.list({
+        userId: "me",
+        q: "newer_than:1d",
+        labelIds: ["INBOX"],
+        maxResults: MAX_MESSAGES_PER_RUN,
+      });
+      for (const msg of listResponse.data.messages ?? []) {
+        if (msg.id && !messageIds.includes(msg.id)) {
+          messageIds.push(msg.id);
+        }
+      }
+      // Anchor watermark to current mailbox historyId so next run uses history.list.
+      try {
+        const profile = await gmail.users.getProfile({ userId: "me" });
+        if (profile.data.historyId) {
+          latestHistoryId = profile.data.historyId;
+        }
+      } catch (profileErr) {
+        const code = profileErr instanceof Error ? profileErr.name : "UnknownError";
+        console.error("[gmail-poller] getProfile error (first-run):", code); // crew-debug-ok
+      }
+    } catch (listErr) {
+      const code = listErr instanceof Error ? listErr.name : "UnknownError";
+      console.error("[gmail-poller] messages.list first-run error:", code); // crew-debug-ok
+      await recordPollError(supabase, pollState.id, `first_run_list_failed: ${code}`);
+      return {
+        processed: 0,
+        skipped: 0,
+        errors: 1,
+        fallback: true,
         history_id: latestHistoryId,
       };
     }

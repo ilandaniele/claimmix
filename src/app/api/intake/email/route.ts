@@ -39,6 +39,7 @@ import {
   RATE_LIMIT_CONFIGS,
   getClientIp,
 } from "@/lib/rate-limit/index";
+import { rehostAttachments } from "@/server/email/rehost-attachments";
 
 /**
  * Resolve the tenant_id for the webhook.
@@ -162,6 +163,104 @@ async function insertClaimMessage(
   }
 
   return (data as { id: string }).id;
+}
+
+/**
+ * W6: Rehost attachments to Supabase Storage and write claim_attachments rows.
+ *
+ * Called after claim_messages is committed. Non-fatal — webhook returns 202
+ * regardless of individual attachment outcomes (IC6).
+ *
+ * AC7:  Valid attachment → storage_path + content_hash set, ATTACHMENT_REHOSTED audit.
+ * AC8:  Bad content-type → rejected_reason set, no upload, ATTACHMENT_REJECTED audit.
+ * AC9:  Oversize → rejected_reason='size_exceeded', no upload.
+ * AC10: Duplicate content_hash in case → reuse existing storage_path.
+ * AC11: Budget exhausted → remaining get rejected_reason='rehost_timeout'.
+ */
+async function processAttachments(
+  supabase: ReturnType<typeof createServiceClient>,
+  opts: {
+    tenantId: string;
+    caseId: string;
+    claimMessageId: string;
+    attachments: Array<{
+      Name: string;
+      Content: string;
+      ContentType: string;
+      ContentLength: number;
+    }>;
+  }
+): Promise<void> {
+  const { tenantId, caseId, claimMessageId, attachments } = opts;
+
+  if (!attachments || attachments.length === 0) return;
+
+  // Rehost all attachments with a 5-second aggregate budget.
+  const results = await rehostAttachments({
+    supabase: supabase as any,
+    attachments,
+    tenantId,
+    caseId,
+    messageId: claimMessageId,
+    budgetMs: 5_000,
+  });
+
+  for (let i = 0; i < attachments.length; i++) {
+    const attachment = attachments[i];
+    const result = results[i];
+
+    if (!result) continue;
+
+    // Insert the claim_attachments row.
+    const attachmentRow: Record<string, unknown> = {
+      case_id: caseId,
+      tenant_id: tenantId,
+      claim_message_id: claimMessageId,
+      original_filename: attachment.Name,
+      content_type: attachment.ContentType,
+      size_bytes: attachment.ContentLength,
+      storage_path: result.stored ? result.storagePath : null,
+      content_hash: result.stored ? result.contentHash : null,
+      rejected_reason: result.stored ? null : result.reason,
+    };
+
+    const { error: attachErr } = await (supabase as any)
+      .from("claim_attachments")
+      .insert(attachmentRow);
+
+    if (attachErr) {
+      console.error("[intake/email] claim_attachments insert:", attachErr.code);
+    }
+
+    // Emit audit events (non-fatal).
+    if (result.stored) {
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.ATTACHMENT_REHOSTED,
+        target_type: "case",
+        target_id: caseId,
+        payload: {
+          storage_path: result.storagePath,
+          size_bytes: attachment.ContentLength,
+          content_hash_prefix: result.contentHash.slice(0, 12),
+        },
+      });
+    } else if (result.reason !== "rehost_timeout") {
+      // Don't emit ATTACHMENT_REJECTED for timeouts — those are operational, not security events.
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.ATTACHMENT_REJECTED,
+        target_type: "case",
+        target_id: caseId,
+        payload: {
+          reason: result.reason,
+          size_bytes: attachment.ContentLength,
+        },
+      });
+    }
+  }
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
@@ -325,7 +424,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   // ── h) Thread reply: insert claim_messages + raw_messages, re-dispatch worker ─
   if (threadCaseId) {
     // W4: Insert claim_messages row (new — dual-write).
-    await insertClaimMessage(supabase, {
+    const threadClaimMessageId = await insertClaimMessage(supabase, {
       caseId: threadCaseId,
       tenantId,
       providerMessageId,
@@ -339,6 +438,16 @@ export async function POST(request: NextRequest): Promise<Response> {
       headers: payload.Headers,
       rawPayload: rawJson,
     });
+
+    // W6: Rehost attachments for thread replies too.
+    if (threadClaimMessageId) {
+      await processAttachments(supabase, {
+        tenantId,
+        caseId: threadCaseId,
+        claimMessageId: threadClaimMessageId,
+        attachments: payload.Attachments ?? [],
+      });
+    }
 
     // Insert a new raw_messages row linked to the existing case (dual-write — keep legacy).
     const { error: rawMsgError } = await (supabase as any).from("raw_messages").insert({
@@ -399,7 +508,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   const newCaseId = (newCase as { id: string }).id;
 
   // W4: Insert claim_messages row (new — dual-write).
-  await insertClaimMessage(supabase, {
+  const newClaimMessageId = await insertClaimMessage(supabase, {
     caseId: newCaseId,
     tenantId,
     providerMessageId,
@@ -413,6 +522,19 @@ export async function POST(request: NextRequest): Promise<Response> {
     headers: payload.Headers,
     rawPayload: rawJson,
   });
+
+  // W6: Rehost attachments to Supabase Storage (AC7-AC11).
+  // Runs synchronously within the request, bounded by a 5s aggregate budget (IC6).
+  // Non-fatal — webhook still returns 202 regardless of attachment outcomes.
+  // Attachment URLs are NOT logged to stdout (PII protection).
+  if (newClaimMessageId) {
+    await processAttachments(supabase, {
+      tenantId,
+      caseId: newCaseId,
+      claimMessageId: newClaimMessageId,
+      attachments: payload.Attachments ?? [],
+    });
+  }
 
   // Insert raw_messages row (dual-write — keep legacy table during transition).
   // email_message_id / email_thread_id are stored on the cases table.
@@ -429,33 +551,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (rawMsgError) {
     console.error("[intake/email] raw_messages insert (new):", rawMsgError.code);
     // Non-fatal — case created; worker will still run and may re-read the payload.
-  }
-
-  // AC23: Insert claim_attachments rows for each attachment in the payload.
-  // Attachment URLs are NOT logged to stdout (PII protection — AC23).
-  const attachments = payload.Attachments ?? [];
-  if (attachments.length > 0) {
-    const attachmentInserts = attachments.map((a) => ({
-      case_id: newCaseId,
-      tenant_id: tenantId,
-      file_name: a.Name,
-      content_type: a.ContentType,
-      size_bytes: a.ContentLength,
-      // ContentURL is Postmark's CDN link; ContentID is for inline attachments.
-      // Use ContentURL as the external URL when present; fall back to null.
-      external_url: a.ContentURL || null,
-      source_message_id: providerMessageId,
-    }));
-
-    const { error: attachmentsError } = await (supabase as any)
-      .from("claim_attachments")
-      .insert(attachmentInserts);
-
-    if (attachmentsError) {
-      console.error("[intake/email] claim_attachments insert:", attachmentsError.code);
-      // Non-fatal — case and raw_message are already persisted; attachments
-      // may be retried by re-sending the email. Log the error code only (no URL).
-    }
   }
 
   // Audit log.

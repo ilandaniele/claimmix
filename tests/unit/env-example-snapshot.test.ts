@@ -47,6 +47,21 @@ describe("W1 — .env.example Gmail migration snapshot", () => {
     expect(content).not.toMatch(/POSTMARK_FROM_ADDRESS/);
   });
 
+  it("does NOT contain POSTMARK_WEBHOOK_SECRET (Postmark intake removed)", () => {
+    const content = readEnvExample();
+    expect(content).not.toMatch(/POSTMARK_WEBHOOK_SECRET/);
+  });
+
+  it("DOES contain CRON_SECRET", () => {
+    const content = readEnvExample();
+    expect(content).toMatch(/CRON_SECRET/);
+  });
+
+  it("DOES contain GMAIL_TENANT_ID", () => {
+    const content = readEnvExample();
+    expect(content).toMatch(/GMAIL_TENANT_ID/);
+  });
+
   it("DOES contain GMAIL_CLIENT_ID", () => {
     const content = readEnvExample();
     expect(content).toMatch(/GMAIL_CLIENT_ID/);

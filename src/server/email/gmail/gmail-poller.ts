@@ -162,8 +162,8 @@ function dispatchExtractionWorker(caseId: string, tenantId: string): void {
     .catch((err: unknown) => {
       const name = err instanceof Error ? err.name : "UnknownError";
       // AC10: log only name + caseId — no PII.
-      console.error(
-        "[gmail-poller] Worker dispatch error:", name, "case:", caseId // crew-debug-ok
+      console.error( // crew-debug-ok
+        "[gmail-poller] Worker dispatch error:", name, "case:", caseId
       );
     });
 
@@ -422,8 +422,8 @@ async function processMessage(
 
     if (caseError || !newCase) {
       // AC10: log code only.
-      console.error(
-        "[gmail-poller] Failed to create case:", caseError?.code // crew-debug-ok
+      console.error( // crew-debug-ok
+        "[gmail-poller] Failed to create case:", caseError?.code
       );
       throw new Error(`case_insert_failed: ${caseError?.code ?? "no_data"}`);
     }
@@ -636,8 +636,8 @@ export async function pollGmail(
       errors++;
       // IC10: per-message isolation — log code only (no PII), continue to next.
       const code = err instanceof Error ? err.name : "UnknownError";
-      console.error(
-        "[gmail-poller] message error:", code, "msgId:", messageId // crew-debug-ok
+      console.error( // crew-debug-ok
+        "[gmail-poller] message error:", code, "msgId:", messageId
       );
       await recordPollError(
         supabase,

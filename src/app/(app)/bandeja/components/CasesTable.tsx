@@ -21,6 +21,7 @@ import {
 import type { CaseRow } from "@/server/cases/list";
 import { StatusBadge } from "./StatusBadge";
 import { SeverityBadge } from "./SeverityBadge";
+import { SourceBadge } from "./SourceBadge";
 import { ConfidenceBar } from "./ConfidenceBar";
 import { formatAge } from "@/lib/utils";
 import { t } from "@/lib/i18n";
@@ -87,6 +88,12 @@ export function CasesTable({ cases }: CasesTableProps) {
             </span>
           );
         },
+      },
+      {
+        // AC15-AC18: Provider source badge ("Fuente" column)
+        accessorKey: "channel",
+        header: t("table.col.source"),
+        cell: ({ getValue }) => <SourceBadge channel={getValue<string | null>()} />,
       },
       {
         accessorKey: "status",

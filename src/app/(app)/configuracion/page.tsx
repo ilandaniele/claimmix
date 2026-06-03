@@ -14,6 +14,8 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { ConfiguracionClient } from "./ConfiguracionClient";
+import { GmailStatusSection } from "./GmailStatusSection";
+import { t } from "@/lib/i18n";
 import packageJson from "../../../../package.json";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
@@ -173,6 +175,13 @@ export default async function ConfiguracionPage() {
             </p>
           )}
         </Section>
+
+        {/* ── Bandeja de entrada Gmail (admin only) ────────────────────────── */}
+        {isAdmin && (
+          <Section title={t("gmail.status.title")}>
+            <GmailStatusSection />
+          </Section>
+        )}
 
         {/* ── Información del sistema ───────────────────────────────────────── */}
         <Section title="Información del sistema">

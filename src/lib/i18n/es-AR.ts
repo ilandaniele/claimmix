@@ -272,6 +272,32 @@ export const esAR = {
   "case.detail.customer": "Cliente",
   "case.detail.policy": "Póliza vinculada",
 
+  // ── Gmail status panel (W1) ─────────────────────────────────────────────────
+  "gmail.status.title": "Bandeja de entrada Gmail",
+  "gmail.status.label": "Estado",
+  "gmail.status.connected": "Conectado",
+  "gmail.status.error": "Error",
+  "gmail.status.not_configured": "Sin configurar",
+  "gmail.status.last_sync": "Último sync",
+  "gmail.status.account": "Cuenta",
+
+  // ── Case table "Fuente" column (W3) ─────────────────────────────────────────
+  "table.col.source": "Fuente",
+
+  // ── Provider badge labels (W3) ───────────────────────────────────────────────
+  "provider.gmail": "Gmail",
+  "provider.sim": "Sim",
+
+  // ── Messages thread (W2) ────────────────────────────────────────────────────
+  "messages.thread.title": "Mensajes recibidos",
+  "messages.thread.from": "De",
+  "messages.thread.subject": "Asunto",
+  "messages.thread.received_at": "Recibido",
+  "messages.thread.attachments": "adjunto(s)",
+  "messages.thread.no_subject": "(sin asunto)",
+  "messages.thread.expand": "Ver más",
+  "messages.thread.collapse": "Ver menos",
+
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clientes",
   "clientes.subtitle": "Clientes y pólizas del tenant",

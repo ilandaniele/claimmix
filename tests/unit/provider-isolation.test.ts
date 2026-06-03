@@ -112,19 +112,15 @@ describe("AC12 — provider isolation (no direct postmark/resend/googleapis impo
     }
   });
 
-  it("only src/server/email/postmark/** files may import postmark", () => {
-    // Collect all server-side email files EXCEPT the postmark directory.
+  it("no files under src/server/email/** may import postmark (postmark/ subdir deleted in W5)", () => {
+    // After W5 the entire src/server/email/postmark/ directory is deleted.
+    // No remaining file should import the 'postmark' package.
     const emailDir = join(ROOT, "src/server/email");
-    const postmarkDir = join(ROOT, "src/server/email/postmark");
-
-    const allEmailFiles = collectTsFiles(emailDir).filter(
-      (f) => !f.startsWith(postmarkDir)
-    );
+    const allEmailFiles = collectTsFiles(emailDir);
 
     for (const file of allEmailFiles) {
       const content = readFile(file);
       const relativePath = file.replace(ROOT, "");
-      // No direct postmark import allowed outside the postmark/ subdir.
       const hasPostmarkImport = /from\s+["']postmark["']/.test(content);
       expect(
         hasPostmarkImport,
@@ -150,14 +146,6 @@ describe("AC12 — provider isolation (no direct postmark/resend/googleapis impo
         `Unexpected 'googleapis' import in ${relativePath} — only src/server/email/gmail/** may import googleapis`
       ).toBe(false);
     }
-  });
-
-  it("postmark/ files DO import postmark (sanity check that postmark-sender.ts uses the package)", () => {
-    const senderPath = join(ROOT, "src/server/email/postmark/postmark-sender.ts");
-    const content = readFile(senderPath);
-
-    expect(content.length).toBeGreaterThan(0);
-    expect(/from\s+["']postmark["']/.test(content)).toBe(true);
   });
 
   it("resend is not imported anywhere in src/server/**", () => {

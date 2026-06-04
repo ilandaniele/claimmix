@@ -5,6 +5,9 @@
  *      X-Internal-Worker: true header and JSON body { caseId, tenantId }.
  * AC6: Dispatch error is logged (name + caseId, no PII) and does NOT crash the
  *      poll loop; subsequent messages are still processed.
+ * NB3: New case insert uses claim_type: null (not a hard-coded string) so that
+ *      cases where extraction fails are detectable by the reprocess endpoint's
+ *      `claim_type IS NULL` filter.
  *
  * Strategy:
  *   - Mock all heavy dependencies (supabase, gmail client, server-only, etc.)
@@ -483,5 +486,47 @@ describe("dispatchExtractionWorker — AC6: error isolation", () => {
 
     // fetch was still called for both messages
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("NB3 — initial case insert uses claim_type: null", () => {
+  it("inserts the new case row with claim_type: null (not a hard-coded string)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+
+    const gmailMock = makeGmailMock();
+    mockGetGmailClient.mockReturnValue(gmailMock);
+
+    // Build a supabase mock that captures the insert payload for 'cases'.
+    let capturedInsertPayload: unknown = undefined;
+    const supabase = {
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === "cases") {
+          return {
+            insert: vi.fn().mockImplementation((payload: unknown) => {
+              capturedInsertPayload = payload;
+              return {
+                select: vi.fn().mockReturnValue({
+                  single: vi.fn().mockResolvedValue({ data: { id: CASE_ID }, error: null }),
+                }),
+              };
+            }),
+          };
+        }
+        return {
+          insert: vi.fn().mockReturnValue({
+            select: vi.fn().mockReturnValue({
+              single: vi.fn().mockResolvedValue({ data: { id: "claim-msg-uuid" }, error: null }),
+            }),
+          }),
+        };
+      }),
+    };
+
+    await pollGmail(supabase);
+
+    // The insert payload must NOT carry a hard-coded claim_type value.
+    expect(capturedInsertPayload).toBeDefined();
+    expect((capturedInsertPayload as Record<string, unknown>).claim_type).toBeNull();
   });
 });

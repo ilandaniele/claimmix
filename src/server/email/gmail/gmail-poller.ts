@@ -171,6 +171,7 @@ function dispatchExtractionWorker(caseId: string, tenantId: string): void {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ caseId, tenantId }),
+    signal: AbortSignal.timeout(8000),
   }).catch((err: unknown) => {
     const name = err instanceof Error ? err.name : "UnknownError";
     // AC6/AC10: log only name + caseId — no PII.
@@ -418,7 +419,7 @@ async function processMessage(
         email_message_id: gmailMessageId,
         email_thread_id: threadId,
         is_claim: true,
-        claim_type: "choque",
+        claim_type: null,
       })
       .select("id")
       .single();

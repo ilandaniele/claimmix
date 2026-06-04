@@ -116,6 +116,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             caseId: caseRow.id,
             tenantId: caseRow.tenant_id,
           }),
+          signal: AbortSignal.timeout(8000),
         });
 
         if (!response.ok) {

@@ -9,7 +9,7 @@
 "use client";
 
 import { useState } from "react";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 interface CoreSyncButtonProps {
   caseId: string;
@@ -24,6 +24,7 @@ type SyncState =
   | { type: "error"; message: string };
 
 export function CoreSyncButton({ caseId, currentStatus }: CoreSyncButtonProps) {
+  const t = useT();
   const [syncState, setSyncState] = useState<SyncState>({ type: "idle" });
 
   // Only show when case is ready for core sync

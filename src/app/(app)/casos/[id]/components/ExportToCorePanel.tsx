@@ -11,7 +11,7 @@
 "use client";
 
 import { useState } from "react";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 interface ExportToCorePanelProps {
   caseId: string;
@@ -19,6 +19,7 @@ interface ExportToCorePanelProps {
 }
 
 export function ExportToCorePanel({ caseId, onError }: ExportToCorePanelProps) {
+  const t = useT();
   const [loading, setLoading] = useState(false);
   const [payload, setPayload] = useState<unknown | null>(null);
   const [copied, setCopied] = useState(false);

@@ -655,6 +655,16 @@ export async function runEmailExtractionWorker(
       caseUpdate.policy_id = resolvedPolicyId;
     }
 
+    // Copy policyholder identity fields from extraction to the cases row so the
+    // detail page can display them even before customer matching succeeds.
+    const extractedFullName = extractedClaimFields.full_name;
+    const extractedPolicyNumber = extractedClaimFields.policy_number;
+    if (extractedFullName && typeof extractedFullName === "string" && extractedFullName.trim()) {
+      caseUpdate.policyholder_name = extractedFullName.trim().slice(0, 200);
+    }
+    if (extractedPolicyNumber && typeof extractedPolicyNumber === "string" && extractedPolicyNumber.trim()) {
+      caseUpdate.policy_number = extractedPolicyNumber.trim().slice(0, 100);
+    }
 
     const { error: caseUpdateError } = await (supabase as any)
       .from("cases")

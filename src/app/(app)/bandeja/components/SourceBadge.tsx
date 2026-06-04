@@ -20,7 +20,9 @@
  *                    bg-slate-200 text-slate-600  (Sim)   ← no collision
  */
 
-import { t } from "@/lib/i18n";
+"use client";
+
+import { useT } from "@/lib/i18n/LocaleContext";
 
 interface SourceBadgeProps {
   /** The case channel value from CaseRow */
@@ -32,6 +34,7 @@ const BASE =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
 
 export function SourceBadge({ channel }: SourceBadgeProps) {
+  const t = useT();
   if (channel === "email") {
     return (
       <span

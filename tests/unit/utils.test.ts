@@ -58,28 +58,28 @@ describe("formatAge()", () => {
     expect(formatAge(thirtySecondsAgo)).toBe("Ahora");
   });
 
-  it("returns minutes for less than an hour", () => {
+  it("returns 'Hace Xm' for less than an hour", () => {
     vi.useFakeTimers();
     const now = new Date("2024-06-01T12:00:00Z");
     vi.setSystemTime(now);
     const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60_000).toISOString();
-    expect(formatAge(thirtyMinutesAgo)).toBe("30m");
+    expect(formatAge(thirtyMinutesAgo)).toBe("Hace 30m");
   });
 
-  it("returns hours for less than a day", () => {
+  it("returns 'Hace Xh' for less than a day", () => {
     vi.useFakeTimers();
     const now = new Date("2024-06-01T12:00:00Z");
     vi.setSystemTime(now);
     const fiveHoursAgo = new Date(now.getTime() - 5 * 3_600_000).toISOString();
-    expect(formatAge(fiveHoursAgo)).toBe("5h");
+    expect(formatAge(fiveHoursAgo)).toBe("Hace 5h");
   });
 
-  it("returns days for more than a day", () => {
+  it("returns 'Hace Xd' for more than a day", () => {
     vi.useFakeTimers();
     const now = new Date("2024-06-01T12:00:00Z");
     vi.setSystemTime(now);
     const threeDaysAgo = new Date(now.getTime() - 3 * 86_400_000).toISOString();
-    expect(formatAge(threeDaysAgo)).toBe("3d");
+    expect(formatAge(threeDaysAgo)).toBe("Hace 3d");
   });
 });
 

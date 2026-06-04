@@ -21,7 +21,7 @@ import { StatusActions } from "./components/StatusActions";
 import { CloseConfirmDialog } from "./components/CloseConfirmDialog";
 import { EscalateDialog } from "./components/EscalateDialog";
 import { ToastContainer, useToast } from "@/app/(app)/bandeja/components/Toast";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 import type { CaseStatus } from "@/lib/schemas/cases";
 
 interface CaseDetailClientProps {
@@ -35,6 +35,7 @@ export function CaseDetailClient({
   status,
   caseNumber,
 }: CaseDetailClientProps) {
+  const t = useT();
   const router = useRouter();
   const { toasts, addToast, dismissToast } = useToast();
 

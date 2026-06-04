@@ -9,7 +9,8 @@
 
 import { Suspense } from "react";
 import { createServerClient } from "@/lib/supabase/server";
-import { t } from "@/lib/i18n";
+import { getT } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 
@@ -27,6 +28,8 @@ interface ClientesPageProps {
 }
 
 async function ClientesContent({ searchParams }: ClientesPageProps) {
+  const locale = await getServerLocale();
+  const t = getT(locale);
   const params = await searchParams;
 
   const searchParam = params["search"];

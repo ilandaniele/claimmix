@@ -13,7 +13,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 interface Confirmation {
   id: string;
@@ -29,13 +29,6 @@ interface FieldConfirmationsPanelProps {
   caseId: string;
   initialConfirmations: Confirmation[];
 }
-
-const STATUS_LABELS: Record<Confirmation["status"], string> = {
-  pending: t("case.detail.pending"),
-  confirmed: t("case.detail.confirmed"),
-  rejected: t("case.detail.rejected"),
-  corrected: t("case.detail.corrected"),
-};
 
 const STATUS_CLASSES: Record<Confirmation["status"], string> = {
   pending: "bg-amber-50 text-amber-800",
@@ -73,6 +66,13 @@ export function FieldConfirmationsPanel({
   caseId,
   initialConfirmations,
 }: FieldConfirmationsPanelProps) {
+  const t = useT();
+  const STATUS_LABELS: Record<Confirmation["status"], string> = {
+    pending: t("case.detail.pending"),
+    confirmed: t("case.detail.confirmed"),
+    rejected: t("case.detail.rejected"),
+    corrected: t("case.detail.corrected"),
+  };
   const [confirmations, setConfirmations] =
     useState<Confirmation[]>(initialConfirmations);
   // Track which confirmation IDs are loading

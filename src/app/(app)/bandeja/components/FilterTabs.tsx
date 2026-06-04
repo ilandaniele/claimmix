@@ -1,16 +1,8 @@
-/**
- * FilterTabs — status filter tabs with count badges.
- *
- * Tabs per AC11: Todos | Listos | Esperando | Escalados | Procesando | Cerrados
- * Each tab shows a count badge.
- * Active tab is highlighted; clicking changes the URL search param "status".
- */
-
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useCallback } from "react";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 import type { CaseStatus } from "@/lib/schemas/cases";
 
 interface StatusCount {
@@ -20,23 +12,23 @@ interface StatusCount {
 
 interface FilterTabsProps {
   counts: StatusCount[];
-  /** Currently active status filter (undefined = "todos") */
   activeStatus: CaseStatus | undefined;
 }
 
-const TABS: { key: CaseStatus | "todos"; label: string }[] = [
-  { key: "todos", label: t("tabs.todos") },
-  { key: "listo", label: t("tabs.listo") },
-  { key: "esperando", label: t("tabs.esperando") },
-  { key: "escalado", label: t("tabs.escalado") },
-  { key: "procesando", label: t("tabs.procesando") },
-  { key: "cerrado", label: t("tabs.cerrado") },
-];
-
 export function FilterTabs({ counts, activeStatus }: FilterTabsProps) {
+  const t = useT();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  const TABS: { key: CaseStatus | "todos"; label: string }[] = [
+    { key: "todos", label: t("tabs.todos") },
+    { key: "listo", label: t("tabs.listo") },
+    { key: "esperando", label: t("tabs.esperando") },
+    { key: "escalado", label: t("tabs.escalado") },
+    { key: "procesando", label: t("tabs.procesando") },
+    { key: "cerrado", label: t("tabs.cerrado") },
+  ];
 
   const handleTabClick = useCallback(
     (status: CaseStatus | "todos") => {
@@ -46,7 +38,6 @@ export function FilterTabs({ counts, activeStatus }: FilterTabsProps) {
       } else {
         params.set("status", status);
       }
-      // Reset to page 1 when changing status filter
       params.delete("page");
       router.push(`${pathname}?${params.toString()}`);
     },

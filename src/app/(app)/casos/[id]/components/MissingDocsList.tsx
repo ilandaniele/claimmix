@@ -1,13 +1,7 @@
-/**
- * MissingDocsList — renders the list of required documents and their status.
- *
- * AC14: List of required docs with status chips:
- *   - "Pendiente" (red chip)   — requested_at set, satisfied_at null
- *   - "Recibido" (green chip)  — satisfied_at set
- *   - "Excusado" (gray chip)   — neither date set (created without request)
- */
+"use client";
 
-import { t, esAR, type TranslationKey } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
+import { esAR, type TranslationKey } from "@/lib/i18n";
 import type { Database } from "@/lib/supabase/types";
 
 type MissingDoc = Database["public"]["Tables"]["missing_docs"]["Row"];
@@ -24,7 +18,10 @@ function getDocStatus(doc: MissingDoc): DocStatus {
   return "excused";
 }
 
-function docLabel(key: string): string {
+function docLabel(
+  key: string,
+  t: (key: TranslationKey) => string
+): string {
   const i18nKey = `docs.${key}` as TranslationKey;
   if (i18nKey in esAR) {
     return t(i18nKey);
@@ -32,25 +29,21 @@ function docLabel(key: string): string {
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-const STATUS_CONFIG: Record<
-  DocStatus,
-  { label: string; classes: string }
-> = {
-  pending: {
-    label: t("doc.status.pending"),
-    classes: "bg-red-100 text-red-700",
-  },
-  received: {
-    label: t("doc.status.received"),
-    classes: "bg-green-100 text-green-700",
-  },
-  excused: {
-    label: t("doc.status.excused"),
-    classes: "bg-slate-100 text-slate-600",
-  },
+const STATUS_BADGE_CLASSES: Record<DocStatus, string> = {
+  pending: "bg-red-100 text-red-700",
+  received: "bg-green-100 text-green-700",
+  excused: "bg-slate-100 text-slate-600",
 };
 
 export function MissingDocsList({ docs }: MissingDocsListProps) {
+  const t = useT();
+
+  const STATUS_LABELS: Record<DocStatus, string> = {
+    pending: t("doc.status.pending"),
+    received: t("doc.status.received"),
+    excused: t("doc.status.excused"),
+  };
+
   if (docs.length === 0) {
     return (
       <p className="text-sm text-slate-400" role="status">
@@ -67,19 +60,20 @@ export function MissingDocsList({ docs }: MissingDocsListProps) {
     >
       {docs.map((doc) => {
         const status = getDocStatus(doc);
-        const config = STATUS_CONFIG[status];
+        const label = STATUS_LABELS[status];
+        const classes = STATUS_BADGE_CLASSES[status];
 
         return (
           <li
             key={doc.id}
             className="flex items-center justify-between gap-3"
           >
-            <span className="text-sm text-slate-700">{docLabel(doc.doc_key)}</span>
+            <span className="text-sm text-slate-700">{docLabel(doc.doc_key, t)}</span>
             <span
-              className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ${config.classes}`}
-              aria-label={`Estado del documento: ${config.label}`}
+              className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ${classes}`}
+              aria-label={`Estado del documento: ${label}`}
             >
-              {config.label}
+              {label}
             </span>
           </li>
         );

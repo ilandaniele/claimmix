@@ -1,33 +1,27 @@
-/**
- * TypeFilterChips — claim type filter chips.
- *
- * Chips per AC11: Todos | Choque | Robo | Granizo | Incendio
- * Clicking changes the URL search param "type".
- */
-
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useCallback } from "react";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 import type { ClaimType } from "@/lib/schemas/cases";
 
 interface TypeFilterChipsProps {
   activeType: ClaimType | undefined;
 }
 
-const CHIPS: { key: ClaimType | "todos"; label: string }[] = [
-  { key: "todos", label: t("type.todos") },
-  { key: "choque", label: t("type.choque") },
-  { key: "robo", label: t("type.robo") },
-  { key: "granizo", label: t("type.granizo") },
-  { key: "incendio", label: t("type.incendio") },
-];
-
 export function TypeFilterChips({ activeType }: TypeFilterChipsProps) {
+  const t = useT();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  const CHIPS: { key: ClaimType | "todos"; label: string }[] = [
+    { key: "todos", label: t("type.todos") },
+    { key: "choque", label: t("type.choque") },
+    { key: "robo", label: t("type.robo") },
+    { key: "granizo", label: t("type.granizo") },
+    { key: "incendio", label: t("type.incendio") },
+  ];
 
   const handleChipClick = useCallback(
     (type: ClaimType | "todos") => {
@@ -37,7 +31,6 @@ export function TypeFilterChips({ activeType }: TypeFilterChipsProps) {
       } else {
         params.set("type", type);
       }
-      // Reset to page 1 when changing type filter
       params.delete("page");
       router.push(`${pathname}?${params.toString()}`);
     },

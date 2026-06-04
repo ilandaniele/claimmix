@@ -3,7 +3,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { t, esAR } from "@/lib/i18n/index";
+import { t, getT, esAR } from "@/lib/i18n/index";
+import { enUS } from "@/lib/i18n/en-US";
 
 describe("t() translation helper", () => {
   it("returns the correct string for 'nav.bandeja'", () => {
@@ -28,6 +29,51 @@ describe("t() translation helper", () => {
       expect(t(key)).toBeTruthy();
       expect(typeof t(key)).toBe("string");
     }
+  });
+});
+
+describe("multilanguage support", () => {
+  it("t() returns Spanish by default (no locale arg)", () => {
+    expect(t("nav.bandeja")).toBe("Bandeja");
+  });
+
+  it("t() returns Spanish when locale='es-AR'", () => {
+    expect(t("nav.bandeja", "es-AR")).toBe("Bandeja");
+  });
+
+  it("t() returns English when locale='en-US'", () => {
+    expect(t("nav.bandeja", "en-US")).toBe("Inbox");
+  });
+
+  it("getT() factory returns locale-bound function for es-AR", () => {
+    const tEs = getT("es-AR");
+    expect(tEs("status.listo")).toBe("Listo");
+  });
+
+  it("getT() factory returns locale-bound function for en-US", () => {
+    const tEn = getT("en-US");
+    expect(tEn("status.listo")).toBe("Ready");
+  });
+
+  it("en-US has all the same keys as es-AR", () => {
+    const esKeys = Object.keys(esAR);
+    const enKeys = Object.keys(enUS);
+    expect(enKeys).toEqual(expect.arrayContaining(esKeys));
+    expect(esKeys).toEqual(expect.arrayContaining(enKeys));
+  });
+
+  it("en-US has no empty string values", () => {
+    for (const [key, value] of Object.entries(enUS)) {
+      expect(value, `en-US key '${key}' should not be empty`).not.toBe("");
+    }
+  });
+
+  it("en-US status labels are in English", () => {
+    expect(enUS["status.listo"]).toBe("Ready");
+    expect(enUS["status.esperando"]).toBe("Waiting");
+    expect(enUS["status.escalado"]).toBe("Escalated");
+    expect(enUS["status.cerrado"]).toBe("Closed");
+    expect(enUS["status.procesando"]).toBe("Processing");
   });
 });
 

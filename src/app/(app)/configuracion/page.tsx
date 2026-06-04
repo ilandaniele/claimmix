@@ -15,7 +15,8 @@ import { createServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { ConfiguracionClient } from "./ConfiguracionClient";
 import { GmailStatusSection } from "./GmailStatusSection";
-import { t } from "@/lib/i18n";
+import { getT } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
 import packageJson from "../../../../package.json";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
@@ -73,6 +74,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function ConfiguracionPage() {
+  const locale = await getServerLocale();
+  const t = getT(locale);
   const supabase = await createServerClient();
   const {
     data: { user },

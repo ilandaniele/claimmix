@@ -1,12 +1,7 @@
-/**
- * ExtractedFieldsTable — displays extracted claim fields with confidence bars.
- *
- * AC14: Table showing Field | Value | Confidence
- *   - Field names displayed in Spanish via es-AR.ts mappings.
- *   - Mini confidence bar: green ≥0.70, yellow 0.50–0.69, red <0.50.
- */
+"use client";
 
-import { t, esAR, type TranslationKey } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
+import { esAR, type TranslationKey } from "@/lib/i18n";
 import type { Database } from "@/lib/supabase/types";
 
 type ExtractedField = Database["public"]["Tables"]["extracted_fields"]["Row"];
@@ -15,13 +10,14 @@ interface ExtractedFieldsTableProps {
   fields: ExtractedField[];
 }
 
-/** Map field_key → Spanish label. Falls back to the raw key if not mapped. */
-function fieldLabel(key: string): string {
+function fieldLabel(
+  key: string,
+  t: (key: TranslationKey) => string
+): string {
   const i18nKey = `field.${key}` as TranslationKey;
   if (i18nKey in esAR) {
     return t(i18nKey);
   }
-  // Fallback: capitalize and replace underscores
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -76,6 +72,8 @@ function MiniConfidenceBar({ value }: MiniBarProps) {
 }
 
 export function ExtractedFieldsTable({ fields }: ExtractedFieldsTableProps) {
+  const t = useT();
+
   if (fields.length === 0) {
     return (
       <p className="text-sm text-slate-400" role="status">
@@ -116,7 +114,7 @@ export function ExtractedFieldsTable({ fields }: ExtractedFieldsTableProps) {
           {fields.map((field) => (
             <tr key={field.id} className="hover:bg-slate-50 transition-colors">
               <td className="py-2.5 pr-4 font-medium text-slate-700 whitespace-nowrap">
-                {fieldLabel(field.field_key)}
+                {fieldLabel(field.field_key, t)}
               </td>
               <td className="py-2.5 pr-4 text-slate-600 break-words max-w-xs">
                 {field.field_value}

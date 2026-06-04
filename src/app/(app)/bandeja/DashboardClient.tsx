@@ -35,7 +35,7 @@ import {
 import type { CaseRow, CaseListResult } from "@/server/cases/list";
 import type { SimulationScenario } from "@/server/intake/scenarios";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 interface PaginationProps {
   page: number;
@@ -45,6 +45,7 @@ interface PaginationProps {
 }
 
 function Pagination({ page, perPage, total, onPageChange }: PaginationProps) {
+  const t = useT();
   const from = (page - 1) * perPage + 1;
   const to = Math.min(page * perPage, total);
 
@@ -90,6 +91,7 @@ export function DashboardClient({
   scenarios,
   allStatusCounts,
 }: DashboardClientProps) {
+  const t = useT();
   const searchParams = useSearchParams();
   const activeStatus = (searchParams.get("status") as CaseStatus) || undefined;
   const activeType = (searchParams.get("type") as ClaimType) || undefined;

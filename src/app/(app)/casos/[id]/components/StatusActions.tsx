@@ -12,7 +12,7 @@
 "use client";
 
 import type { CaseStatus } from "@/lib/schemas/cases";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 import { ExportToCorePanel } from "./ExportToCorePanel";
 
 interface StatusActionsProps {
@@ -36,6 +36,7 @@ export function StatusActions({
   onError,
   dialogOpen,
 }: StatusActionsProps) {
+  const t = useT();
   // ── cerrado — read-only banner ──────────────────────────────────────────────
   if (status === "cerrado") {
     return (

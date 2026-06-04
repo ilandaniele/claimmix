@@ -12,7 +12,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useId } from "react";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 interface CloseConfirmDialogProps {
   caseId: string;
@@ -22,14 +22,7 @@ interface CloseConfirmDialogProps {
   onError: (msg: string) => void;
 }
 
-const CLOSE_REASONS = [
-  { value: "paid_out", label: t("close.reason.paid_out") },
-  { value: "rejected", label: t("close.reason.rejected") },
-  { value: "duplicate", label: t("close.reason.duplicate") },
-  { value: "cancelled", label: t("close.reason.cancelled") },
-] as const;
-
-type CloseReason = (typeof CLOSE_REASONS)[number]["value"];
+type CloseReason = "paid_out" | "rejected" | "duplicate" | "cancelled";
 
 export function CloseConfirmDialog({
   caseId,
@@ -38,6 +31,13 @@ export function CloseConfirmDialog({
   onSuccess,
   onError,
 }: CloseConfirmDialogProps) {
+  const t = useT();
+  const CLOSE_REASONS = [
+    { value: "paid_out" as CloseReason, label: t("close.reason.paid_out") },
+    { value: "rejected" as CloseReason, label: t("close.reason.rejected") },
+    { value: "duplicate" as CloseReason, label: t("close.reason.duplicate") },
+    { value: "cancelled" as CloseReason, label: t("close.reason.cancelled") },
+  ];
   const [typedNumber, setTypedNumber] = useState("");
   const [reason, setReason] = useState<CloseReason>("paid_out");
   const [loading, setLoading] = useState(false);

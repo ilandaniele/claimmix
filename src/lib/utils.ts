@@ -46,9 +46,9 @@ export function formatAge(createdAt: string): string {
   const diffDays = Math.floor(diffMs / 86_400_000);
 
   if (diffMinutes < 1) return "Ahora";
-  if (diffMinutes < 60) return `${diffMinutes}m`;
-  if (diffHours < 24) return `${diffHours}h`;
-  return `${diffDays}d`;
+  if (diffMinutes < 60) return `Hace ${diffMinutes}m`;
+  if (diffHours < 24) return `Hace ${diffHours}h`;
+  return `Hace ${diffDays}d`;
 }
 
 /**

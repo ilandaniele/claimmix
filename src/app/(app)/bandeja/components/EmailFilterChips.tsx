@@ -9,7 +9,7 @@
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useCallback } from "react";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 import type { Severity } from "@/lib/schemas/cases";
 
 // ── Channel filter ─────────────────────────────────────────────────────────────
@@ -20,16 +20,17 @@ interface ChannelFilterChipsProps {
   activeChannel: ChannelFilter | undefined;
 }
 
-const CHANNEL_CHIPS: { key: ChannelFilter; label: string }[] = [
-  { key: "todos", label: t("channel.todos") },
-  { key: "email", label: t("channel.email") },
-  { key: "email_sim", label: t("channel.email_sim") },
-];
-
 export function ChannelFilterChips({ activeChannel }: ChannelFilterChipsProps) {
+  const t = useT();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  const CHANNEL_CHIPS: { key: ChannelFilter; label: string }[] = [
+    { key: "todos", label: t("channel.todos") },
+    { key: "email", label: t("channel.email") },
+    { key: "email_sim", label: t("channel.email_sim") },
+  ];
 
   const handleClick = useCallback(
     (channel: ChannelFilter) => {
@@ -85,36 +86,6 @@ interface SeverityFilterChipsProps {
   activeSeverity: Severity | undefined;
 }
 
-const SEVERITY_CHIPS: { key: SeverityFilter; label: string; color: string }[] =
-  [
-    {
-      key: "todos",
-      label: t("filter.todos"),
-      color:
-        "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900",
-    },
-    {
-      key: "low",
-      label: t("severity.low"),
-      color: "bg-slate-100 text-slate-600 hover:bg-slate-200",
-    },
-    {
-      key: "medium",
-      label: t("severity.medium"),
-      color: "bg-yellow-50 text-yellow-800 hover:bg-yellow-100",
-    },
-    {
-      key: "high",
-      label: t("severity.high"),
-      color: "bg-orange-50 text-orange-800 hover:bg-orange-100",
-    },
-    {
-      key: "critical",
-      label: t("severity.critical"),
-      color: "bg-red-50 text-red-800 hover:bg-red-100",
-    },
-  ];
-
 const SEVERITY_ACTIVE: Record<string, string> = {
   todos: "bg-slate-900 text-white",
   low: "bg-slate-400 text-white",
@@ -126,9 +97,40 @@ const SEVERITY_ACTIVE: Record<string, string> = {
 export function SeverityFilterChips({
   activeSeverity,
 }: SeverityFilterChipsProps) {
+  const t = useT();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  const SEVERITY_CHIPS: { key: SeverityFilter; label: string; color: string }[] =
+    [
+      {
+        key: "todos",
+        label: t("filter.todos"),
+        color:
+          "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900",
+      },
+      {
+        key: "low",
+        label: t("severity.low"),
+        color: "bg-slate-100 text-slate-600 hover:bg-slate-200",
+      },
+      {
+        key: "medium",
+        label: t("severity.medium"),
+        color: "bg-yellow-50 text-yellow-800 hover:bg-yellow-100",
+      },
+      {
+        key: "high",
+        label: t("severity.high"),
+        color: "bg-orange-50 text-orange-800 hover:bg-orange-100",
+      },
+      {
+        key: "critical",
+        label: t("severity.critical"),
+        color: "bg-red-50 text-red-800 hover:bg-red-100",
+      },
+    ];
 
   const handleClick = useCallback(
     (severity: SeverityFilter) => {
@@ -182,16 +184,17 @@ interface IsClaimFilterChipsProps {
   activeIsClaim: IsClaimFilter | undefined;
 }
 
-const IS_CLAIM_CHIPS: { key: IsClaimFilter; label: string }[] = [
-  { key: "todos", label: t("filter.todos") },
-  { key: "true", label: t("filter.reclamos") },
-  { key: "false", label: t("filter.no_relevantes") },
-];
-
 export function IsClaimFilterChips({ activeIsClaim }: IsClaimFilterChipsProps) {
+  const t = useT();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  const IS_CLAIM_CHIPS: { key: IsClaimFilter; label: string }[] = [
+    { key: "todos", label: t("filter.todos") },
+    { key: "true", label: t("filter.reclamos") },
+    { key: "false", label: t("filter.no_relevantes") },
+  ];
 
   const handleClick = useCallback(
     (isClaim: IsClaimFilter) => {

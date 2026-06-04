@@ -47,6 +47,7 @@ import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/server/cases/fsm";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
+import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
 
@@ -667,6 +668,34 @@ export async function runEmailExtractionWorker(
       caseUpdate.policy_number = extractedPolicyNumber.trim().slice(0, 100);
     }
 
+    // ── claim_type: write AI-returned value when valid — AC1, AC2, AC3, AC4 ────
+    // The AI extractor returns claim_type in extracted_fields.claim_type.
+    // Also check the fields array (field_key="claim_type") as a fallback.
+    const rawClaimType =
+      extractedClaimFields.claim_type ??
+      extractedClaim.fields.find((f) => f.field_key === "claim_type")?.field_value;
+
+    if (rawClaimType !== null && rawClaimType !== undefined && typeof rawClaimType === "string" && rawClaimType.trim() !== "") {
+      const claimTypeParsed = ClaimTypeSchema.safeParse(rawClaimType.trim());
+      if (claimTypeParsed.success) {
+        // AC1: write valid claim_type; AC2: "other" works; AC4: same value is idempotent
+        caseUpdate.claim_type = claimTypeParsed.data;
+      } else {
+        // AC3 variant: AI returned a non-null but invalid value — skip, warn, don't throw
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            service: "claimmix",
+            msg: "email_worker.claim_type_invalid",
+            case_id: caseId,
+            raw_value: rawClaimType.trim().slice(0, 50),
+          })
+        );
+      }
+    }
+    // AC3: AI omitted claim_type (null/undefined/empty) → caseUpdate has no claim_type key
+    // → existing cases.claim_type is preserved (no overwrite).
+
     const { error: caseUpdateError } = await (supabase as any)
       .from("cases")
       .update(caseUpdate)
@@ -734,6 +763,7 @@ export async function runEmailExtractionWorker(
         model: extractedClaim.extraction_model,
         severity: finalSeverity,
         new_status: newStatus,
+        claim_type: (caseUpdate.claim_type as string | undefined) ?? null,
         missing_fields: missingFieldKeys,
         customer_matched: !!resolvedCustomerId,
         policy_matched: !!resolvedPolicyId,

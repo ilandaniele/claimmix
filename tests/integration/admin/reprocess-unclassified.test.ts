@@ -1,0 +1,326 @@
+/**
+ * Integration tests for POST /api/admin/reprocess-unclassified.
+ *
+ * AC12: 401 UNAUTHORIZED without internal-auth header (or wrong creds).
+ * AC13: with X-Internal-Worker: true → returns { triggered: N, case_ids: [...] }.
+ * AC14: no unclassified cases → 200 { triggered: 0, case_ids: [], failed: [] }.
+ * AC15: one fetch fails → that case in failed[], others still triggered.
+ *
+ * Mocks: @/lib/supabase/service, @/server/email/dispatch-url, and global.fetch.
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { NextRequest } from "next/server";
+
+// ── Hoisted mocks ─────────────────────────────────────────────────────────────
+
+const { mockGetWorkerBaseUrl } = vi.hoisted(() => ({
+  mockGetWorkerBaseUrl: vi.fn(),
+}));
+
+// ── Module mocks ──────────────────────────────────────────────────────────────
+
+vi.mock("@/lib/supabase/service", () => ({
+  createServiceClient: vi.fn(),
+}));
+
+vi.mock("@/server/email/dispatch-url", () => ({
+  getWorkerBaseUrl: mockGetWorkerBaseUrl,
+}));
+
+// ── Imports (after mocks) ─────────────────────────────────────────────────────
+
+import { createServiceClient } from "@/lib/supabase/service";
+import { POST } from "@/app/api/admin/reprocess-unclassified/route";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Build a NextRequest with optional auth headers. */
+function buildRequest(
+  opts: {
+    internalWorker?: boolean;
+    bearerToken?: string;
+  } = {}
+): NextRequest {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (opts.internalWorker) {
+    headers["x-internal-worker"] = "true";
+  }
+  if (opts.bearerToken) {
+    headers["authorization"] = `Bearer ${opts.bearerToken}`;
+  }
+  return new NextRequest("http://localhost:3000/api/admin/reprocess-unclassified", {
+    method: "POST",
+    headers,
+  });
+}
+
+/** Build a mock Supabase service client that returns the given cases array. */
+function buildServiceMock(
+  cases: Array<{ id: string; tenant_id: string }> | null,
+  queryError: { code: string; message: string } | null = null
+) {
+  return {
+    from: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      or: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({ data: cases, error: queryError }),
+    }),
+  };
+}
+
+/** A resolved 200 fetch response. */
+function mockFetchOk() {
+  return Promise.resolve(
+    new Response(JSON.stringify({ ok: true }), { status: 200 })
+  );
+}
+
+/** A resolved non-2xx fetch response. */
+function mockFetchFail(status = 500) {
+  return Promise.resolve(
+    new Response(JSON.stringify({ error: "oops" }), { status })
+  );
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe("POST /api/admin/reprocess-unclassified", () => {
+  const originalFetch = global.fetch;
+  const originalCronSecret = process.env.CRON_SECRET;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetWorkerBaseUrl.mockReturnValue("http://localhost:3000");
+    process.env.CRON_SECRET = "super-secret-cron";
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    process.env.CRON_SECRET = originalCronSecret;
+  });
+
+  // ── AC12: Auth enforcement ─────────────────────────────────────────────────
+
+  it("AC12: returns 401 when no auth header is provided", async () => {
+    const request = buildRequest(); // no headers
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("AC12: returns 401 when x-internal-worker header is wrong value", async () => {
+    const request = buildRequest();
+    // manually set wrong value
+    const req = new NextRequest("http://localhost:3000/api/admin/reprocess-unclassified", {
+      method: "POST",
+      headers: { "x-internal-worker": "false" },
+    });
+
+    const response = await POST(req);
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("AC12: returns 401 when Bearer token is wrong", async () => {
+    const req = new NextRequest("http://localhost:3000/api/admin/reprocess-unclassified", {
+      method: "POST",
+      headers: { authorization: "Bearer wrong-token" },
+    });
+
+    const response = await POST(req);
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("AC12: accepts valid Bearer CRON_SECRET", async () => {
+    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      buildServiceMock([])
+    );
+
+    const req = new NextRequest("http://localhost:3000/api/admin/reprocess-unclassified", {
+      method: "POST",
+      headers: { authorization: "Bearer super-secret-cron" },
+    });
+
+    const response = await POST(req);
+    expect(response.status).toBe(200);
+  });
+
+  // ── AC13: Successful dispatch ──────────────────────────────────────────────
+
+  it("AC13: dispatches extract for each unclassified case, returns triggered count and case_ids", async () => {
+    const cases = [
+      { id: "case-001", tenant_id: "tenant-001" },
+      { id: "case-002", tenant_id: "tenant-001" },
+      { id: "case-003", tenant_id: "tenant-001" },
+    ];
+
+    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      buildServiceMock(cases)
+    );
+
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+
+    const request = buildRequest({ internalWorker: true });
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.triggered).toBe(3);
+    expect(body.data.case_ids).toHaveLength(3);
+    expect(body.data.case_ids).toEqual(expect.arrayContaining(["case-001", "case-002", "case-003"]));
+    expect(body.data.failed).toHaveLength(0);
+
+    // Verify dispatch was called for each case with the correct URL and headers.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    const [callUrl, callInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(callUrl).toBe("http://localhost:3000/api/worker/extract");
+    expect(callInit.method).toBe("POST");
+    expect(callInit.headers["X-Internal-Worker"]).toBe("true");
+  });
+
+  it("AC13: forwards caseId and tenantId in the dispatch body", async () => {
+    const cases = [{ id: "case-abc", tenant_id: "tenant-xyz" }];
+
+    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      buildServiceMock(cases)
+    );
+
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+
+    const request = buildRequest({ internalWorker: true });
+    await POST(request);
+
+    const [, callInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const dispatchBody = JSON.parse(callInit.body as string);
+    expect(dispatchBody.caseId).toBe("case-abc");
+    expect(dispatchBody.tenantId).toBe("tenant-xyz");
+  });
+
+  // ── AC14: Empty result ─────────────────────────────────────────────────────
+
+  it("AC14: returns 200 with triggered=0 and empty arrays when no unclassified cases exist", async () => {
+    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      buildServiceMock([])
+    );
+
+    global.fetch = vi.fn(); // should not be called
+
+    const request = buildRequest({ internalWorker: true });
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toEqual({ triggered: 0, case_ids: [], failed: [] });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("AC14: returns 200 with triggered=0 when cases is null (no rows)", async () => {
+    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      buildServiceMock(null)
+    );
+
+    global.fetch = vi.fn();
+
+    const request = buildRequest({ internalWorker: true });
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toEqual({ triggered: 0, case_ids: [], failed: [] });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  // ── AC15: Per-case failure isolation ──────────────────────────────────────
+
+  it("AC15: isolates one failing dispatch — that case goes to failed[], others still triggered", async () => {
+    const cases = [
+      { id: "case-ok-1", tenant_id: "tenant-001" },
+      { id: "case-fail", tenant_id: "tenant-001" },
+      { id: "case-ok-2", tenant_id: "tenant-001" },
+    ];
+
+    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      buildServiceMock(cases)
+    );
+
+    // The middle case throws a network error; others succeed.
+    global.fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as { caseId: string };
+      if (body.caseId === "case-fail") {
+        return Promise.reject(new Error("Network timeout"));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    });
+
+    const request = buildRequest({ internalWorker: true });
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.triggered).toBe(2);
+    expect(body.data.case_ids).toHaveLength(2);
+    expect(body.data.case_ids).toEqual(expect.arrayContaining(["case-ok-1", "case-ok-2"]));
+    expect(body.data.failed).toHaveLength(1);
+    expect(body.data.failed).toContain("case-fail");
+  });
+
+  it("AC15: non-2xx worker response moves case to failed[], does not throw", async () => {
+    const cases = [
+      { id: "case-ok", tenant_id: "tenant-001" },
+      { id: "case-500", tenant_id: "tenant-001" },
+    ];
+
+    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      buildServiceMock(cases)
+    );
+
+    global.fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as { caseId: string };
+      if (body.caseId === "case-500") {
+        return mockFetchFail(500);
+      }
+      return mockFetchOk();
+    });
+
+    const request = buildRequest({ internalWorker: true });
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.triggered).toBe(1);
+    expect(body.data.case_ids).toContain("case-ok");
+    expect(body.data.failed).toContain("case-500");
+  });
+
+  // ── DB error path ──────────────────────────────────────────────────────────
+
+  it("returns 500 INTERNAL_ERROR when Supabase query fails", async () => {
+    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      buildServiceMock(null, { code: "PGRST116", message: "relation not found" })
+    );
+
+    const request = buildRequest({ internalWorker: true });
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error.code).toBe("INTERNAL_ERROR");
+  });
+});

@@ -38,6 +38,12 @@ import { setWatchState } from "@/server/email/gmail/poll-state";
 export async function setupGmailWatch(
   topicName: string
 ): Promise<{ historyId: string; expiration: string }> {
+  // Validate env before making any API call to prevent orphaned watch subscriptions.
+  const gmailEmail = process.env.GMAIL_USER_EMAIL;
+  if (!gmailEmail) {
+    throw new Error("[watch] GMAIL_USER_EMAIL env var is not set");
+  }
+
   const gmail = getGmailClient();
 
   const response = await gmail.users.watch({
@@ -61,11 +67,6 @@ export async function setupGmailWatch(
   // expiration is a ms-since-epoch value returned as a string by the Gmail API
   // (e.g. "1750000000000"). Convert to ISO-8601 for consistent DB storage.
   const expirationIso = new Date(Number(expiration)).toISOString();
-
-  const gmailEmail = process.env.GMAIL_USER_EMAIL;
-  if (!gmailEmail) {
-    throw new Error("[watch] GMAIL_USER_EMAIL env var is not set");
-  }
 
   const supabase = createServiceClient();
   await setWatchState(supabase, gmailEmail, expirationIso, historyId);

@@ -12,6 +12,7 @@ export const ClaimTypeSchema = z.enum([
   "robo",
   "granizo",
   "incendio",
+  "other",
 ]);
 export type ClaimType = z.infer<typeof ClaimTypeSchema>;
 

@@ -84,6 +84,13 @@ const FIELD_HINTS: Record<ClaimType, string> = {
     - fotos_danos: "si" if photos of fire damage are mentioned, "no" otherwise
     - denuncia_policial: "si" if a police report is mentioned, "no" otherwise
   `.trim(),
+
+  other: `
+    Extract all available fields from the claim text:
+    - incident_date: Date of the incident (ISO 8601 if possible, else as written)
+    - incident_location: Location where the incident occurred (if mentioned)
+    - declared_damage: Description of damages or losses declared by the insured
+  `.trim(),
 };
 
 /**

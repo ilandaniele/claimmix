@@ -58,6 +58,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
     robo: t("type.robo"),
     granizo: t("type.granizo"),
     incendio: t("type.incendio"),
+    other: t("type.other"),
   };
 
   const supabase = await createServerClient();

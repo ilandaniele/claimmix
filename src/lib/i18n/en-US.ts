@@ -53,6 +53,7 @@ export const enUS: Record<TranslationKey, string> = {
   "type.robo": "Theft",
   "type.granizo": "Hail",
   "type.incendio": "Fire",
+  "type.other": "Other",
 
   // ── Dashboard tabs ─────────────────────────────────────────────────────────
   "tabs.todos": "All",

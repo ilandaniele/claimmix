@@ -114,6 +114,7 @@ function extractDeclaredDamage(text: string, claimType: ClaimType): ExtractedFie
     robo: ["robo", "sustracción", "robado", "faltaba", "faltaba", "desapareció"],
     granizo: ["granizo", "granizos", "granizada", "abollon", "abollón"],
     incendio: ["incendio", "fuego", "quemado", "carbonizado", "humo"],
+    other: [],
   };
 
   const lower = text.toLowerCase();
@@ -275,11 +276,23 @@ function extractIncendio(text: string): ExtractedField[] {
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
+/** Fallback extractor for unknown/other claim types — returns minimal extracted fields. */
+function extractOther(text: string): ExtractedField[] {
+  const fields: ExtractedField[] = [];
+  const dateMatch = /(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/.exec(text);
+  if (dateMatch) {
+    fields.push(field("incident_date", dateMatch[1]!, 0.55));
+  }
+  fields.push(extractDeclaredDamage(text, "other"));
+  return fields;
+}
+
 const EXTRACTORS: Record<ClaimType, (text: string) => ExtractedField[]> = {
   choque: extractChoque,
   robo: extractRobo,
   granizo: extractGranizo,
   incendio: extractIncendio,
+  other: extractOther,
 };
 
 /**

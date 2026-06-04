@@ -24,16 +24,8 @@ import { SeverityBadge } from "./SeverityBadge";
 import { SourceBadge } from "./SourceBadge";
 import { ConfidenceBar } from "./ConfidenceBar";
 import { formatAge } from "@/lib/utils";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
-
-/** Map claim type to display label */
-const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
-  choque: t("type.choque"),
-  robo: t("type.robo"),
-  granizo: t("type.granizo"),
-  incendio: t("type.incendio"),
-};
 
 /** Format a case ID as a short SIN-XXXX display string */
 function formatCaseId(id: string): string {
@@ -46,7 +38,16 @@ interface CasesTableProps {
 }
 
 export function CasesTable({ cases }: CasesTableProps) {
+  const t = useT();
   const router = useRouter();
+
+  /** Map claim type to display label */
+  const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
+    choque: t("type.choque"),
+    robo: t("type.robo"),
+    granizo: t("type.granizo"),
+    incendio: t("type.incendio"),
+  };
 
   const columns = useMemo<ColumnDef<CaseRow>[]>(
     () => [
@@ -114,7 +115,7 @@ export function CasesTable({ cases }: CasesTableProps) {
         header: t("table.col.age"),
         cell: ({ getValue }) => (
           <span className="text-sm text-slate-500">
-            Hace {formatAge(getValue<string>())}
+            {formatAge(getValue<string>())}
           </span>
         ),
       },
@@ -140,7 +141,8 @@ export function CasesTable({ cases }: CasesTableProps) {
         ),
       },
     ],
-    []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t]
   );
 
   const table = useReactTable({

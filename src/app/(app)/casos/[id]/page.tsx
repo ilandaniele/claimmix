@@ -26,20 +26,14 @@ import { AttachmentsPanel } from "./_components/AttachmentsPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
 import { formatAge, formatDate } from "@/lib/utils";
-import { t } from "@/lib/i18n";
+import { getT } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
 import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
 import Link from "next/link";
 
 interface CaseDetailPageProps {
   params: Promise<{ id: string }>;
 }
-
-const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
-  choque: t("type.choque"),
-  robo: t("type.robo"),
-  granizo: t("type.granizo"),
-  incendio: t("type.incendio"),
-};
 
 const CHANNEL_LABELS: Record<string, string> = {
   email_sim: "Email simulado",
@@ -56,6 +50,15 @@ function formatCaseNumber(id: string): string {
 
 export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
   const { id } = await params;
+  const locale = await getServerLocale();
+  const t = getT(locale);
+
+  const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
+    choque: t("type.choque"),
+    robo: t("type.robo"),
+    granizo: t("type.granizo"),
+    incendio: t("type.incendio"),
+  };
 
   const supabase = await createServerClient();
   const detail = await getCaseDetail(supabase, id);
@@ -162,7 +165,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
               </span>
               <span>
                 <span className="font-medium text-slate-700">Creado:</span>{" "}
-                Hace {formatAge(caseRow.created_at)}
+                {formatAge(caseRow.created_at)}
               </span>
               {caseRow.created_at && (
                 <span title={caseRow.created_at}>
@@ -440,6 +443,8 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
  * Isolated here so it can be wrapped in <Suspense> later.
  */
 async function RawEmailAccordion({ caseId }: { caseId: string }) {
+  const locale = await getServerLocale();
+  const t = getT(locale);
   const supabase = await createServerClient();
    
   const { data: messages } = await (supabase as any)

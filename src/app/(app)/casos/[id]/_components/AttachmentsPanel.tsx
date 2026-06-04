@@ -10,7 +10,7 @@
 
 "use client";
 
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 interface Attachment {
   id: string;
@@ -50,6 +50,7 @@ function contentTypeBadge(contentType: string): {
 }
 
 export function AttachmentsPanel({ attachments }: AttachmentsPanelProps) {
+  const t = useT();
   if (attachments.length === 0) {
     return (
       <p className="text-sm text-slate-400">

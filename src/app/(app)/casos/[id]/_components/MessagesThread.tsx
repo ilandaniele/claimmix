@@ -17,7 +17,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -116,6 +116,7 @@ interface MessageCardProps {
 }
 
 function MessageCard({ message }: MessageCardProps) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
 
   const avatarLetter = getAvatarLetter(message.from_addr);
@@ -216,6 +217,7 @@ interface MessagesThreadProps {
 }
 
 export function MessagesThread({ caseId }: MessagesThreadProps) {
+  const t = useT();
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [messages, setMessages] = useState<Message[]>([]);
 

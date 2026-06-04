@@ -13,6 +13,7 @@
 
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 interface TopBarProps {
   fullName: string;
@@ -55,8 +56,9 @@ export function TopBar({ fullName, role }: TopBarProps) {
         </span>
       </div>
 
-      {/* Right: user info + sign out */}
+      {/* Right: language switcher + user info + sign out */}
       <div className="flex items-center gap-3">
+        <LanguageSwitcher />
         {/* User name + role */}
         <div className="hidden sm:block text-right">
           <p className="text-sm font-medium text-slate-900 leading-none">{fullName}</p>

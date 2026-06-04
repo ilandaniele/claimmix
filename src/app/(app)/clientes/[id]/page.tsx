@@ -10,7 +10,8 @@
 
 import { notFound } from "next/navigation";
 import { createServerClient } from "@/lib/supabase/server";
-import { t } from "@/lib/i18n";
+import { getT } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
 import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
 import { formatDate, formatAge } from "@/lib/utils";
@@ -77,6 +78,8 @@ export default async function CustomerDetailPage({
   params,
 }: CustomerDetailPageProps) {
   const { id } = await params;
+  const locale = await getServerLocale();
+  const t = getT(locale);
 
   const supabase = await createServerClient();
 
@@ -309,7 +312,7 @@ export default async function CustomerDetailPage({
                         </Link>
                       </td>
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap">
-                        Hace {formatAge(c.created_at)}
+                        {formatAge(c.created_at)}
                       </td>
                       <td className="py-2.5 px-3">
                         <StatusBadge status={c.status as CaseStatus} />

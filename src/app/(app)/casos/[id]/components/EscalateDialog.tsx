@@ -9,7 +9,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useId } from "react";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 interface EscalateDialogProps {
   caseId: string;
@@ -26,6 +26,7 @@ export function EscalateDialog({
   onSuccess,
   onError,
 }: EscalateDialogProps) {
+  const t = useT();
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);

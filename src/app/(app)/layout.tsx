@@ -13,6 +13,8 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
+import { LocaleProvider } from "@/lib/i18n/LocaleContext";
+import { getServerLocale } from "@/lib/i18n/locale";
 
 export default async function AppLayout({
   children,
@@ -38,22 +40,25 @@ export default async function AppLayout({
 
   const fullName: string = userRow?.full_name ?? user?.email ?? "Analista";
   const role: string = userRow?.role ?? "analyst";
+  const locale = await getServerLocale();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-white">
-      {/* Left sidebar */}
-      <Sidebar />
+    <LocaleProvider locale={locale}>
+      <div className="flex h-screen overflow-hidden bg-white">
+        {/* Left sidebar */}
+        <Sidebar />
 
-      {/* Main content area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Top navigation bar */}
-        <TopBar fullName={fullName} role={role} />
+        {/* Main content area */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Top navigation bar */}
+          <TopBar fullName={fullName} role={role} />
 
-        {/* Page content */}
-        <main className="flex-1 overflow-auto">
-          {children}
-        </main>
+          {/* Page content */}
+          <main className="flex-1 overflow-auto">
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </LocaleProvider>
   );
 }

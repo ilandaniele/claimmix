@@ -13,7 +13,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -84,6 +84,7 @@ function Skeleton() {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function GmailStatusSection() {
+  const t = useT();
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [status, setStatus] = useState<GmailStatus | null>(null);
 

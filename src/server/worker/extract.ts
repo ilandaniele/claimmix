@@ -353,7 +353,7 @@ export async function runEmailExtractionWorker(
 
     const { data: caseRow, error: caseError } = await (supabase as any)
       .from("cases")
-      .select("id,status,claim_type,tenant_id,channel,email_thread_id")
+      .select("id,status,claim_type,tenant_id,channel,email_thread_id,policyholder_name,policy_number")
       .eq("id", caseId)
       .eq("tenant_id", tenantId)
       .single();
@@ -657,12 +657,13 @@ export async function runEmailExtractionWorker(
 
     // Copy policyholder identity fields from extraction to the cases row so the
     // detail page can display them even before customer matching succeeds.
+    // Only write when the column is still null — never overwrite analyst-confirmed data.
     const extractedFullName = extractedClaimFields.full_name;
     const extractedPolicyNumber = extractedClaimFields.policy_number;
-    if (extractedFullName && typeof extractedFullName === "string" && extractedFullName.trim()) {
+    if (!caseRow.policyholder_name && extractedFullName && typeof extractedFullName === "string" && extractedFullName.trim()) {
       caseUpdate.policyholder_name = extractedFullName.trim().slice(0, 200);
     }
-    if (extractedPolicyNumber && typeof extractedPolicyNumber === "string" && extractedPolicyNumber.trim()) {
+    if (!caseRow.policy_number && extractedPolicyNumber && typeof extractedPolicyNumber === "string" && extractedPolicyNumber.trim()) {
       caseUpdate.policy_number = extractedPolicyNumber.trim().slice(0, 100);
     }
 

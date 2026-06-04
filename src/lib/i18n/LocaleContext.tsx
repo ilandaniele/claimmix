@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useCallback,
+  useMemo,
   type ReactNode,
 } from "react";
 import { getT, type Locale, type TranslationKey } from "./index";
@@ -37,7 +38,7 @@ export function LocaleProvider({
     document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000; SameSite=Lax`;
   }, []);
 
-  const tFn = getT(locale);
+  const tFn = useMemo(() => getT(locale), [locale]);
 
   return (
     <LocaleContext.Provider value={{ locale, setLocale, t: tFn }}>

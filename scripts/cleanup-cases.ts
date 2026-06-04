@@ -78,6 +78,21 @@ export function validateEnv(): EnvConfig {
     process.exit(1);
   }
 
+  // Validate URL is a real HTTP/HTTPS URL (catches placeholder values like
+  // "https://<project-ref>.supabase.co" copied from .env.example).
+  try {
+    const u = new URL(supabaseUrl!);
+    if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error();
+  } catch {
+    console.error(
+      `[cleanup-cases] ERROR: NEXT_PUBLIC_SUPABASE_URL is not a valid URL.\n` +
+        `  Got: ${supabaseUrl}\n` +
+        `  Expected format: https://xxxxxxxxxxxx.supabase.co\n` +
+        `  Find your URL in: Supabase dashboard → Project Settings → API`
+    );
+    process.exit(1);
+  }
+
   return {
     supabaseUrl: supabaseUrl!,
     serviceRoleKey: serviceRoleKey!,

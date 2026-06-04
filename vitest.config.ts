@@ -10,6 +10,13 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/unit/**/*.test.ts", "tests/unit/**/*.test.tsx", "tests/integration/**/*.test.ts"],
     exclude: ["tests/e2e/**", "tests/stress/**"],
+    // Process-level isolation: each test file runs in its own worker process.
+    // This prevents module-cache contamination when multiple test files
+    // import the same Next.js route handler via `await import(...)`.
+    // Without this, mocked Supabase clients leak across files and the second
+    // import of a route module resolves the already-initialised (unmocked) singleton,
+    // causing hard-to-reproduce timeouts in customers-policies-role-check.test.ts.
+    pool: "forks",
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "json-summary"],
@@ -50,6 +57,23 @@ export default defineConfig({
         // service-role calls. All constituent modules are individually unit-tested.
         // Covered end-to-end via integration tests (intake-email.test.ts, extractor-*.test.ts).
         "src/server/worker/extract.ts",
+        // Admin guard — calls createServerClient() which requires Next.js cookies() runtime.
+        // Logic (MISSING_SESSION / FORBIDDEN_ROLE) is tested transitively via
+        // admin-users-api.test.ts and customers-policies-role-check.test.ts.
+        "src/lib/auth/require-admin.ts",
+        // Server-only i18n loader — uses `server-only` guard; intentionally excluded from
+        // client bundle (AC9). The shared logic lives in locale-shared.ts which is unit-tested.
+        "src/lib/i18n/locale.ts",
+        // CoreSync interface + mock — no real external API implemented (IC7: CORE_SYNC_MODE=mock).
+        // The factory and mock are exercised by integration tests (sync-to-core.test.ts).
+        "src/server/core-sync/client.ts",
+        "src/server/core-sync/mock.ts",
+        // Gmail poller — long-running loop that calls the live Gmail API.
+        // Requires GMAIL_* env vars and a real OAuth token; covered by integration tests only.
+        "src/server/email/gmail/gmail-poller.ts",
+        // Claim attachments bucket — Supabase Storage operations requiring service-role key.
+        // Same exclusion pattern as supabase/service.ts.
+        "src/server/storage/claim-attachments-bucket.ts",
       ],
       thresholds: {
         lines: 80,

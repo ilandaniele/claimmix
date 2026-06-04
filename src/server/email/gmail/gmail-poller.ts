@@ -425,6 +425,12 @@ async function processMessage(
       .single();
 
     if (caseError || !newCase) {
+      // 23505 = unique_violation: case already exists for this email_message_id.
+      // Treat as already-processed (a previous partial run created the case
+      // but not the claim_message). Return "skipped" so the watermark advances.
+      if (caseError?.code === "23505") {
+        return "skipped";
+      }
       // AC10: log code only.
       console.error( // crew-debug-ok
         "[gmail-poller] Failed to create case:", caseError?.code
@@ -700,9 +706,11 @@ export async function pollGmail(
   }
 
   // ── Advance watermark (AC7/AC8/AC13) ──────────────────────────────────────
-  // Advance when: batch processed cleanly (no errors) OR at least one message succeeded.
-  // Do NOT advance if every message in the batch errored — next run retries from same position.
-  const shouldAdvance = errors === 0 || processed > 0;
+  // Always advance when latestHistoryId moved forward — even if all messages
+  // errored. Staying stuck on the same historyId creates a permanent retry loop
+  // where the same failing messages are re-attempted on every Pub/Sub push.
+  // The daily cron fallback provides a second-chance recovery path.
+  const shouldAdvance = true;
 
   if (shouldAdvance && latestHistoryId !== pollState.historyId) {
     try {

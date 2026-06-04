@@ -39,6 +39,8 @@ export const REQUIRED_DOCS_CONFIG: Record<ClaimType, readonly RequiredDoc[]> = {
     { doc_key: "fotos_danos", label_es: "Fotos de los daños por incendio", required: true },
     { doc_key: "denuncia_policial", label_es: "Denuncia policial", required: true },
   ],
+  // "other" claim types have no pre-configured required docs — reviewed case by case.
+  other: [],
 };
 
 /**

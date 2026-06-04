@@ -32,6 +32,7 @@ import {
   getClientIp,
 } from "@/lib/rate-limit/index";
 import type { Database } from "@/lib/supabase/types";
+import type { ClaimType } from "@/lib/schemas/cases";
 
 type UserRow = Database["public"]["Tables"]["users"]["Row"];
 
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // ── 4. Resolve scenario or raw text ─────────────────────────────────────────
   let rawText: string;
-  let claimType: "choque" | "robo" | "granizo" | "incendio";
+  let claimType: ClaimType;
   let policyholderName: string | null = null;
   let policyNumber: string | null = null;
 

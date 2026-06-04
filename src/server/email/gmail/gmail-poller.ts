@@ -50,6 +50,7 @@ import { checkDuplicate } from "@/server/email/dedupe";
 import { threadLookup } from "@/server/email/thread-lookup";
 import { rehostAttachments } from "@/server/email/rehost-attachments";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import type { gmail_v1 } from "googleapis";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -152,29 +153,32 @@ function resolveTenantId(): string | null {
 
 /**
  * Dispatch the extraction worker for a newly ingested case.
- * Fire-and-forget — does not block the polling loop.
+ *
+ * POSTs to /api/worker/extract via fetch, which creates an independent Vercel
+ * function invocation with its own timeout — the Gmail poller lambda no longer
+ * needs to remain alive while OpenAI runs (AC5).
+ *
+ * Fire-and-forget: errors are logged (name + caseId, no PII — AC6/AC10) and
+ * do NOT propagate; the poll loop continues to the next message.
  */
 function dispatchExtractionWorker(caseId: string, tenantId: string): void {
-  const workerPromise = import("@/server/worker/extract")
-    .then(({ runExtractionWorker }) =>
-      runExtractionWorker(caseId, tenantId, null)
-    )
-    .catch((err: unknown) => {
-      const name = err instanceof Error ? err.name : "UnknownError";
-      // AC10: log only name + caseId — no PII.
-      console.error( // crew-debug-ok
-        "[gmail-poller] Worker dispatch error:", name, "case:", caseId
-      );
-    });
+  const url = `${getWorkerBaseUrl()}/api/worker/extract`;
 
-  // Use waitUntil on Vercel if available (keeps the lambda alive for the promise).
-  const context = (globalThis as Record<string | symbol, unknown>)[
-    Symbol.for("__vercel_runtime__")
-  ] as { waitUntil?: (p: Promise<unknown>) => void } | undefined;
-
-  if (context?.waitUntil) {
-    context.waitUntil(workerPromise);
-  }
+  fetch(url, {
+    method: "POST",
+    headers: {
+      "X-Internal-Worker": "true",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ caseId, tenantId }),
+    signal: AbortSignal.timeout(8000),
+  }).catch((err: unknown) => {
+    const name = err instanceof Error ? err.name : "UnknownError";
+    // AC6/AC10: log only name + caseId — no PII.
+    console.error( // crew-debug-ok
+      "[gmail-poller] Worker dispatch error:", name, "case:", caseId
+    );
+  });
 }
 
 /**
@@ -415,7 +419,7 @@ async function processMessage(
         email_message_id: gmailMessageId,
         email_thread_id: threadId,
         is_claim: true,
-        claim_type: "choque",
+        claim_type: null,
       })
       .select("id")
       .single();

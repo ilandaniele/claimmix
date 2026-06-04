@@ -47,6 +47,7 @@ export function CasesTable({ cases }: CasesTableProps) {
     robo: t("type.robo"),
     granizo: t("type.granizo"),
     incendio: t("type.incendio"),
+    other: t("type.other"),
   };
 
   const columns = useMemo<ColumnDef<CaseRow>[]>(

@@ -31,6 +31,12 @@ const PUBLIC_PREFIXES = [
   "/api/auth/sign-out",
   "/api/auth/callback",
   "/api/admin/health",
+  // Internal-only endpoints authenticated by CRON_SECRET or X-Internal-Worker header
+  // at the route level — no session cookie involved. Passing them through middleware
+  // so Vercel Cron and worker-to-worker calls are not blocked with 401 before the
+  // route handler can verify its own token.
+  "/api/admin/",
+  "/api/worker/",
   "/_next",
   "/favicon.ico",
 ];

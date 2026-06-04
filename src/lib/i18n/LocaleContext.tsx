@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { getT, type Locale, type TranslationKey } from "./index";
-import { LOCALE_COOKIE, SUPPORTED_LOCALES, DEFAULT_LOCALE } from "./locale";
+import { LOCALE_COOKIE, SUPPORTED_LOCALES, DEFAULT_LOCALE } from "./locale-shared";
 
 interface LocaleContextValue {
   locale: Locale;

@@ -1,16 +1,18 @@
 /**
- * Locale persistence helpers.
+ * Server-only locale helper.
+ * Reads the locale from the request cookie (Server Components only).
  *
- * Locale is stored in a `locale` cookie (SameSite=Lax, no HttpOnly so JS can read it).
- * Default: es-AR.
+ * Do NOT import this file from "use client" components — it imports
+ * next/headers which is a server-only API. Use locale-shared.ts for
+ * constants that are safe to import client-side.
  */
 
 import { cookies } from "next/headers";
 import type { Locale } from "./index";
+import { SUPPORTED_LOCALES, DEFAULT_LOCALE, LOCALE_COOKIE } from "./locale-shared";
 
-export const LOCALE_COOKIE = "locale";
-export const SUPPORTED_LOCALES: Locale[] = ["es-AR", "en-US"];
-export const DEFAULT_LOCALE: Locale = "es-AR";
+// Re-export constants so existing `import { LOCALE_COOKIE } from "@/lib/i18n/locale"` keeps working.
+export { LOCALE_COOKIE, SUPPORTED_LOCALES, DEFAULT_LOCALE } from "./locale-shared";
 
 /** Read the current locale from the request cookie (Server Components only). */
 export async function getServerLocale(): Promise<Locale> {

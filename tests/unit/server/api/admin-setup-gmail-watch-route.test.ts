@@ -4,7 +4,7 @@
  * AC12: No auth header (or wrong credentials) → 401, setupGmailWatch NOT called.
  * AC13: X-Internal-Worker: true → setupGmailWatch called, 200 with {historyId, expiration, message}.
  * AC14: Authorization: Bearer <CRON_SECRET> → setupGmailWatch called, 200.
- * AC15: PUBSUB_TOPIC not set → 500 with code PUBSUB_TOPIC_MISSING, setupGmailWatch NOT called.
+ * AC15: PUBSUB_TOPIC not set → 500 with code PUBSUB_NOT_CONFIGURED, setupGmailWatch NOT called.
  *
  * Strategy:
  * - Mock setupGmailWatch via vi.hoisted so it is hoisted before the route import.
@@ -130,9 +130,9 @@ describe("POST /api/admin/setup-gmail-watch", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.data.historyId).toBe(MOCK_WATCH_RESULT.historyId);
-      expect(body.data.expiration).toBe(MOCK_WATCH_RESULT.expiration);
-      expect(body.data.message).toBe("Gmail watch configured successfully.");
+      expect(body.historyId).toBe(MOCK_WATCH_RESULT.historyId);
+      expect(body.expiration).toBe(MOCK_WATCH_RESULT.expiration);
+      expect(body.message).toBe("watch setup OK");
       expect(mockSetupGmailWatch).toHaveBeenCalledOnce();
       expect(mockSetupGmailWatch).toHaveBeenCalledWith(PUBSUB_TOPIC);
     });
@@ -157,9 +157,9 @@ describe("POST /api/admin/setup-gmail-watch", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.data.historyId).toBe(MOCK_WATCH_RESULT.historyId);
-      expect(body.data.expiration).toBe(MOCK_WATCH_RESULT.expiration);
-      expect(body.data.message).toBe("Gmail watch configured successfully.");
+      expect(body.historyId).toBe(MOCK_WATCH_RESULT.historyId);
+      expect(body.expiration).toBe(MOCK_WATCH_RESULT.expiration);
+      expect(body.message).toBe("watch setup OK");
       expect(mockSetupGmailWatch).toHaveBeenCalledOnce();
     });
 
@@ -176,15 +176,15 @@ describe("POST /api/admin/setup-gmail-watch", () => {
 
   // ── AC15: Missing PUBSUB_TOPIC ─────────────────────────────────────────────
 
-  describe("AC15 — PUBSUB_TOPIC missing → 500 PUBSUB_TOPIC_MISSING", () => {
-    it("returns 500 with PUBSUB_TOPIC_MISSING when env var is not set", async () => {
+  describe("AC15 — PUBSUB_TOPIC missing → 500 PUBSUB_NOT_CONFIGURED", () => {
+    it("returns 500 with PUBSUB_NOT_CONFIGURED when env var is not set", async () => {
       delete process.env.PUBSUB_TOPIC;
       const req = makeRequest({ internalWorker: true });
       const res = await POST(req);
 
       expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body.error.code).toBe("PUBSUB_TOPIC_MISSING");
+      expect(body.error.code).toBe("PUBSUB_NOT_CONFIGURED");
       expect(body.error.message).toMatch(/PUBSUB_TOPIC/);
       expect(mockSetupGmailWatch).not.toHaveBeenCalled();
     });
@@ -197,21 +197,21 @@ describe("POST /api/admin/setup-gmail-watch", () => {
       expect(mockSetupGmailWatch).not.toHaveBeenCalled();
     });
 
-    it("returns 500 PUBSUB_TOPIC_MISSING even with valid X-Internal-Worker header", async () => {
+    it("returns 500 PUBSUB_NOT_CONFIGURED even with valid X-Internal-Worker header", async () => {
       delete process.env.PUBSUB_TOPIC;
       const req = makeRequest({ internalWorker: true });
       const res = await POST(req);
 
       expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body.error.code).toBe("PUBSUB_TOPIC_MISSING");
+      expect(body.error.code).toBe("PUBSUB_NOT_CONFIGURED");
     });
   });
 
   // ── Error handling ────────────────────────────────────────────────────────
 
   describe("error handling — setupGmailWatch throws", () => {
-    it("returns 500 WATCH_SETUP_FAILED when setupGmailWatch throws", async () => {
+    it("returns 500 INTERNAL with generic message when setupGmailWatch throws", async () => {
       const err = new Error("Gmail API quota exceeded");
       mockSetupGmailWatch.mockRejectedValue(err);
 
@@ -220,8 +220,10 @@ describe("POST /api/admin/setup-gmail-watch", () => {
 
       expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body.error.code).toBe("WATCH_SETUP_FAILED");
-      expect(body.error.message).toBe("Gmail API quota exceeded");
+      expect(body.error.code).toBe("INTERNAL");
+      expect(body.error.message).toBe("Watch setup failed. Check server logs.");
+      // raw error message must NOT be leaked to callers
+      expect(body.error.message).not.toContain("Gmail API quota exceeded");
     });
 
     it("logs only the error name, not the full message", async () => {

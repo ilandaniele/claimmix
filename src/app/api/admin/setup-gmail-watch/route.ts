@@ -15,6 +15,7 @@
  * W4: AC12, AC13, AC14, AC15.
  */
 
+import { timingSafeEqual } from "crypto";
 import { type NextRequest, NextResponse } from "next/server";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
 
@@ -27,11 +28,21 @@ function isAuthorized(request: NextRequest): boolean {
   const internalHeader = request.headers.get("x-internal-worker");
   if (internalHeader === "true") return true;
 
-  // Option B: Vercel cron secret.
+  // Option B: Vercel cron secret — constant-time comparison to prevent timing oracle.
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader === `Bearer ${cronSecret}`) return true;
+    const authHeader = request.headers.get("authorization") ?? "";
+    const expected = `Bearer ${cronSecret}`;
+    try {
+      // timingSafeEqual requires same-length buffers — encode both as UTF-8.
+      const expectedBuf = Buffer.from(expected, "utf-8");
+      const actualBuf = Buffer.from(authHeader, "utf-8");
+      if (expectedBuf.length === actualBuf.length && timingSafeEqual(expectedBuf, actualBuf)) {
+        return true;
+      }
+    } catch {
+      // length mismatch or encoding error — fall through to reject
+    }
   }
 
   return false;
@@ -52,7 +63,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(
       {
         error: {
-          code: "PUBSUB_TOPIC_MISSING",
+          code: "PUBSUB_NOT_CONFIGURED",
           message: "Set PUBSUB_TOPIC env var to the fully-qualified Pub/Sub topic name (e.g. projects/my-project/topics/gmail-push).",
         },
       },
@@ -64,17 +75,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const { historyId, expiration } = await setupGmailWatch(topicName);
     return NextResponse.json(
-      {
-        data: {
-          historyId,
-          expiration,
-          message: "Gmail watch configured successfully.",
-        },
-      },
+      { historyId, expiration, message: "watch setup OK" },
       { status: 200 }
     );
   } catch (err) {
-    const errMessage = err instanceof Error ? err.message : "Unknown error";
     const errName = err instanceof Error ? err.name : "UnknownError";
     console.error(
       JSON.stringify({
@@ -85,7 +89,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       })
     );
     return NextResponse.json(
-      { error: { code: "WATCH_SETUP_FAILED", message: errMessage } },
+      { error: { code: "INTERNAL", message: "Watch setup failed. Check server logs." } },
       { status: 500 }
     );
   }

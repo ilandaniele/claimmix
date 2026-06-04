@@ -562,3 +562,63 @@ Total: 46 new unit tests. Total passing after W2: 595.
 ## AC6 error code note
 
 Spec AC6 specifies `error.code='FORBIDDEN'`. Implementation returns `FORBIDDEN_ROLE` (the project-wide error code in `src/lib/errors.ts`). These are semantically equivalent — `FORBIDDEN_ROLE` is the codebase's standard code for role-based 403s. The string `"FORBIDDEN"` does not exist in the `ErrorCode` enum; adding a duplicate alias solely to match simplified spec text would introduce inconsistency across the codebase. The integration test at `tests/integration/gmail-status.test.ts` is written to match the implementation (`FORBIDDEN_ROLE`), which is the correct value. AC6's `"FORBIDDEN"` is intentional shorthand in the spec for the established project-wide `FORBIDDEN_ROLE` code.
+
+---
+
+# Implementation Notes — Baseline Audit (test/verify-pr23-fixes, W1)
+
+## Baseline pipeline results (commit 601acb3 — squash of PR #23)
+
+| Check | Command | Exit code | Result |
+|---|---|---|---|
+| AC15 typecheck | `pnpm type-check` | 0 | PASS |
+| AC16 lint | `pnpm lint --max-warnings=5` | 0 | PASS (1 warning: TanStack `useReactTable` memoization in CasesTable.tsx — pre-existing) |
+| AC17 unit tests | `MOCK_AI=true pnpm test:unit:coverage` | 1 | FAIL — pre-existing flaky failures in integration tests + one unit test (see below) |
+| AC18 build | `pnpm build` | 0 | PASS (all 35 routes compiled, 0 TS errors) |
+| AC19 audit | `pnpm audit --audit-level=high` | 0 | PASS (2 moderate vulns only, no HIGH/CRITICAL) |
+
+## Pre-existing test failures (not introduced by PR #23)
+
+These failures exist on main before any new work in this branch:
+
+1. `tests/unit/extractor-ac6-happy-path.test.ts` — timeout on the worker-level AC6 test that uses `vi.doMock` + dynamic `import()`. Flaky depending on machine load; not related to PR #23 changes.
+2. `tests/integration/dispatch-gmail.test.ts` — 2–3 tests fail: timeout + assertion error (`expected 2 to be 1` on `claim_messages` update count). Pre-existing mock state pollution.
+3. `tests/integration/llm-email-probes.test.ts` — timeout on `maskDni` test when MOCK_AI does not propagate to that import chain.
+4. `tests/integration/rls-email.test.ts` — timeout on cross-tenant IDOR test.
+
+## Coverage gap audit: AC tests already present vs missing
+
+### AC1–AC5 (formatAge) — `tests/unit/utils.test.ts`
+
+| AC | Description | Status |
+|---|---|---|
+| AC1 | `formatAge < 1min` → 'Ahora', not 'Hace' | COVERED (30s test) |
+| AC2 | `formatAge 17min` → 'Hace 17m' | PARTIAL (30m tested; same branch) |
+| AC3 | `formatAge 3h 30m` → 'Hace 3h' | PARTIAL (5h tested; same branch) |
+| AC4 | `formatAge 2 days` → 'Hace 2d' | PARTIAL (3d tested; same branch) |
+| AC5 | Boundary at exactly 60s → 'Hace 1m' | MISSING |
+
+### AC6–AC10 (i18n) — `tests/unit/i18n.test.ts`
+
+| AC | Description | Status |
+|---|---|---|
+| AC6 | `getServerLocale` default 'es-AR'; `t('nav.bandeja')` = 'Bandeja' | PARTIAL (`t()` tested; no `getServerLocale` cookie test) |
+| AC7 | LanguageSwitcher sets cookie + re-renders English | MISSING (`LanguageSwitcher.test.tsx` does not exist) |
+| AC8 | es-AR and en-US key sets identical | COVERED ("en-US has all the same keys as es-AR" + reverse) |
+| AC9 | Client component imports locale-shared.ts without server-only violation | IMPLICITLY COVERED (build passes) |
+| AC10 | `useT()` unknown key returns key itself without throwing | MISSING |
+
+### AC11–AC14 (extractor field-copy) — `tests/unit/extractor-field-copy.test.ts`
+
+| AC | Description | Status |
+|---|---|---|
+| AC11 | Worker copies `full_name` → `policyholder_name` (trimmed, max 200) when NULL | MISSING (file does not exist) |
+| AC12 | Worker copies `policy_number` → `cases.policy_number` (trimmed, max 100) when NULL | MISSING (file does not exist) |
+| AC13 | Identity guard: does NOT overwrite populated `policyholder_name` | MISSING (file does not exist) |
+| AC14 | Empty/whitespace values rejected, no UPDATE attempted | MISSING (file does not exist) |
+
+## Work remaining for subsequent branches
+
+- W2: Add AC5 boundary test to `utils.test.ts`; verify AC1–AC4 exact values
+- W3: Add AC6 `getServerLocale` test, AC7 `LanguageSwitcher.test.tsx`, AC10 unknown-key test
+- W4: Create `extractor-field-copy.test.ts` for AC11–AC14

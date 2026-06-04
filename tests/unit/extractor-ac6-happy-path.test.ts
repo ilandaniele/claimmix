@@ -284,6 +284,11 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
       // Build the case update spy before mocking the service client.
       const caseUpdateSpy = vi.fn().mockResolvedValue({ error: null });
 
+      // Reset module registry so the dynamic import below gets a fresh load
+      // that sees our vi.doMock replacements. Without this, a cached module
+      // from another test file is returned and vi.doMock has no effect.
+      vi.resetModules();
+
       // Mock the service client used by the worker.
       vi.doMock("@/lib/supabase/service", () => ({
         createServiceClient: () => ({
@@ -404,6 +409,7 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
       expect(caseUpdatePayload).toBeDefined();
       expect(caseUpdatePayload![0].customer_id).toBe("customer-uuid-001");
       expect(caseUpdatePayload![0].policy_id).toBe("policy-uuid-001");
-    }
+    },
+    30_000 // vi.resetModules() + dynamic import can be slow in the full suite
   );
 });

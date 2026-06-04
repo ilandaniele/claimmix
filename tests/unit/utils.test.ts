@@ -81,6 +81,33 @@ describe("formatAge()", () => {
     const threeDaysAgo = new Date(now.getTime() - 3 * 86_400_000).toISOString();
     expect(formatAge(threeDaysAgo)).toBe("Hace 3d");
   });
+
+  // AC5 — boundary: exactly 60 seconds ago must cross from "Ahora" into "Hace 1m"
+  it("returns 'Hace 1m' at the exact 60-second boundary (AC5)", () => {
+    vi.useFakeTimers();
+    const now = new Date("2024-06-01T12:00:00Z");
+    vi.setSystemTime(now);
+    const sixtySecondsAgo = new Date(now.getTime() - 60_000).toISOString();
+    expect(formatAge(sixtySecondsAgo)).toBe("Hace 1m");
+  });
+
+  // AC2 — explicit 17-minute scenario
+  it("returns 'Hace 17m' for exactly 17 minutes ago (AC2)", () => {
+    vi.useFakeTimers();
+    const now = new Date("2024-06-01T12:00:00Z");
+    vi.setSystemTime(now);
+    const seventeenMinutesAgo = new Date(now.getTime() - 17 * 60_000).toISOString();
+    expect(formatAge(seventeenMinutesAgo)).toBe("Hace 17m");
+  });
+
+  // AC3 — explicit 3-hour scenario
+  it("returns 'Hace 3h' for exactly 3 hours ago (AC3)", () => {
+    vi.useFakeTimers();
+    const now = new Date("2024-06-01T12:00:00Z");
+    vi.setSystemTime(now);
+    const threeHoursAgo = new Date(now.getTime() - 3 * 3_600_000).toISOString();
+    expect(formatAge(threeHoursAgo)).toBe("Hace 3h");
+  });
 });
 
 describe("truncate()", () => {

@@ -146,6 +146,71 @@ Postmark attachment URLs expire after approximately 7 days. The system stores th
 
 ---
 
+## Gmail Push Notifications Setup
+
+ClaimMix uses Google Cloud Pub/Sub push subscriptions to receive real-time Gmail notifications instead of polling. When a new email arrives in the configured inbox, Gmail publishes a notification to a Pub/Sub topic, which immediately POSTs to `/api/webhooks/gmail`.
+
+### One-time gcloud setup (operator)
+
+Run the following commands once to wire up the Pub/Sub topic and push subscription:
+
+```bash
+# 1. Create or reuse a GCP project
+gcloud projects create <your-project-id> --name="claimmix-pubsub"
+# Or verify an existing project:
+gcloud projects describe <your-project-id>
+
+# 2. Enable the Pub/Sub API and create the topic
+gcloud pubsub topics create gmail-inbound --project=<your-project-id>
+
+# 3. Grant Gmail API service account publish permission on the topic
+#    (required so Gmail can publish notifications to your topic)
+gcloud pubsub topics add-iam-policy-binding gmail-inbound \
+  --project=<your-project-id> \
+  --member=serviceAccount:gmail-api-push@system.gserviceaccount.com \
+  --role=roles/pubsub.publisher
+
+# 4. Create a push subscription pointing to your deployed webhook endpoint
+#    Replace <prod-url> with your Vercel deployment URL (e.g. claimmix.vercel.app)
+#    Replace <svc>@<project>.iam.gserviceaccount.com with your service account
+gcloud pubsub subscriptions create gmail-inbound-push \
+  --project=<your-project-id> \
+  --topic=gmail-inbound \
+  --push-endpoint=https://<prod-url>/api/webhooks/gmail \
+  --push-auth-service-account=<svc>@<project>.iam.gserviceaccount.com
+
+# 5. Set the Pub/Sub env vars in Vercel dashboard (Settings → Environment Variables):
+#    PUBSUB_TOPIC=projects/<your-project-id>/topics/gmail-inbound
+#    PUBSUB_AUDIENCE=https://<prod-url>/api/webhooks/gmail
+
+# 6. After deploying, register the Gmail watch (one-time, renews automatically via cron):
+curl -X POST \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  https://<prod-url>/api/admin/setup-gmail-watch
+```
+
+### Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `PUBSUB_TOPIC` | YES (push mode) | Full Pub/Sub topic resource: `projects/<id>/topics/gmail-inbound` |
+| `PUBSUB_AUDIENCE` | NO (local dev) | OIDC token audience for push auth verification. Set to your prod webhook URL. Leave unset locally to skip verification. |
+
+### How it works
+
+```
+Gmail inbox receives email
+  ↓ Gmail API publishes notification to Pub/Sub topic
+  ↓ Pub/Sub POSTs to /api/webhooks/gmail (with OIDC Bearer token)
+  ↓ Route verifies OIDC token audience (if PUBSUB_AUDIENCE is set)
+  ↓ Calls pollGmail() to fetch and process new messages via Gmail History API
+  ↓ Standard extraction worker pipeline (same as cron path)
+```
+
+The `/api/webhooks/gmail` endpoint is excluded from the session-cookie auth check in `proxy.ts` (it handles its own OIDC verification). The Gmail watch registration expires after 7 days; the `/api/cron/gmail-poll` cron job renews it automatically when expiry is within 24 hours.
+
+---
+
 ## Architecture
 
 ```

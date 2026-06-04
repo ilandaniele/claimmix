@@ -37,6 +37,9 @@ const PUBLIC_PREFIXES = [
   // route handler can verify its own token.
   "/api/admin/",
   "/api/worker/",
+  // Google Cloud Pub/Sub push webhooks arrive without a Supabase session cookie.
+  // The route handles its own OIDC token verification (AC16).
+  "/api/webhooks/",
   "/_next",
   "/favicon.ico",
 ];

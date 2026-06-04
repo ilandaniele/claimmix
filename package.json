@@ -23,7 +23,7 @@
     "cleanup:cases": "tsx scripts/cleanup-cases.ts"
   },
   "dependencies": {
-    "@sentry/nextjs": "^9.18.0",
+    "@sentry/nextjs": "^10.56.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.8",
     "@tanstack/react-table": "^8.21.3",

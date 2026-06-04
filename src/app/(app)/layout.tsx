@@ -10,20 +10,9 @@
  * It fetches the current user's profile from Supabase to display name/initials.
  */
 
-import { unstable_cache } from "next/cache";
 import { createServerClient } from "@/lib/supabase/server";
 import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
-
-async function fetchUserRow(userId: string) {
-  const supabase = await createServerClient();
-  const { data } = await (supabase as any)
-    .from("users")
-    .select("full_name, role")
-    .eq("id", userId)
-    .single();
-  return data as { full_name: string; role: string } | null;
-}
 
 export default async function AppLayout({
   children,
@@ -35,13 +24,17 @@ export default async function AppLayout({
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Cache the users-table row for 5 minutes — role/name rarely change.
-  const userRow = user?.id
-    ? await unstable_cache(fetchUserRow, [`user-row-${user.id}`], {
-        revalidate: 300,
-        tags: [`user-row-${user.id}`],
-      })(user.id)
-    : null;
+  // Direct lookup by PK — no unstable_cache because cookies() cannot be called
+  // inside a cached function in Next.js 15+ (causes 500 on cache-miss for new sessions).
+  let userRow: { full_name: string; role: string } | null = null;
+  if (user?.id) {
+    const { data } = await (supabase as any)
+      .from("users")
+      .select("full_name, role")
+      .eq("id", user.id)
+      .single();
+    userRow = data ?? null;
+  }
 
   const fullName: string = userRow?.full_name ?? user?.email ?? "Analista";
   const role: string = userRow?.role ?? "analyst";

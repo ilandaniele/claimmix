@@ -15,6 +15,7 @@
  *  AC10: Error in one message → next message still processed (per-message isolation).
  *  AC13: attachment part → adaptGmailAttachments + rehostAttachments called.
  *  AC14: mark-as-read (modify) called after successful insert; failure is non-fatal.
+ *  AC9 (integration): Cron route renews watch when expiration is within 24h threshold.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -23,7 +24,19 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // ── Mocks (must be declared before any imports that load the modules) ─────────
 
 // Mock googleapis — gmail client factory will return our mock instance.
-const { mockHistoryList, mockMessagesList, mockMessagesGet, mockMessagesModify, mockGetProfile, MockOAuth2, mockGmailFn } = vi.hoisted(() => {
+const {
+  mockHistoryList,
+  mockMessagesList,
+  mockMessagesGet,
+  mockMessagesModify,
+  mockGetProfile,
+  MockOAuth2,
+  mockGmailFn,
+  // Shared mocks reused by both the poller tests and the cron-route watch-renewal test.
+  mockGetWatchExpiration,
+  mockSetupGmailWatch,
+  mockCreateServiceClient,
+} = vi.hoisted(() => {
   const mockHistoryList = vi.fn();
   const mockMessagesList = vi.fn();
   const mockMessagesGet = vi.fn();
@@ -33,7 +46,21 @@ const { mockHistoryList, mockMessagesList, mockMessagesGet, mockMessagesModify, 
     return { setCredentials: vi.fn() };
   });
   const mockGmailFn = vi.fn();
-  return { mockHistoryList, mockMessagesList, mockMessagesGet, mockMessagesModify, mockGetProfile, MockOAuth2, mockGmailFn };
+  const mockGetWatchExpiration = vi.fn();
+  const mockSetupGmailWatch = vi.fn();
+  const mockCreateServiceClient = vi.fn();
+  return {
+    mockHistoryList,
+    mockMessagesList,
+    mockMessagesGet,
+    mockMessagesModify,
+    mockGetProfile,
+    MockOAuth2,
+    mockGmailFn,
+    mockGetWatchExpiration,
+    mockSetupGmailWatch,
+    mockCreateServiceClient,
+  };
 });
 
 vi.mock("googleapis", () => ({
@@ -47,6 +74,15 @@ vi.mock("@/server/email/gmail/poll-state", () => ({
   getOrCreatePollState: vi.fn(),
   advancePollState: vi.fn().mockResolvedValue(undefined),
   recordPollError: vi.fn().mockResolvedValue(undefined),
+  getWatchExpiration: mockGetWatchExpiration,
+}));
+
+vi.mock("@/server/email/gmail/watch", () => ({
+  setupGmailWatch: mockSetupGmailWatch,
+}));
+
+vi.mock("@/lib/supabase/service", () => ({
+  createServiceClient: mockCreateServiceClient,
 }));
 
 vi.mock("@/server/email/dedupe", () => ({
@@ -976,3 +1012,5 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
     });
   });
 });
+
+

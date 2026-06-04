@@ -9,6 +9,12 @@
  *   - pollGmail called exactly once on success
  *
  * AC1: Route calls pollGmail on success and returns its result.
+ * AC9: watch_expiration within 24h + PUBSUB_TOPIC set → setupGmailWatch called;
+ *      response includes watch_renewed:true.
+ * AC10: watch_expiration >24h away + PUBSUB_TOPIC set → setupGmailWatch NOT called;
+ *       response includes watch_renewed:false.
+ * AC11: PUBSUB_TOPIC not set → setupGmailWatch NOT called; response includes
+ *       watch_renewed:false and watch_skipped_reason:'PUBSUB_TOPIC_UNSET'.
  * AC13: 500 errors from pollGmail are caught and returned as { error: { code: "INTERNAL" } }.
  */
 
@@ -17,9 +23,16 @@ import { NextRequest } from "next/server";
 
 // ── Mocks (must be hoisted before the import of route.ts) ─────────────────────
 
-const { mockPollGmail, mockCreateServiceClient } = vi.hoisted(() => ({
+const {
+  mockPollGmail,
+  mockCreateServiceClient,
+  mockGetWatchExpiration,
+  mockSetupGmailWatch,
+} = vi.hoisted(() => ({
   mockPollGmail: vi.fn(),
   mockCreateServiceClient: vi.fn(),
+  mockGetWatchExpiration: vi.fn(),
+  mockSetupGmailWatch: vi.fn(),
 }));
 
 vi.mock("@/server/email/gmail/gmail-poller", () => ({
@@ -28,6 +41,14 @@ vi.mock("@/server/email/gmail/gmail-poller", () => ({
 
 vi.mock("@/lib/supabase/service", () => ({
   createServiceClient: mockCreateServiceClient,
+}));
+
+vi.mock("@/server/email/gmail/poll-state", () => ({
+  getWatchExpiration: mockGetWatchExpiration,
+}));
+
+vi.mock("@/server/email/gmail/watch", () => ({
+  setupGmailWatch: mockSetupGmailWatch,
 }));
 
 // ── Import route AFTER mocks ──────────────────────────────────────────────────
@@ -56,16 +77,32 @@ const MOCK_POLL_RESULT = {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+const GMAIL_EMAIL = "test@example.com";
+const PUBSUB_TOPIC = "projects/my-project/topics/gmail-push";
+
 describe("GET /api/cron/gmail-poll", () => {
   beforeEach(() => {
     process.env.CRON_SECRET = CRON_SECRET;
+    process.env.GMAIL_USER_EMAIL = GMAIL_EMAIL;
+    process.env.PUBSUB_TOPIC = PUBSUB_TOPIC;
     mockCreateServiceClient.mockReturnValue({ from: vi.fn() });
     mockPollGmail.mockResolvedValue(MOCK_POLL_RESULT);
+    // Default: watch expires 5 days from now (not expiring soon)
+    mockGetWatchExpiration.mockResolvedValue(
+      new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
+    );
+    mockSetupGmailWatch.mockResolvedValue({
+      historyId: "12345",
+      expiration: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    });
     vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
   afterEach(() => {
     delete process.env.CRON_SECRET;
+    delete process.env.GMAIL_USER_EMAIL;
+    delete process.env.PUBSUB_TOPIC;
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
@@ -134,6 +171,8 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(body.processed).toBe(MOCK_POLL_RESULT.processed);
     expect(body.skipped).toBe(MOCK_POLL_RESULT.skipped);
     expect(body.history_id).toBe(MOCK_POLL_RESULT.history_id);
+    // watch_renewed is always present in the success response
+    expect(typeof body.watch_renewed).toBe("boolean");
     expect(mockPollGmail).toHaveBeenCalledTimes(1);
   });
 
@@ -193,5 +232,148 @@ describe("GET /api/cron/gmail-poll", () => {
 
     expect(res.status).toBe(401);
     expect(mockPollGmail).not.toHaveBeenCalled();
+  });
+
+  // ── AC9: Watch renewal when expiring within 24h ────────────────────────────
+
+  it("AC9: calls setupGmailWatch when watch_expiration is within 24h", async () => {
+    // Expiration is 12 hours from now — inside the 24h renewal window.
+    mockGetWatchExpiration.mockResolvedValue(
+      new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()
+    );
+
+    const req = makeRequest(`Bearer ${CRON_SECRET}`);
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(mockSetupGmailWatch).toHaveBeenCalledTimes(1);
+    expect(mockSetupGmailWatch).toHaveBeenCalledWith(PUBSUB_TOPIC);
+    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    const body = await res.json();
+    expect(body.watch_renewed).toBe(true);
+    expect(body.watch_skipped_reason).toBeUndefined();
+  });
+
+  it("AC9: calls setupGmailWatch when watch_expiration is exactly now", async () => {
+    // Expiration is now — expired, must renew.
+    mockGetWatchExpiration.mockResolvedValue(new Date(Date.now()).toISOString());
+
+    const req = makeRequest(`Bearer ${CRON_SECRET}`);
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(mockSetupGmailWatch).toHaveBeenCalledTimes(1);
+    const body = await res.json();
+    expect(body.watch_renewed).toBe(true);
+  });
+
+  it("AC9: calls setupGmailWatch when watch_expiration is null (never registered)", async () => {
+    // Null means no watch has ever been set up — treat as needing renewal.
+    mockGetWatchExpiration.mockResolvedValue(null);
+
+    const req = makeRequest(`Bearer ${CRON_SECRET}`);
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(mockSetupGmailWatch).toHaveBeenCalledTimes(1);
+    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    const body = await res.json();
+    expect(body.watch_renewed).toBe(true);
+  });
+
+  // ── AC10: Watch renewal skipped when expiration is >24h away ──────────────
+
+  it("AC10: does NOT call setupGmailWatch when watch_expiration is 5 days away", async () => {
+    // 5 days from now — well outside the 24h renewal window.
+    mockGetWatchExpiration.mockResolvedValue(
+      new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
+    );
+
+    const req = makeRequest(`Bearer ${CRON_SECRET}`);
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(mockSetupGmailWatch).not.toHaveBeenCalled();
+    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    const body = await res.json();
+    expect(body.watch_renewed).toBe(false);
+    expect(body.watch_skipped_reason).toBeUndefined();
+  });
+
+  it("AC10: does NOT call setupGmailWatch when watch_expiration is exactly 25h away", async () => {
+    // 25 hours from now — just outside the 24h threshold.
+    mockGetWatchExpiration.mockResolvedValue(
+      new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString()
+    );
+
+    const req = makeRequest(`Bearer ${CRON_SECRET}`);
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(mockSetupGmailWatch).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.watch_renewed).toBe(false);
+  });
+
+  // ── AC11: Watch renewal skipped when PUBSUB_TOPIC is not set ──────────────
+
+  it("AC11: skips setupGmailWatch and continues polling when PUBSUB_TOPIC is not set", async () => {
+    delete process.env.PUBSUB_TOPIC;
+
+    const req = makeRequest(`Bearer ${CRON_SECRET}`);
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(mockSetupGmailWatch).not.toHaveBeenCalled();
+    expect(mockGetWatchExpiration).not.toHaveBeenCalled();
+    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    const body = await res.json();
+    expect(body.watch_renewed).toBe(false);
+    expect(body.watch_skipped_reason).toBe("PUBSUB_TOPIC_UNSET");
+  });
+
+  it("AC11: does not throw when PUBSUB_TOPIC is not set — cron completes normally", async () => {
+    delete process.env.PUBSUB_TOPIC;
+    mockPollGmail.mockResolvedValue(MOCK_POLL_RESULT);
+
+    const req = makeRequest(`Bearer ${CRON_SECRET}`);
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.processed).toBe(MOCK_POLL_RESULT.processed);
+  });
+
+  // ── Non-blocking renewal error ─────────────────────────────────────────────
+
+  it("logs error name and continues to call pollGmail when setupGmailWatch throws", async () => {
+    // Expiration is within 24h, so renewal is attempted.
+    mockGetWatchExpiration.mockResolvedValue(
+      new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()
+    );
+    const watchError = Object.assign(new Error("API quota exceeded"), {
+      name: "QuotaExceededError",
+    });
+    mockSetupGmailWatch.mockRejectedValue(watchError);
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const req = makeRequest(`Bearer ${CRON_SECRET}`);
+    const res = await GET(req);
+
+    // Response must still be 200 — watch renewal failure is non-fatal.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.watch_renewed).toBe(false);
+
+    // pollGmail must still have been called despite the watch error.
+    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+
+    // Error name must be logged; error message (which may contain PII) must not.
+    const loggedText = consoleSpy.mock.calls.flat().join(" ");
+    expect(loggedText).toContain("QuotaExceededError");
+    expect(loggedText).not.toContain("API quota exceeded");
   });
 });

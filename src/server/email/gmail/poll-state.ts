@@ -10,6 +10,9 @@
  *       so the next cron run retries from the same watermark position.
  * AC13: advancePollState() is called only after a successful batch; a per-message
  *       error calls recordPollError() instead, leaving history_id unchanged.
+ * AC2:  getWatchExpiration() returns null when no row exists or watch_expiration
+ *       is null — safe sentinel for "watch never registered or already cleaned up".
+ * AC3:  getWatchExpiration() returns the ISO timestamp string when set.
  *
  * Pattern: mirrors createStorageClient() from claim-attachments-bucket.ts —
  * accepts an injected SupabaseClient so callers (and tests) control the client
@@ -149,5 +152,86 @@ export async function recordPollError(
   if (dbError) {
     // Non-fatal: log the code but do not throw — the cron should continue.
     console.error("[poll-state] Failed to record poll error:", dbError.code); // crew-debug-ok
+  }
+}
+
+/**
+ * Get the watch_expiration for the given Gmail account.
+ *
+ * Returns the ISO timestamp string if a row exists and watch_expiration is set,
+ * or null if the row is missing (no watch ever registered) or watch_expiration
+ * is null (watch was not set up or was cleared).
+ *
+ * AC2: row missing          → null
+ * AC2: row present, column null → null
+ * AC3: row present, column set  → ISO string
+ *
+ * @param supabase    Service-role Supabase client (bypasses RLS).
+ * @param gmailEmail  The Gmail address to look up.
+ * @returns ISO timestamp string or null.
+ */
+export async function getWatchExpiration(
+  supabase: SupabaseClient,
+  gmailEmail: string
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("gmail_poll_state")
+    .select("watch_expiration")
+    .eq("gmail_account_email", gmailEmail)
+    .maybeSingle();
+
+  if (error) {
+    // Log code only — gmailEmail is PII-adjacent, do not log it.
+    throw new Error(
+      `[poll-state] Failed to read watch_expiration: ${error.code}`
+    );
+  }
+
+  // data is null when no row exists (maybeSingle returns null instead of error).
+  if (!data || data.watch_expiration == null) {
+    return null;
+  }
+
+  // watch_expiration is stored as timestamptz; Supabase JS returns it as an
+  // ISO-8601 string.  Return it verbatim.
+  return data.watch_expiration as string;
+}
+
+/**
+ * Upsert the Gmail watch subscription state for the given account.
+ *
+ * Sets watch_expiration and watch_history_id, and bumps updated_at.
+ * Uses the unique index on gmail_account_email to upsert safely.
+ *
+ * Called by setupGmailWatch() after a successful users.watch() API call (AC1).
+ *
+ * @param supabase         Service-role Supabase client.
+ * @param gmailEmail       The Gmail address whose watch was registered.
+ * @param watchExpiration  ISO-8601 string when the watch expires.
+ * @param watchHistoryId   historyId returned by users.watch().
+ */
+export async function setWatchState(
+  supabase: SupabaseClient,
+  gmailEmail: string,
+  watchExpiration: string,
+  watchHistoryId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("gmail_poll_state")
+    .upsert(
+      {
+        gmail_account_email: gmailEmail,
+        watch_expiration: watchExpiration,
+        watch_history_id: watchHistoryId,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "gmail_account_email" }
+    );
+
+  if (error) {
+    // Log code only — no PII (gmailEmail is PII-adjacent).
+    throw new Error(
+      `[poll-state] Failed to set watch state: ${error.code}`
+    );
   }
 }

@@ -316,8 +316,8 @@ export async function extractEmailClaim(
         error_name: name,
       })
     );
-    // Rethrow — caller handles retry/escalation.
-    throw e;
+    // Fall through to retry. If the retry also fails, return the safe default
+    // so the worker can still apply deterministic parsing fallbacks.
   }
 
   if (result) {

@@ -25,7 +25,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
-import { runEmailExtractionWorker } from "@/server/worker/extract";
+import { runIntakeAgent } from "@/server/agents/intake-agent";
 
 /** 24 hours in milliseconds — renew if the watch expires within this window. */
 const RENEWAL_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -124,7 +124,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         await Promise.all(
           caseIds.map(async (caseId) => {
             try {
-              await runEmailExtractionWorker(caseId, tenantId, null);
+              await runIntakeAgent({ caseId, tenantId, source: "cron" });
             } catch (e) {
               const name = e instanceof Error ? e.name : "UnknownError";
               console.error("[cron/gmail-poll] Worker error:", name, "case:", caseId); // crew-debug-ok

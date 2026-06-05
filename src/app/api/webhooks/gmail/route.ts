@@ -28,7 +28,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { OAuth2Client } from "google-auth-library";
 import { createServiceClient } from "@/lib/supabase/service";
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
-import { runEmailExtractionWorker } from "@/server/worker/extract";
+import { runIntakeAgent } from "@/server/agents/intake-agent";
 
 /** Required: prevent Vercel from statically optimising this dynamic route. */
 export const dynamic = "force-dynamic";
@@ -179,7 +179,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         await Promise.all(
           caseIds.map(async (caseId) => {
             try {
-              await runEmailExtractionWorker(caseId, tenantId, null);
+              await runIntakeAgent({ caseId, tenantId, source: "gmail" });
             } catch (e) {
               const name = e instanceof Error ? e.name : "UnknownError";
               console.error("[webhooks/gmail] Worker error:", name, "case:", caseId); // crew-debug-ok

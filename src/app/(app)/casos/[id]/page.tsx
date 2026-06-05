@@ -28,7 +28,9 @@ import { CoreSyncButton } from "./_components/CoreSyncButton";
 import { formatAge, formatDate } from "@/lib/utils";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
+import { parseEmailClaimFields } from "@/lib/email/claim-parser";
 import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
+import type { Database } from "@/lib/supabase/types";
 import Link from "next/link";
 
 interface CaseDetailPageProps {
@@ -41,6 +43,8 @@ const CHANNEL_LABELS: Record<string, string> = {
   whatsapp_sim: "WhatsApp simulado",
   whatsapp: "WhatsApp",
 };
+
+type ExtractedFieldRow = Database["public"]["Tables"]["extracted_fields"]["Row"];
 
 /** Format case UUID to display SIN-XXXX-XXXX string */
 function formatCaseNumber(id: string): string {
@@ -112,6 +116,21 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
     external_url: string;
     uploaded_at: string | null;
   }> = attachmentsResult.data ?? [];
+
+  let displayedExtractedFields = extracted_fields;
+  if (isEmailCase && displayedExtractedFields.length === 0) {
+    const fallbackEmail = await getLatestEmailText(supabase, id);
+    const fallbackFields = parseEmailClaimFields(fallbackEmail);
+    displayedExtractedFields = fallbackFields.map((field, index) => ({
+      id: `frontend-fallback-${caseRow.id}-${field.field_key}-${index}`,
+      case_id: caseRow.id,
+      tenant_id: caseRow.tenant_id,
+      field_key: field.field_key,
+      field_value: field.field_value,
+      confidence: field.confidence,
+      extracted_at: caseRow.created_at,
+    })) satisfies ExtractedFieldRow[];
+  }
 
   const caseNumber = formatCaseNumber(caseRow.id);
 
@@ -241,7 +260,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
             >
               {t("case.detail.extractedFields")}
             </h2>
-            <ExtractedFieldsTable fields={extracted_fields} />
+            <ExtractedFieldsTable fields={displayedExtractedFields} />
           </section>
 
           {/* Texto original — collapsible accordion */}
@@ -448,12 +467,30 @@ async function RawEmailAccordion({ caseId }: { caseId: string }) {
   const t = getT(locale);
   const supabase = await createServerClient();
    
-  const { data: messages } = await (supabase as any)
+  let { data: messages } = await (supabase as any)
     .from("raw_messages")
     .select("body, subject, received_at")
     .eq("case_id", caseId)
     .order("received_at", { ascending: true })
     .limit(5);
+
+  if (!messages || messages.length === 0) {
+    const { data: claimMessages } = await (supabase as any)
+      .from("claim_messages")
+      .select("body_text, subject, received_at")
+      .eq("case_id", caseId)
+      .eq("direction", "inbound")
+      .order("received_at", { ascending: true })
+      .limit(5);
+
+    messages = (claimMessages ?? []).map(
+      (msg: { body_text: string | null; subject: string | null; received_at: string }) => ({
+        body: msg.body_text ?? "",
+        subject: msg.subject,
+        received_at: msg.received_at,
+      })
+    );
+  }
 
   if (!messages || messages.length === 0) {
     return (
@@ -500,4 +537,40 @@ async function RawEmailAccordion({ caseId }: { caseId: string }) {
       )}
     </div>
   );
+}
+
+async function getLatestEmailText(
+  supabase: any,
+  caseId: string
+): Promise<{ subject: string; body: string; senderEmail: string }> {
+  const { data: rawMsg } = await supabase
+    .from("raw_messages")
+    .select("body,subject,from_addr")
+    .eq("case_id", caseId)
+    .order("received_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (rawMsg) {
+    return {
+      subject: rawMsg.subject ?? "",
+      body: rawMsg.body ?? "",
+      senderEmail: rawMsg.from_addr ?? "",
+    };
+  }
+
+  const { data: claimMsg } = await supabase
+    .from("claim_messages")
+    .select("body_text,subject,from_addr")
+    .eq("case_id", caseId)
+    .eq("direction", "inbound")
+    .order("received_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  return {
+    subject: claimMsg?.subject ?? "",
+    body: claimMsg?.body_text ?? "",
+    senderEmail: claimMsg?.from_addr ?? "",
+  };
 }

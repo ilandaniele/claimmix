@@ -49,6 +49,7 @@ import { isValidTransition } from "@/server/cases/fsm";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
+import { mergeExtractedFields, parseEmailClaimFields } from "@/lib/email/claim-parser";
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
 
@@ -474,9 +475,29 @@ export async function runEmailExtractionWorker(
     // This is a defensive layer — the primary fix is in the prompt (RULE D / RULE F).
     // Ensures fields[] is always the source of truth for DB writes, even if the model
     // populates only one of the two shapes.
+    const fallbackFields = parseEmailClaimFields({
+      subject: emailSubject,
+      body: emailBody,
+      senderEmail,
+    });
+    const hydratedFields = hydrateFieldsFromExtracted(extractedClaim);
+    const hasFallbackClaimSignal = fallbackFields.some((f) =>
+      ["policy_number", "accident_date", "claim_type"].includes(f.field_key)
+    );
+
     extractedClaim = {
       ...scrubPiiFromSummary(extractedClaim),
-      fields: hydrateFieldsFromExtracted(extractedClaim),
+      is_claim:
+        extractedClaim.is_claim === false &&
+        extractedClaim.confidence <= 0.2 &&
+        hasFallbackClaimSignal
+          ? true
+          : extractedClaim.is_claim,
+      confidence:
+        extractedClaim.confidence <= 0.2 && hasFallbackClaimSignal
+          ? 0.7
+          : extractedClaim.confidence,
+      fields: mergeExtractedFields(hydratedFields, fallbackFields),
     };
 
     // ── f) Classify severity — two-layer (pattern + AI) ──────────────────────
@@ -762,20 +783,22 @@ export async function runEmailExtractionWorker(
     // Decides what confirmation/missing-info/specialist emails to send and
     // what final status to apply, based on the extraction result.
     // AC7, AC9, AC10, AC11, AC12.
-    await orchestratePostExtraction(
-      supabase,
-      caseId,
-      tenantId,
-      {
-        extractedClaim,
-        senderEmail,
-        // inReplyToMessageId: not available here; looked up by dispatch from
-        // the raw_messages row if needed. Passed as undefined — dispatch
-        // degrades gracefully (no In-Reply-To header on first send).
-        inReplyToMessageId: undefined,
-      },
-      customerMatches
-    );
+    if (caseRow.channel === "email" || caseRow.channel === "email_sim") {
+      await orchestratePostExtraction(
+        supabase,
+        caseId,
+        tenantId,
+        {
+          extractedClaim,
+          senderEmail,
+          // inReplyToMessageId: not available here; looked up by dispatch from
+          // the raw_messages row if needed. Passed as undefined — dispatch
+          // degrades gracefully (no In-Reply-To header on first send).
+          inReplyToMessageId: undefined,
+        },
+        customerMatches
+      );
+    }
 
     // ── o) Extraction complete audit log ──────────────────────────────────────
     await writeAuditLog({

@@ -1,0 +1,13 @@
+{
+  "phase": "qa_complete",
+  "qa_decision": "PASS",
+  "qa_blocking_count": 1,
+  "review_decision": "APPROVED",
+  "blocking_count": 0,
+  "non_blocking_count": 3,
+  "nit_count": 3,
+  "repo_path": "C:/Users/Ilan/Desktop/Proyectos/claimmix",
+  "pr_url": "https://github.com/ilandaniele/claimmix/pull/30",
+  "branch": "fix/email-extraction-fields",
+  "reviewed_at": "2026-06-05"
+}

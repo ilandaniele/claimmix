@@ -1,10 +1,9 @@
 /**
  * POST /api/worker/extract — internal worker trigger endpoint.
  *
- * Accepts a JSON body with { caseId, tenantId } and runs runEmailExtractionWorker
- * for the specified case. Used as a fire-and-forget endpoint from the webhook
- * handler (or Vercel cron) to decouple the extraction pipeline from the webhook
- * response latency.
+ * Accepts a JSON body with { caseId, tenantId } and runs the bounded intake
+ * agent for the specified case. Used as a fire-and-forget endpoint from webhook
+ * handlers (or Vercel cron) to decouple extraction from webhook response latency.
  *
  * Auth: Internal-only. Accepts either:
  *   a) X-Internal-Worker: true header (same-origin worker call)
@@ -21,7 +20,7 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { runEmailExtractionWorker } from "@/server/worker/extract";
+import { runIntakeAgent } from "@/server/agents/intake-agent";
 
 const WorkerBodySchema = z.object({
   caseId: z.string().uuid("caseId must be a valid UUID."),
@@ -85,8 +84,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ── Run worker ────────────────────────────────────────────────────────────────
   try {
-    await runEmailExtractionWorker(caseId, tenantId, null);
-    return NextResponse.json({ ok: true, case_id: caseId }, { status: 200 });
+    const result = await runIntakeAgent({ caseId, tenantId, source: "worker" });
+    return NextResponse.json({ ok: true, case_id: caseId, agent: result }, { status: 200 });
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
     console.error(

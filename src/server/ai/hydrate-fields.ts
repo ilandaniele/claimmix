@@ -123,7 +123,7 @@ export function scrubPiiFromSummary(extracted: ExtractedClaim): ExtractedClaim {
     // 2. Replace extracted DNI value by its literal string.
     if (dniValue && /^\d[\d.]*$/.test(dniValue)) {
       out = out.replace(
-        new RegExp(dniValue.replace(/[.]/g, "\\."), "g"),
+        new RegExp(dniValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
         "[DNI omitido]"
       );
     }

@@ -47,6 +47,7 @@ import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/server/cases/fsm";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
+import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
@@ -469,6 +470,15 @@ export async function runEmailExtractionWorker(
       );
     }
 
+    // ── e2) Defensive hydration: mirror typed extracted_fields into fields[] + scrub PII ──
+    // This is a defensive layer — the primary fix is in the prompt (RULE D / RULE F).
+    // Ensures fields[] is always the source of truth for DB writes, even if the model
+    // populates only one of the two shapes.
+    extractedClaim = {
+      ...scrubPiiFromSummary(extractedClaim),
+      fields: hydrateFieldsFromExtracted(extractedClaim),
+    };
+
     // ── f) Classify severity — two-layer (pattern + AI) ──────────────────────
     const fullText = `${emailSubject}\n\n${emailBody}`;
     const finalSeverity = classifySeverity(
@@ -577,7 +587,23 @@ export async function runEmailExtractionWorker(
     }
 
     // ── i) Customer matching — AC6, AC22 ─────────────────────────────────────
-    const extractedClaimFields = extractedClaim.extracted_fields ?? {};
+    // Build from fields array first (always present), then overlay with
+    // extracted_fields typed object (may be absent if OpenAI omitted it).
+    const extractedClaimFields: Record<string, string | undefined> = Object.fromEntries(
+      extractedClaim.fields.map((f) => [f.field_key, f.field_value])
+    );
+    if (extractedClaim.extracted_fields) {
+      const ef = extractedClaim.extracted_fields;
+      if (ef.full_name)            extractedClaimFields.full_name = ef.full_name;
+      if (ef.email)                extractedClaimFields.email = ef.email;
+      if (ef.phone)                extractedClaimFields.phone = ef.phone;
+      if (ef.dni)                  extractedClaimFields.dni = ef.dni;
+      if (ef.policy_number)        extractedClaimFields.policy_number = ef.policy_number;
+      if (ef.accident_date)        extractedClaimFields.accident_date = ef.accident_date;
+      if (ef.accident_location)    extractedClaimFields.accident_location = ef.accident_location;
+      if (ef.accident_description) extractedClaimFields.accident_description = ef.accident_description;
+      if (ef.claim_type)           extractedClaimFields.claim_type = ef.claim_type;
+    }
     const customerMatches = await findCustomerMatches(
       supabase,
       tenantId,

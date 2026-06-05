@@ -126,6 +126,14 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.confidence.col": "Confidence",
 
   // ── Field key labels (en-US) ───────────────────────────────────────────────
+  "field.full_name": "Full name",
+  "field.email": "Email address",
+  "field.phone": "Phone",
+  "field.dni": "National ID",
+  "field.policy_number": "Policy number",
+  "field.accident_date": "Accident date",
+  "field.accident_location": "Accident location",
+  "field.accident_description": "Accident description",
   "field.date": "Incident date",
   "field.location": "Incident location",
   "field.party_a_name": "Driver A — Name",

@@ -129,6 +129,14 @@ export const esAR = {
   "case.detail.confidence.col": "Confianza",
 
   // ── Field key labels (es-AR) ───────────────────────────────────────────────
+  "field.full_name": "Nombre completo",
+  "field.email": "Correo electrónico",
+  "field.phone": "Teléfono",
+  "field.dni": "DNI",
+  "field.policy_number": "Número de póliza",
+  "field.accident_date": "Fecha del siniestro",
+  "field.accident_location": "Lugar del siniestro",
+  "field.accident_description": "Descripción del siniestro",
   "field.date": "Fecha del siniestro",
   "field.location": "Lugar del siniestro",
   "field.party_a_name": "Conductor A — Nombre",

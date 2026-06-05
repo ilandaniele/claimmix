@@ -48,7 +48,7 @@ export type ExtractedField = z.infer<typeof ExtractedFieldSchema>;
  */
 export const ClaimFieldsSchema = z.object({
   full_name: z.string().max(200).optional(),
-  email: z.string().email().optional(),
+  email: z.string().max(200).optional(),
   phone: z.string().max(50).optional(),
   dni: z.string().max(20).optional(),          // Argentine national ID [PII]
   policy_number: z.string().max(100).optional(), // [PII]
@@ -247,6 +247,17 @@ export const OPENAI_JSON_SCHEMA = {
             accident_description: { type: "string" },
             claim_type: { type: "string" },
           },
+          required: [
+            "full_name",
+            "email",
+            "phone",
+            "dni",
+            "policy_number",
+            "accident_date",
+            "accident_location",
+            "accident_description",
+            "claim_type",
+          ],
           additionalProperties: false,
         },
         field_confidences: {
@@ -295,6 +306,7 @@ export const OPENAI_JSON_SCHEMA = {
         "cost_usd",
         "is_claim",
         "confidence",
+        "extracted_fields",
         "field_confidences",
         "missing_fields",
         "fields_pending_confirmation",

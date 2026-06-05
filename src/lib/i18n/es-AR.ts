@@ -82,6 +82,10 @@ export const esAR = {
   "bandeja.search": "Buscar casos...",
   "bandeja.empty": "No hay casos en esta categoría.",
   "bandeja.loading": "Cargando casos...",
+  "bandeja.delete": "Eliminar caso",
+  "bandeja.deleteConfirm": "Confirmar",
+  "bandeja.deleteCancel": "Cancelar",
+  "bandeja.deleteSuccess": "Caso eliminado correctamente.",
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simular nuevo siniestro",
@@ -107,6 +111,8 @@ export const esAR = {
   "case.detail.close": "Cerrar siniestro",
   "case.detail.escalate": "Escalar",
   "case.detail.reAnalyze": "Re-analizar",
+  "case.detail.reAnalyzeStarted": "Re-análisis iniciado. La página se actualizará en breve.",
+  "case.detail.reAnalyzeRateLimit": "Demasiados re-análisis. Esperá una hora antes de volver a intentarlo.",
   "case.detail.exportToCore": "Exportar al Core",
   "case.detail.markComplete": "Marcar completo",
   "case.detail.resolveEscalated": "Resolver escalado → Listo",

@@ -10,7 +10,7 @@
 
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   useReactTable,
@@ -35,11 +35,14 @@ function formatCaseId(id: string): string {
 
 interface CasesTableProps {
   cases: CaseRow[];
+  onDelete?: (caseId: string) => Promise<void>;
 }
 
-export function CasesTable({ cases }: CasesTableProps) {
+export function CasesTable({ cases, onDelete }: CasesTableProps) {
   const t = useT();
   const router = useRouter();
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   /** Map claim type to display label */
   const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
@@ -141,9 +144,86 @@ export function CasesTable({ cases }: CasesTableProps) {
           </span>
         ),
       },
+      ...(onDelete
+        ? [
+            {
+              id: "actions",
+              header: "",
+              cell: ({ row }: { row: { original: CaseRow } }) => {
+                const id = row.original.id;
+                const isConfirming = confirmingId === id;
+                const isDeleting = deletingId === id;
+
+                if (isConfirming) {
+                  return (
+                    <div
+                      className="flex items-center gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        disabled={isDeleting}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          setDeletingId(id);
+                          await onDelete(id);
+                          setDeletingId(null);
+                          setConfirmingId(null);
+                        }}
+                        className="rounded px-2 py-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors"
+                        aria-label="Confirmar eliminación"
+                      >
+                        {isDeleting ? "..." : t("bandeja.deleteConfirm")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmingId(null);
+                        }}
+                        className="rounded px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                        aria-label="Cancelar"
+                      >
+                        {t("bandeja.deleteCancel")}
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmingId(id);
+                    }}
+                    className="rounded p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
+                    aria-label={t("bandeja.delete")}
+                    title={t("bandeja.delete")}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="w-4 h-4"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                );
+              },
+            } as ColumnDef<CaseRow>,
+          ]
+        : []),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t]
+    [t, onDelete, confirmingId, deletingId]
   );
 
   const table = useReactTable({

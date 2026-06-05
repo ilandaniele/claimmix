@@ -169,6 +169,20 @@ export function DashboardClient({
 
   useCasesRealtime({ onInsert: handleInsert, onUpdate: handleUpdate });
 
+  const handleDeleteCase = useCallback(
+    async (caseId: string) => {
+      const res = await fetch(`/api/cases/${caseId}`, { method: "DELETE" });
+      if (res.ok) {
+        setCases((prev) => prev.filter((c) => c.id !== caseId));
+        setTotal((prev) => Math.max(0, prev - 1));
+        addToast(t("bandeja.deleteSuccess"), "success");
+      } else {
+        addToast(t("error.generic"), "error");
+      }
+    },
+    [addToast, t]
+  );
+
   // Filter cases for display based on active filters
   const filteredCases = cases.filter((c) => {
     if (activeStatus && c.status !== activeStatus) return false;
@@ -260,7 +274,7 @@ export function DashboardClient({
 
         {/* Cases table */}
         <div className="flex-1 overflow-auto px-6 py-4">
-          <CasesTable cases={paginatedCases} />
+          <CasesTable cases={paginatedCases} onDelete={handleDeleteCase} />
 
           {/* Pagination */}
           {filteredTotal > 0 && (

@@ -63,7 +63,15 @@ export type Database = {
             | "listo"
             | "esperando"
             | "escalado"
-            | "cerrado";
+            | "cerrado"
+            | "recibido"
+            | "info_faltante"
+            | "confirmacion_pendiente"
+            | "requiere_especialista"
+            | "listo_para_core"
+            | "enviado_a_core"
+            | "error_core"
+            | "no_relevante";
           confidence_min: number | null;
           assigned_to: string | null;
           channel: "email_sim" | "email" | "whatsapp_sim" | "whatsapp";
@@ -82,7 +90,15 @@ export type Database = {
             | "listo"
             | "esperando"
             | "escalado"
-            | "cerrado";
+            | "cerrado"
+            | "recibido"
+            | "info_faltante"
+            | "confirmacion_pendiente"
+            | "requiere_especialista"
+            | "listo_para_core"
+            | "enviado_a_core"
+            | "error_core"
+            | "no_relevante";
           confidence_min?: number | null;
           assigned_to?: string | null;
           channel: "email_sim" | "email" | "whatsapp_sim" | "whatsapp";
@@ -101,7 +117,15 @@ export type Database = {
             | "listo"
             | "esperando"
             | "escalado"
-            | "cerrado";
+            | "cerrado"
+            | "recibido"
+            | "info_faltante"
+            | "confirmacion_pendiente"
+            | "requiere_especialista"
+            | "listo_para_core"
+            | "enviado_a_core"
+            | "error_core"
+            | "no_relevante";
           confidence_min?: number | null;
           assigned_to?: string | null;
           channel?: "email_sim" | "email" | "whatsapp_sim" | "whatsapp";

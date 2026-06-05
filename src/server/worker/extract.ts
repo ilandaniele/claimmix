@@ -577,7 +577,23 @@ export async function runEmailExtractionWorker(
     }
 
     // ── i) Customer matching — AC6, AC22 ─────────────────────────────────────
-    const extractedClaimFields = extractedClaim.extracted_fields ?? {};
+    // Build from fields array first (always present), then overlay with
+    // extracted_fields typed object (may be absent if OpenAI omitted it).
+    const extractedClaimFields: Record<string, string | undefined> = Object.fromEntries(
+      extractedClaim.fields.map((f) => [f.field_key, f.field_value])
+    );
+    if (extractedClaim.extracted_fields) {
+      const ef = extractedClaim.extracted_fields;
+      if (ef.full_name)            extractedClaimFields.full_name = ef.full_name;
+      if (ef.email)                extractedClaimFields.email = ef.email;
+      if (ef.phone)                extractedClaimFields.phone = ef.phone;
+      if (ef.dni)                  extractedClaimFields.dni = ef.dni;
+      if (ef.policy_number)        extractedClaimFields.policy_number = ef.policy_number;
+      if (ef.accident_date)        extractedClaimFields.accident_date = ef.accident_date;
+      if (ef.accident_location)    extractedClaimFields.accident_location = ef.accident_location;
+      if (ef.accident_description) extractedClaimFields.accident_description = ef.accident_description;
+      if (ef.claim_type)           extractedClaimFields.claim_type = ef.claim_type;
+    }
     const customerMatches = await findCustomerMatches(
       supabase,
       tenantId,

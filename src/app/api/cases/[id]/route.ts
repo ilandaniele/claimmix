@@ -95,6 +95,67 @@ export async function GET(
   }
 }
 
+// ── DELETE /api/cases/:id ─────────────────────────────────────────────────────
+
+export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  // ── 1. Auth ───────────────────────────────────────────────────────────────
+  const supabase = await createServerClient();
+  const userRow = await resolveUser(supabase);
+
+  if (!userRow) {
+    return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
+  }
+
+  // ── 2. Rate limit ─────────────────────────────────────────────────────────
+  const rlKey = buildUserKey(userRow.id, "cases-delete");
+  const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CASES_API);
+  if (!rl.allowed) {
+    return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes."));
+  }
+
+  // ── 3. Validate route params ──────────────────────────────────────────────
+  const rawParams = await context.params;
+  const parsedParams = ParamsSchema.safeParse(rawParams);
+  if (!parsedParams.success) {
+    return err(new AppError("NOT_FOUND", "El caso no existe."));
+  }
+
+  const { id: caseId } = parsedParams.data;
+
+  // ── 4. Verify case exists and belongs to tenant (IDOR) ────────────────────
+  const { data: existing } = await (supabase as any)
+    .from("cases")
+    .select("id, tenant_id")
+    .eq("id", caseId)
+    .single();
+
+  if (!existing || existing.tenant_id !== userRow.tenant_id) {
+    return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
+  }
+
+  // ── 5. Hard delete (RLS ensures tenant isolation) ─────────────────────────
+  try {
+    const { error: deleteError } = await (supabase as any)
+      .from("cases")
+      .delete()
+      .eq("id", caseId);
+
+    if (deleteError) {
+      console.error("[DELETE /api/cases/:id] db error:", deleteError.message);
+      return err(new AppError("INTERNAL_ERROR"));
+    }
+
+    return ok({ deleted: true });
+  } catch (error) {
+    const errName = error instanceof Error ? error.name : "UnknownError";
+    console.error("[DELETE /api/cases/:id] error:", errName);
+    return err(new AppError("INTERNAL_ERROR"));
+  }
+}
+
 // ── PATCH /api/cases/:id ──────────────────────────────────────────────────────
 
 export async function PATCH(

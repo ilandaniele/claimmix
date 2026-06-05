@@ -79,6 +79,10 @@ export const enUS: Record<TranslationKey, string> = {
   "bandeja.search": "Search cases...",
   "bandeja.empty": "No cases in this category.",
   "bandeja.loading": "Loading cases...",
+  "bandeja.delete": "Delete case",
+  "bandeja.deleteConfirm": "Confirm",
+  "bandeja.deleteCancel": "Cancel",
+  "bandeja.deleteSuccess": "Case deleted successfully.",
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simulate new claim",
@@ -104,6 +108,8 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.close": "Close claim",
   "case.detail.escalate": "Escalate",
   "case.detail.reAnalyze": "Re-analyze",
+  "case.detail.reAnalyzeStarted": "Re-analysis started. The page will update shortly.",
+  "case.detail.reAnalyzeRateLimit": "Too many re-analyses. Please wait an hour before trying again.",
   "case.detail.exportToCore": "Export to Core",
   "case.detail.markComplete": "Mark complete",
   "case.detail.resolveEscalated": "Resolve escalated → Ready",

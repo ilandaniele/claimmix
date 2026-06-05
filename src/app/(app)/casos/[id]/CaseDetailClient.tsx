@@ -42,6 +42,7 @@ export function CaseDetailClient({
   const [showClose, setShowClose] = useState(false);
   const [showEscalate, setShowEscalate] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
+  const [reAnalyzing, setReAnalyzing] = useState(false);
 
   const dialogOpen = showClose || showEscalate || transitioning;
 
@@ -71,6 +72,28 @@ export function CaseDetailClient({
       addToast(t("error.generic"), "error");
     } finally {
       setTransitioning(false);
+    }
+  }
+
+  // ── Re-analyze — trigger AI re-extraction ────────────────────────────────
+  async function handleReAnalyze() {
+    setReAnalyzing(true);
+    try {
+      const res = await fetch(`/api/cases/${caseId}/re-analyze`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        addToast(t("case.detail.reAnalyzeStarted"), "success");
+        router.refresh();
+      } else if (res.status === 429) {
+        addToast(t("case.detail.reAnalyzeRateLimit"), "error");
+      } else {
+        addToast(t("error.generic"), "error");
+      }
+    } catch {
+      addToast(t("error.generic"), "error");
+    } finally {
+      setReAnalyzing(false);
     }
   }
 
@@ -105,6 +128,8 @@ export function CaseDetailClient({
           onClose={() => setShowClose(true)}
           onEscalate={() => setShowEscalate(true)}
           onTransition={handleTransition}
+          onReAnalyze={handleReAnalyze}
+          reAnalyzing={reAnalyzing}
           onError={(msg) => addToast(msg, "error")}
           dialogOpen={dialogOpen}
         />

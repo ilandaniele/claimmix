@@ -50,7 +50,6 @@ import { checkDuplicate } from "@/server/email/dedupe";
 import { threadLookup } from "@/server/email/thread-lookup";
 import { rehostAttachments } from "@/server/email/rehost-attachments";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import type { gmail_v1 } from "googleapis";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -73,6 +72,8 @@ export interface PollResult {
   errors: number;
   fallback: boolean;
   history_id: string;
+  /** Case IDs that were newly created and need extraction. */
+  case_ids: string[];
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -151,35 +152,6 @@ function resolveTenantId(): string | null {
   return MVP_SENTINEL_TENANT_ID;
 }
 
-/**
- * Dispatch the extraction worker for a newly ingested case.
- *
- * POSTs to /api/worker/extract via fetch, which creates an independent Vercel
- * function invocation with its own timeout — the Gmail poller lambda no longer
- * needs to remain alive while OpenAI runs (AC5).
- *
- * Fire-and-forget: errors are logged (name + caseId, no PII — AC6/AC10) and
- * do NOT propagate; the poll loop continues to the next message.
- */
-function dispatchExtractionWorker(caseId: string, tenantId: string): void {
-  const url = `${getWorkerBaseUrl()}/api/worker/extract`;
-
-  fetch(url, {
-    method: "POST",
-    headers: {
-      "X-Internal-Worker": "true",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ caseId, tenantId }),
-    signal: AbortSignal.timeout(8000),
-  }).catch((err: unknown) => {
-    const name = err instanceof Error ? err.name : "UnknownError";
-    // AC6/AC10: log only name + caseId — no PII.
-    console.error( // crew-debug-ok
-      "[gmail-poller] Worker dispatch error:", name, "case:", caseId
-    );
-  });
-}
 
 /**
  * Insert a claim_messages row for a newly received inbound Gmail message.
@@ -358,7 +330,7 @@ async function processMessage(
   gmail: ReturnType<typeof getGmailClient>,
   gmailMessageId: string,
   tenantId: string
-): Promise<"processed" | "skipped"> {
+): Promise<{ outcome: "processed"; caseId: string } | { outcome: "skipped" }> {
   // ── a) Deduplicate ─────────────────────────────────────────────────────────
   const isDuplicate = await checkDuplicate(
     supabase as any,
@@ -366,7 +338,7 @@ async function processMessage(
     gmailMessageId
   );
   if (isDuplicate) {
-    return "skipped";
+    return { outcome: "skipped" };
   }
 
   // ── b) Fetch full message ──────────────────────────────────────────────────
@@ -429,7 +401,7 @@ async function processMessage(
       // Treat as already-processed (a previous partial run created the case
       // but not the claim_message). Return "skipped" so the watermark advances.
       if (caseError?.code === "23505") {
-        return "skipped";
+        return { outcome: "skipped" };
       }
       // AC10: log code only.
       console.error( // crew-debug-ok
@@ -498,10 +470,7 @@ async function processMessage(
     },
   });
 
-  // ── j) Fire extraction worker (fire-and-forget) ────────────────────────────
-  dispatchExtractionWorker(caseId, tenantId);
-
-  return "processed";
+  return { outcome: "processed", caseId };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -523,13 +492,13 @@ export async function pollGmail(
   if (!tenantId) {
     // Should never happen with MVP sentinel, but guard explicitly.
     console.error("[gmail-poller] Could not resolve tenant — aborting poll"); // crew-debug-ok
-    return { processed: 0, skipped: 0, errors: 1, fallback: false, history_id: "0" };
+    return { processed: 0, skipped: 0, errors: 1, fallback: false, history_id: "0", case_ids: [] };
   }
 
   const gmailEmail = process.env.GMAIL_USER_EMAIL;
   if (!gmailEmail) {
     console.error("[gmail-poller] GMAIL_USER_EMAIL not set — aborting poll"); // crew-debug-ok
-    return { processed: 0, skipped: 0, errors: 1, fallback: false, history_id: "0" };
+    return { processed: 0, skipped: 0, errors: 1, fallback: false, history_id: "0", case_ids: [] };
   }
 
   const gmail = getGmailClient();
@@ -618,6 +587,7 @@ export async function pollGmail(
           errors: 1,
           fallback: true,
           history_id: latestHistoryId,
+          case_ids: [],
         };
       }
     } else {
@@ -631,6 +601,7 @@ export async function pollGmail(
         errors: 1,
         fallback: false,
         history_id: latestHistoryId,
+        case_ids: [],
       };
     }
   }
@@ -671,6 +642,7 @@ export async function pollGmail(
         errors: 1,
         fallback: true,
         history_id: latestHistoryId,
+        case_ids: [],
       };
     }
   }
@@ -679,13 +651,15 @@ export async function pollGmail(
   let processed = 0;
   let skipped = 0;
   let errors = 0;
+  const newCaseIds: string[] = [];
 
   // Process in order (oldest first — messageIds from history are in order).
   for (const messageId of messageIds) {
     try {
-      const outcome = await processMessage(supabase, gmail, messageId, tenantId);
-      if (outcome === "processed") {
+      const result = await processMessage(supabase, gmail, messageId, tenantId);
+      if (result.outcome === "processed") {
         processed++;
+        newCaseIds.push(result.caseId);
       } else {
         skipped++;
       }
@@ -728,5 +702,6 @@ export async function pollGmail(
     errors,
     fallback: usedFallback,
     history_id: latestHistoryId,
+    case_ids: newCaseIds,
   };
 }

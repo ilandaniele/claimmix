@@ -640,7 +640,7 @@ export async function runEmailExtractionWorker(
       newStatus = "confirmacion_pendiente";
     } else {
       // All fields present at high confidence — ready for review.
-      newStatus = "recibido";
+      newStatus = "listo";
     }
 
     // FSM safety check (LLM08).

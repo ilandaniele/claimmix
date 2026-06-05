@@ -24,10 +24,11 @@
  * crew-debug-ok: console.error calls are annotated with // crew-debug-ok
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { OAuth2Client } from "google-auth-library";
 import { createServiceClient } from "@/lib/supabase/service";
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
+import { runEmailExtractionWorker } from "@/server/worker/extract";
 
 /** Required: prevent Vercel from statically optimising this dynamic route. */
 export const dynamic = "force-dynamic";
@@ -166,6 +167,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const supabase = createServiceClient();
     const result = await pollGmail(supabase);
+
+    // Schedule extraction for each newly created case using after() so Vercel
+    // keeps the function alive until extraction completes, even after the 200
+    // response is sent to Pub/Sub. Plain fire-and-forget would be killed.
+    if (result.case_ids.length > 0) {
+      const tenantId =
+        process.env.GMAIL_TENANT_ID ?? "00000000-0000-0000-0000-000000000000";
+      const caseIds = result.case_ids;
+      after(async () => {
+        await Promise.all(
+          caseIds.map(async (caseId) => {
+            try {
+              await runEmailExtractionWorker(caseId, tenantId, null);
+            } catch (e) {
+              const name = e instanceof Error ? e.name : "UnknownError";
+              console.error("[webhooks/gmail] Worker error:", name, "case:", caseId); // crew-debug-ok
+            }
+          })
+        );
+      });
+    }
+
     return NextResponse.json({ ok: true, result });
   } catch (err: unknown) {
     // Log error name + messageId only — never body, PII, or stack trace.

@@ -47,6 +47,7 @@ import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/server/cases/fsm";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
+import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
@@ -468,6 +469,15 @@ export async function runEmailExtractionWorker(
         caseId
       );
     }
+
+    // ── e2) Defensive hydration: mirror typed extracted_fields into fields[] + scrub PII ──
+    // This is a defensive layer — the primary fix is in the prompt (RULE D / RULE F).
+    // Ensures fields[] is always the source of truth for DB writes, even if the model
+    // populates only one of the two shapes.
+    extractedClaim = {
+      ...scrubPiiFromSummary(extractedClaim),
+      fields: hydrateFieldsFromExtracted(extractedClaim),
+    };
 
     // ── f) Classify severity — two-layer (pattern + AI) ──────────────────────
     const fullText = `${emailSubject}\n\n${emailBody}`;

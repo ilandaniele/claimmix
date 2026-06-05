@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
     c.id,                                               // Nro. Siniestro (UUID)
     c.policyholder_name ?? "",                           // Asegurado
     c.policy_number ?? "",                               // Póliza
-    CLAIM_TYPE_LABELS[c.claim_type] ?? c.claim_type,    // Tipo
+    c.claim_type ? (CLAIM_TYPE_LABELS[c.claim_type] ?? c.claim_type) : "",  // Tipo
     STATUS_LABELS[c.status] ?? c.status,                // Estado
     formatConfidence(c.confidence_min),                  // Confianza
     formatDate(c.created_at),                           // Fecha

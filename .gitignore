@@ -55,3 +55,7 @@ next-env.d.ts
 # Local example/test emails with real PII — never commit
 examplemail*.txt
 example-email*.txt
+.env*
+
+# Supabase local state (project-ref, temp files)
+supabase/.temp/

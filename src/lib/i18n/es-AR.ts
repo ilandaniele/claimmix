@@ -83,9 +83,15 @@ export const esAR = {
   "bandeja.empty": "No hay casos en esta categoría.",
   "bandeja.loading": "Cargando casos...",
   "bandeja.delete": "Eliminar caso",
-  "bandeja.deleteConfirm": "Confirmar",
+  "bandeja.deleteSelected": "Eliminar seleccionados",
+  "bandeja.deleteConfirm": "Eliminar",
   "bandeja.deleteCancel": "Cancelar",
   "bandeja.deleteSuccess": "Caso eliminado correctamente.",
+  "bandeja.deleteConfirmTitle": "¿Eliminás este siniestro?",
+  "bandeja.deleteConfirmBody1": "Esta acción no se puede deshacer.",
+  "bandeja.deleteConfirmBodyN": "Estás por eliminar",
+  "bandeja.deleteConfirmIrreversible": "Esta acción no se puede deshacer.",
+  "bandeja.deleteRemember": "No volver a preguntar",
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simular nuevo siniestro",

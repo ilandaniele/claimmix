@@ -80,9 +80,15 @@ export const enUS: Record<TranslationKey, string> = {
   "bandeja.empty": "No cases in this category.",
   "bandeja.loading": "Loading cases...",
   "bandeja.delete": "Delete case",
-  "bandeja.deleteConfirm": "Confirm",
+  "bandeja.deleteSelected": "Delete selected",
+  "bandeja.deleteConfirm": "Delete",
   "bandeja.deleteCancel": "Cancel",
   "bandeja.deleteSuccess": "Case deleted successfully.",
+  "bandeja.deleteConfirmTitle": "Delete this claim?",
+  "bandeja.deleteConfirmBody1": "This action cannot be undone.",
+  "bandeja.deleteConfirmBodyN": "You are about to delete",
+  "bandeja.deleteConfirmIrreversible": "This action cannot be undone.",
+  "bandeja.deleteRemember": "Don't ask me again",
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simulate new claim",

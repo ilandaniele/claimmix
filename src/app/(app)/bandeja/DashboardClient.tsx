@@ -1,20 +1,6 @@
-/**
- * DashboardClient — interactive client component for the bandeja page.
- *
- * Responsibilities:
- *   - Renders FilterTabs, TypeFilterChips, CasesTable, Pagination
- *   - Subscribes to Supabase Realtime for live updates (AC12)
- *   - Manages the SimulateModal state (AC13)
- *   - Manages toast notifications
- *   - Handles URL search params for deep-linkable filter/page state
- *
- * Initial data is fetched server-side in page.tsx and passed as props.
- * Realtime updates merge into local state without full page reloads.
- */
-
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { FilterTabs } from "./components/FilterTabs";
 import { TypeFilterChips } from "./components/TypeFilterChips";
@@ -36,6 +22,88 @@ import type { CaseRow, CaseListResult } from "@/server/cases/list";
 import type { SimulationScenario } from "@/server/intake/scenarios";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
+
+const SKIP_CONFIRM_KEY = "claimmix:skip-delete-confirm";
+
+// ── Delete confirmation dialog ────────────────────────────────────────────────
+
+interface DeleteConfirmDialogProps {
+  count: number;
+  onConfirm: (remember: boolean) => void;
+  onCancel: () => void;
+}
+
+function DeleteConfirmDialog({ count, onConfirm, onCancel }: DeleteConfirmDialogProps) {
+  const t = useT();
+  const [remember, setRemember] = useState(false);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-confirm-title"
+    >
+      <div className="w-full max-w-sm rounded-xl bg-white shadow-xl p-6 mx-4">
+        {/* Icon */}
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            className="w-6 h-6 text-red-600"
+            aria-hidden="true"
+          >
+            <path
+              fillRule="evenodd"
+              d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </div>
+
+        <h2 id="delete-confirm-title" className="text-base font-semibold text-slate-900 mb-1">
+          {t("bandeja.deleteConfirmTitle")}
+        </h2>
+        <p className="text-sm text-slate-500 mb-5">
+          {count === 1
+            ? t("bandeja.deleteConfirmBody1")
+            : `${t("bandeja.deleteConfirmBodyN")} ${count} siniestros. ${t("bandeja.deleteConfirmIrreversible")}`}
+        </p>
+
+        {/* Remember checkbox */}
+        <label className="mb-5 flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            className="rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+          />
+          <span className="text-sm text-slate-600">{t("bandeja.deleteRemember")}</span>
+        </label>
+
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+          >
+            {t("bandeja.deleteCancel")}
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(remember)}
+            className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+          >
+            {t("bandeja.deleteConfirm")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Pagination ────────────────────────────────────────────────────────────────
 
 interface PaginationProps {
   page: number;
@@ -79,10 +147,11 @@ function Pagination({ page, perPage, total, onPageChange }: PaginationProps) {
   );
 }
 
+// ── DashboardClient ───────────────────────────────────────────────────────────
+
 interface DashboardClientProps {
   initialData: CaseListResult;
   scenarios: SimulationScenario[];
-  /** All-cases count map for status tabs (fetched server-side without status filter) */
   allStatusCounts: { status: CaseStatus | "todos"; count: number }[];
 }
 
@@ -96,50 +165,94 @@ export function DashboardClient({
   const activeStatus = (searchParams.get("status") as CaseStatus) || undefined;
   const activeType = (searchParams.get("type") as ClaimType) || undefined;
   const activePage = parseInt(searchParams.get("page") ?? "1", 10) || 1;
-  // Email-intake filters (AC18)
   const activeChannel =
     (searchParams.get("channel") as "email" | "email_sim") || undefined;
   const activeSeverity = (searchParams.get("severity") as Severity) || undefined;
   const activeIsClaimRaw = searchParams.get("is_claim") as "true" | "false" | null;
   const activeIsClaim = activeIsClaimRaw ?? undefined;
 
-  // Local cases state — starts from server-fetched data, updated by realtime.
   const [cases, setCases] = useState<CaseRow[]>(initialData.data);
   const [total, setTotal] = useState(initialData.meta.total);
-
-  // Status counts for tabs — starts from server-fetched allStatusCounts, updated by realtime.
   const [statusCountsBase, setStatusCountsBase] = useState(allStatusCounts);
 
-  // Sync cases whenever server re-fetches (URL param changes trigger page.tsx re-render).
-  // Sync cases when server re-fetches (URL param changes trigger page.tsx re-render).
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- server-driven state sync, not a cascade risk
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCases(initialData.data);
-     
     setTotal(initialData.meta.total);
   }, [initialData]);
 
   const { toasts, addToast, dismissToast } = useToast();
   const [showSimulateModal, setShowSimulateModal] = useState(false);
 
-  // Realtime handlers
+  // ── Delete confirmation state ───────────────────────────────────────────────
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
+  const pendingOnDoneRef = useRef<(() => void) | null>(null);
+
+  // ── Execute actual deletes ─────────────────────────────────────────────────
+  const executeDelete = useCallback(
+    async (ids: string[], onDone: () => void) => {
+      await Promise.all(ids.map((id) => fetch(`/api/cases/${id}`, { method: "DELETE" })));
+      setCases((prev) => prev.filter((c) => !ids.includes(c.id)));
+      setTotal((prev) => Math.max(0, prev - ids.length));
+      const n = ids.length;
+      addToast(
+        n === 1 ? t("bandeja.deleteSuccess") : `${n} siniestros eliminados.`,
+        "success"
+      );
+      onDone();
+    },
+    [addToast, t]
+  );
+
+  // ── Entry point called by CasesTable ──────────────────────────────────────
+  const handleDeleteMany = useCallback(
+    (ids: string[], onDone: () => void) => {
+      const skip =
+        typeof window !== "undefined" &&
+        localStorage.getItem(SKIP_CONFIRM_KEY) === "true";
+
+      if (skip) {
+        executeDelete(ids, onDone);
+      } else {
+        pendingOnDoneRef.current = onDone;
+        setPendingDeleteIds(ids);
+      }
+    },
+    [executeDelete]
+  );
+
+  const handleConfirmDelete = useCallback(
+    (remember: boolean) => {
+      if (remember) {
+        localStorage.setItem(SKIP_CONFIRM_KEY, "true");
+      }
+      const ids = pendingDeleteIds;
+      const onDone = pendingOnDoneRef.current ?? (() => {});
+      setPendingDeleteIds([]);
+      pendingOnDoneRef.current = null;
+      executeDelete(ids, onDone);
+    },
+    [pendingDeleteIds, executeDelete]
+  );
+
+  const handleCancelDelete = useCallback(() => {
+    setPendingDeleteIds([]);
+    pendingOnDoneRef.current = null;
+  }, []);
+
+  // ── Realtime handlers ──────────────────────────────────────────────────────
   const handleInsert = useCallback(
     (newCase: CaseRow) => {
       setCases((prev) => mergeCaseUpdate(prev, newCase, "insert"));
       setTotal((prev) => prev + 1);
-      // Update status counts
-      setStatusCountsBase((prev) => {
-        const updated = prev.map((item) => {
+      setStatusCountsBase((prev) =>
+        prev.map((item) => {
           if (item.status === "todos") return { ...item, count: item.count + 1 };
           if (item.status === newCase.status) return { ...item, count: item.count + 1 };
           return item;
-        });
-        return updated;
-      });
-      addToast(
-        `Nuevo siniestro recibido: ${formatCaseNumber(newCase.id)}`,
-        "info"
+        })
       );
+      addToast(`Nuevo siniestro recibido: ${formatCaseNumber(newCase.id)}`, "info");
     },
     [addToast]
   );
@@ -147,19 +260,18 @@ export function DashboardClient({
   const handleUpdate = useCallback(
     (updatedCase: CaseRow, prevStatus: CaseStatus | null) => {
       setCases((prev) => mergeCaseUpdate(prev, updatedCase, "update"));
-      // Update status counts when status changes
       if (prevStatus && prevStatus !== updatedCase.status) {
-        setStatusCountsBase((prev) => {
-          return prev.map((item) => {
-            if (item.status === prevStatus) return { ...item, count: Math.max(0, item.count - 1) };
-            if (item.status === updatedCase.status) return { ...item, count: item.count + 1 };
+        setStatusCountsBase((prev) =>
+          prev.map((item) => {
+            if (item.status === prevStatus)
+              return { ...item, count: Math.max(0, item.count - 1) };
+            if (item.status === updatedCase.status)
+              return { ...item, count: item.count + 1 };
             return item;
-          });
-        });
-        const prevLabel = prevStatus.charAt(0).toUpperCase() + prevStatus.slice(1);
-        const newLabel = updatedCase.status.charAt(0).toUpperCase() + updatedCase.status.slice(1);
+          })
+        );
         addToast(
-          `Siniestro ${formatCaseNumber(updatedCase.id)} actualizado: ${prevLabel} → ${newLabel}`,
+          `Siniestro ${formatCaseNumber(updatedCase.id)} actualizado: ${prevStatus} → ${updatedCase.status}`,
           "info"
         );
       }
@@ -169,25 +281,10 @@ export function DashboardClient({
 
   useCasesRealtime({ onInsert: handleInsert, onUpdate: handleUpdate });
 
-  const handleDeleteCase = useCallback(
-    async (caseId: string) => {
-      const res = await fetch(`/api/cases/${caseId}`, { method: "DELETE" });
-      if (res.ok) {
-        setCases((prev) => prev.filter((c) => c.id !== caseId));
-        setTotal((prev) => Math.max(0, prev - 1));
-        addToast(t("bandeja.deleteSuccess"), "success");
-      } else {
-        addToast(t("error.generic"), "error");
-      }
-    },
-    [addToast, t]
-  );
-
-  // Filter cases for display based on active filters
+  // ── Filtering & pagination ─────────────────────────────────────────────────
   const filteredCases = cases.filter((c) => {
     if (activeStatus && c.status !== activeStatus) return false;
     if (activeType && c.claim_type !== activeType) return false;
-    // Email-intake filters (AC18)
     if (activeChannel && (c as any).channel !== activeChannel) return false;
     if (activeSeverity && (c as any).severity !== activeSeverity) return false;
     if (activeIsClaim === "true" && (c as any).is_claim !== true) return false;
@@ -195,7 +292,6 @@ export function DashboardClient({
     return true;
   });
 
-  // Paginate locally (since realtime may add new cases beyond server page)
   const PER_PAGE = initialData.meta.per_page;
   const paginatedCases = filteredCases.slice(
     (activePage - 1) * PER_PAGE,
@@ -207,11 +303,9 @@ export function DashboardClient({
     const params = new URLSearchParams(searchParams.toString());
     params.set("page", String(newPage));
     window.history.pushState(null, "", `?${params.toString()}`);
-    // Force a re-read of searchParams by dispatching popstate equivalent.
     window.dispatchEvent(new PopStateEvent("popstate"));
   }
 
-  // Compute status counts from current visible cases (realtime-aware)
   const realtimeCounts = computeStatusCounts(cases);
   const tabCounts = statusCountsBase.map((item) => {
     const realtimeCount = realtimeCounts.get(item.status);
@@ -236,7 +330,6 @@ export function DashboardClient({
               </p>
             </div>
             <div className="flex items-center gap-3">
-              {/* CSV Export */}
               <a
                 href={`/api/cases/export.csv${activeStatus || activeType ? "?" + new URLSearchParams({ ...(activeStatus ? { status: activeStatus } : {}), ...(activeType ? { type: activeType } : {}) }).toString() : ""}`}
                 className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
@@ -244,7 +337,6 @@ export function DashboardClient({
               >
                 {t("bandeja.export")}
               </a>
-              {/* Simulate button */}
               <button
                 type="button"
                 onClick={() => setShowSimulateModal(true)}
@@ -255,17 +347,13 @@ export function DashboardClient({
               </button>
             </div>
           </div>
-
-          {/* Status filter tabs */}
           <FilterTabs counts={tabCounts} activeStatus={activeStatus} />
         </div>
 
-        {/* Type filter chips */}
         <div className="border-b border-slate-100 bg-white px-6 py-3">
           <TypeFilterChips activeType={activeType} />
         </div>
 
-        {/* Email-intake filter chips — channel, severity, is_claim (AC18) */}
         <div className="border-b border-slate-100 bg-white px-6 py-2 flex flex-wrap items-center gap-x-6 gap-y-2">
           <ChannelFilterChips activeChannel={activeChannel} />
           <SeverityFilterChips activeSeverity={activeSeverity} />
@@ -274,9 +362,8 @@ export function DashboardClient({
 
         {/* Cases table */}
         <div className="flex-1 overflow-auto px-6 py-4">
-          <CasesTable cases={paginatedCases} onDelete={handleDeleteCase} />
+          <CasesTable cases={paginatedCases} onDeleteMany={handleDeleteMany} />
 
-          {/* Pagination */}
           {filteredTotal > 0 && (
             <Pagination
               page={activePage}
@@ -288,6 +375,15 @@ export function DashboardClient({
         </div>
       </div>
 
+      {/* Delete confirmation dialog */}
+      {pendingDeleteIds.length > 0 && (
+        <DeleteConfirmDialog
+          count={pendingDeleteIds.length}
+          onConfirm={handleConfirmDelete}
+          onCancel={handleCancelDelete}
+        />
+      )}
+
       {/* Simulate modal */}
       {showSimulateModal && (
         <SimulateModal
@@ -298,7 +394,6 @@ export function DashboardClient({
         />
       )}
 
-      {/* Toast notifications */}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );

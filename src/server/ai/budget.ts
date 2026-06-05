@@ -12,26 +12,30 @@
  * Uses service-role client to query ai_usage table (no RLS bypass concern
  * here — this is a server-only, privileged cost check).
  *
- * Token cost model for gpt-4o-mini (as of 2024):
- *   Input:  $0.150 per 1M tokens = $0.00000015 per token
- *   Output: $0.600 per 1M tokens = $0.00000060 per token
+ * Token cost model (as of 2024):
+ *   gpt-4o-mini — Input: $0.150/1M, Output: $0.600/1M
+ *   gpt-4o      — Input: $2.500/1M, Output: $10.00/1M
  */
 
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
 
-/** Cost per token for gpt-4o-mini (USD). */
+/** @deprecated Legacy constants for gpt-4o-mini. Use computeCostUsd(tokens, tokens, model). */
 export const COST_PER_PROMPT_TOKEN = 0.00000015;
 export const COST_PER_COMPLETION_TOKEN = 0.00000060;
 
+const MODEL_COSTS: Record<string, { input: number; output: number }> = {
+  "gpt-4o-mini": { input: 0.00000015, output: 0.00000060 },
+  "gpt-4o":      { input: 0.0000025,  output: 0.00001 },
+};
+
 /**
  * Compute estimated cost for a given token usage.
+ * Pass model to get accurate per-model pricing; defaults to gpt-4o-mini rates.
  */
-export function computeCostUsd(promptTokens: number, completionTokens: number): number {
-  return (
-    promptTokens * COST_PER_PROMPT_TOKEN +
-    completionTokens * COST_PER_COMPLETION_TOKEN
-  );
+export function computeCostUsd(promptTokens: number, completionTokens: number, model?: string): number {
+  const rates = MODEL_COSTS[model ?? "gpt-4o-mini"] ?? MODEL_COSTS["gpt-4o-mini"]!;
+  return promptTokens * rates.input + completionTokens * rates.output;
 }
 
 export interface BudgetCheckResult {

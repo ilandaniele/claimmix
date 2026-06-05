@@ -10,7 +10,7 @@
  * LLM10: Budget check before running extractor.
  */
 
-import { type NextRequest } from "next/server";
+import { type NextRequest, after } from "next/server";
 import { z } from "zod";
 import { createServerClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -122,11 +122,16 @@ export async function POST(
     ua: request.headers.get("user-agent") ?? undefined,
   });
 
-  // ── Trigger worker async ──────────────────────────────────────────────────────
-  const workerPromise = runExtractionWorker(caseId, userRow.tenant_id, userRow.id);
-  workerPromise.catch((e: unknown) => {
-    const name = e instanceof Error ? e.name : "UnknownError";
-    console.error("[re-analyze] Worker error:", name, "case:", caseId);
+  // ── Trigger worker after response is sent ────────────────────────────────────
+  // Using after() ensures Vercel keeps the function alive until the worker
+  // finishes — plain fire-and-forget gets killed when the 202 is returned.
+  after(async () => {
+    try {
+      await runExtractionWorker(caseId, userRow.tenant_id, userRow.id);
+    } catch (e: unknown) {
+      const name = e instanceof Error ? e.name : "UnknownError";
+      console.error("[re-analyze] Worker error:", name, "case:", caseId);
+    }
   });
 
   return accepted({ case_id: caseId, status: "procesando", message: "Re-análisis iniciado." });

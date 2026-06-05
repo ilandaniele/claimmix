@@ -48,16 +48,20 @@ function getClient(): OpenAI {
   return _client;
 }
 
+/** Returns the configured OpenAI model. Override with OPENAI_MODEL env var. */
+function getModel(): string {
+  return process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+}
+
 /**
  * Parse and validate the OpenAI response content as an ExtractedClaim.
  * Returns null if parsing or validation fails.
  */
-function parseResponse(content: string | null, claimType: ClaimType): ExtractedClaim | null {
+function parseResponse(content: string | null, claimType: ClaimType, model?: string): ExtractedClaim | null {
   if (!content) return null;
   try {
     const raw = JSON.parse(content);
-    // Inject the model name if the model didn't fill it (strict schema should have it).
-    if (!raw.extraction_model) raw.extraction_model = "gpt-4o-mini";
+    if (!raw.extraction_model) raw.extraction_model = model ?? getModel();
     const parsed = ExtractedClaimSchema.safeParse(raw);
     if (!parsed.success) {
       console.error("[openai-extractor] Schema validation failed:", parsed.error.issues.length, "issues");
@@ -84,6 +88,7 @@ export async function runOpenAIExtractor(
   caseId: string
 ): Promise<ExtractedClaim> {
   const client = getClient();
+  const model = getModel();
   const systemPrompt = buildSystemPrompt(claimType);
   const userMessage = buildUserMessage(rawText);
 
@@ -94,7 +99,7 @@ export async function runOpenAIExtractor(
 
   try {
     const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model,
       response_format: OPENAI_JSON_SCHEMA,
       messages: [
         { role: "system", content: systemPrompt },
@@ -114,13 +119,13 @@ export async function runOpenAIExtractor(
         service: "claimmix",
         msg: "ai.extraction.attempt1",
         case_id: caseId,
-        model: "gpt-4o-mini",
+        model,
         prompt_tokens: totalPromptTokens,
         completion_tokens: totalCompletionTokens,
       })
     );
 
-    result = parseResponse(response.choices[0]?.message?.content ?? null, claimType);
+    result = parseResponse(response.choices[0]?.message?.content ?? null, claimType, model);
   } catch (e) {
     const name = e instanceof Error ? e.name : "UnknownError";
     console.error(
@@ -138,10 +143,10 @@ export async function runOpenAIExtractor(
   if (result) {
     return {
       ...result,
-      extraction_model: "gpt-4o-mini",
+      extraction_model: model,
       prompt_tokens: totalPromptTokens,
       completion_tokens: totalCompletionTokens,
-      cost_usd: computeCostUsd(totalPromptTokens, totalCompletionTokens),
+      cost_usd: computeCostUsd(totalPromptTokens, totalCompletionTokens, model),
     };
   }
 
@@ -152,7 +157,7 @@ export async function runOpenAIExtractor(
 
   try {
     const retryResponse = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model,
       response_format: OPENAI_JSON_SCHEMA,
       messages: [
         { role: "system", content: stricterSystem },
@@ -174,13 +179,13 @@ export async function runOpenAIExtractor(
         service: "claimmix",
         msg: "ai.extraction.attempt2",
         case_id: caseId,
-        model: "gpt-4o-mini",
+        model,
         prompt_tokens: retryPromptTokens,
         completion_tokens: retryCompletionTokens,
       })
     );
 
-    result = parseResponse(retryResponse.choices[0]?.message?.content ?? null, claimType);
+    result = parseResponse(retryResponse.choices[0]?.message?.content ?? null, claimType, model);
   } catch (e) {
     const name = e instanceof Error ? e.name : "UnknownError";
     console.error(
@@ -197,10 +202,10 @@ export async function runOpenAIExtractor(
   if (result) {
     return {
       ...result,
-      extraction_model: "gpt-4o-mini",
+      extraction_model: model,
       prompt_tokens: totalPromptTokens,
       completion_tokens: totalCompletionTokens,
-      cost_usd: computeCostUsd(totalPromptTokens, totalCompletionTokens),
+      cost_usd: computeCostUsd(totalPromptTokens, totalCompletionTokens, model),
     };
   }
 
@@ -248,6 +253,7 @@ export async function extractEmailClaim(
   caseId?: string
 ): Promise<ExtractedClaim> {
   const client = getClient();
+  const model = getModel();
   const logCaseId = caseId ?? "unknown";
   const logTenantId = tenantId ?? "unknown";
 
@@ -270,7 +276,7 @@ export async function extractEmailClaim(
   // ── Attempt 1 ─────────────────────────────────────────────────────────────
   try {
     const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model,
       response_format: OPENAI_JSON_SCHEMA,
       messages: [
         { role: "system", content: systemPrompt },
@@ -292,13 +298,13 @@ export async function extractEmailClaim(
         msg: "ai.email_extraction.attempt1",
         case_id: logCaseId,
         tenant_id: logTenantId,
-        model: "gpt-4o-mini",
+        model,
         prompt_tokens: totalPromptTokens,
         completion_tokens: totalCompletionTokens,
       })
     );
 
-    result = parseEmailResponse(response.choices[0]?.message?.content ?? null);
+    result = parseEmailResponse(response.choices[0]?.message?.content ?? null, model);
   } catch (e) {
     const name = e instanceof Error ? e.name : "UnknownError";
     console.error(
@@ -315,16 +321,16 @@ export async function extractEmailClaim(
   }
 
   if (result) {
-    const costUsd = computeCostUsd(totalPromptTokens, totalCompletionTokens);
+    const costUsd = computeCostUsd(totalPromptTokens, totalCompletionTokens, model);
 
     // LLM10: Track usage in ai_usage table.
     if (tenantId) {
-      await trackEmailUsage(tenantId, totalPromptTokens, totalCompletionTokens, costUsd, caseId);
+      await trackEmailUsage(tenantId, model, totalPromptTokens, totalCompletionTokens, costUsd, caseId);
     }
 
     return {
       ...result,
-      extraction_model: "gpt-4o-mini",
+      extraction_model: model,
       prompt_tokens: totalPromptTokens,
       completion_tokens: totalCompletionTokens,
       cost_usd: costUsd,
@@ -338,7 +344,7 @@ export async function extractEmailClaim(
 
   try {
     const retryResponse = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model,
       response_format: OPENAI_JSON_SCHEMA,
       messages: [
         { role: "system", content: stricterSystem },
@@ -360,13 +366,13 @@ export async function extractEmailClaim(
         service: "claimmix",
         msg: "ai.email_extraction.attempt2",
         case_id: logCaseId,
-        model: "gpt-4o-mini",
+        model,
         prompt_tokens: retryPromptTokens,
         completion_tokens: retryCompletionTokens,
       })
     );
 
-    result = parseEmailResponse(retryResponse.choices[0]?.message?.content ?? null);
+    result = parseEmailResponse(retryResponse.choices[0]?.message?.content ?? null, model);
   } catch (e) {
     const name = e instanceof Error ? e.name : "UnknownError";
     console.error(
@@ -381,13 +387,13 @@ export async function extractEmailClaim(
   }
 
   if (result) {
-    const costUsd = computeCostUsd(totalPromptTokens, totalCompletionTokens);
+    const costUsd = computeCostUsd(totalPromptTokens, totalCompletionTokens, model);
     if (tenantId) {
-      await trackEmailUsage(tenantId, totalPromptTokens, totalCompletionTokens, costUsd, caseId);
+      await trackEmailUsage(tenantId, model, totalPromptTokens, totalCompletionTokens, costUsd, caseId);
     }
     return {
       ...result,
-      extraction_model: "gpt-4o-mini",
+      extraction_model: model,
       prompt_tokens: totalPromptTokens,
       completion_tokens: totalCompletionTokens,
       cost_usd: costUsd,
@@ -408,11 +414,11 @@ export async function extractEmailClaim(
 }
 
 /** Parse and validate email extractor output. Returns null on validation failure. */
-function parseEmailResponse(content: string | null): ExtractedClaim | null {
+function parseEmailResponse(content: string | null, model?: string): ExtractedClaim | null {
   if (!content) return null;
   try {
     const raw = JSON.parse(content);
-    if (!raw.extraction_model) raw.extraction_model = "gpt-4o-mini";
+    if (!raw.extraction_model) raw.extraction_model = model ?? getModel();
     // Ensure required array/object defaults.
     if (!Array.isArray(raw.fields)) raw.fields = [];
     if (!raw.field_confidences) raw.field_confidences = {};
@@ -445,7 +451,7 @@ function parseEmailResponse(content: string | null): ExtractedClaim | null {
 /** Safe default for parse failures — treats email as non-claim to avoid false positives. */
 function buildSafeDefault(): ExtractedClaim {
   return {
-    extraction_model: "gpt-4o-mini",
+    extraction_model: getModel(),
     fields: [],
     prompt_tokens: 0,
     completion_tokens: 0,
@@ -469,6 +475,7 @@ function buildSafeDefault(): ExtractedClaim {
 /** Track AI usage for the email extraction endpoint. */
 async function trackEmailUsage(
   tenantId: string,
+  model: string,
   promptTokens: number,
   completionTokens: number,
   costUsd: number,
@@ -478,7 +485,7 @@ async function trackEmailUsage(
     await recordUsage(
       tenantId,
       null, // system actor — no user context in webhook pipeline
-      "gpt-4o-mini",
+      model,
       promptTokens,
       completionTokens,
       costUsd

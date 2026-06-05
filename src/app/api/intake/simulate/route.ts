@@ -15,7 +15,7 @@
  *   { raw_text: "...", case_type: "robo" } → ad-hoc text
  */
 
-import { type NextRequest } from "next/server";
+import { type NextRequest, after } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { SimulateIntakeSchema } from "@/lib/schemas/intake";
@@ -211,26 +211,16 @@ export async function POST(request: NextRequest): Promise<Response> {
     ua: request.headers.get("user-agent") ?? undefined,
   });
 
-  // ── 7. Trigger extraction worker asynchronously ───────────────────────────────
-  // Using waitUntil when available (Vercel edge/serverless), else plain async.
-  // ADR: in-process worker for MVP — documented in docs/adr/0001-in-process-worker.md.
-  const workerPromise = runExtractionWorker(caseId, userRow.tenant_id, userRow.id);
-
-   
-  const context = (globalThis as any)[Symbol.for("__vercel_runtime__")] as
-    | { waitUntil?: (p: Promise<unknown>) => void }
-    | undefined;
-
-  if (context?.waitUntil) {
-    context.waitUntil(workerPromise);
-  } else {
-    // In local dev / non-Vercel: run inline async, fire-and-forget.
-    // The 202 response is already sent; this runs in the background.
-    workerPromise.catch((e: unknown) => {
+  // ── 7. Trigger extraction worker after response is sent ──────────────────────
+  // after() keeps the Vercel function alive until the worker finishes.
+  after(async () => {
+    try {
+      await runExtractionWorker(caseId, userRow.tenant_id, userRow.id);
+    } catch (e: unknown) {
       const name = e instanceof Error ? e.name : "UnknownError";
       console.error("[intake/simulate] Worker error:", name, "case:", caseId);
-    });
-  }
+    }
+  });
 
   // ── 8. Return 202 immediately ─────────────────────────────────────────────────
   return accepted({

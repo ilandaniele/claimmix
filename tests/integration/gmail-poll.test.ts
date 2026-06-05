@@ -11,7 +11,7 @@
  *  AC3:  In-Reply-To matching existing case → same case_id used, no new case created.
  *  AC4:  headers array (jsonb) + raw_payload (jsonb) stored; body_text/body_html decoded.
  *  AC7:  Watermark advances after successful batch.
- *  AC8:  Watermark does NOT advance when all messages fail (errors > 0, processed === 0).
+ *  AC8:  Watermark advances even when all messages fail (prevents permanent retry loops).
  *  AC10: Error in one message → next message still processed (per-message isolation).
  *  AC13: attachment part → adaptGmailAttachments + rehostAttachments called.
  *  AC14: mark-as-read (modify) called after successful insert; failure is non-fatal.
@@ -669,10 +669,12 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
     });
   });
 
-  // ── AC8: Watermark does NOT advance when all messages fail ───────────────────
+  // ── AC8: Watermark always advances when historyId moves forward ──────────────
+  // (c57d4c6 changed behavior: always advance to avoid permanent retry loops
+  // where the same failing message re-triggers on every Pub/Sub push)
 
-  describe("AC8: watermark does NOT advance when all messages fail", () => {
-    it("AC8: advancePollState NOT called when all messages error", async () => {
+  describe("AC8: watermark advances even when all messages fail", () => {
+    it("AC8: advancePollState IS called even when all messages error", async () => {
       const { getOrCreatePollState, advancePollState, recordPollError } = await import(
         "@/server/email/gmail/poll-state"
       );
@@ -697,10 +699,14 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       expect(result.errors).toBe(1);
       expect(result.processed).toBe(0);
 
-      // Watermark must NOT advance
-      expect(advancePollState).not.toHaveBeenCalled();
+      // Watermark MUST advance so the same failing message isn't retried forever.
+      expect(advancePollState).toHaveBeenCalledWith(
+        expect.anything(),
+        "poll-state-uuid",
+        HISTORY_ID_NEW
+      );
 
-      // Error must be recorded
+      // Error must still be recorded per message
       expect(recordPollError).toHaveBeenCalled();
     });
 

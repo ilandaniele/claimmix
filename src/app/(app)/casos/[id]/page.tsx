@@ -151,7 +151,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                 {caseNumber}
               </h1>
               <span className="inline-flex items-center rounded-md bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 capitalize">
-                {CLAIM_TYPE_LABELS[caseRow.claim_type] ?? caseRow.claim_type}
+                {caseRow.claim_type ? (CLAIM_TYPE_LABELS[caseRow.claim_type] ?? caseRow.claim_type) : "—"}
               </span>
               <StatusBadge status={caseRow.status as CaseStatus} />
             </div>

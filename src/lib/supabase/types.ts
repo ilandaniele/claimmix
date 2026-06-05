@@ -57,7 +57,7 @@ export type Database = {
           tenant_id: string;
           policy_number: string | null;
           policyholder_name: string | null;
-          claim_type: "choque" | "robo" | "granizo" | "incendio" | "other";
+          claim_type: "choque" | "robo" | "granizo" | "incendio" | "other" | null;
           status:
             | "procesando"
             | "listo"
@@ -76,7 +76,7 @@ export type Database = {
           tenant_id: string;
           policy_number?: string | null;
           policyholder_name?: string | null;
-          claim_type: "choque" | "robo" | "granizo" | "incendio" | "other";
+          claim_type?: "choque" | "robo" | "granizo" | "incendio" | "other" | null;
           status?:
             | "procesando"
             | "listo"

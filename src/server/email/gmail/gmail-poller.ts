@@ -49,6 +49,7 @@ import { adaptGmailAttachments } from "./gmail-attachment-adapter";
 import { checkDuplicate } from "@/server/email/dedupe";
 import { threadLookup } from "@/server/email/thread-lookup";
 import { rehostAttachments } from "@/server/email/rehost-attachments";
+import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import type { gmail_v1 } from "googleapis";
 
@@ -150,6 +151,39 @@ function resolveTenantId(): string | null {
 
   // Use the sentinel UUID for MVP single-inbox mode.
   return MVP_SENTINEL_TENANT_ID;
+}
+
+async function dispatchExtractionWorker(
+  caseId: string,
+  tenantId: string
+): Promise<void> {
+  try {
+    const response = await fetch(`${getWorkerBaseUrl()}/api/worker/extract`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Worker": "true",
+      },
+      body: JSON.stringify({ caseId, tenantId }),
+    });
+
+    if (!response.ok) {
+      console.error(
+        "[gmail-poller] Worker dispatch error:",
+        "HttpError",
+        "case:",
+        caseId
+      ); // crew-debug-ok
+    }
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "UnknownError";
+    console.error(
+      "[gmail-poller] Worker dispatch error:",
+      name,
+      "case:",
+      caseId
+    ); // crew-debug-ok
+  }
 }
 
 
@@ -469,6 +503,8 @@ async function processMessage(
       message_id: gmailMessageId,
     },
   });
+
+  await dispatchExtractionWorker(caseId, tenantId);
 
   return { outcome: "processed", caseId };
 }

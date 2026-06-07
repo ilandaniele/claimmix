@@ -481,6 +481,9 @@ export async function runEmailExtractionWorker(
       senderEmail,
     });
     const hydratedFields = hydrateFieldsFromExtracted(extractedClaim);
+    const aiClaimType =
+      extractedClaim.extracted_fields?.claim_type ??
+      hydratedFields.find((f) => f.field_key === "claim_type")?.field_value;
     const hasFallbackClaimSignal = fallbackFields.some((f) =>
       ["policy_number", "accident_date", "claim_type"].includes(f.field_key)
     );
@@ -717,10 +720,9 @@ export async function runEmailExtractionWorker(
 
     // ── claim_type: write AI-returned value when valid — AC1, AC2, AC3, AC4 ────
     // The AI extractor returns claim_type in extracted_fields.claim_type.
-    // Also check the fields array (field_key="claim_type") as a fallback.
-    const rawClaimType =
-      extractedClaimFields.claim_type ??
-      extractedClaim.fields.find((f) => f.field_key === "claim_type")?.field_value;
+    // Parser fallback fields are persisted for review, but they should not
+    // overwrite cases.claim_type when the AI omitted claim_type.
+    const rawClaimType = aiClaimType;
 
     if (rawClaimType !== null && rawClaimType !== undefined && typeof rawClaimType === "string" && rawClaimType.trim() !== "") {
       const claimTypeParsed = ClaimTypeSchema.safeParse(rawClaimType.trim());

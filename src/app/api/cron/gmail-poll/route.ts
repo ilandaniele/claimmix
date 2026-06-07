@@ -19,13 +19,12 @@
  * timing oracle attacks (constant-time comparison).
  */
 
-import { NextRequest, NextResponse, after } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { createServiceClient } from "@/lib/supabase/service";
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
-import { runIntakeAgent } from "@/server/agents/intake-agent";
 
 /** 24 hours in milliseconds — renew if the watch expires within this window. */
 const RENEWAL_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -113,26 +112,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     // ── Poll ─────────────────────────────────────────────────────────────────
     const result = await pollGmail(supabase);
-
-    // Schedule extraction for newly created cases via after() so Vercel keeps
-    // the Lambda alive until work completes (plain fire-and-forget gets killed).
-    if (result.case_ids.length > 0) {
-      const tenantId =
-        process.env.GMAIL_TENANT_ID ?? "00000000-0000-0000-0000-000000000000";
-      const caseIds = result.case_ids;
-      after(async () => {
-        await Promise.all(
-          caseIds.map(async (caseId) => {
-            try {
-              await runIntakeAgent({ caseId, tenantId, source: "cron" });
-            } catch (e) {
-              const name = e instanceof Error ? e.name : "UnknownError";
-              console.error("[cron/gmail-poll] Worker error:", name, "case:", caseId); // crew-debug-ok
-            }
-          })
-        );
-      });
-    }
 
     const watchPayload: Record<string, unknown> = { watch_renewed: watchRenewed };
     if (watchSkippedReason !== undefined) {

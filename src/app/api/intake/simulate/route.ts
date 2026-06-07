@@ -36,6 +36,20 @@ import type { ClaimType } from "@/lib/schemas/cases";
 
 type UserRow = Database["public"]["Tables"]["users"]["Row"];
 
+function scheduleAfterResponse(task: () => Promise<void>): void {
+  try {
+    after(task);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    const code = (err as { __NEXT_ERROR_CODE?: string })?.__NEXT_ERROR_CODE;
+    if (code === "E468" || message.includes("outside a request scope")) {
+      void task();
+      return;
+    }
+    throw err;
+  }
+}
+
 export async function POST(request: NextRequest): Promise<Response> {
   // ── 1. Auth ─────────────────────────────────────────────────────────────────
   const supabase = await createServerClient();
@@ -213,7 +227,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // ── 7. Trigger extraction worker after response is sent ──────────────────────
   // after() keeps the Vercel function alive until the worker finishes.
-  after(async () => {
+  scheduleAfterResponse(async () => {
     try {
       await runExtractionWorker(caseId, userRow.tenant_id, userRow.id);
     } catch (e: unknown) {

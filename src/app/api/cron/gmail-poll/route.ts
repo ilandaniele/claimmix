@@ -1,5 +1,11 @@
 /**
- * GET /api/cron/gmail-poll — Vercel cron endpoint for Gmail polling.
+ * GET /api/cron/gmail-poll - daily Gmail watch renewal and fallback poll.
+ *
+ * Primary intake is Gmail Push Notifications:
+ *   Gmail -> Pub/Sub -> POST /api/webhooks/gmail -> pollGmail().
+ *
+ * This route stays on a Hobby-safe once-daily Vercel cron schedule to renew the
+ * Gmail watch before it expires and to provide a low-frequency safety net.
  *
  * Vercel cron invocations include: Authorization: Bearer <CRON_SECRET>
  * Direct calls must include the same header for security.

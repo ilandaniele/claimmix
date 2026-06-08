@@ -1,9 +1,12 @@
 /**
- * Gmail inbound polling pipeline for ClaimMix.
+ * Gmail inbound sync pipeline for ClaimMix.
  *
- * Called by the Vercel cron route (GET /api/cron/gmail-poll). Polls for new Gmail
- * messages using the History API (incremental) or falls back to messages.list when
- * the historyId is stale or on first run.
+ * Primary path: Gmail Push Notifications call POST /api/webhooks/gmail, which
+ * invokes this pipeline immediately. A once-daily Vercel cron route also invokes it
+ * as a low-frequency fallback after renewing the Gmail watch.
+ *
+ * Fetches new Gmail messages using the History API (incremental) or falls back to
+ * messages.list when the historyId is stale or on first run.
  *
  * Flow per invocation:
  *   1. Load poll state (historyId watermark) from gmail_poll_state.

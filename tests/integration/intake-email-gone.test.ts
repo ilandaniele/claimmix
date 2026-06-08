@@ -47,7 +47,7 @@ import { GET, POST, PUT, PATCH, DELETE } from "@/app/api/intake/email/route";
 const EXPECTED_BODY = {
   error: {
     code: "GONE",
-    message: "Postmark intake disabled; using Gmail polling",
+    message: "Postmark intake disabled; using Gmail Push Notifications",
   },
 };
 
@@ -91,6 +91,6 @@ describe("/api/intake/email — 410 Gone stub (AC11)", () => {
     const res = await POST();
     const body = await res.json();
     expect(body.error.code).toBe("GONE");
-    expect(body.error.message).toContain("Gmail polling");
+    expect(body.error.message).toContain("Gmail Push Notifications");
   });
 });

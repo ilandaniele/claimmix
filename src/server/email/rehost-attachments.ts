@@ -1,8 +1,8 @@
 /**
- * Attachment rehost service — downloads Postmark CDN attachments and uploads
- * them to Supabase Storage with content-hash deduplication.
+ * Attachment rehost service — uploads inbound email attachments to Supabase
+ * Storage with content-hash deduplication.
  *
- * Called synchronously within the inbound webhook handler, bounded by a
+ * Called synchronously within the inbound email pipeline, bounded by a
  * configurable aggregate budget (default 5 000 ms per IC6).
  *
  * Failures are recorded as { stored: false, reason } and do NOT abort the
@@ -23,10 +23,10 @@ import { validateAttachment, MAX_AGGREGATE_SIZE_BYTES } from "@/server/email/att
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /**
- * Postmark attachment as delivered in the inbound webhook JSON.
+ * Normalized inbound email attachment.
  * Content is base64-encoded bytes (inline payload, not a CDN URL download).
  */
-export interface PostmarkAttachment {
+export interface EmailAttachment {
   Name: string;
   /** Base64-encoded attachment bytes (may be empty string if only ContentURL is set). */
   Content: string;
@@ -77,7 +77,7 @@ async function findExistingByHash(
 export interface RehostAttachmentsOpts {
   /** Service-role Supabase client (bypasses RLS for dedupe query). */
   supabase: SupabaseClient;
-  attachments: PostmarkAttachment[];
+  attachments: EmailAttachment[];
   tenantId: string;
   caseId: string;
   /** The newly-inserted claim_messages.id — used as the path segment. */
@@ -87,7 +87,7 @@ export interface RehostAttachmentsOpts {
 }
 
 /**
- * Rehost each attachment from Postmark's inline base64 payload to Supabase Storage.
+ * Rehost each attachment from an inline base64 payload to Supabase Storage.
  *
  * Returns one RehostResult per attachment, in the same order as the input array.
  *

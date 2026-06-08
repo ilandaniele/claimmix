@@ -57,7 +57,7 @@ export const RATE_LIMIT_CONFIGS = {
   /**
    * EMAIL_INTAKE_WEBHOOK: 100 requests per 10 seconds per IP.
    * Protects /api/intake/email from flood attacks without blocking
-   * legitimate Postmark delivery bursts. AC20.
+   * legitimate provider delivery bursts. AC20.
    */
   EMAIL_INTAKE_WEBHOOK: { limit: 100, windowMs: 10_000 },
 

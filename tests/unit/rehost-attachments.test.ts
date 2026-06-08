@@ -26,7 +26,7 @@ vi.mock("@/server/storage/claim-attachments-bucket", () => ({
 
 // ── Import SUT after mocks are registered ─────────────────────────────────────
 
-import { rehostAttachments, type PostmarkAttachment } from "@/server/email/rehost-attachments";
+import { rehostAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -46,7 +46,7 @@ function buildSupabaseMock(existingStoragePath: string | null = null) {
 }
 
 /** Build a valid PDF attachment. */
-function buildPdfAttachment(overrides: Partial<PostmarkAttachment> = {}): PostmarkAttachment {
+function buildPdfAttachment(overrides: Partial<EmailAttachment> = {}): EmailAttachment {
   const content = Buffer.from("PDF bytes here").toString("base64");
   return {
     Name: "policy.pdf",
@@ -58,10 +58,10 @@ function buildPdfAttachment(overrides: Partial<PostmarkAttachment> = {}): Postma
 }
 
 /** Build a PDF attachment whose decoded buffer has a known SHA-256. */
-function buildAttachmentWithKnownHash(): { attachment: PostmarkAttachment; hash: string } {
+function buildAttachmentWithKnownHash(): { attachment: EmailAttachment; hash: string } {
   const raw = Buffer.from("known-content-for-hashing-12345");
   const hash = createHash("sha256").update(raw).digest("hex");
-  const attachment: PostmarkAttachment = {
+  const attachment: EmailAttachment = {
     Name: "known.pdf",
     Content: raw.toString("base64"),
     ContentType: "application/pdf",
@@ -135,7 +135,7 @@ describe("rehostAttachments", () => {
   // ── AC8: content-type rejection ───────────────────────────────────────────────
 
   it("AC8: application/x-msdownload → stored:false, reason=content_type_not_allowed", async () => {
-    const attachment: PostmarkAttachment = {
+    const attachment: EmailAttachment = {
       Name: "evil.exe",
       Content: Buffer.from("MZ payload").toString("base64"),
       ContentType: "application/x-msdownload",
@@ -162,7 +162,7 @@ describe("rehostAttachments", () => {
   it("AC9: 11 MB attachment → stored:false, reason=size_exceeded", async () => {
     // Create a buffer just over the 10 MB limit.
     const bigBuffer = Buffer.alloc(11 * 1024 * 1024 + 1, 0x42);
-    const attachment: PostmarkAttachment = {
+    const attachment: EmailAttachment = {
       Name: "big.pdf",
       Content: bigBuffer.toString("base64"),
       ContentType: "application/pdf",
@@ -310,7 +310,7 @@ describe("rehostAttachments", () => {
     // Expected: first two stored:true, third stored:false reason=aggregate_size_exceeded.
     const MB = 1024 * 1024;
 
-    const makeAttachment = (name: string, sizeBytes: number): PostmarkAttachment => {
+    const makeAttachment = (name: string, sizeBytes: number): EmailAttachment => {
       const buf = Buffer.alloc(sizeBytes, 0x41);
       return {
         Name: name,
@@ -370,7 +370,7 @@ describe("rehostAttachments", () => {
 
   it("returns results in the same order as input attachments", async () => {
     const pdf = buildPdfAttachment({ Name: "good.pdf" });
-    const exe: PostmarkAttachment = {
+    const exe: EmailAttachment = {
       Name: "evil.exe",
       Content: Buffer.from("bytes").toString("base64"),
       ContentType: "application/x-msdownload",

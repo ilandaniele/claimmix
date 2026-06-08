@@ -1,7 +1,7 @@
 /**
  * /api/intake/email — Postmark inbound webhook endpoint (DEPRECATED).
  *
- * This route has been replaced by Gmail API polling (feat/gmail-email-intake).
+ * This route has been replaced by Gmail Push Notifications (feat/gmail-email-intake).
  * Returning 410 Gone for all HTTP methods so stale Postmark webhook retries
  * fail cleanly without injecting data.
  *
@@ -19,7 +19,7 @@ function goneResponse(): NextResponse {
     {
       error: {
         code: "GONE",
-        message: "Postmark intake disabled; using Gmail polling",
+        message: "Postmark intake disabled; using Gmail Push Notifications",
       },
     },
     { status: 410 }

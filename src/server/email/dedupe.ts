@@ -21,8 +21,8 @@ export interface DedupeResult {
 }
 
 /**
- * Normalise a Postmark MessageID by stripping leading/trailing angle brackets.
- * Postmark itself does NOT send angle brackets in the MessageID field, but
+ * Normalise a provider Message-ID by stripping leading/trailing angle brackets.
+ * Gmail API IDs do not use angle brackets, but email Message-ID headers and
  * In-Reply-To / References headers always include them.  We strip them at every
  * boundary so storage and comparison are always angle-bracket-free (AC15).
  */
@@ -37,7 +37,7 @@ export function normalizeMessageId(raw: string): string {
  *
  * @param supabase  - Service-role Supabase client (bypasses RLS)
  * @param tenantId  - Tenant UUID for scoping the lookup
- * @param providerMessageId - Normalised Postmark MessageID (no angle brackets)
+ * @param providerMessageId - Normalised provider Message-ID (no angle brackets)
  * @returns { isDuplicate: boolean; existingCaseId?: string }
  */
 export async function checkDuplicate(
@@ -71,7 +71,7 @@ export async function checkDuplicate(
  * This is the original exported symbol used by the route handler.  It is kept
  * for backwards compatibility and extended to use checkDuplicate internally.
  *
- * @param messageId - Postmark MessageID (may include angle brackets — normalised internally)
+ * @param messageId - Provider Message-ID (may include angle brackets — normalised internally)
  * @param tenantId  - Tenant UUID for scoping the lookup
  * @returns { isDuplicate: boolean; existingCaseId?: string }
  */

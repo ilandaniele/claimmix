@@ -86,9 +86,15 @@ Seed creates:
 | `CONFIDENCE_THRESHOLD` | NO | Min confidence to avoid escalation. Default: `0.70`. |
 | `NEXT_PUBLIC_SITE_URL` | NO | Deployed URL for CORS and absolute links. Default: `http://localhost:3000`. |
 | `LOG_LEVEL` | NO | Structured log level: `debug` / `info` / `warn` / `error`. Default: `info`. |
-| `POSTMARK_WEBHOOK_SECRET` | YES (email intake) | HMAC-SHA256 secret for Postmark inbound webhook signature verification. |
-| `RESEND_API_KEY` | YES (email intake) | Resend API key for outbound email sending. Get from resend.com. |
-| `RESEND_FROM_ADDRESS` | YES (email intake) | Verified Resend sender address (e.g. `claims@claimmix.example.com`). |
+| `GMAIL_CLIENT_ID` | YES (email intake) | Google OAuth client ID for Gmail API access. |
+| `GMAIL_CLIENT_SECRET` | YES (email intake) | Google OAuth client secret for Gmail API access. |
+| `GMAIL_REFRESH_TOKEN` | YES (email intake) | OAuth refresh token with Gmail modify scope. |
+| `GMAIL_USER_EMAIL` | YES (email intake) | Gmail inbox ClaimMix watches for inbound claims. |
+| `GMAIL_FROM_ADDRESS` | YES (email outbound) | Gmail sender address for outbound claim emails. |
+| `GMAIL_TENANT_ID` | YES (email intake) | Tenant ID used for the MVP single-inbox routing mode. |
+| `CRON_SECRET` | YES (prod) | Secret for the once-daily watch-renewal fallback cron and internal setup endpoints. |
+| `PUBSUB_TOPIC` | YES (push mode) | Google Pub/Sub topic used by Gmail Push Notifications. |
+| `PUBSUB_AUDIENCE` | YES (prod push mode) | Expected OIDC audience for `/api/webhooks/gmail`. |
 | `CORE_SYNC_MODE` | NO | `mock` (default) or `real`. Controls CoreSyncService. |
 | `EMAIL_REPLY_BASE_URL` | NO | Base URL for links in outbound emails (e.g. `https://app.claimmix.com`). |
 
@@ -96,40 +102,20 @@ Seed creates:
 
 ## Email Claims Intake Workflow
 
-ClaimMix can receive inbound insurance claim emails via Postmark and process them automatically.
+ClaimMix receives inbound insurance claim emails via Gmail Push Notifications and processes them automatically. The old Postmark intake route intentionally returns `410 Gone`; do not configure Postmark or Resend for the MVP.
 
 ### Architecture
 
 ```
-Postmark inbound webhook → POST /api/intake/email
-  ↓ HMAC signature verification
-  ↓ Idempotency check (email_message_id)
-  ↓ Thread lookup (In-Reply-To / References headers)
-  ↓ Create/update cases row (channel='email')
-  ↓ Write raw_messages row
-  ↓ Dispatch runExtractionWorker (async, fire-and-forget)
-      ↓ AI extraction (GPT-4o-mini or MOCK_AI=true)
-      ↓ is_claim classifier → severity classifier
-      ↓ Customer/policy matching
-      ↓ Gap analysis → FSM transition
-      ↓ Outbound email via Resend (confirmation_received, missing_information_request, etc.)
+Gmail inbox
+  -> Gmail Push Notification
+  -> Google Pub/Sub push subscription
+  -> POST /api/webhooks/gmail
+  -> pollGmail() fetches new messages via Gmail History API
+  -> claim_messages + claim_attachments rows
+  -> /api/worker/extract
+  -> AI extraction, classification, matching, gap analysis, and outbound Gmail replies
 ```
-
-### Setup Steps (human actions required)
-
-1. **Postmark**: Sign up at [postmark.com](https://postmarkapp.com), create an Inbound Server, configure the HMAC secret, and point the inbound webhook URL to `https://<your-domain>/api/intake/email`.
-2. **Resend**: Sign up at [resend.com](https://resend.com), verify your sending domain (or use `onboarding@resend.dev` for sandbox), and create an API key.
-3. **Environment variables**: Set in Vercel dashboard (or `.env.local` locally):
-   - `POSTMARK_WEBHOOK_SECRET` — from Postmark inbound server settings
-   - `RESEND_API_KEY` — from Resend dashboard
-   - `RESEND_FROM_ADDRESS` — your verified sender address
-   - `CORE_SYNC_MODE=mock` — keep as mock until a real core system is connected
-4. **DB Migration**: Run `supabase db push` to apply migrations 0005–0008 (email intake tables + seed patterns).
-5. **Preview URL**: For testing inbound webhooks on Vercel preview deployments, re-point the Postmark inbound webhook to the preview URL manually.
-
-### Attachment Expiry Note
-
-Postmark attachment URLs expire after approximately 7 days. The system stores the URL and a content hash + filename for audit purposes. In a follow-up iteration, attachments should be downloaded and re-hosted to Supabase Storage for permanent access.
 
 ### FSM Statuses (email intake)
 
@@ -149,6 +135,8 @@ Postmark attachment URLs expire after approximately 7 days. The system stores th
 ## Gmail Push Notifications Setup
 
 ClaimMix uses Google Cloud Pub/Sub push subscriptions to receive real-time Gmail notifications instead of polling. When a new email arrives in the configured inbox, Gmail publishes a notification to a Pub/Sub topic, which immediately POSTs to `/api/webhooks/gmail`.
+
+For the MVP, this avoids Vercel Pro: the only Vercel Cron entry is the Hobby-safe once-daily `/api/cron/gmail-poll` job, which renews the Gmail watch and acts as a safety-net fallback. Real-time intake comes from Pub/Sub push notifications, not frequent cron polling.
 
 ### One-time gcloud setup (operator)
 
@@ -207,7 +195,7 @@ Gmail inbox receives email
   ↓ Standard extraction worker pipeline (same as cron path)
 ```
 
-The `/api/webhooks/gmail` endpoint is excluded from the session-cookie auth check in `proxy.ts` (it handles its own OIDC verification). The Gmail watch registration expires after 7 days; the `/api/cron/gmail-poll` cron job renews it automatically when expiry is within 24 hours.
+The `/api/webhooks/gmail` endpoint is excluded from the session-cookie auth check in `proxy.ts` (it handles its own OIDC verification). The Gmail watch registration expires after 7 days; the once-daily `/api/cron/gmail-poll` cron job renews it automatically when expiry is within 24 hours and performs a fallback sync.
 
 ---
 

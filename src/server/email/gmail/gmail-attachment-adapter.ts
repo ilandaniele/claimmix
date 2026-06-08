@@ -1,6 +1,6 @@
 /**
  * Gmail attachment adapter — converts Gmail MessagePart[] to the
- * PostmarkAttachment-compatible shape expected by rehost-attachments.ts.
+ * EmailAttachment-compatible shape expected by rehost-attachments.ts.
  *
  * IC5: rehost-attachments.ts stays unchanged. This adapter produces the
  * { Name, Content, ContentType, ContentLength } shape that rehostAttachments()
@@ -22,7 +22,7 @@
 
 import "server-only";
 import type { gmail_v1 } from "googleapis";
-import type { PostmarkAttachment } from "@/server/email/rehost-attachments";
+import type { EmailAttachment } from "@/server/email/rehost-attachments";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -134,20 +134,20 @@ function collectAttachmentParts(
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Convert Gmail MessagePart[] to the PostmarkAttachment shape expected by
+ * Convert Gmail MessagePart[] to the EmailAttachment shape expected by
  * rehostAttachments().
  *
  * @param parts      Top-level message parts from gmail_v1.Schema$Message.payload.
  * @param messageId  Gmail message ID — required for attachmentId fetches.
  * @param gmail      Gmail API client — used to fetch large attachment bodies.
- * @returns          Array of PostmarkAttachment objects with standard base64 Content.
+ * @returns          Array of EmailAttachment objects with standard base64 Content.
  */
 export async function adaptGmailAttachments(
   parts: gmail_v1.Schema$MessagePart[],
   messageId: string,
   gmail: GmailAttachmentFetcher
-): Promise<PostmarkAttachment[]> {
-  const results: PostmarkAttachment[] = [];
+): Promise<EmailAttachment[]> {
+  const results: EmailAttachment[] = [];
 
   // Collect attachment parts from the entire part tree.
   const attachmentParts: gmail_v1.Schema$MessagePart[] = [];

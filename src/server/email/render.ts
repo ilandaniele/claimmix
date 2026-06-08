@@ -8,7 +8,7 @@
  * Usage:
  *   const { subject, html, text } = renderTemplate('confirmation_received', { caseId: '...' });
  *
- * Template keys correspond to Postmark template names (also stored in
+ * Template keys correspond to outbound email template names (also stored in
  * outbound_messages.template for audit purposes).
  */
 

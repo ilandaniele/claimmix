@@ -10,11 +10,11 @@
  *   AND audit_log row with event_type='OUTBOUND_EMAIL_SENT' and payload.provider_message_id='out-1'
  *
  * AC5: Outbound failure marks status='failed' and does not throw.
- *   GIVEN EmailProvider.send mock returns { errorCode: 'POSTMARK_SEND_FAILED' }
+ *   GIVEN EmailProvider.send mock returns { errorCode: 'GMAIL_SEND_FAILED' }
  *   WHEN dispatchOutboundEmail is called
  *   THEN the promise resolves (no throw)
- *   AND claim_messages row has status='failed' and error_code='POSTMARK_SEND_FAILED'
- *   AND audit_log row with event_type='OUTBOUND_EMAIL_FAILED' and payload.error='POSTMARK_SEND_FAILED'
+ *   AND claim_messages row has status='failed' and error_code='GMAIL_SEND_FAILED'
+ *   AND audit_log row with event_type='OUTBOUND_EMAIL_FAILED' and payload.error='GMAIL_SEND_FAILED'
  *
  * AC16: Outbound headers include In-Reply-To and References when threading.
  *   GIVEN dispatchOutboundEmail({ ..., inReplyToMessageId: 'in-1' }) is called
@@ -139,13 +139,11 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.GMAIL_FROM_ADDRESS = FROM_ADDR;
-    process.env.POSTMARK_WEBHOOK_SECRET = "test-secret-12345";
     process.env.DEFAULT_TENANT_ID = TENANT_ID;
   });
 
   afterEach(async () => {
     delete process.env.GMAIL_FROM_ADDRESS;
-    delete process.env.POSTMARK_WEBHOOK_SECRET;
     delete process.env.DEFAULT_TENANT_ID;
 
     // Reset provider singleton so mock doesn't bleed between tests.
@@ -272,7 +270,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   // ── AC5 ─────────────────────────────────────────────────────────────────────
 
   it("AC5: promise resolves (does not throw) when provider.send returns errorCode", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ errorCode: "POSTMARK_SEND_FAILED" });
+    const mockSend = vi.fn().mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
@@ -294,8 +292,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     ).resolves.toBeDefined();
   });
 
-  it("AC5: returns { error: 'POSTMARK_SEND_FAILED' } on failure", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ errorCode: "POSTMARK_SEND_FAILED" });
+  it("AC5: returns { error: 'GMAIL_SEND_FAILED' } on failure", async () => {
+    const mockSend = vi.fn().mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
@@ -312,11 +310,11 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
       data: { caseId: CASE_ID },
     });
 
-    expect(result).toEqual({ error: "POSTMARK_SEND_FAILED" });
+    expect(result).toEqual({ error: "GMAIL_SEND_FAILED" });
   });
 
-  it("AC5: claim_messages row has status=failed and error_code=POSTMARK_SEND_FAILED", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ errorCode: "POSTMARK_SEND_FAILED" });
+  it("AC5: claim_messages row has status=failed and error_code=GMAIL_SEND_FAILED", async () => {
+    const mockSend = vi.fn().mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
@@ -338,12 +336,12 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const update = cmUpdates[0] as { patch: Record<string, unknown>; where: Record<string, unknown> };
     expect(update.patch.status).toBe("failed");
-    expect(update.patch.error_code).toBe("POSTMARK_SEND_FAILED");
+    expect(update.patch.error_code).toBe("GMAIL_SEND_FAILED");
     expect(update.where.id).toBe(CLAIM_MSG_ID);
   });
 
-  it("AC5: audit_log contains OUTBOUND_EMAIL_FAILED with payload.error=POSTMARK_SEND_FAILED", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ errorCode: "POSTMARK_SEND_FAILED" });
+  it("AC5: audit_log contains OUTBOUND_EMAIL_FAILED with payload.error=GMAIL_SEND_FAILED", async () => {
+    const mockSend = vi.fn().mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
@@ -366,7 +364,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const auditCall = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
     expect(auditCall.event_type).toBe("email.outbound_failed");
     const payload = auditCall.payload as Record<string, unknown>;
-    expect(payload.error).toBe("POSTMARK_SEND_FAILED");
+    expect(payload.error).toBe("GMAIL_SEND_FAILED");
   });
 
   // ── AC16 ────────────────────────────────────────────────────────────────────
@@ -480,7 +478,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   });
 
   it("outbound_messages row updated to status=failed on provider error", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ errorCode: "POSTMARK_SEND_FAILED" });
+    const mockSend = vi.fn().mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 

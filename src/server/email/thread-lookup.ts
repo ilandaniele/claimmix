@@ -1,7 +1,7 @@
 /**
  * Thread lookup for inbound email replies.
  *
- * When a claimant replies to an existing case notification, Postmark includes
+ * When a claimant replies to an existing case notification, the provider includes
  * the original Message-ID in the In-Reply-To header. This module looks up the
  * existing case by matching:
  *
@@ -16,7 +16,7 @@
  *   c. If neither matches: return { existingCaseId: undefined }
  *
  * The outbound claim_messages check is tried first because it is the common
- * case once W4/W5 are deployed: claimants reply to Postmark-sent outbound
+ * case once W4/W5 are deployed: claimants reply to provider-sent outbound
  * messages whose provider_message_id is stored in claim_messages.
  */
 
@@ -54,8 +54,8 @@ export async function threadLookup(
   const supabase = createServiceClient();
 
   // ── 1. New path: claim_messages WHERE direction='outbound' (AC6 / IC7) ────
-  // A claimant reply to one of our Postmark outbound emails will have
-  // In-Reply-To = <postmark_message_id>.  That id is stored in
+  // A claimant reply to one of our outbound emails will have
+  // In-Reply-To = <provider_message_id>.  That id is stored in
   // claim_messages.provider_message_id with direction='outbound'.
   const { data: claimMsgRow, error: claimMsgError } = await (supabase as any)
     .from("claim_messages")

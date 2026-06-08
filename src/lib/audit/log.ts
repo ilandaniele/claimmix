@@ -184,14 +184,14 @@ export const AuditEvent = {
   CORE_SYNC_FAILED: "core.sync_failed",
 
   /**
-   * OUTBOUND_EMAIL_SENT: Resend successfully delivered an outbound email.
+   * OUTBOUND_EMAIL_SENT: Outbound email provider successfully delivered an email.
    * Payload: { case_id, subject_prefix } — no To address (PII).
    * AC12.
    */
   OUTBOUND_EMAIL_SENT: "email.outbound_sent",
 
   /**
-   * OUTBOUND_EMAIL_FAILED: Resend failed to deliver an outbound email.
+   * OUTBOUND_EMAIL_FAILED: Outbound email provider failed to deliver an email.
    * Payload: { case_id, error } — no To address (PII).
    * AC12.
    */

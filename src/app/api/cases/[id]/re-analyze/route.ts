@@ -14,9 +14,9 @@ import { type NextRequest, after } from "next/server";
 import { z } from "zod";
 import { createServerClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { runExtractionWorker } from "@/server/worker/extract";
+import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
-import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
@@ -127,7 +127,12 @@ export async function POST(
   // finishes — plain fire-and-forget gets killed when the 202 is returned.
   after(async () => {
     try {
-      await runExtractionWorker(caseId, userRow.tenant_id, userRow.id);
+      await runIntakeAgent({
+        caseId,
+        tenantId: userRow.tenant_id,
+        userId: userRow.id,
+        source: "manual",
+      });
     } catch (e: unknown) {
       const name = e instanceof Error ? e.name : "UnknownError";
       console.error("[re-analyze] Worker error:", name, "case:", caseId);

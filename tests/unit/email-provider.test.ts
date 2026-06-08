@@ -23,7 +23,7 @@ const {
 } = await import("../../src/server/email/gmail/index");
 
 // A simple mock provider for DI tests.
-function makeMockProvider(name: "gmail" | "postmark" = "gmail"): EmailProvider {
+function makeMockProvider(name: "gmail" = "gmail"): EmailProvider {
   return {
     name,
     send: vi.fn<[SendEmailOptions], Promise<SendResult>>().mockResolvedValue({
@@ -92,12 +92,6 @@ describe("setEmailProvider()", () => {
     expect(result).toEqual({ providerMessageId: "mock-provider-id" });
   });
 
-  it("accepts a provider with name='postmark' (interface allows both names)", () => {
-    const mock = makeMockProvider("postmark");
-    setEmailProvider(mock);
-
-    expect(getEmailProvider().name).toBe("postmark");
-  });
 });
 
 describe("resetEmailProvider()", () => {

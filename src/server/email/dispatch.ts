@@ -33,7 +33,7 @@ export interface DispatchOptions {
   to: string;
   template: EmailTemplate;
   data: Record<string, unknown>;
-  /** Original Postmark MessageID — used to thread the reply in the claimant's inbox. */
+  /** Original provider Message-ID — used to thread the reply in the claimant's inbox. */
   inReplyToMessageId?: string;
   /** Thread ID for the case — stored in claim_messages.thread_id. */
   threadId?: string;

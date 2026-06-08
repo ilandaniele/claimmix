@@ -1,7 +1,7 @@
 /**
  * Unit tests for orchestratePostExtraction.
  *
- * All DB calls and email dispatches are mocked — no real Supabase or Resend.
+ * All DB calls and email dispatches are mocked — no real Supabase or Gmail.
  *
  * AC7:  Medium-confidence field → inserts claim_field_confirmations row + logs CONFIRMATION_REQUESTED
  * AC9:  Customer conflict → sets confirmacion_pendiente + dispatches data_confirmation_request

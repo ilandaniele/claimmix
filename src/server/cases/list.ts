@@ -145,8 +145,13 @@ export async function listCases(
     throw new Error(`[listCases] data error: ${dataError.code}`);
   }
 
+  const rows = await hydrateCaseListIdentity(
+    supabase,
+    ((data as CaseRow[]) ?? [])
+  );
+
   return {
-    data: (data as CaseRow[]) ?? [],
+    data: rows,
     meta: {
       total,
       page,
@@ -154,6 +159,51 @@ export async function listCases(
       pages: Math.ceil(total / per_page),
     },
   };
+}
+
+async function hydrateCaseListIdentity(
+  supabase: AnySupabaseClient,
+  rows: CaseRow[]
+): Promise<CaseRow[]> {
+  const caseIdsNeedingHydration = rows
+    .filter((row) => !row.policyholder_name || !row.policy_number)
+    .map((row) => row.id);
+
+  if (caseIdsNeedingHydration.length === 0) return rows;
+
+  const extractedFieldsQuery = (supabase as any)
+    .from("extracted_fields")
+    .select("case_id,field_key,field_value");
+
+  if (typeof extractedFieldsQuery.in !== "function") return rows;
+
+  const { data, error } = await extractedFieldsQuery
+    .in("case_id", caseIdsNeedingHydration)
+    .in("field_key", ["full_name", "policy_number"]);
+
+  if (error || !data) {
+    if (error) {
+      console.error("[listCases] extracted_fields hydration error:", error.code);
+    }
+    return rows;
+  }
+
+  const fieldsByCase = new Map<string, Record<string, string>>();
+  for (const field of data as Array<{ case_id: string; field_key: string; field_value: string }>) {
+    const entry = fieldsByCase.get(field.case_id) ?? {};
+    entry[field.field_key] = field.field_value;
+    fieldsByCase.set(field.case_id, entry);
+  }
+
+  return rows.map((row) => {
+    const fields = fieldsByCase.get(row.id);
+    if (!fields) return row;
+    return {
+      ...row,
+      policyholder_name: row.policyholder_name ?? fields.full_name ?? null,
+      policy_number: row.policy_number ?? fields.policy_number ?? null,
+    };
+  });
 }
 
 /**

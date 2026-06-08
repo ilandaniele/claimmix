@@ -40,7 +40,7 @@ export function TypeFilterChips({ activeType }: TypeFilterChipsProps) {
   return (
     <div
       role="group"
-      aria-label="Filtrar por tipo de siniestro"
+      aria-label={t("filter.isClaim")}
       className="flex items-center gap-2 flex-wrap"
     >
       {CHIPS.map(({ key, label }) => {

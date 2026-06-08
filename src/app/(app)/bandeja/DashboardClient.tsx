@@ -120,14 +120,14 @@ function Pagination({ page, perPage, total, onPageChange }: PaginationProps) {
   return (
     <div className="flex items-center justify-between pt-4 border-t border-slate-100">
       <p className="text-sm text-slate-500">
-        Mostrando {from}–{to} de {total} siniestros
+        {t("bandeja.showing")} {from}-{to} {t("pagination.of")} {total} {t("bandeja.claims")}
       </p>
       <div className="flex items-center gap-2">
         <button
           onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
           className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          aria-label="Página anterior"
+          aria-label={t("pagination.previous")}
         >
           {t("pagination.previous")}
         </button>
@@ -138,7 +138,7 @@ function Pagination({ page, perPage, total, onPageChange }: PaginationProps) {
           onClick={() => onPageChange(page + 1)}
           disabled={to >= total}
           className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          aria-label="Página siguiente"
+          aria-label={t("pagination.next")}
         >
           {t("pagination.next")}
         </button>
@@ -208,7 +208,7 @@ export function DashboardClient({
           addToast(
             deletedIds.length === 1
               ? t("bandeja.deleteSuccess")
-              : `${deletedIds.length} siniestros eliminados.`,
+              : `${deletedIds.length} ${t("bandeja.deleteManySuccess")}`,
             "success"
           );
         }
@@ -217,7 +217,7 @@ export function DashboardClient({
           addToast(
             failedCount === ids.length
               ? t("bandeja.deleteError")
-              : `${failedCount} siniestro(s) no se pudieron eliminar.`,
+              : `${failedCount} ${t("bandeja.deleteManyPartial")}`,
             "error"
           );
         }
@@ -351,10 +351,10 @@ export function DashboardClient({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-xl font-semibold text-slate-900">
-                Bandeja de siniestros
+                {t("bandeja.title")}
               </h1>
               <p className="text-sm text-slate-500 mt-0.5">
-                Gestioná y filtrá los siniestros FNOL del sistema
+                {t("bandeja.subtitle")}
               </p>
             </div>
             <div className="flex items-center gap-3">

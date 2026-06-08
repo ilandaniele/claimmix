@@ -76,7 +76,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                   checked={allSelected}
                   indeterminate={someSelected}
                   onChange={toggleAll}
-                  aria-label="Seleccionar todos"
+                  aria-label={t("bandeja.selectAll")}
                 />
               ),
               cell: ({ row }: { row: { original: CaseRow } }) => (
@@ -84,7 +84,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                   checked={selectedIds.has(row.original.id)}
                   indeterminate={false}
                   onChange={() => toggleOne(row.original.id)}
-                  aria-label={`Seleccionar ${formatCaseId(row.original.id)}`}
+                  aria-label={`${t("bandeja.selectCase")} ${formatCaseId(row.original.id)}`}
                 />
               ),
             } as ColumnDef<CaseRow>,
@@ -174,7 +174,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
         header: t("table.col.assignedTo"),
         cell: ({ getValue }) => (
           <span className="text-sm text-slate-500">
-            {getValue<string | null>() ? "Asignado" : "—"}
+            {getValue<string | null>() ? t("case.detail.assigned") : "—"}
           </span>
         ),
       },
@@ -196,7 +196,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                       })
                     );
                   }}
-                  className="rounded p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
+                  className="rounded p-1.5 text-slate-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
                   aria-label={t("bandeja.delete")}
                   title={t("bandeja.delete")}
                 >
@@ -232,7 +232,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
   if (cases.length === 0) {
     return (
       <div className="py-16 text-center text-sm text-slate-500" role="status">
-        No hay siniestros que coincidan con los filtros.
+        {t("bandeja.empty")}
       </div>
     );
   }
@@ -243,7 +243,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
       {onDeleteMany && selectedIds.size > 0 && (
         <div className="mb-3 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5">
           <span className="text-sm font-medium text-red-700">
-            {selectedIds.size} siniestro{selectedIds.size !== 1 ? "s" : ""} seleccionado{selectedIds.size !== 1 ? "s" : ""}
+            {selectedIds.size} {t("bandeja.claims")} {t("bandeja.selected")}
           </span>
           <button
             type="button"
@@ -262,8 +262,8 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
         </div>
       )}
 
-      <div className="overflow-x-auto" role="region" aria-label="Tabla de siniestros">
-        <table className="w-full table-auto text-left" aria-label="Siniestros">
+      <div className="overflow-x-auto" role="region" aria-label={t("bandeja.tableLabel")}>
+        <table className="w-full table-auto text-left" aria-label={t("bandeja.tableLabel")}>
           <thead>
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>

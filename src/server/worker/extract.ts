@@ -47,6 +47,7 @@ import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/server/cases/fsm";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
+import { loadAgentTraining } from "@/server/agents/training";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { mergeExtractedFields, parseEmailClaimFields } from "@/lib/email/claim-parser";
@@ -427,6 +428,7 @@ export async function runEmailExtractionWorker(
 
     // ── c) Load known_claim_patterns ─────────────────────────────────────────
     const knownPatterns = await loadKnownPatterns(supabase, tenantId);
+    const agentTraining = await loadAgentTraining(supabase, tenantId);
 
     // ── d) Budget check ───────────────────────────────────────────────────────
     const budgetResult = await checkBudget(tenantId, userId);
@@ -465,6 +467,7 @@ export async function runEmailExtractionWorker(
           memoryHints,
           knownPatterns,
           senderEmail,
+          agentTraining,
         },
         tenantId,
         caseId
@@ -484,23 +487,20 @@ export async function runEmailExtractionWorker(
     const aiClaimType =
       extractedClaim.extracted_fields?.claim_type ??
       hydratedFields.find((f) => f.field_key === "claim_type")?.field_value;
-    const hasFallbackClaimSignal = fallbackFields.some((f) =>
-      ["policy_number", "accident_date", "claim_type"].includes(f.field_key)
-    );
+    const mergedFields = mergeExtractedFields(hydratedFields, fallbackFields);
+    const mergedFieldKeys = new Set(mergedFields.map((field) => field.field_key));
+    const agentRecognizedClaim =
+      extractedClaim.is_claim !== false ||
+      extractedClaim.confidence > 0.2 ||
+      hydratedFields.length > 0 ||
+      Boolean(extractedClaim.extracted_fields);
 
     extractedClaim = {
       ...scrubPiiFromSummary(extractedClaim),
-      is_claim:
-        extractedClaim.is_claim === false &&
-        extractedClaim.confidence <= 0.2 &&
-        hasFallbackClaimSignal
-          ? true
-          : extractedClaim.is_claim,
-      confidence:
-        extractedClaim.confidence <= 0.2 && hasFallbackClaimSignal
-          ? 0.7
-          : extractedClaim.confidence,
-      fields: mergeExtractedFields(hydratedFields, fallbackFields),
+      fields: agentRecognizedClaim ? mergedFields : hydratedFields,
+      missing_fields: (extractedClaim.missing_fields ?? []).filter(
+        (fieldKey) => !mergedFieldKeys.has(fieldKey)
+      ),
     };
 
     // ── f) Classify severity — two-layer (pattern + AI) ──────────────────────
@@ -698,6 +698,12 @@ export async function runEmailExtractionWorker(
       status: newStatus,
       updated_at: new Date().toISOString(),
     };
+    const confidenceValues = fieldsToWrite.map((field) => field.confidence);
+    if (confidenceValues.length > 0) {
+      caseUpdate.confidence_min = parseFloat(Math.min(...confidenceValues).toFixed(2));
+    } else if (typeof extractedClaim.confidence === "number" && extractedClaim.confidence > 0) {
+      caseUpdate.confidence_min = parseFloat(extractedClaim.confidence.toFixed(2));
+    }
 
     if (resolvedCustomerId) {
       caseUpdate.customer_id = resolvedCustomerId;

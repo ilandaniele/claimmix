@@ -15,6 +15,7 @@ import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
 import { LocaleProvider } from "@/lib/i18n/LocaleContext";
 import { getServerLocale } from "@/lib/i18n/locale";
+import { ThemeProvider } from "@/lib/theme/ThemeContext";
 
 export default async function AppLayout({
   children,
@@ -44,21 +45,23 @@ export default async function AppLayout({
 
   return (
     <LocaleProvider locale={locale}>
-      <div className="flex h-screen overflow-hidden bg-white">
-        {/* Left sidebar */}
-        <Sidebar />
+      <ThemeProvider>
+        <div className="flex h-screen overflow-hidden bg-white">
+          {/* Left sidebar */}
+          <Sidebar />
 
-        {/* Main content area */}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Top navigation bar */}
-          <TopBar fullName={fullName} role={role} />
+          {/* Main content area */}
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {/* Top navigation bar */}
+            <TopBar fullName={fullName} role={role} />
 
-          {/* Page content */}
-          <main className="flex-1 overflow-auto">
-            {children}
-          </main>
+            {/* Page content */}
+            <main className="flex-1 overflow-auto">
+              {children}
+            </main>
+          </div>
         </div>
-      </div>
+      </ThemeProvider>
     </LocaleProvider>
   );
 }

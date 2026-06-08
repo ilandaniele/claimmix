@@ -22,6 +22,14 @@ export const esAR = {
   "nav.admin": "Administración",
   "nav.configuracion": "Configuración",
   "nav.signOut": "Cerrar sesión",
+  "nav.operation": "Operación",
+  "role.admin": "Administrador",
+  "role.analyst": "Analista",
+  "theme.toggle": "Cambiar tema",
+  "theme.light": "Modo claro",
+  "theme.dark": "Modo oscuro",
+  "common.yes": "Sí",
+  "common.no": "No",
 
   // ── Auth ───────────────────────────────────────────────────────────────────
   "auth.signIn.title": "Iniciar sesión",
@@ -87,6 +95,7 @@ export const esAR = {
   "bandeja.deleteConfirm": "Eliminar",
   "bandeja.deleteCancel": "Cancelar",
   "bandeja.deleteSuccess": "Caso eliminado correctamente.",
+  "bandeja.deleteError": "No se pudo eliminar el caso. Recargá e intentá de nuevo.",
   "bandeja.deleteConfirmTitle": "¿Eliminás este siniestro?",
   "bandeja.deleteConfirmBody1": "Esta acción no se puede deshacer.",
   "bandeja.deleteConfirmBodyN": "Estás por eliminar",
@@ -130,6 +139,9 @@ export const esAR = {
   "case.detail.email": "Email",
   "case.detail.channel": "Canal de ingreso",
   "case.detail.assignedTo": "Analista asignado",
+  "case.detail.assigned": "Asignado",
+  "case.detail.unassigned": "Sin asignar",
+  "case.detail.created": "Creado",
   "case.detail.noFields": "Sin campos extraídos.",
   "case.detail.noMissingDocs": "Sin documentación pendiente.",
   "case.detail.noAuditEvents": "Sin eventos registrados.",
@@ -226,6 +238,16 @@ export const esAR = {
   "admin.users.invite": "Invitar analista",
   "configuracion.title": "Configuración",
   "configuracion.subtitle": "Variables de entorno (sólo lectura)",
+  "configuracion.agentTraining.title": "Entrenamiento del agente",
+  "configuracion.agentTraining.label": "Instrucciones y ejemplos para el agente",
+  "configuracion.agentTraining.enabled": "Activo en producción",
+  "configuracion.agentTraining.helper": "Se inyecta en el prompt del agente de email para futuras extracciones. No re-procesa casos anteriores.",
+  "configuracion.agentTraining.save": "Guardar entrenamiento",
+  "configuracion.agentTraining.saving": "Guardando...",
+  "configuracion.agentTraining.saved": "Entrenamiento guardado. El agente lo usará en producción en el próximo análisis.",
+  "configuracion.agentTraining.loadError": "No se pudo cargar el entrenamiento del agente.",
+  "configuracion.agentTraining.saveError": "No se pudo guardar el entrenamiento del agente.",
+  "configuracion.agentTraining.placeholder": "Ejemplos de guía:\n- Para emails con \"Datos del asegurado\", extraer Nombre completo como full_name y Número de póliza como policy_number con alta confianza.\n- Si \"Documentación adjunta\" lista fotos, licencia o denuncia policial, marcar esos documentos como presentes.\n- Para un choque entre dos autos con patentes y sin heridos, la severidad suele ser medium.\n- Pedir confirmación solo cuando un valor sea ambiguo o entre en conflicto con datos guardados de cliente/póliza.",
 
   // ── Health ─────────────────────────────────────────────────────────────────
   "health.ok": "ok",
@@ -256,6 +278,8 @@ export const esAR = {
   "channel.todos": "Todos",
   "channel.email": "Email",
   "channel.email_sim": "Simulación",
+  "channel.whatsapp": "WhatsApp",
+  "channel.whatsapp_sim": "WhatsApp simulado",
 
   // ── Bandeja filter labels ───────────────────────────────────────────────────
   "filter.channel": "Canal",
@@ -292,6 +316,10 @@ export const esAR = {
   "case.detail.openAttachment": "Abrir",
   "case.detail.customer": "Cliente",
   "case.detail.policy": "Póliza vinculada",
+  "case.detail.linked": "Vinculada",
+  "case.detail.pendingCount": "pendiente(s)",
+  "case.detail.coreReadyDescription": "Este caso está listo para ser enviado al sistema central. Revisá los campos confirmados antes de proceder.",
+  "case.detail.noRawEmail": "Sin texto original disponible.",
 
   // ── Gmail status panel (W1) ─────────────────────────────────────────────────
   "gmail.status.title": "Bandeja de entrada Gmail",
@@ -337,6 +365,7 @@ export const esAR = {
   "clientes.detail.cases": "Casos",
   "clientes.detail.noPolicies": "Sin pólizas registradas.",
   "clientes.detail.noCases": "Sin casos registrados.",
+  "clientes.detail.viewClient": "Ver cliente",
   "clientes.detail.policyNumber": "Número de póliza",
   "clientes.detail.policyType": "Tipo",
   "clientes.detail.policyStatus": "Estado",

@@ -226,6 +226,7 @@ export interface EmailClaimPayload {
   memoryHints: MemoryHint[];
   knownPatterns: KnownPattern[];
   senderEmail?: string;
+  agentTraining?: string;
 }
 
 /**
@@ -263,7 +264,8 @@ export async function extractEmailClaim(
     payload.body,
     payload.memoryHints,
     payload.knownPatterns,
-    payload.senderEmail
+    payload.senderEmail,
+    payload.agentTraining
   );
 
   // User message is minimal — all content is in the system prompt via XML tags.

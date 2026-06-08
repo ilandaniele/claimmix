@@ -191,15 +191,43 @@ export function DashboardClient({
   // ── Execute actual deletes ─────────────────────────────────────────────────
   const executeDelete = useCallback(
     async (ids: string[], onDone: () => void) => {
-      await Promise.all(ids.map((id) => fetch(`/api/cases/${id}`, { method: "DELETE" })));
-      setCases((prev) => prev.filter((c) => !ids.includes(c.id)));
-      setTotal((prev) => Math.max(0, prev - ids.length));
-      const n = ids.length;
-      addToast(
-        n === 1 ? t("bandeja.deleteSuccess") : `${n} siniestros eliminados.`,
-        "success"
-      );
-      onDone();
+      try {
+        const results = await Promise.all(
+          ids.map(async (id) => {
+            const res = await fetch(`/api/cases/${id}`, { method: "DELETE" });
+            return { id, ok: res.ok };
+          })
+        );
+
+        const deletedIds = results.filter((result) => result.ok).map((result) => result.id);
+        const failedCount = results.length - deletedIds.length;
+
+        if (deletedIds.length > 0) {
+          setCases((prev) => prev.filter((c) => !deletedIds.includes(c.id)));
+          setTotal((prev) => Math.max(0, prev - deletedIds.length));
+          addToast(
+            deletedIds.length === 1
+              ? t("bandeja.deleteSuccess")
+              : `${deletedIds.length} siniestros eliminados.`,
+            "success"
+          );
+        }
+
+        if (failedCount > 0) {
+          addToast(
+            failedCount === ids.length
+              ? t("bandeja.deleteError")
+              : `${failedCount} siniestro(s) no se pudieron eliminar.`,
+            "error"
+          );
+        }
+
+        if (failedCount === 0) {
+          onDone();
+        }
+      } catch {
+        addToast(t("bandeja.deleteError"), "error");
+      }
     },
     [addToast, t]
   );

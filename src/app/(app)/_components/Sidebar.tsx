@@ -33,7 +33,7 @@ export function Sidebar() {
 
   const navSections = [
     {
-      label: "Operación",
+      label: t("nav.operation"),
       items: [
         { label: t("nav.bandeja"), href: "/bandeja" },
         { label: t("nav.escalados"), href: "/escalados" },
@@ -51,7 +51,7 @@ export function Sidebar() {
 
   return (
     <nav
-      aria-label="Navegación principal"
+      aria-label={t("nav.operation")}
       className="flex h-full w-56 flex-col border-r border-slate-200 bg-slate-50"
     >
       {/* Logo / brand */}

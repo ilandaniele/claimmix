@@ -37,13 +37,6 @@ interface CaseDetailPageProps {
   params: Promise<{ id: string }>;
 }
 
-const CHANNEL_LABELS: Record<string, string> = {
-  email_sim: "Email simulado",
-  email: "Email",
-  whatsapp_sim: "WhatsApp simulado",
-  whatsapp: "WhatsApp",
-};
-
 type ExtractedFieldRow = Database["public"]["Tables"]["extracted_fields"]["Row"];
 
 /** Format case UUID to display SIN-XXXX-XXXX string */
@@ -132,7 +125,27 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
     })) satisfies ExtractedFieldRow[];
   }
 
+  const fieldValues = new Map(
+    displayedExtractedFields.map((field) => [field.field_key, field.field_value])
+  );
+  const fieldConfidences = displayedExtractedFields
+    .map((field) => field.confidence)
+    .filter((confidence): confidence is number => typeof confidence === "number");
+  const displayedPolicyholderName =
+    caseRow.policyholder_name ?? fieldValues.get("full_name") ?? null;
+  const displayedPolicyNumber =
+    caseRow.policy_number ?? fieldValues.get("policy_number") ?? null;
+  const displayedConfidence =
+    caseRow.confidence_min ??
+    (fieldConfidences.length > 0 ? Math.min(...fieldConfidences) : null);
   const caseNumber = formatCaseNumber(caseRow.id);
+  const CHANNEL_LABELS: Record<string, string> = {
+    email: t("channel.email"),
+    email_sim: t("channel.email_sim"),
+    whatsapp: t("channel.whatsapp"),
+    whatsapp_sim: t("channel.whatsapp_sim"),
+  };
+  const channelLabel = CHANNEL_LABELS[caseRow.channel] ?? caseRow.channel;
 
   return (
     <div className="px-6 py-6 max-w-5xl mx-auto">
@@ -181,10 +194,10 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                 <span className="font-medium text-slate-700">
                   {t("case.detail.assignedTo")}:
                 </span>{" "}
-                {caseRow.assigned_to ? "Asignado" : "Sin asignar"}
+                {caseRow.assigned_to ? t("case.detail.assigned") : t("case.detail.unassigned")}
               </span>
               <span>
-                <span className="font-medium text-slate-700">Creado:</span>{" "}
+                <span className="font-medium text-slate-700">{t("case.detail.created")}:</span>{" "}
                 {formatAge(caseRow.created_at)}
               </span>
               {caseRow.created_at && (
@@ -223,26 +236,26 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
               <div>
                 <dt className="text-slate-500">{t("case.detail.policyholderName")}</dt>
                 <dd className="mt-0.5 font-medium text-slate-900">
-                  {caseRow.policyholder_name ?? "—"}
+                  {displayedPolicyholderName ?? "—"}
                 </dd>
               </div>
               <div>
                 <dt className="text-slate-500">{t("case.detail.policyNumber")}</dt>
                 <dd className="mt-0.5 font-mono text-slate-900">
-                  {caseRow.policy_number ?? "—"}
+                  {displayedPolicyNumber ?? "—"}
                 </dd>
               </div>
               <div>
                 <dt className="text-slate-500">{t("case.detail.channel")}</dt>
                 <dd className="mt-0.5 text-slate-900">
-                  {CHANNEL_LABELS[caseRow.channel] ?? caseRow.channel}
+                  {channelLabel}
                 </dd>
               </div>
               <div>
                 <dt className="text-slate-500">{t("case.detail.confidence.col")}</dt>
                 <dd className="mt-0.5 text-slate-900">
-                  {caseRow.confidence_min != null
-                    ? `${Math.round(caseRow.confidence_min * 100)}%`
+                  {displayedConfidence != null
+                    ? `${Math.round(displayedConfidence * 100)}%`
                     : "—"}
                 </dd>
               </div>
@@ -312,9 +325,9 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                     <dt className="text-slate-500">{t("case.detail.isClaim")}</dt>
                     <dd className="mt-0.5 font-medium text-slate-900">
                       {(caseRow as any).is_claim === true
-                        ? "Sí"
+                        ? t("common.yes")
                         : (caseRow as any).is_claim === false
-                        ? "No"
+                        ? t("common.no")
                         : "—"}
                     </dd>
                   </div>
@@ -336,7 +349,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                           href={`/clientes/${(caseRow as any).customer_id}`}
                           className="text-blue-600 hover:underline font-medium text-sm"
                         >
-                          Ver cliente
+                          {t("clientes.detail.viewClient")}
                         </Link>
                       </dd>
                     </div>
@@ -345,7 +358,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                     <div>
                       <dt className="text-slate-500">{t("case.detail.policy")}</dt>
                       <dd className="mt-0.5 font-mono text-slate-800">
-                        {caseRow.policy_number ?? "Vinculada"}
+                        {displayedPolicyNumber ?? t("case.detail.linked")}
                       </dd>
                     </div>
                   )}
@@ -372,7 +385,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                   {t("case.detail.fieldConfirmations")}
                   {confirmations.filter((c) => c.status === "pending").length > 0 && (
                     <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                      {confirmations.filter((c) => c.status === "pending").length} pendiente(s)
+                      {confirmations.filter((c) => c.status === "pending").length} {t("case.detail.pendingCount")}
                     </span>
                   )}
                 </h2>
@@ -409,7 +422,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                     {t("case.detail.coreSyncAction")}
                   </h2>
                   <p className="text-sm text-emerald-700 mb-4">
-                    Este caso está listo para ser enviado al sistema central. Revisá los campos confirmados antes de proceder.
+                    {t("case.detail.coreReadyDescription")}
                   </p>
                   <CoreSyncButton
                     caseId={caseRow.id}
@@ -494,7 +507,7 @@ async function RawEmailAccordion({ caseId }: { caseId: string }) {
 
   if (!messages || messages.length === 0) {
     return (
-      <p className="text-sm text-slate-400">Sin texto original disponible.</p>
+      <p className="text-sm text-slate-400">{t("case.detail.noRawEmail")}</p>
     );
   }
 
@@ -512,7 +525,7 @@ async function RawEmailAccordion({ caseId }: { caseId: string }) {
             <summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-lg select-none list-none">
               <span>
                 {msg.subject
-                  ? `Asunto: ${msg.subject}`
+                  ? `${t("messages.thread.subject")}: ${msg.subject}`
                   : t("case.detail.rawEmailToggle")}
               </span>
               <svg

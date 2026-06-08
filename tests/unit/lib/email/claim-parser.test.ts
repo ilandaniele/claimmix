@@ -51,4 +51,48 @@ describe("parseEmailClaimFields", () => {
     expect(fields.get("full_name")).toBe("Nicolas Jasper");
     expect(fields.get("dni")).toBe("92310691");
   });
+
+  it("extracts labeled claimant data and mentioned documents from a normal claim body", () => {
+    const fields = fieldMap(
+      parseEmailClaimFields({
+        subject: "Siniestro | Choque 15/03/2024 | Ford Focus vs Renault Sandero",
+        senderEmail: "idaniele@blueboot.com",
+        body: `
+          Ilan Daniele <idaniele@blueboot.com>
+
+          Datos del asegurado:
+          - Nombre completo: María Elena González
+          - DNI: 28.456.789
+          - Teléfono: +54 11 4523-8871
+          - Email: maria.gonzalez@gmail.com
+          - Número de póliza: POL-2024-00892
+
+          Descripción del siniestro:
+          El día 15/03/2024 a las 17:30 hs, mi vehículo (Ford Focus 2019, patente AB 123 CD)
+          fue impactado por un Renault Sandero (patente EF 456 GH) en la intersección de
+          Av. Corrientes 4500 y Medrano, Ciudad Autónoma de Buenos Aires.
+
+          Tipo de siniestro: Choque
+
+          Documentación adjunta:
+          - Fotos del vehículo dañado
+          - Copia de licencia de conducir
+          - Denuncia policial Nro. 0045/2024
+        `,
+      })
+    );
+
+    expect(fields.get("full_name")).toBe("María Elena González");
+    expect(fields.get("email")).toBe("maria.gonzalez@gmail.com");
+    expect(fields.get("dni")).toBe("28456789");
+    expect(fields.get("policy_number")).toBe("POL-2024-00892");
+    expect(fields.get("accident_date")).toBe("15/03/2024");
+    expect(fields.get("claim_type")).toBe("choque");
+    expect(fields.get("party_a_plate")).toBe("AB123CD");
+    expect(fields.get("party_b_plate")).toBe("EF456GH");
+    expect(fields.get("fotos_danos")).toBe("si");
+    expect(fields.get("licencia_conducir")).toBe("si");
+    expect(fields.get("denuncia_policial")).toBe("si");
+    expect(fields.get("police_report_number")).toBe("0045/2024");
+  });
 });

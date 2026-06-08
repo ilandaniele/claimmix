@@ -1,19 +1,10 @@
-/**
- * Top navigation bar for the analyst dashboard.
- *
- * Features per AC11:
- *   - User initials avatar (e.g. "LR" for Lucía Ramallo)
- *   - User name + role display
- *   - Sign out action
- *
- * Design: white background, slate-900 text, right-aligned user section.
- */
-
 "use client";
 
 import { useRouter } from "next/navigation";
-import { supabaseBrowser } from "@/lib/supabase/browser";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { useT } from "@/lib/i18n/LocaleContext";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 interface TopBarProps {
   fullName: string;
@@ -29,12 +20,9 @@ function getInitials(name: string): string {
     .join("");
 }
 
-function getRoleLabel(role: string): string {
-  return role === "admin" ? "Administrador" : "Analista";
-}
-
 export function TopBar({ fullName, role }: TopBarProps) {
   const router = useRouter();
+  const t = useT();
 
   async function handleSignOut() {
     await supabaseBrowser.auth.signOut();
@@ -43,44 +31,40 @@ export function TopBar({ fullName, role }: TopBarProps) {
   }
 
   const initials = getInitials(fullName);
-  const roleLabel = getRoleLabel(role);
+  const roleLabel = role === "admin" ? t("role.admin") : t("role.analyst");
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-slate-200 bg-white px-6">
-      {/* Left: page title placeholder — overridden by individual pages */}
       <div className="flex items-center gap-2">
-        <span className="text-sm text-slate-400" aria-label="Atajo de comandos">
-          <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs font-mono text-slate-500">
-            ⌘K
+        <span className="text-sm text-slate-400" aria-label="Command shortcut">
+          <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-xs text-slate-500">
+            Ctrl K
           </kbd>
         </span>
       </div>
 
-      {/* Right: language switcher + user info + sign out */}
       <div className="flex items-center gap-3">
+        <ThemeToggle />
         <LanguageSwitcher />
-        {/* User name + role */}
-        <div className="hidden sm:block text-right">
-          <p className="text-sm font-medium text-slate-900 leading-none">{fullName}</p>
-          <p className="text-xs text-slate-500 mt-0.5">{roleLabel}</p>
+        <div className="hidden text-right sm:block">
+          <p className="text-sm font-medium leading-none text-slate-900">{fullName}</p>
+          <p className="mt-0.5 text-xs text-slate-500">{roleLabel}</p>
         </div>
 
-        {/* Initials avatar */}
         <div
-          aria-label={`Avatar de ${fullName}`}
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-xs font-semibold text-white select-none"
+          aria-label={`Avatar ${fullName}`}
+          className="flex h-8 w-8 select-none items-center justify-center rounded-full bg-slate-800 text-xs font-semibold text-white"
         >
           {initials}
         </div>
 
-        {/* Sign out button */}
         <button
           onClick={handleSignOut}
           data-testid="signout-button"
-          className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
-          aria-label="Cerrar sesión"
+          className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+          aria-label={t("nav.signOut")}
         >
-          Salir
+          {t("nav.signOut")}
         </button>
       </div>
     </header>

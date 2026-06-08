@@ -21,6 +21,14 @@ export const enUS: Record<TranslationKey, string> = {
   "nav.admin": "Administration",
   "nav.configuracion": "Settings",
   "nav.signOut": "Sign out",
+  "nav.operation": "Operation",
+  "role.admin": "Administrator",
+  "role.analyst": "Analyst",
+  "theme.toggle": "Toggle theme",
+  "theme.light": "Light mode",
+  "theme.dark": "Dark mode",
+  "common.yes": "Yes",
+  "common.no": "No",
 
   // ── Auth ───────────────────────────────────────────────────────────────────
   "auth.signIn.title": "Sign in",
@@ -84,6 +92,7 @@ export const enUS: Record<TranslationKey, string> = {
   "bandeja.deleteConfirm": "Delete",
   "bandeja.deleteCancel": "Cancel",
   "bandeja.deleteSuccess": "Case deleted successfully.",
+  "bandeja.deleteError": "Could not delete the case. Reload and try again.",
   "bandeja.deleteConfirmTitle": "Delete this claim?",
   "bandeja.deleteConfirmBody1": "This action cannot be undone.",
   "bandeja.deleteConfirmBodyN": "You are about to delete",
@@ -127,6 +136,9 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.email": "Email",
   "case.detail.channel": "Intake channel",
   "case.detail.assignedTo": "Assigned analyst",
+  "case.detail.assigned": "Assigned",
+  "case.detail.unassigned": "Unassigned",
+  "case.detail.created": "Created",
   "case.detail.noFields": "No extracted fields.",
   "case.detail.noMissingDocs": "No pending documentation.",
   "case.detail.noAuditEvents": "No events recorded.",
@@ -223,6 +235,16 @@ export const enUS: Record<TranslationKey, string> = {
   "admin.users.invite": "Invite analyst",
   "configuracion.title": "Settings",
   "configuracion.subtitle": "Environment variables (read-only)",
+  "configuracion.agentTraining.title": "Agent training",
+  "configuracion.agentTraining.label": "Instructions and examples for the agent",
+  "configuracion.agentTraining.enabled": "Active in production",
+  "configuracion.agentTraining.helper": "Injected into the email agent prompt for future extractions. It does not re-process previous cases.",
+  "configuracion.agentTraining.save": "Save training",
+  "configuracion.agentTraining.saving": "Saving...",
+  "configuracion.agentTraining.saved": "Training saved. The agent will use it in production on the next analysis.",
+  "configuracion.agentTraining.loadError": "Could not load agent training.",
+  "configuracion.agentTraining.saveError": "Could not save agent training.",
+  "configuracion.agentTraining.placeholder": "Example guidance:\n- For emails with \"Datos del asegurado\", extract Nombre completo as full_name and Numero de poliza as policy_number with high confidence.\n- If \"Documentacion adjunta\" lists photos, license, or police report, mark those document fields as present.\n- For a two-car crash with plates and no injuries, severity should usually be medium.\n- Only ask for confirmation when a value is ambiguous or conflicts with stored customer/policy data.",
 
   // ── Health ─────────────────────────────────────────────────────────────────
   "health.ok": "ok",
@@ -253,6 +275,8 @@ export const enUS: Record<TranslationKey, string> = {
   "channel.todos": "All",
   "channel.email": "Email",
   "channel.email_sim": "Simulation",
+  "channel.whatsapp": "WhatsApp",
+  "channel.whatsapp_sim": "WhatsApp simulation",
 
   // ── Bandeja filter labels ───────────────────────────────────────────────────
   "filter.channel": "Channel",
@@ -289,6 +313,10 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.openAttachment": "Open",
   "case.detail.customer": "Client",
   "case.detail.policy": "Linked policy",
+  "case.detail.linked": "Linked",
+  "case.detail.pendingCount": "pending",
+  "case.detail.coreReadyDescription": "This case is ready to be sent to the core system. Review the confirmed fields before proceeding.",
+  "case.detail.noRawEmail": "No original text available.",
 
   // ── Gmail status panel ─────────────────────────────────────────────────────
   "gmail.status.title": "Gmail inbox",
@@ -334,6 +362,7 @@ export const enUS: Record<TranslationKey, string> = {
   "clientes.detail.cases": "Cases",
   "clientes.detail.noPolicies": "No policies on record.",
   "clientes.detail.noCases": "No cases on record.",
+  "clientes.detail.viewClient": "View client",
   "clientes.detail.policyNumber": "Policy number",
   "clientes.detail.policyType": "Type",
   "clientes.detail.policyStatus": "Status",

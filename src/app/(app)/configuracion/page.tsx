@@ -15,6 +15,7 @@ import { createServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { ConfiguracionClient } from "./ConfiguracionClient";
 import { GmailStatusSection } from "./GmailStatusSection";
+import { AgentTrainingPanel } from "./AgentTrainingPanel";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import packageJson from "../../../../package.json";
@@ -183,6 +184,12 @@ export default async function ConfiguracionPage() {
         {isAdmin && (
           <Section title={t("gmail.status.title")}>
             <GmailStatusSection />
+          </Section>
+        )}
+
+        {isAdmin && (
+          <Section title={t("configuracion.agentTraining.title")}>
+            <AgentTrainingPanel />
           </Section>
         )}
 

@@ -19,6 +19,11 @@ import { getGmailClient } from "@/server/email/gmail/gmail-client";
 import { createServiceClient } from "@/lib/supabase/service";
 import { setWatchState } from "@/server/email/gmail/poll-state";
 
+export interface GmailWatchAccount {
+  email: string;
+  refreshToken?: string;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -36,15 +41,16 @@ import { setWatchState } from "@/server/email/gmail/poll-state";
  *          Supabase upsert fails.
  */
 export async function setupGmailWatch(
-  topicName: string
+  topicName: string,
+  account?: GmailWatchAccount
 ): Promise<{ historyId: string; expiration: string }> {
   // Validate env before making any API call to prevent orphaned watch subscriptions.
-  const gmailEmail = process.env.GMAIL_USER_EMAIL;
+  const gmailEmail = account?.email ?? process.env.GMAIL_USER_EMAIL;
   if (!gmailEmail) {
     throw new Error("[watch] GMAIL_USER_EMAIL env var is not set");
   }
 
-  const gmail = getGmailClient();
+  const gmail = getGmailClient(account?.refreshToken);
 
   const response = await gmail.users.watch({
     userId: "me",

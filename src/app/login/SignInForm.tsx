@@ -12,7 +12,7 @@
 "use client";
 
 import { useActionState, useTransition } from "react";
-import { signIn } from "./actions";
+import { signIn, signInWithGoogle } from "./actions";
 
 type FormState = {
   error?: string;
@@ -37,6 +37,7 @@ export function SignInForm() {
   }
 
   return (
+    <>
     <form onSubmit={handleSubmit} noValidate aria-label="Formulario de inicio de sesión">
       {/* Global error (wrong credentials, rate limit, etc.) */}
       {state.error && (
@@ -129,5 +130,20 @@ export function SignInForm() {
         )}
       </button>
     </form>
+      <div className="my-4 flex items-center gap-3 text-xs text-zinc-400">
+        <span className="h-px flex-1 bg-zinc-200" />
+        <span>o</span>
+        <span className="h-px flex-1 bg-zinc-200" />
+      </div>
+
+      <form action={signInWithGoogle}>
+        <button
+          type="submit"
+          className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:ring-offset-2"
+        >
+          Continuar con Google
+        </button>
+      </form>
+    </>
   );
 }

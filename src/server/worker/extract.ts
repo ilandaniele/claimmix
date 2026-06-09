@@ -48,6 +48,7 @@ import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/server/cases/fsm";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { loadAgentTraining } from "@/server/agents/training";
+import { loadMemoryHints as loadClaimMemoryHints } from "@/server/memory/load";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { mergeExtractedFields, parseEmailClaimFields } from "@/lib/email/claim-parser";
@@ -423,7 +424,9 @@ export async function runEmailExtractionWorker(
     }
 
     // ── b) Load memory hints from claim_memory ───────────────────────────────
-    const memoryHints = await loadMemoryHints(supabase, tenantId, senderEmail);
+    const memoryHints = toPromptMemoryHints(
+      await loadClaimMemoryHints(supabase, tenantId, senderEmail, undefined, caseId)
+    );
     const memoryApplied = memoryHints.length > 0;
 
     // ── c) Load known_claim_patterns ─────────────────────────────────────────
@@ -860,6 +863,32 @@ export async function runEmailExtractionWorker(
 }
 
 // ── Helper: load memory hints ─────────────────────────────────────────────────
+
+function toPromptMemoryHints(
+  hints: Awaited<ReturnType<typeof loadClaimMemoryHints>>
+): Array<{ field_key: string; value: string; confirmed_at?: string }> {
+  const promptHints: Array<{ field_key: string; value: string; confirmed_at?: string }> = [];
+
+  for (const hint of hints) {
+    if (!hint.value || typeof hint.value !== "object") continue;
+    const values = hint.value as Record<string, unknown>;
+    for (const [fieldKey, value] of Object.entries(values)) {
+      if (typeof value !== "string" || !value.trim()) continue;
+      promptHints.push({
+        field_key: fieldKey,
+        value,
+        confirmed_at: hint.source === "human_confirmation" ? new Date().toISOString() : undefined,
+      });
+    }
+  }
+
+  const seen = new Set<string>();
+  return promptHints.filter((hint) => {
+    if (seen.has(hint.field_key)) return false;
+    seen.add(hint.field_key);
+    return true;
+  });
+}
 
 async function loadMemoryHints(
   supabase: ReturnType<typeof createServiceClient>,

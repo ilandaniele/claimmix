@@ -28,6 +28,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { OAuth2Client } from "google-auth-library";
 import { createServiceClient } from "@/lib/supabase/service";
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
+import { getGmailAccountByEmail } from "@/server/email/gmail/accounts";
 
 /** Required: prevent Vercel from statically optimising this dynamic route. */
 export const dynamic = "force-dynamic";
@@ -73,6 +74,11 @@ interface PubSubEnvelope {
     publishTime?: string;
   };
   subscription?: string;
+}
+
+interface GmailPushPayload {
+  emailAddress?: string;
+  historyId?: string;
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
@@ -157,6 +163,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  let pushPayload: GmailPushPayload = {};
+  try {
+    pushPayload = JSON.parse(Buffer.from(messageData, "base64").toString("utf8"));
+  } catch {
+    pushPayload = {};
+  }
+
   // ── Trigger Gmail poll ───────────────────────────────────────────────────────
   //
   // We always ACK with 200 when pollGmail throws (IC3): retrying on non-2xx
@@ -165,7 +178,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const supabase = createServiceClient();
-    const result = await pollGmail(supabase);
+    const connectedAccount = pushPayload.emailAddress
+      ? await getGmailAccountByEmail(supabase, pushPayload.emailAddress)
+      : null;
+    const result = connectedAccount
+      ? await pollGmail(supabase, {
+          tenantId: connectedAccount.tenantId,
+          email: connectedAccount.email,
+          refreshToken: connectedAccount.refreshToken,
+        })
+      : await pollGmail(supabase);
 
     return NextResponse.json({ ok: true, result });
   } catch (err: unknown) {

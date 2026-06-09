@@ -162,3 +162,27 @@ export async function signOut(): Promise<void> {
 
   redirect("/login");
 }
+
+export async function signInWithGoogle(): Promise<void> {
+  const supabase = await createServerClient();
+  const headerStore = await headers();
+  const origin =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    `${headerStore.get("x-forwarded-proto") ?? "https"}://${headerStore.get("host")}`;
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${origin}/api/auth/callback?next=/bandeja`,
+      queryParams: {
+        access_type: "offline",
+        prompt: "select_account",
+      },
+    },
+  });
+
+  if (error || !data.url) {
+    redirect("/login?error=google_signin_failed");
+  }
+
+  redirect(data.url);
+}

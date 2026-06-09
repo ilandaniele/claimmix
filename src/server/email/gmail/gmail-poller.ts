@@ -43,6 +43,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getGmailClient } from "./gmail-client";
+import { listEnabledGmailAccounts, type GmailAccount } from "./accounts";
 import {
   getOrCreatePollState,
   advancePollState,
@@ -78,6 +79,20 @@ export interface PollResult {
   history_id: string;
   /** Case IDs that were newly created and need extraction. */
   case_ids: string[];
+}
+
+export interface PollAllResult {
+  accounts: number;
+  processed: number;
+  skipped: number;
+  errors: number;
+  results: Array<PollResult & { account: string }>;
+}
+
+export interface GmailPollAccount {
+  tenantId: string;
+  email: string;
+  refreshToken?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -524,23 +539,24 @@ async function processMessage(
  * @returns         { processed, skipped, errors, fallback, history_id }
  */
 export async function pollGmail(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  account?: GmailPollAccount
 ): Promise<PollResult> {
   // ── Tenant resolution (IC4) ────────────────────────────────────────────────
-  const tenantId = resolveTenantId();
+  const tenantId = account?.tenantId ?? resolveTenantId();
   if (!tenantId) {
     // Should never happen with MVP sentinel, but guard explicitly.
     console.error("[gmail-poller] Could not resolve tenant — aborting poll"); // crew-debug-ok
     return { processed: 0, skipped: 0, errors: 1, fallback: false, history_id: "0", case_ids: [] };
   }
 
-  const gmailEmail = process.env.GMAIL_USER_EMAIL;
+  const gmailEmail = account?.email ?? process.env.GMAIL_USER_EMAIL;
   if (!gmailEmail) {
     console.error("[gmail-poller] GMAIL_USER_EMAIL not set — aborting poll"); // crew-debug-ok
     return { processed: 0, skipped: 0, errors: 1, fallback: false, history_id: "0", case_ids: [] };
   }
 
-  const gmail = getGmailClient();
+  const gmail = getGmailClient(account?.refreshToken);
 
   // ── Load poll state ────────────────────────────────────────────────────────
   const pollState = await getOrCreatePollState(supabase, gmailEmail);
@@ -742,5 +758,41 @@ export async function pollGmail(
     fallback: usedFallback,
     history_id: latestHistoryId,
     case_ids: newCaseIds,
+  };
+}
+
+export async function pollAllGmailAccounts(
+  supabase: SupabaseClient
+): Promise<PollAllResult> {
+  const configuredAccounts = await listEnabledGmailAccounts(supabase);
+  const accounts: Array<GmailPollAccount & { label: string }> =
+    configuredAccounts.length > 0
+      ? configuredAccounts.map((account: GmailAccount) => ({
+          tenantId: account.tenantId,
+          email: account.email,
+          refreshToken: account.refreshToken,
+          label: account.email,
+        }))
+      : [
+          {
+            tenantId: resolveTenantId() ?? MVP_SENTINEL_TENANT_ID,
+            email: process.env.GMAIL_USER_EMAIL ?? "",
+            refreshToken: undefined,
+            label: "env",
+          },
+        ].filter((account) => account.email);
+
+  const results: Array<PollResult & { account: string }> = [];
+  for (const account of accounts) {
+    const result = await pollGmail(supabase, account);
+    results.push({ ...result, account: account.label });
+  }
+
+  return {
+    accounts: results.length,
+    processed: results.reduce((sum, result) => sum + result.processed, 0),
+    skipped: results.reduce((sum, result) => sum + result.skipped, 0),
+    errors: results.reduce((sum, result) => sum + result.errors, 0),
+    results,
   };
 }

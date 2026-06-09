@@ -15,6 +15,7 @@ import { createServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { ConfiguracionClient } from "./ConfiguracionClient";
 import { GmailStatusSection } from "./GmailStatusSection";
+import { GmailAccountsPanel } from "./GmailAccountsPanel";
 import { AgentTrainingPanel } from "./AgentTrainingPanel";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
@@ -181,6 +182,12 @@ export default async function ConfiguracionPage() {
         </Section>
 
         {/* ── Bandeja de entrada Gmail (admin only) ────────────────────────── */}
+        {isAdmin && (
+          <Section title={t("gmail.accounts.title")}>
+            <GmailAccountsPanel />
+          </Section>
+        )}
+
         {isAdmin && (
           <Section title={t("gmail.status.title")}>
             <GmailStatusSection />

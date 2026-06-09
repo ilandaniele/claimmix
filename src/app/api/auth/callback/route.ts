@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
+import { provisionGoogleUserIfAllowed } from "@/lib/auth/google-provision";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
@@ -24,6 +25,21 @@ export async function GET(request: Request) {
       return NextResponse.redirect(
         new URL("/login?error=auth_callback_failed", requestUrl.origin)
       );
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      try {
+        await provisionGoogleUserIfAllowed(user.id);
+      } catch {
+        await supabase.auth.signOut();
+        return NextResponse.redirect(
+          new URL("/login?error=google_user_not_allowed", requestUrl.origin)
+        );
+      }
     }
   }
 

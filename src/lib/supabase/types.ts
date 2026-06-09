@@ -330,6 +330,8 @@ export type Database = {
           history_id: string;
           last_polled_at: string | null;
           last_error: string | null;
+          watch_expiration: string | null;
+          watch_history_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -339,6 +341,8 @@ export type Database = {
           history_id?: string;
           last_polled_at?: string | null;
           last_error?: string | null;
+          watch_expiration?: string | null;
+          watch_history_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -348,8 +352,48 @@ export type Database = {
           history_id?: string;
           last_polled_at?: string | null;
           last_error?: string | null;
+          watch_expiration?: string | null;
+          watch_history_id?: string | null;
           created_at?: string;
           updated_at?: string;
+        };
+      };
+      gmail_accounts: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          email: string;
+          refresh_token_encrypted: string;
+          enabled: boolean;
+          connected_by: string | null;
+          last_connected_at: string | null;
+          last_error: string | null;
+          created_at: string;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          email: string;
+          refresh_token_encrypted: string;
+          enabled?: boolean;
+          connected_by?: string | null;
+          last_connected_at?: string | null;
+          last_error?: string | null;
+          created_at?: string;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          email?: string;
+          refresh_token_encrypted?: string;
+          enabled?: boolean;
+          connected_by?: string | null;
+          last_connected_at?: string | null;
+          last_error?: string | null;
+          created_at?: string;
+          updated_at?: string | null;
         };
       };
       claim_messages: {

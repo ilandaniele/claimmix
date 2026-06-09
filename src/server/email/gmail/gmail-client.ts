@@ -26,7 +26,20 @@ let _auth: OAuth2Client | null = null;
  * Throws if GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, or GMAIL_REFRESH_TOKEN
  * are not set in the environment.
  */
-export function getGmailAuth(): OAuth2Client {
+export function getGmailAuth(refreshToken?: string): OAuth2Client {
+  if (refreshToken) {
+    const clientId = process.env.GMAIL_CLIENT_ID;
+    const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      throw new Error("GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET must be set");
+    }
+
+    const auth = new google.auth.OAuth2(clientId, clientSecret);
+    auth.setCredentials({ refresh_token: refreshToken });
+    return auth;
+  }
+
   if (!_auth) {
     const clientId = process.env.GMAIL_CLIENT_ID;
     const clientSecret = process.env.GMAIL_CLIENT_SECRET;
@@ -56,6 +69,6 @@ export function resetGmailAuth(): void {
 /**
  * Returns a configured Gmail API client bound to the OAuth2 auth singleton.
  */
-export function getGmailClient() {
-  return google.gmail({ version: "v1", auth: getGmailAuth() });
+export function getGmailClient(refreshToken?: string) {
+  return google.gmail({ version: "v1", auth: getGmailAuth(refreshToken) });
 }

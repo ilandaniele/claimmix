@@ -1477,6 +1477,56 @@ COMMENT ON COLUMN public.gmail_poll_state.watch_history_id IS
 
 
 -- =============================================================================
+-- Multi Gmail intake accounts
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS public.gmail_accounts (
+  id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id               uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+  email                   text NOT NULL,
+  refresh_token_encrypted text NOT NULL,
+  enabled                 boolean NOT NULL DEFAULT true,
+  connected_by            uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  last_connected_at       timestamptz,
+  last_error              text,
+  created_at              timestamptz NOT NULL DEFAULT now(),
+  updated_at              timestamptz
+);
+
+DROP TRIGGER IF EXISTS trg_gmail_accounts_updated_at ON public.gmail_accounts;
+
+CREATE TRIGGER trg_gmail_accounts_updated_at
+  BEFORE UPDATE ON public.gmail_accounts
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gmail_accounts_tenant_email
+  ON public.gmail_accounts(tenant_id, email);
+
+CREATE INDEX IF NOT EXISTS idx_gmail_accounts_enabled
+  ON public.gmail_accounts(enabled)
+  WHERE enabled = true;
+
+ALTER TABLE public.gmail_accounts ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'gmail_accounts'
+      AND policyname = 'gmail_accounts_tenant_all'
+  ) THEN
+    CREATE POLICY "gmail_accounts_tenant_all"
+      ON public.gmail_accounts
+      FOR ALL
+      USING (tenant_id = public.current_tenant_id())
+      WITH CHECK (tenant_id = public.current_tenant_id());
+  END IF;
+END $$;
+
+
+-- =============================================================================
 -- BEGIN: supabase\migrations\0012_cases_claim_type_nullable.sql
 -- =============================================================================
 

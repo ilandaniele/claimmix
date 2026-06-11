@@ -46,7 +46,9 @@ export async function logAgentRun(
 
   const modelProvider = claim.extraction_model?.startsWith("mock")
     ? "mock"
-    : "openai";
+    : claim.extraction_model?.startsWith("gemini")
+      ? "google"
+      : "openai";
 
   // Output payload: full validated extractor output. Token/cost metadata is
   // useful for review; PII inside is tenant-RLS-protected like claim_messages.

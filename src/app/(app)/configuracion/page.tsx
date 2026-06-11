@@ -18,6 +18,7 @@ import { GmailStatusSection } from "./GmailStatusSection";
 import { GmailAccountsPanel } from "./GmailAccountsPanel";
 import { AgentTrainingPanel } from "./AgentTrainingPanel";
 import { PromptRulesPanel } from "./PromptRulesPanel";
+import { AiProviderPanel } from "./AiProviderPanel";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import packageJson from "../../../../package.json";
@@ -181,6 +182,13 @@ export default async function ConfiguracionPage() {
             </p>
           )}
         </Section>
+
+        {/* ── Modelo de IA (admin only) ─────────────────────────────────────── */}
+        {isAdmin && (
+          <Section title={t("aiProvider.title")}>
+            <AiProviderPanel />
+          </Section>
+        )}
 
         {/* ── Bandeja de entrada Gmail (admin only) ────────────────────────── */}
         {isAdmin && (

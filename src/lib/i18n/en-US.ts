@@ -343,6 +343,19 @@ export const enUS: Record<TranslationKey, string> = {
   "gmail.accounts.helper": "Connect one or more Gmail inboxes to create claims automatically from each mailbox.",
   "gmail.accounts.connect": "Connect Gmail",
   "gmail.accounts.connectAnother": "Connect another account",
+
+  // ── AI provider switch ─────────────────────────────────────────────────────
+  "aiProvider.title": "AI model",
+  "aiProvider.helper":
+    "Choose which AI provider analyzes incoming emails. The change applies immediately to the next emails.",
+  "aiProvider.openaiHelper": "GPT — requires API credits on OpenAI.",
+  "aiProvider.geminiHelper": "Gemini — Google AI Studio free tier.",
+  "aiProvider.active": "Active",
+  "aiProvider.notConfigured": "Not configured (API key missing on the server)",
+  "aiProvider.loading": "Loading settings...",
+  "aiProvider.loadError": "Could not load the AI settings.",
+  "aiProvider.saveError": "Could not save the AI provider.",
+  "aiProvider.saved": "Provider updated. The next emails will be analyzed with this model.",
   "gmail.accounts.loading": "Loading accounts...",
   "gmail.accounts.empty": "No Gmail accounts are connected yet.",
   "gmail.accounts.enabled": "Enabled",

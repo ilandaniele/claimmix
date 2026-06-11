@@ -42,6 +42,8 @@ import { analyzeGaps } from "@/server/ai/gap-analysis";
 import { checkBudget, recordUsage } from "@/server/ai/budget";
 import { runMockExtractor, extractEmailClaimMock } from "@/server/ai/mock-extractor";
 import { runOpenAIExtractor, extractEmailClaim, OpenAIExtractionError } from "@/server/ai/openai-extractor";
+import { runGeminiExtractor, extractEmailClaimGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
+import { resolveExtractionEngine } from "@/server/ai/provider";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
@@ -60,15 +62,6 @@ import { mergeExtractedFields, parseEmailClaimFields } from "@/lib/email/claim-p
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
 
-/** Determine whether to use mock mode. */
-function shouldUseMock(): boolean {
-  return (
-    process.env.MOCK_AI === "true" ||
-    process.env.AI_MOCK === "true" ||
-    !process.env.OPENAI_API_KEY ||
-    process.env.OPENAI_API_KEY.trim() === ""
-  );
-}
 
 /**
  * Run the extraction worker for a case in "procesando" status.
@@ -160,18 +153,20 @@ export async function runExtractionWorker(
     return;
   }
 
-  // ── 2. Select and run extractor ──────────────────────────────────────────────
-  const useMock = shouldUseMock();
+  // ── 2. Select and run extractor (per-tenant provider: openai | gemini | mock) ─
+  const engine = await resolveExtractionEngine(supabase, tenantId);
   let extractedClaim;
 
   try {
-    if (useMock) {
+    if (engine === "mock") {
       extractedClaim = runMockExtractor(rawMsg.body, claimType);
+    } else if (engine === "gemini") {
+      extractedClaim = await runGeminiExtractor(rawMsg.body, claimType, caseId);
     } else {
       extractedClaim = await runOpenAIExtractor(rawMsg.body, claimType, caseId);
     }
   } catch (e) {
-    if (e instanceof OpenAIExtractionError) {
+    if (e instanceof OpenAIExtractionError || e instanceof GeminiExtractionError) {
       console.error(
         JSON.stringify({
           level: "error",
@@ -479,26 +474,26 @@ export async function runEmailExtractionWorker(
       return;
     }
 
-    // ── e) Run extractor ──────────────────────────────────────────────────────
-    const useMock = shouldUseMock();
+    // ── e) Run extractor (per-tenant provider: openai | gemini | mock) ───────
+    const engine = await resolveExtractionEngine(supabase, tenantId);
     let extractedClaim;
 
-    if (useMock) {
+    if (engine === "mock") {
       extractedClaim = extractEmailClaimMock();
     } else {
-      extractedClaim = await extractEmailClaim(
-        {
-          subject: emailSubject,
-          body: emailBody,
-          memoryHints,
-          knownPatterns,
-          senderEmail,
-          agentTraining,
-          learning,
-        },
-        tenantId,
-        caseId
-      );
+      const emailPayload = {
+        subject: emailSubject,
+        body: emailBody,
+        memoryHints,
+        knownPatterns,
+        senderEmail,
+        agentTraining,
+        learning,
+      };
+      extractedClaim =
+        engine === "gemini"
+          ? await extractEmailClaimGemini(emailPayload, tenantId, caseId)
+          : await extractEmailClaim(emailPayload, tenantId, caseId);
     }
 
     // ── e2) Defensive hydration: mirror typed extracted_fields into fields[] + scrub PII ──

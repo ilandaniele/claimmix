@@ -346,6 +346,19 @@ export const esAR = {
   "gmail.accounts.helper": "Conectá una o más casillas Gmail para crear siniestros automáticamente desde cada inbox.",
   "gmail.accounts.connect": "Conectar Gmail",
   "gmail.accounts.connectAnother": "Conectar otra cuenta",
+
+  // ── AI provider switch ─────────────────────────────────────────────────────
+  "aiProvider.title": "Modelo de IA",
+  "aiProvider.helper":
+    "Elegí qué proveedor de IA analiza los emails entrantes. El cambio aplica de inmediato a los próximos emails.",
+  "aiProvider.openaiHelper": "GPT — requiere créditos de API en OpenAI.",
+  "aiProvider.geminiHelper": "Gemini — capa gratuita de Google AI Studio.",
+  "aiProvider.active": "Activo",
+  "aiProvider.notConfigured": "No configurado (falta la API key en el servidor)",
+  "aiProvider.loading": "Cargando configuración...",
+  "aiProvider.loadError": "No se pudo cargar la configuración de IA.",
+  "aiProvider.saveError": "No se pudo guardar el proveedor de IA.",
+  "aiProvider.saved": "Proveedor actualizado. Los próximos emails se analizarán con este modelo.",
   "gmail.accounts.loading": "Cargando cuentas...",
   "gmail.accounts.empty": "Todavía no hay cuentas Gmail conectadas.",
   "gmail.accounts.enabled": "Activa",

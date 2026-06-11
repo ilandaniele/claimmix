@@ -54,10 +54,11 @@ function getModel(): string {
 }
 
 /**
- * Parse and validate the OpenAI response content as an ExtractedClaim.
+ * Parse and validate the model response content as an ExtractedClaim.
  * Returns null if parsing or validation fails.
+ * Exported for reuse by other providers (gemini-extractor).
  */
-function parseResponse(content: string | null, claimType: ClaimType, model?: string): ExtractedClaim | null {
+export function parseResponse(content: string | null, claimType: ClaimType, model?: string): ExtractedClaim | null {
   if (!content) return null;
   try {
     const raw = JSON.parse(content);
@@ -424,8 +425,11 @@ export async function extractEmailClaim(
   return buildSafeDefault();
 }
 
-/** Parse and validate email extractor output. Returns null on validation failure. */
-function parseEmailResponse(content: string | null, model?: string): ExtractedClaim | null {
+/**
+ * Parse and validate email extractor output. Returns null on validation failure.
+ * Exported for reuse by other providers (gemini-extractor).
+ */
+export function parseEmailResponse(content: string | null, model?: string): ExtractedClaim | null {
   if (!content) return null;
   try {
     const raw = JSON.parse(content);
@@ -459,8 +463,11 @@ function parseEmailResponse(content: string | null, model?: string): ExtractedCl
   }
 }
 
-/** Safe default for parse failures — treats email as non-claim to avoid false positives. */
-function buildSafeDefault(): ExtractedClaim {
+/**
+ * Safe default for parse failures — treats email as non-claim to avoid false positives.
+ * Exported for reuse by other providers (gemini-extractor).
+ */
+export function buildSafeDefault(): ExtractedClaim {
   return {
     extraction_model: getModel(),
     fields: [],

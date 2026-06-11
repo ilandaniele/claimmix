@@ -87,6 +87,7 @@ export const AuditEvent = {
   // ── AI extraction ──────────────────────────────────────────────────────────
   AI_EXTRACTED: "ai.extracted",
   AI_BUDGET_EXCEEDED: "ai.budget_exceeded",
+  AI_PROVIDER_CHANGED: "ai.provider_changed",
 
   // ── Document / gap analysis ────────────────────────────────────────────────
   DOC_RECEIVED: "doc.received",

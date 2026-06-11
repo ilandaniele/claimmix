@@ -79,6 +79,7 @@ export const enUS: Record<TranslationKey, string> = {
   "table.col.status": "Status",
   "table.col.confidence": "Score",
   "table.col.age": "Age",
+  "table.col.received": "Received",
   "table.col.assignedTo": "Assigned to",
 
   // ── Bandeja actions ────────────────────────────────────────────────────────
@@ -108,6 +109,8 @@ export const enUS: Record<TranslationKey, string> = {
   "bandeja.selectAll": "Select all",
   "bandeja.selectCase": "Select",
   "bandeja.tableLabel": "Claims table",
+  "bandeja.toastNew": "New claim received:",
+  "bandeja.toastUpdated": "updated:",
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simulate new claim",
@@ -339,6 +342,7 @@ export const enUS: Record<TranslationKey, string> = {
   "gmail.accounts.title": "Gmail intake accounts",
   "gmail.accounts.helper": "Connect one or more Gmail inboxes to create claims automatically from each mailbox.",
   "gmail.accounts.connect": "Connect Gmail",
+  "gmail.accounts.connectAnother": "Connect another account",
   "gmail.accounts.loading": "Loading accounts...",
   "gmail.accounts.empty": "No Gmail accounts are connected yet.",
   "gmail.accounts.enabled": "Enabled",

@@ -76,6 +76,7 @@ export const AuditEvent = {
   AUTH_FAILURE: "auth.failure",
   AUTH_SIGN_OUT: "auth.sign_out",
   AUTH_RATE_LIMITED: "auth.rate_limited",
+  AUTH_SIGN_UP: "auth.sign_up",
 
   // ── Case lifecycle ─────────────────────────────────────────────────────────
   CASE_CREATED: "case.created",

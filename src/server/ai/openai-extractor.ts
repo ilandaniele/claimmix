@@ -312,6 +312,7 @@ export async function extractEmailClaim(
     result = parseEmailResponse(response.choices[0]?.message?.content ?? null, model);
   } catch (e) {
     const name = e instanceof Error ? e.name : "UnknownError";
+    const apiErr = e as { status?: number; code?: string };
     console.error(
       JSON.stringify({
         level: "error",
@@ -319,6 +320,8 @@ export async function extractEmailClaim(
         msg: "ai.email_extraction.attempt1.error",
         case_id: logCaseId,
         error_name: name,
+        status: apiErr?.status ?? null,
+        code: apiErr?.code ?? null,
       })
     );
     // Fall through to retry. If the retry also fails, return the safe default
@@ -380,6 +383,7 @@ export async function extractEmailClaim(
     result = parseEmailResponse(retryResponse.choices[0]?.message?.content ?? null, model);
   } catch (e) {
     const name = e instanceof Error ? e.name : "UnknownError";
+    const apiErr = e as { status?: number; code?: string };
     console.error(
       JSON.stringify({
         level: "error",
@@ -387,6 +391,8 @@ export async function extractEmailClaim(
         msg: "ai.email_extraction.attempt2.error",
         case_id: logCaseId,
         error_name: name,
+        status: apiErr?.status ?? null,
+        code: apiErr?.code ?? null,
       })
     );
   }

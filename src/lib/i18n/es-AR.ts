@@ -82,6 +82,7 @@ export const esAR = {
   "table.col.status": "Estado",
   "table.col.confidence": "Score",
   "table.col.age": "Antigüedad",
+  "table.col.received": "Recibido",
   "table.col.assignedTo": "Asignación",
 
   // ── Bandeja actions ────────────────────────────────────────────────────────
@@ -111,6 +112,8 @@ export const esAR = {
   "bandeja.selectAll": "Seleccionar todos",
   "bandeja.selectCase": "Seleccionar",
   "bandeja.tableLabel": "Tabla de siniestros",
+  "bandeja.toastNew": "Nuevo siniestro recibido:",
+  "bandeja.toastUpdated": "actualizado:",
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simular nuevo siniestro",
@@ -342,6 +345,7 @@ export const esAR = {
   "gmail.accounts.title": "Cuentas Gmail de ingreso",
   "gmail.accounts.helper": "Conectá una o más casillas Gmail para crear siniestros automáticamente desde cada inbox.",
   "gmail.accounts.connect": "Conectar Gmail",
+  "gmail.accounts.connectAnother": "Conectar otra cuenta",
   "gmail.accounts.loading": "Cargando cuentas...",
   "gmail.accounts.empty": "Todavía no hay cuentas Gmail conectadas.",
   "gmail.accounts.enabled": "Activa",

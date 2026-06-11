@@ -13,8 +13,7 @@ import { StatusBadge } from "./StatusBadge";
 import { SeverityBadge } from "./SeverityBadge";
 import { SourceBadge } from "./SourceBadge";
 import { ConfidenceBar } from "./ConfidenceBar";
-import { formatAge } from "@/lib/utils";
-import { useT } from "@/lib/i18n/LocaleContext";
+import { useLocale } from "@/lib/i18n/LocaleContext";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 
 function formatCaseId(id: string): string {
@@ -32,7 +31,7 @@ interface CasesTableProps {
 }
 
 export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
-  const t = useT();
+  const { t, locale } = useLocale();
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -150,10 +149,15 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
       },
       {
         accessorKey: "created_at",
-        header: t("table.col.age"),
+        header: t("table.col.received"),
         cell: ({ getValue }) => (
-          <span className="text-sm text-slate-500">
-            {formatAge(getValue<string>())}
+          <span className="text-sm text-slate-500 whitespace-nowrap">
+            {new Intl.DateTimeFormat(locale, {
+              day: "2-digit",
+              month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+            }).format(new Date(getValue<string>()))}
           </span>
         ),
       },

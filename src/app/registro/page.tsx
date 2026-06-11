@@ -1,18 +1,19 @@
 /**
- * Login page — AC4 (analyst authentication flow).
+ * Registration page — self-service account creation.
  *
- * Spanish-language sign-in form matching the reference UI aesthetic.
- * Calls POST /api/auth/sign-in via the SignInForm client component.
+ * New accounts are created in the default tenant with the "analyst" role
+ * (same provisioning rule as Google sign-in). Admins can change roles later
+ * from /admin/users.
  */
 
 import Link from "next/link";
-import { SignInForm } from "./SignInForm";
+import { SignUpForm } from "./SignUpForm";
 
 export const metadata = {
-  title: "Iniciar sesión — ClaimMix",
+  title: "Crear cuenta — ClaimMix",
 };
 
-export default function LoginPage() {
+export default function RegistroPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-zinc-50 px-4">
       <div className="w-full max-w-sm">
@@ -26,21 +27,18 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Sign-in card */}
+        {/* Sign-up card */}
         <div className="rounded-xl border border-zinc-200 bg-white p-8 shadow-sm">
           <h2 className="mb-6 text-lg font-medium text-zinc-800">
-            Iniciar sesión
+            Crear cuenta
           </h2>
-          <SignInForm />
+          <SignUpForm />
         </div>
 
         <p className="mt-4 text-center text-sm text-zinc-500">
-          ¿No tenés cuenta?{" "}
-          <Link
-            href="/registro"
-            className="font-medium text-zinc-800 underline-offset-2 hover:underline"
-          >
-            Crear cuenta
+          ¿Ya tenés cuenta?{" "}
+          <Link href="/login" className="font-medium text-zinc-800 underline-offset-2 hover:underline">
+            Iniciar sesión
           </Link>
         </p>
       </div>

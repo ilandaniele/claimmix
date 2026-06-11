@@ -188,7 +188,7 @@ async function dispatchExtractionWorker(
     if (!response.ok) {
       console.error(
         "[gmail-poller] Worker dispatch error:",
-        "HttpError",
+        `HttpError status=${response.status}`,
         "case:",
         caseId
       ); // crew-debug-ok

@@ -91,7 +91,9 @@ export function GmailAccountsPanel() {
           href="/api/admin/gmail-accounts/connect"
           className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
         >
-          {t("gmail.accounts.connect")}
+          {accounts.length > 0
+            ? t("gmail.accounts.connectAnother")
+            : t("gmail.accounts.connect")}
         </a>
       </div>
 

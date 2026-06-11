@@ -280,9 +280,9 @@ export function DashboardClient({
           return item;
         })
       );
-      addToast(`Nuevo siniestro recibido: ${formatCaseNumber(newCase.id)}`, "info");
+      addToast(`${t("bandeja.toastNew")} ${formatCaseNumber(newCase.id)}`, "info");
     },
-    [addToast]
+    [addToast, t]
   );
 
   const handleUpdate = useCallback(
@@ -299,12 +299,12 @@ export function DashboardClient({
           })
         );
         addToast(
-          `Siniestro ${formatCaseNumber(updatedCase.id)} actualizado: ${prevStatus} → ${updatedCase.status}`,
+          `${formatCaseNumber(updatedCase.id)} ${t("bandeja.toastUpdated")} ${prevStatus} → ${updatedCase.status}`,
           "info"
         );
       }
     },
-    [addToast]
+    [addToast, t]
   );
 
   useCasesRealtime({ onInsert: handleInsert, onUpdate: handleUpdate });

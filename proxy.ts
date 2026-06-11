@@ -27,6 +27,7 @@ import { buildCsp, generateNonce } from "@/lib/security/csp";
 /** Public paths that do not require authentication. */
 const PUBLIC_PREFIXES = [
   "/login",
+  "/registro",
   "/api/auth/sign-in",
   "/api/auth/sign-out",
   "/api/auth/callback",
@@ -189,8 +190,8 @@ export async function proxy(request: NextRequest) {
     return redirectResponse;
   }
 
-  // ── 7. Redirect authenticated users away from login ───────────────────────
-  if (pathname === "/login" || pathname === "/") {
+  // ── 7. Redirect authenticated users away from login/registro ──────────────
+  if (pathname === "/login" || pathname === "/registro" || pathname === "/") {
     return NextResponse.redirect(new URL("/bandeja", request.url));
   }
 

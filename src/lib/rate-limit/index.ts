@@ -47,6 +47,8 @@ export function checkRateLimit(
 export const RATE_LIMIT_CONFIGS = {
   /** Sign-in: 5 attempts per 10 seconds per IP+email */
   AUTH_SIGN_IN: { limit: 5, windowMs: 10_000 },
+  /** Sign-up: 3 new accounts per minute per IP */
+  AUTH_SIGN_UP: { limit: 3, windowMs: 60_000 },
   /** Intake simulation: 30 per minute per user */
   INTAKE_SIMULATE: { limit: 30, windowMs: 60_000 },
   /** Cases API: 100 per minute per user */

@@ -23,6 +23,27 @@ export const SignInSchema = z.object({
 
 export type SignInInput = z.infer<typeof SignInSchema>;
 
+/** /registro sign-up form */
+export const SignUpSchema = z.object({
+  full_name: z
+    .string({ required_error: "El nombre es requerido." })
+    .trim()
+    .min(2, "El nombre es demasiado corto.")
+    .max(100, "El nombre es demasiado largo."),
+  email: z
+    .string({ required_error: "El correo electrónico es requerido." })
+    .trim()
+    .toLowerCase()
+    .max(254, "El correo electrónico es demasiado largo.")
+    .email("El correo electrónico no es válido."),
+  password: z
+    .string({ required_error: "La contraseña es requerida." })
+    .min(8, "La contraseña debe tener al menos 8 caracteres.")
+    .max(128, "La contraseña es demasiado larga."),
+});
+
+export type SignUpInput = z.infer<typeof SignUpSchema>;
+
 /** GET /api/auth/me response shape */
 export const MeResponseSchema = z.object({
   id: z.string().uuid(),

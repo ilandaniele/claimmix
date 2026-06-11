@@ -59,3 +59,4 @@ example-email*.txt
 
 # Supabase local state (project-ref, temp files)
 supabase/.temp/
+.git-commit-msg.txt

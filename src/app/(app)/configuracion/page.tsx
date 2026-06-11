@@ -17,6 +17,7 @@ import { ConfiguracionClient } from "./ConfiguracionClient";
 import { GmailStatusSection } from "./GmailStatusSection";
 import { GmailAccountsPanel } from "./GmailAccountsPanel";
 import { AgentTrainingPanel } from "./AgentTrainingPanel";
+import { PromptRulesPanel } from "./PromptRulesPanel";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import packageJson from "../../../../package.json";
@@ -99,7 +100,7 @@ export default async function ConfiguracionPage() {
   const fullName: string = userRow?.full_name ?? user?.email ?? "Analista";
   const role: string = userRow?.role ?? "analyst";
   const email: string = user.email ?? "—";
-  const isAdmin = role === "admin";
+  const isAdmin = role === "admin" || role === "owner";
 
   // AI thresholds — read from env with documented defaults
   const confidenceThreshold = Number(
@@ -197,6 +198,13 @@ export default async function ConfiguracionPage() {
         {isAdmin && (
           <Section title={t("configuracion.agentTraining.title")}>
             <AgentTrainingPanel />
+          </Section>
+        )}
+
+        {/* ── Consola de entrenamiento del agente (reglas) ──────────────────── */}
+        {isAdmin && (
+          <Section title="Consola de entrenamiento del agente">
+            <PromptRulesPanel />
           </Section>
         )}
 

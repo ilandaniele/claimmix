@@ -195,6 +195,14 @@ export const ExtractedClaimSchema = z.object({
    * Not used directly — templates are rendered server-side.
    */
   suggested_reply: z.string().max(5000).default(""),
+
+  /**
+   * Set by the extractor (never by the model) when BOTH OpenAI attempts
+   * returned unparseable output and the safe default was used. Consumed by
+   * the trainability assessment — a run without valid JSON can never be
+   * suggested (or approved) as a training example.
+   */
+  parse_failed: z.boolean().optional(),
 });
 
 export type ExtractedClaim = z.infer<typeof ExtractedClaimSchema>;

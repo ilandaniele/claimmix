@@ -22,6 +22,7 @@ import { AuditTimeline } from "./components/AuditTimeline";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
 import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
 import { FieldConfirmationsPanel } from "./_components/FieldConfirmationsPanel";
+import { AgentRunPanel } from "./_components/AgentRunPanel";
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
@@ -63,6 +64,22 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
 
   if (!detail) {
     notFound();
+  }
+
+  // Role gate for the training confirmation button (owner/admin/specialist).
+  const {
+    data: { user: currentUser },
+  } = await supabase.auth.getUser();
+  let canConfirmTraining = false;
+  if (currentUser) {
+    const { data: roleRow } = await (supabase as any)
+      .from("users")
+      .select("role")
+      .eq("id", currentUser.id)
+      .single();
+    canConfirmTraining = ["owner", "admin", "specialist"].includes(
+      roleRow?.role ?? ""
+    );
   }
 
   const { case: caseRow, extracted_fields, missing_docs, audit_log } = detail;
@@ -274,6 +291,23 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
               {t("case.detail.extractedFields")}
             </h2>
             <ExtractedFieldsTable fields={displayedExtractedFields} />
+          </section>
+
+          {/* Análisis del agente — live preview (extracted JSON, trainability, download) */}
+          <section
+            aria-labelledby="agent-run-heading"
+            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+          >
+            <h2
+              id="agent-run-heading"
+              className="text-sm font-semibold text-slate-900 mb-4"
+            >
+              Análisis del agente
+            </h2>
+            <AgentRunPanel
+              caseId={caseRow.id}
+              canConfirmTraining={canConfirmTraining}
+            />
           </section>
 
           {/* Texto original — collapsible accordion */}

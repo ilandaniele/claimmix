@@ -29,15 +29,19 @@ interface Props {
 // ── Role badge ────────────────────────────────────────────────────────────────
 
 const ROLE_STYLES: Record<string, string> = {
-  analyst: "bg-blue-100 text-blue-800",
-  supervisor: "bg-purple-100 text-purple-800",
+  owner: "bg-amber-100 text-amber-800",
   admin: "bg-red-100 text-red-800",
+  specialist: "bg-purple-100 text-purple-800",
+  analyst: "bg-blue-100 text-blue-800",
+  viewer: "bg-slate-100 text-slate-700",
 };
 
 const ROLE_LABELS: Record<string, string> = {
-  analyst: "Analista",
-  supervisor: "Supervisor",
+  owner: "Owner",
   admin: "Admin",
+  specialist: "Especialista",
+  analyst: "Analista",
+  viewer: "Visor",
 };
 
 function RoleBadge({ role }: { role: string }) {
@@ -183,7 +187,10 @@ function CreateUserDialog({
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
             >
               <option value="analyst">Analista</option>
+              <option value="specialist">Especialista</option>
+              <option value="viewer">Visor (solo lectura)</option>
               <option value="admin">Admin</option>
+              <option value="owner">Owner</option>
             </select>
           </div>
 

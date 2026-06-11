@@ -47,7 +47,10 @@ export async function requireAdmin(): Promise<AdminContext> {
     .single();
 
   if (!userRow) throw new AppError("MISSING_SESSION");
-  if (userRow.role !== "admin") throw new AppError("FORBIDDEN_ROLE");
+  // 'owner' is a superset of 'admin' (agent learning workflow roles).
+  if (userRow.role !== "admin" && userRow.role !== "owner") {
+    throw new AppError("FORBIDDEN_ROLE");
+  }
 
   return { supabase, user, userRow };
 }

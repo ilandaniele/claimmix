@@ -97,7 +97,7 @@ export async function GET() {
 const CreateUserSchema = z.object({
   full_name: z.string().min(2).max(100),
   email: z.string().email(),
-  role: z.enum(["analyst", "admin"]),
+  role: z.enum(["owner", "admin", "specialist", "analyst", "viewer"]),
 });
 
 export async function POST(request: NextRequest) {

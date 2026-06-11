@@ -210,6 +210,37 @@ export const AuditEvent = {
    * AC8, AC9.
    */
   ATTACHMENT_REJECTED: "attachment.rejected",
+
+  // ── Agent learning & review workflow ───────────────────────────────────────
+
+  /**
+   * TRAINING_EXAMPLE_APPROVED: a human confirmed an agent run as a safe
+   * training example ("Confirm as safe training example" button).
+   * Payload: { case_id, agent_run_id, training_example_id } — no email content.
+   */
+  TRAINING_EXAMPLE_APPROVED: "training.example_approved",
+
+  /**
+   * TRAINING_EXAMPLE_REJECTED: approval was attempted but blocked (duplicate,
+   * unsafe run, or missing agent run). Payload: { case_id, reason }.
+   */
+  TRAINING_EXAMPLE_REJECTED: "training.example_rejected",
+
+  /**
+   * PROMPT_RULE_CREATED / UPDATED / TOGGLED: operator-authored agent prompt
+   * rules changed in the Agent Training Console.
+   * Payload: { rule_id, rule_type, active } — rule text NOT included.
+   */
+  PROMPT_RULE_CREATED: "training.prompt_rule_created",
+  PROMPT_RULE_UPDATED: "training.prompt_rule_updated",
+  PROMPT_RULE_TOGGLED: "training.prompt_rule_toggled",
+
+  /**
+   * FINETUNE_JOB_QUEUED: enough approved examples accumulated — a draft
+   * model_training_jobs row was created (batch fine-tuning, never automatic).
+   * Payload: { job_id, training_example_count }.
+   */
+  FINETUNE_JOB_QUEUED: "training.finetune_job_queued",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

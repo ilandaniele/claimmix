@@ -21,7 +21,7 @@ import { ExtractedClaimSchema, OPENAI_JSON_SCHEMA } from "@/lib/schemas/extracte
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { ClaimType } from "@/lib/schemas/cases";
 import { buildSystemPrompt, buildUserMessage, buildEmailClaimPrompt } from "./prompt";
-import type { MemoryHint, KnownPattern } from "./prompt";
+import type { MemoryHint, KnownPattern, PromptLearningContext } from "./prompt";
 import { computeCostUsd, recordUsage } from "./budget";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -227,6 +227,8 @@ export interface EmailClaimPayload {
   knownPatterns: KnownPattern[];
   senderEmail?: string;
   agentTraining?: string;
+  /** Operator learning context: rules, approved examples, versioned prompt. */
+  learning?: PromptLearningContext;
 }
 
 /**
@@ -265,7 +267,8 @@ export async function extractEmailClaim(
     payload.memoryHints,
     payload.knownPatterns,
     payload.senderEmail,
-    payload.agentTraining
+    payload.agentTraining,
+    payload.learning
   );
 
   // User message is minimal — all content is in the system prompt via XML tags.
@@ -471,6 +474,7 @@ function buildSafeDefault(): ExtractedClaim {
     not_relevant_reason: "No se pudo procesar el email — error de extracción AI.",
     summary: "",
     suggested_reply: "",
+    parse_failed: true,
   };
 }
 

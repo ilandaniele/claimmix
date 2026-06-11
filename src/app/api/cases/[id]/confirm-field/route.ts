@@ -68,6 +68,11 @@ export async function PATCH(
 
   const userRow = userRowRaw as { id: string; tenant_id: string; role: string };
 
+  // Viewers are read-only: they can inspect claims but never mutate them.
+  if (userRow.role === "viewer") {
+    return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
+  }
+
   // ── 2. Rate limit — 30/min per user ──────────────────────────────────────
   const rlKey = buildUserKey(userRow.id, "confirm-field");
   const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CONFIRM_FIELD);

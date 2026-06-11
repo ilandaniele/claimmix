@@ -63,6 +63,11 @@ export async function POST(
   const userRow = userRowRaw as UserRow | null;
   if (!userRow) return err(new AppError("MISSING_SESSION"));
 
+  // Viewers are read-only.
+  if ((userRow as { role?: string }).role === "viewer") {
+    return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
+  }
+
   // ── Rate limit per case ───────────────────────────────────────────────────────
   const ip = getClientIp(request);
   const rlKey = `re-analyze:${caseId}:${userRow.id}`;

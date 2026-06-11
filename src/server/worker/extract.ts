@@ -48,6 +48,11 @@ import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/server/cases/fsm";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { loadAgentTraining } from "@/server/agents/training";
+import { loadActivePromptRules, formatPromptRules } from "@/server/training/prompt-rules";
+import { loadApprovedExamples, formatApprovedExamples } from "@/server/training/examples";
+import { getActivePromptVersion } from "@/server/training/prompt-version";
+import { assessTrainability } from "@/server/training/trainability";
+import { logAgentRun } from "@/server/training/agent-runs";
 import { loadMemoryHints as loadClaimMemoryHints } from "@/server/memory/load";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
@@ -389,6 +394,8 @@ export async function runEmailExtractionWorker(
     let emailBody = "";
     let emailSubject = "";
     let senderEmail = "";
+    let claimMessageId: string | null = null;
+    let providerMessageId: string | null = null;
 
     const { data: rawMsg, error: rawError } = await (supabase as any)
       .from("raw_messages")
@@ -406,7 +413,7 @@ export async function runEmailExtractionWorker(
       // Fallback: Gmail intake cases store messages in claim_messages.
       const { data: claimMsg, error: claimError } = await (supabase as any)
         .from("claim_messages")
-        .select("body_text,subject,from_addr")
+        .select("id,provider_message_id,body_text,subject,from_addr")
         .eq("case_id", caseId)
         .eq("direction", "inbound")
         .order("received_at", { ascending: false })
@@ -421,6 +428,8 @@ export async function runEmailExtractionWorker(
       emailBody = claimMsg.body_text ?? "";
       emailSubject = claimMsg.subject ?? "";
       senderEmail = claimMsg.from_addr ?? "";
+      claimMessageId = claimMsg.id ?? null;
+      providerMessageId = claimMsg.provider_message_id ?? null;
     }
 
     // ── b) Load memory hints from claim_memory ───────────────────────────────
@@ -429,9 +438,23 @@ export async function runEmailExtractionWorker(
     );
     const memoryApplied = memoryHints.length > 0;
 
-    // ── c) Load known_claim_patterns ─────────────────────────────────────────
-    const knownPatterns = await loadKnownPatterns(supabase, tenantId);
-    const agentTraining = await loadAgentTraining(supabase, tenantId);
+    // ── c) Load known_claim_patterns + operator learning context ─────────────
+    // Learning context = freeform training blob + active prompt rules +
+    // human-approved few-shot examples + active versioned tenant prompt.
+    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion] =
+      await Promise.all([
+        loadKnownPatterns(supabase, tenantId),
+        loadAgentTraining(supabase, tenantId),
+        loadActivePromptRules(supabase, tenantId),
+        loadApprovedExamples(supabase, tenantId, caseRow.claim_type),
+        getActivePromptVersion(supabase, tenantId),
+      ]);
+
+    const learning = {
+      rules: formatPromptRules(promptRules),
+      approvedExamples: formatApprovedExamples(approvedExamples),
+      tenantSystemPrompt: promptVersion.systemPrompt ?? undefined,
+    };
 
     // ── d) Budget check ───────────────────────────────────────────────────────
     const budgetResult = await checkBudget(tenantId, userId);
@@ -471,6 +494,7 @@ export async function runEmailExtractionWorker(
           knownPatterns,
           senderEmail,
           agentTraining,
+          learning,
         },
         tenantId,
         caseId
@@ -514,6 +538,30 @@ export async function runEmailExtractionWorker(
       knownPatterns
     );
     const needsSpecialist = requiresSpecialist(finalSeverity);
+
+    // ── f2) Agent run logging + trainability suggestion ───────────────────────
+    // EVERY processed email creates an agent_runs row (claim or not). The
+    // trainability assessment is a SUGGESTION only — learning happens solely
+    // through the human confirmation endpoint. Non-fatal on failure.
+    const trainability = assessTrainability({
+      claim: extractedClaim,
+      parseFailed: extractedClaim.parse_failed === true,
+      caseId,
+      emailText: fullText,
+    });
+
+    await logAgentRun(supabase, {
+      tenantId,
+      caseId,
+      claimMessageId,
+      providerMessageId,
+      modelName: extractedClaim.extraction_model,
+      promptVersionId: promptVersion.id,
+      promptVersion: promptVersion.version,
+      input: { subject: emailSubject, body: emailBody, sender_email: senderEmail },
+      claim: extractedClaim,
+      trainability,
+    });
 
     // ── g) Handle is_claim=false — AC5 ───────────────────────────────────────
     if (extractedClaim.is_claim === false) {

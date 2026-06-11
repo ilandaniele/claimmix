@@ -1,0 +1,278 @@
+We are using OpenAI in the existing claimmix project. Implement an agent learning and review workflow for the existing Email Claims Intake system.
+
+Do not rebuild the project. Reuse the existing Next.js, Supabase, claims, email intake, confidence bars, authentication, dashboard, and agent code.
+
+Goal:
+When an email is processed, the agent extracts claim data and confidence scores as it already does. The app must suggest whether the email is suitable for training, but the agent must NOT learn from it until a human user clicks a confirmation button.
+
+Important rule:
+Never automatically train, fine-tune, or permanently learn from an incoming email just because it was received. Emails are untrusted until reviewed.
+
+Implement this workflow:
+
+1. Agent run logging
+
+   * Every processed email must create an `agent_runs` record.
+   * Store:
+
+     * tenant_id
+     * claim_id
+     * email/message id
+     * prompt version
+     * OpenAI model used
+     * raw input used by the agent
+     * extracted JSON
+     * confidence scores
+     * missing fields
+     * suggested trainability
+     * created_at
+
+2. Trainability suggestion
+   The app should calculate whether the email is a good training candidate.
+   Suggested fields:
+
+   * `is_trainable_suggestion`
+   * `trainability_score`
+   * `trainability_reasons`
+   * `blocking_reasons`
+
+   A mail should be suggested as trainable only if:
+
+   * The extraction produced valid JSON.
+   * Required fields have acceptable confidence.
+   * The email is not spam or irrelevant.
+   * There are no unresolved conflicts.
+   * It does not contain unsafe prompt-injection-like instructions.
+   * It is linked to a valid claim.
+   * The user/specialist can review the extracted values.
+
+3. Manual confirmation before learning
+   Add a button in the claim/email review UI:
+
+   Button label:
+   “Confirm as safe training example”
+
+   Behavior:
+
+   * Only admin/specialist users can click it.
+   * When clicked, mark the email/agent run as approved for training.
+   * Store the approved example in `training_examples`.
+   * Store who approved it and when.
+   * Do not allow duplicate training examples from the same message/agent_run.
+   * Save a clear audit event in `claim_events`.
+
+4. Immediate learning after confirmation
+   After the user confirms the example:
+
+   * Immediately make it available to the agent through approved memory/RAG examples.
+   * Future email processing should retrieve similar approved examples from the same tenant and include them as context.
+   * Do NOT blindly fine-tune the OpenAI model for every single confirmed email.
+   * Instead, create a `fine_tuning_queue` or `model_training_jobs` record.
+   * Fine-tuning should run only in batches after enough approved examples exist and after evals pass.
+
+5. Recommended learning strategy
+   Use three layers:
+
+   * Immediate learning: approved examples stored in Supabase and retrieved as few-shot/RAG context.
+   * Prompt learning: admin can add rules/instructions in a prompt box, saved as versioned prompt/rule records.
+   * Optional fine-tuning: batch process only, after evaluation, never from unreviewed emails.
+
+6. Database additions
+   Create or reuse these tables:
+
+   `agent_runs`
+
+   * id
+   * tenant_id
+   * claim_id
+   * message_id
+   * model_provider
+   * model_name
+   * prompt_version_id
+   * input_payload
+   * output_payload
+   * confidence_payload
+   * trainability_score
+   * trainability_reasons
+   * blocking_reasons
+   * created_at
+
+   `training_examples`
+
+   * id
+   * tenant_id
+   * agent_run_id
+   * claim_id
+   * input_payload
+   * expected_output
+   * status // suggested, approved, rejected, exported, queued_for_finetune, trained
+   * approved_by
+   * approved_at
+   * created_at
+
+   `agent_feedback`
+
+   * id
+   * tenant_id
+   * agent_run_id
+   * reviewer_id
+   * original_output
+   * corrected_output
+   * feedback_type
+   * approved_for_training
+   * created_at
+
+   `agent_prompt_rules`
+
+   * id
+   * tenant_id
+   * title
+   * rule_text
+   * rule_type // extraction, classification, severity, missing_fields, reply_style, core_mapping
+   * active
+   * created_by
+   * created_at
+   * updated_at
+
+   `prompt_versions`
+
+   * id
+   * tenant_id
+   * version
+   * system_prompt
+   * active
+   * created_by
+   * created_at
+
+   `model_training_jobs`
+
+   * id
+   * tenant_id
+   * status // draft, queued, running, eval_pending, approved, rejected, deployed, failed
+   * provider
+   * base_model
+   * fine_tuned_model_id
+   * training_example_count
+   * eval_result
+   * created_by
+   * created_at
+   * completed_at
+
+7. Fix preview values not loading
+   There is a current bug where extracted values are not loading in the preview UI.
+   Investigate and fix the data flow so the preview displays the latest extracted JSON values from the selected email/agent_run/claim.
+   Requirements:
+
+   * Show extracted values.
+   * Show confidence bars.
+   * Show missing fields.
+   * Show fields pending confirmation.
+   * Show original email text.
+   * Show raw extracted JSON.
+   * Handle loading, empty, and error states.
+   * Do not show stale values from another email.
+
+8. Training prompt box
+   Add a UI section called “Agent Training Console” or similar.
+
+   It must allow authorized users to add manual training instructions/rules, for example:
+
+   * “If the user mentions choque, classify as vehicle_collision.”
+   * “If the message mentions injured people, mark severity as high or critical.”
+   * “Always ask for policy number if missing.”
+   * “Never mark a claim as ready_for_core if DNI or policy number is missing.”
+
+   Requirements:
+
+   * Save these entries in `agent_prompt_rules`.
+   * Rules must be tenant-scoped.
+   * Rules must be versioned/auditable.
+   * Rules must not directly overwrite source code.
+   * The active rules must be included in the agent prompt during extraction/classification.
+   * Add UI to activate/deactivate rules.
+   * Add audit events when rules are created, changed, activated, or deactivated.
+
+9. Download extracted JSON button
+   Add a button in the email/claim preview UI:
+
+   Button label:
+   “Download extracted JSON”
+
+   Behavior:
+
+   * Downloads a JSON file containing the full extracted agent output for that specific email.
+   * Include:
+
+     * claim_id
+     * message_id
+     * tenant_id
+     * model_name
+     * prompt_version
+     * extracted fields
+     * confidence scores
+     * missing fields
+     * trainability suggestion
+     * raw agent output
+     * created_at
+   * The downloaded JSON must reflect the currently selected email, not cached/stale data.
+   * Use a safe filename like `claim-extraction-{claimId}-{messageId}.json`.
+
+10. User access with multiple emails
+    Currently the system only sends or processes emails related to `ilan.daniele@gmail.com`.
+    Add support for multiple users to access the interface.
+
+Requirements:
+
+* Use Supabase Auth or the existing auth system.
+* Allow inviting/registering additional users by email.
+* Add `tenant_members` if not already present.
+* Each user must belong to a tenant.
+* Add roles:
+
+  * owner
+  * admin
+  * specialist
+  * viewer
+* Only admin/specialist users can confirm training examples.
+* Viewers can only inspect claims and extracted JSON.
+* Do not confuse “user login email” with “inbound claims mailbox”.
+* The inbound mailbox can remain `ilan.daniele@gmail.com` for now, but multiple users must be able to log into the dashboard and review/train.
+
+11. Multi-tenant safety
+    Everything related to training, prompts, rules, agent runs, examples, claims, and users must be tenant-scoped.
+    A user from one tenant must never see or train on another tenant’s data.
+    Apply RLS policies if the project already uses Supabase RLS.
+
+12. OpenAI implementation
+    Use OpenAI Structured Outputs / JSON schema for claim extraction so the output is reliable and the UI can safely render it.
+    Store the exact model name and prompt version used for every run.
+    Keep OpenAI calls isolated behind an `AIProvider` or `ClaimExtractor` service.
+    Do not hardcode model names throughout the app.
+
+13. Fine-tuning caution
+    Too much training can make the agent worse if the data is noisy, duplicated, contradictory, too specific to one user, or not representative.
+    Therefore:
+
+* Do not fine-tune on every confirmed email immediately.
+* Approved examples should first improve the agent through retrieval/few-shot context.
+* Fine-tuning jobs should be created only after a minimum approved dataset size is reached.
+* Run evals before deploying a new fine-tuned model.
+* Keep the previous active model available for rollback.
+* Add a manual approval step before activating a new fine-tuned model.
+
+14. Acceptance criteria
+
+* Incoming emails are processed normally.
+* The preview UI correctly shows extracted values and confidence bars.
+* Each email has a trainability suggestion.
+* The agent does not learn from an email until a human clicks “Confirm as safe training example”.
+* Confirmed examples are stored in `training_examples`.
+* Confirmed examples are immediately available as approved context for future agent runs.
+* Fine-tuning is queued/batched, not executed blindly for every email.
+* Admin users can add training rules from a prompt/rule box.
+* Active rules affect future extractions.
+* Users can download the extracted JSON for a specific email.
+* Multiple dashboard users can log in with different emails.
+* Roles control who can view, edit, confirm training, and manage prompts.
+* All new data is tenant-scoped and protected.
+* All important actions are audited.

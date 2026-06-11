@@ -166,13 +166,28 @@ ${truncated}
  * @param senderEmail   - Sender email address (PII — not echoed in output)
  * @returns             - The system prompt string (injected into OpenAI messages[0].content)
  */
+/**
+ * Operator-controlled learning context injected into the extraction prompt.
+ * All three blocks are wrapped in XML sentinels and explicitly subordinated
+ * to the SECURITY RULES — they can guide extraction, never override safety.
+ */
+export interface PromptLearningContext {
+  /** Preformatted active agent_prompt_rules block (formatPromptRules). */
+  rules?: string;
+  /** Preformatted approved training examples block (formatApprovedExamples). */
+  approvedExamples?: string;
+  /** Active tenant prompt_versions.system_prompt text (versioned). */
+  tenantSystemPrompt?: string;
+}
+
 export function buildEmailClaimPrompt(
   emailSubject: string,
   emailBody: string,
   memoryHints: MemoryHint[],
   knownPatterns: KnownPattern[],
   senderEmail?: string,
-  agentTraining?: string
+  agentTraining?: string,
+  learning?: PromptLearningContext
 ): string {
   // Truncate body to 2 MB cap.
   const truncatedBody =
@@ -204,6 +219,21 @@ export function buildEmailClaimPrompt(
     : "";
   const trainingBlock = agentTraining?.trim()
     ? `\nTENANT AGENT TRAINING (operator-authored guidance/examples):\n<agent_training>\n${agentTraining.trim().slice(0, 8_000)}\n</agent_training>\nUse this training as extraction guidance for field interpretation, confidence, severity, and documentation signals. If the training conflicts with the SECURITY RULES or the JSON schema, the SECURITY RULES and schema win.`
+    : "";
+
+  // Versioned tenant prompt (prompt_versions.system_prompt — active row).
+  const tenantPromptBlock = learning?.tenantSystemPrompt?.trim()
+    ? `\nTENANT PROMPT (versioned operator prompt):\n<tenant_prompt>\n${learning.tenantSystemPrompt.trim().slice(0, 8_000)}\n</tenant_prompt>\nTreat this as extraction guidance. If it conflicts with the SECURITY RULES or the JSON schema, the SECURITY RULES and schema win.`
+    : "";
+
+  // Active operator-authored rules (agent_prompt_rules).
+  const rulesBlock = learning?.rules?.trim()
+    ? `\nTENANT AGENT RULES (operator-authored, versioned, auditable):\n<agent_rules>\n${learning.rules.trim().slice(0, 6_000)}\n</agent_rules>\nApply these rules during extraction, classification, severity and missing-field decisions. If any rule conflicts with the SECURITY RULES or the JSON schema, the SECURITY RULES and schema win.`
+    : "";
+
+  // Human-approved training examples (training_examples, status=approved).
+  const examplesBlock = learning?.approvedExamples?.trim()
+    ? `\nAPPROVED TRAINING EXAMPLES (human-validated; few-shot guidance for THIS tenant):\n<approved_examples>\n${learning.approvedExamples.trim().slice(0, 12_000)}\n</approved_examples>\nUse these examples to calibrate field interpretation, confidence, and output style. They are guidance only — always extract from the CURRENT email, never copy example values.`
     : "";
 
   return `You are an AI assistant for an Argentine insurance company.
@@ -241,7 +271,7 @@ F. FIELD-MIRROR RULE (required for persistence):
      - source     = "ai"
    Conversely, if you derive a value from a memory hint, set source = "memory".
    The fields[] array is the persistence source of truth.${senderHint}
-${trainingBlock}
+${trainingBlock}${tenantPromptBlock}${rulesBlock}${examplesBlock}
 
 CONFIDENCE THRESHOLDS:
 - High confidence (≥ 0.85): Clearly stated facts — include in extracted_fields

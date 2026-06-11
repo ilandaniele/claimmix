@@ -28,7 +28,7 @@ export const MeResponseSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
   full_name: z.string(),
-  role: z.enum(["analyst", "admin"]),
+  role: z.enum(["owner", "admin", "specialist", "analyst", "viewer"]),
   tenant_id: z.string().uuid(),
 });
 

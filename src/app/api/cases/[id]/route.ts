@@ -109,6 +109,11 @@ export async function DELETE(
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
 
+  // Viewers are read-only.
+  if ((userRow as { role?: string }).role === "viewer") {
+    return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
+  }
+
   // ── 2. Rate limit ─────────────────────────────────────────────────────────
   const rlKey = buildUserKey(userRow.id, "cases-delete");
   const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CASES_API);
@@ -168,6 +173,11 @@ export async function PATCH(
 
   if (!userRow) {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
+  }
+
+  // Viewers are read-only.
+  if ((userRow as { role?: string }).role === "viewer") {
+    return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
   }
 
   // ── 2. Rate limit ─────────────────────────────────────────────────────────

@@ -34,6 +34,7 @@ export type Database = {
           tenant_id: string;
           full_name: string;
           role: "analyst" | "admin";
+          locale: string | null;
           created_at: string;
         };
         Insert: {
@@ -41,6 +42,7 @@ export type Database = {
           tenant_id: string;
           full_name: string;
           role: "analyst" | "admin";
+          locale?: string | null;
           created_at?: string;
         };
         Update: {
@@ -48,6 +50,7 @@ export type Database = {
           tenant_id?: string;
           full_name?: string;
           role?: "analyst" | "admin";
+          locale?: string | null;
           created_at?: string;
         };
       };

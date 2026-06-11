@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useState,
+  useEffect,
   useCallback,
   useMemo,
   type ReactNode,
@@ -49,6 +50,14 @@ export function LocaleProvider({
     setLocaleState(next);
     document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000; SameSite=Lax`;
   }, []);
+
+  // Keep the device cookie aligned with the effective locale. Matters when the
+  // locale came from the account preference (users.locale) on a device whose
+  // cookie is missing or stale — server components that read only the cookie
+  // (getServerLocale) agree from the next request on.
+  useEffect(() => {
+    document.cookie = `${LOCALE_COOKIE}=${locale}; path=/; max-age=31536000; SameSite=Lax`;
+  }, [locale]);
 
   const tFn = useMemo(() => getT(locale), [locale]);
 

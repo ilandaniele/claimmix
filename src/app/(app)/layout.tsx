@@ -29,11 +29,13 @@ export default async function AppLayout({
 
   // Direct lookup by PK — no unstable_cache because cookies() cannot be called
   // inside a cached function in Next.js 15+ (causes 500 on cache-miss for new sessions).
-  let userRow: { full_name: string; role: string } | null = null;
+  let userRow: { full_name: string; role: string; locale?: string | null } | null = null;
   if (user?.id) {
+    // select("*") instead of naming columns: keeps working whether or not the
+    // optional `locale` column (migration 0016) exists yet.
     const { data } = await (supabase as any)
       .from("users")
-      .select("full_name, role")
+      .select("*")
       .eq("id", user.id)
       .single();
     userRow = data ?? null;
@@ -41,7 +43,14 @@ export default async function AppLayout({
 
   const fullName: string = userRow?.full_name ?? user?.email ?? "Analista";
   const role: string = userRow?.role ?? "analyst";
-  const locale = await getServerLocale();
+  // Account preference wins over the device cookie (so the saved language
+  // follows the user to any device); cookie/default covers the rest.
+  const cookieLocale = await getServerLocale();
+  const accountLocale = userRow?.locale;
+  const locale =
+    accountLocale === "es-AR" || accountLocale === "en-US"
+      ? accountLocale
+      : cookieLocale;
 
   return (
     <LocaleProvider locale={locale}>

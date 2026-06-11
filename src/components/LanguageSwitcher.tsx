@@ -16,6 +16,13 @@ export function LanguageSwitcher() {
   function handleSwitch(next: Locale) {
     if (next === locale) return;
     setLocale(next);
+    // Persist per account (applied on any device at next login). Fire-and-forget:
+    // the cookie already covers this device even if the request fails.
+    void fetch("/api/auth/me", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locale: next }),
+    }).catch(() => {});
     router.refresh();
   }
 

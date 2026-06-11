@@ -32,6 +32,18 @@ export function LocaleProvider({
 }) {
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
 
+  // The server re-renders the layout with the cookie locale on every request
+  // (router.refresh, navigation, another tab switching the cookie). Follow it:
+  // without this sync, client components (Sidebar/TopBar) keep the stale
+  // first-hydration locale while server-rendered pages show the new one.
+  // Render-phase state adjustment — the pattern react-hooks/set-state-in-effect
+  // prescribes for prop-driven resets.
+  const [syncedInitial, setSyncedInitial] = useState<Locale>(initialLocale);
+  if (syncedInitial !== initialLocale) {
+    setSyncedInitial(initialLocale);
+    setLocaleState(initialLocale);
+  }
+
   const setLocale = useCallback((next: Locale) => {
     if (!(SUPPORTED_LOCALES as string[]).includes(next)) return;
     setLocaleState(next);

@@ -16,7 +16,7 @@
  */
 
 import { desc } from "drizzle-orm";
-import { requireAdmin } from "@/lib/auth/require-admin";
+import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
 import { tables } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
@@ -47,7 +47,7 @@ const EMPTY_RESPONSE: GmailStatusResponse = {
 export async function GET() {
   try {
     // ── 1. Auth + admin role check ────────────────────────────────────────────
-    const { db, user } = await requireAdmin();
+    const { db, user } = await requireRole(...ALL_ROLES);
 
     // ── 2. Rate limit ─────────────────────────────────────────────────────────
     const rateLimitResult = await rateLimit(

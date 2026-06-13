@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { and, asc, eq } from "drizzle-orm";
-import { requireAdmin } from "@/lib/auth/require-admin";
+import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
 import { tables } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
@@ -25,7 +25,7 @@ const ACCOUNT_COLUMNS = {
 
 export async function GET() {
   try {
-    const { db, userRow } = await requireAdmin();
+    const { db, userRow } = await requireRole(...ALL_ROLES);
 
     let data;
     try {
@@ -49,7 +49,7 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { db, userRow } = await requireAdmin();
+    const { db, userRow } = await requireRole(...ALL_ROLES);
     const parsed = UpdateGmailAccountSchema.safeParse(await request.json());
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
@@ -93,7 +93,7 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { db, userRow } = await requireAdmin();
+    const { db, userRow } = await requireRole(...ALL_ROLES);
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new AppError("VALIDATION_FAILED");
 

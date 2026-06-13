@@ -186,18 +186,14 @@ export default async function ConfiguracionPage() {
           </Section>
         )}
 
-        {/* ── Bandeja de entrada Gmail (admin only) ────────────────────────── */}
-        {isAdmin && (
-          <Section title={t("gmail.accounts.title")}>
-            <GmailAccountsPanel />
-          </Section>
-        )}
+        {/* ── Bandeja de entrada Gmail (todos los usuarios) ───────────────── */}
+        <Section title={t("gmail.accounts.title")}>
+          <GmailAccountsPanel />
+        </Section>
 
-        {isAdmin && (
-          <Section title={t("gmail.status.title")}>
-            <GmailStatusSection />
-          </Section>
-        )}
+        <Section title={t("gmail.status.title")}>
+          <GmailStatusSection />
+        </Section>
 
         {isAdmin && (
           <Section title={t("configuracion.agentTraining.title")}>

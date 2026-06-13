@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useT } from "@/lib/i18n/LocaleContext";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+import { authClient } from "@/lib/auth/client";
 
 interface TopBarProps {
   fullName: string;
@@ -25,7 +25,7 @@ export function TopBar({ fullName, role }: TopBarProps) {
   const t = useT();
 
   async function handleSignOut() {
-    await supabaseBrowser.auth.signOut();
+    await authClient.signOut();
     router.push("/login");
     router.refresh();
   }

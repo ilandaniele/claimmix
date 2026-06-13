@@ -9,11 +9,11 @@
  *   200  { status: "degraded", db: "error", ... }  (200 so LB doesn't cycle)
  *
  * AC16 (security): env checks return booleans only — never exposes key values.
- * Used by UptimeRobot every 5 minutes to prevent Supabase free-tier pause.
+ * Pinged by an external uptime monitor every 5 minutes.
  */
 
 import { NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase/server";
+import { db, tables } from "@/lib/db";
 // package.json is a static asset — importing version avoids a runtime read.
 import packageJson from "../../../../../package.json";
 
@@ -29,19 +29,15 @@ export async function GET() {
   let dbError: string | undefined;
 
   try {
-    const supabase = await createServerClient();
-    const { error } = await supabase.from("tenants").select("id").limit(1);
-    if (error) {
-      // Known codes: schema not yet applied (pre-migration)
-      const knownCodes = ["PGRST116", "42P01"];
-      if (!knownCodes.includes(error.code ?? "")) {
-        dbStatus = "error";
-        dbError = error.code ?? "UNKNOWN";
-      }
-    }
+    await db.select({ id: tables.tenants.id }).from(tables.tenants).limit(1);
   } catch (e) {
-    dbStatus = "error";
-    dbError = e instanceof Error ? e.message.slice(0, 50) : "UNKNOWN";
+    // Known code: schema not yet applied (pre-migration) — still "connected".
+    const code = (e as { code?: string })?.code;
+    if (code !== "42P01") {
+      dbStatus = "error";
+      dbError =
+        code ?? (e instanceof Error ? e.message.slice(0, 50) : "UNKNOWN");
+    }
   }
 
   // ── Response ──────────────────────────────────────────────────────────────────
@@ -49,8 +45,7 @@ export async function GET() {
 
   // env: boolean presence checks — NEVER expose actual key values (AC16)
   const env = {
-    supabase_url: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-    supabase_anon_key: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    database_url: !!process.env.DATABASE_URL,
     openai_api_key: !!process.env.OPENAI_API_KEY,
     sentry_dsn: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
   };

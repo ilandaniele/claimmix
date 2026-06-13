@@ -3,7 +3,7 @@
  *
  * Returns aggregated KPI metrics for the Métricas page (AC16 supplemental pages).
  * All numbers are computed from real data in the `cases` and `ai_usage` tables.
- * Scoped to the authenticated user's tenant via RLS.
+ * Scoped to the authenticated user's tenant via an explicit tenant_id filter.
  *
  * Response shape:
  * {
@@ -19,78 +19,81 @@
  * }
  */
 
-import { createServerClient } from "@/lib/supabase/server";
+import { and, eq, gte, lt } from "drizzle-orm";
+import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
+import { cases, users } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
-import { AppError } from "@/lib/errors";
 
 export async function GET() {
   try {
-    const supabase = await createServerClient();
-    const {
-      data: { user },
-      error: authErr,
-    } = await supabase.auth.getUser();
-
-    if (!user || authErr) throw new AppError("MISSING_SESSION");
+    const { db, userRow } = await requireRole(...ALL_ROLES);
+    const tenantId = userRow.tenant_id;
 
     // ── Date window: current calendar month ──────────────────────────────────
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
 
-    // ── Parallel queries ──────────────────────────────────────────────────────
-    const [casesMonthResult, byStatusResult, byTypeResult, escalatedResult, topAnalystsResult] =
+    // ── Parallel queries (all explicitly tenant-scoped) ──────────────────────
+    const [casesThisMonth, byStatusRows, byTypeRows, escalatedCount, topAnalystRows] =
       await Promise.all([
         // Total cases created this month
-         
-        (supabase as any)
-          .from("cases")
-          .select("id, status, created_at, closed_at, confidence_min", {
-            count: "exact",
+        db
+          .select({
+            id: cases.id,
+            status: cases.status,
+            created_at: cases.created_at,
+            closed_at: cases.closed_at,
+            confidence_min: cases.confidence_min,
           })
-          .gte("created_at", monthStart)
-          .lt("created_at", monthEnd),
+          .from(cases)
+          .where(
+            and(
+              eq(cases.tenant_id, tenantId),
+              gte(cases.created_at, monthStart),
+              lt(cases.created_at, monthEnd)
+            )
+          ),
 
         // Cases by status (all time — to show distribution)
-         
-        (supabase as any)
-          .from("cases")
-          .select("status"),
+        db
+          .select({ status: cases.status })
+          .from(cases)
+          .where(eq(cases.tenant_id, tenantId)),
 
         // Cases by type (all time)
-         
-        (supabase as any)
-          .from("cases")
-          .select("claim_type"),
+        db
+          .select({ claim_type: cases.claim_type })
+          .from(cases)
+          .where(eq(cases.tenant_id, tenantId)),
 
         // Escalated this month
-         
-        (supabase as any)
-          .from("cases")
-          .select("id", { count: "exact" })
-          .eq("status", "escalado")
-          .gte("created_at", monthStart)
-          .lt("created_at", monthEnd),
+        db.$count(
+          cases,
+          and(
+            eq(cases.tenant_id, tenantId),
+            eq(cases.status, "escalado"),
+            gte(cases.created_at, monthStart),
+            lt(cases.created_at, monthEnd)
+          )
+        ),
 
         // Top 5 analysts by cases closed this month
-         
-        (supabase as any)
-          .from("cases")
-          .select("assigned_to, users!cases_assigned_to_fkey(full_name)")
-          .eq("status", "cerrado")
-          .gte("closed_at", monthStart)
-          .lt("closed_at", monthEnd),
+        db
+          .select({ assigned_to: cases.assigned_to, full_name: users.full_name })
+          .from(cases)
+          .leftJoin(users, eq(users.id, cases.assigned_to))
+          .where(
+            and(
+              eq(cases.tenant_id, tenantId),
+              eq(cases.status, "cerrado"),
+              gte(cases.closed_at, monthStart),
+              lt(cases.closed_at, monthEnd)
+            )
+          ),
       ]);
 
     // ── Summary: total cases this month ──────────────────────────────────────
-    const casesThisMonth: Array<{
-      id: string;
-      status: string;
-      created_at: string;
-      closed_at: string | null;
-      confidence_min: number | null;
-    }> = casesMonthResult.data ?? [];
-
     const totalCasesMonth = casesThisMonth.length;
 
     // ── Average opening time (created → closed, for cerrado cases this month) ─
@@ -112,19 +115,19 @@ export async function GET() {
     const autoCompletionRate =
       totalCasesMonth > 0 ? Math.round((listoCount / totalCasesMonth) * 100) : 0;
 
-    // ── Escalated count this month ────────────────────────────────────────────
-    const escalatedCount: number = escalatedResult.count ?? 0;
-
     // ── By status (all time) ──────────────────────────────────────────────────
     const byStatus: Record<string, number> = {};
-    for (const row of byStatusResult.data ?? []) {
+    for (const row of byStatusRows) {
       byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
     }
 
     // ── By type (all time) ───────────────────────────────────────────────────
     const byType: Record<string, number> = {};
-    for (const row of byTypeResult.data ?? []) {
-      byType[row.claim_type] = (byType[row.claim_type] ?? 0) + 1;
+    for (const row of byTypeRows) {
+      // NULL claim_type buckets under the "null" key — matches the previous
+      // supabase-js behaviour where obj[null] coerces to obj["null"].
+      const key = row.claim_type ?? "null";
+      byType[key] = (byType[key] ?? 0) + 1;
     }
     // Ensure all 4 types are present even with 0 counts
     for (const t of ["choque", "robo", "granizo", "incendio"]) {
@@ -133,11 +136,10 @@ export async function GET() {
 
     // ── Top 5 analysts by closed cases this month ─────────────────────────────
     const analystCounts: Record<string, { name: string; count: number }> = {};
-    for (const row of topAnalystsResult.data ?? []) {
-      const id = row.assigned_to as string | null;
+    for (const row of topAnalystRows) {
+      const id = row.assigned_to;
       if (!id) continue;
-      const name =
-        (row.users as { full_name?: string } | null)?.full_name ?? "Analista";
+      const name = row.full_name ?? "Analista";
       if (!analystCounts[id]) {
         analystCounts[id] = { name, count: 0 };
       }

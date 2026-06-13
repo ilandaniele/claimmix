@@ -23,7 +23,11 @@
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { cases, claimFieldConfirmations, outboundMessages } from "@/lib/db/schema";
+import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
@@ -46,14 +50,12 @@ export interface ExtractedClaimOutput {
  * Idempotent within a single extraction run — checks for existing
  * outbound_messages and claim_field_confirmations before inserting.
  *
- * @param supabase         - Service-role Supabase client (DB writes bypass RLS).
  * @param caseId           - UUID of the case.
- * @param tenantId         - UUID of the tenant.
+ * @param tenantId         - UUID of the tenant (explicit tenant scoping — RLS is gone).
  * @param extractedOutput  - Extraction result + sender info.
  * @param customerMatches  - Customer matches from the customer-matcher module.
  */
 export async function orchestratePostExtraction(
-  supabase: SupabaseClient,
   caseId: string,
   tenantId: string,
   extractedOutput: ExtractedClaimOutput,
@@ -76,7 +78,7 @@ export async function orchestratePostExtraction(
 
   if (isHighSeverity) {
     // Ensure status is requiere_especialista (may already be set by worker).
-    await setStatus(supabase, caseId, "requiere_especialista");
+    await setStatus(caseId, tenantId, "requiere_especialista");
 
     // Dispatch specialist escalation email to claimant.
     await dispatchOutboundEmail({
@@ -108,7 +110,7 @@ export async function orchestratePostExtraction(
     const confidence = extractedFieldEntry?.confidence ?? 0;
 
     // Insert claim_field_confirmations row (upsert to avoid duplicates).
-    await upsertFieldConfirmation(supabase, caseId, tenantId, {
+    await upsertFieldConfirmation(caseId, tenantId, {
       field_key: fieldKey,
       proposed_value: proposedValue,
       confidence,
@@ -140,7 +142,7 @@ export async function orchestratePostExtraction(
       const storedValue = getStoredFieldValue(match, conflictField);
 
       // Insert conflict confirmation row (extracted value vs stored customer value).
-      await upsertFieldConfirmation(supabase, caseId, tenantId, {
+      await upsertFieldConfirmation(caseId, tenantId, {
         field_key: conflictField,
         proposed_value: extractedValue,
         confidence,
@@ -148,7 +150,7 @@ export async function orchestratePostExtraction(
       });
 
       // Set case status to confirmacion_pendiente for conflict.
-      await setStatus(supabase, caseId, "confirmacion_pendiente");
+      await setStatus(caseId, tenantId, "confirmacion_pendiente");
 
       // Dispatch data_confirmation_request email.
       await dispatchOutboundEmail({
@@ -206,7 +208,7 @@ export async function orchestratePostExtraction(
   const gapResult = await analyzeEmailClaimGaps(
     caseId,
     extractedClaim.fields,
-    supabase
+    tenantId
   );
 
   if (gapResult.missingRequiredFields.length > 0) {
@@ -238,7 +240,7 @@ export async function orchestratePostExtraction(
     });
 
     // Update status to info_faltante.
-    await setStatus(supabase, caseId, "info_faltante");
+    await setStatus(caseId, tenantId, "info_faltante");
 
     // Audit: MISSING_INFO_REQUESTED.
     await writeAuditLog({
@@ -251,18 +253,18 @@ export async function orchestratePostExtraction(
     });
   } else if (gapResult.status === "confirmacion_pendiente") {
     // Pending confirmations, no missing required fields.
-    await setStatus(supabase, caseId, "confirmacion_pendiente");
+    await setStatus(caseId, tenantId, "confirmacion_pendiente");
   } else if (gapResult.status === "listo_para_core") {
     // All required fields present + no pending confirmations.
     // Only set listo_para_core if not escalated.
     if (!isHighSeverity) {
-      await setStatus(supabase, caseId, "listo_para_core");
+      await setStatus(caseId, tenantId, "listo_para_core");
     }
   }
 
   // ── F. Always send confirmation_received for valid claims — AC12 ──────────
   // Check if a confirmation_received email has already been sent for this case.
-  const alreadySent = await checkConfirmationAlreadySent(supabase, caseId);
+  const alreadySent = await checkConfirmationAlreadySent(caseId, tenantId);
 
   if (!alreadySent) {
     // Extract claim_type and policy_number from fields for the email template.
@@ -287,25 +289,41 @@ export async function orchestratePostExtraction(
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
+/** Extract a loggable error code from a thrown DB error (PII-safe). */
+function errCode(err: unknown): string {
+  return (
+    (err as { code?: string })?.code ??
+    (err instanceof Error ? err.name : "UnknownError")
+  );
+}
+
 /** Update the case status (no FSM transition check — worker already validated). */
 async function setStatus(
-  supabase: SupabaseClient,
   caseId: string,
+  tenantId: string,
   status: string
 ): Promise<void> {
-  const { error } = await (supabase as any)
-    .from("cases")
-    .update({ status, updated_at: new Date().toISOString() })
-    .eq("id", caseId);
-
-  if (error) {
-    console.error("[orchestrate] Failed to update case status:", error.code, "case:", caseId);
+  try {
+    await db
+      .update(cases)
+      .set({
+        status: status as CaseRow["status"],
+        updated_at: new Date().toISOString(),
+      })
+      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+  } catch (err) {
+    console.error("[orchestrate] Failed to update case status:", errCode(err), "case:", caseId);
   }
 }
 
-/** Upsert a claim_field_confirmations row. Avoids duplicate pending rows. */
+/**
+ * Upsert a claim_field_confirmations row. Avoids duplicate pending rows.
+ *
+ * NOTE: the Neon schema has no unique constraint on (case_id, field_name),
+ * so the "only one row per field per case" rule is emulated with an
+ * update-then-insert (no ON CONFLICT target available).
+ */
 async function upsertFieldConfirmation(
-  supabase: SupabaseClient,
   caseId: string,
   tenantId: string,
   row: {
@@ -315,25 +333,44 @@ async function upsertFieldConfirmation(
     conflict_with_value: string | null;
   }
 ): Promise<void> {
-  const { error } = await (supabase as any)
-    .from("claim_field_confirmations")
-    .upsert(
-      {
-        case_id: caseId,
-        tenant_id: tenantId,
-        field_key: row.field_key,
-        proposed_value: row.proposed_value,
-        conflict_with_value: row.conflict_with_value,
-        confidence: parseFloat(row.confidence.toFixed(2)),
-        status: "pending",
-        created_at: new Date().toISOString(),
-      },
-      // Upsert on (case_id, field_key) — only one pending row per field per case.
-      { onConflict: "case_id,field_key", ignoreDuplicates: false }
+  try {
+    const existing = firstRow(
+      await db
+        .select({ id: claimFieldConfirmations.id })
+        .from(claimFieldConfirmations)
+        .where(
+          and(
+            eq(claimFieldConfirmations.case_id, caseId),
+            eq(claimFieldConfirmations.tenant_id, tenantId),
+            eq(claimFieldConfirmations.field_name, row.field_key)
+          )
+        )
+        .limit(1)
     );
 
-  if (error) {
-    console.error("[orchestrate] Failed to upsert claim_field_confirmations:", error.code);
+    const values = {
+      suggested_value: row.proposed_value,
+      conflict_with_value: row.conflict_with_value,
+      confidence: row.confidence.toFixed(2),
+      status: "pending",
+      created_at: new Date().toISOString(),
+    };
+
+    if (existing) {
+      await db
+        .update(claimFieldConfirmations)
+        .set(values)
+        .where(eq(claimFieldConfirmations.id, existing.id));
+    } else {
+      await db.insert(claimFieldConfirmations).values({
+        case_id: caseId,
+        tenant_id: tenantId,
+        field_name: row.field_key,
+        ...values,
+      });
+    }
+  } catch (err) {
+    console.error("[orchestrate] Failed to upsert claim_field_confirmations:", errCode(err));
   }
 }
 
@@ -342,24 +379,25 @@ async function upsertFieldConfirmation(
  * for this case. Used to enforce the AC12 "always send, but only once" rule.
  */
 async function checkConfirmationAlreadySent(
-  supabase: SupabaseClient,
-  caseId: string
+  caseId: string,
+  tenantId: string
 ): Promise<boolean> {
   try {
-    const { data, error } = await (supabase as any)
-      .from("outbound_messages")
-      .select("id")
-      .eq("case_id", caseId)
-      .eq("template", "confirmation_received")
+    const data = await db
+      .select({ id: outboundMessages.id })
+      .from(outboundMessages)
+      .where(
+        and(
+          eq(outboundMessages.case_id, caseId),
+          eq(outboundMessages.tenant_id, tenantId),
+          eq(outboundMessages.template, "confirmation_received")
+        )
+      )
       .limit(1);
 
-    if (error) {
-      console.error("[orchestrate] Failed to check outbound_messages:", error.code);
-      return false;
-    }
-
-    return (data ?? []).length > 0;
-  } catch {
+    return data.length > 0;
+  } catch (err) {
+    console.error("[orchestrate] Failed to check outbound_messages:", errCode(err));
     return false;
   }
 }

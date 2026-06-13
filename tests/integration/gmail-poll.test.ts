@@ -1,7 +1,7 @@
 /**
  * Integration tests for src/server/email/gmail/gmail-poller.ts
  *
- * All external dependencies are mocked (googleapis, Supabase, audit log,
+ * All external dependencies are mocked (googleapis, @/lib/db, audit log,
  * rehost-attachments, thread-lookup, dedupe, poll-state). No real network
  * calls or DB writes occur.
  *
@@ -15,11 +15,9 @@
  *  AC10: Error in one message → next message still processed (per-message isolation).
  *  AC13: attachment part → adaptGmailAttachments + rehostAttachments called.
  *  AC14: mark-as-read (modify) called after successful insert; failure is non-fatal.
- *  AC9 (integration): Cron route renews watch when expiration is within 24h threshold.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { SupabaseClient } from "@supabase/supabase-js";
 
 // ── Mocks (must be declared before any imports that load the modules) ─────────
 
@@ -32,10 +30,14 @@ const {
   mockGetProfile,
   MockOAuth2,
   mockGmailFn,
-  // Shared mocks reused by both the poller tests and the cron-route watch-renewal test.
   mockGetWatchExpiration,
   mockSetupGmailWatch,
-  mockCreateServiceClient,
+  // DB tracking arrays - shared via closure so tests can inspect inserts/updates
+  dbInserts,
+  dbUpdates,
+  mockDbInsert,
+  mockDbSelect,
+  mockDbUpdate,
 } = vi.hoisted(() => {
   const mockHistoryList = vi.fn();
   const mockMessagesList = vi.fn();
@@ -48,7 +50,60 @@ const {
   const mockGmailFn = vi.fn();
   const mockGetWatchExpiration = vi.fn();
   const mockSetupGmailWatch = vi.fn();
-  const mockCreateServiceClient = vi.fn();
+
+  // Tracked DB calls
+  const dbInserts: Array<{ table: string; values: Record<string, unknown> }> = [];
+  const dbUpdates: Array<{ table: string; values: Record<string, unknown> }> = [];
+
+  // IDs that the db mock returns for inserted rows
+  const CASE_UUID = "case-uuid-test-001";
+  const CLAIM_MSG_UUID = "claim-msg-uuid-001";
+
+  /**
+   * Build a chainable Drizzle-style insert mock.
+   * Tracks the inserted values in dbInserts and returns the configured id.
+   */
+  function mockDbInsert(returnId: string, tableName: string) {
+    return vi.fn().mockImplementation((values: Record<string, unknown>) => {
+      const rows = Array.isArray(values) ? values : [values];
+      for (const row of rows) {
+        dbInserts.push({ table: tableName, values: row as Record<string, unknown> });
+      }
+      return {
+        returning: vi.fn().mockResolvedValue([{ id: returnId }]),
+        onConflictDoNothing: vi.fn().mockResolvedValue([]),
+        onConflictDoUpdate: vi.fn().mockResolvedValue([]),
+      };
+    });
+  }
+
+  /**
+   * Build a chainable Drizzle-style select mock that returns empty results.
+   */
+  function mockDbSelect() {
+    return vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    });
+  }
+
+  /**
+   * Build a chainable Drizzle-style update mock.
+   */
+  function mockDbUpdate(tableName: string) {
+    return vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockImplementation((values: unknown) => {
+          dbUpdates.push({ table: tableName, values: values as Record<string, unknown> });
+          return Promise.resolve([]);
+        }),
+      }),
+    });
+  }
+
   return {
     mockHistoryList,
     mockMessagesList,
@@ -59,9 +114,17 @@ const {
     mockGmailFn,
     mockGetWatchExpiration,
     mockSetupGmailWatch,
-    mockCreateServiceClient,
+    dbInserts,
+    dbUpdates,
+    mockDbInsert,
+    mockDbSelect,
+    mockDbUpdate,
+    CASE_UUID,
+    CLAIM_MSG_UUID,
   };
 });
+
+// ── Module mocks ──────────────────────────────────────────────────────────────
 
 vi.mock("googleapis", () => ({
   google: {
@@ -70,6 +133,133 @@ vi.mock("googleapis", () => ({
   },
 }));
 
+// Mock @/lib/db so no DATABASE_URL is required and we can track calls.
+// The db object needs insert/select/update methods that return chainable builders.
+vi.mock("@/lib/db", () => {
+  const CASE_UUID_INNER = "case-uuid-test-001";
+  const CLAIM_MSG_UUID_INNER = "claim-msg-uuid-001";
+
+  // We expose the same dbInserts/dbUpdates arrays via the hoisted closure.
+  // But we need them inside this factory — use a local proxy that pushes into
+  // the hoisted arrays by re-importing them at call time via the closure.
+  const insertProxy = (tableName: string, returnId: string) =>
+    vi.fn().mockImplementation((values: unknown) => {
+      const rows = Array.isArray(values) ? values : [values];
+      for (const row of rows) {
+        dbInserts.push({ table: tableName, values: row as Record<string, unknown> });
+      }
+      return {
+        returning: vi.fn().mockResolvedValue([{ id: returnId }]),
+        onConflictDoNothing: vi.fn().mockResolvedValue([]),
+        onConflictDoUpdate: vi.fn().mockResolvedValue([]),
+      };
+    });
+
+  const updateProxy = (tableName: string) =>
+    vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockImplementation(() => {
+          dbUpdates.push({ table: tableName, values: {} });
+          return Promise.resolve([]);
+        }),
+      }),
+    });
+
+  const selectProxy = () =>
+    vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    });
+
+  const db = {
+    insert: vi.fn().mockImplementation((table: { _: { name?: string }; tableName?: string }) => {
+      const name = (table as unknown as { tableName?: string }).tableName ??
+        (table as unknown as { _?: { name?: string } })?._?.name ??
+        "unknown";
+
+      let returnId = "generic-uuid";
+      if (name === "cases") returnId = CASE_UUID_INNER;
+      else if (name === "claim_messages") returnId = CLAIM_MSG_UUID_INNER;
+
+      return insertProxy(name, returnId)(/* call immediately with deferred values */);
+    }),
+    select: selectProxy(),
+    update: vi.fn().mockImplementation((table: unknown) => {
+      const name = (table as unknown as { tableName?: string }).tableName ??
+        (table as unknown as { _?: { name?: string } })?._?.name ??
+        "unknown";
+      return updateProxy(name)();
+    }),
+    $count: vi.fn().mockResolvedValue(0),
+  };
+
+  // Override db.insert to be a passthrough to insertProxy that captures the
+  // table reference so we can figure out the name. Because Drizzle table
+  // objects carry their name in different ways depending on the version, we
+  // handle both.
+  db.insert = vi.fn().mockImplementation((table: unknown) => {
+    const tbl = table as Record<string | symbol, unknown>;
+    const drizzleNameSym = Symbol.for("drizzle:Name");
+    const name =
+      (tbl?.tableName as string | undefined) ??
+      ((tbl?._ as Record<string, unknown>)?.name as string | undefined) ??
+      (tbl?.[drizzleNameSym] as string | undefined) ??
+      String(table);
+
+    let returnId = "generic-uuid";
+    if (name === "cases") returnId = CASE_UUID_INNER;
+    else if (name === "claim_messages") returnId = CLAIM_MSG_UUID_INNER;
+    else if (name === "claim_attachments") returnId = "attach-uuid-001";
+
+    return {
+      values: vi.fn().mockImplementation((values: unknown) => {
+        const rows = Array.isArray(values) ? values : [values];
+        for (const row of rows) {
+          dbInserts.push({ table: name, values: row as Record<string, unknown> });
+        }
+        return {
+          returning: vi.fn().mockResolvedValue([{ id: returnId }]),
+          onConflictDoNothing: vi.fn().mockResolvedValue([]),
+          onConflictDoUpdate: vi.fn().mockResolvedValue([]),
+        };
+      }),
+    };
+  });
+
+  db.select = vi.fn().mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue([]),
+      }),
+    }),
+  });
+
+  db.update = vi.fn().mockImplementation((table: unknown) => {
+    const tbl = table as Record<string | symbol, unknown>;
+    const drizzleNameSym = Symbol.for("drizzle:Name");
+    const name =
+      (tbl?.tableName as string | undefined) ??
+      ((tbl?._ as Record<string, unknown>)?.name as string | undefined) ??
+      (tbl?.[drizzleNameSym] as string | undefined) ??
+      String(table);
+
+    return {
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockImplementation(() => {
+          dbUpdates.push({ table: name, values: {} });
+          return Promise.resolve([]);
+        }),
+      }),
+    };
+  });
+
+  return { db, tables: {} };
+});
+
+// Mock poll-state module entirely — its real implementation uses db directly.
 vi.mock("@/server/email/gmail/poll-state", () => ({
   getOrCreatePollState: vi.fn(),
   advancePollState: vi.fn().mockResolvedValue(undefined),
@@ -79,10 +269,6 @@ vi.mock("@/server/email/gmail/poll-state", () => ({
 
 vi.mock("@/server/email/gmail/watch", () => ({
   setupGmailWatch: mockSetupGmailWatch,
-}));
-
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: mockCreateServiceClient,
 }));
 
 vi.mock("@/server/email/dedupe", () => ({
@@ -113,6 +299,9 @@ vi.mock("@/lib/audit/log", () => ({
 vi.mock("@/server/worker/extract", () => ({
   runExtractionWorker: vi.fn().mockResolvedValue(undefined),
 }));
+
+// Mock fetch so dispatchExtractionWorker doesn't hit the network.
+vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
 
 // ── Test constants ────────────────────────────────────────────────────────────
 
@@ -179,72 +368,6 @@ function buildGmailMessage(opts: {
   };
 }
 
-// ── Supabase mock builder ─────────────────────────────────────────────────────
-
-interface InsertRecord {
-  table: string;
-  row: Record<string, unknown>;
-}
-
-/**
- * Build a minimal Supabase service-role client mock.
- * Tracks all insert/update calls for assertions.
- */
-function buildSupabaseMock(opts: {
-  caseInsertId?: string;
-  claimMessageInsertId?: string;
-} = {}) {
-  const inserts: InsertRecord[] = [];
-  const updates: Array<{ table: string; patch: unknown; where: unknown }> = [];
-
-  const caseId = opts.caseInsertId ?? CASE_UUID;
-  const claimMsgId = opts.claimMessageInsertId ?? CLAIM_MSG_UUID;
-
-  function makeChain(tableName: string, returnId: string) {
-    return {
-      insert: (row: unknown) => {
-        const rows = Array.isArray(row) ? row : [row];
-        for (const r of rows) {
-          inserts.push({ table: tableName, row: r as Record<string, unknown> });
-        }
-        return {
-          select: () => ({
-            single: () =>
-              Promise.resolve({ data: { id: returnId }, error: null }),
-          }),
-          single: () =>
-            Promise.resolve({ data: { id: returnId }, error: null }),
-        };
-      },
-      update: (patch: unknown) => ({
-        eq: (col: string, val: unknown) => {
-          updates.push({ table: tableName, patch, where: { [col]: val } });
-          return Promise.resolve({ data: null, error: null });
-        },
-      }),
-      select: () => ({
-        eq: () => ({
-          single: () => Promise.resolve({ data: null, error: null }),
-        }),
-      }),
-    };
-  }
-
-  const supabase = {
-    from: vi.fn().mockImplementation((table: string) => {
-      if (table === "cases") return makeChain("cases", caseId);
-      if (table === "claim_messages") return makeChain("claim_messages", claimMsgId);
-      if (table === "claim_attachments") return makeChain("claim_attachments", "attach-uuid-001");
-      // Fallback
-      return makeChain(table, "generic-uuid");
-    }),
-    _inserts: inserts,
-    _updates: updates,
-  };
-
-  return supabase as unknown as SupabaseClient & { _inserts: InsertRecord[]; _updates: typeof updates };
-}
-
 // ── Test setup ────────────────────────────────────────────────────────────────
 
 /**
@@ -281,6 +404,9 @@ function setupGmailHistoryMock(messageIds: string[], historyId: string = HISTORY
 describe("pollGmail — Gmail inbound polling pipeline", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Clear tracked DB calls between tests
+    dbInserts.length = 0;
+    dbUpdates.length = 0;
 
     // Default env
     process.env.GMAIL_USER_EMAIL = "claims@gmail.com";
@@ -288,6 +414,9 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
     process.env.GMAIL_CLIENT_SECRET = "test-client-secret";
     process.env.GMAIL_REFRESH_TOKEN = "test-refresh-token";
     delete process.env.GMAIL_TENANT_ID;
+
+    // Re-stub fetch after clearAllMocks
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
   });
 
   afterEach(async () => {
@@ -323,10 +452,8 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { threadLookup } = await import("@/server/email/thread-lookup");
       (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      const result = await pollGmail(supabase);
+      const result = await pollGmail();
 
       expect(result.processed).toBe(1);
       expect(result.skipped).toBe(0);
@@ -358,17 +485,13 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { threadLookup } = await import("@/server/email/thread-lookup");
       (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      await pollGmail(supabase);
+      await pollGmail();
 
-      const claimMsgInserts = supabase._inserts.filter(
-        (r) => r.table === "claim_messages"
-      );
+      const claimMsgInserts = dbInserts.filter((r) => r.table === "claim_messages");
       expect(claimMsgInserts).toHaveLength(1);
 
-      const row = claimMsgInserts[0].row;
+      const row = claimMsgInserts[0].values;
       expect(row.direction).toBe("inbound");
       expect(row.provider).toBe("gmail");
       expect(row.status).toBe("received");
@@ -398,13 +521,11 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { threadLookup } = await import("@/server/email/thread-lookup");
       (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      await pollGmail(supabase);
+      await pollGmail();
 
-      const claimMsgInserts = supabase._inserts.filter((r) => r.table === "claim_messages");
-      expect(claimMsgInserts[0].row.body_text).toBe(bodyText);
+      const claimMsgInserts = dbInserts.filter((r) => r.table === "claim_messages");
+      expect(claimMsgInserts[0].values.body_text).toBe(bodyText);
     });
   });
 
@@ -424,10 +545,8 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { checkDuplicate } = await import("@/server/email/dedupe");
       (checkDuplicate as ReturnType<typeof vi.fn>).mockResolvedValue(true);
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      const result = await pollGmail(supabase);
+      const result = await pollGmail();
 
       expect(result.processed).toBe(0);
       expect(result.skipped).toBe(1);
@@ -446,12 +565,10 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { checkDuplicate } = await import("@/server/email/dedupe");
       (checkDuplicate as ReturnType<typeof vi.fn>).mockResolvedValue(true);
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      await pollGmail(supabase);
+      await pollGmail();
 
-      const claimMsgInserts = supabase._inserts.filter((r) => r.table === "claim_messages");
+      const claimMsgInserts = dbInserts.filter((r) => r.table === "claim_messages");
       expect(claimMsgInserts).toHaveLength(0);
     });
   });
@@ -486,20 +603,18 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
         existingCaseId: EXISTING_CASE_ID,
       });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      const result = await pollGmail(supabase);
+      const result = await pollGmail();
 
       expect(result.processed).toBe(1);
 
       // claim_messages must reference the existing case
-      const claimMsgInserts = supabase._inserts.filter((r) => r.table === "claim_messages");
+      const claimMsgInserts = dbInserts.filter((r) => r.table === "claim_messages");
       expect(claimMsgInserts).toHaveLength(1);
-      expect(claimMsgInserts[0].row.case_id).toBe(EXISTING_CASE_ID);
+      expect(claimMsgInserts[0].values.case_id).toBe(EXISTING_CASE_ID);
 
       // No new case should be created
-      const caseInserts = supabase._inserts.filter((r) => r.table === "cases");
+      const caseInserts = dbInserts.filter((r) => r.table === "cases");
       expect(caseInserts).toHaveLength(0);
     });
 
@@ -526,14 +641,12 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
         existingCaseId: "existing-case-001",
       });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      await pollGmail(supabase);
+      await pollGmail();
 
-      const claimMsgInserts = supabase._inserts.filter((r) => r.table === "claim_messages");
+      const claimMsgInserts = dbInserts.filter((r) => r.table === "claim_messages");
       // Angle brackets must be stripped
-      expect(claimMsgInserts[0].row.in_reply_to).toBe("original-msg@gmail.com");
+      expect(claimMsgInserts[0].values.in_reply_to).toBe("original-msg@gmail.com");
     });
   });
 
@@ -558,13 +671,11 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { threadLookup } = await import("@/server/email/thread-lookup");
       (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      await pollGmail(supabase);
+      await pollGmail();
 
-      const claimMsgInserts = supabase._inserts.filter((r) => r.table === "claim_messages");
-      const row = claimMsgInserts[0].row;
+      const claimMsgInserts = dbInserts.filter((r) => r.table === "claim_messages");
+      const row = claimMsgInserts[0].values;
 
       expect(Array.isArray(row.headers)).toBe(true);
       const headers = row.headers as Array<{ name: string; value: string }>;
@@ -592,13 +703,11 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { threadLookup } = await import("@/server/email/thread-lookup");
       (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      await pollGmail(supabase);
+      await pollGmail();
 
-      const claimMsgInserts = supabase._inserts.filter((r) => r.table === "claim_messages");
-      const rawPayload = claimMsgInserts[0].row.raw_payload as typeof gmailMessage;
+      const claimMsgInserts = dbInserts.filter((r) => r.table === "claim_messages");
+      const rawPayload = claimMsgInserts[0].values.raw_payload as typeof gmailMessage;
 
       // raw_payload must be the verbatim Gmail message object
       expect(rawPayload.id).toBe(MSG_ID_1);
@@ -630,13 +739,10 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { threadLookup } = await import("@/server/email/thread-lookup");
       (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      await pollGmail(supabase);
+      await pollGmail();
 
       expect(advancePollState).toHaveBeenCalledWith(
-        supabase,
         "poll-state-uuid",
         HISTORY_ID_NEW
       );
@@ -660,18 +766,15 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { threadLookup } = await import("@/server/email/thread-lookup");
       (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      const result = await pollGmail(supabase);
+      const result = await pollGmail();
 
       expect(result.history_id).toBe(HISTORY_ID_NEW);
     });
   });
 
   // ── AC8: Watermark always advances when historyId moves forward ──────────────
-  // (c57d4c6 changed behavior: always advance to avoid permanent retry loops
-  // where the same failing message re-triggers on every Pub/Sub push)
+  // (behavior: always advance to avoid permanent retry loops)
 
   describe("AC8: watermark advances even when all messages fail", () => {
     it("AC8: advancePollState IS called even when all messages error", async () => {
@@ -691,17 +794,14 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { checkDuplicate } = await import("@/server/email/dedupe");
       (checkDuplicate as ReturnType<typeof vi.fn>).mockResolvedValue(false);
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      const result = await pollGmail(supabase);
+      const result = await pollGmail();
 
       expect(result.errors).toBe(1);
       expect(result.processed).toBe(0);
 
       // Watermark MUST advance so the same failing message isn't retried forever.
       expect(advancePollState).toHaveBeenCalledWith(
-        expect.anything(),
         "poll-state-uuid",
         HISTORY_ID_NEW
       );
@@ -749,10 +849,8 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { threadLookup } = await import("@/server/email/thread-lookup");
       (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      const result = await pollGmail(supabase);
+      const result = await pollGmail();
 
       expect(result.fallback).toBe(true);
       expect(mockMessagesList).toHaveBeenCalled();
@@ -784,19 +882,17 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { threadLookup } = await import("@/server/email/thread-lookup");
       (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      const result = await pollGmail(supabase);
+      const result = await pollGmail();
 
       // Both messages attempted: 1 error + 1 processed
       expect(result.errors).toBe(1);
       expect(result.processed).toBe(1);
 
       // MSG_ID_2 must have been inserted
-      const claimMsgInserts = supabase._inserts.filter((r) => r.table === "claim_messages");
+      const claimMsgInserts = dbInserts.filter((r) => r.table === "claim_messages");
       expect(claimMsgInserts).toHaveLength(1);
-      expect(claimMsgInserts[0].row.provider_message_id).toBe(MSG_ID_2);
+      expect(claimMsgInserts[0].values.provider_message_id).toBe(MSG_ID_2);
     });
 
     it("AC10: no PII in error paths — only error code logged (not body/headers/from_addr)", async () => {
@@ -815,16 +911,15 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { checkDuplicate } = await import("@/server/email/dedupe");
       (checkDuplicate as ReturnType<typeof vi.fn>).mockResolvedValue(false);
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      await pollGmail(supabase);
+      await pollGmail();
 
       // recordPollError should be called but the error string must not contain PII.
       expect(recordPollError).toHaveBeenCalled();
       const calls = (recordPollError as ReturnType<typeof vi.fn>).mock.calls;
       for (const call of calls) {
-        const errorStr = call[2] as string;
+        // recordPollError(id, errorString) — errorString is the second argument
+        const errorStr = call[1] as string;
         // Must not contain email addresses or body content
         expect(errorStr).not.toMatch(/@example\.com/);
         expect(errorStr).not.toMatch(/accident/i);
@@ -834,7 +929,7 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
     });
   });
 
-  // ── AC13: Attachment stored in Supabase Storage ───────────────────────────────
+  // ── AC13: Attachment adapter called for messages with parts ──────────────────
 
   describe("AC13: attachment adapter called for messages with parts", () => {
     it("AC13: adaptGmailAttachments called with correct messageId and parts", async () => {
@@ -869,10 +964,8 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
         "@/server/email/gmail/gmail-attachment-adapter"
       );
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      await pollGmail(supabase);
+      await pollGmail();
 
       expect(adaptGmailAttachments).toHaveBeenCalledWith(
         expect.any(Array),
@@ -903,10 +996,8 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       const { threadLookup } = await import("@/server/email/thread-lookup");
       (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      await pollGmail(supabase);
+      await pollGmail();
 
       expect(mockMessagesModify).toHaveBeenCalledWith({
         userId: "me",
@@ -936,10 +1027,8 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       // mark-as-read fails
       mockMessagesModify.mockRejectedValue(new Error("ModifyError"));
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      const result = await pollGmail(supabase);
+      const result = await pollGmail();
 
       // Non-fatal — message still counted as processed
       expect(result.processed).toBe(1);
@@ -977,10 +1066,8 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
         },
       });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      const result = await pollGmail(supabase);
+      const result = await pollGmail();
 
       expect(result.processed).toBe(0);
       expect(result.skipped).toBe(0);
@@ -1008,15 +1095,11 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
         },
       });
 
-      const supabase = buildSupabaseMock();
-
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
-      const result = await pollGmail(supabase);
+      const result = await pollGmail();
 
       expect(result.errors).toBe(1);
       expect(result.processed).toBe(0);
     });
   });
 });
-
-

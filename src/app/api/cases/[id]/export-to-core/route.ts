@@ -9,14 +9,15 @@
  * IDOR: case must belong to authenticated user's tenant.
  */
 
+import { and, eq } from "drizzle-orm";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
-import { createServerClient } from "@/lib/supabase/server";
+
+import { requireRole } from "@/lib/auth/require-role";
+import { db } from "@/lib/db";
+import { cases, extractedFields, missingDocs } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
-import type { Database } from "@/lib/supabase/types";
-
-type UserRow = Database["public"]["Tables"]["users"]["Row"];
 
 const ParamsSchema = z.object({
   id: z.string().uuid("ID de caso inválido."),
@@ -33,52 +34,40 @@ export async function POST(
   }
   const caseId = paramsParsed.data.id;
 
-  // ── Auth ─────────────────────────────────────────────────────────────────────
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // ── Auth ──────────────────────────────────────────────────────────────────────
+  let ctx: Awaited<ReturnType<typeof requireRole>>;
+  try {
+    ctx = await requireRole("owner", "admin", "specialist", "analyst");
+  } catch (e) {
+    if (e instanceof AppError) return err(e);
+    throw e;
+  }
+  const { userRow } = ctx;
 
-  if (!user) return err(new AppError("MISSING_SESSION"));
-
-   
-  const { data: userRowRaw } = await (supabase as any)
-    .from("users")
-    .select("*")
-    .eq("id", user.id)
-    .single();
-
-  const userRow = userRowRaw as UserRow | null;
-  if (!userRow) return err(new AppError("MISSING_SESSION"));
-
-  // ── Case detail with RLS scoping ─────────────────────────────────────────────
-   
-  const { data: caseRow } = await (supabase as any)
-    .from("cases")
-    .select("*")
-    .eq("id", caseId)
-    .single();
+  // ── Case detail (explicit tenant filter = IDOR protection) ───────────────────
+  const [caseRow] = await db
+    .select()
+    .from(cases)
+    .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
+    .limit(1);
 
   if (!caseRow) return err(new AppError("NOT_FOUND"));
 
-  // ── Extracted fields ──────────────────────────────────────────────────────────
-   
-  const { data: fields } = await (supabase as any)
-    .from("extracted_fields")
-    .select("field_key,field_value,confidence")
-    .eq("case_id", caseId);
+  // ── Extracted fields ─────────────────────────────────────────────────────────
+  const fields = await db
+    .select({ field_key: extractedFields.field_key, field_value: extractedFields.field_value, confidence: extractedFields.confidence })
+    .from(extractedFields)
+    .where(eq(extractedFields.case_id, caseId));
 
-  // ── Missing docs ──────────────────────────────────────────────────────────────
-   
-  const { data: missingDocs } = await (supabase as any)
-    .from("missing_docs")
-    .select("doc_key,requested_at,satisfied_at")
-    .eq("case_id", caseId);
+  // ── Missing docs ─────────────────────────────────────────────────────────────
+  const docs = await db
+    .select({ doc_key: missingDocs.doc_key, requested_at: missingDocs.requested_at, satisfied_at: missingDocs.satisfied_at })
+    .from(missingDocs)
+    .where(eq(missingDocs.case_id, caseId));
 
   // ── Build core-system payload ─────────────────────────────────────────────────
   const payload = {
-    _note:
-      "Payload de integración. En producción este objeto se enviaría al sistema core del asegurador vía HTTP POST.",
+    _note: "Payload de integración. En producción este objeto se enviaría al sistema core del asegurador vía HTTP POST.",
     case_id: caseRow.id,
     policy_number: caseRow.policy_number,
     policyholder_name: caseRow.policyholder_name,
@@ -89,8 +78,8 @@ export async function POST(
     created_at: caseRow.created_at,
     updated_at: caseRow.updated_at,
     closed_at: caseRow.closed_at,
-    extracted_fields: fields ?? [],
-    missing_docs: missingDocs ?? [],
+    extracted_fields: fields,
+    missing_docs: docs,
     exported_at: new Date().toISOString(),
     exported_by: userRow.id,
   };

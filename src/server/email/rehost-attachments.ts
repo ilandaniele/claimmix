@@ -1,6 +1,6 @@
 /**
- * Attachment rehost service — uploads inbound email attachments to Supabase
- * Storage with content-hash deduplication.
+ * Attachment rehost service — uploads inbound email attachments to object
+ * storage with content-hash deduplication.
  *
  * Called synchronously within the inbound email pipeline, bounded by a
  * configurable aggregate budget (default 5 000 ms per IC6).
@@ -16,7 +16,10 @@
  * AC11: Budget exhausted → remaining attachments get reason='rehost_timeout'.
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { claimAttachments } from "@/lib/db/schema";
+import { firstRow } from "@/lib/db/helpers";
 import { computeContentHash, uploadAttachment } from "@/server/storage/claim-attachments-bucket";
 import { validateAttachment, MAX_AGGREGATE_SIZE_BYTES } from "@/server/email/attachment-validator";
 
@@ -56,27 +59,35 @@ function timeoutPromise(ms: number): Promise<never> {
  * AC10: Deduplication — if the same file was attached before, reuse the path.
  */
 async function findExistingByHash(
-  supabase: SupabaseClient,
+  tenantId: string,
   caseId: string,
   contentHash: string
 ): Promise<string | null> {
-  const { data, error } = await (supabase as any)
-    .from("claim_attachments")
-    .select("storage_path")
-    .eq("case_id", caseId)
-    .eq("content_hash", contentHash)
-    .limit(1)
-    .maybeSingle();
+  try {
+    const row = firstRow(
+      await db
+        .select({ storage_path: claimAttachments.storage_path })
+        .from(claimAttachments)
+        .where(
+          and(
+            eq(claimAttachments.tenant_id, tenantId),
+            eq(claimAttachments.case_id, caseId),
+            eq(claimAttachments.content_hash, contentHash)
+          )
+        )
+        .limit(1)
+    );
 
-  if (error || !data) return null;
-  return (data as { storage_path: string | null }).storage_path ?? null;
+    return row?.storage_path ?? null;
+  } catch {
+    // Best-effort dedupe — on lookup failure, fall through to a fresh upload.
+    return null;
+  }
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export interface RehostAttachmentsOpts {
-  /** Service-role Supabase client (bypasses RLS for dedupe query). */
-  supabase: SupabaseClient;
   attachments: EmailAttachment[];
   tenantId: string;
   caseId: string;
@@ -87,7 +98,7 @@ export interface RehostAttachmentsOpts {
 }
 
 /**
- * Rehost each attachment from an inline base64 payload to Supabase Storage.
+ * Rehost each attachment from an inline base64 payload to object storage.
  *
  * Returns one RehostResult per attachment, in the same order as the input array.
  *
@@ -102,7 +113,6 @@ export async function rehostAttachments(
   opts: RehostAttachmentsOpts
 ): Promise<RehostResult[]> {
   const {
-    supabase,
     attachments,
     tenantId,
     caseId,
@@ -146,7 +156,7 @@ export async function rehostAttachments(
     const contentHash = computeContentHash(data);
 
     // ── AC10: dedupe by content_hash within the case ───────────────────────────
-    const existingPath = await findExistingByHash(supabase, caseId, contentHash);
+    const existingPath = await findExistingByHash(tenantId, caseId, contentHash);
     if (existingPath !== null) {
       // File already uploaded for this case — reuse the existing storage path.
       results.push({ stored: true, storagePath: existingPath, contentHash });
@@ -160,7 +170,7 @@ export async function rehostAttachments(
       continue;
     }
 
-    // ── Upload to Supabase Storage within remaining budget ─────────────────────
+    // ── Upload to object storage within remaining budget ───────────────────────
     const remainingAfterDedupe = deadline - Date.now();
     if (remainingAfterDedupe <= 0) {
       results.push({ stored: false, reason: "rehost_timeout" });

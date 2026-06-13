@@ -14,26 +14,169 @@ import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────────────
 
-const { mockRunMockExtractor, mockRunOpenAIExtractor, mockCheckBudget } = vi.hoisted(() => ({
-  mockRunMockExtractor: vi.fn(),
-  mockRunOpenAIExtractor: vi.fn(),
-  mockCheckBudget: vi.fn(),
-}));
+const {
+  mockRunMockExtractor,
+  mockRunOpenAIExtractor,
+  mockCheckBudget,
+  mockResolveExtractionEngine,
+  mockDbHolder,
+} = vi.hoisted(() => {
+  // ── Captured state (must be hoisted so vi.mock factory can close over them) ──
+  const state = {
+    capturedUpdateArgs: [] as Record<string, unknown>[],
+    capturedMissingDocsInsert: false,
+    capturedOutboundInsert: false,
+  };
+
+  /**
+   * Build a mock Drizzle db where:
+   *  - select call #1 → [caseRow]          (cases query)
+   *  - select call #2 → [rawMessageData]   (raw_messages query)
+   *  - select call #3+ → []                (missingDocs existing-keys query)
+   *  - update().set(args) → captures args
+   *  - insert().values() → captures outbound/missingDocs flags
+   */
+  function buildMockDb(
+    caseData: Record<string, unknown>,
+    rawMessageData: { body: string } | null = {
+      body: "El 15/03/2024 tuve un choque en Av. Corrientes al 2400. Adjunto parte amistoso, fotos y licencia.",
+    }
+  ) {
+    state.capturedUpdateArgs = [];
+    state.capturedMissingDocsInsert = false;
+    state.capturedOutboundInsert = false;
+
+    let selectCallIdx = 0;
+
+    const mockSelect = vi.fn().mockImplementation(() => {
+      selectCallIdx++;
+      const idx = selectCallIdx;
+
+      const limitFn = vi.fn().mockImplementation(() => {
+        if (idx === 1) return Promise.resolve([caseData]);
+        // missingDocs select (insertMissingDocsIfAbsent existing-keys check)
+        return Promise.resolve([]);
+      });
+
+      const orderByFn = vi.fn().mockReturnValue({
+        limit: vi.fn().mockImplementation(() => {
+          if (idx === 2) {
+            // raw_messages query
+            return rawMessageData ? Promise.resolve([rawMessageData]) : Promise.resolve([]);
+          }
+          return Promise.resolve([]);
+        }),
+      });
+
+      const whereFn = vi.fn().mockReturnValue({
+        limit: limitFn,
+        orderBy: orderByFn,
+      });
+
+      return { from: vi.fn().mockReturnValue({ where: whereFn }) };
+    });
+
+    const mockUpdate = vi.fn().mockImplementation(() => ({
+      set: vi.fn().mockImplementation((args: Record<string, unknown>) => {
+        state.capturedUpdateArgs.push(args);
+        return { where: vi.fn().mockResolvedValue({ rowCount: 1 }) };
+      }),
+    }));
+
+    const mockInsert = vi.fn().mockImplementation(() => {
+      const valuesChain = {
+        onConflictDoUpdate: vi.fn().mockResolvedValue({ rowCount: 1 }),
+        then: (
+          resolve: (v: unknown) => unknown,
+          reject?: (e: unknown) => unknown
+        ) => Promise.resolve({ rowCount: 1 }).then(resolve, reject),
+        catch: (fn?: (e: unknown) => unknown) =>
+          Promise.resolve({ rowCount: 1 }).catch(fn ?? undefined),
+        finally: (fn?: () => void) =>
+          Promise.resolve({ rowCount: 1 }).finally(fn ?? undefined),
+      };
+
+      return {
+        values: vi.fn().mockImplementation((rows: unknown) => {
+          const firstRow = Array.isArray(rows) ? rows[0] : rows;
+          if (
+            firstRow &&
+            typeof firstRow === "object" &&
+            "template" in (firstRow as object)
+          ) {
+            // outbound_messages insert
+            state.capturedOutboundInsert = true;
+          } else {
+            // missing_docs or extracted_fields insert
+            state.capturedMissingDocsInsert = true;
+          }
+          return valuesChain;
+        }),
+      };
+    });
+
+    return {
+      select: mockSelect,
+      update: mockUpdate,
+      insert: mockInsert,
+      delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({ rowCount: 0 }) }),
+      $count: vi.fn().mockResolvedValue(0),
+    };
+  }
+
+  // Holder exposes state + builder so tests can read captured data and rebuild.
+  const holder = {
+    state,
+    buildMockDb,
+    current: buildMockDb({
+      id: "case-001",
+      status: "procesando",
+      claim_type: "choque",
+      tenant_id: "tenant-001",
+      channel: "email_sim",
+    }),
+  };
+
+  return {
+    mockRunMockExtractor: vi.fn(),
+    mockRunOpenAIExtractor: vi.fn(),
+    mockCheckBudget: vi.fn(),
+    mockResolveExtractionEngine: vi.fn(),
+    mockDbHolder: holder,
+  };
+});
 
 // ── Mock all external dependencies ────────────────────────────────────────────
 
 vi.mock("@/server/ai/mock-extractor", () => ({
   runMockExtractor: mockRunMockExtractor,
+  extractEmailClaimMock: vi.fn(),
 }));
 
 vi.mock("@/server/ai/openai-extractor", () => ({
   runOpenAIExtractor: mockRunOpenAIExtractor,
+  extractEmailClaim: vi.fn(),
   OpenAIExtractionError: class OpenAIExtractionError extends Error {
     constructor(msg: string) {
       super(msg);
       this.name = "OpenAIExtractionError";
     }
   },
+}));
+
+vi.mock("@/server/ai/gemini-extractor", () => ({
+  runGeminiExtractor: vi.fn(),
+  extractEmailClaimGemini: vi.fn(),
+  GeminiExtractionError: class GeminiExtractionError extends Error {
+    constructor(msg: string) {
+      super(msg);
+      this.name = "GeminiExtractionError";
+    }
+  },
+}));
+
+vi.mock("@/server/ai/provider", () => ({
+  resolveExtractionEngine: mockResolveExtractionEngine,
 }));
 
 vi.mock("@/server/ai/budget", () => ({
@@ -56,97 +199,94 @@ vi.mock("@/lib/audit/log", () => ({
     AI_EXTRACTED: "ai.extracted",
     AI_BUDGET_EXCEEDED: "ai.budget_exceeded",
     DOC_RECEIVED: "doc.received",
+    EXTRACTION_COMPLETE: "claim.extraction_complete",
+    SPECIALIST_REQUIRED: "claim.specialist_required",
+    MEMORY_APPLIED: "claim.memory_applied",
   },
 }));
 
-// ── Mock service client factory ────────────────────────────────────────────────
+vi.mock("@/server/matching/customer-matcher", () => ({
+  findCustomerMatches: vi.fn().mockResolvedValue([]),
+}));
 
-/** Track update() calls to verify status transitions. */
-let capturedUpdateArgs: Record<string, unknown>[] = [];
-let capturedMissingDocsUpsert: boolean = false;
-let capturedOutboundInsert: boolean = false;
+vi.mock("@/server/matching/policy-matcher", () => ({
+  findPolicyMatches: vi.fn().mockResolvedValue([]),
+}));
 
-function buildServiceMock(
-  caseData: Record<string, unknown>,
-  rawMessageData: { body: string } | null = { body: "El 15/03/2024 tuve un choque en Av. Corrientes al 2400. Adjunto parte amistoso, fotos y licencia." }
-) {
-  capturedUpdateArgs = [];
-  capturedMissingDocsUpsert = false;
-  capturedOutboundInsert = false;
+vi.mock("@/server/confirmations/orchestrate", () => ({
+  orchestratePostExtraction: vi.fn().mockResolvedValue(undefined),
+}));
 
-  return {
-    from: (table: string) => {
-      if (table === "cases") {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          single: vi.fn().mockResolvedValue({ data: caseData, error: null }),
-          update: vi.fn().mockImplementation((args: Record<string, unknown>) => {
-            capturedUpdateArgs.push(args);
-            return { eq: vi.fn().mockResolvedValue({ error: null }) };
-          }),
-          upsert: vi.fn().mockResolvedValue({ error: null }),
-        };
-      }
-      if (table === "raw_messages") {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockReturnThis(),
-          limit: vi.fn().mockReturnThis(),
-          single: vi.fn().mockResolvedValue({
-            data: rawMessageData,
-            error: rawMessageData ? null : { code: "PGRST116" },
-          }),
-        };
-      }
-      if (table === "extracted_fields") {
-        return { upsert: vi.fn().mockResolvedValue({ error: null }) };
-      }
-      if (table === "missing_docs") {
-        return {
-          upsert: vi.fn().mockImplementation(() => {
-            capturedMissingDocsUpsert = true;
-            return Promise.resolve({ error: null });
-          }),
-        };
-      }
-      if (table === "outbound_messages") {
-        return {
-          insert: vi.fn().mockImplementation(() => {
-            capturedOutboundInsert = true;
-            return Promise.resolve({ error: null });
-          }),
-        };
-      }
-      return {
-        select: vi.fn().mockReturnThis(),
-        insert: vi.fn().mockResolvedValue({ error: null }),
-        upsert: vi.fn().mockResolvedValue({ error: null }),
-        update: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) }),
-        eq: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: null, error: null }),
-      };
-    },
-  };
-}
+vi.mock("@/server/ai/severity-classifier", () => ({
+  classifySeverity: vi.fn().mockReturnValue("medium"),
+  requiresSpecialist: vi.fn().mockReturnValue(false),
+}));
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(),
+vi.mock("@/server/agents/training", () => ({
+  loadAgentTraining: vi.fn().mockResolvedValue(""),
+}));
+
+vi.mock("@/server/training/prompt-rules", () => ({
+  loadActivePromptRules: vi.fn().mockResolvedValue([]),
+  formatPromptRules: vi.fn().mockReturnValue(""),
+}));
+
+vi.mock("@/server/training/examples", () => ({
+  loadApprovedExamples: vi.fn().mockResolvedValue([]),
+  formatApprovedExamples: vi.fn().mockReturnValue(""),
+}));
+
+vi.mock("@/server/training/prompt-version", () => ({
+  getActivePromptVersion: vi.fn().mockResolvedValue({ id: null, version: 0, systemPrompt: null }),
+}));
+
+vi.mock("@/server/training/trainability", () => ({
+  assessTrainability: vi.fn().mockReturnValue({ trainable: false }),
+}));
+
+vi.mock("@/server/training/agent-runs", () => ({
+  logAgentRun: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/server/memory/load", () => ({
+  loadMemoryHints: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@/server/ai/hydrate-fields", () => ({
+  hydrateFieldsFromExtracted: vi.fn().mockReturnValue([]),
+  scrubPiiFromSummary: vi.fn().mockImplementation((x: unknown) => x),
+}));
+
+vi.mock("@/lib/email/claim-parser", () => ({
+  mergeExtractedFields: vi.fn().mockImplementation((a: unknown[]) => a),
+  parseEmailClaimFields: vi.fn().mockReturnValue([]),
+}));
+
+// ── Mock @/lib/db using the hoisted holder ─────────────────────────────────────
+
+vi.mock("@/lib/db", () => ({
+  // Use a getter so tests can swap mockDbHolder.current between runs.
+  get db() {
+    return mockDbHolder.current;
+  },
+  tables: {},
 }));
 
 // ── Import worker after mocks ─────────────────────────────────────────────────
 
 import { runExtractionWorker } from "@/server/worker/extract";
 
-// ── Helper: build mock extraction results ─────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const MOCK_CASE_DATA = {
   id: "case-001",
   status: "procesando",
   claim_type: "choque",
   tenant_id: "tenant-001",
+  channel: "email_sim",
 };
+
+// ── Helper: build mock extraction results ─────────────────────────────────────
 
 function choqueAllFields(confidence = 0.85): ExtractedClaim {
   return {
@@ -196,16 +336,14 @@ function choqueAllLowConfidence(): ExtractedClaim {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("runExtractionWorker", () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
     process.env.MOCK_AI = "true";
     process.env.OPENAI_API_KEY = "";
     mockCheckBudget.mockResolvedValue({ exceeded: false });
-
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    vi.mocked(createServiceClient).mockReturnValue(
-      buildServiceMock(MOCK_CASE_DATA) as unknown as ReturnType<typeof createServiceClient>
-    );
+    mockResolveExtractionEngine.mockResolvedValue("mock");
+    // Reset the db mock with fresh state for the default case.
+    mockDbHolder.current = mockDbHolder.buildMockDb(MOCK_CASE_DATA);
   });
 
   // ── AC5: listo path ────────────────────────────────────────────────────────
@@ -216,7 +354,7 @@ describe("runExtractionWorker", () => {
     await runExtractionWorker("case-001", "tenant-001", "user-001");
 
     expect(mockRunMockExtractor).toHaveBeenCalledOnce();
-    const statusUpdates = capturedUpdateArgs.map((a) => a.status);
+    const statusUpdates = mockDbHolder.state.capturedUpdateArgs.map((a) => a.status);
     expect(statusUpdates).toContain("listo");
     expect(statusUpdates).not.toContain("cerrado");
   });
@@ -225,18 +363,14 @@ describe("runExtractionWorker", () => {
 
   it("AC6: transitions to esperando when required docs missing", async () => {
     mockRunMockExtractor.mockReturnValue(choqueMissingDocs(0.85));
-
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    vi.mocked(createServiceClient).mockReturnValue(
-      buildServiceMock(MOCK_CASE_DATA) as unknown as ReturnType<typeof createServiceClient>
-    );
+    mockDbHolder.current = mockDbHolder.buildMockDb(MOCK_CASE_DATA);
 
     await runExtractionWorker("case-001", "tenant-001", "user-001");
 
-    const statusUpdates = capturedUpdateArgs.map((a) => a.status);
+    const statusUpdates = mockDbHolder.state.capturedUpdateArgs.map((a) => a.status);
     expect(statusUpdates).toContain("esperando");
-    expect(capturedMissingDocsUpsert).toBe(true);
-    expect(capturedOutboundInsert).toBe(true);
+    expect(mockDbHolder.state.capturedMissingDocsInsert).toBe(true);
+    expect(mockDbHolder.state.capturedOutboundInsert).toBe(true);
   });
 
   // ── AC7: escalado path ─────────────────────────────────────────────────────
@@ -246,14 +380,13 @@ describe("runExtractionWorker", () => {
 
     await runExtractionWorker("case-001", "tenant-001", "user-001");
 
-    const statusUpdates = capturedUpdateArgs.map((a) => a.status);
+    const statusUpdates = mockDbHolder.state.capturedUpdateArgs.map((a) => a.status);
     expect(statusUpdates).toContain("escalado");
   });
 
   // ── AC17: Prompt injection containment ─────────────────────────────────────
 
   it("AC17: prompt injection in email body cannot set status to cerrado", async () => {
-    // Even with injected fields, worker only reads extracted field keys, not values for status.
     mockRunMockExtractor.mockReturnValue({
       extraction_model: "mock-v1",
       fields: [
@@ -271,8 +404,7 @@ describe("runExtractionWorker", () => {
 
     await runExtractionWorker("case-001", "tenant-001", "user-001");
 
-    // Verify status was never set to cerrado or procesando.
-    for (const args of capturedUpdateArgs) {
+    for (const args of mockDbHolder.state.capturedUpdateArgs) {
       expect(args.status).not.toBe("cerrado");
       expect(args.status).not.toBe("procesando");
       expect(["listo", "esperando", "escalado"]).toContain(args.status);
@@ -282,8 +414,7 @@ describe("runExtractionWorker", () => {
   // ── AI output invalid → escalado ───────────────────────────────────────────
 
   it("escalates to escalado when extractor throws OpenAIExtractionError", async () => {
-    process.env.MOCK_AI = "false";
-    process.env.OPENAI_API_KEY = "fake-key";
+    mockResolveExtractionEngine.mockResolvedValue("openai");
 
     const { OpenAIExtractionError } = await import("@/server/ai/openai-extractor");
     mockRunOpenAIExtractor.mockRejectedValue(
@@ -292,7 +423,7 @@ describe("runExtractionWorker", () => {
 
     await runExtractionWorker("case-001", "tenant-001", "user-001");
 
-    const statusUpdates = capturedUpdateArgs.map((a) => a.status);
+    const statusUpdates = mockDbHolder.state.capturedUpdateArgs.map((a) => a.status);
     expect(statusUpdates).toContain("escalado");
   });
 
@@ -311,7 +442,6 @@ describe("runExtractionWorker", () => {
       ...stderrSpy.mock.calls.map((c) => String(c[0])),
     ].join("\n");
 
-    // Raw email text should never appear in logs.
     expect(allOutput).not.toContain("El 15/03/2024 tuve un choque en Av. Corrientes");
     expect(allOutput).not.toContain("parte amistoso");
 
@@ -329,7 +459,7 @@ describe("runExtractionWorker", () => {
 
     await runExtractionWorker("case-001", "tenant-001", "user-001");
 
-    const statusUpdates = capturedUpdateArgs.map((a) => a.status);
+    const statusUpdates = mockDbHolder.state.capturedUpdateArgs.map((a) => a.status);
     expect(statusUpdates).toContain("escalado");
     expect(mockRunMockExtractor).not.toHaveBeenCalled();
   });
@@ -337,10 +467,7 @@ describe("runExtractionWorker", () => {
   // ── Case not in procesando → skip ─────────────────────────────────────────
 
   it("skips worker if case is not in procesando status", async () => {
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    vi.mocked(createServiceClient).mockReturnValue(
-      buildServiceMock({ ...MOCK_CASE_DATA, status: "listo" }) as unknown as ReturnType<typeof createServiceClient>
-    );
+    mockDbHolder.current = mockDbHolder.buildMockDb({ ...MOCK_CASE_DATA, status: "listo" });
 
     await runExtractionWorker("case-001", "tenant-001", "user-001");
 
@@ -355,7 +482,7 @@ describe("runExtractionWorker", () => {
     await runExtractionWorker("case-001", "tenant-001", "user-001");
 
     const ALLOWED = new Set(["listo", "esperando", "escalado"]);
-    for (const args of capturedUpdateArgs) {
+    for (const args of mockDbHolder.state.capturedUpdateArgs) {
       if (args.status !== undefined) {
         expect(ALLOWED.has(String(args.status))).toBe(true);
       }

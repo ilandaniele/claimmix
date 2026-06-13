@@ -19,7 +19,9 @@
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq, isNull } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { claimFieldConfirmations, missingDocs } from "@/lib/db/schema";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -81,15 +83,15 @@ export interface GapAnalysisResult {
  *
  * @param caseId         - UUID of the case being analyzed.
  * @param extractedFields - Fields extracted in this run (from ExtractedClaimSchema.fields).
- * @param supabase       - Supabase service-role client (reads claim_field_confirmations).
+ * @param tenantId       - UUID of the tenant (explicit tenant scoping — RLS is gone).
  */
 export async function analyzeEmailClaimGaps(
   caseId: string,
   extractedFields: ExtractedField[],
-  supabase: SupabaseClient
+  tenantId: string
 ): Promise<GapAnalysisResult> {
   // ── 1. Fetch unresolved missing_docs rows ──────────────────────────────────
-  const missingDocKeys = await fetchMissingDocKeys(supabase, caseId);
+  const missingDocKeys = await fetchMissingDocKeys(caseId, tenantId);
 
   // ── 2. Build a map of extracted field values and confidences ──────────────
   const fieldMap = new Map<string, ExtractedField>();
@@ -129,7 +131,7 @@ export async function analyzeEmailClaimGaps(
   }
 
   // ── 4. Fetch pending claim_field_confirmations ────────────────────────────
-  const pendingConfirmations = await fetchPendingConfirmations(supabase, caseId);
+  const pendingConfirmations = await fetchPendingConfirmations(caseId, tenantId);
 
   // ── 5. Build fieldsNeedingConfirmation from pending rows ──────────────────
   const fieldsNeedingConfirmation: FieldNeedingConfirmation[] = pendingConfirmations.map(
@@ -185,31 +187,35 @@ export async function analyzeEmailClaimGaps(
 
 /** Fetch unresolved (satisfied_at IS NULL) doc keys for this case. */
 async function fetchMissingDocKeys(
-  supabase: SupabaseClient,
-  caseId: string
+  caseId: string,
+  tenantId: string
 ): Promise<string[]> {
   try {
-    const { data, error } = await (supabase as any)
-      .from("missing_docs")
-      .select("doc_key")
-      .eq("case_id", caseId)
-      .is("satisfied_at", null);
+    const data = await db
+      .select({ doc_key: missingDocs.doc_key })
+      .from(missingDocs)
+      .where(
+        and(
+          eq(missingDocs.case_id, caseId),
+          eq(missingDocs.tenant_id, tenantId),
+          isNull(missingDocs.satisfied_at)
+        )
+      );
 
-    if (error) {
-      console.error("[gap-analyzer] missing_docs fetch error:", error.code);
-      return [];
-    }
-
-    return (data ?? []).map((row: { doc_key: string }) => row.doc_key);
-  } catch {
+    return data.map((row) => row.doc_key);
+  } catch (err) {
+    const code =
+      (err as { code?: string })?.code ??
+      (err instanceof Error ? err.name : "UnknownError");
+    console.error("[gap-analyzer] missing_docs fetch error:", code);
     return [];
   }
 }
 
 /** Fetch pending (status='pending') claim_field_confirmations for this case. */
 async function fetchPendingConfirmations(
-  supabase: SupabaseClient,
-  caseId: string
+  caseId: string,
+  tenantId: string
 ): Promise<Array<{
   field_key: string;
   proposed_value: string | null;
@@ -217,19 +223,34 @@ async function fetchPendingConfirmations(
   confidence: number;
 }>> {
   try {
-    const { data, error } = await (supabase as any)
-      .from("claim_field_confirmations")
-      .select("field_key,proposed_value,conflict_with_value,confidence")
-      .eq("case_id", caseId)
-      .eq("status", "pending");
+    // Column names in the Neon schema are field_name / suggested_value —
+    // aliased here to preserve the internal field_key / proposed_value shape.
+    const data = await db
+      .select({
+        field_key: claimFieldConfirmations.field_name,
+        proposed_value: claimFieldConfirmations.suggested_value,
+        conflict_with_value: claimFieldConfirmations.conflict_with_value,
+        confidence: claimFieldConfirmations.confidence,
+      })
+      .from(claimFieldConfirmations)
+      .where(
+        and(
+          eq(claimFieldConfirmations.case_id, caseId),
+          eq(claimFieldConfirmations.tenant_id, tenantId),
+          eq(claimFieldConfirmations.status, "pending")
+        )
+      );
 
-    if (error) {
-      console.error("[gap-analyzer] claim_field_confirmations fetch error:", error.code);
-      return [];
-    }
-
-    return data ?? [];
-  } catch {
+    // numeric columns come back as strings from Drizzle — normalize to number.
+    return data.map((row) => ({
+      ...row,
+      confidence: Number(row.confidence),
+    }));
+  } catch (err) {
+    const code =
+      (err as { code?: string })?.code ??
+      (err instanceof Error ? err.name : "UnknownError");
+    console.error("[gap-analyzer] claim_field_confirmations fetch error:", code);
     return [];
   }
 }

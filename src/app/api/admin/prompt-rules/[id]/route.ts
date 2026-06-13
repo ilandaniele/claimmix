@@ -8,7 +8,10 @@
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { tables } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
@@ -40,12 +43,24 @@ const UpdateRuleSchema = z
     message: "Nada para actualizar.",
   });
 
+const t = tables.agentPromptRules;
+
+const RULE_COLUMNS = {
+  id: t.id,
+  title: t.title,
+  rule_text: t.rule_text,
+  rule_type: t.rule_type,
+  active: t.active,
+  created_at: t.created_at,
+  updated_at: t.updated_at,
+};
+
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { supabase, user, userRow } = await requireAdmin();
+    const { db, user, userRow } = await requireAdmin();
 
     const rl = await rateLimit(
       buildUserKey(user.id, "prompt-rules"),
@@ -65,28 +80,54 @@ export async function PATCH(
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
     }
 
-    // Tenant-scoped fetch first (IDOR-safe 404).
-    const { data: existing } = await (supabase as any)
-      .from("agent_prompt_rules")
-      .select("id,active")
-      .eq("id", parsedParams.data.id)
-      .eq("tenant_id", userRow.tenant_id)
-      .maybeSingle();
+    // Tenant-scoped fetch first (IDOR-safe 404). A DB error here degrades to
+    // NOT_FOUND, matching the previous (error-ignoring) supabase behavior.
+    let existing: { id: string; active: boolean } | null;
+    try {
+      existing = firstRow(
+        await db
+          .select({ id: t.id, active: t.active })
+          .from(t)
+          .where(
+            and(
+              eq(t.id, parsedParams.data.id),
+              eq(t.tenant_id, userRow.tenant_id)
+            )
+          )
+          .limit(1)
+      );
+    } catch {
+      existing = null;
+    }
 
     if (!existing) {
       return err(new AppError("NOT_FOUND", "La regla no existe."));
     }
 
-    const { data, error } = await (supabase as any)
-      .from("agent_prompt_rules")
-      .update(parsed.data)
-      .eq("id", parsedParams.data.id)
-      .eq("tenant_id", userRow.tenant_id)
-      .select("id,title,rule_text,rule_type,active,created_at,updated_at")
-      .single();
+    let data;
+    try {
+      data = firstRow(
+        await db
+          .update(t)
+          .set(parsed.data)
+          .where(
+            and(
+              eq(t.id, parsedParams.data.id),
+              eq(t.tenant_id, userRow.tenant_id)
+            )
+          )
+          .returning(RULE_COLUMNS)
+      );
+    } catch (e) {
+      console.error(
+        "[admin/prompt-rules PATCH]",
+        (e as { code?: string })?.code ?? "unknown"
+      );
+      return err(new AppError("INTERNAL_ERROR"));
+    }
 
-    if (error || !data) {
-      console.error("[admin/prompt-rules PATCH]", error?.code ?? "no_data");
+    if (!data) {
+      console.error("[admin/prompt-rules PATCH]", "no_data");
       return err(new AppError("INTERNAL_ERROR"));
     }
 

@@ -3,7 +3,7 @@
  *
  * AC18: Supports filters: customer_id, policy_number, status (active/inactive/expired/cancelled).
  * Returns: id, policy_number, policy_type, status, customer_id, customer full_name (joined).
- * RLS is enforced by the user-scoped Supabase client.
+ * Tenant isolation is enforced with an explicit tenant_id filter (RLS is gone).
  *
  * Auth: yes (any authenticated user)
  * Rate limit: CASES_API config (100/min)
@@ -12,7 +12,11 @@
  */
 
 import { type NextRequest } from "next/server";
-import { createServerClient } from "@/lib/supabase/server";
+import { and, desc, eq, type SQL } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { customers, policies, users } from "@/lib/db/schema";
+import { getSessionContext } from "@/lib/auth/session";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
@@ -36,10 +40,8 @@ const PolicyQuerySchema = z.object({
 
 export async function GET(request: NextRequest) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await getSessionContext();
+  const user = session?.user;
 
   if (!user) {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
@@ -48,14 +50,16 @@ export async function GET(request: NextRequest) {
   // ── 1b. Role check — admin or specialist only (API5) ─────────────────────
   // Policy data contains sensitive information (policy_number, coverage details).
   // Only privileged roles may enumerate this endpoint. Analysts may not access it.
-  const { data: userRow } = await (supabase as any)
-    .from("users")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const userRow = firstRow(
+    await db
+      .select({ role: users.role, tenant_id: users.tenant_id })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1)
+  );
 
   const role: string = userRow?.role ?? "analyst";
-  if (!["admin", "specialist"].includes(role)) {
+  if (!userRow || !["admin", "specialist"].includes(role)) {
     return err(
       new AppError(
         "FORBIDDEN_ROLE",
@@ -63,6 +67,8 @@ export async function GET(request: NextRequest) {
       )
     );
   }
+
+  const tenantId = userRow.tenant_id;
 
   // ── 2. Rate limit ─────────────────────────────────────────────────────────
   const rlKey = buildUserKey(user.id, "policies-list");
@@ -94,59 +100,47 @@ export async function GET(request: NextRequest) {
 
   const { customer_id, policy_number, status, page, per_page } = parsed.data;
 
-  // ── 4. Query (RLS-scoped) ─────────────────────────────────────────────────
+  // ── 4. Query (explicitly tenant-scoped) ───────────────────────────────────
   try {
-    // Join with customers to return customer_name.
-    // Supabase syntax: "policies(*,customers(full_name)"
-    const selectColumns =
-      "id, policy_number, policy_type, status, customer_id, valid_from, valid_to, created_at, customers(full_name)";
+    const conditions: SQL[] = [eq(policies.tenant_id, tenantId)];
+    if (customer_id) conditions.push(eq(policies.customer_id, customer_id));
+    if (policy_number) conditions.push(eq(policies.policy_number, policy_number));
+    if (status) conditions.push(eq(policies.status, status));
+
+    const where = and(...conditions);
 
     // Count query
-    let countQ = (supabase as any)
-      .from("policies")
-      .select("id", { count: "exact", head: true });
+    const total = await db.$count(policies, where);
 
-    if (customer_id) countQ = countQ.eq("customer_id", customer_id);
-    if (policy_number) countQ = countQ.eq("policy_number", policy_number);
-    if (status) countQ = countQ.eq("status", status);
-
-    const { count, error: countError } = await countQ;
-    if (countError) {
-      console.error("[GET /api/policies] count error:", countError.code);
-      return err(new AppError("INTERNAL_ERROR"));
-    }
-
-    const total = count ?? 0;
-
-    // Data query with customer join
-    let dataQ = (supabase as any)
-      .from("policies")
-      .select(selectColumns)
-      .order("created_at", { ascending: false });
-
-    if (customer_id) dataQ = dataQ.eq("customer_id", customer_id);
-    if (policy_number) dataQ = dataQ.eq("policy_number", policy_number);
-    if (status) dataQ = dataQ.eq("status", status);
-
-    // Pagination
+    // Data query with customer join (schema columns are start_date/end_date;
+    // the API contract keeps exposing them as valid_from/valid_to).
     const from = (page - 1) * per_page;
-    const to = from + per_page - 1;
-    dataQ = dataQ.range(from, to);
+    const rawData = await db
+      .select({
+        id: policies.id,
+        policy_number: policies.policy_number,
+        policy_type: policies.policy_type,
+        status: policies.status,
+        customer_id: policies.customer_id,
+        valid_from: policies.start_date,
+        valid_to: policies.end_date,
+        created_at: policies.created_at,
+        customer_name: customers.full_name,
+      })
+      .from(policies)
+      .leftJoin(customers, eq(customers.id, policies.customer_id))
+      .where(where)
+      .orderBy(desc(policies.created_at))
+      .limit(per_page)
+      .offset(from);
 
-    const { data: rawData, error: dataError } = await dataQ;
-    if (dataError) {
-      console.error("[GET /api/policies] data error:", dataError.code);
-      return err(new AppError("INTERNAL_ERROR"));
-    }
-
-    // Flatten the nested customers join into a customer_name field.
-    const data = (rawData ?? []).map((row: any) => ({
+    const data = rawData.map((row) => ({
       id: row.id,
       policy_number: row.policy_number,
       policy_type: row.policy_type,
       status: row.status,
       customer_id: row.customer_id,
-      customer_name: row.customers?.full_name ?? null,
+      customer_name: row.customer_name ?? null,
       valid_from: row.valid_from,
       valid_to: row.valid_to,
       created_at: row.created_at,

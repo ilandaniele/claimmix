@@ -8,12 +8,16 @@
  *      Re-analysis temporarily sets status to "procesando" then the worker transitions it.
  *
  * LLM10: Budget check before running extractor.
+ * RLS is gone — every query filters explicitly by the caller's tenant_id.
  */
 
 import { type NextRequest, after } from "next/server";
 import { z } from "zod";
-import { createServerClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
+import { and, eq } from "drizzle-orm";
+import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { cases } from "@/lib/db/schema";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
 import { writeAuditLog } from "@/lib/audit/log";
@@ -23,9 +27,6 @@ import {
   rateLimit,
   getClientIp,
 } from "@/lib/rate-limit/index";
-import type { Database } from "@/lib/supabase/types";
-
-type UserRow = Database["public"]["Tables"]["users"]["Row"];
 
 const ParamsSchema = z.object({
   id: z.string().uuid("ID de caso inválido."),
@@ -46,25 +47,16 @@ export async function POST(
   const caseId = paramsParsed.data.id;
 
   // ── Auth ─────────────────────────────────────────────────────────────────────
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return err(new AppError("MISSING_SESSION"));
-
-   
-  const { data: userRowRaw } = await (supabase as any)
-    .from("users")
-    .select("*")
-    .eq("id", user.id)
-    .single();
-
-  const userRow = userRowRaw as UserRow | null;
-  if (!userRow) return err(new AppError("MISSING_SESSION"));
+  let ctx: RoleContext;
+  try {
+    ctx = await requireRole(...ALL_ROLES);
+  } catch {
+    return err(new AppError("MISSING_SESSION"));
+  }
+  const { userRow } = ctx;
 
   // Viewers are read-only.
-  if ((userRow as { role?: string }).role === "viewer") {
+  if (userRow.role === "viewer") {
     return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
   }
 
@@ -84,13 +76,19 @@ export async function POST(
     );
   }
 
-  // ── Verify case belongs to tenant (IDOR) ─────────────────────────────────────
-   
-  const { data: caseRow } = await (supabase as any)
-    .from("cases")
-    .select("id,status,tenant_id")
-    .eq("id", caseId)
-    .single();
+  // ── Verify case belongs to tenant (IDOR — explicit tenant_id filter) ─────────
+  let caseRow: { id: string; status: string } | null;
+  try {
+    caseRow = firstRow(
+      await db
+        .select({ id: cases.id, status: cases.status })
+        .from(cases)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
+        .limit(1)
+    );
+  } catch {
+    caseRow = null;
+  }
 
   if (!caseRow) return err(new AppError("NOT_FOUND"));
   if (caseRow.status === "cerrado") {
@@ -104,15 +102,14 @@ export async function POST(
   }
 
   // ── Reset case to procesando ──────────────────────────────────────────────────
-  const serviceSupabase = createServiceClient();
-   
-  const { error: resetError } = await (serviceSupabase as any)
-    .from("cases")
-    .update({ status: "procesando", updated_at: new Date().toISOString() })
-    .eq("id", caseId);
-
-  if (resetError) {
-    console.error("[re-analyze] Failed to reset case:", resetError.code, caseId);
+  try {
+    await db
+      .update(cases)
+      .set({ status: "procesando", updated_at: new Date().toISOString() })
+      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)));
+  } catch (e) {
+    const code = (e as { code?: string })?.code ?? (e instanceof Error ? e.name : "UnknownError");
+    console.error("[re-analyze] Failed to reset case:", code, caseId);
     return err(new AppError("INTERNAL_ERROR"));
   }
 

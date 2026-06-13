@@ -20,7 +20,11 @@
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
 import { requireRole, TRAINING_APPROVER_ROLES } from "@/lib/auth/require-role";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { cases } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { approveTrainingExample } from "@/server/training/examples";
@@ -43,9 +47,7 @@ export async function POST(
 ) {
   try {
     // ── 1. Auth + role (only admin/specialist/owner can confirm training) ───
-    const { supabase, user, userRow } = await requireRole(
-      ...TRAINING_APPROVER_ROLES
-    );
+    const { user, userRow } = await requireRole(...TRAINING_APPROVER_ROLES);
 
     // ── 2. Rate limit ────────────────────────────────────────────────────────
     const rl = await rateLimit(
@@ -73,12 +75,14 @@ export async function POST(
       throw new AppError("VALIDATION_FAILED", undefined, parsedBody.error.flatten());
     }
 
-    // ── 4. IDOR check — case must exist within the user's tenant (RLS) ───────
-    const { data: caseRow } = await (supabase as any)
-      .from("cases")
-      .select("id")
-      .eq("id", caseId)
-      .maybeSingle();
+    // ── 4. IDOR check — case must exist within the user's tenant ─────────────
+    const caseRow = firstRow(
+      await db
+        .select({ id: cases.id })
+        .from(cases)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
+        .limit(1)
+    );
     if (!caseRow) {
       return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
     }
@@ -86,7 +90,7 @@ export async function POST(
     // ── 5. Resolve the agent run ─────────────────────────────────────────────
     let agentRunId = parsedBody.data.agent_run_id ?? null;
     if (!agentRunId) {
-      const latest = await getLatestAgentRun(supabase as any, caseId);
+      const latest = await getLatestAgentRun(userRow.tenant_id, caseId);
       agentRunId = latest?.id ?? null;
     }
     if (!agentRunId) {
@@ -98,8 +102,8 @@ export async function POST(
       );
     }
 
-    // ── 6. Approve (RLS-scoped client — tenant isolation enforced by DB) ─────
-    const result = await approveTrainingExample(supabase as any, {
+    // ── 6. Approve (explicit tenant scoping enforced inside the module) ──────
+    const result = await approveTrainingExample({
       tenantId: userRow.tenant_id,
       agentRunId,
       approvedBy: user.id,

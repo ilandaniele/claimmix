@@ -1,94 +1,50 @@
 /**
  * GET  /api/admin/users  — list analysts in the current tenant (role=admin only)
- * POST /api/admin/users  — invite a new analyst via Supabase Admin API (role=admin only)
+ * POST /api/admin/users  — create a new user via Better Auth (role=admin only)
  *
- * AC17: Only admins can access this endpoint; others get 403 FORBIDDEN_ROLE.
- * RLS: The `users` table is tenant-scoped. Service-role is needed for POST to
- *       call supabase.auth.admin.createUser() — user-scoped client cannot create users.
- *
- * NOTE: POST requires SUPABASE_SERVICE_ROLE_KEY. If it is not set, the endpoint
- * returns 501 and logs a warning. This is documented in implementation-notes.md.
+ * NOTE: POST creates the auth user then updates the profile to the correct tenant/role.
+ * The user receives a confirmation email from Better Auth (if email is configured).
  */
 
+import { and, eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { createServerClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
+
+import { requireAdmin } from "@/lib/auth/require-admin";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { authUsers, users } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
-
-// ── Auth guard helper ─────────────────────────────────────────────────────────
-
-async function requireAdmin() {
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-    error: authErr,
-  } = await supabase.auth.getUser();
-
-  if (!user || authErr) {
-    throw new AppError("MISSING_SESSION");
-  }
-
-   
-  const { data: userRow } = await (supabase as any)
-    .from("users")
-    .select("id, tenant_id, role")
-    .eq("id", user.id)
-    .single();
-
-  if (!userRow) throw new AppError("MISSING_SESSION");
-  if (userRow.role !== "admin" && userRow.role !== "owner") {
-    throw new AppError("FORBIDDEN_ROLE");
-  }
-
-  return { supabase, user, userRow };
-}
 
 // ── GET /api/admin/users ──────────────────────────────────────────────────────
 
 export async function GET() {
   try {
-    const { supabase, userRow } = await requireAdmin();
+    const { userRow } = await requireAdmin();
 
-     
-    const { data, error } = await (supabase as any)
-      .from("users")
-      .select("id, full_name, role, created_at")
-      .eq("tenant_id", userRow.tenant_id)
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      console.error("[admin/users GET]", error.code);
-      return err("INTERNAL_ERROR");
-    }
-
-    // Fetch emails from auth.users via service client (RLS-bypassed for admin access).
-    // We join on id to get the email field which is only in auth.users.
-    let authUsers: Array<{ id: string; email?: string }> = [];
-    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      const serviceClient = createServiceClient();
-      const { data: { users: authUsersData } = { users: [] } } =
-        await serviceClient.auth.admin.listUsers({ perPage: 1000 });
-      authUsers = authUsersData ?? [];
-    }
-
-    const emailById: Record<string, string> = {};
-    for (const u of authUsers) {
-      emailById[u.id] = u.email ?? "";
-    }
-
-    const rows = (data ?? []).map(
-      (u: { id: string; full_name: string; role: string; created_at: string }) => ({
-        id: u.id,
-        full_name: u.full_name,
-        email: emailById[u.id] ?? "",
-        role: u.role,
-        created_at: u.created_at,
+    const rows = await db
+      .select({
+        id: users.id,
+        full_name: users.full_name,
+        role: users.role,
+        created_at: users.created_at,
+        email: authUsers.email,
       })
-    );
+      .from(users)
+      .leftJoin(authUsers, eq(users.id, authUsers.id))
+      .where(eq(users.tenant_id, userRow.tenant_id))
+      .orderBy(users.created_at);
 
-    return ok({ users: rows });
+    return ok({
+      users: rows.map((r) => ({
+        id: r.id,
+        full_name: r.full_name,
+        email: r.email ?? "",
+        role: r.role,
+        created_at: r.created_at,
+      })),
+    });
   } catch (e) {
     return err(e);
   }
@@ -100,16 +56,12 @@ const CreateUserSchema = z.object({
   full_name: z.string().min(2).max(100),
   email: z.string().email(),
   role: z.enum(["owner", "admin", "specialist", "analyst", "viewer"]),
+  password: z.string().min(8).optional(),
 });
 
 export async function POST(request: NextRequest) {
   try {
-    const { userRow } = await requireAdmin();
-
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      console.warn("[admin/users POST] SUPABASE_SERVICE_ROLE_KEY not set — cannot create users");
-      return err("INTERNAL_ERROR");
-    }
+    const { userRow: adminRow } = await requireAdmin();
 
     const body = await request.json();
     const parsed = CreateUserSchema.safeParse(body);
@@ -118,49 +70,37 @@ export async function POST(request: NextRequest) {
     }
 
     const { full_name, email, role } = parsed.data;
-    const serviceClient = createServiceClient();
+    // Generate a temporary password if none provided
+    const password = parsed.data.password ?? crypto.randomUUID().replace(/-/g, "");
 
-    // Create auth user — Supabase sends a magic-link/invite email automatically.
-    const { data: newAuthUser, error: createErr } =
-      await serviceClient.auth.admin.createUser({
-        email,
-        email_confirm: true,
-        user_metadata: { full_name },
-      });
+    // Create auth user via Better Auth
+    const result = await auth.api.signUpEmail({
+      body: { name: full_name, email, password },
+      // No request headers — server-side creation skips cookie setting
+      headers: new Headers(),
+    });
 
-    if (createErr || !newAuthUser.user) {
-      console.error("[admin/users POST] auth.admin.createUser:", createErr?.message ?? "unknown");
-      return err("INTERNAL_ERROR");
-    }
+    const newUserId = result.user.id;
 
-    // Insert public.users row for the new analyst.
-    const { error: insertErr } = await serviceClient
-      .from("users" as never)
-      .insert({
-        id: newAuthUser.user.id,
-        tenant_id: userRow.tenant_id,
-        full_name,
-        role,
-      } as never);
-
-    if (insertErr) {
-      console.error("[admin/users POST] insert users row:", insertErr.code);
-      // Best-effort: clean up auth user so we don't leave an orphan.
-      await serviceClient.auth.admin.deleteUser(newAuthUser.user.id);
-      return err("INTERNAL_ERROR");
-    }
+    // Update the provisioned profile to the admin's tenant and the requested role
+    await db
+      .update(users)
+      .set({ tenant_id: adminRow.tenant_id, full_name, role })
+      .where(and(eq(users.id, newUserId)));
 
     return ok(
       {
-        id: newAuthUser.user.id,
+        id: newUserId,
         email,
         full_name,
         role,
-        message: "Usuario creado. Se enviará un correo de invitación.",
+        message: "Usuario creado. La contraseña temporal debe ser cambiada en el primer inicio de sesión.",
       },
       201
     );
   } catch (e) {
-    return err(e);
+    if (e instanceof AppError) return err(e);
+    console.error("[admin/users POST]", e instanceof Error ? e.message : "unknown");
+    return err(new AppError("INTERNAL_ERROR", "No se pudo crear el usuario."));
   }
 }

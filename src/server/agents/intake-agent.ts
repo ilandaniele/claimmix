@@ -1,7 +1,8 @@
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { createServiceClient } from "@/lib/supabase/service";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 
@@ -63,16 +64,26 @@ type CaseRow = {
  * write a non-PII decision audit event, and delegate to the extraction worker.
  */
 export async function runIntakeAgent(input: IntakeAgentInput): Promise<IntakeAgentResult> {
-  const supabase = createServiceClient();
+  let caseRow: CaseRow | null;
+  try {
+    const c = tables.cases;
+    caseRow = (firstRow(
+      await db
+        .select({
+          id: c.id,
+          tenant_id: c.tenant_id,
+          channel: c.channel,
+          status: c.status,
+        })
+        .from(c)
+        .where(and(eq(c.id, input.caseId), eq(c.tenant_id, input.tenantId)))
+        .limit(1)
+    ) as CaseRow | null);
+  } catch {
+    caseRow = null;
+  }
 
-  const { data: caseRow, error } = await (supabase as any)
-    .from("cases")
-    .select("id,tenant_id,channel,status")
-    .eq("id", input.caseId)
-    .eq("tenant_id", input.tenantId)
-    .single();
-
-  if (error || !caseRow) {
+  if (!caseRow) {
     return {
       ok: false,
       caseId: input.caseId,
@@ -81,7 +92,7 @@ export async function runIntakeAgent(input: IntakeAgentInput): Promise<IntakeAge
     };
   }
 
-  const row = caseRow as CaseRow;
+  const row = caseRow;
   const action = chooseAction(row.channel);
 
   await writeAuditLog({
@@ -138,14 +149,13 @@ export async function createWhatsAppIntakeAndRunAgent(
 export async function createWhatsAppIntake(
   input: WhatsAppIntakeInput
 ): Promise<StoredWhatsAppIntake> {
-  const supabase = createServiceClient();
   const threadId = input.threadId?.trim() || input.from.trim();
   const providerMessageId = input.providerMessageId?.trim() || null;
 
-  const existingCaseId = await findExistingWhatsAppCase(supabase, input.tenantId, threadId);
-  const caseId = existingCaseId ?? await createWhatsAppCase(supabase, input.tenantId, threadId);
+  const existingCaseId = await findExistingWhatsAppCase(input.tenantId, threadId);
+  const caseId = existingCaseId ?? await createWhatsAppCase(input.tenantId, threadId);
 
-  await insertWhatsAppMessage(supabase, {
+  await insertWhatsAppMessage({
     caseId,
     tenantId: input.tenantId,
     from: input.from,
@@ -181,58 +191,73 @@ function chooseAction(channel: IntakeChannel): IntakeAgentResult["action"] {
 }
 
 async function findExistingWhatsAppCase(
-  supabase: SupabaseClient,
   tenantId: string,
   threadId: string
 ): Promise<string | null> {
-  const { data } = await (supabase as any)
-    .from("cases")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("channel", "whatsapp")
-    .eq("email_thread_id", threadId)
-    .in("status", [
-      "recibido",
-      "info_faltante",
-      "confirmacion_pendiente",
-      "requiere_especialista",
-      "listo",
-      "listo_para_core",
-    ])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  try {
+    const c = tables.cases;
+    const data = firstRow(
+      await db
+        .select({ id: c.id })
+        .from(c)
+        .where(
+          and(
+            eq(c.tenant_id, tenantId),
+            eq(c.channel, "whatsapp"),
+            eq(c.email_thread_id, threadId),
+            inArray(c.status, [
+              "recibido",
+              "info_faltante",
+              "confirmacion_pendiente",
+              "requiere_especialista",
+              "listo",
+              "listo_para_core",
+            ])
+          )
+        )
+        .orderBy(desc(c.created_at))
+        .limit(1)
+    );
 
-  return data?.id ?? null;
+    return data?.id ?? null;
+  } catch {
+    // Supabase swallowed query errors here (data would be null) — preserve that.
+    return null;
+  }
 }
 
 async function createWhatsAppCase(
-  supabase: SupabaseClient,
   tenantId: string,
   threadId: string
 ): Promise<string> {
-  const { data, error } = await (supabase as any)
-    .from("cases")
-    .insert({
-      tenant_id: tenantId,
-      channel: "whatsapp",
-      status: "recibido",
-      email_thread_id: threadId,
-      is_claim: true,
-      claim_type: null,
-    })
-    .select("id")
-    .single();
-
-  if (error || !data) {
-    throw new Error(`whatsapp_case_insert_failed:${error?.code ?? "no_data"}`);
+  let data: { id: string } | null;
+  try {
+    data = firstRow(
+      await db
+        .insert(tables.cases)
+        .values({
+          tenant_id: tenantId,
+          channel: "whatsapp",
+          status: "recibido",
+          email_thread_id: threadId,
+          is_claim: true,
+          claim_type: null,
+        })
+        .returning({ id: tables.cases.id })
+    );
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    throw new Error(`whatsapp_case_insert_failed:${code ?? "no_data"}`);
   }
 
-  return data.id as string;
+  if (!data) {
+    throw new Error(`whatsapp_case_insert_failed:no_data`);
+  }
+
+  return data.id;
 }
 
 async function insertWhatsAppMessage(
-  supabase: SupabaseClient,
   input: {
     caseId: string;
     tenantId: string;
@@ -244,9 +269,8 @@ async function insertWhatsAppMessage(
 ): Promise<void> {
   const now = new Date().toISOString();
 
-  const { error: claimMessageError } = await (supabase as any)
-    .from("claim_messages")
-    .insert({
+  try {
+    await db.insert(tables.claimMessages).values({
       case_id: input.caseId,
       tenant_id: input.tenantId,
       direction: "inbound",
@@ -262,15 +286,14 @@ async function insertWhatsAppMessage(
       status: "received",
       received_at: now,
     });
-
-  if (claimMessageError?.code === "23505") return;
-  if (claimMessageError) {
-    throw new Error(`whatsapp_claim_message_insert_failed:${claimMessageError.code}`);
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    if (code === "23505") return;
+    throw new Error(`whatsapp_claim_message_insert_failed:${code}`);
   }
 
-  await (supabase as any)
-    .from("raw_messages")
-    .insert({
+  try {
+    await db.insert(tables.rawMessages).values({
       case_id: input.caseId,
       tenant_id: input.tenantId,
       channel: "whatsapp",
@@ -279,4 +302,7 @@ async function insertWhatsAppMessage(
       body: input.body,
       received_at: now,
     });
+  } catch {
+    // The supabase call ignored insert errors here — preserve that behaviour.
+  }
 }

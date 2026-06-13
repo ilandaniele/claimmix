@@ -19,7 +19,9 @@
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
+import { countRows, firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { UNSAFE_BLOCKING_REASONS } from "./trainability";
 
@@ -46,11 +48,11 @@ const EXAMPLE_BODY_CHARS = 1_200;
  * slots with the newest approved examples of any type. Tenant-scoped.
  */
 export async function loadApprovedExamples(
-  supabase: SupabaseClient,
   tenantId: string,
   claimType?: string | null
 ): Promise<ApprovedExample[]> {
   try {
+    const t = tables.trainingExamples;
     const collected: Array<{
       id: string;
       input_payload: { subject?: string; body?: string };
@@ -58,26 +60,37 @@ export async function loadApprovedExamples(
     }> = [];
 
     if (claimType) {
-      const { data } = await (supabase as any)
-        .from("training_examples")
-        .select("id,input_payload,expected_output")
-        .eq("tenant_id", tenantId)
-        .eq("status", "approved")
-        .eq("claim_type", claimType)
-        .order("approved_at", { ascending: false })
-        .limit(MAX_EXAMPLES);
-      if (data) collected.push(...data);
+      const data = (await db
+        .select({
+          id: t.id,
+          input_payload: t.input_payload,
+          expected_output: t.expected_output,
+        })
+        .from(t)
+        .where(
+          and(
+            eq(t.tenant_id, tenantId),
+            eq(t.status, "approved"),
+            eq(t.claim_type, claimType)
+          )
+        )
+        .orderBy(desc(t.approved_at))
+        .limit(MAX_EXAMPLES)) as typeof collected;
+      collected.push(...data);
     }
 
     if (collected.length < MAX_EXAMPLES) {
-      const { data } = await (supabase as any)
-        .from("training_examples")
-        .select("id,input_payload,expected_output")
-        .eq("tenant_id", tenantId)
-        .eq("status", "approved")
-        .order("approved_at", { ascending: false })
-        .limit(MAX_EXAMPLES * 2);
-      for (const row of data ?? []) {
+      const data = (await db
+        .select({
+          id: t.id,
+          input_payload: t.input_payload,
+          expected_output: t.expected_output,
+        })
+        .from(t)
+        .where(and(eq(t.tenant_id, tenantId), eq(t.status, "approved")))
+        .orderBy(desc(t.approved_at))
+        .limit(MAX_EXAMPLES * 2)) as typeof collected;
+      for (const row of data) {
         if (collected.length >= MAX_EXAMPLES) break;
         if (!collected.some((c) => c.id === row.id)) collected.push(row);
       }
@@ -136,22 +149,40 @@ export interface ApproveTrainingExampleParams {
  * - May queue a draft fine-tuning job (batch threshold) — never trains.
  */
 export async function approveTrainingExample(
-  supabase: SupabaseClient,
   params: ApproveTrainingExampleParams
 ): Promise<ApproveResult> {
   const { tenantId, agentRunId, approvedBy } = params;
 
   // ── 1. Load the agent run ───────────────────────────────────────────────────
-  const { data: run, error: runError } = await (supabase as any)
-    .from("agent_runs")
-    .select(
-      "id,case_id,claim_message_id,input_payload,output_payload,blocking_reasons"
-    )
-    .eq("id", agentRunId)
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
+  let run: {
+    id: string;
+    case_id: string | null;
+    claim_message_id: string | null;
+    input_payload: unknown;
+    output_payload: unknown;
+    blocking_reasons: unknown;
+  } | null;
+  try {
+    const t = tables.agentRuns;
+    run = firstRow(
+      await db
+        .select({
+          id: t.id,
+          case_id: t.case_id,
+          claim_message_id: t.claim_message_id,
+          input_payload: t.input_payload,
+          output_payload: t.output_payload,
+          blocking_reasons: t.blocking_reasons,
+        })
+        .from(t)
+        .where(and(eq(t.id, agentRunId), eq(t.tenant_id, tenantId)))
+        .limit(1)
+    );
+  } catch {
+    run = null;
+  }
 
-  if (runError || !run) {
+  if (!run) {
     return { ok: false, reason: "run_not_found" };
   }
 
@@ -178,19 +209,35 @@ export async function approveTrainingExample(
   let claimType: string | null = null;
 
   if (run.case_id) {
-    const [{ data: fields }, { data: caseRow }] = await Promise.all([
-      (supabase as any)
-        .from("extracted_fields")
-        .select("field_key,field_value,confidence")
-        .eq("case_id", run.case_id),
-      (supabase as any)
-        .from("cases")
-        .select("claim_type")
-        .eq("id", run.case_id)
-        .maybeSingle(),
-    ]);
-    confirmedFields = fields ?? [];
-    claimType = caseRow?.claim_type ?? null;
+    try {
+      const ef = tables.extractedFields;
+      const c = tables.cases;
+      const [fields, caseRows] = await Promise.all([
+        db
+          .select({
+            field_key: ef.field_key,
+            field_value: ef.field_value,
+            confidence: ef.confidence,
+          })
+          .from(ef)
+          .where(and(eq(ef.tenant_id, tenantId), eq(ef.case_id, run.case_id))),
+        db
+          .select({ claim_type: c.claim_type })
+          .from(c)
+          .where(and(eq(c.tenant_id, tenantId), eq(c.id, run.case_id)))
+          .limit(1),
+      ]);
+      // numeric → string under Drizzle; convert to keep the stored JSON shape.
+      confirmedFields = fields.map((f) => ({
+        field_key: f.field_key,
+        field_value: f.field_value,
+        confidence: Number(f.confidence),
+      }));
+      claimType = firstRow(caseRows)?.claim_type ?? null;
+    } catch {
+      confirmedFields = [];
+      claimType = null;
+    }
   }
 
   const expectedOutput = {
@@ -200,32 +247,40 @@ export async function approveTrainingExample(
 
   // ── 4. Insert (unique indexes enforce dedupe) ───────────────────────────────
   const nowIso = new Date().toISOString();
-  const { data: inserted, error: insertError } = await (supabase as any)
-    .from("training_examples")
-    .insert({
-      tenant_id: tenantId,
-      agent_run_id: agentRunId,
-      case_id: run.case_id,
-      claim_message_id: run.claim_message_id,
-      claim_type: claimType,
-      input_payload: run.input_payload ?? {},
-      expected_output: expectedOutput,
-      status: "approved",
-      approved_by: approvedBy,
-      approved_at: nowIso,
-    })
-    .select("id")
-    .single();
+  let exampleId: string;
+  try {
+    const inserted = firstRow(
+      await db
+        .insert(tables.trainingExamples)
+        .values({
+          tenant_id: tenantId,
+          agent_run_id: agentRunId,
+          case_id: run.case_id,
+          claim_message_id: run.claim_message_id,
+          claim_type: claimType,
+          input_payload: run.input_payload ?? {},
+          expected_output: expectedOutput,
+          status: "approved",
+          approved_by: approvedBy,
+          approved_at: nowIso,
+        })
+        .returning({ id: tables.trainingExamples.id })
+    );
 
-  if (insertError || !inserted) {
-    if (insertError?.code === "23505") {
+    if (!inserted) {
+      console.error("[training-examples] insert error:", "no_data"); // crew-debug-ok
+      return { ok: false, reason: "insert_failed" };
+    }
+
+    exampleId = inserted.id;
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    if (code === "23505") {
       return { ok: false, reason: "duplicate" };
     }
-    console.error("[training-examples] insert error:", insertError?.code ?? "no_data"); // crew-debug-ok
+    console.error("[training-examples] insert error:", code ?? "no_data"); // crew-debug-ok
     return { ok: false, reason: "insert_failed" };
   }
-
-  const exampleId = (inserted as { id: string }).id;
 
   // ── 5. Audit event (claim_events equivalent in this codebase: audit_log) ───
   await writeAuditLog({
@@ -238,11 +293,7 @@ export async function approveTrainingExample(
   });
 
   // ── 6. Batch fine-tuning queue (draft only — see module header) ────────────
-  const queuedFineTuneJobId = await maybeQueueFineTuneJob(
-    supabase,
-    tenantId,
-    approvedBy
-  );
+  const queuedFineTuneJobId = await maybeQueueFineTuneJob(tenantId, approvedBy);
 
   return { ok: true, exampleId, queuedFineTuneJobId };
 }
@@ -268,48 +319,47 @@ const OPEN_JOB_STATUSES = ["draft", "queued", "running", "eval_pending"];
  * evals, and explicit approval before anything is trained or deployed.
  */
 export async function maybeQueueFineTuneJob(
-  supabase: SupabaseClient,
   tenantId: string,
   createdBy: string | null
 ): Promise<string | null> {
   try {
-    const { count, error: countError } = await (supabase as any)
-      .from("training_examples")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", tenantId)
-      .eq("status", "approved");
+    const te = tables.trainingExamples;
+    const approvedCount = await countRows(
+      te,
+      and(eq(te.tenant_id, tenantId), eq(te.status, "approved"))
+    );
 
-    if (countError) return null;
-
-    const approvedCount = count ?? 0;
     const threshold = getFineTuneMinExamples();
     if (approvedCount < threshold) return null;
 
-    const { data: openJobs, error: openError } = await (supabase as any)
-      .from("model_training_jobs")
-      .select("id")
-      .eq("tenant_id", tenantId)
-      .in("status", OPEN_JOB_STATUSES)
+    const mtj = tables.modelTrainingJobs;
+    const openJobs = await db
+      .select({ id: mtj.id })
+      .from(mtj)
+      .where(
+        and(eq(mtj.tenant_id, tenantId), inArray(mtj.status, OPEN_JOB_STATUSES))
+      )
       .limit(1);
 
-    if (openError || (openJobs && openJobs.length > 0)) return null;
+    if (openJobs.length > 0) return null;
 
-    const { data: job, error: jobError } = await (supabase as any)
-      .from("model_training_jobs")
-      .insert({
-        tenant_id: tenantId,
-        status: "draft",
-        provider: "openai",
-        base_model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-        training_example_count: approvedCount,
-        created_by: createdBy,
-      })
-      .select("id")
-      .single();
+    const job = firstRow(
+      await db
+        .insert(mtj)
+        .values({
+          tenant_id: tenantId,
+          status: "draft",
+          provider: "openai",
+          base_model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+          training_example_count: approvedCount,
+          created_by: createdBy,
+        })
+        .returning({ id: mtj.id })
+    );
 
-    if (jobError || !job) return null;
+    if (!job) return null;
 
-    const jobId = (job as { id: string }).id;
+    const jobId = job.id;
 
     await writeAuditLog({
       tenant_id: tenantId,

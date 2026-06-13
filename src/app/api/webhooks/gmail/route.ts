@@ -26,7 +26,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { OAuth2Client } from "google-auth-library";
-import { createServiceClient } from "@/lib/supabase/service";
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
 import { getGmailAccountByEmail } from "@/server/email/gmail/accounts";
 
@@ -177,17 +176,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // and next push event will catch up.
 
   try {
-    const supabase = createServiceClient();
     const connectedAccount = pushPayload.emailAddress
-      ? await getGmailAccountByEmail(supabase, pushPayload.emailAddress)
+      ? await getGmailAccountByEmail(pushPayload.emailAddress)
       : null;
     const result = connectedAccount
-      ? await pollGmail(supabase, {
+      ? await pollGmail({
           tenantId: connectedAccount.tenantId,
           email: connectedAccount.email,
           refreshToken: connectedAccount.refreshToken,
         })
-      : await pollGmail(supabase);
+      : await pollGmail();
 
     return NextResponse.json({ ok: true, result });
   } catch (err: unknown) {

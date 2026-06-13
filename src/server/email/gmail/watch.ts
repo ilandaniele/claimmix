@@ -16,7 +16,6 @@
 
 import "server-only";
 import { getGmailClient } from "@/server/email/gmail/gmail-client";
-import { createServiceClient } from "@/lib/supabase/service";
 import { setWatchState } from "@/server/email/gmail/poll-state";
 
 export interface GmailWatchAccount {
@@ -38,7 +37,7 @@ export interface GmailWatchAccount {
  * @returns { historyId, expiration } — historyId as returned by the API;
  *          expiration as an ISO-8601 string derived from the ms-epoch value.
  * @throws  If the API response is missing historyId or expiration, or if the
- *          Supabase upsert fails.
+ *          DB upsert fails.
  */
 export async function setupGmailWatch(
   topicName: string,
@@ -74,8 +73,7 @@ export async function setupGmailWatch(
   // (e.g. "1750000000000"). Convert to ISO-8601 for consistent DB storage.
   const expirationIso = new Date(Number(expiration)).toISOString();
 
-  const supabase = createServiceClient();
-  await setWatchState(supabase, gmailEmail, expirationIso, historyId);
+  await setWatchState(gmailEmail, expirationIso, historyId);
 
   return { historyId, expiration: expirationIso };
 }

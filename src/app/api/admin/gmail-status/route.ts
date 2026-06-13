@@ -8,14 +8,17 @@
  *
  * Security:
  *   - Auth: proxy.ts session guard + requireAdmin() checks role='admin' → 403 if not admin.
- *   - DB: createServiceClient() — gmail_poll_state has no user RLS policies (service-role required).
+ *   - DB: gmail_poll_state is global operational state (no tenant column) —
+ *     queried via the shared Drizzle handle; access gated by requireAdmin().
  *   - Rate limit: CASES_API (100 req/min per user) — reused per spec.
  *   - PII: gmail_account_email is masked before returning; never logged.
  *   - history_id is OMITTED entirely (AC7, IC2).
  */
 
+import { desc } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { createServiceClient } from "@/lib/supabase/service";
+import { tables } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { maskEmail } from "@/lib/email/mask";
@@ -44,7 +47,7 @@ const EMPTY_RESPONSE: GmailStatusResponse = {
 export async function GET() {
   try {
     // ── 1. Auth + admin role check ────────────────────────────────────────────
-    const { user } = await requireAdmin();
+    const { db, user } = await requireAdmin();
 
     // ── 2. Rate limit ─────────────────────────────────────────────────────────
     const rateLimitResult = await rateLimit(
@@ -55,29 +58,33 @@ export async function GET() {
       return err(new AppError("RATE_LIMITED"));
     }
 
-    // ── 3. DB — service client (gmail_poll_state has no user RLS policies) ────
-    const serviceClient = createServiceClient();
+    // ── 3. DB — gmail_poll_state is system-wide (no tenant column) ────────────
+    const t = tables.gmailPollState;
 
     // MVP: single row — order by updated_at desc, take the most recent.
-    // Using type assertion because the generated types don't yet include gmail_poll_state.
-    const serviceAny = serviceClient as ReturnType<typeof createServiceClient> & Record<string, unknown>;
-    const { data: row, error: dbError } = await (serviceAny as any)
-      .from("gmail_poll_state")
-      .select("gmail_account_email, last_polled_at, last_error")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle() as {
-        data: {
-          gmail_account_email: string;
-          last_polled_at: string | null;
-          last_error: string | null;
-        } | null;
-        error: { code: string; message: string } | null;
-      };
-
-    if (dbError) {
+    let row: {
+      gmail_account_email: string;
+      last_polled_at: string | null;
+      last_error: string | null;
+    } | null;
+    try {
+      row = firstRow(
+        await db
+          .select({
+            gmail_account_email: t.gmail_account_email,
+            last_polled_at: t.last_polled_at,
+            last_error: t.last_error,
+          })
+          .from(t)
+          .orderBy(desc(t.updated_at))
+          .limit(1)
+      );
+    } catch (e) {
       // Log only the error code — never the row data or PII.
-      console.error("[admin/gmail-status GET]", dbError.code); // crew-debug-ok
+      console.error(
+        "[admin/gmail-status GET]",
+        (e as { code?: string })?.code ?? "unknown"
+      ); // crew-debug-ok
       return err(new AppError("INTERNAL_ERROR"));
     }
 

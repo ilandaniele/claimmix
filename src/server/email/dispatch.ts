@@ -10,8 +10,9 @@
  *   6. UPDATE outbound_messages with status='sent'|'failed'
  *   7. Write audit log
  *
- * Uses the service-role client for DB writes (system actor — no user context).
- * Import from here — do not call the provider or renderTemplate directly from routes.
+ * DB writes run as a system actor (no user context) — every row is explicitly
+ * tenant-scoped. Import from here — do not call the provider or renderTemplate
+ * directly from routes.
  *
  * AC4:  claim_messages row updated with provider_message_id='out-*' after send.
  * AC5:  Function never throws — resolves with { error } on failure.
@@ -21,7 +22,10 @@
  */
 
 import "server-only";
-import { createServiceClient } from "@/lib/supabase/service";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { claimMessages, outboundMessages } from "@/lib/db/schema";
+import { firstRow } from "@/lib/db/helpers";
 import { renderTemplate, type EmailTemplate } from "./render";
 import { getEmailProvider } from "./gmail/index";
 import { isSendSuccess } from "./provider";
@@ -66,68 +70,65 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     return { error: "RENDER_FAILED" };
   }
 
-  const supabase = createServiceClient();
   const fromAddress = process.env.GMAIL_FROM_ADDRESS ?? "";
 
   // ── 2. INSERT claim_messages row (status='queued') — AC4/AC5 ──────────────
   let claimMessageId: string | undefined;
   try {
-    const { data: inserted, error: insertError } = await (supabase as any)
-      .from("claim_messages")
-      .insert({
-        tenant_id: tenantId,
-        case_id: caseId,
-        direction: "outbound",
-        provider: "gmail",
-        provider_message_id: null, // set after send
-        thread_id: threadId ?? null,
-        in_reply_to: inReplyToMessageId ?? null,
-        from_addr: fromAddress,
-        to_addr: to,
-        subject: rendered.subject,
-        body_text: rendered.text,
-        template,
-        status: "queued",
-        headers: [],
-        received_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
+    const inserted = firstRow(
+      await db
+        .insert(claimMessages)
+        .values({
+          tenant_id: tenantId,
+          case_id: caseId,
+          direction: "outbound",
+          provider: "gmail",
+          provider_message_id: null, // set after send
+          thread_id: threadId ?? null,
+          in_reply_to: inReplyToMessageId ?? null,
+          from_addr: fromAddress,
+          to_addr: to,
+          subject: rendered.subject,
+          body_text: rendered.text,
+          template,
+          status: "queued",
+          headers: [],
+          received_at: new Date().toISOString(),
+        })
+        .returning({ id: claimMessages.id })
+    );
 
-    if (insertError) {
-      console.error("[dispatch] Failed to insert claim_messages:", insertError.code); // crew-debug-ok
-    } else if (inserted) {
-      claimMessageId = (inserted as { id: string }).id;
+    if (inserted) {
+      claimMessageId = inserted.id;
     }
   } catch (err) {
-    const name = err instanceof Error ? err.name : "DBError";
-    console.error("[dispatch] claim_messages insert exception:", name); // crew-debug-ok
+    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "DBError");
+    console.error("[dispatch] Failed to insert claim_messages:", code); // crew-debug-ok
   }
 
   // ── 3. INSERT outbound_messages row (status='queued') — dual-write window ─
   let outboundMsgId: string | undefined;
   try {
-    const { data: inserted, error: insertError } = await (supabase as any)
-      .from("outbound_messages")
-      .insert({
-        case_id: caseId,
-        tenant_id: tenantId,
-        channel: "email",
-        template,
-        rendered_body: rendered.html,
-        status: "queued",
-      })
-      .select("id")
-      .single();
+    const inserted = firstRow(
+      await db
+        .insert(outboundMessages)
+        .values({
+          case_id: caseId,
+          tenant_id: tenantId,
+          channel: "email",
+          template,
+          rendered_body: rendered.html,
+          status: "queued",
+        })
+        .returning({ id: outboundMessages.id })
+    );
 
-    if (insertError) {
-      console.error("[dispatch] Failed to insert outbound_messages:", insertError.code); // crew-debug-ok
-    } else if (inserted) {
-      outboundMsgId = (inserted as { id: string }).id;
+    if (inserted) {
+      outboundMsgId = inserted.id;
     }
   } catch (err) {
-    const name = err instanceof Error ? err.name : "DBError";
-    console.error("[dispatch] DB insert exception:", name); // crew-debug-ok
+    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "DBError");
+    console.error("[dispatch] Failed to insert outbound_messages:", code); // crew-debug-ok
   }
 
   // ── 4. Send via EmailProvider (Gmail) ─────────────────────────────────────
@@ -157,14 +158,14 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     // Update claim_messages — set provider_message_id + status='sent' + sent_at
     if (claimMessageId) {
       try {
-        await (supabase as any)
-          .from("claim_messages")
-          .update({
+        await db
+          .update(claimMessages)
+          .set({
             provider_message_id: providerMessageId,
             status: "sent",
             sent_at: new Date().toISOString(),
           })
-          .eq("id", claimMessageId);
+          .where(eq(claimMessages.id, claimMessageId));
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
         console.error("[dispatch] Failed to update claim_messages status (sent):", name); // crew-debug-ok
@@ -174,10 +175,10 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     // Update outbound_messages (dual-write window)
     if (outboundMsgId) {
       try {
-        await (supabase as any)
-          .from("outbound_messages")
-          .update({ status: "sent" })
-          .eq("id", outboundMsgId);
+        await db
+          .update(outboundMessages)
+          .set({ status: "sent" })
+          .where(eq(outboundMessages.id, outboundMsgId));
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
         console.error("[dispatch] Failed to update outbound_messages status (sent):", name); // crew-debug-ok
@@ -205,10 +206,10 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     // Update claim_messages — set status='failed' + error_code
     if (claimMessageId) {
       try {
-        await (supabase as any)
-          .from("claim_messages")
-          .update({ status: "failed", error_code: errorCode })
-          .eq("id", claimMessageId);
+        await db
+          .update(claimMessages)
+          .set({ status: "failed", error_code: errorCode })
+          .where(eq(claimMessages.id, claimMessageId));
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
         console.error("[dispatch] Failed to update claim_messages status (failed):", name); // crew-debug-ok
@@ -218,10 +219,10 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     // Update outbound_messages (dual-write window)
     if (outboundMsgId) {
       try {
-        await (supabase as any)
-          .from("outbound_messages")
-          .update({ status: "failed" })
-          .eq("id", outboundMsgId);
+        await db
+          .update(outboundMessages)
+          .set({ status: "failed" })
+          .where(eq(outboundMessages.id, outboundMsgId));
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
         console.error("[dispatch] Failed to update outbound_messages status (failed):", name); // crew-debug-ok

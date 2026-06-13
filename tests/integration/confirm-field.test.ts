@@ -1,27 +1,32 @@
 /**
  * Integration-style unit tests for PATCH /api/cases/:id/confirm-field.
  *
- * These tests mock the Supabase clients and test the route handler logic
- * directly without spinning up a server.
+ * These tests mock @/lib/db and @/lib/auth/require-role to test the route
+ * handler logic directly without spinning up a server or live DB.
  *
  * AC14: Memory only updated via confirm-field (updateMemoryFromConfirmation called).
  * AC21: Audit log FIELD_CONFIRMED with redacted values.
  * AC16: FSM re-evaluated after confirmation.
- *
- * Note: True integration tests (INTEGRATION_ENABLED=true) require a live DB.
- * These tests exercise the route handler logic with mocked DB responses.
+ * AC19: 404 for wrong-tenant case (IDOR defense).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ── Mocks ─────────────────────────────────────────────────────────────────────
+// ── Mocks must be hoisted before any imports that use them ────────────────────
 
-vi.mock("@/lib/supabase/server", () => ({
-  createServerClient: vi.fn(),
-}));
+vi.mock("@/lib/db", () => {
+  const mockDb = {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  };
+  return { db: mockDb };
+});
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(),
+vi.mock("@/lib/auth/require-role", () => ({
+  requireRole: vi.fn(),
+  ALL_ROLES: ["owner", "admin", "specialist", "analyst", "viewer"],
 }));
 
 vi.mock("@/server/memory/update", () => ({
@@ -46,9 +51,37 @@ vi.mock("@/server/cases/gap-analyzer", () => ({
   }),
 }));
 
+// Mock rate-limit to always allow.
+vi.mock("@/lib/rate-limit/index", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/rate-limit/index")>(
+    "@/lib/rate-limit/index"
+  );
+  return {
+    ...actual,
+    rateLimit: vi.fn().mockResolvedValue({
+      allowed: true,
+      remaining: 29,
+      resetAt: 0,
+      retryAfterSeconds: 0,
+    }),
+  };
+});
+
+import { db } from "@/lib/db";
+import { requireRole } from "@/lib/auth/require-role";
+import { updateMemoryFromConfirmation } from "@/server/memory/update";
+import { writeAuditLog } from "@/lib/audit/log";
+import { PATCH } from "@/app/api/cases/[id]/confirm-field/route";
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const CASE_ID = "123e4567-e89b-12d3-a456-426614174000";
+const TENANT_ID = "tenant-1";
+const USER_ID = "user-1";
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeRequest(body: unknown, caseId = "123e4567-e89b-12d3-a456-426614174000") {
+function makeRequest(body: unknown, caseId = CASE_ID) {
   const url = `http://localhost/api/cases/${caseId}/confirm-field`;
   return new Request(url, {
     method: "PATCH",
@@ -57,127 +90,153 @@ function makeRequest(body: unknown, caseId = "123e4567-e89b-12d3-a456-4266141740
   }) as any;
 }
 
-function makeContext(caseId = "123e4567-e89b-12d3-a456-426614174000") {
+function makeContext(caseId = CASE_ID) {
   return { params: Promise.resolve({ id: caseId }) };
 }
 
-function buildUserSupabase(opts: {
-  user?: { id: string } | null;
-  userRow?: { id: string; tenant_id: string; role: string } | null;
-  caseRow?: Record<string, unknown> | null;
-  confirmationRow?: Record<string, unknown> | null;
-  rateLimitAllowed?: boolean;
-}) {
+/**
+ * Set up requireRole to return a valid analyst session.
+ */
+function setupAuth(role: string = "analyst") {
+  vi.mocked(requireRole).mockResolvedValue({
+    db: db as any,
+    user: { id: USER_ID, email: "test@example.com" },
+    userRow: { id: USER_ID, tenant_id: TENANT_ID, role: role as any },
+  });
+}
+
+/**
+ * Set up requireRole to throw (unauthenticated).
+ */
+function setupNoAuth() {
+  vi.mocked(requireRole).mockRejectedValue(new Error("MISSING_SESSION"));
+}
+
+/**
+ * Build a chainable select mock that resolves to the given rows.
+ * Handles both .limit() and bare await (thennable).
+ */
+function selectChain(rows: unknown[]) {
+  const chain: any = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(rows),
+    then: (resolve: (v: unknown) => void) => resolve(rows),
+  };
+  return chain;
+}
+
+/**
+ * Build a chainable update mock that resolves successfully.
+ */
+function updateChain() {
+  const chain: any = {
+    set: vi.fn().mockReturnThis(),
+    where: vi.fn().mockResolvedValue([]),
+    then: (resolve: (v: unknown) => void) => resolve([]),
+  };
+  return chain;
+}
+
+/**
+ * Build a chainable insert mock that resolves successfully.
+ */
+function insertChain() {
+  const chain: any = {
+    values: vi.fn().mockReturnThis(),
+    onConflictDoUpdate: vi.fn().mockResolvedValue([]),
+    then: (resolve: (v: unknown) => void) => resolve([]),
+  };
+  return chain;
+}
+
+/**
+ * Default DB mock setup for a successful confirm action.
+ *
+ * db.select calls (in order):
+ *  1. case lookup -> returns caseRow
+ *  2. confirmation row -> returns confirmationRow
+ *  3. getSenderEmail (raw_messages) -> returns senderRow
+ *  4. reEvaluateStatus: extracted_fields -> returns []
+ *
+ * db.update calls (in order):
+ *  1. update claimFieldConfirmations status
+ *  2. satisfy missing_docs
+ *  3. update case status (if transition)
+ *
+ * db.insert calls (in order):
+ *  1. upsert extracted_fields
+ */
+function setupDbForConfirm(opts: {
+  caseRow?: unknown;
+  confirmationRow?: unknown;
+  senderRow?: unknown;
+  extractedFields?: unknown[];
+} = {}) {
   const {
-    user = { id: "user-1" },
-    userRow = { id: "user-1", tenant_id: "tenant-1", role: "analyst" },
-    caseRow = {
-      id: "123e4567-e89b-12d3-a456-426614174000",
-      status: "confirmacion_pendiente",
-      tenant_id: "tenant-1",
-      email_thread_id: "thread-1",
-    },
+    caseRow = { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID },
     confirmationRow = {
       id: "conf-1",
       proposed_value: "Juan Pérez",
       conflict_with_value: null,
       status: "pending",
     },
-    rateLimitAllowed = true,
-  } = opts;
-
-  // Build mock that tracks what table/op is being called
-  const chainFor = (data: unknown, error: unknown = null) => {
-    const final = Promise.resolve({ data, error });
-    const chain: any = {
-      select: () => chain,
-      eq: () => chain,
-      single: () => final,
-      maybeSingle: () => final,
-      in: () => chain,
-      order: () => chain,
-      limit: () => chain,
-      is: () => final,
-      ilike: () => chain,
-      update: () => chain,
-      upsert: () => final,
-      range: () => chain,
-    };
-    return chain;
-  };
-
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user } }),
-    },
-    from: vi.fn().mockImplementation((table: string) => {
-      if (table === "users") return chainFor(userRow);
-      if (table === "cases") return chainFor(caseRow);
-      if (table === "claim_field_confirmations") return chainFor(confirmationRow);
-      return chainFor(null);
-    }),
-  };
-}
-
-function buildServiceSupabase(opts: {
-  rawMsgRow?: Record<string, unknown> | null;
-  extractedFields?: Array<{ field_key: string; field_value: string; confidence: number; source: string }>;
-} = {}) {
-  const {
-    rawMsgRow = { from_addr: "sender@example.com" },
+    senderRow = { from_addr: "sender@example.com" },
     extractedFields = [],
   } = opts;
 
-  const chainFor = (data: unknown, error: unknown = null) => {
-    const final = Promise.resolve({ data, error });
-    const chain: any = {
-      select: () => chain,
-      eq: () => chain,
-      single: () => final,
-      maybeSingle: () => final,
-      in: () => chain,
-      order: () => chain,
-      limit: () => chain,
-      is: () => final,
-      ilike: () => chain,
-      update: () => chain,
-      upsert: () => Promise.resolve({ error: null }),
-      range: () => chain,
-    };
-    return chain;
-  };
+  vi.mocked(db.select)
+    .mockReturnValueOnce(selectChain(caseRow ? [caseRow] : []))    // case lookup
+    .mockReturnValueOnce(selectChain(confirmationRow ? [confirmationRow] : [])) // confirmation
+    .mockReturnValueOnce(selectChain(senderRow ? [senderRow] : [])) // getSenderEmail
+    .mockReturnValueOnce(selectChain(extractedFields));              // reEvaluateStatus
 
-  return {
-    from: vi.fn().mockImplementation((table: string) => {
-      if (table === "raw_messages") return chainFor(rawMsgRow);
-      if (table === "extracted_fields") return chainFor(extractedFields);
-      return chainFor(null);
-    }),
-  };
+  vi.mocked(db.update).mockReturnValue(updateChain() as any);
+  vi.mocked(db.insert).mockReturnValue(insertChain() as any);
+}
+
+/**
+ * Setup for reject action (no insert, different update path).
+ */
+function setupDbForReject(opts: {
+  caseRow?: unknown;
+  confirmationRow?: unknown;
+} = {}) {
+  const {
+    caseRow = { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID },
+    confirmationRow = {
+      id: "conf-1",
+      proposed_value: "Juan Pérez",
+      conflict_with_value: null,
+      status: "pending",
+    },
+  } = opts;
+
+  vi.mocked(db.select)
+    .mockReturnValueOnce(selectChain(caseRow ? [caseRow] : []))
+    .mockReturnValueOnce(selectChain(confirmationRow ? [confirmationRow] : []));
+
+  vi.mocked(db.update).mockReturnValue(updateChain() as any);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("PATCH /api/cases/:id/confirm-field", () => {
-  let createServerClientMock: ReturnType<typeof vi.fn>;
-  let createServiceClientMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-
-    const { createServerClient } = await import("@/lib/supabase/server");
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    createServerClientMock = createServerClient as ReturnType<typeof vi.fn>;
-    createServiceClientMock = createServiceClient as ReturnType<typeof vi.fn>;
+    // Reset db mock queues so mockReturnValueOnce calls don't bleed between tests.
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.update).mockReset();
+    vi.mocked(db.insert).mockReset();
+    // Re-apply stable implementations cleared by mockReset.
+    vi.mocked(updateMemoryFromConfirmation).mockResolvedValue(undefined);
+    vi.mocked(writeAuditLog).mockResolvedValue(undefined);
   });
 
   it("confirm action: returns 200 with updated status", async () => {
-    createServerClientMock.mockResolvedValue(buildUserSupabase({}));
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
-
-    const { PATCH } = await import(
-      "@/app/api/cases/[id]/confirm-field/route"
-    );
+    setupAuth();
+    setupDbForConfirm();
 
     const req = makeRequest({
       field_key: "full_name",
@@ -190,22 +249,14 @@ describe("PATCH /api/cases/:id/confirm-field", () => {
 
     expect(response.status).toBe(200);
     expect(body).toMatchObject({
-      case_id: "123e4567-e89b-12d3-a456-426614174000",
+      case_id: CASE_ID,
       field_key: "full_name",
     });
   });
 
   it("AC14: calls updateMemoryFromConfirmation after confirm action", async () => {
-    createServerClientMock.mockResolvedValue(buildUserSupabase({}));
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
-
-    const { updateMemoryFromConfirmation } = await import(
-      "@/server/memory/update"
-    );
-
-    const { PATCH } = await import(
-      "@/app/api/cases/[id]/confirm-field/route"
-    );
+    setupAuth();
+    setupDbForConfirm();
 
     await PATCH(
       makeRequest({ field_key: "full_name", value: "Juan Pérez", action: "confirm" }),
@@ -213,26 +264,19 @@ describe("PATCH /api/cases/:id/confirm-field", () => {
     );
 
     expect(updateMemoryFromConfirmation).toHaveBeenCalledWith(
-      expect.anything(), // supabase
-      "tenant-1",
+      TENANT_ID,
       "full_name",
       "Juan Pérez",
       "sender@example.com",
-      "123e4567-e89b-12d3-a456-426614174000",
-      "user-1",
+      CASE_ID,
+      USER_ID,
       "Juan Pérez" // old proposed_value from confirmationRow
     );
   });
 
   it("AC21: writes FIELD_CONFIRMED audit log", async () => {
-    createServerClientMock.mockResolvedValue(buildUserSupabase({}));
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
-
-    const { writeAuditLog } = await import("@/lib/audit/log");
-
-    const { PATCH } = await import(
-      "@/app/api/cases/[id]/confirm-field/route"
-    );
+    setupAuth();
+    setupDbForConfirm();
 
     await PATCH(
       makeRequest({ field_key: "full_name", value: "Juan Pérez", action: "confirm" }),
@@ -242,18 +286,14 @@ describe("PATCH /api/cases/:id/confirm-field", () => {
     expect(writeAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
         event_type: "claim.field_confirmed",
-        target_id: "123e4567-e89b-12d3-a456-426614174000",
+        target_id: CASE_ID,
       })
     );
   });
 
   it("reject action: returns 200 with rejected status", async () => {
-    createServerClientMock.mockResolvedValue(buildUserSupabase({}));
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
-
-    const { PATCH } = await import(
-      "@/app/api/cases/[id]/confirm-field/route"
-    );
+    setupAuth();
+    setupDbForReject();
 
     const req = makeRequest({
       field_key: "full_name",
@@ -270,14 +310,8 @@ describe("PATCH /api/cases/:id/confirm-field", () => {
   });
 
   it("reject action: logs FIELD_CONFIRMED audit event", async () => {
-    createServerClientMock.mockResolvedValue(buildUserSupabase({}));
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
-
-    const { writeAuditLog } = await import("@/lib/audit/log");
-
-    const { PATCH } = await import(
-      "@/app/api/cases/[id]/confirm-field/route"
-    );
+    setupAuth();
+    setupDbForReject();
 
     await PATCH(
       makeRequest({ field_key: "full_name", value: null, action: "reject" }),
@@ -293,13 +327,7 @@ describe("PATCH /api/cases/:id/confirm-field", () => {
   });
 
   it("returns 401 when unauthenticated", async () => {
-    createServerClientMock.mockResolvedValue(
-      buildUserSupabase({ user: null, userRow: null })
-    );
-
-    const { PATCH } = await import(
-      "@/app/api/cases/[id]/confirm-field/route"
-    );
+    setupNoAuth();
 
     const response = await PATCH(
       makeRequest({ field_key: "full_name", value: "Juan", action: "confirm" }),
@@ -310,15 +338,12 @@ describe("PATCH /api/cases/:id/confirm-field", () => {
   });
 
   it("AC19: returns 404 when case belongs to different tenant (IDOR defense)", async () => {
-    // User is authenticated but case returns null (RLS filters it out)
-    createServerClientMock.mockResolvedValue(
-      buildUserSupabase({ caseRow: null })
-    );
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
+    setupAuth();
 
-    const { PATCH } = await import(
-      "@/app/api/cases/[id]/confirm-field/route"
-    );
+    // Case lookup returns empty array (no row for this tenant).
+    vi.mocked(db.select)
+      .mockReturnValueOnce(selectChain([]))    // case lookup -> not found
+      .mockReturnValueOnce(selectChain([]));   // confirmation (may or may not be called)
 
     const response = await PATCH(
       makeRequest({ field_key: "full_name", value: "Juan", action: "confirm" }),
@@ -331,11 +356,12 @@ describe("PATCH /api/cases/:id/confirm-field", () => {
   });
 
   it("returns 400 when request body is invalid", async () => {
-    createServerClientMock.mockResolvedValue(buildUserSupabase({}));
+    setupAuth();
 
-    const { PATCH } = await import(
-      "@/app/api/cases/[id]/confirm-field/route"
-    );
+    // DB select for case lookup - but validation happens before case lookup
+    // so we still need the auth mock but not necessarily the db mock.
+    // Still set up db just in case the route fetches the case first.
+    vi.mocked(db.select).mockReturnValue(selectChain([]) as any);
 
     const response = await PATCH(
       makeRequest({ field_key: "", value: "test", action: "invalid_action" }),
@@ -345,5 +371,40 @@ describe("PATCH /api/cases/:id/confirm-field", () => {
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.error.code).toBe("VALIDATION_FAILED");
+  });
+
+  it("correct action: returns 200 with corrected value", async () => {
+    setupAuth();
+    setupDbForConfirm();
+
+    const req = makeRequest({
+      field_key: "full_name",
+      value: "María García",
+      action: "correct",
+    });
+
+    const response = await PATCH(req, makeContext());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      case_id: CASE_ID,
+      field_key: "full_name",
+    });
+  });
+
+  it("confirm without existing confirmation row still succeeds", async () => {
+    setupAuth();
+    // Override: no confirmation row
+    setupDbForConfirm({ confirmationRow: null });
+
+    const response = await PATCH(
+      makeRequest({ field_key: "policy_number", value: "POL-999", action: "confirm" }),
+      makeContext()
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.field_key).toBe("policy_number");
   });
 });

@@ -5,25 +5,35 @@ const {
   afterCallbacks,
   mockAfter,
   mockCheckBudget,
-  mockCreateServerClient,
-  mockCreateServiceClient,
   mockGetClientIp,
   mockRateLimit,
   mockRunIntakeAgent,
   mockWriteAuditLog,
-} = vi.hoisted(() => ({
-  afterCallbacks: [] as Array<() => unknown | Promise<unknown>>,
-  mockAfter: vi.fn((callback: () => unknown | Promise<unknown>) => {
-    afterCallbacks.push(callback);
-  }),
-  mockCheckBudget: vi.fn(),
-  mockCreateServerClient: vi.fn(),
-  mockCreateServiceClient: vi.fn(),
-  mockGetClientIp: vi.fn(),
-  mockRateLimit: vi.fn(),
-  mockRunIntakeAgent: vi.fn(),
-  mockWriteAuditLog: vi.fn(),
-}));
+  mockRequireRole,
+  mockDb,
+} = vi.hoisted(() => {
+  const afterCallbacks: Array<() => unknown | Promise<unknown>> = [];
+  const mockDb = {
+    select: vi.fn(),
+    update: vi.fn(),
+    insert: vi.fn(),
+    delete: vi.fn(),
+    $count: vi.fn(),
+  };
+  return {
+    afterCallbacks,
+    mockAfter: vi.fn((callback: () => unknown | Promise<unknown>) => {
+      afterCallbacks.push(callback);
+    }),
+    mockCheckBudget: vi.fn(),
+    mockGetClientIp: vi.fn(),
+    mockRateLimit: vi.fn(),
+    mockRunIntakeAgent: vi.fn(),
+    mockWriteAuditLog: vi.fn(),
+    mockRequireRole: vi.fn(),
+    mockDb,
+  };
+});
 
 vi.mock("server-only", () => ({}));
 
@@ -35,12 +45,14 @@ vi.mock("next/server", async () => {
   };
 });
 
-vi.mock("@/lib/supabase/server", () => ({
-  createServerClient: mockCreateServerClient,
+vi.mock("@/lib/db", () => ({
+  db: mockDb,
+  tables: {},
 }));
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: mockCreateServiceClient,
+vi.mock("@/lib/auth/require-role", () => ({
+  requireRole: mockRequireRole,
+  ALL_ROLES: ["owner", "admin", "specialist", "analyst", "viewer"],
 }));
 
 vi.mock("@/server/agents/intake-agent", () => ({
@@ -67,68 +79,6 @@ const CASE_ID = "123e4567-e89b-12d3-a456-426614174001";
 const TENANT_ID = "10000000-0000-0000-0000-000000000001";
 const USER_ID = "20000000-0000-0000-0000-000000000001";
 
-type CaseRow = {
-  id: string;
-  status: string;
-  tenant_id: string;
-};
-
-let caseRow: CaseRow;
-let caseUpdatePayload: Record<string, unknown> | null;
-
-function makeSelectSingle<T>(data: T) {
-  return {
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    single: vi.fn().mockResolvedValue({ data, error: null }),
-  };
-}
-
-function makeServerClient() {
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({
-        data: { user: { id: USER_ID } },
-        error: null,
-      }),
-    },
-    from: vi.fn((table: string) => {
-      if (table === "users") {
-        return makeSelectSingle({
-          id: USER_ID,
-          tenant_id: TENANT_ID,
-          role: "admin",
-        });
-      }
-
-      if (table === "cases") {
-        return makeSelectSingle(caseRow);
-      }
-
-      throw new Error(`Unexpected table ${table}`);
-    }),
-  };
-}
-
-function makeServiceClient() {
-  return {
-    from: vi.fn((table: string) => {
-      if (table !== "cases") {
-        throw new Error(`Unexpected table ${table}`);
-      }
-
-      return {
-        update: vi.fn((payload: Record<string, unknown>) => {
-          caseUpdatePayload = payload;
-          return {
-            eq: vi.fn().mockResolvedValue({ error: null }),
-          };
-        }),
-      };
-    }),
-  };
-}
-
 function makeRequest() {
   return new NextRequest(`http://localhost/api/cases/${CASE_ID}/re-analyze`, {
     method: "POST",
@@ -139,18 +89,51 @@ function makeRequest() {
   });
 }
 
+/**
+ * Build db.select chain that resolves to the given rows.
+ * The route does: db.select({...}).from(...).where(...).limit(1)
+ */
+function makeSelectChain(rows: unknown[]) {
+  const chain: any = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(rows),
+  };
+  return chain;
+}
+
+/**
+ * Build db.update chain that resolves successfully.
+ * The route does: db.update(cases).set({...}).where(...)
+ */
+function makeUpdateChain() {
+  const chain: any = {
+    set: vi.fn().mockReturnValue({
+      where: vi.fn().mockResolvedValue([]),
+    }),
+  };
+  return chain;
+}
+
 describe("POST /api/cases/:id/re-analyze", () => {
   beforeEach(() => {
     afterCallbacks.length = 0;
-    caseUpdatePayload = null;
-    caseRow = {
-      id: CASE_ID,
-      status: "listo_para_core",
-      tenant_id: TENANT_ID,
-    };
 
-    mockCreateServerClient.mockResolvedValue(makeServerClient());
-    mockCreateServiceClient.mockReturnValue(makeServiceClient());
+    // requireRole resolves with a valid role context (admin user)
+    mockRequireRole.mockResolvedValue({
+      db: mockDb,
+      user: { id: USER_ID },
+      userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "admin" },
+    });
+
+    // db.select returns a case in "listo_para_core" status by default
+    mockDb.select.mockReturnValue(
+      makeSelectChain([{ id: CASE_ID, status: "listo_para_core" }])
+    );
+
+    // db.update succeeds
+    mockDb.update.mockReturnValue(makeUpdateChain());
+
     mockCheckBudget.mockResolvedValue({ exceeded: false });
     mockGetClientIp.mockReturnValue("127.0.0.1");
     mockRateLimit.mockResolvedValue({
@@ -176,7 +159,10 @@ describe("POST /api/cases/:id/re-analyze", () => {
       case_id: CASE_ID,
       status: "procesando",
     });
-    expect(caseUpdatePayload).toMatchObject({ status: "procesando" });
+
+    // db.update was called to reset the case
+    expect(mockDb.update).toHaveBeenCalledTimes(1);
+
     expect(mockWriteAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
         tenant_id: TENANT_ID,
@@ -201,11 +187,10 @@ describe("POST /api/cases/:id/re-analyze", () => {
   });
 
   it("does not schedule the agent for closed cases", async () => {
-    caseRow = {
-      id: CASE_ID,
-      status: "cerrado",
-      tenant_id: TENANT_ID,
-    };
+    // Return a closed case
+    mockDb.select.mockReturnValue(
+      makeSelectChain([{ id: CASE_ID, status: "cerrado" }])
+    );
 
     const res = await POST(makeRequest(), {
       params: Promise.resolve({ id: CASE_ID }),
@@ -215,8 +200,87 @@ describe("POST /api/cases/:id/re-analyze", () => {
     await expect(res.json()).resolves.toMatchObject({
       error: { code: "FSM_INVALID_TRANSITION" },
     });
-    expect(caseUpdatePayload).toBeNull();
+    expect(mockDb.update).not.toHaveBeenCalled();
     expect(mockAfter).not.toHaveBeenCalled();
     expect(mockRunIntakeAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when requireRole throws (unauthenticated)", async () => {
+    const { AppError } = await import("@/lib/errors");
+    mockRequireRole.mockRejectedValue(new AppError("MISSING_SESSION"));
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "MISSING_SESSION" },
+    });
+    expect(mockRunIntakeAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for viewer role", async () => {
+    mockRequireRole.mockResolvedValue({
+      db: mockDb,
+      user: { id: USER_ID },
+      userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "viewer" },
+    });
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN_ROLE" },
+    });
+    expect(mockRunIntakeAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when the case does not belong to the tenant", async () => {
+    // db.select returns empty (no case found for this tenant)
+    mockDb.select.mockReturnValue(makeSelectChain([]));
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "NOT_FOUND" },
+    });
+    expect(mockAfter).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 when rate limit is exceeded", async () => {
+    mockRateLimit.mockResolvedValue({
+      allowed: false,
+      remaining: 0,
+      retryAfterSeconds: 3600,
+    });
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error.code).toBe("RATE_LIMITED");
+    expect(mockAfter).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 when AI budget is exceeded", async () => {
+    mockCheckBudget.mockResolvedValue({ exceeded: true });
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "AI_BUDGET_EXCEEDED" },
+    });
+    expect(mockAfter).not.toHaveBeenCalled();
   });
 });

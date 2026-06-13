@@ -2,7 +2,7 @@
  * Attachment validator for inbound email attachments.
  *
  * Enforces content-type allowlist, per-attachment size cap, and
- * per-email aggregate size cap before any upload to Supabase Storage.
+ * per-email aggregate size cap before any upload to object storage.
  *
  * PII note: filenames are sanitized before use; original name is NOT logged.
  *

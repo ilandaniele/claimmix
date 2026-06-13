@@ -6,20 +6,61 @@
  * AC6: Returns 403 when user is not admin (analyst role).
  * AC7: history_id is NOT in the response body at any depth.
  *
- * Runs against a mock Next.js request context using vi.mock for Supabase clients.
- * This avoids a live server dependency while still exercising the route handler logic.
+ * Runs against a mock Next.js request context using vi.mock for the db and
+ * session. This avoids a live server dependency while still exercising the
+ * route handler logic.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ── Mock Supabase clients ─────────────────────────────────────────────────────
+// ── Hoisted mock factories ────────────────────────────────────────────────────
 
-vi.mock("@/lib/supabase/server", () => ({
-  createServerClient: vi.fn(),
+const { mockGetSessionContext, mockDbSelect, fakeUsersTable, fakeGmailPollStateTable } =
+  vi.hoisted(() => {
+    const fakeCol = () => Symbol("col");
+    return {
+      mockGetSessionContext: vi.fn(),
+      mockDbSelect: vi.fn(),
+      // Fake column reference objects — used as property references by the route
+      // and requireAdmin. Passed to db.select({...}), .from(t), .where(eq(...)),
+      // .orderBy(desc(...)), etc. Since our db mock ignores these arguments, they
+      // only need to be truthy non-null values so property accesses don't throw.
+      fakeUsersTable: {
+        id: fakeCol(),
+        tenant_id: fakeCol(),
+        role: fakeCol(),
+      },
+      fakeGmailPollStateTable: {
+        gmail_account_email: fakeCol(),
+        last_polled_at: fakeCol(),
+        last_error: fakeCol(),
+        updated_at: fakeCol(),
+      },
+    };
+  });
+
+// ── Mock session (replaces Supabase auth.getUser) ─────────────────────────────
+
+vi.mock("@/lib/auth/session", () => ({
+  getSessionContext: mockGetSessionContext,
 }));
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(),
+// ── Mock @/lib/db ─────────────────────────────────────────────────────────────
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: mockDbSelect,
+  },
+  tables: {
+    gmailPollState: fakeGmailPollStateTable,
+  },
+}));
+
+// ── Mock @/lib/db/schema — requireAdmin imports `users` from here ─────────────
+
+vi.mock("@/lib/db/schema", () => ({
+  users: fakeUsersTable,
+  gmailPollState: fakeGmailPollStateTable,
 }));
 
 // Mock rate-limit to always allow (not testing rate-limit in this suite).
@@ -33,54 +74,73 @@ vi.mock("@/lib/rate-limit/index", async () => {
   };
 });
 
-import { createServerClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
 import { GET } from "@/app/api/admin/gmail-status/route";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Build a mock Supabase server client with a user of the given role. */
-function buildServerClientMock(role: "admin" | "analyst" | null) {
-  const userId = role ? "user-uuid-001" : null;
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({
-        data: {
-          user: role ? { id: userId, email: "test@example.com" } : null,
-        },
-        error: null,
-      }),
-    },
-    from: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({
-        data: role ? { id: userId, tenant_id: "tenant-001", role } : null,
-        error: null,
-      }),
-    }),
-  };
-}
+const USER_ID = "user-uuid-001";
+const TENANT_ID = "tenant-001";
 
-/** Build a mock service client with the given gmail_poll_state row (or null). */
-function buildServiceClientMock(
-  row: {
+/**
+ * Configure the db.select mock to handle two sequential select calls:
+ *   1. requireAdmin() → users table lookup → returns the user row
+ *   2. Route handler  → gmail_poll_state lookup → returns the status row
+ *
+ * Drizzle select chain:
+ *   db.select(cols).from(table).where(...).limit(n)     → array
+ *   db.select(cols).from(table).orderBy(...).limit(n)   → array
+ */
+function setupDbMock(
+  role: "admin" | "analyst" | null,
+  gmailRow: {
     gmail_account_email: string;
     last_polled_at: string | null;
     last_error: string | null;
   } | null
 ) {
-  return {
-    from: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({
-        data: row,
-        error: null,
-      }),
-    }),
-  };
+  let callCount = 0;
+
+  mockDbSelect.mockImplementation(() => {
+    callCount++;
+    const callIndex = callCount;
+
+    // Build a fluent chain where every intermediate method returns the same
+    // chain object. The terminal .limit() resolves to the appropriate array.
+    const chain: Record<string, unknown> = {};
+    const fluent = () => chain;
+    chain.from = fluent;
+    chain.where = fluent;
+    chain.orderBy = fluent;
+
+    if (callIndex === 1) {
+      // requireAdmin: users table lookup
+      chain.limit = () =>
+        Promise.resolve(
+          role
+            ? [{ id: USER_ID, tenant_id: TENANT_ID, role }]
+            : []
+        );
+    } else {
+      // Route handler: gmail_poll_state query
+      chain.limit = () =>
+        Promise.resolve(
+          gmailRow ? [gmailRow] : []
+        );
+    }
+
+    return chain;
+  });
+}
+
+/** Set up session mock for the given role (null = unauthenticated). */
+function setupSession(role: "admin" | "analyst" | null) {
+  if (!role) {
+    mockGetSessionContext.mockResolvedValue(null);
+  } else {
+    mockGetSessionContext.mockResolvedValue({
+      user: { id: USER_ID, email: "test@example.com" },
+    });
+  }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -91,16 +151,12 @@ describe("GET /api/admin/gmail-status", () => {
   });
 
   it("AC1: returns 200 with masked email and is_connected=true when healthy row exists", async () => {
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildServerClientMock("admin")
-    );
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceClientMock({
-        gmail_account_email: "gmail@claimmix.com",
-        last_polled_at: "2026-06-03T00:00:00Z",
-        last_error: null,
-      })
-    );
+    setupSession("admin");
+    setupDbMock("admin", {
+      gmail_account_email: "gmail@claimmix.com",
+      last_polled_at: "2026-06-03T00:00:00Z",
+      last_error: null,
+    });
 
     const response = await GET();
     const body = await response.json();
@@ -113,12 +169,8 @@ describe("GET /api/admin/gmail-status", () => {
   });
 
   it("AC2: returns 200 with all-null shape when no row exists", async () => {
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildServerClientMock("admin")
-    );
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceClientMock(null)
-    );
+    setupSession("admin");
+    setupDbMock("admin", null);
 
     const response = await GET();
     const body = await response.json();
@@ -133,9 +185,8 @@ describe("GET /api/admin/gmail-status", () => {
   });
 
   it("AC6: returns 403 FORBIDDEN when user has role=analyst", async () => {
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildServerClientMock("analyst")
-    );
+    setupSession("analyst");
+    setupDbMock("analyst", null);
 
     const response = await GET();
     const body = await response.json();
@@ -145,9 +196,7 @@ describe("GET /api/admin/gmail-status", () => {
   });
 
   it("returns 401 MISSING_SESSION when not authenticated", async () => {
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildServerClientMock(null)
-    );
+    setupSession(null);
 
     const response = await GET();
     const body = await response.json();
@@ -157,16 +206,12 @@ describe("GET /api/admin/gmail-status", () => {
   });
 
   it("AC7: history_id is NOT present in the response body at any depth", async () => {
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildServerClientMock("admin")
-    );
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceClientMock({
-        gmail_account_email: "g@example.com",
-        last_polled_at: "2026-06-03T00:00:00Z",
-        last_error: null,
-      })
-    );
+    setupSession("admin");
+    setupDbMock("admin", {
+      gmail_account_email: "g@example.com",
+      last_polled_at: "2026-06-03T00:00:00Z",
+      last_error: null,
+    });
 
     const response = await GET();
     const bodyText = await response.text();
@@ -179,16 +224,12 @@ describe("GET /api/admin/gmail-status", () => {
   });
 
   it("returns is_connected=false when last_polled_at is null (unconfigured)", async () => {
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildServerClientMock("admin")
-    );
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceClientMock({
-        gmail_account_email: "g@example.com",
-        last_polled_at: null,
-        last_error: null,
-      })
-    );
+    setupSession("admin");
+    setupDbMock("admin", {
+      gmail_account_email: "g@example.com",
+      last_polled_at: null,
+      last_error: null,
+    });
 
     const response = await GET();
     const body = await response.json();
@@ -199,16 +240,12 @@ describe("GET /api/admin/gmail-status", () => {
   });
 
   it("returns is_connected=false and last_error when last_error is set", async () => {
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildServerClientMock("admin")
-    );
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceClientMock({
-        gmail_account_email: "g@example.com",
-        last_polled_at: "2026-06-03T00:00:00Z",
-        last_error: "invalid_grant",
-      })
-    );
+    setupSession("admin");
+    setupDbMock("admin", {
+      gmail_account_email: "g@example.com",
+      last_polled_at: "2026-06-03T00:00:00Z",
+      last_error: "invalid_grant",
+    });
 
     const response = await GET();
     const body = await response.json();

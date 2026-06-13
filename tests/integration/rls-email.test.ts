@@ -7,8 +7,8 @@
  *   - PATCH /api/cases/:id/confirm-field
  *   - GET /api/customers (returns empty, not error — RLS-filtered)
  *
- * These tests mock the Supabase clients to simulate RLS behavior
- * (null return for cross-tenant queries = RLS blocks access).
+ * These tests mock @/lib/db (Drizzle) and @/lib/auth/session to simulate
+ * the behavior where cross-tenant queries return no rows.
  *
  * True DB RLS tests require RLS_INTEGRATION_ENABLED=true + live Supabase.
  */
@@ -17,12 +17,25 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("@/lib/supabase/server", () => ({
-  createServerClient: vi.fn(),
+vi.mock("@/lib/auth/session", () => ({
+  getSessionContext: vi.fn(),
 }));
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(),
+vi.mock("@/lib/auth/require-role", () => ({
+  requireRole: vi.fn(),
+  ALL_ROLES: ["owner", "admin", "specialist", "analyst", "viewer"],
+  TRAINING_APPROVER_ROLES: ["owner", "admin", "specialist"],
+  ADMIN_ROLES: ["owner", "admin"],
+  CASE_EDITOR_ROLES: ["owner", "admin", "specialist", "analyst"],
+}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    $count: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/audit/log", () => ({
@@ -46,43 +59,47 @@ vi.mock("@/server/cases/gap-analyzer", () => ({
   }),
 }));
 
+vi.mock("@/lib/rate-limit/index", () => ({
+  rateLimit: vi.fn().mockResolvedValue({
+    allowed: true,
+    remaining: 29,
+    resetAt: Date.now() + 60000,
+    retryAfterSeconds: 0,
+  }),
+  RATE_LIMIT_CONFIGS: {
+    CASES_API: { limit: 100, windowMs: 60000 },
+    CONFIRM_FIELD: { limit: 30, windowMs: 60000 },
+  },
+  buildUserKey: (uid: string, ep: string) => `user:${uid}:${ep}`,
+  getClientIp: () => "127.0.0.1",
+}));
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Use "admin" role so the role guard on /api/customers passes.
 // The RLS isolation (empty result) is what we are testing here, not the role guard.
-const TENANT_A_USER = { id: "user-a", tenant_id: "tenant-a", role: "admin" };
+const TENANT_A_USER = { id: "user-a", tenant_id: "tenant-a", role: "admin" as const };
 const TENANT_B_CASE_ID = "bbbbbbbb-0000-0000-0000-000000000001";
 
-function makeAuthSupabase(user: typeof TENANT_A_USER, caseRow: unknown) {
-  const chainFor = (data: unknown, error: unknown = null) => {
-    const final = Promise.resolve({ data, error });
-    const chain: any = {
-      select: () => chain,
-      eq: () => chain,
-      single: () => final,
-      maybeSingle: () => final,
-      order: () => chain,
-      limit: () => chain,
-      is: () => final,
-      ilike: () => chain,
-      or: () => chain,
-      range: () => chain,
-    };
-    return chain;
+/**
+ * Build a fluent Drizzle-style query chain that resolves to the given data.
+ */
+function makeChain(data: unknown) {
+  const result = Promise.resolve(Array.isArray(data) ? data : data === null ? [] : [data]);
+  const chain: any = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn(() => result),
+    orderBy: vi.fn().mockReturnThis(),
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    and: vi.fn().mockReturnThis(),
+    offset: vi.fn().mockReturnThis(),
   };
-
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user: { id: user.id } } }),
-    },
-    from: vi.fn().mockImplementation((table: string) => {
-      if (table === "users") return chainFor(user);
-      // RLS blocks cross-tenant case → returns null
-      if (table === "cases") return chainFor(caseRow);
-      if (table === "customers") return chainFor([]);
-      return chainFor(null);
-    }),
-  };
+  // Make the chain itself thenable (resolves when awaited directly).
+  chain.then = result.then.bind(result);
+  chain.catch = result.catch.bind(result);
+  return chain;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -93,12 +110,41 @@ describe("AC19: Cross-tenant IDOR defense", () => {
   });
 
   it("GET /api/cases/:id — tenant A cannot access tenant B case (returns 404, not 403)", async () => {
-    const { createServerClient } = await import("@/lib/supabase/server");
+    const { getSessionContext } = await import("@/lib/auth/session");
+    const { db } = await import("@/lib/db");
 
-    // RLS returns null for cross-tenant case access
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      makeAuthSupabase(TENANT_A_USER, null)
-    );
+    vi.mocked(getSessionContext).mockResolvedValue({
+      user: { id: TENANT_A_USER.id, email: "user-a@example.com" },
+    } as any);
+
+    // requireRole returns tenant A context
+    const { requireRole } = await import("@/lib/auth/require-role");
+    vi.mocked(requireRole).mockResolvedValue({
+      db: db as any,
+      user: { id: TENANT_A_USER.id },
+      userRow: TENANT_A_USER,
+    });
+
+    // db.select() for cases returns empty (cross-tenant = no rows)
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]), // no rows = cross-tenant blocked
+          orderBy: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+            catch: vi.fn().mockResolvedValue([]),
+          }),
+          catch: vi.fn().mockResolvedValue([]),
+        }),
+        orderBy: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+            catch: vi.fn().mockResolvedValue([]),
+          }),
+          catch: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    } as any);
 
     const { GET } = await import("@/app/api/cases/[id]/route");
     const { NextRequest } = await import("next/server");
@@ -117,23 +163,24 @@ describe("AC19: Cross-tenant IDOR defense", () => {
   });
 
   it("PATCH /api/cases/:id/confirm-field — tenant A cannot confirm field on tenant B case (returns 404)", async () => {
-    const { createServerClient } = await import("@/lib/supabase/server");
-    const { createServiceClient } = await import("@/lib/supabase/service");
+    const { db } = await import("@/lib/db");
 
-    // RLS returns null for the case belonging to tenant B
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      makeAuthSupabase(TENANT_A_USER, null)
-    );
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-        single: vi.fn().mockResolvedValue({ data: null, error: null }),
-      }),
+    // requireRole returns tenant A context
+    const { requireRole } = await import("@/lib/auth/require-role");
+    vi.mocked(requireRole).mockResolvedValue({
+      db: db as any,
+      user: { id: TENANT_A_USER.id },
+      userRow: TENANT_A_USER,
     });
+
+    // db.select() for cases returns empty (cross-tenant blocked)
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]), // case not found for this tenant
+        }),
+      }),
+    } as any);
 
     const { PATCH } = await import(
       "@/app/api/cases/[id]/confirm-field/route"
@@ -163,68 +210,44 @@ describe("AC19: Cross-tenant IDOR defense", () => {
   });
 
   it("GET /api/customers — tenant A gets empty list when no customers exist in their tenant", async () => {
-    const { createServerClient } = await import("@/lib/supabase/server");
+    const { getSessionContext } = await import("@/lib/auth/session");
+    const { db } = await import("@/lib/db");
 
-    // RLS returns empty array for cross-tenant customers query
-    const supabaseMock = {
-      auth: {
-        getUser: vi.fn().mockResolvedValue({
-          data: { user: { id: TENANT_A_USER.id } },
-        }),
-      },
-      from: vi.fn().mockImplementation((table: string) => {
-        if (table === "users") {
-          const chain: any = {
-            select: () => chain,
-            eq: () => chain,
-            single: () =>
-              Promise.resolve({ data: TENANT_A_USER, error: null }),
-          };
-          return chain;
-        }
-        if (table === "customers") {
-          const chain: any = {
-            select: () => chain,
-            eq: () => chain,
-            ilike: () => chain,
-            order: () => chain,
-            range: () => chain,
-            // RLS filters to empty array — not an error
-            then: (resolve: (val: any) => void) =>
-              resolve({ data: [], count: 0, error: null }),
-          };
-          // Mock count query
-          const countChain: any = {
-            select: () => countChain,
-            eq: () => countChain,
-            ilike: () => countChain,
-            order: () => countChain,
-            range: () => countChain,
-            then: (resolve: (val: any) => void) =>
-              resolve({ data: null, count: 0, error: null }),
-          };
-          return {
-            select: (cols: string, opts?: any) => {
-              if (opts?.count === "exact" && opts?.head === true) {
-                return countChain;
-              }
-              return chain;
-            },
-          };
-        }
+    vi.mocked(getSessionContext).mockResolvedValue({
+      user: { id: TENANT_A_USER.id, email: "user-a@example.com" },
+    } as any);
+
+    // db.select() first call = users lookup (returns admin row)
+    // second call = customers query (returns empty)
+    let selectCallCount = 0;
+    vi.mocked(db.select).mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        // users lookup
         return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          single: vi
-            .fn()
-            .mockResolvedValue({ data: null, error: null }),
-        };
-      }),
-    };
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([TENANT_A_USER]),
+            }),
+          }),
+        } as any;
+      }
+      // customers query — empty result (RLS-filtered)
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockReturnValue({
+              limit: vi.fn().mockReturnValue({
+                offset: vi.fn().mockResolvedValue([]),
+              }),
+            }),
+          }),
+        }),
+      } as any;
+    });
 
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      supabaseMock
-    );
+    // db.$count returns 0
+    vi.mocked(db.$count).mockResolvedValue(0 as any);
 
     const { GET } = await import("@/app/api/customers/route");
 

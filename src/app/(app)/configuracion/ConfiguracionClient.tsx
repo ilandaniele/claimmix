@@ -1,20 +1,18 @@
 /**
  * ConfiguracionClient — password change form.
  *
- * Uses Supabase browser client's `updateUser()` to change the password.
- * Only the new password + confirm are needed — Supabase handles re-auth
- * via the existing session (the current password is verified server-side
- * by Supabase Auth).
+ * Uses Better Auth's changePassword which requires the current password.
  */
 
 "use client";
 
 import { useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+import { authClient } from "@/lib/auth/client";
 
 type FormState = "idle" | "loading" | "success" | "error";
 
 export function ConfiguracionClient() {
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [state, setState] = useState<FormState>("idle");
@@ -36,20 +34,22 @@ export function ConfiguracionClient() {
     setState("loading");
 
     try {
-      const { error } = await supabaseBrowser.auth.updateUser({
-        password: newPassword,
+      const { error } = await authClient.changePassword({
+        currentPassword,
+        newPassword,
+        revokeOtherSessions: false,
       });
 
       if (error) {
-        setErrorMsg("Error al cambiar la contraseña. Intentá de nuevo.");
+        setErrorMsg("Error al cambiar la contraseña. Verificá que la contraseña actual sea correcta.");
         setState("error");
         return;
       }
 
       setState("success");
+      setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      // Auto-reset success state after 4 seconds
       setTimeout(() => setState("idle"), 4000);
     } catch {
       setErrorMsg("Error inesperado. Intentá de nuevo.");
@@ -59,6 +59,25 @@ export function ConfiguracionClient() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <label
+          htmlFor="current_password"
+          className="mb-1 block text-xs font-medium text-slate-600"
+        >
+          Contraseña actual
+        </label>
+        <input
+          id="current_password"
+          type="password"
+          required
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+          className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
+          placeholder="Tu contraseña actual"
+          autoComplete="current-password"
+        />
+      </div>
+
       <div>
         <label
           htmlFor="new_password"

@@ -6,14 +6,17 @@
  * covers both new rows written by this PR and rows written before the
  * migration (during the dual-write window).
  *
- * Uses the service-role client to bypass RLS — this is a system-level check
- * that runs before the user-scoped request context is fully established.
+ * System-level check that runs before the user-scoped request context is
+ * fully established — every query is explicitly tenant-scoped.
  *
  * AC2: Duplicate provider_message_id returns { isDuplicate: true, existingCaseId }.
  */
 
 import "server-only";
-import { createServiceClient } from "@/lib/supabase/service";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { cases, claimMessages } from "@/lib/db/schema";
+import { firstRow } from "@/lib/db/helpers";
 
 export interface DedupeResult {
   isDuplicate: boolean;
@@ -35,33 +38,37 @@ export function normalizeMessageId(raw: string): string {
  * in claim_messages for this tenant.  Falls back to the legacy cases table lookup
  * so duplicate detection works during the dual-write transition window.
  *
- * @param supabase  - Service-role Supabase client (bypasses RLS)
  * @param tenantId  - Tenant UUID for scoping the lookup
  * @param providerMessageId - Normalised provider Message-ID (no angle brackets)
- * @returns { isDuplicate: boolean; existingCaseId?: string }
+ * @returns true when a matching claim_messages row exists
  */
 export async function checkDuplicate(
-  supabase: ReturnType<typeof createServiceClient>,
   tenantId: string,
   providerMessageId: string
 ): Promise<boolean> {
   // Primary check: claim_messages table (new path — W4 onwards).
-  const { data, error } = await (supabase as any)
-    .from("claim_messages")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("provider_message_id", providerMessageId)
-    .limit(1)
-    .maybeSingle();
+  try {
+    const row = firstRow(
+      await db
+        .select({ id: claimMessages.id })
+        .from(claimMessages)
+        .where(
+          and(
+            eq(claimMessages.tenant_id, tenantId),
+            eq(claimMessages.provider_message_id, providerMessageId)
+          )
+        )
+        .limit(1)
+    );
 
-  if (error) {
-    // Log code only — never raw Supabase error body (may contain PII).
-    console.error("[dedupe] claim_messages check error:", error.code); // crew-debug-ok
+    return row !== null;
+  } catch (err) {
+    // Log code only — never raw DB error body (may contain PII).
+    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
+    console.error("[dedupe] claim_messages check error:", code); // crew-debug-ok
     // Fail open — let the request proceed; idempotency is best-effort.
     return false;
   }
-
-  return data !== null && data !== undefined;
 }
 
 /**
@@ -80,46 +87,60 @@ export async function dedupe(
   tenantId: string
 ): Promise<DedupeResult> {
   const normalised = normalizeMessageId(messageId);
-  const supabase = createServiceClient();
 
   // 1. New path: check claim_messages by provider_message_id (AC2).
-  const isDuplicateInClaimMessages = await checkDuplicate(
-    supabase,
-    tenantId,
-    normalised
-  );
+  const isDuplicateInClaimMessages = await checkDuplicate(tenantId, normalised);
 
   if (isDuplicateInClaimMessages) {
     // Resolve the case_id by reading the claim_messages row.
-    const { data: msgRow } = await (supabase as any)
-      .from("claim_messages")
-      .select("case_id")
-      .eq("tenant_id", tenantId)
-      .eq("provider_message_id", normalised)
-      .limit(1)
-      .maybeSingle();
+    let msgRow: { case_id: string } | null = null;
+    try {
+      msgRow = firstRow(
+        await db
+          .select({ case_id: claimMessages.case_id })
+          .from(claimMessages)
+          .where(
+            and(
+              eq(claimMessages.tenant_id, tenantId),
+              eq(claimMessages.provider_message_id, normalised)
+            )
+          )
+          .limit(1)
+      );
+    } catch {
+      // Best-effort — duplicate already established; case id resolution failed.
+      msgRow = null;
+    }
 
     return {
       isDuplicate: true,
-      existingCaseId: (msgRow as { case_id: string } | null)?.case_id,
+      existingCaseId: msgRow?.case_id,
     };
   }
 
   // 2. Legacy fallback: check cases.email_message_id for rows pre-migration.
-  const { data: caseRow, error: caseError } = await (supabase as any)
-    .from("cases")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("email_message_id", normalised)
-    .maybeSingle();
-
-  if (caseError) {
-    console.error("[dedupe] cases check error:", caseError.code); // crew-debug-ok
+  let caseRow: { id: string } | null = null;
+  try {
+    caseRow = firstRow(
+      await db
+        .select({ id: cases.id })
+        .from(cases)
+        .where(
+          and(
+            eq(cases.tenant_id, tenantId),
+            eq(cases.email_message_id, normalised)
+          )
+        )
+        .limit(1)
+    );
+  } catch (err) {
+    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
+    console.error("[dedupe] cases check error:", code); // crew-debug-ok
     return { isDuplicate: false };
   }
 
   if (caseRow) {
-    return { isDuplicate: true, existingCaseId: (caseRow as { id: string }).id };
+    return { isDuplicate: true, existingCaseId: caseRow.id };
   }
 
   return { isDuplicate: false };

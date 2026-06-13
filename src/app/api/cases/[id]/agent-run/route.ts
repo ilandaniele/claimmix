@@ -7,8 +7,9 @@
  * the CURRENT case (no stale router-cache payloads from another email) and it
  * can poll while the case is still 'procesando' (extraction in flight).
  *
- * Auth: any authenticated role (viewers may inspect). RLS scopes the tenant;
- * wrong-tenant case → 404 (never 403 — no tenant enumeration).
+ * Auth: any authenticated role (viewers may inspect). Explicit tenant_id
+ * filters scope the tenant (RLS is gone); wrong-tenant case → 404 (never 403 —
+ * no tenant enumeration).
  *
  * Response:
  *   {
@@ -24,7 +25,17 @@
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { createServerClient } from "@/lib/supabase/server";
+import { and, asc, eq, isNull } from "drizzle-orm";
+import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import {
+  cases,
+  claimFieldConfirmations,
+  extractedFields,
+  missingDocs,
+  trainingExamples,
+} from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { getLatestAgentRun } from "@/server/training/agent-runs";
@@ -44,11 +55,8 @@ export async function GET(
 ) {
   try {
     // ── 1. Auth ──────────────────────────────────────────────────────────────
-    const supabase = await createServerClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return err(new AppError("MISSING_SESSION"));
+    const { user, userRow } = await requireRole(...ALL_ROLES);
+    const tenantId = userRow.tenant_id;
 
     // ── 2. Rate limit ────────────────────────────────────────────────────────
     const rl = await rateLimit(
@@ -65,56 +73,107 @@ export async function GET(
     }
     const caseId = parsed.data.id;
 
-    // ── 4. Case (RLS-scoped → wrong tenant = no row = 404) ───────────────────
-    const { data: caseRow } = await (supabase as any)
-      .from("cases")
-      .select("id,status,is_claim")
-      .eq("id", caseId)
-      .maybeSingle();
+    // ── 4. Case (explicit tenant filter → wrong tenant = no row = 404) ───────
+    const caseRow = firstRow(
+      await db
+        .select({ id: cases.id, status: cases.status, is_claim: cases.is_claim })
+        .from(cases)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
+        .limit(1)
+    );
     if (!caseRow) {
       return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
     }
 
     // ── 5. Latest run + current extraction state, in parallel ────────────────
-    const [run, fieldsResult, missingResult, confirmationsResult] =
-      await Promise.all([
-        getLatestAgentRun(supabase as any, caseId),
-        (supabase as any)
-          .from("extracted_fields")
-          .select("field_key,field_value,confidence,extracted_at")
-          .eq("case_id", caseId)
-          .order("field_key", { ascending: true }),
-        (supabase as any)
-          .from("missing_docs")
-          .select("doc_key,satisfied_at")
-          .eq("case_id", caseId)
-          .is("satisfied_at", null),
-        (supabase as any)
-          .from("claim_field_confirmations")
-          .select("field_key,proposed_value,confidence,status")
-          .eq("case_id", caseId)
-          .eq("status", "pending"),
-      ]);
+    // Each related query degrades to [] on failure — matching the previous
+    // behavior where query errors yielded empty arrays.
+    const [run, fieldRows, missingRows, confirmationRows] = await Promise.all([
+      getLatestAgentRun(tenantId, caseId),
+      db
+        .select({
+          field_key: extractedFields.field_key,
+          field_value: extractedFields.field_value,
+          confidence: extractedFields.confidence,
+          extracted_at: extractedFields.extracted_at,
+        })
+        .from(extractedFields)
+        .where(
+          and(
+            eq(extractedFields.case_id, caseId),
+            eq(extractedFields.tenant_id, tenantId)
+          )
+        )
+        .orderBy(asc(extractedFields.field_key))
+        .catch(() => []),
+      db
+        .select({
+          doc_key: missingDocs.doc_key,
+          satisfied_at: missingDocs.satisfied_at,
+        })
+        .from(missingDocs)
+        .where(
+          and(
+            eq(missingDocs.case_id, caseId),
+            eq(missingDocs.tenant_id, tenantId),
+            isNull(missingDocs.satisfied_at)
+          )
+        )
+        .catch(() => []),
+      db
+        .select({
+          // Neon column names are field_name / suggested_value — aliased to
+          // preserve the previous field_key / proposed_value response shape.
+          field_key: claimFieldConfirmations.field_name,
+          proposed_value: claimFieldConfirmations.suggested_value,
+          confidence: claimFieldConfirmations.confidence,
+          status: claimFieldConfirmations.status,
+        })
+        .from(claimFieldConfirmations)
+        .where(
+          and(
+            eq(claimFieldConfirmations.case_id, caseId),
+            eq(claimFieldConfirmations.tenant_id, tenantId),
+            eq(claimFieldConfirmations.status, "pending")
+          )
+        )
+        .catch(() => []),
+    ]);
 
     // ── 6. Already approved? ─────────────────────────────────────────────────
     let alreadyApproved = false;
     if (run) {
-      const { data: existing } = await (supabase as any)
-        .from("training_examples")
-        .select("id")
-        .eq("agent_run_id", run.id)
-        .limit(1)
-        .maybeSingle();
+      const existing = firstRow(
+        await db
+          .select({ id: trainingExamples.id })
+          .from(trainingExamples)
+          .where(
+            and(
+              eq(trainingExamples.agent_run_id, run.id),
+              eq(trainingExamples.tenant_id, tenantId)
+            )
+          )
+          .limit(1)
+          .catch(() => [] as Array<{ id: string }>)
+      );
       alreadyApproved = Boolean(existing);
     }
 
+    // numeric columns come back as strings from Drizzle — convert so the JSON
+    // shape matches the previous PostgREST response (numbers).
     return ok({
       case_status: caseRow.status,
       is_claim: caseRow.is_claim,
       run,
-      extracted_fields: fieldsResult?.data ?? [],
-      missing_docs: missingResult?.data ?? [],
-      pending_confirmations: confirmationsResult?.data ?? [],
+      extracted_fields: fieldRows.map((f) => ({
+        ...f,
+        confidence: Number(f.confidence),
+      })),
+      missing_docs: missingRows,
+      pending_confirmations: confirmationRows.map((c) => ({
+        ...c,
+        confidence: Number(c.confidence),
+      })),
       already_approved: alreadyApproved,
     });
   } catch (e) {

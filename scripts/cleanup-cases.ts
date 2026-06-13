@@ -2,15 +2,13 @@
  * scripts/cleanup-cases.ts
  *
  * DEV UTILITY — deletes all cases (and dependent rows) for a configured tenant.
- * Uses the Supabase service-role key to bypass RLS.
  *
  * Usage:
  *   pnpm cleanup:cases
  *
  * Required env vars (loaded from .env.local):
- *   NEXT_PUBLIC_SUPABASE_URL   — Supabase project URL
- *   SUPABASE_SERVICE_ROLE_KEY  — service-role key (bypasses RLS)
- *   GMAIL_TENANT_ID            — tenant whose cases will be deleted
+ *   DATABASE_URL    — Neon/Postgres connection string
+ *   GMAIL_TENANT_ID — tenant whose cases will be deleted
  *
  * Deletion order (child tables first, parent last):
  *   1. audit_log               (tenant-scoped; no FK to cases)
@@ -24,17 +22,13 @@
  *   9. ai_usage                (tenant-scoped; no FK to cases)
  *  10. cases                   (root)
  *
- * Note: tables with ON DELETE CASCADE on case_id would be handled automatically
- * when deleting from cases, but we delete them explicitly to print per-table counts
- * and to give the operator visibility into what is being removed.
- *
  * NEVER runs against production without explicit "DELETE" confirmation.
  */
 
 import * as readline from "node:readline";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { neon } from "@neondatabase/serverless";
 import * as dotenv from "dotenv";
 
 // ---------------------------------------------------------------------------
@@ -45,7 +39,6 @@ function loadEnv(): void {
   if (fs.existsSync(envPath)) {
     dotenv.config({ path: envPath });
   } else {
-    // Fall back to .env if .env.local is absent (CI / Docker usage)
     dotenv.config();
   }
 }
@@ -54,19 +47,16 @@ function loadEnv(): void {
 // Validation — exits with code 1 on any missing required variable
 // ---------------------------------------------------------------------------
 export interface EnvConfig {
-  supabaseUrl: string;
-  serviceRoleKey: string;
+  databaseUrl: string;
   tenantId: string;
 }
 
 export function validateEnv(): EnvConfig {
-  const supabaseUrl = process.env["NEXT_PUBLIC_SUPABASE_URL"];
-  const serviceRoleKey = process.env["SUPABASE_SERVICE_ROLE_KEY"];
+  const databaseUrl = process.env["DATABASE_URL"];
   const tenantId = process.env["GMAIL_TENANT_ID"];
 
   const missing: string[] = [];
-  if (!supabaseUrl) missing.push("NEXT_PUBLIC_SUPABASE_URL");
-  if (!serviceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  if (!databaseUrl) missing.push("DATABASE_URL");
   if (!tenantId) missing.push("GMAIL_TENANT_ID");
 
   if (missing.length > 0) {
@@ -78,98 +68,14 @@ export function validateEnv(): EnvConfig {
     process.exit(1);
   }
 
-  // Validate URL is a real HTTP/HTTPS URL (catches placeholder values like
-  // "https://<project-ref>.supabase.co" copied from .env.example).
-  try {
-    const u = new URL(supabaseUrl!);
-    if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error();
-  } catch {
-    console.error(
-      `[cleanup-cases] ERROR: NEXT_PUBLIC_SUPABASE_URL is not a valid URL.\n` +
-        `  Got: ${supabaseUrl}\n` +
-        `  Expected format: https://xxxxxxxxxxxx.supabase.co\n` +
-        `  Find your URL in: Supabase dashboard → Project Settings → API`
-    );
-    process.exit(1);
-  }
-
   return {
-    supabaseUrl: supabaseUrl!,
-    serviceRoleKey: serviceRoleKey!,
+    databaseUrl: databaseUrl!,
     tenantId: tenantId!,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Deletion order — child tables first, parent (cases) last
-// Entries that are tenant-scoped without a FK to cases are cleaned too
-// so the tenant workspace is fully reset.
-// ---------------------------------------------------------------------------
-export interface DeletionTable {
-  table: string;
-  filter: "tenant_id" | "case_id_via_tenant";
-}
-
-// All tables use tenant_id filter for explicit, safe, tenant-scoped deletion.
-export const DELETION_ORDER: readonly DeletionTable[] = [
-  { table: "audit_log", filter: "tenant_id" },
-  { table: "claim_messages", filter: "tenant_id" },
-  { table: "claim_attachments", filter: "tenant_id" },
-  { table: "claim_field_confirmations", filter: "tenant_id" },
-  { table: "missing_docs", filter: "tenant_id" },
-  { table: "extracted_fields", filter: "tenant_id" },
-  { table: "raw_messages", filter: "tenant_id" },
-  { table: "outbound_messages", filter: "tenant_id" },
-  { table: "ai_usage", filter: "tenant_id" },
-  { table: "cases", filter: "tenant_id" },
-] as const;
-
-// ---------------------------------------------------------------------------
-// Count helper
-// ---------------------------------------------------------------------------
-export async function countCases(
-  supabase: SupabaseClient,
-  tenantId: string
-): Promise<number> {
-  const { count, error } = await supabase
-    .from("cases")
-    .select("id", { count: "exact", head: true })
-    .eq("tenant_id", tenantId);
-
-  if (error) {
-    console.error(`[cleanup-cases] Failed to count cases: ${error.message}`);
-    process.exit(1);
-  }
-
-  return count ?? 0;
-}
-
-// ---------------------------------------------------------------------------
-// Delete a single table — returns row count deleted
-// ---------------------------------------------------------------------------
-export async function deleteFromTable(
-  supabase: SupabaseClient,
-  tableName: string,
-  tenantId: string
-): Promise<number> {
-  const { data, error } = await supabase
-    .from(tableName)
-    .delete()
-    .eq("tenant_id", tenantId)
-    .select("*");
-
-  if (error) {
-    console.error(
-      `[cleanup-cases] Failed to delete from ${tableName}: ${error.message}`
-    );
-    process.exit(1);
-  }
-
-  return data?.length ?? 0;
-}
-
-// ---------------------------------------------------------------------------
-// Prompt helper — wraps readline for testability
+// Prompt helper
 // ---------------------------------------------------------------------------
 export function promptUser(question: string): Promise<string> {
   return new Promise((resolve) => {
@@ -185,21 +91,23 @@ export function promptUser(question: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Main orchestration function — exported for testing
+// Main orchestration function
 // ---------------------------------------------------------------------------
 export async function run(
   env: EnvConfig,
   deps: {
-    supabase: SupabaseClient;
+    databaseUrl: string;
     prompt: (question: string) => Promise<string>;
     log: (msg: string) => void;
   }
 ): Promise<void> {
-  const { supabase, prompt, log } = deps;
+  const { prompt, log } = deps;
   const { tenantId } = env;
+  const sql = neon(deps.databaseUrl);
 
-  // Count cases for this tenant
-  const caseCount = await countCases(supabase, tenantId);
+  // Count before delete
+  const countRows = await sql`SELECT COUNT(*) AS count FROM cases WHERE tenant_id = ${tenantId}`;
+  const caseCount = Number((countRows[0] as Record<string, unknown>)?.["count"] ?? 0);
 
   log(`\nAbout to delete ${caseCount} cases for tenant ${tenantId}.`);
   log(`This cannot be undone.\n`);
@@ -213,29 +121,40 @@ export async function run(
 
   log("\nDeleting...");
 
-  for (const entry of DELETION_ORDER) {
-    const deleted = await deleteFromTable(supabase, entry.table, tenantId);
-    log(`  ${entry.table}: ${deleted} rows deleted`);
+  const tables: [string, ReturnType<typeof neon>][] = [];
+  void tables; // tables not used — inline deletes below
+
+  // Delete in order: children first, parent last
+  const steps: Array<{ name: string; query: () => Promise<unknown[]> }> = [
+    { name: "audit_log",                 query: () => sql`DELETE FROM audit_log WHERE tenant_id = ${tenantId} RETURNING id` },
+    { name: "claim_messages",            query: () => sql`DELETE FROM claim_messages WHERE tenant_id = ${tenantId} RETURNING id` },
+    { name: "claim_attachments",         query: () => sql`DELETE FROM claim_attachments WHERE tenant_id = ${tenantId} RETURNING id` },
+    { name: "claim_field_confirmations", query: () => sql`DELETE FROM claim_field_confirmations WHERE tenant_id = ${tenantId} RETURNING id` },
+    { name: "missing_docs",              query: () => sql`DELETE FROM missing_docs WHERE tenant_id = ${tenantId} RETURNING id` },
+    { name: "extracted_fields",          query: () => sql`DELETE FROM extracted_fields WHERE tenant_id = ${tenantId} RETURNING id` },
+    { name: "raw_messages",              query: () => sql`DELETE FROM raw_messages WHERE tenant_id = ${tenantId} RETURNING id` },
+    { name: "outbound_messages",         query: () => sql`DELETE FROM outbound_messages WHERE tenant_id = ${tenantId} RETURNING id` },
+    { name: "ai_usage",                  query: () => sql`DELETE FROM ai_usage WHERE tenant_id = ${tenantId} RETURNING id` },
+    { name: "cases",                     query: () => sql`DELETE FROM cases WHERE tenant_id = ${tenantId} RETURNING id` },
+  ];
+
+  for (const step of steps) {
+    const rows = await step.query();
+    log(`  ${step.name}: ${(rows as unknown[]).length} rows deleted`);
   }
 
   log("\nCleanup complete.");
 }
 
 // ---------------------------------------------------------------------------
-// Entry point — only executed when run directly (not imported in tests)
+// Entry point
 // ---------------------------------------------------------------------------
-// Vitest runs the file in a module context, so we guard on import.meta.url.
-// `tsx` sets import.meta.url to the file path; we compare to argv[1].
 if (process.argv[1] && process.argv[1].endsWith("cleanup-cases.ts")) {
   loadEnv();
   const env = validateEnv();
 
-  const supabase = createClient(env.supabaseUrl, env.serviceRoleKey, {
-    auth: { persistSession: false },
-  });
-
   run(env, {
-    supabase,
+    databaseUrl: env.databaseUrl,
     prompt: promptUser,
     log: console.log,
   }).catch((err: unknown) => {

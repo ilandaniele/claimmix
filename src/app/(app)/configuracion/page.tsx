@@ -11,8 +11,12 @@
  * password change form (requires interactivity).
  */
 
-import { createServerClient } from "@/lib/supabase/server";
+import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
+
+import { getSessionContext } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { users } from "@/lib/db/schema";
 import { ConfiguracionClient } from "./ConfiguracionClient";
 import { GmailStatusSection } from "./GmailStatusSection";
 import { GmailAccountsPanel } from "./GmailAccountsPanel";
@@ -80,27 +84,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default async function ConfiguracionPage() {
   const locale = await getServerLocale();
   const t = getT(locale);
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-    error: authErr,
-  } = await supabase.auth.getUser();
 
-  if (!user || authErr) {
-    redirect("/login");
-  }
+  const session = await getSessionContext();
+  if (!session?.user) redirect("/login");
 
-  // Fetch public.users row for full_name + role
-   
-  const { data: userRow } = await (supabase as any)
-    .from("users")
-    .select("full_name, role")
-    .eq("id", user.id)
-    .single();
+  const [userRow] = await db
+    .select({ full_name: users.full_name, role: users.role })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
 
-  const fullName: string = userRow?.full_name ?? user?.email ?? "Analista";
+  const fullName: string = userRow?.full_name ?? session.user.email ?? "Analista";
   const role: string = userRow?.role ?? "analyst";
-  const email: string = user.email ?? "—";
+  const email: string = session.user.email ?? "—";
   const isAdmin = role === "admin" || role === "owner";
 
   // AI thresholds — read from env with documented defaults

@@ -10,15 +10,16 @@
  *
  * AC6:  High-confidence match sets cases.customer_id + cases.policy_id.
  * AC22: Priority: policy > dni > email > phone.
- * IDOR: Uses service-role client — RLS ensures no cross-tenant leakage on the
- *       customer data (tenant_id filter is always applied in SQL).
+ * IDOR: No cross-tenant leakage on the customer data — the tenant_id filter
+ *       is always applied in SQL.
  *
  * LLM06: PII fields (email, phone, dni) are never logged. Only customer_id
  *        and match_type are logged.
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
 import type { ClaimFields } from "@/lib/schemas/extracted-claim";
 
 /** A single customer match result. */
@@ -54,12 +55,10 @@ const MATCH_CONFIDENCE: Record<CustomerMatch["matchType"], number> = {
  * Returns an array of matches sorted by confidence descending.
  * Returns [] if no matches are found.
  *
- * @param supabase  - Supabase client (service role for privileged reads).
  * @param tenantId  - Tenant scope (always applied — prevents cross-tenant leakage).
  * @param fields    - Extracted claim fields from the AI extractor.
  */
 export async function findCustomerMatches(
-  supabase: SupabaseClient,
   tenantId: string,
   fields: Partial<ClaimFields>
 ): Promise<CustomerMatch[]> {
@@ -68,7 +67,7 @@ export async function findCustomerMatches(
 
   // ── 1. Policy number match (highest priority) ────────────────────────────────
   if (fields.policy_number && fields.policy_number.trim() !== "") {
-    const policyMatches = await matchByPolicyNumber(supabase, tenantId, fields.policy_number.trim(), fields);
+    const policyMatches = await matchByPolicyNumber(tenantId, fields.policy_number.trim(), fields);
     for (const m of policyMatches) {
       if (!seenCustomerIds.has(m.customerId)) {
         matches.push(m);
@@ -79,7 +78,7 @@ export async function findCustomerMatches(
 
   // ── 2. DNI match ──────────────────────────────────────────────────────────────
   if (fields.dni && fields.dni.trim() !== "") {
-    const dniMatches = await matchByDni(supabase, tenantId, fields.dni.trim(), fields);
+    const dniMatches = await matchByDni(tenantId, fields.dni.trim(), fields);
     for (const m of dniMatches) {
       if (!seenCustomerIds.has(m.customerId)) {
         matches.push(m);
@@ -90,7 +89,7 @@ export async function findCustomerMatches(
 
   // ── 3. Email match ─────────────────────────────────────────────────────────────
   if (fields.email && fields.email.trim() !== "") {
-    const emailMatches = await matchByEmail(supabase, tenantId, fields.email.trim(), fields);
+    const emailMatches = await matchByEmail(tenantId, fields.email.trim(), fields);
     for (const m of emailMatches) {
       if (!seenCustomerIds.has(m.customerId)) {
         matches.push(m);
@@ -101,7 +100,7 @@ export async function findCustomerMatches(
 
   // ── 4. Phone match via customer_contacts ──────────────────────────────────────
   if (fields.phone && fields.phone.trim() !== "") {
-    const phoneMatches = await matchByPhone(supabase, tenantId, fields.phone.trim(), fields);
+    const phoneMatches = await matchByPhone(tenantId, fields.phone.trim(), fields);
     for (const m of phoneMatches) {
       if (!seenCustomerIds.has(m.customerId)) {
         matches.push(m);
@@ -130,25 +129,41 @@ export async function findCustomerMatches(
 // ── Private matchers ──────────────────────────────────────────────────────────
 
 async function matchByPolicyNumber(
-  supabase: SupabaseClient,
   tenantId: string,
   policyNumber: string,
   fields: Partial<ClaimFields>
 ): Promise<CustomerMatch[]> {
-  const { data, error } = await (supabase as any)
-    .from("policies")
-    .select("id, customer_id, customers(id, full_name, email, dni)")
-    .eq("tenant_id", tenantId)
-    .eq("policy_number", policyNumber)
-    .limit(5);
+  const p = tables.policies;
+  const c = tables.customers;
 
-  if (error) {
-    console.error("[customer-matcher] Policy lookup error:", error.code);
+  let data: Array<{
+    id: string;
+    customer_id: string;
+    customer: { id: string; full_name: string; email: string | null; dni: string | null } | null;
+  }>;
+  try {
+    data = await db
+      .select({
+        id: p.id,
+        customer_id: p.customer_id,
+        customer: {
+          id: c.id,
+          full_name: c.full_name,
+          email: c.email,
+          dni: c.dni,
+        },
+      })
+      .from(p)
+      .leftJoin(c, eq(p.customer_id, c.id))
+      .where(and(eq(p.tenant_id, tenantId), eq(p.policy_number, policyNumber)))
+      .limit(5);
+  } catch (e) {
+    console.error("[customer-matcher] Policy lookup error:", (e as { code?: string })?.code);
     return [];
   }
 
-  return (data ?? []).map((row: any) => {
-    const customer = row.customers;
+  return data.map((row) => {
+    const customer = row.customer;
     const conflicts = detectConflicts(fields, customer);
     return {
       customerId: row.customer_id,
@@ -162,24 +177,25 @@ async function matchByPolicyNumber(
 }
 
 async function matchByDni(
-  supabase: SupabaseClient,
   tenantId: string,
   dni: string,
   fields: Partial<ClaimFields>
 ): Promise<CustomerMatch[]> {
-  const { data, error } = await (supabase as any)
-    .from("customers")
-    .select("id, full_name, email, dni")
-    .eq("tenant_id", tenantId)
-    .eq("dni", dni)
-    .limit(5);
+  const c = tables.customers;
 
-  if (error) {
-    console.error("[customer-matcher] DNI lookup error:", error.code);
+  let data: Array<{ id: string; full_name: string; email: string | null; dni: string | null }>;
+  try {
+    data = await db
+      .select({ id: c.id, full_name: c.full_name, email: c.email, dni: c.dni })
+      .from(c)
+      .where(and(eq(c.tenant_id, tenantId), eq(c.dni, dni)))
+      .limit(5);
+  } catch (e) {
+    console.error("[customer-matcher] DNI lookup error:", (e as { code?: string })?.code);
     return [];
   }
 
-  return (data ?? []).map((customer: any) => {
+  return data.map((customer) => {
     const conflicts = detectConflicts(fields, customer);
     return {
       customerId: customer.id,
@@ -193,24 +209,25 @@ async function matchByDni(
 }
 
 async function matchByEmail(
-  supabase: SupabaseClient,
   tenantId: string,
   email: string,
   fields: Partial<ClaimFields>
 ): Promise<CustomerMatch[]> {
-  const { data, error } = await (supabase as any)
-    .from("customers")
-    .select("id, full_name, email, dni")
-    .eq("tenant_id", tenantId)
-    .eq("email", email.toLowerCase())
-    .limit(5);
+  const c = tables.customers;
 
-  if (error) {
-    console.error("[customer-matcher] Email lookup error:", error.code);
+  let data: Array<{ id: string; full_name: string; email: string | null; dni: string | null }>;
+  try {
+    data = await db
+      .select({ id: c.id, full_name: c.full_name, email: c.email, dni: c.dni })
+      .from(c)
+      .where(and(eq(c.tenant_id, tenantId), eq(c.email, email.toLowerCase())))
+      .limit(5);
+  } catch (e) {
+    console.error("[customer-matcher] Email lookup error:", (e as { code?: string })?.code);
     return [];
   }
 
-  return (data ?? []).map((customer: any) => {
+  return data.map((customer) => {
     const conflicts = detectConflicts(fields, customer);
     return {
       customerId: customer.id,
@@ -224,7 +241,6 @@ async function matchByEmail(
 }
 
 async function matchByPhone(
-  supabase: SupabaseClient,
   tenantId: string,
   phone: string,
   fields: Partial<ClaimFields>
@@ -232,23 +248,43 @@ async function matchByPhone(
   // Normalize phone: strip spaces, dashes, parentheses for matching.
   const normalized = phone.replace(/[\s\-().+]/g, "");
 
-  const { data, error } = await (supabase as any)
-    .from("customer_contacts")
-    .select("customer_id, customers(id, full_name, email, dni)")
-    .eq("tenant_id", tenantId)
-    .eq("contact_type", "phone")
-    .eq("value", phone)
-    .limit(5);
+  const cc = tables.customerContacts;
+  const c = tables.customers;
 
-  void normalized; // used for logging only; not in SQL (match exact stored value)
-
-  if (error) {
-    console.error("[customer-matcher] Phone lookup error:", error.code);
+  let data: Array<{
+    customer_id: string;
+    customer: { id: string; full_name: string; email: string | null; dni: string | null } | null;
+  }>;
+  try {
+    data = await db
+      .select({
+        customer_id: cc.customer_id,
+        customer: {
+          id: c.id,
+          full_name: c.full_name,
+          email: c.email,
+          dni: c.dni,
+        },
+      })
+      .from(cc)
+      .leftJoin(c, eq(cc.customer_id, c.id))
+      .where(
+        and(
+          eq(cc.tenant_id, tenantId),
+          eq(cc.contact_type, "phone"),
+          eq(cc.value, phone)
+        )
+      )
+      .limit(5);
+  } catch (e) {
+    console.error("[customer-matcher] Phone lookup error:", (e as { code?: string })?.code);
     return [];
   }
 
-  return (data ?? []).map((row: any) => {
-    const customer = row.customers;
+  void normalized; // used for logging only; not in SQL (match exact stored value)
+
+  return data.map((row) => {
+    const customer = row.customer;
     const conflicts = detectConflicts(fields, customer);
     return {
       customerId: row.customer_id,
@@ -271,7 +307,7 @@ async function matchByPhone(
  */
 function detectConflicts(
   extracted: Partial<ClaimFields>,
-  customer: { full_name?: string; email?: string; dni?: string } | null
+  customer: { full_name?: string | null; email?: string | null; dni?: string | null } | null
 ): string[] {
   if (!customer) return [];
   const conflicts: string[] = [];

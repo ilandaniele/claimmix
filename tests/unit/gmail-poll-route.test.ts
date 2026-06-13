@@ -6,16 +6,16 @@
  *   - Wrong bearer token → 401
  *   - Correct CRON_SECRET → 200 { ok: true, ... }
  *   - Gmail API not called on 401
- *   - pollGmail called exactly once on success
+ *   - pollAllGmailAccounts called exactly once on success
  *
- * AC1: Route calls pollGmail on success and returns its result.
+ * AC1: Route calls pollAllGmailAccounts on success and returns its result.
  * AC9: watch_expiration within 24h + PUBSUB_TOPIC set → setupGmailWatch called;
  *      response includes watch_renewed:true.
  * AC10: watch_expiration >24h away + PUBSUB_TOPIC set → setupGmailWatch NOT called;
  *       response includes watch_renewed:false.
  * AC11: PUBSUB_TOPIC not set → setupGmailWatch NOT called; response includes
  *       watch_renewed:false and watch_skipped_reason:'PUBSUB_TOPIC_UNSET'.
- * AC13: 500 errors from pollGmail are caught and returned as { error: { code: "INTERNAL" } }.
+ * AC13: 500 errors from pollAllGmailAccounts are caught and returned as { error: { code: "INTERNAL" } }.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -24,23 +24,23 @@ import { NextRequest } from "next/server";
 // ── Mocks (must be hoisted before the import of route.ts) ─────────────────────
 
 const {
-  mockPollGmail,
-  mockCreateServiceClient,
+  mockPollAllGmailAccounts,
+  mockListEnabledGmailAccounts,
   mockGetWatchExpiration,
   mockSetupGmailWatch,
 } = vi.hoisted(() => ({
-  mockPollGmail: vi.fn(),
-  mockCreateServiceClient: vi.fn(),
+  mockPollAllGmailAccounts: vi.fn(),
+  mockListEnabledGmailAccounts: vi.fn(),
   mockGetWatchExpiration: vi.fn(),
   mockSetupGmailWatch: vi.fn(),
 }));
 
 vi.mock("@/server/email/gmail/gmail-poller", () => ({
-  pollGmail: mockPollGmail,
+  pollAllGmailAccounts: mockPollAllGmailAccounts,
 }));
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: mockCreateServiceClient,
+vi.mock("@/server/email/gmail/accounts", () => ({
+  listEnabledGmailAccounts: mockListEnabledGmailAccounts,
 }));
 
 vi.mock("@/server/email/gmail/poll-state", () => ({
@@ -68,11 +68,11 @@ function makeRequest(authHeader?: string): NextRequest {
 }
 
 const MOCK_POLL_RESULT = {
+  accounts: 1,
   processed: 2,
   skipped: 1,
   errors: 0,
-  fallback: false,
-  history_id: "99999",
+  results: [],
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -85,8 +85,9 @@ describe("GET /api/cron/gmail-poll", () => {
     process.env.CRON_SECRET = CRON_SECRET;
     process.env.GMAIL_USER_EMAIL = GMAIL_EMAIL;
     process.env.PUBSUB_TOPIC = PUBSUB_TOPIC;
-    mockCreateServiceClient.mockReturnValue({ from: vi.fn() });
-    mockPollGmail.mockResolvedValue(MOCK_POLL_RESULT);
+    // By default, no connected accounts (fallback to env var)
+    mockListEnabledGmailAccounts.mockResolvedValue([]);
+    mockPollAllGmailAccounts.mockResolvedValue(MOCK_POLL_RESULT);
     // Default: watch expires 5 days from now (not expiring soon)
     mockGetWatchExpiration.mockResolvedValue(
       new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
@@ -116,7 +117,7 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error.code).toBe("UNAUTHORIZED");
-    expect(mockPollGmail).not.toHaveBeenCalled();
+    expect(mockPollAllGmailAccounts).not.toHaveBeenCalled();
   });
 
   it("AC6: returns 401 when Authorization header is an empty string", async () => {
@@ -126,7 +127,7 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error.code).toBe("UNAUTHORIZED");
-    expect(mockPollGmail).not.toHaveBeenCalled();
+    expect(mockPollAllGmailAccounts).not.toHaveBeenCalled();
   });
 
   it("AC6: returns 401 when bearer token is wrong", async () => {
@@ -136,7 +137,7 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error.code).toBe("UNAUTHORIZED");
-    expect(mockPollGmail).not.toHaveBeenCalled();
+    expect(mockPollAllGmailAccounts).not.toHaveBeenCalled();
   });
 
   it("AC6: returns 401 when Authorization is missing 'Bearer' prefix", async () => {
@@ -146,7 +147,7 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error.code).toBe("UNAUTHORIZED");
-    expect(mockPollGmail).not.toHaveBeenCalled();
+    expect(mockPollAllGmailAccounts).not.toHaveBeenCalled();
   });
 
   it("AC6: returns 401 when CRON_SECRET env var is not set", async () => {
@@ -156,12 +157,12 @@ describe("GET /api/cron/gmail-poll", () => {
 
     // When CRON_SECRET is not configured, returns 500 (not 401)
     expect(res.status).toBe(500);
-    expect(mockPollGmail).not.toHaveBeenCalled();
+    expect(mockPollAllGmailAccounts).not.toHaveBeenCalled();
   });
 
-  // ── AC1/AC6: Successful auth + pollGmail called ────────────────────────────
+  // ── AC1/AC6: Successful auth + pollAllGmailAccounts called ────────────────────────────
 
-  it("AC6: returns 200 with correct CRON_SECRET and calls pollGmail once", async () => {
+  it("AC6: returns 200 with correct CRON_SECRET and calls pollAllGmailAccounts once", async () => {
     const req = makeRequest(`Bearer ${CRON_SECRET}`);
     const res = await GET(req);
 
@@ -170,30 +171,26 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(body.ok).toBe(true);
     expect(body.processed).toBe(MOCK_POLL_RESULT.processed);
     expect(body.skipped).toBe(MOCK_POLL_RESULT.skipped);
-    expect(body.history_id).toBe(MOCK_POLL_RESULT.history_id);
     // watch_renewed is always present in the success response
     expect(typeof body.watch_renewed).toBe("boolean");
-    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    expect(mockPollAllGmailAccounts).toHaveBeenCalledTimes(1);
   });
 
-  it("AC1: passes a supabase service client to pollGmail", async () => {
-    const mockClient = { from: vi.fn() };
-    mockCreateServiceClient.mockReturnValue(mockClient);
-
+  it("AC1: calls pollAllGmailAccounts without arguments", async () => {
     const req = makeRequest(`Bearer ${CRON_SECRET}`);
     await GET(req);
 
-    expect(mockCreateServiceClient).toHaveBeenCalledTimes(1);
-    expect(mockPollGmail).toHaveBeenCalledWith(mockClient);
+    expect(mockPollAllGmailAccounts).toHaveBeenCalledTimes(1);
+    expect(mockPollAllGmailAccounts).toHaveBeenCalledWith();
   });
 
   // ── AC13: Error handling ───────────────────────────────────────────────────
 
-  it("AC13: returns 500 when pollGmail throws a fatal error", async () => {
+  it("AC13: returns 500 when pollAllGmailAccounts throws a fatal error", async () => {
     const fatalError = Object.assign(new Error("DB connection lost"), {
       code: "CONNECTION_FAILED",
     });
-    mockPollGmail.mockRejectedValue(fatalError);
+    mockPollAllGmailAccounts.mockRejectedValue(fatalError);
 
     const req = makeRequest(`Bearer ${CRON_SECRET}`);
     const res = await GET(req);
@@ -209,7 +206,7 @@ describe("GET /api/cron/gmail-poll", () => {
     const err = Object.assign(new Error("sensitive data here"), {
       code: "FATAL_CODE",
     });
-    mockPollGmail.mockRejectedValue(err);
+    mockPollAllGmailAccounts.mockRejectedValue(err);
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -231,7 +228,7 @@ describe("GET /api/cron/gmail-poll", () => {
     const res = await GET(req);
 
     expect(res.status).toBe(401);
-    expect(mockPollGmail).not.toHaveBeenCalled();
+    expect(mockPollAllGmailAccounts).not.toHaveBeenCalled();
   });
 
   // ── AC9: Watch renewal when expiring within 24h ────────────────────────────
@@ -247,8 +244,11 @@ describe("GET /api/cron/gmail-poll", () => {
 
     expect(res.status).toBe(200);
     expect(mockSetupGmailWatch).toHaveBeenCalledTimes(1);
-    expect(mockSetupGmailWatch).toHaveBeenCalledWith(PUBSUB_TOPIC);
-    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    expect(mockSetupGmailWatch).toHaveBeenCalledWith(
+      PUBSUB_TOPIC,
+      expect.objectContaining({ email: GMAIL_EMAIL })
+    );
+    expect(mockPollAllGmailAccounts).toHaveBeenCalledTimes(1);
     const body = await res.json();
     expect(body.watch_renewed).toBe(true);
     expect(body.watch_skipped_reason).toBeUndefined();
@@ -276,7 +276,7 @@ describe("GET /api/cron/gmail-poll", () => {
 
     expect(res.status).toBe(200);
     expect(mockSetupGmailWatch).toHaveBeenCalledTimes(1);
-    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    expect(mockPollAllGmailAccounts).toHaveBeenCalledTimes(1);
     const body = await res.json();
     expect(body.watch_renewed).toBe(true);
   });
@@ -294,7 +294,7 @@ describe("GET /api/cron/gmail-poll", () => {
 
     expect(res.status).toBe(200);
     expect(mockSetupGmailWatch).not.toHaveBeenCalled();
-    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    expect(mockPollAllGmailAccounts).toHaveBeenCalledTimes(1);
     const body = await res.json();
     expect(body.watch_renewed).toBe(false);
     expect(body.watch_skipped_reason).toBeUndefined();
@@ -326,7 +326,7 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(res.status).toBe(200);
     expect(mockSetupGmailWatch).not.toHaveBeenCalled();
     expect(mockGetWatchExpiration).not.toHaveBeenCalled();
-    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    expect(mockPollAllGmailAccounts).toHaveBeenCalledTimes(1);
     const body = await res.json();
     expect(body.watch_renewed).toBe(false);
     expect(body.watch_skipped_reason).toBe("PUBSUB_TOPIC_UNSET");
@@ -334,7 +334,7 @@ describe("GET /api/cron/gmail-poll", () => {
 
   it("AC11: does not throw when PUBSUB_TOPIC is not set — cron completes normally", async () => {
     delete process.env.PUBSUB_TOPIC;
-    mockPollGmail.mockResolvedValue(MOCK_POLL_RESULT);
+    mockPollAllGmailAccounts.mockResolvedValue(MOCK_POLL_RESULT);
 
     const req = makeRequest(`Bearer ${CRON_SECRET}`);
     const res = await GET(req);
@@ -347,7 +347,7 @@ describe("GET /api/cron/gmail-poll", () => {
 
   // ── Non-blocking renewal error ─────────────────────────────────────────────
 
-  it("logs error name and continues to call pollGmail when setupGmailWatch throws", async () => {
+  it("logs error name and continues to call pollAllGmailAccounts when setupGmailWatch throws", async () => {
     // Expiration is within 24h, so renewal is attempted.
     mockGetWatchExpiration.mockResolvedValue(
       new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()
@@ -368,8 +368,8 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(body.ok).toBe(true);
     expect(body.watch_renewed).toBe(false);
 
-    // pollGmail must still have been called despite the watch error.
-    expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    // pollAllGmailAccounts must still have been called despite the watch error.
+    expect(mockPollAllGmailAccounts).toHaveBeenCalledTimes(1);
 
     // Error name must be logged; error message (which may contain PII) must not.
     const loggedText = consoleSpy.mock.calls.flat().join(" ");

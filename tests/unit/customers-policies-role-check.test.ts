@@ -12,8 +12,37 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
-vi.mock("@/lib/supabase/server", () => ({
-  createServerClient: vi.fn(),
+const { mockDb, mockGetSessionContext } = vi.hoisted(() => {
+  const mockDb = {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    $count: vi.fn(),
+  };
+  return {
+    mockDb,
+    mockGetSessionContext: vi.fn(),
+  };
+});
+
+vi.mock("server-only", () => ({}));
+
+vi.mock("@/lib/db", () => ({
+  db: mockDb,
+  tables: {},
+}));
+
+vi.mock("@/lib/db/helpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/helpers")>();
+  return {
+    ...actual,
+    firstRow: actual.firstRow,
+  };
+});
+
+vi.mock("@/lib/auth/session", () => ({
+  getSessionContext: mockGetSessionContext,
 }));
 
 vi.mock("@/lib/rate-limit/index", () => ({
@@ -24,81 +53,67 @@ vi.mock("@/lib/rate-limit/index", () => ({
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
-import { createServerClient } from "@/lib/supabase/server";
 import { NextRequest } from "next/server";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Build a mock Supabase client that returns the given user and role. */
-function buildSupabaseMock(opts: {
-  userId?: string | null;
-  role?: string | null;
-  customers?: any[];
-  policies?: any[];
-}) {
-  const {
-    userId = "user-uuid-001",
-    role = "analyst",
-    customers = [],
-    policies = [],
-  } = opts;
+const USER_ID = "user-uuid-001";
+const TENANT_ID = "tenant-uuid-001";
 
-  const user = userId ? { id: userId } : null;
-
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user }, error: null }),
-    },
-    from: (table: string) => {
-      if (table === "users") {
-        return {
-          select: (_cols: string) => ({
-            eq: (_col: string, _val: string) => ({
-              single: () =>
-                Promise.resolve({
-                  data: role !== null ? { role } : null,
-                  error: null,
-                }),
-            }),
-          }),
-        };
-      }
-      if (table === "customers") {
-        return {
-          select: (_cols: string, _opts?: any) => ({
-            count: customers.length,
-            error: null,
-            ilike: (_col: string, _val: string) => ({
-              count: customers.length,
-              error: null,
-            }),
-            order: (_col: string, _opts?: any) => ({
-              range: (_from: number, _to: number) =>
-                Promise.resolve({ data: customers, error: null }),
-            }),
-          }),
-        };
-      }
-      if (table === "policies") {
-        return {
-          select: (_cols: string, _opts?: any) => ({
-            count: policies.length,
-            error: null,
-            order: (_col: string, _opts?: any) => ({
-              range: (_from: number, _to: number) =>
-                Promise.resolve({ data: policies, error: null }),
-            }),
-          }),
-        };
-      }
-      return {};
-    },
-  };
-}
-
-/** Build a NextRequest for GET requests (required by routes that use request.nextUrl). */
+/** Build a NextRequest for GET requests. */
 function makeGETRequest(url: string): NextRequest {
   return new NextRequest(url, { method: "GET" });
+}
+
+/**
+ * Configure mocks for a user with a given role.
+ * db.select returns the user row; db.$count and the data select return empty results.
+ */
+function setupDbForRole(role: string | null) {
+  // db.select chain: used by the route to load the user row
+  // .select({...}).from(users).where(...).limit(1) → [userRow] or []
+  const userRows =
+    role !== null
+      ? [{ role, tenant_id: TENANT_ID }]
+      : [];
+
+  const selectChain: any = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    leftJoin: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
+    offset: vi.fn().mockResolvedValue([]),
+  };
+
+  // First call is for users table (role check), subsequent calls are data queries
+  let callCount = 0;
+  mockDb.select.mockImplementation(() => {
+    callCount++;
+    if (callCount === 1) {
+      // User row lookup
+      return {
+        from: vi.fn().mockReturnThis(),
+        where: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockResolvedValue(userRows),
+      };
+    }
+    // Data query (customers or policies listing)
+    return selectChain;
+  });
+
+  mockDb.$count.mockResolvedValue(0);
+}
+
+/** Configure session to return a logged-in user. */
+function setupSession(userId: string | null) {
+  if (userId === null) {
+    mockGetSessionContext.mockResolvedValue(null);
+  } else {
+    mockGetSessionContext.mockResolvedValue({
+      user: { id: userId, email: "test@example.com" },
+    });
+  }
 }
 
 // ── Tests: GET /api/customers ─────────────────────────────────────────────────
@@ -106,29 +121,27 @@ function makeGETRequest(url: string): NextRequest {
 describe("GET /api/customers — role enforcement (B2)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset call counter hack by reassigning fresh mock
+    mockDb.select.mockReset();
+    mockDb.$count.mockReset();
   });
 
   it("returns 403 FORBIDDEN_ROLE for analyst role", async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      buildSupabaseMock({ role: "analyst" }) as any
-    );
+    setupSession(USER_ID);
+    setupDbForRole("analyst");
 
     const { GET } = await import("@/app/api/customers/route");
     const request = makeGETRequest("http://localhost/api/customers");
     const response = await GET(request as any);
 
     expect(response.status).toBe(403);
-    const body = await response.json() as any;
+    const body = (await response.json()) as any;
     expect(body.error.code).toBe("FORBIDDEN_ROLE");
   });
 
   it("returns 200 with data for admin role", async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      buildSupabaseMock({
-        role: "admin",
-        customers: [{ id: "c1", full_name: "Ana García", dni: "12345678", email: "ana@example.com", phone: null, created_at: "2024-01-01" }],
-      }) as any
-    );
+    setupSession(USER_ID);
+    setupDbForRole("admin");
 
     const { GET } = await import("@/app/api/customers/route");
     const request = makeGETRequest("http://localhost/api/customers");
@@ -136,29 +149,26 @@ describe("GET /api/customers — role enforcement (B2)", () => {
 
     // Admin role is allowed — should not be 403.
     expect(response.status).not.toBe(403);
-    const body = await response.json() as any;
+    const body = (await response.json()) as any;
     // Should not contain an INSUFFICIENT_ROLE/FORBIDDEN_ROLE error.
     expect(body.error?.code).not.toBe("FORBIDDEN_ROLE");
   });
 
   it("returns 200 (not 403) for specialist role", async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      buildSupabaseMock({ role: "specialist", customers: [] }) as any
-    );
+    setupSession(USER_ID);
+    setupDbForRole("specialist");
 
     const { GET } = await import("@/app/api/customers/route");
     const request = makeGETRequest("http://localhost/api/customers");
     const response = await GET(request as any);
 
     expect(response.status).not.toBe(403);
-    const body = await response.json() as any;
+    const body = (await response.json()) as any;
     expect(body.error?.code).not.toBe("FORBIDDEN_ROLE");
   });
 
   it("returns 401 for unauthenticated request (no user)", async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      buildSupabaseMock({ userId: null, role: null }) as any
-    );
+    setupSession(null);
 
     const { GET } = await import("@/app/api/customers/route");
     const request = makeGETRequest("http://localhost/api/customers");
@@ -173,54 +183,51 @@ describe("GET /api/customers — role enforcement (B2)", () => {
 describe("GET /api/policies — role enforcement (B2)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDb.select.mockReset();
+    mockDb.$count.mockReset();
   });
 
   it("returns 403 FORBIDDEN_ROLE for analyst role", async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      buildSupabaseMock({ role: "analyst" }) as any
-    );
+    setupSession(USER_ID);
+    setupDbForRole("analyst");
 
     const { GET } = await import("@/app/api/policies/route");
     const request = makeGETRequest("http://localhost/api/policies");
     const response = await GET(request as any);
 
     expect(response.status).toBe(403);
-    const body = await response.json() as any;
+    const body = (await response.json()) as any;
     expect(body.error.code).toBe("FORBIDDEN_ROLE");
   });
 
   it("returns 200 (not 403) for admin role", async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      buildSupabaseMock({ role: "admin", policies: [] }) as any
-    );
+    setupSession(USER_ID);
+    setupDbForRole("admin");
 
     const { GET } = await import("@/app/api/policies/route");
     const request = makeGETRequest("http://localhost/api/policies");
     const response = await GET(request as any);
 
     expect(response.status).not.toBe(403);
-    const body = await response.json() as any;
+    const body = (await response.json()) as any;
     expect(body.error?.code).not.toBe("FORBIDDEN_ROLE");
   });
 
   it("returns 200 (not 403) for specialist role", async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      buildSupabaseMock({ role: "specialist", policies: [] }) as any
-    );
+    setupSession(USER_ID);
+    setupDbForRole("specialist");
 
     const { GET } = await import("@/app/api/policies/route");
     const request = makeGETRequest("http://localhost/api/policies");
     const response = await GET(request as any);
 
     expect(response.status).not.toBe(403);
-    const body = await response.json() as any;
+    const body = (await response.json()) as any;
     expect(body.error?.code).not.toBe("FORBIDDEN_ROLE");
   });
 
   it("returns 401 for unauthenticated request (no user)", async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      buildSupabaseMock({ userId: null, role: null }) as any
-    );
+    setupSession(null);
 
     const { GET } = await import("@/app/api/policies/route");
     const request = makeGETRequest("http://localhost/api/policies");

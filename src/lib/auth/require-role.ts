@@ -13,9 +13,17 @@
  *
  * Throws AppError('MISSING_SESSION') if no valid session.
  * Throws AppError('FORBIDDEN_ROLE')  if the user's role is not in the list.
+ *
+ * NOTE: with RLS gone, ctx.userRow.tenant_id is the ONLY tenant boundary.
+ * Every query on tenant-owned tables MUST filter by it explicitly.
  */
 
-import { createServerClient } from "@/lib/supabase/server";
+import { eq } from "drizzle-orm";
+
+import { getSessionContext } from "@/lib/auth/session";
+import { db, type Db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 
 export const ALL_ROLES = ["owner", "admin", "specialist", "analyst", "viewer"] as const;
@@ -31,37 +39,37 @@ export const ADMIN_ROLES: UserRole[] = ["owner", "admin"];
 export const CASE_EDITOR_ROLES: UserRole[] = ["owner", "admin", "specialist", "analyst"];
 
 export interface RoleContext {
-  supabase: Awaited<ReturnType<typeof createServerClient>>;
+  db: Db;
   user: { id: string; email?: string };
   userRow: { id: string; tenant_id: string; role: UserRole };
 }
 
 /**
  * Validate the session and require one of the given roles.
- * Returns the Supabase client, auth user, and public.users row.
+ * Returns the db handle, the session user, and the public.users row.
  */
 export async function requireRole(...roles: UserRole[]): Promise<RoleContext> {
-  const supabase = await createServerClient();
-
-  const {
-    data: { user },
-    error: authErr,
-  } = await supabase.auth.getUser();
-
-  if (!user || authErr) {
+  const session = await getSessionContext();
+  if (!session?.user) {
     throw new AppError("MISSING_SESSION");
   }
 
-  const { data: userRow } = await (supabase as any)
-    .from("users")
-    .select("id, tenant_id, role")
-    .eq("id", user.id)
-    .single();
+  const userRow = firstRow(
+    await db
+      .select({ id: users.id, tenant_id: users.tenant_id, role: users.role })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .limit(1),
+  );
 
   if (!userRow) throw new AppError("MISSING_SESSION");
   if (!roles.includes(userRow.role as UserRole)) {
     throw new AppError("FORBIDDEN_ROLE");
   }
 
-  return { supabase, user, userRow: userRow as RoleContext["userRow"] };
+  return {
+    db,
+    user: { id: session.user.id, email: session.user.email ?? undefined },
+    userRow: userRow as RoleContext["userRow"],
+  };
 }

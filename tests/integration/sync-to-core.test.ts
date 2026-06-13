@@ -8,19 +8,27 @@
  *   - Wrong role → 403 FORBIDDEN_ROLE
  *
  * Note: True integration tests require INTEGRATION_ENABLED=true and a live DB.
- * These tests mock the DB clients and test the route handler logic directly.
+ * These tests mock @/lib/db (Drizzle) and @/lib/auth/require-role directly.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("@/lib/supabase/server", () => ({
-  createServerClient: vi.fn(),
+vi.mock("@/lib/auth/require-role", () => ({
+  requireRole: vi.fn(),
+  ALL_ROLES: ["owner", "admin", "specialist", "analyst", "viewer"],
+  TRAINING_APPROVER_ROLES: ["owner", "admin", "specialist"],
+  ADMIN_ROLES: ["owner", "admin"],
+  CASE_EDITOR_ROLES: ["owner", "admin", "specialist", "analyst"],
 }));
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(),
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/audit/log", () => ({
@@ -29,6 +37,20 @@ vi.mock("@/lib/audit/log", () => ({
     CORE_SYNC_SUCCESS: "core.sync_success",
     CORE_SYNC_FAILED: "core.sync_failed",
   },
+}));
+
+vi.mock("@/lib/rate-limit/index", () => ({
+  rateLimit: vi.fn().mockResolvedValue({
+    allowed: true,
+    remaining: 4,
+    resetAt: Date.now() + 60000,
+    retryAfterSeconds: 0,
+  }),
+  RATE_LIMIT_CONFIGS: {
+    SYNC_TO_CORE: { limit: 5, windowMs: 60000 },
+  },
+  buildUserKey: (uid: string, ep: string) => `user:${uid}:${ep}`,
+  getClientIp: () => "127.0.0.1",
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -48,96 +70,63 @@ function makeContext(caseId = VALID_CASE_ID) {
   return { params: Promise.resolve({ id: caseId }) };
 }
 
-function makeChain(data: unknown, error: unknown = null) {
-  const final = Promise.resolve({ data, error });
-  const chain: any = {
-    select: () => chain,
-    eq: () => chain,
-    single: () => final,
-    maybeSingle: () => final,
-    update: () => chain,
-    upsert: () => Promise.resolve({ error: null }),
-    order: () => chain,
-    limit: () => chain,
-    range: () => chain,
-    in: () => chain,
-    is: () => final,
-  };
-  return chain;
-}
+const DEFAULT_USER_ROW = { id: "user-1", tenant_id: "tenant-1", role: "admin" as const };
 
-function buildUserSupabase(opts: {
-  user?: { id: string } | null;
-  userRow?: { id: string; tenant_id: string; role: string } | null;
+const DEFAULT_CASE_ROW = {
+  id: VALID_CASE_ID,
+  status: "listo_para_core",
+  tenant_id: "tenant-1",
+  claim_type: "choque",
+  severity: "low",
+  policy_number: "POL-2024-001",
+  policyholder_name: "Juan Pérez",
+  customer_id: null,
+  policy_id: null,
+};
+
+const DEFAULT_EXTRACTED_FIELDS = [
+  { field_key: "accident_date", field_value: "2024-01-15" },
+  { field_key: "accident_description", field_value: "Choque en Av. Cabildo" },
+];
+
+function buildDbMocks(opts: {
   caseRow?: Record<string, unknown> | null;
-}) {
-  const {
-    user = { id: "user-1" },
-    userRow = { id: "user-1", tenant_id: "tenant-1", role: "admin" },
-    caseRow = {
-      id: VALID_CASE_ID,
-      status: "listo_para_core",
-      tenant_id: "tenant-1",
-      claim_type: "choque",
-      severity: "low",
-      policy_number: "POL-2024-001",
-      policyholder_name: "Juan Pérez",
-      customer_id: null,
-      policy_id: null,
-    },
-  } = opts;
-
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user } }),
-    },
-    from: vi.fn().mockImplementation((table: string) => {
-      if (table === "users") return makeChain(userRow);
-      if (table === "cases") return makeChain(caseRow);
-      return makeChain(null);
-    }),
-  };
-}
-
-function buildServiceSupabase(opts: {
   extractedFields?: Array<{ field_key: string; field_value: string }>;
-  updateResult?: { error: unknown };
 } = {}) {
   const {
-    extractedFields = [
-      { field_key: "accident_date", field_value: "2024-01-15" },
-      { field_key: "accident_description", field_value: "Choque en Av. Cabildo" },
-    ],
-    updateResult = { error: null },
+    caseRow = DEFAULT_CASE_ROW,
+    extractedFields = DEFAULT_EXTRACTED_FIELDS,
   } = opts;
 
-  const chain: any = {
-    select: () => chain,
-    eq: () => chain,
-    single: () => Promise.resolve({ data: null, error: null }),
-    update: () => ({
-      eq: () => Promise.resolve(updateResult),
-    }),
-    order: () => chain,
-    limit: () => chain,
-    range: () => chain,
-  };
-
   return {
-    from: vi.fn().mockImplementation((table: string) => {
-      if (table === "extracted_fields") {
-        return {
-          select: () => ({
-            eq: () => Promise.resolve({ data: extractedFields, error: null }),
-          }),
-        };
-      }
-      return {
-        ...chain,
-        update: () => ({
-          eq: () => Promise.resolve(updateResult),
+    // db.select() returns different data based on call order
+    select: vi.fn().mockImplementation(() => {
+      let callCount = 0;
+      const outerChain: any = {
+        from: vi.fn().mockImplementation(() => {
+          callCount++;
+          if (callCount === 1) {
+            // First select: cases query
+            return {
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue(
+                  caseRow ? [caseRow] : []
+                ),
+              }),
+            };
+          }
+          // Second select: extracted_fields query
+          return {
+            where: vi.fn().mockResolvedValue(extractedFields),
+          };
         }),
       };
+      return outerChain;
+    }),
+    update: vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+      }),
     }),
   };
 }
@@ -145,22 +134,46 @@ function buildServiceSupabase(opts: {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("POST /api/cases/:id/sync-to-core", () => {
-  let createServerClientMock: ReturnType<typeof vi.fn>;
-  let createServiceClientMock: ReturnType<typeof vi.fn>;
-
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-
-    const { createServerClient } = await import("@/lib/supabase/server");
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    createServerClientMock = createServerClient as ReturnType<typeof vi.fn>;
-    createServiceClientMock = createServiceClient as ReturnType<typeof vi.fn>;
   });
 
   it("listo_para_core → enviado_a_core (mock success)", async () => {
-    createServerClientMock.mockResolvedValue(buildUserSupabase({}));
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      db: db as any,
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    });
+
+    let selectCallCount = 0;
+    vi.mocked(db.select).mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return {
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([DEFAULT_CASE_ROW]),
+            }),
+          }),
+        } as any;
+      }
+      // extracted_fields
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(DEFAULT_EXTRACTED_FIELDS),
+        }),
+      } as any;
+    });
+
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+      }),
+    } as any);
 
     const { POST } = await import(
       "@/app/api/cases/[id]/sync-to-core/route"
@@ -175,10 +188,41 @@ describe("POST /api/cases/:id/sync-to-core", () => {
   });
 
   it("AC17: logs CORE_SYNC_SUCCESS on success", async () => {
-    createServerClientMock.mockResolvedValue(buildUserSupabase({}));
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
-
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
     const { writeAuditLog } = await import("@/lib/audit/log");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      db: db as any,
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    });
+
+    let selectCallCount = 0;
+    vi.mocked(db.select).mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return {
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([DEFAULT_CASE_ROW]),
+            }),
+          }),
+        } as any;
+      }
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(DEFAULT_EXTRACTED_FIELDS),
+        }),
+      } as any;
+    });
+
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+      }),
+    } as any);
+
     const { POST } = await import(
       "@/app/api/cases/[id]/sync-to-core/route"
     );
@@ -194,22 +238,51 @@ describe("POST /api/cases/:id/sync-to-core", () => {
   });
 
   it("mock failure (caseId ends in 0) → error_core + errorMessage returned", async () => {
-    createServerClientMock.mockResolvedValue(
-      buildUserSupabase({
-        caseRow: {
-          id: FAILING_CASE_ID,
-          status: "listo_para_core",
-          tenant_id: "tenant-1",
-          claim_type: "choque",
-          severity: "medium",
-          policy_number: null,
-          policyholder_name: null,
-          customer_id: null,
-          policy_id: null,
-        },
-      })
-    );
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      db: db as any,
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    });
+
+    const failingCaseRow = {
+      id: FAILING_CASE_ID,
+      status: "listo_para_core",
+      tenant_id: "tenant-1",
+      claim_type: "choque",
+      severity: "medium",
+      policy_number: null,
+      policyholder_name: null,
+      customer_id: null,
+      policy_id: null,
+    };
+
+    let selectCallCount = 0;
+    vi.mocked(db.select).mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return {
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([failingCaseRow]),
+            }),
+          }),
+        } as any;
+      }
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(DEFAULT_EXTRACTED_FIELDS),
+        }),
+      } as any;
+    });
+
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+      }),
+    } as any);
 
     const { POST } = await import(
       "@/app/api/cases/[id]/sync-to-core/route"
@@ -224,24 +297,53 @@ describe("POST /api/cases/:id/sync-to-core", () => {
   });
 
   it("AC17: logs CORE_SYNC_FAILED on mock failure", async () => {
-    createServerClientMock.mockResolvedValue(
-      buildUserSupabase({
-        caseRow: {
-          id: FAILING_CASE_ID,
-          status: "listo_para_core",
-          tenant_id: "tenant-1",
-          claim_type: "choque",
-          severity: "medium",
-          policy_number: null,
-          policyholder_name: null,
-          customer_id: null,
-          policy_id: null,
-        },
-      })
-    );
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
-
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
     const { writeAuditLog } = await import("@/lib/audit/log");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      db: db as any,
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    });
+
+    const failingCaseRow = {
+      id: FAILING_CASE_ID,
+      status: "listo_para_core",
+      tenant_id: "tenant-1",
+      claim_type: "choque",
+      severity: "medium",
+      policy_number: null,
+      policyholder_name: null,
+      customer_id: null,
+      policy_id: null,
+    };
+
+    let selectCallCount = 0;
+    vi.mocked(db.select).mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return {
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([failingCaseRow]),
+            }),
+          }),
+        } as any;
+      }
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(DEFAULT_EXTRACTED_FIELDS),
+        }),
+      } as any;
+    });
+
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+      }),
+    } as any);
+
     const { POST } = await import(
       "@/app/api/cases/[id]/sync-to-core/route"
     );
@@ -256,23 +358,35 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     );
   });
 
-  it("wrong status → 400 FSM_INVALID_TRANSITION", async () => {
-    createServerClientMock.mockResolvedValue(
-      buildUserSupabase({
-        caseRow: {
-          id: VALID_CASE_ID,
-          status: "recibido", // wrong status — must be listo_para_core
-          tenant_id: "tenant-1",
-          claim_type: "choque",
-          severity: null,
-          policy_number: null,
-          policyholder_name: null,
-          customer_id: null,
-          policy_id: null,
-        },
-      })
-    );
-    createServiceClientMock.mockReturnValue(buildServiceSupabase());
+  it("wrong status → 409 FSM_INVALID_TRANSITION", async () => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      db: db as any,
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    });
+
+    const wrongStatusCaseRow = {
+      id: VALID_CASE_ID,
+      status: "recibido", // wrong status — must be listo_para_core
+      tenant_id: "tenant-1",
+      claim_type: "choque",
+      severity: null,
+      policy_number: null,
+      policyholder_name: null,
+      customer_id: null,
+      policy_id: null,
+    };
+
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([wrongStatusCaseRow]),
+        }),
+      }),
+    } as any);
 
     const { POST } = await import(
       "@/app/api/cases/[id]/sync-to-core/route"
@@ -286,11 +400,11 @@ describe("POST /api/cases/:id/sync-to-core", () => {
   });
 
   it("wrong role → 403 FORBIDDEN_ROLE", async () => {
-    createServerClientMock.mockResolvedValue(
-      buildUserSupabase({
-        userRow: { id: "user-2", tenant_id: "tenant-1", role: "analyst" }, // analyst not allowed
-      })
-    );
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { AppError } = await import("@/lib/errors");
+
+    // requireRole throws FORBIDDEN_ROLE for analyst role
+    vi.mocked(requireRole).mockRejectedValue(new AppError("FORBIDDEN_ROLE"));
 
     const { POST } = await import(
       "@/app/api/cases/[id]/sync-to-core/route"
@@ -304,9 +418,23 @@ describe("POST /api/cases/:id/sync-to-core", () => {
   });
 
   it("AC19: returns 404 for non-existent / wrong-tenant case", async () => {
-    createServerClientMock.mockResolvedValue(
-      buildUserSupabase({ caseRow: null })
-    );
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      db: db as any,
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    });
+
+    // No rows returned — cross-tenant case
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    } as any);
 
     const { POST } = await import(
       "@/app/api/cases/[id]/sync-to-core/route"
@@ -320,9 +448,10 @@ describe("POST /api/cases/:id/sync-to-core", () => {
   });
 
   it("returns 401 when unauthenticated", async () => {
-    createServerClientMock.mockResolvedValue(
-      buildUserSupabase({ user: null, userRow: null })
-    );
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { AppError } = await import("@/lib/errors");
+
+    vi.mocked(requireRole).mockRejectedValue(new AppError("MISSING_SESSION"));
 
     const { POST } = await import(
       "@/app/api/cases/[id]/sync-to-core/route"

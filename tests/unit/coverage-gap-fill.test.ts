@@ -8,10 +8,43 @@
  *   - src/server/cases/list.ts (filter branches, error path)
  *   - src/server/worker/extract.ts (shouldUseMock — the only pure function)
  *
- * All DB interactions are mocked with a chainable Supabase mock.
+ * All DB interactions are mocked via vi.mock("@/lib/db").
  */
 
+// vi.mock() must be at module top level — Vitest hoists these calls.
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    $count: vi.fn(),
+  },
+  tables: {
+    policies: {
+      id: "id",
+      customer_id: "customer_id",
+      tenant_id: "tenant_id",
+      policy_number: "policy_number",
+    },
+    customers: {
+      id: "id",
+      full_name: "full_name",
+      email: "email",
+      dni: "dni",
+      tenant_id: "tenant_id",
+    },
+    customerContacts: {
+      customer_id: "customer_id",
+      tenant_id: "tenant_id",
+      contact_type: "contact_type",
+      value: "value",
+    },
+  },
+}));
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { db } from "@/lib/db";
 
 // ── scenarios.ts ──────────────────────────────────────────────────────────────
 
@@ -128,38 +161,39 @@ const CUSTOMER_B = {
   dni: "87654321",
 };
 
-/** Build a chainable Supabase mock that returns a fixed result for a given table. */
-function buildSelectChain(result: { data: any; error: any }) {
-  // Supports: .select().eq().eq().limit() and .select().eq().limit()
-  const chain: any = {
-    limit: () => Promise.resolve(result),
-    eq: () => chain,
-    select: () => chain,
-    order: () => chain,
-    range: () => Promise.resolve(result),
-  };
-  return chain;
-}
-
 describe("findCustomerMatches — phone match", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("returns low-confidence match (0.60) for phone match", async () => {
+    // matchByPhone: db.select().from().leftJoin().where().limit()
+    // matchByPolicyNumber, matchByDni, matchByEmail all return [] (no fields provided for those)
     const phoneRow = {
       customer_id: CUSTOMER_B.id,
-      customers: CUSTOMER_B,
+      customer: {
+        id: CUSTOMER_B.id,
+        full_name: CUSTOMER_B.full_name,
+        email: CUSTOMER_B.email,
+        dni: CUSTOMER_B.dni,
+      },
     };
 
-    const supabase = {
-      from: (table: string) => {
-        if (table === "customer_contacts") {
-          return buildSelectChain({ data: [phoneRow], error: null });
-        }
-        // No match on other tables
-        return buildSelectChain({ data: [], error: null });
-      },
-    } as any;
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([phoneRow]),
+          }),
+        }),
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    } as any);
 
     const fields: Partial<ClaimFields> = { phone: "11-1234-5678" };
-    const matches = await findCustomerMatches(supabase, TENANT_ID, fields);
+    const matches = await findCustomerMatches(TENANT_ID, fields);
 
     const phoneMatch = matches.find((m) => m.matchType === "phone");
     expect(phoneMatch).toBeDefined();
@@ -168,18 +202,31 @@ describe("findCustomerMatches — phone match", () => {
   });
 
   it("returns empty array when phone DB lookup errors", async () => {
-    const supabase = {
-      from: () => buildSelectChain({ data: null, error: { code: "PGRST001" } }),
-    } as any;
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockRejectedValue({ code: "PGRST001" }),
+          }),
+        }),
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    } as any);
 
     const fields: Partial<ClaimFields> = { phone: "11-9999-0000" };
-    const matches = await findCustomerMatches(supabase, TENANT_ID, fields);
+    const matches = await findCustomerMatches(TENANT_ID, fields);
     expect(Array.isArray(matches)).toBe(true);
     // Should not throw
   });
 });
 
 describe("findCustomerMatches — conflict detection branches", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("detects email conflict when extracted email differs from stored", async () => {
     const customer = {
       id: CUSTOMER_B.id,
@@ -188,27 +235,31 @@ describe("findCustomerMatches — conflict detection branches", () => {
       dni: "87654321",
     };
 
-    const supabase = {
-      from: (table: string) => {
-        if (table === "customers") {
-          return buildSelectChain({ data: [customer], error: null });
-        }
-        return buildSelectChain({ data: [], error: null });
-      },
-    } as any;
+    // matchByDni path: db.select().from().where().limit()
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([customer]),
+        }),
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      }),
+    } as any);
 
     const fields: Partial<ClaimFields> = {
       dni: "87654321",
       email: "different@example.com", // conflict with stored
     };
-    const matches = await findCustomerMatches(supabase, TENANT_ID, fields);
+    const matches = await findCustomerMatches(TENANT_ID, fields);
     const dniMatch = matches.find((m) => m.matchType === "dni");
     expect(dniMatch).toBeDefined();
     expect(dniMatch!.conflictsWithExtracted).toContain("email");
   });
 
   it("detects DNI conflict when extracted DNI differs from stored (via email match)", async () => {
-    // Provide only email so the email match path runs; stored customer has different DNI
     const customer = {
       id: CUSTOMER_B.id,
       full_name: "María García",
@@ -216,22 +267,23 @@ describe("findCustomerMatches — conflict detection branches", () => {
       dni: "11111111", // stored DNI
     };
 
-    const supabase = {
-      from: (table: string) => {
-        if (table === "customers") {
-          return buildSelectChain({ data: [customer], error: null });
-        }
-        return buildSelectChain({ data: [], error: null });
-      },
-    } as any;
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([customer]),
+        }),
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      }),
+    } as any);
 
     const fields: Partial<ClaimFields> = {
       email: "maria@example.com",
-      // No dni field in extracted so DNI match won't run; email match runs and
-      // detectConflicts sees no extracted.dni → no conflict on dni (that branch uncovered
-      // in a different way). Here we verify no false-positive conflict.
     };
-    const matches = await findCustomerMatches(supabase, TENANT_ID, fields);
+    const matches = await findCustomerMatches(TENANT_ID, fields);
     const emailMatch = matches.find((m) => m.matchType === "email");
     expect(emailMatch).toBeDefined();
     // No conflict — extracted.dni is absent so the branch is skipped (no conflict added)
@@ -239,10 +291,6 @@ describe("findCustomerMatches — conflict detection branches", () => {
   });
 
   it("detects DNI conflict (extracted DNI ≠ stored) when matched via dni", async () => {
-    // DNI match path: extracted.dni provided but different stored value triggers conflict
-    // via detectConflicts (but detectConflicts compares extracted.dni vs customer.dni —
-    // since the DNI match itself IS on customer.dni equality, conflict can't occur for dni.
-    // This test exercises the branch where stored customer.dni is normalised with /\D/g.)
     const customer = {
       id: CUSTOMER_B.id,
       full_name: "María García",
@@ -250,19 +298,23 @@ describe("findCustomerMatches — conflict detection branches", () => {
       dni: "12.345.678", // stored with dots
     };
 
-    const supabase = {
-      from: (table: string) => {
-        if (table === "customers") {
-          return buildSelectChain({ data: [customer], error: null });
-        }
-        return buildSelectChain({ data: [], error: null });
-      },
-    } as any;
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([customer]),
+        }),
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      }),
+    } as any);
 
     const fields: Partial<ClaimFields> = {
       dni: "12345678", // same digits, different format — after strip should equal
     };
-    const matches = await findCustomerMatches(supabase, TENANT_ID, fields);
+    const matches = await findCustomerMatches(TENANT_ID, fields);
     const dniMatch = matches.find((m) => m.matchType === "dni");
     expect(dniMatch).toBeDefined();
     // After /\D/g strip: "12345678" === "12345678" — no conflict
@@ -270,20 +322,24 @@ describe("findCustomerMatches — conflict detection branches", () => {
   });
 
   it("handles null customer in phone match result gracefully", async () => {
-    // Row with null customers join (edge case: customer deleted but contact row remains)
-    const phoneRow = { customer_id: CUSTOMER_B.id, customers: null };
+    // Row with null customer join (edge case: customer deleted but contact row remains)
+    const phoneRow = { customer_id: CUSTOMER_B.id, customer: null };
 
-    const supabase = {
-      from: (table: string) => {
-        if (table === "customer_contacts") {
-          return buildSelectChain({ data: [phoneRow], error: null });
-        }
-        return buildSelectChain({ data: [], error: null });
-      },
-    } as any;
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([phoneRow]),
+          }),
+        }),
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    } as any);
 
     const fields: Partial<ClaimFields> = { phone: "11-0000-1111" };
-    const matches = await findCustomerMatches(supabase, TENANT_ID, fields);
+    const matches = await findCustomerMatches(TENANT_ID, fields);
     // Should not throw; customerName defaults to ""
     const phoneMatch = matches.find((m) => m.matchType === "phone");
     expect(phoneMatch).toBeDefined();
@@ -293,29 +349,47 @@ describe("findCustomerMatches — conflict detection branches", () => {
 
   it("does not add duplicate customer from multiple match types", async () => {
     // Same customer matched via policy_number AND dni — should appear only once each
-    const policy = {
+    const policyRow = {
       id: "30000000-0000-0000-0000-000000000002",
       customer_id: CUSTOMER_B.id,
-      customers: CUSTOMER_B,
+      customer: CUSTOMER_B,
     };
 
-    const supabase = {
-      from: (table: string) => {
-        if (table === "policies") {
-          return buildSelectChain({ data: [policy], error: null });
-        }
-        if (table === "customers") {
-          return buildSelectChain({ data: [CUSTOMER_B], error: null });
-        }
-        return buildSelectChain({ data: [], error: null });
-      },
-    } as any;
+    let callCount = 0;
+    vi.mocked(db.select).mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // policy_number match: db.select().from().leftJoin().where().limit()
+        return {
+          from: vi.fn().mockReturnValue({
+            leftJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue([policyRow]),
+              }),
+            }),
+          }),
+        } as any;
+      }
+      // dni/email match: db.select().from().where().limit()
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([CUSTOMER_B]),
+          }),
+          leftJoin: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
+      } as any;
+    });
 
     const fields: Partial<ClaimFields> = {
       policy_number: "POL-5678",
       dni: CUSTOMER_B.dni,
     };
-    const matches = await findCustomerMatches(supabase, TENANT_ID, fields);
+    const matches = await findCustomerMatches(TENANT_ID, fields);
 
     // Policy match included, DNI match deduped (same customerId)
     const policyMatches = matches.filter((m) => m.matchType === "policy_number");
@@ -330,53 +404,6 @@ describe("findCustomerMatches — conflict detection branches", () => {
 import { listCases, listCasesForExport } from "@/server/cases/list";
 import type { CaseQuery } from "@/lib/schemas/cases";
 
-/** Build a Supabase mock for listCases that supports the full method chain. */
-function buildListMockSupabase(options: {
-  countResult?: { count: number | null; error: any };
-  dataResult?: { data: any[]; error: any };
-}) {
-  const countResult = options.countResult ?? { count: 0, error: null };
-  const dataResult = options.dataResult ?? { data: [], error: null };
-
-  const makeChain = (terminal: () => Promise<any>): any => ({
-    eq: (..._: any[]) => makeChain(terminal),
-    or: (..._: any[]) => makeChain(terminal),
-    order: (..._: any[]) => makeChain(terminal),
-    range: (..._: any[]) => terminal(),
-    // head:true path returns immediately on .select()
-    _terminal: terminal,
-  });
-
-  let callIdx = 0;
-
-  return {
-    from: (_table: string) => ({
-      select: (_cols: string, opts?: any) => {
-        // First call = count query (head: true), second = data query
-        if (opts?.head) {
-          // Count chain ends at range or direct call
-          const countChain: any = {
-            eq: (..._: any[]) => countChain,
-            or: (..._: any[]) => countChain,
-            range: () => Promise.resolve(countResult),
-            // Fallback: if no range, resolve immediately
-            then: (fn: any) => Promise.resolve(countResult).then(fn),
-          };
-          return countChain;
-        }
-        // Data chain
-        const dataChain: any = {
-          order: (..._: any[]) => dataChain,
-          eq: (..._: any[]) => dataChain,
-          or: (..._: any[]) => dataChain,
-          range: () => Promise.resolve(dataResult),
-        };
-        return dataChain;
-      },
-    }),
-  };
-}
-
 const BASE_QUERY: CaseQuery = {
   page: 1,
   per_page: 10,
@@ -385,163 +412,153 @@ const BASE_QUERY: CaseQuery = {
 };
 
 describe("listCases — filter branches", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function setupListMocks(total: number, data: any[]) {
+    // countRows uses db.$count
+    vi.mocked(db.$count).mockResolvedValue(total);
+
+    // hydrateCaseListIdentity only runs when rows are missing policyholder_name/policy_number.
+    // We ensure every row has those fields set so hydration short-circuits after the first select.
+    const dataWithIdentity = data.map((row: any) => ({
+      policyholder_name: "Test Name",
+      policy_number: "POL-0000",
+      ...row,
+    }));
+
+    // data query: db.select().from().where().orderBy().limit().offset()
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          orderBy: vi.fn().mockReturnValue({
+            limit: vi.fn().mockReturnValue({
+              offset: vi.fn().mockResolvedValue(dataWithIdentity),
+            }),
+          }),
+        }),
+      }),
+    } as any);
+  }
+
   it("returns empty list with no filters", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: 0, error: null }, dataResult: { data: [], error: null } });
-    const result = await listCases(supabase, BASE_QUERY);
+    setupListMocks(0, []);
+    const result = await listCases(TENANT_ID, BASE_QUERY);
     expect(result.data).toEqual([]);
     expect(result.meta.total).toBe(0);
     expect(result.meta.pages).toBe(0);
   });
 
   it("applies status filter (branch: if status)", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: 2, error: null }, dataResult: { data: [{ id: "abc" }], error: null } });
-    const result = await listCases(supabase, { ...BASE_QUERY, status: "recibido" });
+    setupListMocks(2, [{ id: "abc" }]);
+    const result = await listCases(TENANT_ID, { ...BASE_QUERY, status: "recibido" });
     expect(result.meta.total).toBe(2);
   });
 
   it("applies type filter (branch: if type)", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: 1, error: null }, dataResult: { data: [{ id: "xyz" }], error: null } });
-    const result = await listCases(supabase, { ...BASE_QUERY, type: "choque" });
+    setupListMocks(1, [{ id: "xyz" }]);
+    const result = await listCases(TENANT_ID, { ...BASE_QUERY, type: "choque" });
     expect(result.data.length).toBe(1);
   });
 
   it("applies q filter (branch: if q)", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: 3, error: null }, dataResult: { data: [{}, {}, {}], error: null } });
-    const result = await listCases(supabase, { ...BASE_QUERY, q: "Martín" });
+    setupListMocks(3, [{}, {}, {}]);
+    const result = await listCases(TENANT_ID, { ...BASE_QUERY, q: "Martín" });
     expect(result.meta.total).toBe(3);
   });
 
   it("applies severity filter", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: 1, error: null }, dataResult: { data: [{ id: "s1" }], error: null } });
-    const result = await listCases(supabase, { ...BASE_QUERY, severity: "high" });
+    setupListMocks(1, [{ id: "s1" }]);
+    const result = await listCases(TENANT_ID, { ...BASE_QUERY, severity: "high" });
     expect(result.data.length).toBe(1);
   });
 
   it("applies customer_id filter", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: 1, error: null }, dataResult: { data: [{ id: "c1" }], error: null } });
-    const result = await listCases(supabase, { ...BASE_QUERY, customer_id: "cust-uuid" });
+    setupListMocks(1, [{ id: "c1" }]);
+    const result = await listCases(TENANT_ID, { ...BASE_QUERY, customer_id: "cust-uuid" });
     expect(result.data.length).toBe(1);
   });
 
   it("applies policy_id filter", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: 1, error: null }, dataResult: { data: [{ id: "p1" }], error: null } });
-    const result = await listCases(supabase, { ...BASE_QUERY, policy_id: "pol-uuid" });
+    setupListMocks(1, [{ id: "p1" }]);
+    const result = await listCases(TENANT_ID, { ...BASE_QUERY, policy_id: "pol-uuid" });
     expect(result.data.length).toBe(1);
   });
 
   it("applies channel filter", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: 5, error: null }, dataResult: { data: new Array(5).fill({ id: "e" }), error: null } });
-    const result = await listCases(supabase, { ...BASE_QUERY, channel: "email" });
+    setupListMocks(5, new Array(5).fill({ id: "e" }));
+    const result = await listCases(TENANT_ID, { ...BASE_QUERY, channel: "email" });
     expect(result.meta.total).toBe(5);
   });
 
   it("applies is_claim=false filter", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: 2, error: null }, dataResult: { data: [{}, {}], error: null } });
-    const result = await listCases(supabase, { ...BASE_QUERY, is_claim: false });
+    setupListMocks(2, [{}, {}]);
+    const result = await listCases(TENANT_ID, { ...BASE_QUERY, is_claim: false });
     expect(result.meta.total).toBe(2);
   });
 
   it("computes pagination meta correctly", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: 25, error: null }, dataResult: { data: new Array(10).fill({}), error: null } });
-    const result = await listCases(supabase, { ...BASE_QUERY, per_page: 10 });
+    setupListMocks(25, new Array(10).fill({}));
+    const result = await listCases(TENANT_ID, { ...BASE_QUERY, per_page: 10 });
     expect(result.meta.pages).toBe(3); // ceil(25/10)=3
     expect(result.meta.page).toBe(1);
     expect(result.meta.per_page).toBe(10);
   });
 
-  it("count null defaults to 0", async () => {
-    const supabase = buildListMockSupabase({ countResult: { count: null, error: null }, dataResult: { data: [], error: null } });
-    const result = await listCases(supabase, BASE_QUERY);
+  it("count 0 defaults to 0 pages", async () => {
+    setupListMocks(0, []);
+    const result = await listCases(TENANT_ID, BASE_QUERY);
     expect(result.meta.total).toBe(0);
   });
 });
 
 describe("listCasesForExport — filter branches", () => {
-  function buildExportMock(dataResult: { data: any[]; error: any }) {
-    return {
-      from: (_table: string) => ({
-        select: (_cols: string) => ({
-          order: (..._: any[]) => ({
-            range: (..._: any[]) => ({
-              eq: function (this: any, ...args: any[]) { return this; },
-              or: function (this: any, ...args: any[]) { return this; },
-              then: (fn: any) => Promise.resolve(dataResult).then(fn),
-              // make it thenable by vitest awaiting
-              [Symbol.toStringTag]: "Promise",
-            }),
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function setupExportMock(data: any[]) {
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          orderBy: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue(data),
           }),
         }),
       }),
-    };
+    } as any);
   }
 
   it("returns rows matching export query (no filters)", async () => {
-    const chainFinal = { data: [{ id: "export-1" }], error: null };
-
-    const supabase = {
-      from: (_: string) => {
-        const chain: any = {
-          select: () => chain,
-          order: () => chain,
-          range: () => chain,
-          eq: () => chain,
-          or: () => chain,
-          then: (fn: any) => Promise.resolve(chainFinal).then(fn),
-        };
-        return chain;
-      },
-    } as any;
-
-    const result = await listCasesForExport(supabase, {});
+    setupExportMock([{ id: "export-1" }]);
+    const result = await listCasesForExport(TENANT_ID, {});
     expect(Array.isArray(result)).toBe(true);
   });
 
   it("applies status + type + q filters in export", async () => {
-    const chainFinal = { data: [], error: null };
-
-    const supabase = {
-      from: (_: string) => {
-        const chain: any = {
-          select: () => chain,
-          order: () => chain,
-          range: () => chain,
-          eq: () => chain,
-          or: () => chain,
-          then: (fn: any) => Promise.resolve(chainFinal).then(fn),
-        };
-        return chain;
-      },
-    } as any;
-
-    const result = await listCasesForExport(supabase, { status: "recibido", type: "robo", q: "Pérez" });
+    setupExportMock([]);
+    const result = await listCasesForExport(TENANT_ID, { status: "recibido", type: "robo", q: "Pérez" });
     expect(Array.isArray(result)).toBe(true);
   });
 
   it("throws when DB returns error in export", async () => {
-    const chainFinal = { data: null, error: { code: "PGRST001" } };
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          orderBy: vi.fn().mockReturnValue({
+            limit: vi.fn().mockRejectedValue({ code: "PGRST001" }),
+          }),
+        }),
+      }),
+    } as any);
 
-    const supabase = {
-      from: (_: string) => {
-        const chain: any = {
-          select: () => chain,
-          order: () => chain,
-          range: () => chain,
-          eq: () => chain,
-          or: () => chain,
-          then: (fn: any) => Promise.resolve(chainFinal).then(fn),
-        };
-        return chain;
-      },
-    } as any;
-
-    await expect(listCasesForExport(supabase, {})).rejects.toThrow("listCasesForExport");
+    await expect(listCasesForExport(TENANT_ID, {})).rejects.toThrow("listCasesForExport");
   });
 });
 
 // ── extract.ts — shouldUseMock (only pure function) ───────────────────────────
 // We test it indirectly via environment variable branches since it's not exported.
-// This is best achieved by testing the exported runExtractionWorker with a mocked
-// Supabase that short-circuits on the first DB call.
 
 describe("extract.ts — environment-driven mock selection (indirect)", () => {
   const originalMockAI = process.env.MOCK_AI;

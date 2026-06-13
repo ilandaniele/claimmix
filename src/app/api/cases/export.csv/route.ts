@@ -4,7 +4,7 @@
  * AC13: Returns text/csv with Content-Disposition attachment.
  *       Formula-injection-safe values (=, +, -, @ prefixed with single quote).
  *       Max 1000 rows per export.
- *       Same tenant isolation (RLS) as GET /api/cases.
+ *       Same explicit tenant_id isolation as GET /api/cases (RLS is gone).
  *
  * Columns: Nro. Siniestro, Asegurado, Póliza, Tipo, Estado, Confianza, Fecha, Analista.
  * Filters: same query params as GET /api/cases (status, type, q).
@@ -13,7 +13,7 @@
  */
 
 import { type NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase/server";
+import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { CaseQuerySchema } from "@/lib/schemas/cases";
 import { listCasesForExport } from "@/server/cases/list";
 import { buildCsv } from "@/lib/csv/safe-encode";
@@ -74,14 +74,13 @@ function formatConfidence(score: number | null): string {
 
 export async function GET(request: NextRequest) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
+  let ctx: RoleContext;
+  try {
+    ctx = await requireRole(...ALL_ROLES);
+  } catch (e) {
+    return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));
   }
+  const { user, userRow } = ctx;
 
   // ── 2. Rate limit ─────────────────────────────────────────────────────────
   const ip = getClientIp(request);
@@ -115,10 +114,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── 4. Fetch cases (max 1000, RLS-scoped) ─────────────────────────────────
+  // ── 4. Fetch cases (max 1000, explicit tenant_id filter) ─────────────────
   let cases;
   try {
-    cases = await listCasesForExport(supabase, {
+    cases = await listCasesForExport(userRow.tenant_id, {
       status: parsed.data.status,
       type: parsed.data.type,
       q: parsed.data.q,
@@ -136,7 +135,8 @@ export async function GET(request: NextRequest) {
     c.policy_number ?? "",                               // Póliza
     c.claim_type ? (CLAIM_TYPE_LABELS[c.claim_type] ?? c.claim_type) : "",  // Tipo
     STATUS_LABELS[c.status] ?? c.status,                // Estado
-    formatConfidence(c.confidence_min),                  // Confianza
+    // Drizzle numeric → string; convert to number at the boundary.
+    formatConfidence(c.confidence_min === null ? null : Number(c.confidence_min)), // Confianza
     formatDate(c.created_at),                           // Fecha
     c.assigned_to ?? "",                                 // Analista (UUID — W5 will join name)
   ]);

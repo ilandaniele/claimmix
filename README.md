@@ -53,6 +53,16 @@ Migrations are in `supabase/migrations/`:
 
 ---
 
+## Database Branching & Preview Deploys
+
+**Supabase preview branching is intentionally DISABLED — do not re-enable it.** The Supabase↔Vercel/GitHub integration's "create preview branch per PR" feature burns the free tier's 200 branch-hours/month on idle branches (this happened in June 2026 and paused all branches until the quota reset). Nothing in this repo depends on branches.
+
+- Vercel **Preview** deployments use the same env vars as production (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) pointing at the main Supabase project. Tenant isolation comes from RLS, not separate databases.
+- To test schema changes safely, use the free local stack (`supabase start` via Docker, seed from `supabase/all.sql`) instead of cloud branches.
+- Migrations are applied manually with `supabase db push` or `node scripts/apply-migration.mjs` with `DATABASE_URL` set to the pooler URL.
+
+---
+
 ## Running Seed Data
 
 ```bash

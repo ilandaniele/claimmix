@@ -1,28 +1,24 @@
 /**
- * E2E: simulate → realtime → case appears in table.
+ * E2E: simulate → polling → case appears in table.
  *
  * AC4: POST /api/intake/simulate creates a case in "procesando" status,
- *      visible via Supabase Realtime within 2 seconds.
+ *      visible via the polling hook within 5 seconds.
  *
  * Requirements:
- *   - Needs a live Supabase backend (NEXT_PUBLIC_SUPABASE_URL in env).
+ *   - Needs a live app with DATABASE_URL configured.
  *   - Uses MOCK_AI=true (set in playwright.config.ts webServer env) so no real
  *     OpenAI call is made during simulation.
- *   - Needs SUPABASE_URL, TEST_ANALYST_EMAIL, TEST_ANALYST_PASSWORD env vars for
- *     authenticated flow.
+ *   - Needs TEST_ANALYST_EMAIL, TEST_ANALYST_PASSWORD env vars for authenticated flow.
  *
- * Without live Supabase the test is skipped automatically.
+ * Without live backend the test is skipped automatically.
  */
 
 import { test, expect } from "@playwright/test";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const TEST_EMAIL = process.env.TEST_ANALYST_EMAIL ?? "";
 const TEST_PASSWORD = process.env.TEST_ANALYST_PASSWORD ?? "";
 
-const hasLiveSupabase =
-  SUPABASE_URL.length > 0 &&
-  !SUPABASE_URL.includes("placeholder") &&
+const hasLiveBackend =
   TEST_EMAIL.length > 0 &&
   TEST_PASSWORD.length > 0;
 
@@ -35,10 +31,10 @@ async function signIn(page: import("@playwright/test").Page) {
   await page.waitForURL(/\/bandeja/, { timeout: 15_000 });
 }
 
-test.describe("Simulate → realtime flow (AC4)", () => {
+test.describe("Simulate → polling flow (AC4)", () => {
   test.skip(
-    !hasLiveSupabase,
-    "Requires live Supabase (NEXT_PUBLIC_SUPABASE_URL, TEST_ANALYST_EMAIL, TEST_ANALYST_PASSWORD)"
+    !hasLiveBackend,
+    "Requires live backend (TEST_ANALYST_EMAIL, TEST_ANALYST_PASSWORD)"
   );
 
   test(
@@ -61,11 +57,9 @@ test.describe("Simulate → realtime flow (AC4)", () => {
       const modal = page.getByRole("dialog");
       await expect(modal).toBeVisible();
 
-      // 5. The modal defaults to "Escenario pre-cargado" mode with a scenario
-      //    already selected. Select an explicit scenario to be deterministic.
+      // 5. Select an explicit scenario for deterministic behavior.
       const scenarioSelect = modal.locator("#scenario-select");
       await expect(scenarioSelect).toBeVisible();
-      // Pick the first option (choque-01 or whatever is first).
       await scenarioSelect.selectOption({ index: 0 });
 
       // 6. Click "Simular" (the submit button inside the modal).
@@ -76,16 +70,15 @@ test.describe("Simulate → realtime flow (AC4)", () => {
       // 7. Modal should close after submission (success path).
       await expect(modal).not.toBeVisible({ timeout: 5_000 });
 
-      // 8. Poll until a new row appears in the cases table (up to 5 seconds).
-      //    The row is inserted via Supabase Realtime, so the table updates
-      //    without a page reload.
+      // 8. Poll until a new row appears in the cases table (up to 10 seconds).
+      //    The row appears via the polling hook (useCasesRealtime), which polls
+      //    every 5 seconds. Give it a bit more time than the poll interval.
       await expect(async () => {
         const rowCount = await tableBody.locator("tr").count();
         expect(rowCount).toBeGreaterThan(initialRowCount);
-      }).toPass({ timeout: 5_000, intervals: [300, 300, 500, 500, 500, 500, 500, 500, 500, 500] });
+      }).toPass({ timeout: 12_000, intervals: [500, 500, 500, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000] });
 
       // 9. Verify the newest row shows "Procesando" status badge.
-      //    The row is inserted at the top of the table via mergeCaseUpdate.
       const firstRow = tableBody.locator("tr").first();
       await expect(firstRow).toContainText(/procesando/i, { timeout: 5_000 });
     }
@@ -94,8 +87,6 @@ test.describe("Simulate → realtime flow (AC4)", () => {
   test(
     "simulate via API without auth returns 401",
     async ({ request }) => {
-      // This test does NOT need live Supabase — proxy.ts enforces auth before DB.
-      // It verifies the security gate for the simulate endpoint.
       const res = await request.post("/api/intake/simulate", {
         data: { scenario_id: "choque-01" },
       });

@@ -8,15 +8,49 @@
  *  - resolveExtractionEngine: mock mode, key-based fallback, no-keys → mock
  */
 
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+
+// ---------- db mock (hoisted so it runs before module imports) ----------
+const mockDbChain = vi.hoisted(() => {
+  const chain = {
+    select: vi.fn(),
+    from: vi.fn(),
+    where: vi.fn(),
+    limit: vi.fn(),
+  };
+  // Each method returns the chain object so calls can be fluent.
+  chain.select.mockReturnValue(chain);
+  chain.from.mockReturnValue(chain);
+  chain.where.mockReturnValue(chain);
+  // limit is terminal — tests override this per-scenario.
+  chain.limit.mockResolvedValue([]);
+  return chain;
+});
+
+vi.mock("server-only", () => ({}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: (...args: unknown[]) => mockDbChain.select(...args),
+  },
+  tables: {
+    tenantAiSettings: { tenant_id: "tenant_id", provider: "provider" },
+  },
+}));
+
+vi.mock("@/lib/db/helpers", () => ({
+  firstRow: <T>(rows: T[]): T | null => rows[0] ?? null,
+}));
+
+// ---------- module under test ----------
 import {
   getDefaultProvider,
   getTenantAiProvider,
   resolveExtractionEngine,
   hasProviderKey,
 } from "@/server/ai/provider";
-import type { SupabaseClient } from "@supabase/supabase-js";
 
+// ---------- env helpers ----------
 const ENV_KEYS = [
   "AI_PROVIDER",
   "MOCK_AI",
@@ -33,34 +67,26 @@ afterEach(() => {
     if (ORIGINAL[k] === undefined) delete process.env[k];
     else process.env[k] = ORIGINAL[k];
   }
+  vi.clearAllMocks();
+  // Reset chain defaults after each test.
+  mockDbChain.select.mockReturnValue(mockDbChain);
+  mockDbChain.from.mockReturnValue(mockDbChain);
+  mockDbChain.where.mockReturnValue(mockDbChain);
+  mockDbChain.limit.mockResolvedValue([]);
 });
-
-/** Supabase mock whose tenant_ai_settings query resolves with the given result. */
-function supabaseWithSetting(result: {
-  data: { provider: string } | null;
-  error: { code?: string } | null;
-}): SupabaseClient {
-  return {
-    from: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          maybeSingle: vi.fn().mockResolvedValue(result),
-        }),
-      }),
-    }),
-  } as unknown as SupabaseClient;
-}
-
-function supabaseThatThrows(): SupabaseClient {
-  return {
-    from: vi.fn().mockImplementation(() => {
-      throw new Error("relation does not exist");
-    }),
-  } as unknown as SupabaseClient;
-}
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
 
+// ---------- helpers ----------
+function setDbResult(rows: { provider: string }[]) {
+  mockDbChain.limit.mockResolvedValue(rows);
+}
+
+function setDbError() {
+  mockDbChain.limit.mockRejectedValue(new Error("relation does not exist"));
+}
+
+// ---------- tests ----------
 describe("getDefaultProvider", () => {
   it("defaults to openai when AI_PROVIDER is unset", () => {
     delete process.env.AI_PROVIDER;
@@ -95,31 +121,36 @@ describe("hasProviderKey", () => {
 describe("getTenantAiProvider", () => {
   it("returns the tenant setting when present", async () => {
     delete process.env.AI_PROVIDER;
-    const supabase = supabaseWithSetting({ data: { provider: "gemini" }, error: null });
-    expect(await getTenantAiProvider(supabase, TENANT)).toBe("gemini");
+    setDbResult([{ provider: "gemini" }]);
+    expect(await getTenantAiProvider(TENANT)).toBe("gemini");
   });
 
   it("falls back to env default when no row exists", async () => {
     process.env.AI_PROVIDER = "gemini";
-    const supabase = supabaseWithSetting({ data: null, error: null });
-    expect(await getTenantAiProvider(supabase, TENANT)).toBe("gemini");
+    setDbResult([]);
+    expect(await getTenantAiProvider(TENANT)).toBe("gemini");
   });
 
   it("falls back to env default on query error (table missing)", async () => {
     delete process.env.AI_PROVIDER;
-    const supabase = supabaseWithSetting({ data: null, error: { code: "42P01" } });
-    expect(await getTenantAiProvider(supabase, TENANT)).toBe("openai");
+    setDbError();
+    expect(await getTenantAiProvider(TENANT)).toBe("openai");
   });
 
-  it("never throws even when the client throws synchronously", async () => {
+  it("never throws even when the db throws synchronously", async () => {
     delete process.env.AI_PROVIDER;
-    expect(await getTenantAiProvider(supabaseThatThrows(), TENANT)).toBe("openai");
+    mockDbChain.select.mockImplementation(() => {
+      throw new Error("relation does not exist");
+    });
+    expect(await getTenantAiProvider(TENANT)).toBe("openai");
+    // Restore for afterEach to work correctly.
+    mockDbChain.select.mockReturnValue(mockDbChain);
   });
 
   it("ignores invalid stored values", async () => {
     delete process.env.AI_PROVIDER;
-    const supabase = supabaseWithSetting({ data: { provider: "llama" }, error: null });
-    expect(await getTenantAiProvider(supabase, TENANT)).toBe("openai");
+    setDbResult([{ provider: "llama" }]);
+    expect(await getTenantAiProvider(TENANT)).toBe("openai");
   });
 });
 
@@ -127,8 +158,8 @@ describe("resolveExtractionEngine", () => {
   it("returns mock when MOCK_AI=true regardless of keys", async () => {
     process.env.MOCK_AI = "true";
     process.env.OPENAI_API_KEY = "sk-test";
-    const supabase = supabaseWithSetting({ data: { provider: "openai" }, error: null });
-    expect(await resolveExtractionEngine(supabase, TENANT)).toBe("mock");
+    setDbResult([{ provider: "openai" }]);
+    expect(await resolveExtractionEngine(TENANT)).toBe("mock");
   });
 
   it("uses the preferred provider when its key is configured", async () => {
@@ -136,8 +167,8 @@ describe("resolveExtractionEngine", () => {
     process.env.AI_MOCK = "false";
     process.env.GEMINI_API_KEY = "g-test";
     delete process.env.OPENAI_API_KEY;
-    const supabase = supabaseWithSetting({ data: { provider: "gemini" }, error: null });
-    expect(await resolveExtractionEngine(supabase, TENANT)).toBe("gemini");
+    setDbResult([{ provider: "gemini" }]);
+    expect(await resolveExtractionEngine(TENANT)).toBe("gemini");
   });
 
   it("falls back to the other provider when the preferred key is missing", async () => {
@@ -145,8 +176,8 @@ describe("resolveExtractionEngine", () => {
     process.env.AI_MOCK = "false";
     delete process.env.OPENAI_API_KEY;
     process.env.GEMINI_API_KEY = "g-test";
-    const supabase = supabaseWithSetting({ data: { provider: "openai" }, error: null });
-    expect(await resolveExtractionEngine(supabase, TENANT)).toBe("gemini");
+    setDbResult([{ provider: "openai" }]);
+    expect(await resolveExtractionEngine(TENANT)).toBe("gemini");
   });
 
   it("returns mock when no provider has a key", async () => {
@@ -154,7 +185,7 @@ describe("resolveExtractionEngine", () => {
     process.env.AI_MOCK = "false";
     delete process.env.OPENAI_API_KEY;
     delete process.env.GEMINI_API_KEY;
-    const supabase = supabaseWithSetting({ data: null, error: null });
-    expect(await resolveExtractionEngine(supabase, TENANT)).toBe("mock");
+    setDbResult([]);
+    expect(await resolveExtractionEngine(TENANT)).toBe("mock");
   });
 });

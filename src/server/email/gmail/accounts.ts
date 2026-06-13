@@ -1,7 +1,10 @@
 import "server-only";
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { gmailAccounts } from "@/lib/db/schema";
+import { firstRow } from "@/lib/db/helpers";
 
 const TOKEN_ALGORITHM = "aes-256-gcm";
 
@@ -61,30 +64,39 @@ export function decryptRefreshToken(encryptedToken: string): string {
   return decrypted.toString("utf8");
 }
 
-export async function listEnabledGmailAccounts(
-  supabase: SupabaseClient
-): Promise<GmailAccount[]> {
-  const { data, error } = await (supabase as any)
-    .from("gmail_accounts")
-    .select("id,tenant_id,email,refresh_token_encrypted,enabled")
-    .eq("enabled", true)
-    .order("created_at", { ascending: true });
-
-  if (error || !data) {
-    if (error?.code !== "42P01") {
-      console.error("[gmail-accounts] list enabled error:", error?.code ?? "unknown");
-    }
-    return [];
-  }
-
-  const accounts: GmailAccount[] = [];
-  for (const row of data as Array<{
+export async function listEnabledGmailAccounts(): Promise<GmailAccount[]> {
+  // System path (poller): lists enabled accounts across ALL tenants by design;
+  // each account row carries its own tenant_id used for downstream scoping.
+  let data: Array<{
     id: string;
     tenant_id: string;
     email: string;
     refresh_token_encrypted: string;
     enabled: boolean;
-  }>) {
+  }>;
+  try {
+    data = await db
+      .select({
+        id: gmailAccounts.id,
+        tenant_id: gmailAccounts.tenant_id,
+        email: gmailAccounts.email,
+        refresh_token_encrypted: gmailAccounts.refresh_token_encrypted,
+        enabled: gmailAccounts.enabled,
+      })
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.enabled, true))
+      .orderBy(asc(gmailAccounts.created_at));
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    // 42P01 = undefined_table — the migration has not run yet; stay silent.
+    if (code !== "42P01") {
+      console.error("[gmail-accounts] list enabled error:", code ?? "unknown");
+    }
+    return [];
+  }
+
+  const accounts: GmailAccount[] = [];
+  for (const row of data) {
     try {
       accounts.push({
         id: row.id,
@@ -103,20 +115,44 @@ export async function listEnabledGmailAccounts(
 }
 
 export async function getGmailAccountByEmail(
-  supabase: SupabaseClient,
   email: string
 ): Promise<GmailAccount | null> {
-  const { data, error } = await (supabase as any)
-    .from("gmail_accounts")
-    .select("id,tenant_id,email,refresh_token_encrypted,enabled")
-    .eq("email", email.toLowerCase())
-    .eq("enabled", true)
-    .maybeSingle();
-
-  if (error || !data) {
-    if (error?.code !== "42P01") {
-      console.error("[gmail-accounts] fetch by email error:", error?.code ?? "unknown");
+  let data: {
+    id: string;
+    tenant_id: string;
+    email: string;
+    refresh_token_encrypted: string;
+    enabled: boolean;
+  } | null;
+  try {
+    data = firstRow(
+      await db
+        .select({
+          id: gmailAccounts.id,
+          tenant_id: gmailAccounts.tenant_id,
+          email: gmailAccounts.email,
+          refresh_token_encrypted: gmailAccounts.refresh_token_encrypted,
+          enabled: gmailAccounts.enabled,
+        })
+        .from(gmailAccounts)
+        .where(
+          and(
+            eq(gmailAccounts.email, email.toLowerCase()),
+            eq(gmailAccounts.enabled, true)
+          )
+        )
+        .limit(1)
+    );
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    // 42P01 = undefined_table — the migration has not run yet; stay silent.
+    if (code !== "42P01") {
+      console.error("[gmail-accounts] fetch by email error:", code ?? "unknown");
     }
+    return null;
+  }
+
+  if (!data) {
     return null;
   }
 
@@ -128,4 +164,3 @@ export async function getGmailAccountByEmail(
     enabled: data.enabled,
   };
 }
-

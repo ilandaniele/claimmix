@@ -2,11 +2,14 @@
  * Análisis page — W7 supplemental pages.
  *
  * Shows aggregated statistics about cases across time periods.
- * Server Component — fetches data directly from Supabase via the server client.
- * RLS ensures only the current tenant's cases are visible.
+ * Server Component — fetches data directly from Drizzle.
+ * Explicit tenant_id filter on every query (RLS removed).
  */
 
-import { createServerClient } from "@/lib/supabase/server";
+import { getSessionContext } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { eq, and, gte, count } from "drizzle-orm";
+import { cases, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { redirect } from "next/navigation";
 
@@ -40,62 +43,56 @@ interface AnalisisData {
 
 async function fetchAnalisis(): Promise<AnalisisData | null> {
   try {
-    const supabase = await createServerClient();
-    const {
-      data: { user },
-      error: authErr,
-    } = await supabase.auth.getUser();
+    const session = await getSessionContext();
+    if (!session?.user) return null;
 
-    if (!user || authErr) return null;
+    const [userRow] = await db
+      .select({ tenant_id: users.tenant_id })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .limit(1);
+    if (!userRow) return null;
 
     const now = new Date();
     const day7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const day30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    const [allCasesRes, recent7Res, recent30Res] = await Promise.all([
-       
-      (supabase as any)
-        .from("cases")
-        .select("status, claim_type, confidence_min"),
-       
-      (supabase as any)
-        .from("cases")
-        .select("id", { count: "exact" })
-        .gte("created_at", day7),
-       
-      (supabase as any)
-        .from("cases")
-        .select("id", { count: "exact" })
-        .gte("created_at", day30),
+    const [allCasesRows, [recent7Row], [recent30Row]] = await Promise.all([
+      db
+        .select({ status: cases.status, claim_type: cases.claim_type, confidence_min: cases.confidence_min })
+        .from(cases)
+        .where(eq(cases.tenant_id, userRow.tenant_id)),
+      db
+        .select({ n: count() })
+        .from(cases)
+        .where(and(eq(cases.tenant_id, userRow.tenant_id), gte(cases.created_at, day7))),
+      db
+        .select({ n: count() })
+        .from(cases)
+        .where(and(eq(cases.tenant_id, userRow.tenant_id), gte(cases.created_at, day30))),
     ]);
-
-    const allCases: Array<{
-      status: string;
-      claim_type: string;
-      confidence_min: number | null;
-    }> = allCasesRes.data ?? [];
 
     const byStatus: Record<string, number> = {};
     const byType: Record<string, number> = {};
     let confSum = 0;
     let confCount = 0;
 
-    for (const c of allCases) {
+    for (const c of allCasesRows) {
       byStatus[c.status] = (byStatus[c.status] ?? 0) + 1;
-      byType[c.claim_type] = (byType[c.claim_type] ?? 0) + 1;
+      if (c.claim_type) byType[c.claim_type] = (byType[c.claim_type] ?? 0) + 1;
       if (c.confidence_min !== null) {
-        confSum += c.confidence_min;
+        confSum += parseFloat(String(c.confidence_min));
         confCount++;
       }
     }
 
     return {
-      total: allCases.length,
+      total: allCasesRows.length,
       by_status: byStatus,
       by_type: byType,
       avg_confidence: confCount > 0 ? Math.round((confSum / confCount) * 100) / 100 : null,
-      recent_7_days: recent7Res.count ?? 0,
-      recent_30_days: recent30Res.count ?? 0,
+      recent_7_days: recent7Row?.n ?? 0,
+      recent_30_days: recent30Row?.n ?? 0,
     };
   } catch (e) {
     if (e instanceof AppError) throw e;

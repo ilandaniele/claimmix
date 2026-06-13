@@ -13,7 +13,9 @@
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, desc, eq } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { TrainabilityAssessment } from "./trainability";
 
@@ -39,7 +41,6 @@ export interface LogAgentRunParams {
  * the insert fails (extraction pipeline must never break on logging).
  */
 export async function logAgentRun(
-  supabase: SupabaseClient,
   params: LogAgentRunParams
 ): Promise<string | null> {
   const { claim, trainability } = params;
@@ -78,29 +79,32 @@ export async function logAgentRun(
     },
     missing_fields: claim.missing_fields ?? [],
     is_trainable_suggestion: trainability.isTrainableSuggestion,
-    trainability_score: trainability.trainabilityScore,
+    trainability_score: trainability.trainabilityScore.toString(),
     trainability_reasons: trainability.trainabilityReasons,
     blocking_reasons: trainability.blockingReasons,
   };
 
   try {
-    const { data, error } = await (supabase as any)
-      .from("agent_runs")
-      .insert(row)
-      .select("id")
-      .single();
+    const data = firstRow(
+      await db
+        .insert(tables.agentRuns)
+        .values(row)
+        .returning({ id: tables.agentRuns.id })
+    );
 
-    if (error || !data) {
-      // 42P01 = table missing (migration not applied yet) — degrade silently
-      // so existing deployments keep extracting.
-      if (error?.code !== "42P01") {
-        console.error("[agent-runs] insert error:", error?.code ?? "no_data"); // crew-debug-ok
-      }
+    if (!data) {
+      console.error("[agent-runs] insert error:", "no_data"); // crew-debug-ok
       return null;
     }
 
-    return (data as { id: string }).id;
-  } catch {
+    return data.id;
+  } catch (e) {
+    // 42P01 = table missing (migration not applied yet) — degrade silently
+    // so existing deployments keep extracting.
+    const code = (e as { code?: string })?.code;
+    if (code !== "42P01") {
+      console.error("[agent-runs] insert error:", code ?? "no_data"); // crew-debug-ok
+    }
     // Never break the extraction pipeline because run logging failed.
     return null;
   }
@@ -127,33 +131,54 @@ export interface AgentRunRow {
 }
 
 /**
- * Fetch the most recent agent run for a case (tenant scoping enforced by the
- * caller's client — pass a user-scoped client for RLS, service for workers).
+ * Fetch the most recent agent run for a case. Tenant scoping is enforced
+ * explicitly (RLS is gone): pass the tenant id from the authenticated context.
  */
 export async function getLatestAgentRun(
-  supabase: SupabaseClient,
+  tenantId: string,
   caseId: string
 ): Promise<AgentRunRow | null> {
   try {
-    const { data, error } = await (supabase as any)
-      .from("agent_runs")
-      .select(
-        "id,case_id,claim_message_id,provider_message_id,model_provider,model_name,prompt_version,input_payload,output_payload,confidence_payload,missing_fields,is_trainable_suggestion,trainability_score,trainability_reasons,blocking_reasons,created_at"
-      )
-      .eq("case_id", caseId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const t = tables.agentRuns;
+    const data = firstRow(
+      await db
+        .select({
+          id: t.id,
+          case_id: t.case_id,
+          claim_message_id: t.claim_message_id,
+          provider_message_id: t.provider_message_id,
+          model_provider: t.model_provider,
+          model_name: t.model_name,
+          prompt_version: t.prompt_version,
+          input_payload: t.input_payload,
+          output_payload: t.output_payload,
+          confidence_payload: t.confidence_payload,
+          missing_fields: t.missing_fields,
+          is_trainable_suggestion: t.is_trainable_suggestion,
+          trainability_score: t.trainability_score,
+          trainability_reasons: t.trainability_reasons,
+          blocking_reasons: t.blocking_reasons,
+          created_at: t.created_at,
+        })
+        .from(t)
+        .where(and(eq(t.tenant_id, tenantId), eq(t.case_id, caseId)))
+        .orderBy(desc(t.created_at))
+        .limit(1)
+    );
 
-    if (error || !data) {
-      if (error && error.code !== "42P01") {
-        console.error("[agent-runs] latest fetch error:", error.code); // crew-debug-ok
-      }
-      return null;
+    if (!data) return null;
+
+    // numeric columns surface as strings — convert to keep the JSON shape
+    // identical to the previous PostgREST response.
+    return {
+      ...data,
+      trainability_score: Number(data.trainability_score),
+    } as AgentRunRow;
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    if (code && code !== "42P01") {
+      console.error("[agent-runs] latest fetch error:", code); // crew-debug-ok
     }
-
-    return data as AgentRunRow;
-  } catch {
     return null;
   }
 }

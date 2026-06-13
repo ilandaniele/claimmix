@@ -1,22 +1,24 @@
 /**
  * Cases list query — `GET /api/cases`.
  *
- * Builds the Supabase query for the cases listing endpoint.
- * RLS is enforced by the Supabase client (user-scoped JWT):
- *   - tenant isolation: automatically applied via RLS policy
+ * Builds the Drizzle query for the cases listing endpoint.
+ * Tenant isolation is enforced by an explicit tenant_id filter
+ * (RLS is gone — the explicit filter is the ONLY tenant boundary):
  *   - IDOR: not applicable to list — users only see their tenant's rows
  *
- * AC9:  List is RLS-isolated by tenant_id.
+ * AC9:  List is isolated by tenant_id.
  * AC11: Filter by claim type returns only matching cases.
  * AC12: Pagination per_page is capped at 100.
  */
 
- 
-type AnySupabaseClient = any;
-import type { Database } from "@/lib/supabase/types";
-import type { CaseQuery } from "@/lib/schemas/cases";
+import { and, asc, desc, eq, inArray, type SQL } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { countRows, ilikeAny } from "@/lib/db/helpers";
+import { cases, extractedFields } from "@/lib/db/schema";
+import type { CaseRow } from "@/lib/db/types";
+import type { CaseQuery, SortColumn } from "@/lib/schemas/cases";
 
-export type CaseRow = Database["public"]["Tables"]["cases"]["Row"];
+export type { CaseRow };
 
 export interface CaseListResult {
   data: CaseRow[];
@@ -28,17 +30,32 @@ export interface CaseListResult {
   };
 }
 
+/** Extract a loggable error code from a thrown DB error (PII-safe). */
+function errCode(err: unknown): string {
+  return (
+    (err as { code?: string })?.code ??
+    (err instanceof Error ? err.name : "UnknownError")
+  );
+}
+
+/** Whitelisted sort columns (SortColumnSchema prevents arbitrary input). */
+const SORT_COLUMNS = {
+  created_at: cases.created_at,
+  confidence_min: cases.confidence_min,
+  status: cases.status,
+} as const satisfies Record<SortColumn, unknown>;
+
 /**
  * Query cases with filtering, sorting, and pagination.
  *
- * The Supabase client is user-scoped (anon key + JWT) so RLS automatically
- * limits results to the authenticated user's tenant. The caller MUST pass
- * the user-scoped client — never the service-role client — to preserve IDOR safety.
+ * Every query filters explicitly by the caller's tenant_id. The caller MUST
+ * pass the authenticated user's tenant id — never a client-supplied value —
+ * to preserve IDOR safety.
  *
  * raw_intake_text is intentionally NOT selected here (large field, not needed for list).
  */
 export async function listCases(
-  supabase: AnySupabaseClient,
+  tenantId: string,
   query: CaseQuery
 ): Promise<CaseListResult> {
   const {
@@ -57,97 +74,80 @@ export async function listCases(
     is_claim,
   } = query;
 
-  // ── Count query ────────────────────────────────────────────────────────────
+  // ── Shared filters ─────────────────────────────────────────────────────────
+  const conditions: (SQL | undefined)[] = [eq(cases.tenant_id, tenantId)];
 
-  let countQ = (supabase as any)
-    .from("cases")
-    .select("id", { count: "exact", head: true });
-
-  if (status) countQ = countQ.eq("status", status);
-  if (type) countQ = countQ.eq("claim_type", type);
+  if (status) conditions.push(eq(cases.status, status));
+  if (type) conditions.push(eq(cases.claim_type, type));
   if (q) {
-    // Full-text search on policyholder_name and policy_number using ilike.
-    // Parameterized via Supabase client — no raw SQL string interpolation.
-    countQ = countQ.or(
-      `policyholder_name.ilike.%${q}%,policy_number.ilike.%${q}%`
-    );
+    // Case-insensitive substring search on policyholder_name and policy_number.
+    // Parameterized via Drizzle — no raw SQL string interpolation.
+    conditions.push(ilikeAny([cases.policyholder_name, cases.policy_number], q));
   }
   // AC18: Email-intake filters
-  if (severity) countQ = countQ.eq("severity", severity);
-  if (customer_id) countQ = countQ.eq("customer_id", customer_id);
-  if (policy_id) countQ = countQ.eq("policy_id", policy_id);
-  if (channel) countQ = countQ.eq("channel", channel);
-  if (is_claim !== undefined) countQ = countQ.eq("is_claim", is_claim);
+  if (severity) conditions.push(eq(cases.severity, severity));
+  if (customer_id) conditions.push(eq(cases.customer_id, customer_id));
+  if (policy_id) conditions.push(eq(cases.policy_id, policy_id));
+  if (channel) conditions.push(eq(cases.channel, channel));
+  if (is_claim !== undefined) conditions.push(eq(cases.is_claim, is_claim));
 
-  const { count, error: countError } = await countQ;
-  if (countError) {
-    throw new Error(`[listCases] count error: ${countError.code}`);
+  const where = and(...conditions);
+
+  // ── Count query ────────────────────────────────────────────────────────────
+  let total: number;
+  try {
+    total = await countRows(cases, where);
+  } catch (err) {
+    throw new Error(`[listCases] count error: ${errCode(err)}`);
   }
-
-  const total = count ?? 0;
 
   // ── Data query ─────────────────────────────────────────────────────────────
   // Select core case columns + email-intake columns added in 0005/0006.
-  const selectColumns = [
-    "id",
-    "tenant_id",
-    "policy_number",
-    "policyholder_name",
-    "claim_type",
-    "status",
-    "confidence_min",
-    "assigned_to",
-    "channel",
-    "created_at",
-    "updated_at",
-    "closed_at",
-    // Email-intake columns (0005, 0006)
-    "severity",
-    "customer_id",
-    "policy_id",
-    "email_message_id",
-    "email_thread_id",
-    "is_claim",
-    "not_relevant_reason",
-    "requires_specialist",
-    "core_external_id",
-    "core_error_message",
-    "core_sent_at",
-  ].join(", ");
-
-
-  let dataQ = (supabase as any)
-    .from("cases")
-    .select(selectColumns)
-    .order(sort, { ascending: order === "asc" });
-
-  if (status) dataQ = dataQ.eq("status", status);
-  if (type) dataQ = dataQ.eq("claim_type", type);
-  if (q) {
-    dataQ = dataQ.or(
-      `policyholder_name.ilike.%${q}%,policy_number.ilike.%${q}%`
-    );
-  }
-  // AC18: Email-intake filters
-  if (severity) dataQ = dataQ.eq("severity", severity);
-  if (customer_id) dataQ = dataQ.eq("customer_id", customer_id);
-  if (policy_id) dataQ = dataQ.eq("policy_id", policy_id);
-  if (channel) dataQ = dataQ.eq("channel", channel);
-  if (is_claim !== undefined) dataQ = dataQ.eq("is_claim", is_claim);
-
-  // Pagination — max 100 per page (enforced in CaseQuerySchema)
+  const sortColumn = SORT_COLUMNS[sort];
   const from = (page - 1) * per_page;
-  const to = from + per_page - 1;
-  dataQ = dataQ.range(from, to);
 
-  const { data, error: dataError } = await dataQ;
-  if (dataError) {
-    throw new Error(`[listCases] data error: ${dataError.code}`);
+  let data: Record<string, unknown>[];
+  try {
+    data = await db
+      .select({
+        id: cases.id,
+        tenant_id: cases.tenant_id,
+        policy_number: cases.policy_number,
+        policyholder_name: cases.policyholder_name,
+        claim_type: cases.claim_type,
+        status: cases.status,
+        confidence_min: cases.confidence_min,
+        assigned_to: cases.assigned_to,
+        channel: cases.channel,
+        created_at: cases.created_at,
+        updated_at: cases.updated_at,
+        closed_at: cases.closed_at,
+        // Email-intake columns (0005, 0006)
+        severity: cases.severity,
+        customer_id: cases.customer_id,
+        policy_id: cases.policy_id,
+        email_message_id: cases.email_message_id,
+        email_thread_id: cases.email_thread_id,
+        is_claim: cases.is_claim,
+        not_relevant_reason: cases.not_relevant_reason,
+        requires_specialist: cases.requires_specialist,
+        core_external_id: cases.core_external_id,
+        core_error_message: cases.core_error_message,
+        core_sent_at: cases.core_sent_at,
+      })
+      .from(cases)
+      .where(where)
+      .orderBy(order === "asc" ? asc(sortColumn) : desc(sortColumn))
+      // Pagination — max 100 per page (enforced in CaseQuerySchema)
+      .limit(per_page)
+      .offset(from);
+  } catch (err) {
+    throw new Error(`[listCases] data error: ${errCode(err)}`);
   }
 
   const rows = await hydrateCaseListIdentity(
-    supabase,
-    ((data as CaseRow[]) ?? [])
+    tenantId,
+    data as unknown as CaseRow[]
   );
 
   return {
@@ -162,7 +162,7 @@ export async function listCases(
 }
 
 async function hydrateCaseListIdentity(
-  supabase: AnySupabaseClient,
+  tenantId: string,
   rows: CaseRow[]
 ): Promise<CaseRow[]> {
   const caseIdsNeedingHydration = rows
@@ -171,25 +171,29 @@ async function hydrateCaseListIdentity(
 
   if (caseIdsNeedingHydration.length === 0) return rows;
 
-  const extractedFieldsQuery = (supabase as any)
-    .from("extracted_fields")
-    .select("case_id,field_key,field_value");
-
-  if (typeof extractedFieldsQuery.in !== "function") return rows;
-
-  const { data, error } = await extractedFieldsQuery
-    .in("case_id", caseIdsNeedingHydration)
-    .in("field_key", ["full_name", "policy_number"]);
-
-  if (error || !data) {
-    if (error) {
-      console.error("[listCases] extracted_fields hydration error:", error.code);
-    }
+  let data: Array<{ case_id: string; field_key: string; field_value: string }>;
+  try {
+    data = await db
+      .select({
+        case_id: extractedFields.case_id,
+        field_key: extractedFields.field_key,
+        field_value: extractedFields.field_value,
+      })
+      .from(extractedFields)
+      .where(
+        and(
+          eq(extractedFields.tenant_id, tenantId),
+          inArray(extractedFields.case_id, caseIdsNeedingHydration),
+          inArray(extractedFields.field_key, ["full_name", "policy_number"])
+        )
+      );
+  } catch (err) {
+    console.error("[listCases] extracted_fields hydration error:", errCode(err));
     return rows;
   }
 
   const fieldsByCase = new Map<string, Record<string, string>>();
-  for (const field of data as Array<{ case_id: string; field_key: string; field_value: string }>) {
+  for (const field of data) {
     const entry = fieldsByCase.get(field.case_id) ?? {};
     entry[field.field_key] = field.field_value;
     fieldsByCase.set(field.case_id, entry);
@@ -210,44 +214,42 @@ async function hydrateCaseListIdentity(
  * Query cases for CSV export (up to 1000 rows, no pagination offset).
  * Accepts the same filters as listCases but ignores page/per_page.
  *
- * AC13: Same tenant isolation (RLS) as the list endpoint.
+ * AC13: Same explicit tenant isolation as the list endpoint.
  */
 export async function listCasesForExport(
-  supabase: AnySupabaseClient,
+  tenantId: string,
   query: Omit<CaseQuery, "page" | "per_page" | "sort" | "order">
 ): Promise<CaseRow[]> {
   const { status, type, q } = query;
 
-  const selectColumns = [
-    "id",
-    "policy_number",
-    "policyholder_name",
-    "claim_type",
-    "status",
-    "confidence_min",
-    "assigned_to",
-    "channel",
-    "created_at",
-  ].join(", ");
-
-  // Max 1000 rows per export — range 0..999
-   
-  let q2 = (supabase as any)
-    .from("cases")
-    .select(selectColumns)
-    .order("created_at", { ascending: false })
-    .range(0, 999);
-
-  if (status) q2 = q2.eq("status", status);
-  if (type) q2 = q2.eq("claim_type", type);
+  const conditions: (SQL | undefined)[] = [eq(cases.tenant_id, tenantId)];
+  if (status) conditions.push(eq(cases.status, status));
+  if (type) conditions.push(eq(cases.claim_type, type));
   if (q) {
-    q2 = q2.or(`policyholder_name.ilike.%${q}%,policy_number.ilike.%${q}%`);
+    conditions.push(ilikeAny([cases.policyholder_name, cases.policy_number], q));
   }
 
-  const { data, error } = await q2;
-  if (error) {
-    throw new Error(`[listCasesForExport] error: ${error.code}`);
-  }
+  try {
+    // Max 1000 rows per export.
+    const data = await db
+      .select({
+        id: cases.id,
+        policy_number: cases.policy_number,
+        policyholder_name: cases.policyholder_name,
+        claim_type: cases.claim_type,
+        status: cases.status,
+        confidence_min: cases.confidence_min,
+        assigned_to: cases.assigned_to,
+        channel: cases.channel,
+        created_at: cases.created_at,
+      })
+      .from(cases)
+      .where(and(...conditions))
+      .orderBy(desc(cases.created_at))
+      .limit(1000);
 
-  return (data as CaseRow[]) ?? [];
+    return data as unknown as CaseRow[];
+  } catch (err) {
+    throw new Error(`[listCasesForExport] error: ${errCode(err)}`);
+  }
 }

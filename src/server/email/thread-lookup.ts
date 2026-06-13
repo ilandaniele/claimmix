@@ -21,7 +21,10 @@
  */
 
 import "server-only";
-import { createServiceClient } from "@/lib/supabase/service";
+import { and, eq, inArray } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { cases, claimMessages } from "@/lib/db/schema";
+import { firstRow } from "@/lib/db/helpers";
 
 export interface ThreadLookupResult {
   existingCaseId?: string;
@@ -51,48 +54,59 @@ export async function threadLookup(
     return { existingCaseId: undefined };
   }
 
-  const supabase = createServiceClient();
-
   // ── 1. New path: claim_messages WHERE direction='outbound' (AC6 / IC7) ────
   // A claimant reply to one of our outbound emails will have
   // In-Reply-To = <provider_message_id>.  That id is stored in
   // claim_messages.provider_message_id with direction='outbound'.
-  const { data: claimMsgRow, error: claimMsgError } = await (supabase as any)
-    .from("claim_messages")
-    .select("case_id")
-    .eq("tenant_id", tenantId)
-    .eq("direction", "outbound")
-    .in("provider_message_id", candidates)
-    .limit(1)
-    .maybeSingle();
+  try {
+    const claimMsgRow = firstRow(
+      await db
+        .select({ case_id: claimMessages.case_id })
+        .from(claimMessages)
+        .where(
+          and(
+            eq(claimMessages.tenant_id, tenantId),
+            eq(claimMessages.direction, "outbound"),
+            inArray(claimMessages.provider_message_id, candidates)
+          )
+        )
+        .limit(1)
+    );
 
-  if (claimMsgError) {
-    console.error("[thread-lookup] claim_messages error:", claimMsgError.code); // crew-debug-ok
+    if (claimMsgRow) {
+      return { existingCaseId: claimMsgRow.case_id };
+    }
+  } catch (err) {
+    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
+    console.error("[thread-lookup] claim_messages error:", code); // crew-debug-ok
     // Non-fatal — fall through to legacy check.
-  } else if (claimMsgRow) {
-    return {
-      existingCaseId: (claimMsgRow as { case_id: string }).case_id,
-    };
   }
 
   // ── 2. Legacy path: cases.email_thread_id ────────────────────────────────
   // This covers:
   //   - Replies to the original inbound message (cases.email_thread_id = first MessageID)
   //   - Any rows that predate the claim_messages table (migration 0009)
-  const { data: caseRow, error: caseError } = await (supabase as any)
-    .from("cases")
-    .select("id, email_thread_id")
-    .eq("tenant_id", tenantId)
-    .in("email_thread_id", candidates)
-    .maybeSingle();
+  try {
+    const caseRow = firstRow(
+      await db
+        .select({ id: cases.id, email_thread_id: cases.email_thread_id })
+        .from(cases)
+        .where(
+          and(
+            eq(cases.tenant_id, tenantId),
+            inArray(cases.email_thread_id, candidates)
+          )
+        )
+        .limit(1)
+    );
 
-  if (caseError) {
-    console.error("[thread-lookup] cases error:", caseError.code); // crew-debug-ok
+    if (caseRow) {
+      return { existingCaseId: caseRow.id };
+    }
+  } catch (err) {
+    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
+    console.error("[thread-lookup] cases error:", code); // crew-debug-ok
     return { existingCaseId: undefined };
-  }
-
-  if (caseRow) {
-    return { existingCaseId: (caseRow as { id: string }).id };
   }
 
   return { existingCaseId: undefined };

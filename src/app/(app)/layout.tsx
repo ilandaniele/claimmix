@@ -7,10 +7,15 @@
  *   - Main content area
  *
  * This layout is only rendered for authenticated users (enforced by proxy.ts).
- * It fetches the current user's profile from Supabase to display name/initials.
+ * It fetches the current user's profile (Drizzle) to display name/initials.
  */
 
-import { createServerClient } from "@/lib/supabase/server";
+import { eq } from "drizzle-orm";
+
+import { getSessionContext } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { users } from "@/lib/db/schema";
 import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
 import { LocaleProvider } from "@/lib/i18n/LocaleContext";
@@ -22,23 +27,29 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await getSessionContext();
+  const user = session?.user ?? null;
 
-  // Direct lookup by PK — no unstable_cache because cookies() cannot be called
-  // inside a cached function in Next.js 15+ (causes 500 on cache-miss for new sessions).
-  let userRow: { full_name: string; role: string; locale?: string | null } | null = null;
+  // Direct lookup by PK — graceful null handling: a missing/failed profile row
+  // must never crash the shell (falls back to session email / defaults).
+  let userRow: { full_name: string; role: string; locale: string | null } | null =
+    null;
   if (user?.id) {
-    // select("*") instead of naming columns: keeps working whether or not the
-    // optional `locale` column (migration 0016) exists yet.
-    const { data } = await (supabase as any)
-      .from("users")
-      .select("*")
-      .eq("id", user.id)
-      .single();
-    userRow = data ?? null;
+    try {
+      userRow = firstRow(
+        await db
+          .select({
+            full_name: users.full_name,
+            role: users.role,
+            locale: users.locale,
+          })
+          .from(users)
+          .where(eq(users.id, user.id))
+          .limit(1)
+      );
+    } catch {
+      userRow = null;
+    }
   }
 
   const fullName: string = userRow?.full_name ?? user?.email ?? "Analista";

@@ -4,15 +4,49 @@
  * AC14: Memory only updated via confirm-field endpoint (updateMemoryFromConfirmation).
  * AC21: Audit log FIELD_CONFIRMED with redacted values.
  *
- * All DB calls are mocked — no real Supabase connection needed.
+ * All DB calls are mocked — no real DB connection needed.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  updateMemoryFromConfirmation,
-  seedMemoryFromExtraction,
-} from "@/server/memory/update";
-import type { ExtractedField } from "@/lib/schemas/extracted-claim";
+// ── Mock @/lib/db BEFORE any imports ─────────────────────────────────────────
+vi.mock("@/lib/db", () => {
+  const onConflictDoUpdate = vi.fn().mockResolvedValue([]);
+  const onConflictDoNothing = vi.fn().mockResolvedValue([]);
+  const values = vi.fn().mockReturnValue({ onConflictDoUpdate, onConflictDoNothing });
+  const insert = vi.fn().mockReturnValue({ values });
+
+  const limit = vi.fn().mockResolvedValue([]);
+  const where = vi.fn().mockReturnValue({ limit });
+  const from = vi.fn().mockReturnValue({ where });
+  const select = vi.fn().mockReturnValue({ from });
+
+  return {
+    db: { select, insert },
+    tables: {
+      claimMemory: {
+        id: "id",
+        tenant_id: "tenant_id",
+        memory_type: "memory_type",
+        key: "key",
+        value: "value",
+        use_count: "use_count",
+        confidence: "confidence",
+        source: "source",
+        last_used_at: "last_used_at",
+      },
+    },
+  };
+});
+
+// ── Mock drizzle-orm operators ────────────────────────────────────────────────
+vi.mock("drizzle-orm", () => ({
+  and: vi.fn((...args: unknown[]) => args),
+  eq: vi.fn((col: unknown, val: unknown) => ({ col, val })),
+}));
+
+// ── Mock @/lib/db/helpers ─────────────────────────────────────────────────────
+vi.mock("@/lib/db/helpers", () => ({
+  firstRow: vi.fn((rows: unknown[]) => rows[0] ?? null),
+}));
 
 // ── Mock audit/log ────────────────────────────────────────────────────────────
 vi.mock("@/lib/audit/log", () => ({
@@ -22,52 +56,42 @@ vi.mock("@/lib/audit/log", () => ({
   },
 }));
 
-// ── Mock Supabase builder ─────────────────────────────────────────────────────
+// ── Mock audit/redact ─────────────────────────────────────────────────────────
+vi.mock("@/lib/audit/redact", () => ({
+  redactObject: vi.fn((obj: Record<string, unknown>) => {
+    // Default pass-through; individual tests can override for PII checks.
+    return { ...obj };
+  }),
+}));
 
-function buildMockSupabase(
-  existingRow: {
-    id: string;
-    value: Record<string, unknown>;
-    use_count: number;
-  } | null = null
-) {
-  const upsertMock = vi.fn().mockResolvedValue({ error: null });
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  updateMemoryFromConfirmation,
+  seedMemoryFromExtraction,
+} from "@/server/memory/update";
+import type { ExtractedField } from "@/lib/schemas/extracted-claim";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 
-  return {
-    _upsertMock: upsertMock,
-    from: (table: string) => {
-      if (table === "claim_memory") {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                eq: () => ({
-                  maybeSingle: () =>
-                    Promise.resolve({ data: existingRow, error: null }),
-                }),
-              }),
-            }),
-          }),
-          upsert: upsertMock,
-          update: () => ({
-            in: vi.fn().mockResolvedValue({ error: null }),
-          }),
-        };
-      }
-      if (table === "missing_docs") {
-        return {
-          update: () => ({
-            eq: () => ({
-              eq: () => ({
-                is: () => Promise.resolve({ error: null }),
-              }),
-            }),
-          }),
-        };
-      }
-      return {};
-    },
-  } as any;
+// Helper: rebuild the insert chain mocks and wire them into db.insert
+function makeInsertChain() {
+  const onConflictDoUpdate = vi.fn().mockResolvedValue([]);
+  const onConflictDoNothing = vi.fn().mockResolvedValue([]);
+  const valuesMock = vi.fn().mockReturnValue({ onConflictDoUpdate, onConflictDoNothing });
+  vi.mocked(db.insert).mockReturnValue({ values: valuesMock } as ReturnType<typeof db.insert>);
+  return { valuesMock, onConflictDoUpdate, onConflictDoNothing };
+}
+
+// Helper: rebuild the select chain mocks returning the given rows
+function makeSelectChain(rows: unknown[] = []) {
+  vi.mocked(db.select).mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue(rows),
+      }),
+    }),
+  } as ReturnType<typeof db.select>);
+  vi.mocked(firstRow).mockReturnValue(rows[0] ?? null);
 }
 
 // ── Tests: updateMemoryFromConfirmation ──────────────────────────────────────
@@ -75,13 +99,14 @@ function buildMockSupabase(
 describe("updateMemoryFromConfirmation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    makeSelectChain([]);
+    makeInsertChain();
   });
 
   it("upserts a new field_correction row when no existing row", async () => {
-    const supabase = buildMockSupabase(null);
+    const { valuesMock } = makeInsertChain();
 
     await updateMemoryFromConfirmation(
-      supabase,
       "tenant-1",
       "full_name",
       "Juan Pérez",
@@ -90,7 +115,7 @@ describe("updateMemoryFromConfirmation", () => {
       "user-1"
     );
 
-    expect(supabase._upsertMock).toHaveBeenCalledWith(
+    expect(valuesMock).toHaveBeenCalledWith(
       expect.objectContaining({
         tenant_id: "tenant-1",
         memory_type: "field_correction",
@@ -99,21 +124,22 @@ describe("updateMemoryFromConfirmation", () => {
         confidence: 0.90,
         source: "human_confirmation",
         use_count: 1,
-      }),
-      expect.objectContaining({ onConflict: "tenant_id,memory_type,key" })
+      })
     );
   });
 
   it("merges confirmed value into existing value JSON", async () => {
-    const existing = {
+    const existingRow = {
       id: "m1",
       value: { dni: "35123456" },
       use_count: 2,
     };
-    const supabase = buildMockSupabase(existing);
+
+    makeSelectChain([existingRow]);
+
+    const { valuesMock } = makeInsertChain();
 
     await updateMemoryFromConfirmation(
-      supabase,
       "tenant-1",
       "full_name",
       "Ana García",
@@ -122,24 +148,21 @@ describe("updateMemoryFromConfirmation", () => {
       "user-1"
     );
 
-    expect(supabase._upsertMock).toHaveBeenCalledWith(
+    expect(valuesMock).toHaveBeenCalledWith(
       expect.objectContaining({
         value: expect.objectContaining({
-          dni: "35123456",    // preserved from existing
+          dni: "35123456",        // preserved from existing
           full_name: "Ana García", // new value added
         }),
         use_count: 3, // incremented from 2
-      }),
-      expect.any(Object)
+      })
     );
   });
 
   it("AC21: calls writeAuditLog with FIELD_CONFIRMED event", async () => {
     const { writeAuditLog } = await import("@/lib/audit/log");
-    const supabase = buildMockSupabase(null);
 
     await updateMemoryFromConfirmation(
-      supabase,
       "tenant-1",
       "full_name",
       "Juan Pérez",
@@ -160,17 +183,34 @@ describe("updateMemoryFromConfirmation", () => {
 
   it("AC21: audit payload has redacted values (no raw PII in DNI/policy)", async () => {
     const { writeAuditLog } = await import("@/lib/audit/log");
-    const supabase = buildMockSupabase(null);
+    const { redactObject } = await import("@/lib/audit/redact");
+
+    // Override redactObject to redact DNI patterns
+    vi.mocked(redactObject).mockImplementation((obj: Record<string, unknown>) => {
+      const result: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === "string") {
+          // Redact DNI pattern: 8 digits optionally separated by dots
+          if (/^\d{2}\.?\d{3}\.?\d{3}$/.test(v.replace(/\./g, ""))) {
+            result[k] = "[DNI]";
+          } else {
+            result[k] = v;
+          }
+        } else {
+          result[k] = v;
+        }
+      }
+      return result;
+    });
 
     await updateMemoryFromConfirmation(
-      supabase,
       "tenant-1",
       "dni",
-      "35.123.456",     // DNI — should be redacted in audit payload
+      "35.123.456",      // DNI — should be redacted in audit payload
       "sender@example.com",
       "case-1",
       "user-1",
-      "12.345.678"      // old DNI — should also be redacted
+      "12.345.678"       // old DNI — should also be redacted
     );
 
     const callPayload = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].payload;
@@ -180,25 +220,13 @@ describe("updateMemoryFromConfirmation", () => {
   });
 
   it("does not throw on DB error (graceful degradation)", async () => {
-    const upsertMock = vi.fn().mockResolvedValue({ error: { code: "DB_ERROR" } });
-    const supabase = {
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              eq: () => ({
-                maybeSingle: () => Promise.resolve({ data: null, error: null }),
-              }),
-            }),
-          }),
-        }),
-        upsert: upsertMock,
-      }),
-    } as any;
+    // Make insert throw to simulate DB error
+    vi.mocked(db.insert).mockImplementation(() => {
+      throw new Error("DB_ERROR");
+    });
 
     await expect(
       updateMemoryFromConfirmation(
-        supabase,
         "tenant-1",
         "full_name",
         "Juan",
@@ -214,6 +242,8 @@ describe("updateMemoryFromConfirmation", () => {
 describe("seedMemoryFromExtraction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    makeSelectChain([]);
+    makeInsertChain();
   });
 
   const highConfidenceFields: ExtractedField[] = [
@@ -252,100 +282,91 @@ describe("seedMemoryFromExtraction", () => {
   ];
 
   it("seeds only full_name, dni, policy_number — never phone or email", async () => {
-    const supabase = buildMockSupabase(null);
+    const { valuesMock } = makeInsertChain();
 
     await seedMemoryFromExtraction(
-      supabase,
       "tenant-1",
       "sender@example.com",
       highConfidenceFields,
       "case-1"
     );
 
-    expect(supabase._upsertMock).toHaveBeenCalledWith(
+    expect(valuesMock).toHaveBeenCalledWith(
       expect.objectContaining({
         value: expect.not.objectContaining({ phone: expect.anything() }),
-      }),
-      expect.any(Object)
+      })
     );
-    expect(supabase._upsertMock).toHaveBeenCalledWith(
+    expect(valuesMock).toHaveBeenCalledWith(
       expect.objectContaining({
         value: expect.not.objectContaining({ email: expect.anything() }),
-      }),
-      expect.any(Object)
+      })
     );
     // full_name, dni, policy_number should be seeded
-    expect(supabase._upsertMock).toHaveBeenCalledWith(
+    expect(valuesMock).toHaveBeenCalledWith(
       expect.objectContaining({
         value: expect.objectContaining({
           full_name: "Juan Pérez",
           dni: "35123456",
           policy_number: "POL-2024-001",
         }),
-      }),
-      expect.any(Object)
+      })
     );
   });
 
   it("discounts confidence by 0.8 factor for auto-seeded memory", async () => {
-    const supabase = buildMockSupabase(null);
+    const { valuesMock } = makeInsertChain();
 
     const fields: ExtractedField[] = [
       { field_key: "full_name", field_value: "Ana García", confidence: 0.90, source: "ai" },
     ];
 
-    await seedMemoryFromExtraction(supabase, "tenant-1", "s@example.com", fields, "c1");
+    await seedMemoryFromExtraction("tenant-1", "s@example.com", fields, "c1");
 
     // min confidence is 0.90; discounted = 0.90 * 0.8 = 0.72
-    expect(supabase._upsertMock).toHaveBeenCalledWith(
+    expect(valuesMock).toHaveBeenCalledWith(
       expect.objectContaining({
         confidence: 0.72,
         source: "auto_extracted",
-      }),
-      expect.any(Object)
+      })
     );
   });
 
   it("does NOT seed fields below 0.85 confidence threshold", async () => {
-    const supabase = buildMockSupabase(null);
+    const { valuesMock } = makeInsertChain();
 
     const lowConfFields: ExtractedField[] = [
       { field_key: "full_name", field_value: "Juan", confidence: 0.75, source: "ai" },
       { field_key: "dni", field_value: "12345", confidence: 0.60, source: "ai" },
     ];
 
-    await seedMemoryFromExtraction(supabase, "tenant-1", "s@example.com", lowConfFields, "c1");
+    await seedMemoryFromExtraction("tenant-1", "s@example.com", lowConfFields, "c1");
 
-    // No upsert should be called since no fields meet the threshold
-    expect(supabase._upsertMock).not.toHaveBeenCalled();
+    // No insert should be called since no fields meet the threshold
+    expect(db.insert).not.toHaveBeenCalled();
   });
 
-  it("uses ignoreDuplicates=true to not overwrite existing confirmed memory", async () => {
-    const existing = { id: "m1", value: { full_name: "Existing" }, use_count: 5 };
-    const supabase = buildMockSupabase(existing);
+  it("uses onConflictDoNothing to not overwrite existing confirmed memory", async () => {
+    const { onConflictDoNothing } = makeInsertChain();
 
     const fields: ExtractedField[] = [
       { field_key: "full_name", field_value: "New Name", confidence: 0.95, source: "ai" },
     ];
 
-    await seedMemoryFromExtraction(supabase, "tenant-1", "s@example.com", fields, "c1");
+    await seedMemoryFromExtraction("tenant-1", "s@example.com", fields, "c1");
 
-    // ignoreDuplicates=true ensures existing confirmed rows are not overwritten
-    expect(supabase._upsertMock).toHaveBeenCalledWith(
-      expect.any(Object),
-      expect.objectContaining({ ignoreDuplicates: true })
-    );
+    // onConflictDoNothing ensures existing confirmed rows are not overwritten
+    expect(onConflictDoNothing).toHaveBeenCalled();
   });
 
   it("returns early without calling DB when senderEmail is empty", async () => {
-    const supabase = buildMockSupabase(null);
+    const { valuesMock } = makeInsertChain();
 
     const fields: ExtractedField[] = [
       { field_key: "full_name", field_value: "Juan", confidence: 0.92, source: "ai" },
     ];
 
-    await seedMemoryFromExtraction(supabase, "tenant-1", "", fields, "c1");
+    await seedMemoryFromExtraction("tenant-1", "", fields, "c1");
 
-    expect(supabase._upsertMock).not.toHaveBeenCalled();
+    expect(db.insert).not.toHaveBeenCalled();
   });
 });

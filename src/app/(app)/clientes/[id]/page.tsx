@@ -2,14 +2,17 @@
  * Customer detail page — Server Component.
  *
  * Shows customer personal info, list of policies, and list of cases.
- * All data is RLS-scoped to the authenticated user's tenant.
+ * Explicit tenant_id filter on every query (RLS removed).
  *
  * Protected by proxy.ts — unauthenticated access redirects to /login.
- * IDOR: getCaseDetail uses user-scoped Supabase client (RLS-enforced) — wrong tenant returns 404.
+ * IDOR: tenant_id check enforced explicitly in every query.
  */
 
 import { notFound } from "next/navigation";
-import { createServerClient } from "@/lib/supabase/server";
+import { getSessionContext } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { eq, and, desc } from "drizzle-orm";
+import { cases, customers, policies, users } from "@/lib/db/schema";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
@@ -27,8 +30,8 @@ interface Policy {
   policy_number: string;
   policy_type: string;
   status: string;
-  valid_from: string | null;
-  valid_to: string | null;
+  start_date: string | null;
+  end_date: string | null;
 }
 
 interface CustomerCase {
@@ -36,7 +39,7 @@ interface CustomerCase {
   created_at: string;
   status: string;
   severity: string | null;
-  claim_type: string;
+  claim_type: string | null;
 }
 
 interface Customer {
@@ -81,38 +84,41 @@ export default async function CustomerDetailPage({
   const locale = await getServerLocale();
   const t = getT(locale);
 
-  const supabase = await createServerClient();
+  const session = await getSessionContext();
+  if (!session?.user) notFound();
+  const [userRow] = await db
+    .select({ tenant_id: users.tenant_id })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+  if (!userRow) notFound();
 
-  // Fetch customer (RLS-scoped — wrong tenant returns null → 404)
-  const { data: customerRaw, error: customerError } = await (supabase as any)
-    .from("customers")
-    .select("id,full_name,dni,email,phone,created_at")
-    .eq("id", id)
-    .single();
+  // Fetch customer (explicit tenant check — wrong tenant → 404)
+  const [customer] = await db
+    .select({ id: customers.id, full_name: customers.full_name, dni: customers.dni, email: customers.email, phone: customers.phone, created_at: customers.created_at })
+    .from(customers)
+    .where(and(eq(customers.id, id), eq(customers.tenant_id, userRow.tenant_id)))
+    .limit(1);
 
-  if (customerError || !customerRaw) {
-    notFound();
-  }
-
-  const customer = customerRaw as Customer;
+  if (!customer) notFound();
 
   // Fetch policies + cases in parallel
-  const [{ data: policiesRaw }, { data: casesRaw }] = await Promise.all([
-    (supabase as any)
-      .from("policies")
-      .select("id,policy_number,policy_type,status,valid_from,valid_to")
-      .eq("customer_id", id)
-      .order("valid_from", { ascending: false }),
-    (supabase as any)
-      .from("cases")
-      .select("id,created_at,status,severity,claim_type")
-      .eq("customer_id", id)
-      .order("created_at", { ascending: false })
+  const [policiesData, casesData] = await Promise.all([
+    db
+      .select({ id: policies.id, policy_number: policies.policy_number, policy_type: policies.policy_type, status: policies.status, start_date: policies.start_date, end_date: policies.end_date })
+      .from(policies)
+      .where(and(eq(policies.customer_id, id), eq(policies.tenant_id, userRow.tenant_id)))
+      .orderBy(desc(policies.created_at)),
+    db
+      .select({ id: cases.id, created_at: cases.created_at, status: cases.status, severity: cases.severity, claim_type: cases.claim_type })
+      .from(cases)
+      .where(and(eq(cases.customer_id, id), eq(cases.tenant_id, userRow.tenant_id)))
+      .orderBy(desc(cases.created_at))
       .limit(50),
   ]);
 
-  const policies: Policy[] = policiesRaw ?? [];
-  const cases: CustomerCase[] = casesRaw ?? [];
+  const customerPolicies: Policy[] = policiesData;
+  const customerCases: CustomerCase[] = casesData;
 
   return (
     <div className="px-6 py-6 max-w-5xl mx-auto">
@@ -182,10 +188,10 @@ export default async function CustomerDetailPage({
           >
             {t("clientes.detail.policies")}
             <span className="ml-2 text-slate-400 font-normal">
-              ({policies.length})
+              ({customerPolicies.length})
             </span>
           </h2>
-          {policies.length === 0 ? (
+          {customerPolicies.length === 0 ? (
             <p className="text-sm text-slate-400">
               {t("clientes.detail.noPolicies")}
             </p>
@@ -215,7 +221,7 @@ export default async function CustomerDetailPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {policies.map((policy) => (
+                  {customerPolicies.map((policy) => (
                     <tr
                       key={policy.id}
                       className="border-b border-slate-100 last:border-0"
@@ -239,12 +245,12 @@ export default async function CustomerDetailPage({
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap">
-                        {policy.valid_from
-                          ? formatDate(policy.valid_from)
+                        {policy.start_date
+                          ? formatDate(policy.start_date)
                           : "—"}
                       </td>
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap last:pr-0">
-                        {policy.valid_to ? formatDate(policy.valid_to) : "—"}
+                        {policy.end_date ? formatDate(policy.end_date) : "—"}
                       </td>
                     </tr>
                   ))}
@@ -265,10 +271,10 @@ export default async function CustomerDetailPage({
           >
             {t("clientes.detail.cases")}
             <span className="ml-2 text-slate-400 font-normal">
-              ({cases.length})
+              ({customerCases.length})
             </span>
           </h2>
-          {cases.length === 0 ? (
+          {customerCases.length === 0 ? (
             <p className="text-sm text-slate-400">
               {t("clientes.detail.noCases")}
             </p>
@@ -298,7 +304,7 @@ export default async function CustomerDetailPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {cases.map((c) => (
+                  {customerCases.map((c) => (
                     <tr
                       key={c.id}
                       className="border-b border-slate-100 last:border-0"

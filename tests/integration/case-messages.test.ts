@@ -7,17 +7,28 @@
  * AC13: body_text is truncated to 500 chars server-side.
  * AC14: attachment_count is populated from claim_attachments join.
  *
- * Runs against a mock Next.js request context using vi.mock for Supabase clients.
- * This avoids a live server dependency while still exercising route handler logic.
+ * Uses vi.mock("@/lib/db") and vi.mock("@/lib/auth/require-role") to exercise
+ * route handler logic without a live DB or server.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { type NextRequest } from "next/server";
 
-// ── Mock Supabase clients ─────────────────────────────────────────────────────
+// ── Mocks must be hoisted before any imports that use them ────────────────────
 
-vi.mock("@/lib/supabase/server", () => ({
-  createServerClient: vi.fn(),
+vi.mock("@/lib/db", () => {
+  const mockDb = {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  };
+  return { db: mockDb };
+});
+
+vi.mock("@/lib/auth/require-role", () => ({
+  requireRole: vi.fn(),
+  ALL_ROLES: ["owner", "admin", "specialist", "analyst", "viewer"],
 }));
 
 // Mock rate-limit to always allow (not testing rate-limit in this suite).
@@ -36,7 +47,8 @@ vi.mock("@/lib/rate-limit/index", async () => {
   };
 });
 
-import { createServerClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
+import { requireRole } from "@/lib/auth/require-role";
 import { GET } from "@/app/api/cases/[id]/messages/route";
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
@@ -54,7 +66,6 @@ function makeMessage(overrides: Partial<{
   from_addr: string | null;
   body_text: string | null;
   received_at: string;
-  claim_attachments: Array<{ id: string }>;
 }> = {}) {
   return {
     id: "msg-uuid-001",
@@ -64,79 +75,7 @@ function makeMessage(overrides: Partial<{
     from_addr: "claimant@example.com",
     body_text: "Hello, this is the body of the email.",
     received_at: "2026-06-01T10:00:00Z",
-    claim_attachments: [],
     ...overrides,
-  };
-}
-
-// ── Mock Supabase builder ─────────────────────────────────────────────────────
-
-/**
- * Builds a mock Supabase server client.
- *
- * @param userPresent - whether auth.getUser() returns a user
- * @param caseExists  - whether the case lookup returns a row
- * @param messages    - the claim_messages rows to return
- */
-function buildClientMock(
-  userPresent: boolean,
-  caseExists: boolean,
-  messages: ReturnType<typeof makeMessage>[] = []
-) {
-  const userId = userPresent ? USER_ID : null;
-  const user = userPresent
-    ? { id: userId, email: "test@example.com" }
-    : null;
-
-  // We need to model two sequential .from() calls:
-  // 1. .from("cases").select("id").eq("id", ...).maybeSingle()
-  // 2. .from("claim_messages").select(...).eq(...).order(...).limit(...)
-  //
-  // Use a call counter to return different data for each .from() call.
-  let callCount = 0;
-
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({
-        data: { user },
-        error: null,
-      }),
-    },
-    from: vi.fn().mockImplementation((table: string) => {
-      callCount++;
-
-      if (table === "cases") {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({
-            data: caseExists ? { id: CASE_ID } : null,
-            error: null,
-          }),
-        };
-      }
-
-      if (table === "claim_messages") {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockReturnThis(),
-          limit: vi.fn().mockResolvedValue({
-            data: messages,
-            error: null,
-          }),
-        };
-      }
-
-      // Fallback
-      return {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockResolvedValue({ data: null, error: null }),
-        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-      };
-    }),
   };
 }
 
@@ -152,23 +91,67 @@ function buildContext(id: string) {
   };
 }
 
+/**
+ * Set up requireRole to return a valid session context.
+ */
+function setupAuth() {
+  vi.mocked(requireRole).mockResolvedValue({
+    db: db as any,
+    user: { id: USER_ID, email: "test@example.com" },
+    userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "analyst" },
+  });
+}
+
+/**
+ * Set up requireRole to throw (unauthenticated).
+ */
+function setupNoAuth() {
+  vi.mocked(requireRole).mockRejectedValue(new Error("MISSING_SESSION"));
+}
+
+/**
+ * Build a chainable db.select mock that resolves with the given rows.
+ * The route calls db.select().from().where().orderBy().limit() for messages
+ * and db.select().from().where() for case lookup and attachments.
+ */
+function buildSelectChain(rows: unknown[]) {
+  const chain: any = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(rows),
+    // Make the chain itself thenable so it resolves when not calling .limit()
+    then: (resolve: (v: unknown) => void) => resolve(rows),
+  };
+  return chain;
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("GET /api/cases/[id]/messages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset only the db.select queue so mockReturnValueOnce calls don't bleed between tests.
+    vi.mocked(db.select).mockReset();
   });
 
   it("AC8: returns 200 with messages array when case is owned and messages exist", async () => {
+    setupAuth();
+
     const messages = [
       makeMessage({ id: "msg-001", received_at: "2026-06-01T08:00:00Z" }),
       makeMessage({ id: "msg-002", received_at: "2026-06-01T09:00:00Z" }),
       makeMessage({ id: "msg-003", received_at: "2026-06-01T10:00:00Z" }),
     ];
 
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildClientMock(true, true, messages)
-    );
+    // db.select() is called 3 times:
+    // 1. case lookup  -> returns [{ id: CASE_ID }]
+    // 2. messages     -> returns messages array
+    // 3. attachments  -> returns [] (no attachments)
+    vi.mocked(db.select)
+      .mockReturnValueOnce(buildSelectChain([{ id: CASE_ID }]))
+      .mockReturnValueOnce(buildSelectChain(messages))
+      .mockReturnValueOnce(buildSelectChain([]));
 
     const response = await GET(buildRequest(), buildContext(CASE_ID));
     const body = await response.json();
@@ -189,10 +172,10 @@ describe("GET /api/cases/[id]/messages", () => {
   });
 
   it("AC9: returns 404 NOT_FOUND for case belonging to a different tenant (IDOR safe)", async () => {
-    // Case lookup returns null — simulates RLS returning no row for wrong tenant.
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildClientMock(true, false, [])
-    );
+    setupAuth();
+
+    // Case lookup returns empty array (no row for this tenant).
+    vi.mocked(db.select).mockReturnValueOnce(buildSelectChain([]));
 
     const response = await GET(buildRequest(), buildContext(OTHER_CASE_ID));
     const body = await response.json();
@@ -204,9 +187,13 @@ describe("GET /api/cases/[id]/messages", () => {
   });
 
   it("AC10: returns 200 with empty array when no claim_messages rows exist", async () => {
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildClientMock(true, true, [])
-    );
+    setupAuth();
+
+    // 1. case lookup -> found
+    // 2. messages    -> empty
+    vi.mocked(db.select)
+      .mockReturnValueOnce(buildSelectChain([{ id: CASE_ID }]))
+      .mockReturnValueOnce(buildSelectChain([]));
 
     const response = await GET(buildRequest(), buildContext(CASE_ID));
     const body = await response.json();
@@ -216,9 +203,7 @@ describe("GET /api/cases/[id]/messages", () => {
   });
 
   it("returns 401 MISSING_SESSION when not authenticated", async () => {
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildClientMock(false, false, [])
-    );
+    setupNoAuth();
 
     const response = await GET(buildRequest(), buildContext(CASE_ID));
     const body = await response.json();
@@ -228,9 +213,7 @@ describe("GET /api/cases/[id]/messages", () => {
   });
 
   it("returns 404 for invalid (non-UUID) case ID", async () => {
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildClientMock(true, false, [])
-    );
+    setupAuth();
 
     const response = await GET(buildRequest(), buildContext("not-a-uuid"));
     const body = await response.json();
@@ -240,12 +223,15 @@ describe("GET /api/cases/[id]/messages", () => {
   });
 
   it("AC13: body_text is truncated to 500 chars when input exceeds 500 chars", async () => {
+    setupAuth();
+
     const longBody = "x".repeat(800);
     const messages = [makeMessage({ body_text: longBody })];
 
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildClientMock(true, true, messages)
-    );
+    vi.mocked(db.select)
+      .mockReturnValueOnce(buildSelectChain([{ id: CASE_ID }]))
+      .mockReturnValueOnce(buildSelectChain(messages))
+      .mockReturnValueOnce(buildSelectChain([]));
 
     const response = await GET(buildRequest(), buildContext(CASE_ID));
     const body = await response.json();
@@ -258,12 +244,15 @@ describe("GET /api/cases/[id]/messages", () => {
   });
 
   it("AC13: body_text is NOT truncated when under 500 chars", async () => {
+    setupAuth();
+
     const shortBody = "y".repeat(200);
     const messages = [makeMessage({ body_text: shortBody })];
 
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildClientMock(true, true, messages)
-    );
+    vi.mocked(db.select)
+      .mockReturnValueOnce(buildSelectChain([{ id: CASE_ID }]))
+      .mockReturnValueOnce(buildSelectChain(messages))
+      .mockReturnValueOnce(buildSelectChain([]));
 
     const response = await GET(buildRequest(), buildContext(CASE_ID));
     const body = await response.json();
@@ -274,16 +263,21 @@ describe("GET /api/cases/[id]/messages", () => {
   });
 
   it("AC14: attachment_count is populated from claim_attachments join", async () => {
-    const messages = [
-      makeMessage({
-        id: "msg-with-attachments",
-        claim_attachments: [{ id: "att-001" }, { id: "att-002" }],
-      }),
+    setupAuth();
+
+    const msgId = "msg-with-attachments";
+    const messages = [makeMessage({ id: msgId })];
+
+    // attachments: two rows pointing to msgId
+    const attachmentRows = [
+      { claim_message_id: msgId },
+      { claim_message_id: msgId },
     ];
 
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildClientMock(true, true, messages)
-    );
+    vi.mocked(db.select)
+      .mockReturnValueOnce(buildSelectChain([{ id: CASE_ID }]))
+      .mockReturnValueOnce(buildSelectChain(messages))
+      .mockReturnValueOnce(buildSelectChain(attachmentRows));
 
     const response = await GET(buildRequest(), buildContext(CASE_ID));
     const body = await response.json();
@@ -293,11 +287,14 @@ describe("GET /api/cases/[id]/messages", () => {
   });
 
   it("AC14: attachment_count is 0 when no attachments exist", async () => {
-    const messages = [makeMessage({ claim_attachments: [] })];
+    setupAuth();
 
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildClientMock(true, true, messages)
-    );
+    const messages = [makeMessage()];
+
+    vi.mocked(db.select)
+      .mockReturnValueOnce(buildSelectChain([{ id: CASE_ID }]))
+      .mockReturnValueOnce(buildSelectChain(messages))
+      .mockReturnValueOnce(buildSelectChain([]));
 
     const response = await GET(buildRequest(), buildContext(CASE_ID));
     const body = await response.json();
@@ -307,11 +304,14 @@ describe("GET /api/cases/[id]/messages", () => {
   });
 
   it("body_text handles null gracefully — returns null in response", async () => {
+    setupAuth();
+
     const messages = [makeMessage({ body_text: null })];
 
-    (createServerClient as ReturnType<typeof vi.fn>).mockResolvedValue(
-      buildClientMock(true, true, messages)
-    );
+    vi.mocked(db.select)
+      .mockReturnValueOnce(buildSelectChain([{ id: CASE_ID }]))
+      .mockReturnValueOnce(buildSelectChain(messages))
+      .mockReturnValueOnce(buildSelectChain([]));
 
     const response = await GET(buildRequest(), buildContext(CASE_ID));
     const body = await response.json();

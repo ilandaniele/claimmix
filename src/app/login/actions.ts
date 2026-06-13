@@ -1,10 +1,15 @@
 /**
  * Server Actions for authentication — login page.
  *
- * signIn: validates email+password, calls POST /api/auth/sign-in internally
- * via direct Supabase call (not HTTP self-call), then redirects to /bandeja.
+ * signIn: validates email+password, calls auth.api.signInEmail (Better Auth)
+ * with the request headers so nextCookies sets the session cookie, then
+ * redirects to /bandeja.
  *
- * signOut: calls POST /api/auth/sign-out, then redirects to /login.
+ * signOut: revokes the Better Auth session, then redirects to /login.
+ *
+ * signInWithGoogle: asks Better Auth for the Google OAuth URL
+ * (auth.api.signInSocial) and redirects the browser there. The provider
+ * redirects back to /api/auth/callback/google (handled by the [...all] route).
  *
  * NOTE: redirect() must NOT be wrapped in try/catch — it throws a special
  * Next.js internal error to trigger the redirect.
@@ -12,19 +17,21 @@
 
 "use server";
 
+import { eq } from "drizzle-orm";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { createServerClient } from "@/lib/supabase/server";
-import { SignInSchema } from "@/lib/schemas/auth";
+
+import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { auth } from "@/lib/auth";
+import { getSessionContext } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { users } from "@/lib/db/schema";
 import {
   rateLimit,
   RATE_LIMIT_CONFIGS,
   buildSignInKey,
 } from "@/lib/rate-limit/index";
-import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import { headers } from "next/headers";
-import type { Database } from "@/lib/supabase/types";
-
-type UserRow = Database["public"]["Tables"]["users"]["Row"];
+import { SignInSchema } from "@/lib/schemas/auth";
 
 type SignInState = {
   error?: string;
@@ -81,14 +88,15 @@ export async function signIn(
     };
   }
 
-  // ── 3. Supabase sign-in ────────────────────────────────────────────────────
-  const supabase = await createServerClient();
-  const { data, error: signInError } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-
-  if (signInError || !data.session || !data.user) {
+  // ── 3. Better Auth sign-in (nextCookies sets the session cookie) ──────────
+  let userId: string;
+  try {
+    const result = await auth.api.signInEmail({
+      body: { email, password },
+      headers: headerStore,
+    });
+    userId = result.user.id;
+  } catch {
     await writeAuditLog({
       tenant_id: "00000000-0000-0000-0000-000000000000",
       actor_id: null,
@@ -104,22 +112,21 @@ export async function signIn(
   }
 
   // ── 4. Fetch public.users row for tenant_id + role ─────────────────────────
-  const { data: userRowRaw } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", data.user.id)
-    .single();
-  const userRow = userRowRaw as UserRow | null;
+  const [userRow] = await db
+    .select({ tenant_id: users.tenant_id, role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
 
   const tenantId = userRow?.tenant_id ?? "00000000-0000-0000-0000-000000000000";
 
   // ── 5. Write success audit log ─────────────────────────────────────────────
   await writeAuditLog({
     tenant_id: tenantId,
-    actor_id: data.user.id,
+    actor_id: userId,
     event_type: AuditEvent.AUTH_SUCCESS,
     target_type: "user",
-    target_id: data.user.id,
+    target_id: userId,
     payload: { role: userRow?.role ?? "unknown" },
     ip,
     ua,
@@ -134,55 +141,49 @@ export async function signIn(
  * Can be called from any server action or form action.
  */
 export async function signOut(): Promise<void> {
-  const supabase = await createServerClient();
+  const session = await getSessionContext();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (user) {
-    const { data: userRowRaw } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", user.id)
-      .single();
-    const userRow = userRowRaw as UserRow | null;
+  if (session?.user) {
+    const [userRow] = await db
+      .select({ tenant_id: users.tenant_id })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .limit(1);
 
     await writeAuditLog({
       tenant_id: userRow?.tenant_id ?? "00000000-0000-0000-0000-000000000000",
-      actor_id: user.id,
+      actor_id: session.user.id,
       event_type: AuditEvent.AUTH_SIGN_OUT,
       target_type: "user",
-      target_id: user.id,
+      target_id: session.user.id,
       payload: {},
     });
 
-    await supabase.auth.signOut();
+    await auth.api.signOut({ headers: await headers() });
   }
 
   redirect("/login");
 }
 
 export async function signInWithGoogle(): Promise<void> {
-  const supabase = await createServerClient();
-  const headerStore = await headers();
-  const origin =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    `${headerStore.get("x-forwarded-proto") ?? "https"}://${headerStore.get("host")}`;
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: `${origin}/api/auth/callback?next=/bandeja`,
-      queryParams: {
-        access_type: "offline",
-        prompt: "select_account",
+  let url: string | undefined;
+  try {
+    const result = await auth.api.signInSocial({
+      body: {
+        provider: "google",
+        callbackURL: "/bandeja",
+        errorCallbackURL: "/login?error=auth_callback_failed",
       },
-    },
-  });
+      headers: await headers(),
+    });
+    url = result.url ?? undefined;
+  } catch {
+    url = undefined;
+  }
 
-  if (error || !data.url) {
+  if (!url) {
     redirect("/login?error=google_signin_failed");
   }
 
-  redirect(data.url);
+  redirect(url);
 }

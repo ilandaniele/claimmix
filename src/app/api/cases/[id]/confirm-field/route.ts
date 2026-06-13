@@ -5,7 +5,8 @@
  * AC16: FSM transition is re-evaluated after each confirmation.
  * AC21: Every confirmation writes audit_log FIELD_CONFIRMED with redacted values.
  *
- * Auth: user-scoped Supabase client (RLS enforces cross-tenant isolation → AC19).
+ * Auth: Better Auth session. RLS is gone — every query filters explicitly by
+ * the caller's tenant_id (IDOR-safe 404 for wrong-tenant cases → AC19).
  * Rate limit: CONFIRM_FIELD config (30/min per user).
  *
  * Request body: { field_key, value, action: 'confirm' | 'correct' | 'reject' }
@@ -15,8 +16,17 @@
  */
 
 import { type NextRequest } from "next/server";
-import { createServerClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import {
+  cases,
+  claimFieldConfirmations,
+  extractedFields,
+  missingDocs,
+  rawMessages,
+} from "@/lib/db/schema";
 import { ConfirmFieldSchema } from "@/lib/schemas/cases";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { updateMemoryFromConfirmation } from "@/server/memory/update";
@@ -39,34 +49,28 @@ const ParamsSchema = z.object({
   id: z.string().uuid("ID de caso inválido."),
 });
 
+/** Extract a loggable error code from a thrown DB error (PII-safe). */
+function dbErrCode(e: unknown): string {
+  return (
+    (e as { code?: string })?.code ??
+    (e instanceof Error ? e.name : "UnknownError")
+  );
+}
+
 // ── PATCH /api/cases/:id/confirm-field ───────────────────────────────────────
 
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  // ── 1. Auth — user-scoped client (RLS enforces tenant isolation) ──────────
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  // ── 1. Auth — Better Auth session + public.users row ──────────────────────
+  let ctx: RoleContext;
+  try {
+    ctx = await requireRole(...ALL_ROLES);
+  } catch {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
-
-  // Fetch the user row to get tenant_id and role.
-  const { data: userRowRaw } = await (supabase as any)
-    .from("users")
-    .select("id,tenant_id,role")
-    .eq("id", user.id)
-    .single();
-
-  if (!userRowRaw) {
-    return err(new AppError("MISSING_SESSION", "Usuario no encontrado."));
-  }
-
-  const userRow = userRowRaw as { id: string; tenant_id: string; role: string };
+  const { userRow } = ctx;
 
   // Viewers are read-only: they can inspect claims but never mutate them.
   if (userRow.role === "viewer") {
@@ -111,33 +115,63 @@ export async function PATCH(
 
   const { field_key: fieldKey, value: confirmedValue, action } = parsed.data;
 
-  // ── 5. Fetch case (RLS-scoped — wrong tenant returns null → 404) ──────────
-  // Using the user-scoped client so RLS automatically filters to the user's tenant.
-  const { data: caseRow, error: caseError } = await (supabase as any)
-    .from("cases")
-    .select("id,status,tenant_id,email_thread_id")
-    .eq("id", caseId)
-    .single();
+  // ── 5. Fetch case (explicit tenant filter — wrong tenant returns null → 404) ─
+  let caseRow: { id: string; status: string; tenant_id: string } | null;
+  try {
+    caseRow = firstRow(
+      await db
+        .select({
+          id: cases.id,
+          status: cases.status,
+          tenant_id: cases.tenant_id,
+        })
+        .from(cases)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
+        .limit(1)
+    );
+  } catch {
+    caseRow = null;
+  }
 
-  if (caseError || !caseRow) {
+  if (!caseRow) {
     // AC19: Always 404, never 403 — no tenant enumeration.
     return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
   }
 
   const currentStatus = caseRow.status as CaseStatus;
-  const tenantId = caseRow.tenant_id as string;
+  const tenantId = caseRow.tenant_id;
 
   // ── 6. Find pending claim_field_confirmations row ─────────────────────────
-  const { data: confirmationRow, error: confirmError } = await (supabase as any)
-    .from("claim_field_confirmations")
-    .select("id,proposed_value,conflict_with_value,status")
-    .eq("case_id", caseId)
-    .eq("field_key", fieldKey)
-    .eq("status", "pending")
-    .maybeSingle();
-
-  if (confirmError) {
-    console.error("[confirm-field] claim_field_confirmations fetch error:", confirmError.code);
+  // Neon column names are field_name / suggested_value — aliased to preserve
+  // the previous field_key / proposed_value shape.
+  let confirmationRow: {
+    id: string;
+    proposed_value: string | null;
+    conflict_with_value: string | null;
+    status: string;
+  } | null;
+  try {
+    confirmationRow = firstRow(
+      await db
+        .select({
+          id: claimFieldConfirmations.id,
+          proposed_value: claimFieldConfirmations.suggested_value,
+          conflict_with_value: claimFieldConfirmations.conflict_with_value,
+          status: claimFieldConfirmations.status,
+        })
+        .from(claimFieldConfirmations)
+        .where(
+          and(
+            eq(claimFieldConfirmations.case_id, caseId),
+            eq(claimFieldConfirmations.tenant_id, tenantId),
+            eq(claimFieldConfirmations.field_name, fieldKey),
+            eq(claimFieldConfirmations.status, "pending")
+          )
+        )
+        .limit(1)
+    );
+  } catch (e) {
+    console.error("[confirm-field] claim_field_confirmations fetch error:", dbErrCode(e));
     return err(new AppError("INTERNAL_ERROR"));
   }
 
@@ -146,63 +180,79 @@ export async function PATCH(
   // were extracted with high confidence but need an explicit human stamp.
 
   const now = new Date().toISOString();
-  const serviceSupabase = createServiceClient();
 
   // ── 7. Handle action ──────────────────────────────────────────────────────
 
   if (action === "confirm" || action === "correct") {
     // ── 7a. Update claim_field_confirmations status ────────────────────────
     if (confirmationRow) {
-      const { error: updateConfError } = await (serviceSupabase as any)
-        .from("claim_field_confirmations")
-        .update({
-          status: action === "confirm" ? "confirmed" : "corrected",
-          confirmed_by: userRow.id,
-          confirmed_at: now,
-        })
-        .eq("id", confirmationRow.id);
-
-      if (updateConfError) {
-        console.error("[confirm-field] confirmation update error:", updateConfError.code);
+      try {
+        await db
+          .update(claimFieldConfirmations)
+          .set({
+            status: action === "confirm" ? "confirmed" : "corrected",
+            confirmed_by: userRow.id,
+            confirmed_at: now,
+          })
+          .where(
+            and(
+              eq(claimFieldConfirmations.id, confirmationRow.id),
+              eq(claimFieldConfirmations.tenant_id, tenantId)
+            )
+          );
+      } catch (e) {
+        console.error("[confirm-field] confirmation update error:", dbErrCode(e));
       }
     }
 
     // ── 7b. Upsert extracted_fields with confirmed value ───────────────────
     if (confirmedValue !== null && confirmedValue !== undefined) {
-      const { error: fieldUpsertError } = await (serviceSupabase as any)
-        .from("extracted_fields")
-        .upsert(
-          {
+      try {
+        await db
+          .insert(extractedFields)
+          .values({
             case_id: caseId,
             tenant_id: tenantId,
             field_key: fieldKey,
             field_value: confirmedValue,
-            confidence: 1.0, // Human-confirmed fields have 100% confidence.
-          },
-          { onConflict: "case_id,field_key" }
-        );
-
-      if (fieldUpsertError) {
-        console.error("[confirm-field] extracted_fields upsert error:", fieldUpsertError.code);
+            confidence: "1.00", // Human-confirmed fields have 100% confidence.
+          })
+          .onConflictDoUpdate({
+            target: [extractedFields.case_id, extractedFields.field_key],
+            set: {
+              field_value: sql`excluded.field_value`,
+              confidence: sql`excluded.confidence`,
+            },
+          });
+      } catch (e) {
+        console.error("[confirm-field] extracted_fields upsert error:", dbErrCode(e));
       }
 
       // ── 7c. Satisfy missing_docs if this field was missing ────────────────
-      await (serviceSupabase as any)
-        .from("missing_docs")
-        .update({ satisfied_at: now })
-        .eq("case_id", caseId)
-        .eq("doc_key", fieldKey)
-        .is("satisfied_at", null);
+      try {
+        await db
+          .update(missingDocs)
+          .set({ satisfied_at: now })
+          .where(
+            and(
+              eq(missingDocs.case_id, caseId),
+              eq(missingDocs.tenant_id, tenantId),
+              eq(missingDocs.doc_key, fieldKey),
+              isNull(missingDocs.satisfied_at)
+            )
+          );
+      } catch (e) {
+        console.error("[confirm-field] missing_docs update error:", dbErrCode(e));
+      }
 
       // ── 7d. Update claim_memory — AC14 ────────────────────────────────────
       // Get sender email from raw_messages for this case.
-      const senderEmail = await getSenderEmail(serviceSupabase, caseId);
+      const senderEmail = await getSenderEmail(caseId, tenantId);
 
       let memoryUpdated = false;
       if (senderEmail) {
         const oldValue = confirmationRow?.proposed_value ?? undefined;
         await updateMemoryFromConfirmation(
-          serviceSupabase,
           tenantId,
           fieldKey,
           confirmedValue,
@@ -235,7 +285,6 @@ export async function PATCH(
 
       // ── 7f. Re-run gap analysis → possible status transition ───────────────
       const newStatus = await reEvaluateStatus(
-        serviceSupabase,
         caseId,
         currentStatus,
         tenantId,
@@ -254,17 +303,22 @@ export async function PATCH(
   if (action === "reject") {
     // ── 7g. Reject: mark confirmation as rejected ─────────────────────────
     if (confirmationRow) {
-      const { error: rejectError } = await (serviceSupabase as any)
-        .from("claim_field_confirmations")
-        .update({
-          status: "rejected",
-          confirmed_by: userRow.id,
-          confirmed_at: now,
-        })
-        .eq("id", confirmationRow.id);
-
-      if (rejectError) {
-        console.error("[confirm-field] reject update error:", rejectError.code);
+      try {
+        await db
+          .update(claimFieldConfirmations)
+          .set({
+            status: "rejected",
+            confirmed_by: userRow.id,
+            confirmed_at: now,
+          })
+          .where(
+            and(
+              eq(claimFieldConfirmations.id, confirmationRow.id),
+              eq(claimFieldConfirmations.tenant_id, tenantId)
+            )
+          );
+      } catch (e) {
+        console.error("[confirm-field] reject update error:", dbErrCode(e));
       }
     }
 
@@ -300,24 +354,26 @@ export async function PATCH(
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 /**
- * Get the sender email from raw_messages for a case.
+ * Get the sender email from raw_messages for a case (tenant-scoped).
  * Returns null if not found (graceful degradation — memory update is skipped).
  */
 async function getSenderEmail(
-  supabase: ReturnType<typeof createServiceClient>,
-  caseId: string
+  caseId: string,
+  tenantId: string
 ): Promise<string | null> {
   try {
-    const { data, error } = await (supabase as any)
-      .from("raw_messages")
-      .select("from_addr")
-      .eq("case_id", caseId)
-      .order("received_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+    const row = firstRow(
+      await db
+        .select({ from_addr: rawMessages.from_addr })
+        .from(rawMessages)
+        .where(
+          and(eq(rawMessages.case_id, caseId), eq(rawMessages.tenant_id, tenantId))
+        )
+        .orderBy(asc(rawMessages.received_at))
+        .limit(1)
+    );
 
-    if (error || !data) return null;
-    return data.from_addr ?? null;
+    return row?.from_addr ?? null;
   } catch {
     return null;
   }
@@ -334,7 +390,6 @@ async function getSenderEmail(
  * Returns the new case status.
  */
 async function reEvaluateStatus(
-  supabase: ReturnType<typeof createServiceClient>,
   caseId: string,
   currentStatus: CaseStatus,
   tenantId: string,
@@ -342,38 +397,45 @@ async function reEvaluateStatus(
 ): Promise<string> {
   try {
     // Fetch current extracted fields for gap analysis.
-    const { data: fields } = await (supabase as any)
-      .from("extracted_fields")
-      .select("field_key,field_value,confidence,source")
-      .eq("case_id", caseId);
+    const fields = await db
+      .select({
+        field_key: extractedFields.field_key,
+        field_value: extractedFields.field_value,
+        confidence: extractedFields.confidence,
+      })
+      .from(extractedFields)
+      .where(
+        and(
+          eq(extractedFields.case_id, caseId),
+          eq(extractedFields.tenant_id, tenantId)
+        )
+      );
 
-    const extractedFields = (fields ?? []).map((f: any) => ({
+    // numeric → string under Drizzle; convert. The Neon schema has no `source`
+    // column — default to "ai" (matches the previous `?? "ai"` fallback).
+    const currentFields = fields.map((f) => ({
       field_key: f.field_key,
       field_value: f.field_value,
-      confidence: f.confidence,
-      source: f.source ?? "ai",
+      confidence: Number(f.confidence),
+      source: "ai" as const,
     }));
 
-    const gapResult = await analyzeEmailClaimGaps(
-      caseId,
-      extractedFields,
-      supabase
-    );
+    const gapResult = await analyzeEmailClaimGaps(caseId, currentFields, tenantId);
 
     const newStatus = gapResult.status as CaseStatus;
 
     // Only transition if FSM allows it.
     if (newStatus !== currentStatus && isValidTransition(currentStatus, newStatus)) {
-      const { error: statusError } = await (supabase as any)
-        .from("cases")
-        .update({
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", caseId);
-
-      if (statusError) {
-        console.error("[confirm-field] status update error:", statusError.code);
+      try {
+        await db
+          .update(cases)
+          .set({
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+      } catch (e) {
+        console.error("[confirm-field] status update error:", dbErrCode(e));
         return currentStatus;
       }
 
@@ -394,8 +456,8 @@ async function reEvaluateStatus(
     }
 
     return currentStatus;
-  } catch (err) {
-    const errName = err instanceof Error ? err.name : "UnknownError";
+  } catch (e) {
+    const errName = e instanceof Error ? e.name : "UnknownError";
     console.error("[confirm-field] reEvaluateStatus error:", errName);
     return currentStatus;
   }

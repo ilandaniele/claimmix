@@ -1,7 +1,7 @@
 /**
  * Métricas page — AC16 supplemental pages (W7).
  *
- * Server Component that fetches KPI data from /api/metricas and renders:
+ * Server Component that fetches KPI data and renders:
  *   - 4 summary cards
  *   - Cases by status (visual bar chart — HTML/CSS only, no chart library)
  *   - Cases by type (donut-style percentage bars)
@@ -10,7 +10,10 @@
  * All numbers in Spanish (es-AR). Empty state shown when no data exists.
  */
 
-import { createServerClient } from "@/lib/supabase/server";
+import { getSessionContext } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { eq, and, gte, lt, count } from "drizzle-orm";
+import { cases, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { redirect } from "next/navigation";
 
@@ -33,52 +36,59 @@ interface MetricasData {
 
 async function fetchMetricas(): Promise<MetricasData | null> {
   try {
-    const supabase = await createServerClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const session = await getSessionContext();
+    if (!session?.user) return null;
 
-    if (!user) return null;
+    const [userRow] = await db
+      .select({ tenant_id: users.tenant_id })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .limit(1);
+    if (!userRow) return null;
 
     // ── Date window ────────────────────────────────────────────────────────────
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
 
-    const [casesMonthRes, byStatusRes, byTypeRes, escalatedRes, topAnalystsRes] =
+    const [casesThisMonth, byStatusRows, byTypeRows, [escalatedRow], topAnalystsRows] =
       await Promise.all([
-         
-        (supabase as any)
-          .from("cases")
-          .select("id, status, created_at, closed_at")
-          .gte("created_at", monthStart)
-          .lt("created_at", monthEnd),
-         
-        (supabase as any).from("cases").select("status"),
-         
-        (supabase as any).from("cases").select("claim_type"),
-         
-        (supabase as any)
-          .from("cases")
-          .select("id", { count: "exact" })
-          .eq("status", "escalado")
-          .gte("created_at", monthStart)
-          .lt("created_at", monthEnd),
-         
-        (supabase as any)
-          .from("cases")
-          .select("assigned_to, users!cases_assigned_to_fkey(full_name)")
-          .eq("status", "cerrado")
-          .gte("closed_at", monthStart)
-          .lt("closed_at", monthEnd),
+        db
+          .select({ id: cases.id, status: cases.status, created_at: cases.created_at, closed_at: cases.closed_at })
+          .from(cases)
+          .where(and(
+            eq(cases.tenant_id, userRow.tenant_id),
+            gte(cases.created_at, monthStart),
+            lt(cases.created_at, monthEnd),
+          )),
+        db
+          .select({ status: cases.status })
+          .from(cases)
+          .where(eq(cases.tenant_id, userRow.tenant_id)),
+        db
+          .select({ claim_type: cases.claim_type })
+          .from(cases)
+          .where(eq(cases.tenant_id, userRow.tenant_id)),
+        db
+          .select({ n: count() })
+          .from(cases)
+          .where(and(
+            eq(cases.tenant_id, userRow.tenant_id),
+            eq(cases.status, "escalado"),
+            gte(cases.created_at, monthStart),
+            lt(cases.created_at, monthEnd),
+          )),
+        db
+          .select({ assigned_to: cases.assigned_to, full_name: users.full_name })
+          .from(cases)
+          .leftJoin(users, eq(cases.assigned_to, users.id))
+          .where(and(
+            eq(cases.tenant_id, userRow.tenant_id),
+            eq(cases.status, "cerrado"),
+            gte(cases.closed_at, monthStart),
+            lt(cases.closed_at, monthEnd),
+          )),
       ]);
-
-    const casesThisMonth: Array<{
-      id: string;
-      status: string;
-      created_at: string;
-      closed_at: string | null;
-    }> = casesMonthRes.data ?? [];
 
     const totalCasesMonth = casesThisMonth.length;
 
@@ -103,26 +113,25 @@ async function fetchMetricas(): Promise<MetricasData | null> {
       totalCasesMonth > 0 ? Math.round((listoCount / totalCasesMonth) * 100) : 0;
 
     const byStatus: Record<string, number> = {};
-    for (const row of byStatusRes.data ?? []) {
+    for (const row of byStatusRows) {
       byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
     }
 
     const byType: Record<string, number> = {};
-    for (const row of byTypeRes.data ?? []) {
-      byType[row.claim_type] = (byType[row.claim_type] ?? 0) + 1;
+    for (const row of byTypeRows) {
+      if (row.claim_type) byType[row.claim_type] = (byType[row.claim_type] ?? 0) + 1;
     }
     for (const t of ["choque", "robo", "granizo", "incendio"]) {
       if (!(t in byType)) byType[t] = 0;
     }
 
     const analystCounts: Record<string, { name: string; count: number }> = {};
-    for (const row of topAnalystsRes.data ?? []) {
-      const id = row.assigned_to as string | null;
-      if (!id) continue;
-      const name =
-        (row.users as { full_name?: string } | null)?.full_name ?? "Analista";
-      if (!analystCounts[id]) analystCounts[id] = { name, count: 0 };
-      analystCounts[id].count += 1;
+    for (const row of topAnalystsRows) {
+      const assignedId = row.assigned_to as string | null;
+      if (!assignedId) continue;
+      const name = row.full_name ?? "Analista";
+      if (!analystCounts[assignedId]) analystCounts[assignedId] = { name, count: 0 };
+      analystCounts[assignedId].count += 1;
     }
     const topAnalysts = Object.values(analystCounts)
       .sort((a, b) => b.count - a.count)
@@ -134,7 +143,7 @@ async function fetchMetricas(): Promise<MetricasData | null> {
         total_cases_month: totalCasesMonth,
         avg_opening_time_minutes: avgOpeningMinutes,
         auto_completion_rate: autoCompletionRate,
-        escalated_count: escalatedRes.count ?? 0,
+        escalated_count: escalatedRow?.n ?? 0,
       },
       by_status: byStatus,
       by_type: byType,

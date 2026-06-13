@@ -2,7 +2,7 @@
  * GET /api/customers — list customers for the authenticated user's tenant.
  *
  * AC18: Supports filters: search (full_name ILIKE), dni, email.
- * RLS is enforced by the user-scoped Supabase client — no manual tenant_id filter needed.
+ * Tenant isolation is enforced with an explicit tenant_id filter (RLS is gone).
  *
  * Auth: yes (any authenticated user)
  * Rate limit: CASES_API config (100/min — shared with cases list)
@@ -11,7 +11,11 @@
  */
 
 import { type NextRequest } from "next/server";
-import { createServerClient } from "@/lib/supabase/server";
+import { and, desc, eq, type SQL } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { firstRow, ilikeAny } from "@/lib/db/helpers";
+import { customers, users } from "@/lib/db/schema";
+import { getSessionContext } from "@/lib/auth/session";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
@@ -31,16 +35,12 @@ const CustomerQuerySchema = z.object({
   per_page: z.coerce.number().int().min(1).max(100).default(25),
 });
 
-type CustomerQuery = z.infer<typeof CustomerQuerySchema>;
-
 // ── GET /api/customers ────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await getSessionContext();
+  const user = session?.user;
 
   if (!user) {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
@@ -49,14 +49,16 @@ export async function GET(request: NextRequest) {
   // ── 1b. Role check — admin or specialist only (API5) ─────────────────────
   // Customer data contains PII (DNI, email, phone). Only privileged roles may
   // enumerate this endpoint. Analysts may not access it.
-  const { data: userRow } = await (supabase as any)
-    .from("users")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const userRow = firstRow(
+    await db
+      .select({ role: users.role, tenant_id: users.tenant_id })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1)
+  );
 
   const role: string = userRow?.role ?? "analyst";
-  if (!["admin", "specialist"].includes(role)) {
+  if (!userRow || !["admin", "specialist"].includes(role)) {
     return err(
       new AppError(
         "FORBIDDEN_ROLE",
@@ -64,6 +66,8 @@ export async function GET(request: NextRequest) {
       )
     );
   }
+
+  const tenantId = userRow.tenant_id;
 
   // ── 2. Rate limit ─────────────────────────────────────────────────────────
   const rlKey = buildUserKey(user.id, "customers-list");
@@ -95,69 +99,40 @@ export async function GET(request: NextRequest) {
 
   const { search, dni, email, page, per_page } = parsed.data;
 
-  // ── 4. Query (RLS-scoped) ─────────────────────────────────────────────────
+  // ── 4. Query (explicitly tenant-scoped) ───────────────────────────────────
   try {
-    const selectColumns = [
-      "id",
-      "full_name",
-      "dni",
-      "email",
-      "phone",
-      "created_at",
-    ].join(", ");
+    const conditions: SQL[] = [eq(customers.tenant_id, tenantId)];
+    if (search) {
+      const searchCond = ilikeAny([customers.full_name], search);
+      if (searchCond) conditions.push(searchCond);
+    }
+    if (dni) conditions.push(eq(customers.dni, dni));
+    if (email) conditions.push(eq(customers.email, email));
+
+    const where = and(...conditions);
 
     // Count query
-    let countQ = (supabase as any)
-      .from("customers")
-      .select("id", { count: "exact", head: true });
-
-    if (search) {
-      countQ = countQ.ilike("full_name", `%${search}%`);
-    }
-    if (dni) {
-      countQ = countQ.eq("dni", dni);
-    }
-    if (email) {
-      countQ = countQ.eq("email", email);
-    }
-
-    const { count, error: countError } = await countQ;
-    if (countError) {
-      console.error("[GET /api/customers] count error:", countError.code);
-      return err(new AppError("INTERNAL_ERROR"));
-    }
-
-    const total = count ?? 0;
+    const total = await db.$count(customers, where);
 
     // Data query
-    let dataQ = (supabase as any)
-      .from("customers")
-      .select(selectColumns)
-      .order("created_at", { ascending: false });
-
-    if (search) {
-      dataQ = dataQ.ilike("full_name", `%${search}%`);
-    }
-    if (dni) {
-      dataQ = dataQ.eq("dni", dni);
-    }
-    if (email) {
-      dataQ = dataQ.eq("email", email);
-    }
-
-    // Pagination
     const from = (page - 1) * per_page;
-    const to = from + per_page - 1;
-    dataQ = dataQ.range(from, to);
-
-    const { data, error: dataError } = await dataQ;
-    if (dataError) {
-      console.error("[GET /api/customers] data error:", dataError.code);
-      return err(new AppError("INTERNAL_ERROR"));
-    }
+    const data = await db
+      .select({
+        id: customers.id,
+        full_name: customers.full_name,
+        dni: customers.dni,
+        email: customers.email,
+        phone: customers.phone,
+        created_at: customers.created_at,
+      })
+      .from(customers)
+      .where(where)
+      .orderBy(desc(customers.created_at))
+      .limit(per_page)
+      .offset(from);
 
     return ok({
-      data: data ?? [],
+      data,
       meta: {
         total,
         page,

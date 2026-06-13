@@ -13,7 +13,12 @@
  */
 
 import { Suspense } from "react";
-import { createServerClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import { and, eq } from "drizzle-orm";
+import { getSessionContext } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { countRows, firstRow } from "@/lib/db/helpers";
+import { cases, users } from "@/lib/db/schema";
 import { listCases } from "@/server/cases/list";
 import { SCENARIOS } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
@@ -82,10 +87,21 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const is_claim =
     isClaimParam === "true" ? true : isClaimParam === "false" ? false : undefined;
 
-  const supabase = await createServerClient();
+  // Resolve the tenant boundary (RLS is gone — explicit tenant_id filter only).
+  const session = await getSessionContext();
+  if (!session?.user) redirect("/login");
+  const userRow = firstRow(
+    await db
+      .select({ tenant_id: users.tenant_id })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .limit(1)
+  );
+  if (!userRow) redirect("/login");
+  const tenantId = userRow.tenant_id;
 
   // Fetch cases matching the current filter.
-  const initialData = await listCases(supabase, {
+  const initialData = await listCases(tenantId, {
     status,
     type,
     page,
@@ -98,24 +114,19 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     is_claim,
   });
 
-  // Fetch counts for all statuses in parallel (was 6 sequential round-trips).
-  const supabaseAny = supabase as any;
-
-  const [totalResult, ...statusResults] = await Promise.all([
-    supabaseAny.from("cases").select("id", { count: "exact", head: true }),
+  // Fetch counts for all statuses in parallel (tenant-scoped).
+  const [totalCount, ...statusCounts] = await Promise.all([
+    countRows(cases, eq(cases.tenant_id, tenantId)),
     ...VALID_STATUSES.map((s) =>
-      supabaseAny
-        .from("cases")
-        .select("id", { count: "exact", head: true })
-        .eq("status", s)
+      countRows(cases, and(eq(cases.tenant_id, tenantId), eq(cases.status, s)))
     ),
   ]);
 
   const allStatusCounts: { status: CaseStatus | "todos"; count: number }[] = [
-    { status: "todos", count: totalResult.count ?? 0 },
+    { status: "todos", count: totalCount },
     ...VALID_STATUSES.map((s, i) => ({
       status: s,
-      count: statusResults[i].count ?? 0,
+      count: statusCounts[i],
     })),
   ];
 

@@ -1,10 +1,14 @@
 /**
  * Server Action for account creation — /registro page.
  *
- * Creates a Supabase auth user (email+password) plus the public.users profile
- * row in the default tenant, mirroring the Google sign-in auto-provisioning
- * (provisionGoogleUserIfAllowed): new self-registered accounts get the
- * "analyst" role. Admins can promote them later from /admin/users.
+ * Creates a Better Auth user (email+password) via auth.api.signUpEmail. The
+ * databaseHooks user.create.after hook (provisionUserProfile) creates the
+ * public.users profile row in the default tenant with the "analyst" role —
+ * same provisioning rule as first-time Google sign-in. Admins can promote
+ * accounts later from /admin/users.
+ *
+ * signUpEmail auto-signs the user in (nextCookies sets the session cookie),
+ * so no separate sign-in call is needed.
  *
  * NOTE: redirect() must NOT be wrapped in try/catch — it throws a special
  * Next.js internal error to trigger the redirect.
@@ -12,28 +16,20 @@
 
 "use server";
 
-import { redirect } from "next/navigation";
+import { APIError } from "better-auth/api";
 import { headers } from "next/headers";
-import { createServerClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
-import { SignUpSchema } from "@/lib/schemas/auth";
-import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import { redirect } from "next/navigation";
+
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { auth } from "@/lib/auth";
+import { resolveDefaultTenantId } from "@/lib/auth/provision";
+import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import { SignUpSchema } from "@/lib/schemas/auth";
 
 type SignUpState = {
   error?: string;
   fieldErrors?: Record<string, string[]>;
 };
-
-/** Default tenant for self-registered users — same resolution as Google sign-in. */
-function resolveDefaultTenantId(): string | null {
-  return (
-    process.env.GOOGLE_DEFAULT_TENANT_ID ??
-    process.env.DEFAULT_TENANT_ID ??
-    process.env.GMAIL_TENANT_ID ??
-    null
-  );
-}
 
 export async function signUp(
   _prev: SignUpState,
@@ -68,67 +64,54 @@ export async function signUp(
   }
 
   // ── 3. Preconditions ───────────────────────────────────────────────────────
+  // The provisioning hook needs a default tenant; without it user creation
+  // would fail halfway. Fail fast with the same message as before.
   const tenantId = resolveDefaultTenantId();
-  if (!tenantId || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!tenantId) {
     return { error: "El registro no está habilitado. Contactá al administrador." };
   }
 
-  // ── 4. Create the auth user + profile row ─────────────────────────────────
-  const serviceClient = createServiceClient();
-  const { data: created, error: createErr } =
-    await serviceClient.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name },
+  // ── 4. Create the auth user (profile row provisioned by the create hook) ──
+  let userId: string;
+  let signedIn: boolean;
+  try {
+    const result = await auth.api.signUpEmail({
+      body: { name: full_name, email, password },
+      headers: headerStore,
     });
-
-  if (createErr || !created.user) {
-    // Supabase reports duplicates with the email_exists code (422).
-    const code = (createErr as { code?: string } | null)?.code;
-    if (code === "email_exists" || /already/i.test(createErr?.message ?? "")) {
-      return { error: "Ya existe una cuenta con ese correo. Iniciá sesión." };
+    userId = result.user.id;
+    // token is null when auto sign-in did not happen.
+    signedIn = result.token !== null;
+  } catch (e) {
+    if (e instanceof APIError) {
+      const code = e.body?.code;
+      if (code === "USER_ALREADY_EXISTS" || /already/i.test(e.body?.message ?? "")) {
+        return { error: "Ya existe una cuenta con ese correo. Iniciá sesión." };
+      }
+      console.error("[registro] auth.api.signUpEmail:", code ?? e.message);
+    } else {
+      console.error(
+        "[registro] auth.api.signUpEmail:",
+        e instanceof Error ? e.name : "unknown"
+      );
     }
-    console.error("[registro] auth.admin.createUser:", code ?? createErr?.message);
-    return { error: "No se pudo crear la cuenta. Intentá de nuevo." };
-  }
-
-  const { error: insertErr } = await serviceClient
-    .from("users" as never)
-    .insert({
-      id: created.user.id,
-      tenant_id: tenantId,
-      full_name,
-      role: "analyst",
-    } as never);
-
-  if (insertErr) {
-    console.error("[registro] insert users row:", insertErr.code);
-    // Best-effort: clean up the auth user so we don't leave an orphan.
-    await serviceClient.auth.admin.deleteUser(created.user.id);
     return { error: "No se pudo crear la cuenta. Intentá de nuevo." };
   }
 
   await writeAuditLog({
     tenant_id: tenantId,
-    actor_id: created.user.id,
+    actor_id: userId,
     event_type: AuditEvent.AUTH_SIGN_UP,
     target_type: "user",
-    target_id: created.user.id,
+    target_id: userId,
     payload: { role: "analyst", self_registered: true },
     ip,
     ua,
   });
 
-  // ── 5. Sign the new user in and redirect ──────────────────────────────────
-  const supabase = await createServerClient();
-  const { error: signInError } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-
-  if (signInError) {
-    // Account exists but auto-login failed — send them to the login form.
+  // ── 5. Redirect (session cookie already set by signUpEmail) ───────────────
+  if (!signedIn) {
+    // Account exists but auto-login did not happen — send them to the login form.
     redirect("/login");
   }
 

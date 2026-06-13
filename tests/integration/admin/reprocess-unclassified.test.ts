@@ -6,7 +6,7 @@
  * AC14: no unclassified cases → 200 { triggered: 0, case_ids: [], failed: [] }.
  * AC15: one fetch fails → that case in failed[], others still triggered.
  *
- * Mocks: @/lib/supabase/service, @/server/email/dispatch-url, and global.fetch.
+ * Mocks: @/lib/db, @/server/email/dispatch-url, and global.fetch.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -20,17 +20,59 @@ const { mockGetWorkerBaseUrl } = vi.hoisted(() => ({
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(),
-}));
-
 vi.mock("@/server/email/dispatch-url", () => ({
   getWorkerBaseUrl: mockGetWorkerBaseUrl,
 }));
 
+// ── Mock @/lib/db ──────────────────────────────────────────────────────────────
+
+/**
+ * A mock Drizzle db whose select().from().where().orderBy().limit() chain
+ * resolves to the given cases array (or throws when queryError is set).
+ */
+function buildMockDb(
+  cases: Array<{ id: string; tenant_id: string }> | null,
+  queryError: Error | null = null
+) {
+  const limitFn = vi.fn().mockImplementation(() => {
+    if (queryError) return Promise.reject(queryError);
+    return Promise.resolve(cases ?? []);
+  });
+
+  const orderByFn = vi.fn().mockReturnValue({ limit: limitFn });
+  const whereFn = vi.fn().mockReturnValue({ orderBy: orderByFn });
+  const fromFn = vi.fn().mockReturnValue({ where: whereFn });
+  const selectFn = vi.fn().mockReturnValue({ from: fromFn });
+
+  return {
+    select: selectFn,
+    insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue({ rowCount: 1 }) }),
+    update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({ rowCount: 1 }) }) }),
+    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({ rowCount: 0 }) }),
+    $count: vi.fn().mockResolvedValue(0),
+  };
+}
+
+// The mock db is a module-level var so tests can swap it out.
+let mockDbInstance = buildMockDb([]);
+
+vi.mock("@/lib/db", () => ({
+  get db() { return mockDbInstance; },
+  tables: {
+    cases: {
+      id: "id",
+      tenant_id: "tenant_id",
+      channel: "channel",
+      status: "status",
+      severity: "severity",
+      claim_type: "claim_type",
+      created_at: "created_at",
+    },
+  },
+}));
+
 // ── Imports (after mocks) ─────────────────────────────────────────────────────
 
-import { createServiceClient } from "@/lib/supabase/service";
 import { POST } from "@/app/api/admin/reprocess-unclassified/route";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -57,23 +99,6 @@ function buildRequest(
   });
 }
 
-/** Build a mock Supabase service client that returns the given cases array. */
-function buildServiceMock(
-  cases: Array<{ id: string; tenant_id: string }> | null,
-  queryError: { code: string; message: string } | null = null
-) {
-  return {
-    from: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      in: vi.fn().mockReturnThis(),
-      or: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue({ data: cases, error: queryError }),
-    }),
-  };
-}
-
 /** A resolved 200 fetch response. */
 function mockFetchOk() {
   return Promise.resolve(
@@ -98,6 +123,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
     vi.clearAllMocks();
     mockGetWorkerBaseUrl.mockReturnValue("http://localhost:3000");
     process.env.CRON_SECRET = "super-secret-cron";
+    mockDbInstance = buildMockDb([]);
   });
 
   afterEach(() => {
@@ -117,8 +143,6 @@ describe("POST /api/admin/reprocess-unclassified", () => {
   });
 
   it("AC12: returns 401 when x-internal-worker header is wrong value", async () => {
-    const request = buildRequest();
-    // manually set wrong value
     const req = new NextRequest("http://localhost:3000/api/admin/reprocess-unclassified", {
       method: "POST",
       headers: { "x-internal-worker": "false" },
@@ -145,9 +169,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
   });
 
   it("AC12: accepts valid Bearer CRON_SECRET", async () => {
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceMock([])
-    );
+    mockDbInstance = buildMockDb([]);
 
     const req = new NextRequest("http://localhost:3000/api/admin/reprocess-unclassified", {
       method: "POST",
@@ -167,9 +189,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
       { id: "case-003", tenant_id: "tenant-001" },
     ];
 
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceMock(cases)
-    );
+    mockDbInstance = buildMockDb(cases);
 
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 })
@@ -196,9 +216,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
   it("AC13: forwards caseId and tenantId in the dispatch body", async () => {
     const cases = [{ id: "case-abc", tenant_id: "tenant-xyz" }];
 
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceMock(cases)
-    );
+    mockDbInstance = buildMockDb(cases);
 
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 })
@@ -216,9 +234,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
   // ── AC14: Empty result ─────────────────────────────────────────────────────
 
   it("AC14: returns 200 with triggered=0 and empty arrays when no unclassified cases exist", async () => {
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceMock([])
-    );
+    mockDbInstance = buildMockDb([]);
 
     global.fetch = vi.fn(); // should not be called
 
@@ -232,9 +248,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
   });
 
   it("AC14: returns 200 with triggered=0 when cases is null (no rows)", async () => {
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceMock(null)
-    );
+    mockDbInstance = buildMockDb(null);
 
     global.fetch = vi.fn();
 
@@ -256,9 +270,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
       { id: "case-ok-2", tenant_id: "tenant-001" },
     ];
 
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceMock(cases)
-    );
+    mockDbInstance = buildMockDb(cases);
 
     // The middle case throws a network error; others succeed.
     global.fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
@@ -287,9 +299,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
       { id: "case-500", tenant_id: "tenant-001" },
     ];
 
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceMock(cases)
-    );
+    mockDbInstance = buildMockDb(cases);
 
     global.fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
       const body = JSON.parse(init.body as string) as { caseId: string };
@@ -311,10 +321,10 @@ describe("POST /api/admin/reprocess-unclassified", () => {
 
   // ── DB error path ──────────────────────────────────────────────────────────
 
-  it("returns 500 INTERNAL_ERROR when Supabase query fails", async () => {
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      buildServiceMock(null, { code: "PGRST116", message: "relation not found" })
-    );
+  it("returns 500 INTERNAL_ERROR when db query fails", async () => {
+    const dbError = new Error("relation not found");
+    (dbError as Error & { code?: string }).code = "PGRST116";
+    mockDbInstance = buildMockDb(null, dbError);
 
     const request = buildRequest({ internalWorker: true });
     const response = await POST(request);

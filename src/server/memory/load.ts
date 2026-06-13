@@ -6,7 +6,7 @@
  *       fields can be filled from prior confirmed values.
  *
  * Security:
- *   - Queries are parameterized via the Supabase client (no raw SQL interpolation).
+ *   - Queries are parameterized via Drizzle (no raw SQL interpolation).
  *   - Sender email is NEVER written to stdout — only case_id and count.
  *   - last_used_at updated fire-and-forget (does not block the extraction path).
  *
@@ -14,7 +14,8 @@
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -58,14 +59,12 @@ const MEMORY_LOAD_LIMIT = 20;
  *
  * Logs MEMORY_APPLIED audit event (without PII) when hints are found.
  *
- * @param supabase     - Supabase client (service-role or user-scoped; reads only).
  * @param tenantId     - UUID of the tenant.
  * @param senderEmail  - Sender's email address (PII — used as lookup key, not logged).
  * @param senderPhone  - Sender's phone number (PII — used as lookup key, not logged).
  * @param caseId       - Optional case UUID for the MEMORY_APPLIED audit log.
  */
 export async function loadMemoryHints(
-  supabase: SupabaseClient,
   tenantId: string,
   senderEmail?: string,
   senderPhone?: string,
@@ -77,55 +76,58 @@ export async function loadMemoryHints(
   }
 
   try {
-    // Build an OR filter for sender email / phone keys.
-    // Supabase .or() accepts a PostgREST filter string.
-    const conditions: string[] = [];
-    if (senderEmail) {
-      // Escape any single quotes in the email address for PostgREST safety.
-      const escapedEmail = senderEmail.replace(/'/g, "''");
-      conditions.push(`key.eq.${escapedEmail}`);
-    }
-    if (senderPhone) {
-      const escapedPhone = senderPhone.replace(/'/g, "''");
-      conditions.push(`key.eq.${escapedPhone}`);
-    }
+    const t = tables.claimMemory;
 
-    const orFilter = conditions.join(",");
+    // Build an OR filter for sender email / phone keys (parameterized).
+    const keyConditions = [];
+    if (senderEmail) keyConditions.push(eq(t.key, senderEmail));
+    if (senderPhone) keyConditions.push(eq(t.key, senderPhone));
 
-    const { data, error } = await (supabase as any)
-      .from("claim_memory")
-      .select(
-        "id,memory_type,key,value,confidence,source,last_used_at"
-      )
-      .eq("tenant_id", tenantId)
-      .in("memory_type", MEMORY_TYPES_TO_LOAD)
-      .or(orFilter)
-      .order("confidence", { ascending: false })
-      .order("last_used_at", { ascending: false })
-      .limit(MEMORY_LOAD_LIMIT);
-
-    if (error) {
-      console.error("[memory/load] claim_memory fetch error:", error.code);
-      return [];
-    }
-
-    if (!data || data.length === 0) {
-      return [];
-    }
-
-    const hints: MemoryHint[] = (data as Array<{
+    let data: Array<{
       id: string;
       memory_type: string;
       key: string;
       value: unknown;
-      confidence: number;
-      source: string;
-    }>).map((row) => ({
+      confidence: number | null;
+      source: string | null;
+      last_used_at: string | null;
+    }>;
+    try {
+      data = await db
+        .select({
+          id: t.id,
+          memory_type: t.memory_type,
+          key: t.key,
+          value: t.value,
+          confidence: t.confidence,
+          source: t.source,
+          last_used_at: t.last_used_at,
+        })
+        .from(t)
+        .where(
+          and(
+            eq(t.tenant_id, tenantId),
+            inArray(t.memory_type, [...MEMORY_TYPES_TO_LOAD]),
+            or(...keyConditions)
+          )
+        )
+        .orderBy(desc(t.confidence), desc(t.last_used_at))
+        .limit(MEMORY_LOAD_LIMIT);
+    } catch (e) {
+      console.error("[memory/load] claim_memory fetch error:", (e as { code?: string })?.code);
+      return [];
+    }
+
+    if (data.length === 0) {
+      return [];
+    }
+
+    const hints: MemoryHint[] = data.map((row) => ({
       memoryType: row.memory_type,
       key: row.key,
       value: row.value,
-      confidence: row.confidence,
-      source: row.source,
+      confidence: row.confidence as number,
+      source: row.source as string,
     }));
 
     // AC13: Log MEMORY_APPLIED audit event when hints were found.
@@ -156,10 +158,7 @@ export async function loadMemoryHints(
       }
 
       // Fire-and-forget: update last_used_at on fetched rows.
-      void updateLastUsedAt(
-        supabase,
-        (data as Array<{ id: string }>).map((r) => r.id)
-      );
+      void updateLastUsedAt(data.map((r) => r.id));
     }
 
     return hints;
@@ -176,20 +175,13 @@ export async function loadMemoryHints(
  * Update last_used_at on the fetched memory rows.
  * Fire-and-forget — failures are logged but not propagated.
  */
-async function updateLastUsedAt(
-  supabase: SupabaseClient,
-  ids: string[]
-): Promise<void> {
+async function updateLastUsedAt(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   try {
-    const { error } = await (supabase as any)
-      .from("claim_memory")
-      .update({ last_used_at: new Date().toISOString() })
-      .in("id", ids);
-
-    if (error) {
-      console.error("[memory/load] last_used_at update error:", error.code);
-    }
+    await db
+      .update(tables.claimMemory)
+      .set({ last_used_at: new Date().toISOString() })
+      .where(inArray(tables.claimMemory.id, ids));
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
     console.error("[memory/load] last_used_at update exception:", errName);

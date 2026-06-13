@@ -31,10 +31,10 @@ vi.mock("@/server/email/gmail/poll-state", () => ({
   setWatchState: vi.fn(),
 }));
 
-// Mock createServiceClient — watch.ts passes this to setWatchState; with
-// setWatchState mocked we only need the factory to return something non-null.
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(() => ({ __mock: "supabase-service-client" })),
+// Mock @/lib/db to prevent DATABASE_URL errors on any transitive imports.
+vi.mock("@/lib/db", () => ({
+  db: { select: vi.fn(), insert: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  tables: {},
 }));
 
 import { setupGmailWatch } from "@/server/email/gmail/watch";
@@ -100,8 +100,8 @@ describe("setupGmailWatch", () => {
 
       // setWatchState persists the ISO expiration, not the raw ms string
       expect(setWatchState).toHaveBeenCalledOnce();
-      const [_supabase, email, expIso, hId] = vi.mocked(setWatchState).mock
-        .calls[0] as [unknown, string, string, string];
+      const [email, expIso, hId] = vi.mocked(setWatchState).mock
+        .calls[0] as [string, string, string];
       expect(email).toBe(GMAIL_EMAIL);
       expect(expIso).toBe(EXPIRATION_ISO);
       expect(hId).toBe(HISTORY_ID);
@@ -181,8 +181,7 @@ describe("setupGmailWatch", () => {
 
       await setupGmailWatch(TOPIC_NAME);
 
-      const [, , expArg] = vi.mocked(setWatchState).mock.calls[0] as [
-        unknown,
+      const [, expArg] = vi.mocked(setWatchState).mock.calls[0] as [
         string,
         string,
         string,

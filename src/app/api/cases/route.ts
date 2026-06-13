@@ -1,7 +1,7 @@
 /**
  * GET /api/cases — list cases with filtering, pagination, and sorting.
  *
- * AC9:  RLS-isolated by tenant_id (user-scoped Supabase client).
+ * AC9:  Tenant-isolated by explicit tenant_id filter (RLS is gone).
  * AC11: Filter by claim type returns only matching cases.
  * AC12: Pagination per_page capped at 100.
  *
@@ -14,7 +14,7 @@
  */
 
 import { type NextRequest } from "next/server";
-import { createServerClient } from "@/lib/supabase/server";
+import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { CaseQuerySchema } from "@/lib/schemas/cases";
 import { listCases } from "@/server/cases/list";
 import { ok, err } from "@/lib/api/respond";
@@ -27,15 +27,14 @@ import {
 } from "@/lib/rate-limit/index";
 
 export async function GET(request: NextRequest) {
-  // ── 1. Auth — user was already validated by proxy.ts middleware ───────────
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
+  // ── 1. Auth — Better Auth session + public.users row ──────────────────────
+  let ctx: RoleContext;
+  try {
+    ctx = await requireRole(...ALL_ROLES);
+  } catch (e) {
+    return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));
   }
+  const { user, userRow } = ctx;
 
   // ── 2. Rate limit — 100 req/min per user ──────────────────────────────────
   const ip = getClientIp(request);
@@ -78,10 +77,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── 4. Fetch data (RLS-scoped — user only sees their tenant) ──────────────
+  // ── 4. Fetch data (explicit tenant_id filter — RLS is gone) ───────────────
   try {
-    const result = await listCases(supabase, parsed.data);
-    return ok(result);
+    const result = await listCases(userRow.tenant_id, parsed.data);
+    // Drizzle numeric columns surface as strings — convert at the boundary so
+    // the JSON shape matches the previous PostgREST response (numbers).
+    return ok({
+      ...result,
+      data: result.data.map((c) => ({
+        ...c,
+        confidence_min:
+          c.confidence_min === null ? null : Number(c.confidence_min),
+      })),
+    });
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
     console.error("[GET /api/cases] query error:", errName, ip);

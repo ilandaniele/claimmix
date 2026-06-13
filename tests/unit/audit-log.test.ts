@@ -1,27 +1,25 @@
 /**
- * Unit tests for audit log writer — mocks the Supabase service client.
+ * Unit tests for audit log writer — mocks the Drizzle db instance.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock the service module before importing writeAuditLog.
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(),
+// Mock @/lib/db before importing writeAuditLog (hoisted by Vitest).
+const mockValues = vi.fn();
+vi.mock("@/lib/db", () => ({
+  db: {
+    insert: vi.fn(() => ({ values: mockValues })),
+  },
 }));
 
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import { createServiceClient } from "@/lib/supabase/service";
+import { db } from "@/lib/db";
 
 describe("writeAuditLog", () => {
-  const mockInsert = vi.fn();
-  const mockFrom = vi.fn(() => ({ insert: mockInsert }));
-
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(createServiceClient).mockReturnValue({
-      from: mockFrom,
-    } as unknown as ReturnType<typeof createServiceClient>);
-    mockInsert.mockResolvedValue({ error: null });
+    vi.mocked(db.insert).mockReturnValue({ values: mockValues } as ReturnType<typeof db.insert>);
+    mockValues.mockResolvedValue({ rowCount: 1 });
   });
 
   it("inserts an audit log entry with required fields", async () => {
@@ -36,8 +34,8 @@ describe("writeAuditLog", () => {
       ua: "Mozilla/5.0",
     });
 
-    expect(mockFrom).toHaveBeenCalledWith("audit_log");
-    expect(mockInsert).toHaveBeenCalledWith(
+    expect(db.insert).toHaveBeenCalled();
+    expect(mockValues).toHaveBeenCalledWith(
       expect.objectContaining({
         tenant_id: "10000000-0000-0000-0000-000000000001",
         actor_id: "20000000-0000-0000-0000-000000000001",
@@ -52,7 +50,7 @@ describe("writeAuditLog", () => {
       event_type: AuditEvent.AUTH_RATE_LIMITED,
     });
 
-    expect(mockInsert).toHaveBeenCalledWith(
+    expect(mockValues).toHaveBeenCalledWith(
       expect.objectContaining({
         actor_id: null,
         target_type: null,
@@ -63,12 +61,12 @@ describe("writeAuditLog", () => {
     );
   });
 
-  it("does not throw when Supabase returns an error", async () => {
-    mockInsert.mockResolvedValue({
-      error: { code: "PGRST301", message: "internal" },
+  it("does not throw when db.insert throws", async () => {
+    vi.mocked(db.insert).mockImplementation(() => {
+      throw new Error("db connection error");
     });
 
-    // Should not throw — audit log failures must not break the request flow.
+    // Audit log failures must never break the request flow.
     await expect(
       writeAuditLog({
         tenant_id: "10000000-0000-0000-0000-000000000001",
@@ -77,12 +75,11 @@ describe("writeAuditLog", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("does not throw when createServiceClient throws", async () => {
-    vi.mocked(createServiceClient).mockImplementation(() => {
-      throw new Error("service client error");
-    });
+  it("does not throw when db.insert returns a rejected promise", async () => {
+    vi.mocked(db.insert).mockReturnValue({
+      values: vi.fn().mockRejectedValue(new Error("neon error")),
+    } as ReturnType<typeof db.insert>);
 
-    // Should not throw.
     await expect(
       writeAuditLog({
         tenant_id: "10000000-0000-0000-0000-000000000001",
@@ -97,7 +94,7 @@ describe("writeAuditLog", () => {
       event_type: AuditEvent.AUTH_SUCCESS,
     });
 
-    expect(mockInsert).toHaveBeenCalledWith(
+    expect(mockValues).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: {},
       })

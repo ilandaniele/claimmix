@@ -5,59 +5,74 @@
  * AC2: getWatchExpiration returns null when row exists but watch_expiration is null.
  * AC3: getWatchExpiration returns the ISO timestamp string when watch_expiration is set.
  *
- * setWatchState: upsert is called with correct fields (gmail_account_email,
- * watch_expiration, watch_history_id, updated_at), using onConflict strategy.
+ * setWatchState: upsert (insert + onConflictDoUpdate) is called with correct fields
+ * (gmail_account_email, watch_expiration, watch_history_id, updated_at).
  *
- * Strategy: mock the Supabase client at the call-chain level so no real DB is
- * required.  All functions accept an injected SupabaseClient (no module singleton).
+ * Strategy: mock @/lib/db at the module level so no real DB is required.
+ * Functions use the module-level db singleton (no injected client).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Mock 'server-only' before importing the module under test
+// vi.mock() is hoisted before any imports by Vitest.
 vi.mock("server-only", () => ({}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    insert: vi.fn(),
+    select: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  },
+  tables: {},
+}));
+
+vi.mock("@/lib/db/schema", () => ({
+  cases: {},
+  claimMessages: {},
+  claimAttachments: {},
+  gmailPollState: {
+    gmail_account_email: "gmail_account_email",
+    watch_expiration: "watch_expiration",
+    watch_history_id: "watch_history_id",
+  },
+}));
+
+vi.mock("@/lib/db/helpers", () => ({
+  firstRow: <T>(rows: T[]): T | null => rows[0] ?? null,
+}));
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { db } from "@/lib/db";
 
 import {
   getWatchExpiration,
   setWatchState,
 } from "@/server/email/gmail/poll-state";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const GMAIL_EMAIL = "claims@claimmix.com";
 const EXPIRATION_ISO = "2026-06-11T18:00:00.000Z";
 const HISTORY_ID = "99999";
 
-/**
- * Build a minimal Supabase mock whose .from().select().eq().maybeSingle()
- * chain resolves to the provided result.
- */
-function makeSelectMock(result: { data: unknown; error: unknown }) {
-  const maybeSingle = vi.fn().mockResolvedValue(result);
-  const eq = vi.fn().mockReturnValue({ maybeSingle });
-  const select = vi.fn().mockReturnValue({ eq });
-  const from = vi.fn().mockReturnValue({ select });
-  return { from, select, eq, maybeSingle };
-}
-
-/**
- * Build a minimal Supabase mock whose .from().upsert() chain resolves
- * to the provided result.
- */
-function makeUpsertMock(result: { error: unknown }) {
-  const upsert = vi.fn().mockResolvedValue(result);
-  const from = vi.fn().mockReturnValue({ upsert });
-  return { from, upsert };
-}
-
 // ── getWatchExpiration ────────────────────────────────────────────────────────
 
 describe("getWatchExpiration", () => {
-  describe("AC2 — returns null when no row exists", () => {
-    it("returns null when maybeSingle returns data: null (no row)", async () => {
-      const mock = makeSelectMock({ data: null, error: null });
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-      const result = await getWatchExpiration(mock as any, GMAIL_EMAIL);
+  describe("AC2 — returns null when no row exists", () => {
+    it("returns null when select returns empty array (no row)", async () => {
+      // db.select().from().where().limit() → []
+      vi.mocked(db.select).mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      } as any);
+
+      const result = await getWatchExpiration(GMAIL_EMAIL);
 
       expect(result).toBeNull();
     });
@@ -65,23 +80,29 @@ describe("getWatchExpiration", () => {
 
   describe("AC2 — returns null when row exists but watch_expiration is null", () => {
     it("returns null when row has watch_expiration: null", async () => {
-      const mock = makeSelectMock({
-        data: { watch_expiration: null },
-        error: null,
-      });
+      vi.mocked(db.select).mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{ watch_expiration: null }]),
+          }),
+        }),
+      } as any);
 
-      const result = await getWatchExpiration(mock as any, GMAIL_EMAIL);
+      const result = await getWatchExpiration(GMAIL_EMAIL);
 
       expect(result).toBeNull();
     });
 
     it("returns null when row has watch_expiration: undefined (defensive)", async () => {
-      const mock = makeSelectMock({
-        data: { watch_expiration: undefined },
-        error: null,
-      });
+      vi.mocked(db.select).mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{ watch_expiration: undefined }]),
+          }),
+        }),
+      } as any);
 
-      const result = await getWatchExpiration(mock as any, GMAIL_EMAIL);
+      const result = await getWatchExpiration(GMAIL_EMAIL);
 
       expect(result).toBeNull();
     });
@@ -89,38 +110,51 @@ describe("getWatchExpiration", () => {
 
   describe("AC3 — returns ISO timestamp when watch_expiration is set", () => {
     it("returns the ISO string stored in watch_expiration", async () => {
-      const mock = makeSelectMock({
-        data: { watch_expiration: EXPIRATION_ISO },
-        error: null,
-      });
+      vi.mocked(db.select).mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{ watch_expiration: EXPIRATION_ISO }]),
+          }),
+        }),
+      } as any);
 
-      const result = await getWatchExpiration(mock as any, GMAIL_EMAIL);
+      const result = await getWatchExpiration(GMAIL_EMAIL);
 
       expect(result).toBe(EXPIRATION_ISO);
     });
   });
 
   describe("error handling", () => {
-    it("throws with error code when Supabase returns an error", async () => {
-      const mock = makeSelectMock({
-        data: null,
-        error: { code: "PGRST301", message: "some db error" },
-      });
+    it("throws with error code when db.select rejects", async () => {
+      vi.mocked(db.select).mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockRejectedValue({ code: "PGRST301", message: "some db error" }),
+          }),
+        }),
+      } as any);
 
       await expect(
-        getWatchExpiration(mock as any, GMAIL_EMAIL)
+        getWatchExpiration(GMAIL_EMAIL)
       ).rejects.toThrow("[poll-state] Failed to read watch_expiration: PGRST301");
     });
 
-    it("queries gmail_poll_state table with the correct email filter", async () => {
-      const mock = makeSelectMock({ data: null, error: null });
+    it("queries gmailPollState table with the correct email filter", async () => {
+      const limitMock = vi.fn().mockResolvedValue([]);
+      const whereMock = vi.fn().mockReturnValue({ limit: limitMock });
+      const fromMock = vi.fn().mockReturnValue({ where: whereMock });
+      vi.mocked(db.select).mockReturnValue({ from: fromMock } as any);
 
-      await getWatchExpiration(mock as any, GMAIL_EMAIL);
+      await getWatchExpiration(GMAIL_EMAIL);
 
-      expect(mock.from).toHaveBeenCalledWith("gmail_poll_state");
-      expect(mock.select).toHaveBeenCalledWith("watch_expiration");
-      expect(mock.eq).toHaveBeenCalledWith("gmail_account_email", GMAIL_EMAIL);
-      expect(mock.maybeSingle).toHaveBeenCalledOnce();
+      // db.select() should be called (selecting watch_expiration column)
+      expect(db.select).toHaveBeenCalledOnce();
+      // from() should be called with the gmailPollState table
+      expect(fromMock).toHaveBeenCalledOnce();
+      // where() should be called once (email filter)
+      expect(whereMock).toHaveBeenCalledOnce();
+      // limit(1) should be called
+      expect(limitMock).toHaveBeenCalledWith(1);
     });
   });
 });
@@ -128,56 +162,95 @@ describe("getWatchExpiration", () => {
 // ── setWatchState ─────────────────────────────────────────────────────────────
 
 describe("setWatchState", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   describe("upsert fields", () => {
-    it("calls upsert on gmail_poll_state with gmail_account_email, watch_expiration, watch_history_id", async () => {
-      const mock = makeUpsertMock({ error: null });
+    it("calls insert + onConflictDoUpdate on gmailPollState with correct fields", async () => {
+      // setWatchState uses:
+      //   db.insert(gmailPollState)
+      //     .values({ gmail_account_email, watch_expiration, watch_history_id, updated_at })
+      //     .onConflictDoUpdate({ target: [...], set: { ... } })
+      let capturedValues: Record<string, unknown> = {};
+      let capturedConflictSet: Record<string, unknown> = {};
 
-      await setWatchState(mock as any, GMAIL_EMAIL, EXPIRATION_ISO, HISTORY_ID);
+      const onConflictDoUpdate = vi.fn().mockImplementation((opts: { set: Record<string, unknown> }) => {
+        capturedConflictSet = opts.set;
+        return Promise.resolve(undefined);
+      });
 
-      expect(mock.from).toHaveBeenCalledWith("gmail_poll_state");
-      expect(mock.upsert).toHaveBeenCalledOnce();
+      const valuesMock = vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+        capturedValues = payload;
+        return { onConflictDoUpdate };
+      });
 
-      const [payload, options] = mock.upsert.mock.calls[0] as [
-        Record<string, unknown>,
-        { onConflict: string },
-      ];
+      vi.mocked(db.insert).mockReturnValue({
+        values: valuesMock,
+      } as any);
 
-      expect(payload.gmail_account_email).toBe(GMAIL_EMAIL);
-      expect(payload.watch_expiration).toBe(EXPIRATION_ISO);
-      expect(payload.watch_history_id).toBe(HISTORY_ID);
-      expect(typeof payload.updated_at).toBe("string");
-      expect(options.onConflict).toBe("gmail_account_email");
+      await setWatchState(GMAIL_EMAIL, EXPIRATION_ISO, HISTORY_ID);
+
+      expect(db.insert).toHaveBeenCalledOnce();
+      expect(valuesMock).toHaveBeenCalledOnce();
+      expect(onConflictDoUpdate).toHaveBeenCalledOnce();
+
+      // values() payload
+      expect(capturedValues.gmail_account_email).toBe(GMAIL_EMAIL);
+      expect(capturedValues.watch_expiration).toBe(EXPIRATION_ISO);
+      expect(capturedValues.watch_history_id).toBe(HISTORY_ID);
+      expect(typeof capturedValues.updated_at).toBe("string");
+
+      // onConflictDoUpdate set payload
+      expect(capturedConflictSet.watch_expiration).toBe(EXPIRATION_ISO);
+      expect(capturedConflictSet.watch_history_id).toBe(HISTORY_ID);
+      expect(typeof capturedConflictSet.updated_at).toBe("string");
     });
 
     it("passes the exact watchExpiration and watchHistoryId provided by caller", async () => {
-      const mock = makeUpsertMock({ error: null });
       const expiration = "2026-07-01T00:00:00.000Z";
       const historyId = "12345678";
 
-      await setWatchState(mock as any, GMAIL_EMAIL, expiration, historyId);
+      let capturedValues: Record<string, unknown> = {};
 
-      const [payload] = mock.upsert.mock.calls[0] as [Record<string, unknown>];
-      expect(payload.watch_expiration).toBe(expiration);
-      expect(payload.watch_history_id).toBe(historyId);
+      vi.mocked(db.insert).mockReturnValue({
+        values: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+          capturedValues = payload;
+          return {
+            onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+          };
+        }),
+      } as any);
+
+      await setWatchState(GMAIL_EMAIL, expiration, historyId);
+
+      expect(capturedValues.watch_expiration).toBe(expiration);
+      expect(capturedValues.watch_history_id).toBe(historyId);
     });
   });
 
   describe("error handling", () => {
-    it("throws with error code when Supabase upsert returns an error", async () => {
-      const mock = makeUpsertMock({
-        error: { code: "23514", message: "constraint violation" },
-      });
+    it("throws with error code when db.insert chain rejects", async () => {
+      vi.mocked(db.insert).mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoUpdate: vi.fn().mockRejectedValue({ code: "23514", message: "constraint violation" }),
+        }),
+      } as any);
 
       await expect(
-        setWatchState(mock as any, GMAIL_EMAIL, EXPIRATION_ISO, HISTORY_ID)
+        setWatchState(GMAIL_EMAIL, EXPIRATION_ISO, HISTORY_ID)
       ).rejects.toThrow("[poll-state] Failed to set watch state: 23514");
     });
 
-    it("resolves without throwing when upsert succeeds", async () => {
-      const mock = makeUpsertMock({ error: null });
+    it("resolves without throwing when insert succeeds", async () => {
+      vi.mocked(db.insert).mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+        }),
+      } as any);
 
       await expect(
-        setWatchState(mock as any, GMAIL_EMAIL, EXPIRATION_ISO, HISTORY_ID)
+        setWatchState(GMAIL_EMAIL, EXPIRATION_ISO, HISTORY_ID)
       ).resolves.toBeUndefined();
     });
   });

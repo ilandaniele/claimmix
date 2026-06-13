@@ -4,16 +4,20 @@
  * GET  — list all rules for the tenant (active + inactive).
  * POST — create a rule. Body: { title, rule_text, rule_type, active? }.
  *
- * Rules are tenant-scoped (RLS + explicit tenant filter), versioned via
- * updated_at + audit events, and NEVER touch source code — active rules are
- * injected into the extraction prompt at runtime (see prompt-rules.ts).
+ * Rules are tenant-scoped (explicit tenant_id filter — the only isolation
+ * boundary now that RLS is gone), versioned via updated_at + audit events,
+ * and NEVER touch source code — active rules are injected into the
+ * extraction prompt at runtime (see prompt-rules.ts).
  *
  * Auth: admin/owner (requireAdmin). Audit: PROMPT_RULE_CREATED.
  */
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { desc, eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { tables } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
@@ -39,22 +43,34 @@ const CreateRuleSchema = z.object({
   active: z.boolean().default(true),
 });
 
-const RULE_COLUMNS = "id,title,rule_text,rule_type,active,created_at,updated_at";
+const t = tables.agentPromptRules;
+
+const RULE_COLUMNS = {
+  id: t.id,
+  title: t.title,
+  rule_text: t.rule_text,
+  rule_type: t.rule_type,
+  active: t.active,
+  created_at: t.created_at,
+  updated_at: t.updated_at,
+};
 
 export async function GET() {
   try {
-    const { supabase, userRow } = await requireAdmin();
+    const { db, userRow } = await requireAdmin();
 
-    const { data, error } = await (supabase as any)
-      .from("agent_prompt_rules")
-      .select(RULE_COLUMNS)
-      .eq("tenant_id", userRow.tenant_id)
-      .order("created_at", { ascending: false });
-
-    if (error) {
+    let data;
+    try {
+      data = await db
+        .select(RULE_COLUMNS)
+        .from(t)
+        .where(eq(t.tenant_id, userRow.tenant_id))
+        .orderBy(desc(t.created_at));
+    } catch (e) {
+      const code = (e as { code?: string })?.code;
       // 42P01 = migration not applied yet — return empty list, not a 500.
-      if (error.code === "42P01") return ok({ rules: [] });
-      console.error("[admin/prompt-rules GET]", error.code);
+      if (code === "42P01") return ok({ rules: [] });
+      console.error("[admin/prompt-rules GET]", code ?? "unknown");
       return err(new AppError("INTERNAL_ERROR"));
     }
 
@@ -66,7 +82,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { supabase, user, userRow } = await requireAdmin();
+    const { db, user, userRow } = await requireAdmin();
 
     const rl = await rateLimit(
       buildUserKey(user.id, "prompt-rules"),
@@ -80,21 +96,31 @@ export async function POST(request: NextRequest) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
     }
 
-    const { data, error } = await (supabase as any)
-      .from("agent_prompt_rules")
-      .insert({
-        tenant_id: userRow.tenant_id,
-        title: parsed.data.title,
-        rule_text: parsed.data.rule_text,
-        rule_type: parsed.data.rule_type,
-        active: parsed.data.active,
-        created_by: user.id,
-      })
-      .select(RULE_COLUMNS)
-      .single();
+    let data;
+    try {
+      data = firstRow(
+        await db
+          .insert(t)
+          .values({
+            tenant_id: userRow.tenant_id,
+            title: parsed.data.title,
+            rule_text: parsed.data.rule_text,
+            rule_type: parsed.data.rule_type,
+            active: parsed.data.active,
+            created_by: user.id,
+          })
+          .returning(RULE_COLUMNS)
+      );
+    } catch (e) {
+      console.error(
+        "[admin/prompt-rules POST]",
+        (e as { code?: string })?.code ?? "unknown"
+      );
+      return err(new AppError("INTERNAL_ERROR"));
+    }
 
-    if (error || !data) {
-      console.error("[admin/prompt-rules POST]", error?.code ?? "no_data");
+    if (!data) {
+      console.error("[admin/prompt-rules POST]", "no_data");
       return err(new AppError("INTERNAL_ERROR"));
     }
 

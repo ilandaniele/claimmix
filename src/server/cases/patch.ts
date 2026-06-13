@@ -7,23 +7,26 @@
  * Ownership rules:
  * - An analyst can PATCH cases assigned to them (`assigned_to = user.id`).
  * - A supervisor or admin can PATCH any case in their tenant.
- * - A wrong-tenant request is caught by RLS (returns 404, not 403).
+ * - A wrong-tenant request is caught by the explicit tenant_id filter
+ *   (returns 404, not 403).
  *
  * AC15: Successful PATCH writes an audit_log row with old/new status.
- * AC15: Wrong-tenant PATCH returns 404 (RLS hides the row → no rows updated).
+ * AC15: Wrong-tenant PATCH returns 404 (tenant filter hides the row → no rows updated).
  */
 
- 
-type AnySupabaseClient = any;
-import type { Database } from "@/lib/supabase/types";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { cases } from "@/lib/db/schema";
+import type { CaseInsert, CaseRow, UserRow } from "@/lib/db/types";
 import type { CasePatch } from "@/lib/schemas/cases";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import { validateTransition } from "@/server/cases/fsm";
 import { writeAuditLog, AuditEvent, type AuditEventType } from "@/lib/audit/log";
 import { AppError } from "@/lib/errors";
 
-type CaseRow = Database["public"]["Tables"]["cases"]["Row"];
-type UserRow = Database["public"]["Tables"]["users"]["Row"];
+/** The actor fields patchCase actually needs (matches requireRole's userRow). */
+export type PatchActor = Pick<UserRow, "id" | "tenant_id" | "role">;
 
 export interface PatchResult {
   case: CaseRow;
@@ -32,39 +35,41 @@ export interface PatchResult {
 /**
  * Patch a case with the given updates.
  *
- * @param supabase  - User-scoped Supabase client (RLS enforces tenant isolation).
  * @param caseId    - UUID of the case to update.
  * @param patch     - Validated patch payload (status, assigned_to, reason).
- * @param actor     - The authenticated user performing the update.
+ * @param actor     - The authenticated user performing the update
+ *                    (actor.tenant_id is the explicit tenant boundary).
  * @param ip        - Client IP for audit log.
  * @param ua        - User-Agent for audit log.
  *
  * @throws AppError(NOT_FOUND)              - Case not found or wrong tenant.
  * @throws AppError(FSM_INVALID_TRANSITION) - Requested status transition is not allowed.
  * @throws AppError(FORBIDDEN_ROLE)         - Analyst cannot patch another analyst's case.
- * @throws AppError(INTERNAL_ERROR)         - Supabase update failed unexpectedly.
  */
 export async function patchCase(
-  supabase: AnySupabaseClient,
   caseId: string,
   patch: CasePatch,
-  actor: UserRow,
+  actor: PatchActor,
   ip: string | null,
   ua: string | null
 ): Promise<PatchResult> {
-  // ── 1. Fetch current case (RLS-scoped — wrong tenant → null) ──────────────
-   
-  const { data: currentData, error: fetchError } = await (supabase as any)
-    .from("cases")
-    .select("*")
-    .eq("id", caseId)
-    .single();
-
-  if (fetchError || !currentData) {
-    throw new AppError("NOT_FOUND", "El caso no existe o no tenés acceso.");
+  // ── 1. Fetch current case (tenant-scoped — wrong tenant → null) ───────────
+  let current: CaseRow | null;
+  try {
+    current = firstRow(
+      await db
+        .select()
+        .from(cases)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, actor.tenant_id)))
+        .limit(1)
+    );
+  } catch {
+    current = null;
   }
 
-  const current = currentData as CaseRow;
+  if (!current) {
+    throw new AppError("NOT_FOUND", "El caso no existe o no tenés acceso.");
+  }
 
   // ── 2. Ownership check ─────────────────────────────────────────────────────
   // An analyst can only PATCH their own assigned cases.
@@ -87,7 +92,7 @@ export async function patchCase(
   }
 
   // ── 4. Build update payload ────────────────────────────────────────────────
-  const updateData: Record<string, unknown> = {
+  const updateData: Partial<CaseInsert> = {
     updated_at: new Date().toISOString(),
   };
 
@@ -102,21 +107,24 @@ export async function patchCase(
     updateData.assigned_to = patch.assigned_to;
   }
 
-  // ── 5. Apply update (RLS ensures only tenant-matching rows are updated) ────
-   
-  const { data: updatedData, error: updateError } = await (supabase as any)
-    .from("cases")
-    .update(updateData)
-    .eq("id", caseId)
-    .select("*")
-    .single();
-
-  if (updateError || !updatedData) {
-    // RLS may silently return 0 rows for wrong-tenant updates.
-    throw new AppError("NOT_FOUND", "El caso no existe o no tenés acceso.");
+  // ── 5. Apply update (tenant filter ensures only tenant-matching rows) ──────
+  let updated: CaseRow | null;
+  try {
+    updated = firstRow(
+      await db
+        .update(cases)
+        .set(updateData)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, actor.tenant_id)))
+        .returning()
+    );
+  } catch {
+    updated = null;
   }
 
-  const updated = updatedData as CaseRow;
+  if (!updated) {
+    // Wrong-tenant updates match 0 rows → indistinguishable 404.
+    throw new AppError("NOT_FOUND", "El caso no existe o no tenés acceso.");
+  }
 
   // ── 6. Write audit log ────────────────────────────────────────────────────
   const auditPayload: Record<string, unknown> = {

@@ -2,9 +2,15 @@
 
 import { useT } from "@/lib/i18n/LocaleContext";
 import { esAR, type TranslationKey } from "@/lib/i18n";
-import type { Database } from "@/lib/supabase/types";
-
-type ExtractedField = Database["public"]["Tables"]["extracted_fields"]["Row"];
+interface ExtractedField {
+  id: string;
+  case_id: string;
+  tenant_id: string;
+  field_key: string;
+  field_value: string;
+  confidence: number;
+  extracted_at: string;
+}
 
 interface ExtractedFieldsTableProps {
   fields: ExtractedField[];
@@ -120,7 +126,7 @@ export function ExtractedFieldsTable({ fields }: ExtractedFieldsTableProps) {
                 {field.field_value}
               </td>
               <td className="py-2.5">
-                <MiniConfidenceBar value={field.confidence} />
+                <MiniConfidenceBar value={parseFloat(String(field.confidence))} />
               </td>
             </tr>
           ))}

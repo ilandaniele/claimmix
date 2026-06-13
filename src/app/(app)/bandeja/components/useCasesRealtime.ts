@@ -1,21 +1,26 @@
 /**
- * useCasesRealtime — Supabase Realtime hook for the cases dashboard.
+ * useCasesRealtime — polling hook for the cases dashboard.
  *
- * AC12: Subscribes to postgres_changes on the cases table.
- *   - INSERT: new case appears at top of table, triggers toast "Nuevo siniestro recibido: SIN-..."
- *   - UPDATE: status change updates the row in-place, triggers toast "Siniestro SIN-... actualizado: X → Y"
+ * Replaces the former Supabase Realtime (postgres_changes) subscription with
+ * plain polling against the existing GET /api/cases endpoint:
+ *   - Every ~5 seconds: fetch the current filter view (per_page=100, newest first).
+ *   - New ids vs. the previous snapshot  → onInsert(row)  (toast "Nuevo siniestro...")
+ *   - Changed rows vs. the snapshot     → onUpdate(row, prevStatus)
+ *   - The first successful poll only seeds the snapshot (no handler calls),
+ *     mirroring realtime semantics where only *changes* emitted events.
  *
- * The hook merges realtime updates with the initial server-fetched data.
- * Count badges update in real-time as rows come in.
+ * Hidden tabs are skipped (document.visibilityState), overlapping requests are
+ * prevented with an in-flight guard, and the interval is cleared on unmount.
+ *
+ * The exported name/interface is unchanged so consumers don't change.
  *
  * Pure utility functions (mergeCaseUpdate, computeStatusCounts, formatCaseNumber)
- * are in casesRealtimeUtils.ts for testability without Supabase browser client.
+ * are in casesRealtimeUtils.ts for testability.
  */
 
 "use client";
 
 import { useEffect, useRef } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
 import type { CaseRow } from "@/server/cases/list";
 import type { CaseStatus } from "@/lib/schemas/cases";
 
@@ -24,51 +29,99 @@ interface RealtimeHandlers {
   onUpdate: (updatedCase: CaseRow, prevStatus: CaseStatus | null) => void;
 }
 
+const POLL_INTERVAL_MS = 5000;
+
+/** URL filters forwarded to /api/cases (the ones the dashboard supports). */
+const FILTER_PARAMS = ["status", "type", "channel", "severity", "is_claim"] as const;
+
+/** Build the /api/cases query string from the current location filters. */
+function buildQuery(): string {
+  const current = new URLSearchParams(window.location.search);
+  const params = new URLSearchParams();
+  for (const key of FILTER_PARAMS) {
+    const value = current.get(key);
+    if (value) params.set(key, value);
+  }
+  params.set("page", "1");
+  params.set("per_page", "100");
+  params.set("sort", "created_at");
+  params.set("order", "desc");
+  return params.toString();
+}
+
+/** Shallow change detection on the serialized row (rows are small/flat). */
+function rowChanged(prev: CaseRow, next: CaseRow): boolean {
+  return JSON.stringify(prev) !== JSON.stringify(next);
+}
+
 /**
- * Subscribe to realtime case changes for a given tenant.
- * The subscription is scoped to INSERT and UPDATE events only (no DELETE per FSM — cases are never deleted).
+ * Poll for case changes. Emits insert/update events by diffing successive
+ * snapshots of the cases list (no DELETE per FSM — cases are never deleted).
  */
 export function useCasesRealtime(handlers: RealtimeHandlers) {
-  // Keep handlers in a ref so the subscription closure stays stable across renders.
+  // Keep handlers in a ref so the polling closure stays stable across renders.
   const handlersRef = useRef(handlers);
   useEffect(() => {
     handlersRef.current = handlers;
   });
 
   useEffect(() => {
-    const channel = supabaseBrowser
-      .channel("cases-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "cases",
-        },
-        (payload) => {
-          const newCase = payload.new as CaseRow;
-          handlersRef.current.onInsert(newCase);
+    let cancelled = false;
+    let inFlight = false;
+    let snapshot: Map<string, CaseRow> | null = null;
+
+    async function poll() {
+      // Skip hidden tabs and overlapping requests.
+      if (inFlight || document.visibilityState === "hidden") return;
+      inFlight = true;
+      try {
+        const res = await fetch(`/api/cases?${buildQuery()}`, {
+          headers: { accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+
+        const body = (await res.json()) as { data?: CaseRow[] };
+        const rows = Array.isArray(body?.data) ? body.data : [];
+        if (cancelled) return;
+
+        if (snapshot === null) {
+          // First poll: seed the baseline silently.
+          snapshot = new Map(rows.map((row) => [row.id, row]));
+          return;
         }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "cases",
-        },
-        (payload) => {
-          const updatedCase = payload.new as CaseRow;
-          const prevStatus = (payload.old as Partial<CaseRow>)?.status as CaseStatus | null ?? null;
-          handlersRef.current.onUpdate(updatedCase, prevStatus);
+
+        const next = new Map(snapshot);
+        for (const row of rows) {
+          const prev = next.get(row.id);
+          if (!prev) {
+            handlersRef.current.onInsert(row);
+          } else if (rowChanged(prev, row)) {
+            handlersRef.current.onUpdate(
+              row,
+              (prev.status as CaseStatus | null) ?? null
+            );
+          }
+          next.set(row.id, row);
         }
-      )
-      .subscribe();
+        snapshot = next;
+      } catch {
+        // Transient network/parse errors: ignore, retry on the next tick.
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    void poll(); // Seed the baseline immediately on mount.
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, POLL_INTERVAL_MS);
 
     return () => {
-      supabaseBrowser.removeChannel(channel);
+      cancelled = true;
+      window.clearInterval(intervalId);
     };
-  }, []); // Empty deps — subscription is set up once and uses ref for handlers.
+  }, []); // Empty deps — polling is set up once and uses refs for handlers.
 }
 
 // Re-export pure utils from casesRealtimeUtils.ts for backward compatibility.

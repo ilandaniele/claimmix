@@ -7,9 +7,6 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     groups:
-      supabase:
-        patterns:
-          - "@supabase/*"
       sentry:
         patterns:
           - "@sentry/*"

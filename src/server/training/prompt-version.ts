@@ -9,7 +9,9 @@
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 
 /** Version label recorded when no tenant prompt_versions row is active. */
 export const BUILTIN_PROMPT_VERSION = "builtin-v1";
@@ -34,32 +36,30 @@ const BUILTIN: ActivePromptVersion = {
  * Falls back to the built-in version on any error or when none is active.
  */
 export async function getActivePromptVersion(
-  supabase: SupabaseClient,
   tenantId: string
 ): Promise<ActivePromptVersion> {
   try {
-    const { data, error } = await (supabase as any)
-      .from("prompt_versions")
-      .select("id,version,system_prompt")
-      .eq("tenant_id", tenantId)
-      .eq("active", true)
-      .limit(1)
-      .maybeSingle();
+    const t = tables.promptVersions;
+    const row = firstRow(
+      await db
+        .select({ id: t.id, version: t.version, system_prompt: t.system_prompt })
+        .from(t)
+        .where(and(eq(t.tenant_id, tenantId), eq(t.active, true)))
+        .limit(1)
+    );
 
-    if (error || !data) {
-      if (error && error.code !== "42P01") {
-        console.error("[prompt-version] load error:", error.code); // crew-debug-ok
-      }
-      return BUILTIN;
-    }
+    if (!row) return BUILTIN;
 
-    const row = data as { id: string; version: string; system_prompt: string };
     return {
       id: row.id,
       version: row.version,
       systemPrompt: row.system_prompt?.trim() ? row.system_prompt : null,
     };
-  } catch {
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    if (code && code !== "42P01") {
+      console.error("[prompt-version] load error:", code); // crew-debug-ok
+    }
     // Never break extraction because the prompt version could not be loaded.
     return BUILTIN;
   }

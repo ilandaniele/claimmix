@@ -2,14 +2,22 @@
  * Unit tests for the case patch logic.
  *
  * Tests FSM validation, ownership checks, and audit log behavior
- * using a mocked Supabase client and mocked audit log.
+ * using a mocked Drizzle db and mocked audit log.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { patchCase } from "@/server/cases/patch";
-import { AppError } from "@/lib/errors";
+// vi.mock calls must be hoisted to module top level before any other imports
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    $count: vi.fn(),
+  },
+  tables: {},
+}));
 
-// Mock the audit log to avoid Supabase calls
+// Mock the audit log to avoid DB calls
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: vi.fn().mockResolvedValue(undefined),
   AuditEvent: {
@@ -19,39 +27,10 @@ vi.mock("@/lib/audit/log", () => ({
   },
 }));
 
-// ── Mock helpers ──────────────────────────────────────────────────────────────
-
-type FetchResult = { data: unknown; error: { code: string } | null };
-
-function buildPatchMock(
-  fetchResult: FetchResult,
-  updateResult: FetchResult
-) {
-  const updateChain = {
-    update: () => updateChain,
-    eq: () => updateChain,
-    select: () => updateChain,
-    single: () => Promise.resolve(updateResult),
-  };
-
-  const fetchChain = {
-    select: () => fetchChain,
-    eq: () => fetchChain,
-    single: () => Promise.resolve(fetchResult),
-  };
-
-  return {
-    from: (table: string) => {
-      if (table === "cases") {
-        return {
-          select: () => fetchChain,
-          update: () => updateChain,
-        };
-      }
-      return { select: () => ({}) };
-    },
-  };
-}
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { patchCase } from "@/server/cases/patch";
+import { AppError } from "@/lib/errors";
+import { db } from "@/lib/db";
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -86,6 +65,32 @@ const listoCase = {
   closed_at: null,
 };
 
+// ── Mock helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * Configure db.select and db.update mocks for a fetch+update cycle.
+ *
+ * fetchRows: rows returned by db.select().from().where().limit(1)
+ * updatedRows: rows returned by db.update().set().where().returning()
+ */
+function setupPatchMocks(fetchRows: unknown[], updatedRows: unknown[]) {
+  // db.select chain: .from().where().limit() → resolves to fetchRows
+  const selectChain: any = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(fetchRows),
+  };
+  vi.mocked(db.select).mockReturnValue(selectChain as any);
+
+  // db.update chain: .set().where().returning() → resolves to updatedRows
+  const returningFn = vi.fn().mockResolvedValue(updatedRows);
+  const whereAfterSet = vi.fn().mockReturnValue({ returning: returningFn });
+  const setChain: any = {
+    set: vi.fn().mockReturnValue({ where: whereAfterSet }),
+  };
+  vi.mocked(db.update).mockReturnValue(setChain as any);
+}
+
 // ── patchCase — FSM validation ────────────────────────────────────────────────
 
 describe("patchCase — FSM validation", () => {
@@ -95,37 +100,27 @@ describe("patchCase — FSM validation", () => {
 
   it("throws FSM_INVALID_TRANSITION for cerrado → procesando", async () => {
     const cerradoCase = { ...listoCase, status: "cerrado" };
-    const supabase = buildPatchMock(
-      { data: cerradoCase, error: null },
-      { data: { ...cerradoCase, status: "procesando" }, error: null }
-    );
+    setupPatchMocks([cerradoCase], [{ ...cerradoCase, status: "procesando" }]);
 
     await expect(
-      patchCase(supabase, "case-1", { status: "procesando" }, adminActor, null, null)
+      patchCase("case-1", { status: "procesando" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
   });
 
   it("throws FSM_INVALID_TRANSITION for procesando → cerrado", async () => {
     const procesandoCase = { ...listoCase, status: "procesando" };
-    const supabase = buildPatchMock(
-      { data: procesandoCase, error: null },
-      { data: { ...procesandoCase, status: "cerrado" }, error: null }
-    );
+    setupPatchMocks([procesandoCase], [{ ...procesandoCase, status: "cerrado" }]);
 
     await expect(
-      patchCase(supabase, "case-1", { status: "cerrado" }, adminActor, null, null)
+      patchCase("case-1", { status: "cerrado" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
   });
 
   it("succeeds for valid FSM transition: listo → cerrado", async () => {
     const updatedCase = { ...listoCase, status: "cerrado", closed_at: new Date().toISOString() };
-    const supabase = buildPatchMock(
-      { data: listoCase, error: null },
-      { data: updatedCase, error: null }
-    );
+    setupPatchMocks([listoCase], [updatedCase]);
 
     const result = await patchCase(
-      supabase,
       "case-1",
       { status: "cerrado", reason: "paid_out" },
       adminActor,
@@ -137,13 +132,9 @@ describe("patchCase — FSM validation", () => {
 
   it("succeeds for valid FSM transition: listo → escalado", async () => {
     const updatedCase = { ...listoCase, status: "escalado" };
-    const supabase = buildPatchMock(
-      { data: listoCase, error: null },
-      { data: updatedCase, error: null }
-    );
+    setupPatchMocks([listoCase], [updatedCase]);
 
     const result = await patchCase(
-      supabase,
       "case-1",
       { status: "escalado" },
       adminActor,
@@ -154,13 +145,10 @@ describe("patchCase — FSM validation", () => {
   });
 
   it("throws FSM_INVALID_TRANSITION for listo → esperando (not in allowed transitions)", async () => {
-    const supabase = buildPatchMock(
-      { data: listoCase, error: null },
-      { data: {}, error: null }
-    );
+    setupPatchMocks([listoCase], []);
 
     await expect(
-      patchCase(supabase, "case-1", { status: "esperando" }, adminActor, null, null)
+      patchCase("case-1", { status: "esperando" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
   });
 });
@@ -173,25 +161,20 @@ describe("patchCase — IDOR and not found", () => {
   });
 
   it("throws NOT_FOUND when case does not exist", async () => {
-    const supabase = buildPatchMock(
-      { data: null, error: { code: "PGRST116" } },
-      { data: null, error: null }
-    );
+    // db.select returns no rows → case not found
+    setupPatchMocks([], []);
 
     await expect(
-      patchCase(supabase, "non-existent", { status: "listo" }, adminActor, null, null)
+      patchCase("non-existent", { status: "listo" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
   });
 
   it("throws NOT_FOUND (not FORBIDDEN) for wrong-tenant case (IDOR prevention)", async () => {
-    // RLS blocks the row → same as not found
-    const supabase = buildPatchMock(
-      { data: null, error: { code: "PGRST116" } },
-      { data: null, error: null }
-    );
+    // Explicit tenant filter means wrong-tenant case returns zero rows
+    setupPatchMocks([], []);
 
     try {
-      await patchCase(supabase, "other-tenant-case", { status: "listo" }, adminActor, null, null);
+      await patchCase("other-tenant-case", { status: "listo" }, adminActor, null, null);
       expect.fail("Should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(AppError);
@@ -213,13 +196,9 @@ describe("patchCase — ownership check", () => {
   it("allows admin to patch any case in their tenant", async () => {
     const caseAssignedToOther = { ...listoCase, assigned_to: "other-analyst" };
     const updatedCase = { ...caseAssignedToOther, status: "escalado" };
-    const supabase = buildPatchMock(
-      { data: caseAssignedToOther, error: null },
-      { data: updatedCase, error: null }
-    );
+    setupPatchMocks([caseAssignedToOther], [updatedCase]);
 
     const result = await patchCase(
-      supabase,
       "case-1",
       { status: "escalado" },
       adminActor, // admin can patch any case
@@ -231,14 +210,10 @@ describe("patchCase — ownership check", () => {
 
   it("throws NOT_FOUND when analyst patches a case not assigned to them", async () => {
     const caseAssignedToOther = { ...listoCase, assigned_to: "other-analyst-id" };
-    const supabase = buildPatchMock(
-      { data: caseAssignedToOther, error: null },
-      { data: {}, error: null }
-    );
+    setupPatchMocks([caseAssignedToOther], []);
 
     await expect(
       patchCase(
-        supabase,
         "case-1",
         { status: "cerrado" },
         analystActor, // analyst does not own this case
@@ -251,13 +226,9 @@ describe("patchCase — ownership check", () => {
   it("allows analyst to patch a case assigned to them", async () => {
     // analystActor.id === listoCase.assigned_to
     const updatedCase = { ...listoCase, status: "cerrado" };
-    const supabase = buildPatchMock(
-      { data: listoCase, error: null },
-      { data: updatedCase, error: null }
-    );
+    setupPatchMocks([listoCase], [updatedCase]);
 
     const result = await patchCase(
-      supabase,
       "case-1",
       { status: "cerrado" },
       analystActor,
@@ -275,14 +246,12 @@ describe("patchCase — update failure", () => {
     vi.clearAllMocks();
   });
 
-  it("throws NOT_FOUND when Supabase update returns no rows (RLS blocked write)", async () => {
-    const supabase = buildPatchMock(
-      { data: listoCase, error: null },
-      { data: null, error: { code: "PGRST116" } }
-    );
+  it("throws NOT_FOUND when DB update returns no rows (RLS-equivalent: tenant filter blocked write)", async () => {
+    // Select finds the case, but update returns no rows (wrong tenant on write)
+    setupPatchMocks([listoCase], []);
 
     await expect(
-      patchCase(supabase, "case-1", { status: "escalado" }, adminActor, null, null)
+      patchCase("case-1", { status: "escalado" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
   });
 });

@@ -4,12 +4,13 @@
  * AC6:  policy_number match sets cases.policy_id.
  * AC22: Policy match has the highest confidence (0.95).
  *
- * Uses service-role client — tenant_id filter is always applied.
+ * The tenant_id filter is always applied.
  * IDOR: Cross-tenant leakage is prevented by the tenant_id column filter.
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, asc, eq } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
 
 /** A single policy match result. */
 export interface PolicyMatch {
@@ -30,13 +31,11 @@ export interface PolicyMatch {
 /**
  * Find policies by policy number (exact match) and/or by customer ID.
  *
- * @param supabase      - Supabase client (service role for privileged reads).
  * @param tenantId      - Tenant scope (always applied).
  * @param policyNumber  - Optional policy number for exact-match lookup.
  * @param customerId    - Optional customer UUID — returns all policies for this customer.
  */
 export async function findPolicyMatches(
-  supabase: SupabaseClient,
   tenantId: string,
   policyNumber?: string,
   customerId?: string
@@ -45,14 +44,14 @@ export async function findPolicyMatches(
 
   // ── 1. Policy number exact match ──────────────────────────────────────────────
   if (policyNumber && policyNumber.trim() !== "") {
-    const matches = await matchByPolicyNumber(supabase, tenantId, policyNumber.trim());
+    const matches = await matchByPolicyNumber(tenantId, policyNumber.trim());
     results.push(...matches);
   }
 
   // ── 2. Customer-based policy lookup ───────────────────────────────────────────
   if (customerId && customerId.trim() !== "") {
     const seenPolicyIds = new Set(results.map((r) => r.policyId));
-    const customerMatches = await matchByCustomerId(supabase, tenantId, customerId.trim());
+    const customerMatches = await matchByCustomerId(tenantId, customerId.trim());
     for (const m of customerMatches) {
       if (!seenPolicyIds.has(m.policyId)) {
         results.push(m);
@@ -85,23 +84,38 @@ export async function findPolicyMatches(
 // ── Private matchers ──────────────────────────────────────────────────────────
 
 async function matchByPolicyNumber(
-  supabase: SupabaseClient,
   tenantId: string,
   policyNumber: string
 ): Promise<PolicyMatch[]> {
-  const { data, error } = await (supabase as any)
-    .from("policies")
-    .select("id, policy_number, policy_type, status, customers(full_name)")
-    .eq("tenant_id", tenantId)
-    .eq("policy_number", policyNumber)
-    .limit(5);
+  const p = tables.policies;
+  const c = tables.customers;
 
-  if (error) {
-    console.error("[policy-matcher] Policy number lookup error:", error.code);
+  let data: Array<{
+    id: string;
+    policy_number: string;
+    policy_type: string | null;
+    status: string;
+    customer_full_name: string | null;
+  }>;
+  try {
+    data = await db
+      .select({
+        id: p.id,
+        policy_number: p.policy_number,
+        policy_type: p.policy_type,
+        status: p.status,
+        customer_full_name: c.full_name,
+      })
+      .from(p)
+      .leftJoin(c, eq(p.customer_id, c.id))
+      .where(and(eq(p.tenant_id, tenantId), eq(p.policy_number, policyNumber)))
+      .limit(5);
+  } catch (e) {
+    console.error("[policy-matcher] Policy number lookup error:", (e as { code?: string })?.code);
     return [];
   }
 
-  return (data ?? []).map((row: any) => {
+  return data.map((row) => {
     // Active policy number match → highest confidence.
     const confidence = row.status === "active" ? 0.95 : 0.70;
     return {
@@ -109,31 +123,46 @@ async function matchByPolicyNumber(
       policyNumber: row.policy_number,
       policyType: row.policy_type ?? "other",
       status: row.status,
-      customerName: row.customers?.full_name ?? "",
+      customerName: row.customer_full_name ?? "",
       confidence,
     };
   });
 }
 
 async function matchByCustomerId(
-  supabase: SupabaseClient,
   tenantId: string,
   customerId: string
 ): Promise<PolicyMatch[]> {
-  const { data, error } = await (supabase as any)
-    .from("policies")
-    .select("id, policy_number, policy_type, status, customers(full_name)")
-    .eq("tenant_id", tenantId)
-    .eq("customer_id", customerId)
-    .order("status", { ascending: true }) // 'active' < 'cancelled' < 'expired' alphabetically
-    .limit(20);
+  const p = tables.policies;
+  const c = tables.customers;
 
-  if (error) {
-    console.error("[policy-matcher] Customer policy lookup error:", error.code);
+  let data: Array<{
+    id: string;
+    policy_number: string;
+    policy_type: string | null;
+    status: string;
+    customer_full_name: string | null;
+  }>;
+  try {
+    data = await db
+      .select({
+        id: p.id,
+        policy_number: p.policy_number,
+        policy_type: p.policy_type,
+        status: p.status,
+        customer_full_name: c.full_name,
+      })
+      .from(p)
+      .leftJoin(c, eq(p.customer_id, c.id))
+      .where(and(eq(p.tenant_id, tenantId), eq(p.customer_id, customerId)))
+      .orderBy(asc(p.status)) // 'active' < 'cancelled' < 'expired' alphabetically
+      .limit(20);
+  } catch (e) {
+    console.error("[policy-matcher] Customer policy lookup error:", (e as { code?: string })?.code);
     return [];
   }
 
-  return (data ?? []).map((row: any) => {
+  return data.map((row) => {
     // Active = 0.85 (good match from customer link, not direct policy number).
     // Expired/cancelled = 0.60 (lower — may not be the right policy for the claim).
     const confidence = row.status === "active" ? 0.85 : 0.60;
@@ -142,7 +171,7 @@ async function matchByCustomerId(
       policyNumber: row.policy_number,
       policyType: row.policy_type ?? "other",
       status: row.status,
-      customerName: row.customers?.full_name ?? "",
+      customerName: row.customer_full_name ?? "",
       confidence,
     };
   });

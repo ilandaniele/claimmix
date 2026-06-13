@@ -5,7 +5,7 @@
  * Here we test the environment checks and CSP utilities used by it.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // Mock server-only so imports that use it compile in the test environment.
 vi.mock("server-only", () => ({}));
@@ -35,10 +35,6 @@ describe("generateNonce", () => {
 });
 
 describe("buildCsp", () => {
-  beforeEach(() => {
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://test.supabase.co");
-  });
-
   it("includes the nonce in script-src", () => {
     const nonce = "abc123testNonce==";
     const csp = buildCsp(nonce);
@@ -72,11 +68,6 @@ describe("buildCsp", () => {
   it("includes object-src 'none'", () => {
     const csp = buildCsp("testnonce123==");
     expect(csp).toContain("object-src 'none'");
-  });
-
-  it("includes the Supabase URL in connect-src", () => {
-    const csp = buildCsp("testnonce123==");
-    expect(csp).toContain("https://test.supabase.co");
   });
 
   it("includes 'self' in default-src", () => {

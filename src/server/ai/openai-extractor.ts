@@ -23,7 +23,6 @@ import type { ClaimType } from "@/lib/schemas/cases";
 import { buildSystemPrompt, buildUserMessage, buildEmailClaimPrompt } from "./prompt";
 import type { MemoryHint, KnownPattern, PromptLearningContext } from "./prompt";
 import { computeCostUsd, recordUsage } from "./budget";
-import { createServiceClient } from "@/lib/supabase/service";
 
 /** Custom error for unrecoverable AI extraction failures. */
 export class OpenAIExtractionError extends Error {

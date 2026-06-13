@@ -27,7 +27,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
-import { createServiceClient } from "@/lib/supabase/service";
 import { pollAllGmailAccounts } from "@/server/email/gmail/gmail-poller";
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
@@ -74,14 +73,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const supabase = createServiceClient();
-
     // ── Watch renewal (AC9, AC10, AC11) ──────────────────────────────────────
     // Renew the Gmail push subscription before polling so the next day's push
     // notifications continue to arrive uninterrupted.
 
     const pubsubTopic = process.env.PUBSUB_TOPIC;
-    const connectedAccounts = await listEnabledGmailAccounts(supabase);
+    const connectedAccounts = await listEnabledGmailAccounts();
     const gmailEmail = process.env.GMAIL_USER_EMAIL;
     const renewalAccounts =
       connectedAccounts.length > 0
@@ -107,7 +104,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     } else {
       for (const account of renewalAccounts) {
       // Check whether the current watch subscription is expiring soon.
-      const expiration = await getWatchExpiration(supabase, account.email);
+      const expiration = await getWatchExpiration(account.email);
 
       const needsRenewal =
         expiration === null ||
@@ -130,7 +127,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     // ── Poll ─────────────────────────────────────────────────────────────────
-    const result = await pollAllGmailAccounts(supabase);
+    const result = await pollAllGmailAccounts();
 
     const watchPayload: Record<string, unknown> = { watch_renewed: watchRenewed };
     if (watchSkippedReason !== undefined) {

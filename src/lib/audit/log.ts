@@ -2,9 +2,8 @@
  * Audit log writer for ClaimMix.
  *
  * Every mutation writes an immutable row to audit_log.
- * This module uses the service-role client to write audit logs
- * (the service role bypasses RLS so audit writes succeed even
- * for system events where there is no authenticated user).
+ * Writes go through the shared Drizzle db handle (Neon) — audit writes
+ * succeed even for system events where there is no authenticated user.
  *
  * PII rules:
  * - Never include DNI, license plates, policy numbers, or full names in payload.
@@ -15,11 +14,10 @@
  * AC3: audit log row inserted on auth.rate_limited.
  */
 
-import { createServiceClient } from "@/lib/supabase/service";
-import type { Database } from "@/lib/supabase/types";
+import { db } from "@/lib/db";
+import { auditLog } from "@/lib/db/schema";
+import type { AuditLogInsert } from "@/lib/db/types";
 import type { AuditPayload } from "./redact";
-
-type AuditLogInsert = Database["public"]["Tables"]["audit_log"]["Insert"];
 
 export interface AuditLogEntry {
   tenant_id: string;
@@ -35,7 +33,7 @@ export interface AuditLogEntry {
 /**
  * Write an audit log entry.
  *
- * Uses the service-role client so the write succeeds regardless of
+ * Uses the shared db handle so the write succeeds regardless of
  * the current auth context (system events, failed auth, etc.).
  *
  * Failures are logged to stderr but never thrown — audit log writes
@@ -43,7 +41,6 @@ export interface AuditLogEntry {
  */
 export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
   try {
-    const supabase = createServiceClient();
     const insertRow: AuditLogInsert = {
       tenant_id: entry.tenant_id,
       actor_id: entry.actor_id ?? null,
@@ -54,18 +51,17 @@ export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
       ip: entry.ip ?? null,
       ua: entry.ua ?? null,
     };
-    // The Supabase typed client resolves insert() as 'never[]' when Update: never.
-    // Casting to any to bypass the type bug — the insert shape is verified by AuditLogInsert above.
-     
-    const { error } = await (supabase.from("audit_log") as any).insert(insertRow);
 
-    if (error) {
-      // Log the error code only — never the full Supabase error (may contain PII).
-      console.error("[audit] Failed to write audit log:", error.code);
-    }
+    await db.insert(auditLog).values(insertRow);
   } catch (err) {
-    const errName = err instanceof Error ? err.name : "UnknownError";
-    console.error("[audit] Exception writing audit log:", errName);
+    // Log the error code/name only — never the full error (may contain PII).
+    const code = (err as { code?: string })?.code;
+    if (code) {
+      console.error("[audit] Failed to write audit log:", code);
+    } else {
+      const errName = err instanceof Error ? err.name : "UnknownError";
+      console.error("[audit] Exception writing audit log:", errName);
+    }
   }
 }
 

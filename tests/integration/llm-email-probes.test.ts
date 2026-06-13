@@ -12,12 +12,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// ── Mocks ─────────────────────────────────────────────────────────────────────
-
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(),
-}));
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("AC25: LLM prompt injection probe", () => {

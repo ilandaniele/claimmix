@@ -32,12 +32,6 @@ vi.mock("@/lib/schemas/postmark-inbound", () => ({
   },
 }));
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn().mockImplementation(() => {
-    throw new Error("createServiceClient should NOT be called by 410 stub");
-  }),
-}));
-
 // ── Import route under test AFTER mocks ──────────────────────────────────────
 
 import { GET, POST, PUT, PATCH, DELETE } from "@/app/api/intake/email/route";

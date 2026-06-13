@@ -5,9 +5,9 @@
  * and the last 20 audit_log entries (sorted descending by created_at).
  *
  * IDOR protection:
- * - Uses the user-scoped Supabase client (anon key + JWT).
- * - RLS policy `tenant_id = current_tenant_id()` ensures that a case
- *   belonging to another tenant returns zero rows.
+ * - Every query filters explicitly by tenant_id (RLS is gone — the
+ *   explicit filter is the ONLY tenant boundary).
+ * - A case belonging to another tenant returns zero rows.
  * - The route handler converts a missing row to 404 (not 403) to
  *   prevent tenant enumeration (AC10).
  *
@@ -15,14 +15,16 @@
  * AC10: Wrong-tenant case returns null (caller returns 404 NOT_FOUND).
  */
 
- 
-type AnySupabaseClient = any;
-import type { Database } from "@/lib/supabase/types";
-
-type CaseRow = Database["public"]["Tables"]["cases"]["Row"];
-type ExtractedFieldRow = Database["public"]["Tables"]["extracted_fields"]["Row"];
-type MissingDocRow = Database["public"]["Tables"]["missing_docs"]["Row"];
-type AuditLogRow = Database["public"]["Tables"]["audit_log"]["Row"];
+import { and, asc, desc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { auditLog, cases, extractedFields, missingDocs } from "@/lib/db/schema";
+import type {
+  AuditLogRow,
+  CaseRow,
+  ExtractedFieldRow,
+  MissingDocRow,
+} from "@/lib/db/types";
 
 export interface CaseDetail {
   case: CaseRow;
@@ -36,64 +38,78 @@ export interface CaseDetail {
  *
  * Returns null if:
  * - The case does not exist.
- * - The case belongs to a different tenant (RLS returns zero rows).
+ * - The case belongs to a different tenant (explicit tenant filter → zero rows).
  *
  * The caller MUST use this null signal to return a 404 response.
  * NEVER return 403 — doing so leaks the existence of the resource
  * to a potential attacker (IDOR enumeration).
  *
- * @param supabase - User-scoped Supabase client (never service role for this query).
+ * @param tenantId - Tenant of the authenticated user (explicit tenant boundary).
  * @param caseId   - UUID of the case to fetch.
  */
 export async function getCaseDetail(
-  supabase: AnySupabaseClient,
+  tenantId: string,
   caseId: string
 ): Promise<CaseDetail | null> {
-  // ── 1. Fetch the case row (RLS-scoped to current tenant) ──────────────────
-   
-  const { data: caseData, error: caseError } = await (supabase as any)
-    .from("cases")
-    .select("*")
-    .eq("id", caseId)
-    .single();
-
-  if (caseError || !caseData) {
-    // PGRST116 = "JSON object requested, multiple (or no) rows returned"
-    // Any error here (including no rows) → 404 (never 403).
+  // ── 1. Fetch the case row (explicitly tenant-scoped) ──────────────────────
+  let caseRow: CaseRow | null;
+  try {
+    caseRow = firstRow(
+      await db
+        .select()
+        .from(cases)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
+        .limit(1)
+    );
+  } catch {
+    // Any error here (including invalid uuid) → 404 (never 403).
     return null;
   }
 
-  const caseRow = caseData as CaseRow;
+  if (!caseRow) return null;
 
   // ── 2-4. Fetch related data in parallel (was 3 sequential round-trips) ───
-  const [
-    { data: extractedData },
-    { data: missingDocsData },
-    { data: auditData },
-  ] = await Promise.all([
-    (supabase as any)
-      .from("extracted_fields")
-      .select("*")
-      .eq("case_id", caseId)
-      .order("extracted_at", { ascending: true }),
-    (supabase as any)
-      .from("missing_docs")
-      .select("*")
-      .eq("case_id", caseId)
-      .order("requested_at", { ascending: true }),
-    (supabase as any)
-      .from("audit_log")
-      .select("*")
-      .eq("target_type", "case")
-      .eq("target_id", caseId)
-      .order("created_at", { ascending: false })
-      .limit(20),
+  // Each related query degrades to an empty array on failure — matching the
+  // previous behavior where related-query errors were silently ignored.
+  const [extractedData, missingDocsData, auditData] = await Promise.all([
+    db
+      .select()
+      .from(extractedFields)
+      .where(
+        and(
+          eq(extractedFields.case_id, caseId),
+          eq(extractedFields.tenant_id, tenantId)
+        )
+      )
+      .orderBy(asc(extractedFields.extracted_at))
+      .catch(() => [] as ExtractedFieldRow[]),
+    db
+      .select()
+      .from(missingDocs)
+      .where(
+        and(eq(missingDocs.case_id, caseId), eq(missingDocs.tenant_id, tenantId))
+      )
+      .orderBy(asc(missingDocs.requested_at))
+      .catch(() => [] as MissingDocRow[]),
+    db
+      .select()
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.tenant_id, tenantId),
+          eq(auditLog.target_type, "case"),
+          eq(auditLog.target_id, caseId)
+        )
+      )
+      .orderBy(desc(auditLog.created_at))
+      .limit(20)
+      .catch(() => [] as AuditLogRow[]),
   ]);
 
   return {
     case: caseRow,
-    extracted_fields: (extractedData as ExtractedFieldRow[]) ?? [],
-    missing_docs: (missingDocsData as MissingDocRow[]) ?? [],
-    audit_log: (auditData as AuditLogRow[]) ?? [],
+    extracted_fields: extractedData,
+    missing_docs: missingDocsData,
+    audit_log: auditData as AuditLogRow[],
   };
 }

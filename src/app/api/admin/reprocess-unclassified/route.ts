@@ -8,6 +8,10 @@
  *   a) X-Internal-Worker: true header (same-origin worker call)
  *   b) Authorization: Bearer <CRON_SECRET> header (Vercel cron / scheduled triggers)
  *
+ * Tenant scoping: this is a SYSTEM path that intentionally scans cases across
+ * ALL tenants (like the Gmail poller); each selected row carries its own
+ * tenant_id, which is forwarded to the worker for downstream scoping.
+ *
  * Response shape (always 200 on partial or full success):
  *   { data: { triggered: number, case_ids: string[], failed: string[] } }
  *
@@ -18,7 +22,8 @@
  */
 
 import { type NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/service";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 
 /** Statuses considered "open" for reprocessing. */
@@ -60,28 +65,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // ── Query unclassified cases ──────────────────────────────────────────────────
-  const supabase = createServiceClient();
+  // ── Query unclassified cases (system-wide, all tenants by design) ─────────────
+  const t = tables.cases;
 
-  const { data: cases, error: queryError } = await (supabase as any)
-    .from("cases")
-    .select("id, tenant_id")
-    .eq("channel", "email")
-    .in("status", OPEN_STATUSES)
-    .or("severity.is.null,claim_type.is.null")
-    .order("created_at", { ascending: true })
-    .limit(BATCH_LIMIT) as {
-      data: UnclassifiedCase[] | null;
-      error: { code: string; message: string } | null;
-    };
-
-  if (queryError) {
+  let cases: UnclassifiedCase[];
+  try {
+    cases = await db
+      .select({ id: t.id, tenant_id: t.tenant_id })
+      .from(t)
+      .where(
+        and(
+          eq(t.channel, "email"),
+          inArray(t.status, [...OPEN_STATUSES]),
+          or(isNull(t.severity), isNull(t.claim_type))
+        )
+      )
+      .orderBy(asc(t.created_at))
+      .limit(BATCH_LIMIT);
+  } catch (e) {
     console.error(
       JSON.stringify({
         level: "error",
         service: "claimmix",
         msg: "reprocess_unclassified.query_error",
-        error_code: queryError.code,
+        error_code: (e as { code?: string })?.code ?? "unknown",
       })
     );
     return NextResponse.json(
@@ -91,7 +98,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // ── Empty result — return early ───────────────────────────────────────────────
-  if (!cases || cases.length === 0) {
+  if (cases.length === 0) {
     return NextResponse.json(
       { data: { triggered: 0, case_ids: [], failed: [] } },
       { status: 200 }

@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { tables } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 
@@ -11,19 +14,39 @@ const UpdateAgentTrainingSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
+const t = tables.agentTraining;
+
+const TRAINING_COLUMNS = {
+  id: t.id,
+  title: t.title,
+  content: t.content,
+  enabled: t.enabled,
+  updated_at: t.updated_at,
+};
+
 export async function GET() {
   try {
-    const { supabase, userRow } = await requireAdmin();
+    const { db, userRow } = await requireAdmin();
 
-    const { data, error } = await (supabase as any)
-      .from("agent_training")
-      .select("id,title,content,enabled,updated_at")
-      .eq("tenant_id", userRow.tenant_id)
-      .eq("title", TRAINING_TITLE)
-      .maybeSingle();
-
-    if (error) {
-      console.error("[admin/agent-training GET]", error.code);
+    let data;
+    try {
+      data = firstRow(
+        await db
+          .select(TRAINING_COLUMNS)
+          .from(t)
+          .where(
+            and(
+              eq(t.tenant_id, userRow.tenant_id),
+              eq(t.title, TRAINING_TITLE)
+            )
+          )
+          .limit(1)
+      );
+    } catch (e) {
+      console.error(
+        "[admin/agent-training GET]",
+        (e as { code?: string })?.code ?? "unknown"
+      );
       return err("INTERNAL_ERROR");
     }
 
@@ -43,7 +66,7 @@ export async function GET() {
 
 export async function PUT(request: NextRequest) {
   try {
-    const { supabase, user, userRow } = await requireAdmin();
+    const { db, user, userRow } = await requireAdmin();
     const body = await request.json();
     const parsed = UpdateAgentTrainingSchema.safeParse(body);
     if (!parsed.success) {
@@ -58,14 +81,32 @@ export async function PUT(request: NextRequest) {
       updated_by: user.id,
     };
 
-    const { data, error } = await (supabase as any)
-      .from("agent_training")
-      .upsert(payload, { onConflict: "tenant_id,title" })
-      .select("id,title,content,enabled,updated_at")
-      .single();
+    let data;
+    try {
+      data = firstRow(
+        await db
+          .insert(t)
+          .values(payload)
+          .onConflictDoUpdate({
+            target: [t.tenant_id, t.title],
+            set: {
+              content: payload.content,
+              enabled: payload.enabled,
+              updated_by: payload.updated_by,
+            },
+          })
+          .returning(TRAINING_COLUMNS)
+      );
+    } catch (e) {
+      console.error(
+        "[admin/agent-training PUT]",
+        (e as { code?: string })?.code ?? "unknown"
+      );
+      return err("INTERNAL_ERROR");
+    }
 
-    if (error || !data) {
-      console.error("[admin/agent-training PUT]", error?.code ?? "no_data");
+    if (!data) {
+      console.error("[admin/agent-training PUT]", "no_data");
       return err("INTERNAL_ERROR");
     }
 

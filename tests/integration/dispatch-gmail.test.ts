@@ -27,10 +27,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(),
-}));
-
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: vi.fn().mockResolvedValue(undefined),
   AuditEvent: {
@@ -52,13 +48,16 @@ const OUTBOUND_MSG_ID = "outbound-msg-uuid-001";
 
 /**
  * Track what was inserted / updated on each table.
- * Returns an inserts map + updates map for assertions.
+ * Returns inserts map + updates map for assertions.
+ *
+ * Mimics the Drizzle ORM fluent API:
+ *   db.insert(table).values(row).returning({ id: table.id })  → [{ id }]
+ *   db.update(table).set(patch).where(eq(...))                → void
  */
-function buildServiceMock() {
+function buildDbMock() {
   const inserts: Record<string, unknown[]> = {
     claim_messages: [],
     outbound_messages: [],
-    audit_log: [],
   };
 
   const updates: Record<string, unknown[]> = {
@@ -66,71 +65,62 @@ function buildServiceMock() {
     outbound_messages: [],
   };
 
-  /**
-   * Generic Supabase query builder chain.
-   * Supports: .insert().select().single()  — returns inserted row id
-   *           .update().eq()               — records update args
-   */
-  function makeTableMock(
-    tableName: string,
-    insertedId: string,
-  ) {
-    return {
-      insert: (row: unknown) => {
-        const rows = Array.isArray(row) ? row : [row];
-        inserts[tableName].push(...rows);
+  // Map table symbol → logical table name + generated insert id.
+  // Drizzle passes the actual table object (imported schema); we key by object reference
+  // using a WeakMap populated the first time each table is seen.
+  const tableNames = new WeakMap<object, string>();
+  const tableIds = new WeakMap<object, string>();
 
-        return {
-          select: () => ({
-            single: () =>
-              Promise.resolve({ data: { id: insertedId }, error: null }),
-          }),
-          single: () =>
-            Promise.resolve({ data: { id: insertedId }, error: null }),
-        };
-      },
+  // We assign names lazily by checking which table object was passed first.
+  // For the tests we need claim_messages first (insert step 2) then outbound_messages (step 3).
+  let seenCount = 0;
+  const TABLE_SEQUENCE = [
+    { name: "claim_messages", id: CLAIM_MSG_ID },
+    { name: "outbound_messages", id: OUTBOUND_MSG_ID },
+  ];
 
-      update: (patch: unknown) => {
-        // Capture the update payload — the .eq() call follows
-        const pending = { patch };
-        return {
-          eq: (col: string, val: unknown) => {
-            updates[tableName].push({ ...pending, where: { [col]: val } });
-            return Promise.resolve({ data: null, error: null });
-          },
-        };
-      },
-    };
+  function resolveTable(tableObj: object): { name: string; id: string } {
+    if (!tableNames.has(tableObj)) {
+      const entry = TABLE_SEQUENCE[seenCount] ?? { name: `unknown_${seenCount}`, id: `id-${seenCount}` };
+      tableNames.set(tableObj, entry.name);
+      tableIds.set(tableObj, entry.id);
+      seenCount++;
+    }
+    return { name: tableNames.get(tableObj)!, id: tableIds.get(tableObj)! };
   }
 
-  const mock = {
+  const dbMock = {
     _inserts: inserts,
     _updates: updates,
 
-    from: vi.fn().mockImplementation((table: string) => {
-      if (table === "claim_messages") {
-        return makeTableMock("claim_messages", CLAIM_MSG_ID);
-      }
-      if (table === "outbound_messages") {
-        return makeTableMock("outbound_messages", OUTBOUND_MSG_ID);
-      }
-      // fallback
+    insert: vi.fn().mockImplementation((tableObj: object) => {
+      const { name, id } = resolveTable(tableObj);
       return {
-        insert: (row: unknown) => {
+        values: (row: unknown) => {
           const rows = Array.isArray(row) ? row : [row];
-          (inserts[table] = inserts[table] ?? []).push(...rows);
+          (inserts[name] = inserts[name] ?? []).push(...rows);
           return {
-            select: () => ({
-              single: () => Promise.resolve({ data: { id: "fallback-id" }, error: null }),
-            }),
+            returning: (_cols: unknown) =>
+              Promise.resolve([{ id }]),
           };
         },
-        update: () => ({ eq: () => Promise.resolve({ data: null, error: null }) }),
+      };
+    }),
+
+    update: vi.fn().mockImplementation((tableObj: object) => {
+      const { name, id } = resolveTable(tableObj);
+      return {
+        set: (patch: unknown) => ({
+          where: (_condition: unknown) => {
+            (updates[name] = updates[name] ?? []).push({ patch, where: { id } });
+            return Promise.resolve(undefined);
+          },
+        }),
       };
     }),
   };
 
-  return mock;
+  return dbMock;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -149,6 +139,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     // Reset provider singleton so mock doesn't bleed between tests.
     const { resetEmailProvider } = await import("@/server/email/gmail/index");
     resetEmailProvider();
+    vi.resetModules();
   });
 
   // ── AC4 ─────────────────────────────────────────────────────────────────────
@@ -158,9 +149,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -193,9 +183,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -222,9 +211,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { writeAuditLog } = await import("@/lib/audit/log");
 
@@ -250,9 +238,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     const result = await dispatchOutboundEmail({
@@ -274,9 +261,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
 
@@ -297,9 +283,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     const result = await dispatchOutboundEmail({
@@ -318,9 +303,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -345,9 +329,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { writeAuditLog } = await import("@/lib/audit/log");
 
@@ -374,9 +357,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -402,9 +384,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -429,9 +410,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -456,9 +436,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -482,9 +461,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const { setEmailProvider } = await import("@/server/email/gmail/index");
     setEmailProvider({ name: "gmail", send: mockSend });
 
-    const dbMock = buildServiceMock();
-    const { createServiceClient } = await import("@/lib/supabase/service");
-    (createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(dbMock);
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({

@@ -18,7 +18,8 @@
  */
 
 import "server-only";
-import { createServiceClient } from "@/lib/supabase/service";
+import { and, eq, gte, sql } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
 
 /** @deprecated Legacy constants for gpt-4o-mini. Use computeCostUsd(tokens, tokens, model). */
 export const COST_PER_PROMPT_TOKEN = 0.00000015;
@@ -59,8 +60,6 @@ export async function checkBudget(
   tenantId: string,
   userId?: string | null
 ): Promise<BudgetCheckResult> {
-  const supabase = createServiceClient();
-
   const monthlyCapUsd = parseFloat(process.env.MONTHLY_BUDGET_USD ?? "200");
   const tenantDailyTokenCap = parseInt(
     process.env.AI_TENANT_DAILY_TOKEN_CAP ?? "5000000",
@@ -76,22 +75,20 @@ export async function checkBudget(
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
-   
-  const { data: monthlyData, error: monthlyError } = await (supabase as any)
-    .from("ai_usage")
-    .select("cost_usd")
-    .gte("created_at", monthStart.toISOString());
-
-  if (monthlyError) {
+  let monthlyCostUsd = 0;
+  try {
+    const [monthly] = await db
+      .select({
+        total: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8`,
+      })
+      .from(tables.aiUsage)
+      .where(gte(tables.aiUsage.created_at, monthStart.toISOString()));
+    monthlyCostUsd = monthly?.total ?? 0;
+  } catch (e) {
     // Fail open on DB error (don't block users due to budget check failure).
-    console.error("[budget] Monthly check error:", monthlyError.code);
+    console.error("[budget] Monthly check error:", (e as { code?: string })?.code);
     return { exceeded: false };
   }
-
-  const monthlyCostUsd = (monthlyData ?? []).reduce(
-    (sum: number, row: Record<string, unknown>) => sum + ((row.cost_usd as number) ?? 0),
-    0
-  );
 
   if (monthlyCostUsd >= monthlyCapUsd) {
     return {
@@ -104,23 +101,24 @@ export async function checkBudget(
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
 
-   
-  const { data: tenantDayData, error: tenantDayError } = await (supabase as any)
-    .from("ai_usage")
-    .select("prompt_tokens,completion_tokens")
-    .eq("tenant_id", tenantId)
-    .gte("created_at", dayStart.toISOString());
-
-  if (tenantDayError) {
-    console.error("[budget] Tenant daily check error:", tenantDayError.code);
+  let tenantDayTokens = 0;
+  try {
+    const [tenantDay] = await db
+      .select({
+        total: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
+      })
+      .from(tables.aiUsage)
+      .where(
+        and(
+          eq(tables.aiUsage.tenant_id, tenantId),
+          gte(tables.aiUsage.created_at, dayStart.toISOString())
+        )
+      );
+    tenantDayTokens = tenantDay?.total ?? 0;
+  } catch (e) {
+    console.error("[budget] Tenant daily check error:", (e as { code?: string })?.code);
     return { exceeded: false };
   }
-
-  const tenantDayTokens = (tenantDayData ?? []).reduce(
-    (sum: number, row: Record<string, unknown>) =>
-      sum + ((row.prompt_tokens as number) ?? 0) + ((row.completion_tokens as number) ?? 0),
-    0
-  );
 
   if (tenantDayTokens >= tenantDailyTokenCap) {
     return {
@@ -131,23 +129,24 @@ export async function checkBudget(
 
   // ── 3. Per-user daily token cap ───────────────────────────────────────────────
   if (userId) {
-     
-    const { data: userDayData, error: userDayError } = await (supabase as any)
-      .from("ai_usage")
-      .select("prompt_tokens,completion_tokens")
-      .eq("user_id", userId)
-      .gte("created_at", dayStart.toISOString());
-
-    if (userDayError) {
-      console.error("[budget] User daily check error:", userDayError.code);
+    let userDayTokens = 0;
+    try {
+      const [userDay] = await db
+        .select({
+          total: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
+        })
+        .from(tables.aiUsage)
+        .where(
+          and(
+            eq(tables.aiUsage.user_id, userId),
+            gte(tables.aiUsage.created_at, dayStart.toISOString())
+          )
+        );
+      userDayTokens = userDay?.total ?? 0;
+    } catch (e) {
+      console.error("[budget] User daily check error:", (e as { code?: string })?.code);
       return { exceeded: false };
     }
-
-    const userDayTokens = (userDayData ?? []).reduce(
-      (sum: number, row: Record<string, unknown>) =>
-        sum + ((row.prompt_tokens as number) ?? 0) + ((row.completion_tokens as number) ?? 0),
-      0
-    );
 
     if (userDayTokens >= userDailyTokenCap) {
       return {
@@ -180,19 +179,14 @@ export async function recordUsage(
   costUsd: number
 ): Promise<void> {
   try {
-    const supabase = createServiceClient();
-     
-    const { error } = await (supabase as any).from("ai_usage").insert({
+    await db.insert(tables.aiUsage).values({
       tenant_id: tenantId,
       user_id: userId,
       model,
       prompt_tokens: promptTokens,
       completion_tokens: completionTokens,
-      cost_usd: parseFloat(costUsd.toFixed(4)),
+      cost_usd: costUsd.toFixed(4),
     });
-    if (error) {
-      console.error("[budget] Failed to record AI usage:", error.code);
-    }
   } catch (e) {
     const name = e instanceof Error ? e.name : "UnknownError";
     console.error("[budget] Exception recording AI usage:", name);

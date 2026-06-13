@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { and, asc, eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { tables } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 
@@ -9,18 +12,32 @@ const UpdateGmailAccountSchema = z.object({
   enabled: z.boolean(),
 });
 
+const t = tables.gmailAccounts;
+
+const ACCOUNT_COLUMNS = {
+  id: t.id,
+  email: t.email,
+  enabled: t.enabled,
+  last_connected_at: t.last_connected_at,
+  last_error: t.last_error,
+  created_at: t.created_at,
+};
+
 export async function GET() {
   try {
-    const { supabase, userRow } = await requireAdmin();
-    const { data, error } = await (supabase as any)
-      .from("gmail_accounts")
-      .select("id,email,enabled,last_connected_at,last_error,created_at")
-      .eq("tenant_id", userRow.tenant_id)
-      .order("created_at", { ascending: true });
+    const { db, userRow } = await requireAdmin();
 
-    if (error) {
-      if (error.code === "42P01") return ok({ accounts: [] });
-      console.error("[admin/gmail-accounts GET]", error.code);
+    let data;
+    try {
+      data = await db
+        .select(ACCOUNT_COLUMNS)
+        .from(t)
+        .where(eq(t.tenant_id, userRow.tenant_id))
+        .orderBy(asc(t.created_at));
+    } catch (e) {
+      const code = (e as { code?: string })?.code;
+      if (code === "42P01") return ok({ accounts: [] });
+      console.error("[admin/gmail-accounts GET]", code ?? "unknown");
       return err("INTERNAL_ERROR");
     }
 
@@ -32,25 +49,39 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { supabase, userRow } = await requireAdmin();
+    const { db, userRow } = await requireAdmin();
     const parsed = UpdateGmailAccountSchema.safeParse(await request.json());
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
     }
 
-    const { data, error } = await (supabase as any)
-      .from("gmail_accounts")
-      .update({
-        enabled: parsed.data.enabled,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", parsed.data.id)
-      .eq("tenant_id", userRow.tenant_id)
-      .select("id,email,enabled,last_connected_at,last_error,created_at")
-      .single();
+    let data;
+    try {
+      data = firstRow(
+        await db
+          .update(t)
+          .set({
+            enabled: parsed.data.enabled,
+            updated_at: new Date().toISOString(),
+          })
+          .where(
+            and(
+              eq(t.id, parsed.data.id),
+              eq(t.tenant_id, userRow.tenant_id)
+            )
+          )
+          .returning(ACCOUNT_COLUMNS)
+      );
+    } catch (e) {
+      console.error(
+        "[admin/gmail-accounts PATCH]",
+        (e as { code?: string })?.code ?? "unknown"
+      );
+      return err("INTERNAL_ERROR");
+    }
 
-    if (error || !data) {
-      console.error("[admin/gmail-accounts PATCH]", error?.code ?? "no_data");
+    if (!data) {
+      console.error("[admin/gmail-accounts PATCH]", "no_data");
       return err("INTERNAL_ERROR");
     }
 
@@ -62,18 +93,19 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { supabase, userRow } = await requireAdmin();
+    const { db, userRow } = await requireAdmin();
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new AppError("VALIDATION_FAILED");
 
-    const { error } = await (supabase as any)
-      .from("gmail_accounts")
-      .delete()
-      .eq("id", id)
-      .eq("tenant_id", userRow.tenant_id);
-
-    if (error) {
-      console.error("[admin/gmail-accounts DELETE]", error.code);
+    try {
+      await db
+        .delete(t)
+        .where(and(eq(t.id, id), eq(t.tenant_id, userRow.tenant_id)));
+    } catch (e) {
+      console.error(
+        "[admin/gmail-accounts DELETE]",
+        (e as { code?: string })?.code ?? "unknown"
+      );
       return err("INTERNAL_ERROR");
     }
 
@@ -82,4 +114,3 @@ export async function DELETE(request: NextRequest) {
     return err(e);
   }
 }
-

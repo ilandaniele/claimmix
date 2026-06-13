@@ -6,64 +6,29 @@
  *       with conflictValue populated.
  * AC10: Missing required fields drive status='info_faltante'.
  *
- * All DB calls are mocked — no real Supabase connection needed.
+ * All DB calls are mocked via vi.mock("@/lib/db") — no real DB connection needed.
  */
 
-import { describe, it, expect } from "vitest";
+// vi.mock() must be at module top level — Vitest hoists these calls.
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  },
+  tables: {},
+}));
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { db } from "@/lib/db";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
-
-// ── Mock Supabase builder ─────────────────────────────────────────────────────
-
-/**
- * Build a mock Supabase client that returns:
- *   - missingDocRows for .from('missing_docs').select(...).eq(...).is(...)
- *   - confirmationRows for .from('claim_field_confirmations').select(...).eq(...).eq(...)
- */
-function buildMockSupabase(
-  missingDocRows: Array<{ doc_key: string }>,
-  confirmationRows: Array<{
-    field_key: string;
-    proposed_value: string | null;
-    conflict_with_value: string | null;
-    confidence: number;
-  }>
-) {
-  return {
-    from: (table: string) => {
-      if (table === "missing_docs") {
-        return {
-          select: () => ({
-            eq: () => ({
-              is: () => Promise.resolve({ data: missingDocRows, error: null }),
-            }),
-          }),
-        };
-      }
-      if (table === "claim_field_confirmations") {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => Promise.resolve({ data: confirmationRows, error: null }),
-            }),
-          }),
-        };
-      }
-      return {
-        select: () => ({
-          eq: () => ({
-            eq: () => Promise.resolve({ data: [], error: null }),
-            is: () => Promise.resolve({ data: [], error: null }),
-          }),
-        }),
-      };
-    },
-  };
-}
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const CASE_ID = "aaaaaaaa-0000-0000-0000-000000000001";
+const TENANT_ID = "bbbbbbbb-0000-0000-0000-000000000001";
 
 /** All required fields at high confidence — no missing docs, no pending confirmations. */
 const FULL_HIGH_CONFIDENCE_FIELDS: ExtractedField[] = [
@@ -74,12 +39,50 @@ const FULL_HIGH_CONFIDENCE_FIELDS: ExtractedField[] = [
   { field_key: "claim_type",           field_value: "choque",           confidence: 0.90, source: "ai" },
 ];
 
+/**
+ * Configure db.select mock for two sequential calls:
+ *   1st call → missing_docs (returns missingDocRows)
+ *   2nd call → claim_field_confirmations (returns confirmationRows)
+ */
+function setupDbMocks(
+  missingDocRows: Array<{ doc_key: string }>,
+  confirmationRows: Array<{
+    field_key: string;
+    proposed_value: string | null;
+    conflict_with_value: string | null;
+    confidence: number;
+  }>
+) {
+  let callCount = 0;
+  vi.mocked(db.select).mockImplementation(() => {
+    callCount++;
+    if (callCount === 1) {
+      // missing_docs query: db.select({doc_key:...}).from(...).where(and(...))
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(missingDocRows),
+        }),
+      } as any;
+    }
+    // claim_field_confirmations query: db.select({...}).from(...).where(and(...))
+    return {
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(confirmationRows),
+      }),
+    } as any;
+  });
+}
+
 // ── Test suite: Complete claim → listo_para_core ──────────────────────────────
 
 describe("analyzeEmailClaimGaps — complete claim", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("returns listo_para_core when all required fields are present at high confidence", async () => {
-    const supabase = buildMockSupabase([], []);
-    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, supabase as any);
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, TENANT_ID);
 
     expect(result.status).toBe("listo_para_core");
     expect(result.isComplete).toBe(true);
@@ -95,8 +98,8 @@ describe("analyzeEmailClaimGaps — complete claim", () => {
       { field_key: "accident_description", field_value: "Robo del vehículo", confidence: 0.87, source: "ai" },
       { field_key: "claim_type",           field_value: "robo",        confidence: 0.89, source: "ai" },
     ];
-    const supabase = buildMockSupabase([], []);
-    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsWithPhone, supabase as any);
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsWithPhone, TENANT_ID);
 
     expect(result.status).toBe("listo_para_core");
     expect(result.isComplete).toBe(true);
@@ -106,6 +109,10 @@ describe("analyzeEmailClaimGaps — complete claim", () => {
 // ── Test suite: Missing required field → info_faltante ───────────────────────
 
 describe("analyzeEmailClaimGaps — missing required field", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("returns info_faltante when accident_date is absent", async () => {
     const fieldsNoDate: ExtractedField[] = [
       { field_key: "full_name",            field_value: "Juan Pérez",       confidence: 0.92, source: "ai" },
@@ -113,8 +120,8 @@ describe("analyzeEmailClaimGaps — missing required field", () => {
       { field_key: "accident_description", field_value: "Choque en calle",  confidence: 0.88, source: "ai" },
       { field_key: "claim_type",           field_value: "choque",           confidence: 0.90, source: "ai" },
     ];
-    const supabase = buildMockSupabase([], []);
-    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoDate, supabase as any);
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoDate, TENANT_ID);
 
     expect(result.status).toBe("info_faltante");
     expect(result.isComplete).toBe(false);
@@ -122,17 +129,12 @@ describe("analyzeEmailClaimGaps — missing required field", () => {
   });
 
   it("returns info_faltante when accident_date is in missing_docs (still unresolved)", async () => {
-    const supabase = buildMockSupabase([{ doc_key: "accident_date" }], []);
-    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, supabase as any);
-
-    // full fields present but DB says accident_date is missing — still info_faltante
-    // (missing_docs takes priority when extracted field is absent)
-    // Note: FULL_HIGH_CONFIDENCE_FIELDS includes accident_date, so it should resolve.
     // Test the case where fields are absent:
     const fieldsNoDate: ExtractedField[] = FULL_HIGH_CONFIDENCE_FIELDS.filter(
       (f) => f.field_key !== "accident_date"
     );
-    const result2 = await analyzeEmailClaimGaps(CASE_ID, fieldsNoDate, supabase as any);
+    setupDbMocks([{ doc_key: "accident_date" }], []);
+    const result2 = await analyzeEmailClaimGaps(CASE_ID, fieldsNoDate, TENANT_ID);
     expect(result2.status).toBe("info_faltante");
     expect(result2.missingRequiredFields).toContain("accident_date");
   });
@@ -141,8 +143,8 @@ describe("analyzeEmailClaimGaps — missing required field", () => {
     const fieldsNoName: ExtractedField[] = FULL_HIGH_CONFIDENCE_FIELDS.filter(
       (f) => f.field_key !== "full_name"
     );
-    const supabase = buildMockSupabase([], []);
-    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoName, supabase as any);
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoName, TENANT_ID);
 
     expect(result.status).toBe("info_faltante");
     expect(result.missingRequiredFields).toContain("full_name");
@@ -152,8 +154,8 @@ describe("analyzeEmailClaimGaps — missing required field", () => {
     const fieldsNoContact: ExtractedField[] = FULL_HIGH_CONFIDENCE_FIELDS.filter(
       (f) => f.field_key !== "email" && f.field_key !== "phone"
     );
-    const supabase = buildMockSupabase([], []);
-    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoContact, supabase as any);
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoContact, TENANT_ID);
 
     expect(result.status).toBe("info_faltante");
     // email_or_phone missing-contact sentinel is included
@@ -168,8 +170,8 @@ describe("analyzeEmailClaimGaps — missing required field", () => {
     const confirmationRows = [
       { field_key: "full_name", proposed_value: "Juan Pérez", conflict_with_value: null, confidence: 0.72 },
     ];
-    const supabase = buildMockSupabase([], confirmationRows);
-    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoDate, supabase as any);
+    setupDbMocks([], confirmationRows);
+    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoDate, TENANT_ID);
 
     // info_faltante > confirmacion_pendiente
     expect(result.status).toBe("info_faltante");
@@ -179,6 +181,10 @@ describe("analyzeEmailClaimGaps — missing required field", () => {
 // ── Test suite: Pending confirmation → confirmacion_pendiente ─────────────────
 
 describe("analyzeEmailClaimGaps — pending confirmation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("returns confirmacion_pendiente when claim_field_confirmations has a pending row", async () => {
     const confirmationRows = [
       {
@@ -188,8 +194,8 @@ describe("analyzeEmailClaimGaps — pending confirmation", () => {
         confidence: 0.72,
       },
     ];
-    const supabase = buildMockSupabase([], confirmationRows);
-    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, supabase as any);
+    setupDbMocks([], confirmationRows);
+    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, TENANT_ID);
 
     expect(result.status).toBe("confirmacion_pendiente");
     expect(result.isComplete).toBe(false);
@@ -207,8 +213,8 @@ describe("analyzeEmailClaimGaps — pending confirmation", () => {
       { field_key: "accident_description", field_value: "Choque en calle",  confidence: 0.88, source: "ai" },
       { field_key: "claim_type",           field_value: "choque",           confidence: 0.90, source: "ai" },
     ];
-    const supabase = buildMockSupabase([], []);
-    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsWithMediumConfidence, supabase as any);
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsWithMediumConfidence, TENANT_ID);
 
     expect(result.status).toBe("confirmacion_pendiente");
     const nameConfirmation = result.fieldsNeedingConfirmation.find(
@@ -223,8 +229,8 @@ describe("analyzeEmailClaimGaps — pending confirmation", () => {
       { field_key: "full_name", proposed_value: "Juan Pérez", conflict_with_value: null, confidence: 0.72 },
       { field_key: "policy_number", proposed_value: "POL-9999", conflict_with_value: null, confidence: 0.65 },
     ];
-    const supabase = buildMockSupabase([], confirmationRows);
-    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, supabase as any);
+    setupDbMocks([], confirmationRows);
+    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, TENANT_ID);
 
     expect(result.status).toBe("confirmacion_pendiente");
     expect(result.fieldsNeedingConfirmation.length).toBeGreaterThanOrEqual(2);
@@ -234,6 +240,10 @@ describe("analyzeEmailClaimGaps — pending confirmation", () => {
 // ── Test suite: Conflict rows — AC9 ──────────────────────────────────────────
 
 describe("analyzeEmailClaimGaps — conflict rows (AC9)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("includes conflictValue when claim_field_confirmations has conflict_with_value", async () => {
     const confirmationRows = [
       {
@@ -243,8 +253,8 @@ describe("analyzeEmailClaimGaps — conflict rows (AC9)", () => {
         confidence: 0.90,
       },
     ];
-    const supabase = buildMockSupabase([], confirmationRows);
-    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, supabase as any);
+    setupDbMocks([], confirmationRows);
+    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, TENANT_ID);
 
     expect(result.status).toBe("confirmacion_pendiente");
     const conflictField = result.fieldsNeedingConfirmation.find(
@@ -265,8 +275,8 @@ describe("analyzeEmailClaimGaps — conflict rows (AC9)", () => {
         confidence: 0.92, // high confidence but still a conflict
       },
     ];
-    const supabase = buildMockSupabase([], confirmationRows);
-    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, supabase as any);
+    setupDbMocks([], confirmationRows);
+    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, TENANT_ID);
 
     const conflictField = result.fieldsNeedingConfirmation.find(
       (f) => f.fieldName === "full_name"
@@ -286,8 +296,8 @@ describe("analyzeEmailClaimGaps — conflict rows (AC9)", () => {
         confidence: 0.90,
       },
     ];
-    const supabase = buildMockSupabase([], confirmationRows);
-    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoDate, supabase as any);
+    setupDbMocks([], confirmationRows);
+    const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoDate, TENANT_ID);
 
     // info_faltante takes priority over conflict confirmations
     expect(result.status).toBe("info_faltante");
@@ -298,20 +308,20 @@ describe("analyzeEmailClaimGaps — conflict rows (AC9)", () => {
 // ── Test suite: DB error handling ─────────────────────────────────────────────
 
 describe("analyzeEmailClaimGaps — error handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("degrades gracefully when DB query fails (returns info_faltante for safety)", async () => {
-    const errorSupabase = {
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            is: () => Promise.resolve({ data: null, error: { code: "PGRST301" } }),
-            eq: () => Promise.resolve({ data: null, error: { code: "PGRST301" } }),
-          }),
-        }),
+    // Both queries reject — gap-analyzer catches errors and returns []
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockRejectedValue({ code: "PGRST301" }),
       }),
-    };
+    } as any);
 
     // With no extracted fields and no DB data (error state), should handle gracefully
-    const result = await analyzeEmailClaimGaps(CASE_ID, [], errorSupabase as any);
+    const result = await analyzeEmailClaimGaps(CASE_ID, [], TENANT_ID);
 
     // All required fields missing → info_faltante
     expect(result.status).toBe("info_faltante");

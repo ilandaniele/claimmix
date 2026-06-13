@@ -2,9 +2,9 @@
 
 import { useT } from "@/lib/i18n/LocaleContext";
 import { esAR, type TranslationKey } from "@/lib/i18n";
-import type { Database } from "@/lib/supabase/types";
+import type { MissingDocRow } from "@/lib/db/types";
 
-type MissingDoc = Database["public"]["Tables"]["missing_docs"]["Row"];
+type MissingDoc = MissingDocRow;
 
 interface MissingDocsListProps {
   docs: MissingDoc[];

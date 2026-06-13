@@ -1,8 +1,8 @@
 /**
- * Supabase Storage client for the `claim-attachments` bucket.
+ * Cloudflare R2 (S3-compatible) client for the `claim-attachments` bucket.
  *
- * Uses the service-role key so uploads bypass RLS (uploads are system-actor
- * operations, not user-actor). Service-role key is NEVER exposed to the client.
+ * Uses server-only R2 credentials so uploads are system-actor operations.
+ * Credentials are NEVER exposed to the client.
  *
  * Storage path convention (IC2):
  *   {tenant_id}/{case_id}/{message_id}/{random8hex}-{sanitized_filename}
@@ -14,36 +14,45 @@
  */
 
 import "server-only";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { createHash } from "crypto";
 import { sanitizeFilename } from "@/server/email/attachment-validator";
 
-const BUCKET = "claim-attachments";
+/** Bucket name — resolved at call time so env-var overrides in tests work. */
+function bucketName(): string {
+  return process.env.R2_BUCKET || "claim-attachments";
+}
 
 // ── Storage client factory ───────────────────────────────────────────────────
 
-/**
- * Create a Supabase client with the service-role key.
- *
- * Called once per request — not a module-level singleton, so env-var overrides
- * in tests work correctly between test cases.
- */
-export function createStorageClient(): SupabaseClient {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let client: S3Client | null = null;
 
-  if (!url || !key) {
+/**
+ * Return the R2 (S3-compatible) client.
+ *
+ * Lazy-init singleton: the client is created (and env vars validated) on first
+ * use, NOT at import time — so CI builds without R2 credentials still pass.
+ */
+export function createStorageClient(): S3Client {
+  if (client) return client;
+
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+
+  if (!accountId || !accessKeyId || !secretAccessKey) {
     throw new Error(
-      "[claim-attachments-bucket] NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set."
+      "[claim-attachments-bucket] R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY must be set."
     );
   }
 
-  return createClient(url, key, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
+  client = new S3Client({
+    region: "auto",
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: { accessKeyId, secretAccessKey },
   });
+
+  return client;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -62,14 +71,15 @@ export type UploadAttachmentResult =
   | { error: string };
 
 /**
- * Upload a single attachment Buffer to Supabase Storage.
+ * Upload a single attachment Buffer to Cloudflare R2.
  *
  * The storage path is deterministic given the same messageId + sanitized filename,
  * but the 8-byte hex prefix in sanitizeFilename() guarantees uniqueness even when
  * the same filename is sent twice in different messages.
  *
- * upsert: false — duplicate uploads within the same message will fail fast with
- * a storage error, which the caller converts to { stored: false, reason: 'storage_upload_failed' }.
+ * IfNoneMatch: "*" — duplicate uploads to the same key fail fast with a 412
+ * PreconditionFailed (equivalent of Supabase upsert: false), which the caller
+ * converts to { stored: false, reason: 'storage_upload_failed' }.
  * Deduplication by content_hash (AC10) prevents reaching this path for true duplicates.
  */
 export async function uploadAttachment(
@@ -80,18 +90,25 @@ export async function uploadAttachment(
   const sanitizedName = sanitizeFilename(filename);
   const storagePath = `${tenantId}/${caseId}/${messageId}/${sanitizedName}`;
 
-  const supabase = createStorageClient();
-
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(storagePath, data, {
-      contentType,
-      upsert: false,
-    });
-
-  if (error) {
-    // Log storage error code only — path may contain tenant/case IDs but not PII.
-    console.error("[claim-attachments-bucket] Upload failed:", (error as any).statusCode ?? "unknown"); // crew-debug-ok
+  try {
+    const s3 = createStorageClient();
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: bucketName(),
+        Key: storagePath,
+        Body: data,
+        ContentType: contentType,
+        // Fail when the key already exists (replicates Supabase upsert: false).
+        IfNoneMatch: "*",
+      })
+    );
+  } catch (error) {
+    // Log status code only — path may contain tenant/case IDs but not PII.
+    // 412 PreconditionFailed = key already exists (duplicate upload).
+    const statusCode =
+      (error as { $metadata?: { httpStatusCode?: number } })?.$metadata
+        ?.httpStatusCode ?? "unknown";
+    console.error("[claim-attachments-bucket] Upload failed:", statusCode); // crew-debug-ok
     return { error: "STORAGE_UPLOAD_FAILED" };
   }
 

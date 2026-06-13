@@ -16,8 +16,11 @@
  */
 
 import { type NextRequest, after } from "next/server";
-import { createServerClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { cases, rawMessages, users } from "@/lib/db/schema";
+import { getSessionContext } from "@/lib/auth/session";
 import { SimulateIntakeSchema } from "@/lib/schemas/intake";
 import { getScenarioById } from "@/server/intake/scenarios";
 import { runExtractionWorker } from "@/server/worker/extract";
@@ -31,10 +34,7 @@ import {
   buildUserKey,
   getClientIp,
 } from "@/lib/rate-limit/index";
-import type { Database } from "@/lib/supabase/types";
 import type { ClaimType } from "@/lib/schemas/cases";
-
-type UserRow = Database["public"]["Tables"]["users"]["Row"];
 
 function scheduleAfterResponse(task: () => Promise<void>): void {
   try {
@@ -52,23 +52,16 @@ function scheduleAfterResponse(task: () => Promise<void>): void {
 
 export async function POST(request: NextRequest): Promise<Response> {
   // ── 1. Auth ─────────────────────────────────────────────────────────────────
-  const supabase = await createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await getSessionContext();
+  const user = session?.user;
 
   if (!user) {
     return err(new AppError("MISSING_SESSION"));
   }
 
-   
-  const { data: userRowRaw } = await (supabase as any)
-    .from("users")
-    .select("*")
-    .eq("id", user.id)
-    .single();
-
-  const userRow = userRowRaw as UserRow | null;
+  const userRow = firstRow(
+    await db.select().from(users).where(eq(users.id, user.id)).limit(1)
+  );
   if (!userRow) {
     return err(new AppError("MISSING_SESSION"));
   }
@@ -167,45 +160,50 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  // ── 6. Create case + raw_message in DB (service role for reliability) ────────
-  const serviceSupabase = createServiceClient();
-
-   
-  const { data: newCase, error: caseError } = await (serviceSupabase as any)
-    .from("cases")
-    .insert({
-      tenant_id: userRow.tenant_id,
-      policy_number: policyNumber,
-      policyholder_name: policyholderName,
-      claim_type: claimType,
-      status: "procesando",
-      confidence_min: null,
-      assigned_to: userRow.id,
-      channel: "email_sim",
-    })
-    .select("id")
-    .single();
-
-  if (caseError || !newCase) {
-    console.error("[intake/simulate] Failed to create case:", caseError?.code);
+  // ── 6. Create case + raw_message in DB ───────────────────────────────────────
+  let caseId: string;
+  try {
+    const newCase = firstRow(
+      await db
+        .insert(cases)
+        .values({
+          tenant_id: userRow.tenant_id,
+          policy_number: policyNumber,
+          policyholder_name: policyholderName,
+          claim_type: claimType,
+          status: "procesando",
+          confidence_min: null,
+          assigned_to: userRow.id,
+          channel: "email_sim",
+        })
+        .returning({ id: cases.id })
+    );
+    if (!newCase) {
+      console.error("[intake/simulate] Failed to create case: no_row");
+      return err(new AppError("INTERNAL_ERROR"));
+    }
+    caseId = newCase.id;
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    console.error("[intake/simulate] Failed to create case:", code);
     return err(new AppError("INTERNAL_ERROR"));
   }
 
-  const caseId = (newCase as { id: string }).id;
-
   // Create raw_message row (stores full email body verbatim — PII stored, never logged).
-   
-  const { error: rawMsgError } = await (serviceSupabase as any).from("raw_messages").insert({
-    case_id: caseId,
-    tenant_id: userRow.tenant_id,
-    channel: "email_sim",
-    from_addr: policyholderName ? `${policyholderName.toLowerCase().replace(/\s+/g, ".")}@example.com` : null,
-    subject: `[email_sim] Siniestro - ${claimType} - ${input.scenario_id ?? "custom"}`,
-    body: rawText,
-  });
-
-  if (rawMsgError) {
-    console.error("[intake/simulate] Failed to create raw_message:", rawMsgError.code);
+  try {
+    await db.insert(rawMessages).values({
+      case_id: caseId,
+      tenant_id: userRow.tenant_id,
+      channel: "email_sim",
+      from_addr: policyholderName
+        ? `${policyholderName.toLowerCase().replace(/\s+/g, ".")}@example.com`
+        : null,
+      subject: `[email_sim] Siniestro - ${claimType} - ${input.scenario_id ?? "custom"}`,
+      body: rawText,
+    });
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    console.error("[intake/simulate] Failed to create raw_message:", code);
     // Non-fatal — case still created; worker will fail gracefully.
   }
 

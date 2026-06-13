@@ -1,7 +1,7 @@
 /**
  * Unit tests for orchestratePostExtraction.
  *
- * All DB calls and email dispatches are mocked — no real Supabase or Gmail.
+ * All DB calls and email dispatches are mocked — no real DB or Gmail.
  *
  * AC7:  Medium-confidence field → inserts claim_field_confirmations row + logs CONFIRMATION_REQUESTED
  * AC9:  Customer conflict → sets confirmacion_pendiente + dispatches data_confirmation_request
@@ -16,6 +16,24 @@ import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
+
+// Mock the entire @/lib/db module — drizzle requires DATABASE_URL at init time
+// which is not available in unit tests. We provide a chainable mock instead.
+vi.mock("@/lib/db", () => {
+  const mockDb = {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+  };
+  return { db: mockDb, tables: {} };
+});
+
+// Mock @/lib/db/helpers — firstRow just returns rows[0] ?? null, safe to mock.
+vi.mock("@/lib/db/helpers", () => ({
+  firstRow: (rows: unknown[]) => rows[0] ?? null,
+  ilikeAny: vi.fn(),
+  countRows: vi.fn(),
+}));
 
 // Mock dispatchOutboundEmail so no real emails are sent.
 vi.mock("@/server/email/dispatch", () => ({
@@ -46,68 +64,87 @@ vi.mock("@/server/cases/gap-analyzer", () => ({
 
 // ── Import mocked modules for assertion ──────────────────────────────────────
 
+import { db } from "@/lib/db";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import { writeAuditLog } from "@/lib/audit/log";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 
-// ── Mock Supabase factory ─────────────────────────────────────────────────────
+// ── DB mock builder ───────────────────────────────────────────────────────────
+
+type MockDb = {
+  select: ReturnType<typeof vi.fn>;
+  insert: ReturnType<typeof vi.fn>;
+  update: ReturnType<typeof vi.fn>;
+};
+
+// Drizzle stores the table name at Symbol.for("drizzle:Name").
+const DRIZZLE_NAME = Symbol.for("drizzle:Name");
+
+/** Extract the underlying table name from a drizzle table object. */
+function getTableName(table: unknown): string {
+  return (table as Record<symbol, string>)[DRIZZLE_NAME] ?? "";
+}
 
 /**
- * Build a mock Supabase client.
- *   outboundMessagesRows: what .from('outbound_messages').select('id').eq(...).eq(...).limit(1) returns
- *                         (used for confirmation_received idempotency check)
- *   caseUpdateSpy: tracks .from('cases').update(...).eq(...) calls
- *   confirmationUpsertSpy: tracks .from('claim_field_confirmations').upsert(...) calls
+ * Configure the db mock chains for a single test.
+ *
+ * orchestrate.ts uses three chain patterns:
+ *   1. db.select({id}).from(claimFieldConfirmations).where(...).limit(1)
+ *      → returns [] (no existing row) so upsertFieldConfirmation takes the insert path
+ *   2. db.select({id}).from(outboundMessages).where(...).limit(1)
+ *      → controlled by outboundMessagesRows
+ *   3. db.update(cases|claimFieldConfirmations).set({...}).where(...)
+ *      → tracked by updateSpy
+ *   4. db.insert(claimFieldConfirmations).values({...})
+ *      → tracked by insertSpy
+ *
+ * The from() call differentiates which table by reading the drizzle
+ * Symbol.for("drizzle:Name") property on the real table object.
  */
-function buildMockSupabase({
-  outboundMessagesRows = [] as any[],
-  caseUpdateSpy = vi.fn().mockResolvedValue({ error: null }),
-  confirmationUpsertSpy = vi.fn().mockResolvedValue({ error: null }),
+function setupDbMocks({
+  outboundMessagesRows = [] as Array<{ id: string }>,
 } = {}) {
-  const upsert = confirmationUpsertSpy;
-  const updateCase = caseUpdateSpy;
+  const mockDbTyped = db as MockDb;
 
-  return {
-    from: (table: string) => {
-      if (table === "cases") {
+  // Track all insert .values() and update .where() calls for assertions.
+  const insertSpy = vi.fn().mockResolvedValue([]);
+  const updateSpy = vi.fn().mockResolvedValue([]);
+
+  // db.select() returns a chainable builder; from() decides the result.
+  mockDbTyped.select.mockImplementation(() => ({
+    from: (table: unknown) => {
+      const tableName = getTableName(table);
+
+      if (tableName === "outbound_messages") {
         return {
-          update: (data: any) => ({
-            eq: (col: string, val: string) => updateCase(data, col, val),
+          where: () => ({
+            limit: () => Promise.resolve(outboundMessagesRows),
           }),
         };
       }
-      if (table === "claim_field_confirmations") {
-        return {
-          upsert: (data: any, opts: any) => upsert(data, opts),
-        };
-      }
-      if (table === "outbound_messages") {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                limit: () => Promise.resolve({ data: outboundMessagesRows, error: null }),
-              }),
-            }),
-          }),
-        };
-      }
+
+      // claim_field_confirmations (or any other table) — return empty so upsert inserts.
       return {
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              limit: () => Promise.resolve({ data: [], error: null }),
-            }),
-            is: () => Promise.resolve({ data: [], error: null }),
-          }),
+        where: () => ({
+          limit: () => Promise.resolve([]),
         }),
-        upsert: () => Promise.resolve({ error: null }),
-        update: () => ({ eq: () => Promise.resolve({ error: null }) }),
       };
     },
-    _updateCase: updateCase,
-    _confirmationUpsert: upsert,
-  };
+  }));
+
+  // db.insert(table).values({...}) — track all inserts.
+  mockDbTyped.insert.mockImplementation(() => ({
+    values: insertSpy,
+  }));
+
+  // db.update(table).set({...}).where(...) — track all updates.
+  mockDbTyped.update.mockImplementation(() => ({
+    set: (data: unknown) => ({
+      where: () => updateSpy(data),
+    }),
+  }));
+
+  return { insertSpy, updateSpy };
 }
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -121,6 +158,9 @@ const NO_MATCHES: CustomerMatch[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
+
+  // Set up default DB mock chains for every test.
+  setupDbMocks();
 
   // Reset gap analyzer to default (complete claim) for each test.
   vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
@@ -140,10 +180,8 @@ afterEach(() => {
 describe("orchestratePostExtraction — non-claim (is_claim=false)", () => {
   it("returns early without dispatching any emails when is_claim=false", async () => {
     const claim = extractEmailClaimMock({ is_claim: false });
-    const supabase = buildMockSupabase();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -156,18 +194,17 @@ describe("orchestratePostExtraction — non-claim (is_claim=false)", () => {
 
   it("does not update case status when is_claim=false", async () => {
     const claim = extractEmailClaimMock({ is_claim: false });
-    const caseUpdateSpy = vi.fn().mockResolvedValue({ error: null });
-    const supabase = buildMockSupabase({ caseUpdateSpy });
+    const { updateSpy } = setupDbMocks();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
       NO_MATCHES
     );
 
-    expect(caseUpdateSpy).not.toHaveBeenCalled();
+    // No DB update calls for non-claim.
+    expect(updateSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -176,10 +213,8 @@ describe("orchestratePostExtraction — non-claim (is_claim=false)", () => {
 describe("orchestratePostExtraction — high severity (AC11)", () => {
   it("dispatches specialist_escalation email for severity=high", async () => {
     const claim = extractEmailClaimMock({ severity: "high", requires_specialist: true });
-    const supabase = buildMockSupabase();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -196,10 +231,8 @@ describe("orchestratePostExtraction — high severity (AC11)", () => {
 
   it("dispatches specialist_escalation for severity=critical", async () => {
     const claim = extractEmailClaimMock({ severity: "critical", requires_specialist: true });
-    const supabase = buildMockSupabase();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -214,10 +247,8 @@ describe("orchestratePostExtraction — high severity (AC11)", () => {
 
   it("logs SPECIALIST_REQUIRED audit event for high severity", async () => {
     const claim = extractEmailClaimMock({ severity: "high", requires_specialist: true });
-    const supabase = buildMockSupabase();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -233,29 +264,27 @@ describe("orchestratePostExtraction — high severity (AC11)", () => {
 
   it("sets case status to requiere_especialista for high severity", async () => {
     const claim = extractEmailClaimMock({ severity: "critical", requires_specialist: true });
-    const caseUpdateSpy = vi.fn().mockResolvedValue({ error: null });
-    const supabase = buildMockSupabase({ caseUpdateSpy });
+    const { updateSpy } = setupDbMocks();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
       NO_MATCHES
     );
 
-    const statusUpdate = caseUpdateSpy.mock.calls.find(
-      (call) => call[0]?.status === "requiere_especialista"
+    // updateSpy receives the set({...}) data object.
+    const statusUpdate = updateSpy.mock.calls.find(
+      (call) => (call[0] as { status?: string })?.status === "requiere_especialista"
     );
     expect(statusUpdate).toBeDefined();
   });
 
   it("also dispatches confirmation_received for high severity claim (AC12)", async () => {
     const claim = extractEmailClaimMock({ severity: "high", requires_specialist: true });
-    const supabase = buildMockSupabase({ outboundMessagesRows: [] });
+    setupDbMocks({ outboundMessagesRows: [] });
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -281,21 +310,22 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
         { field_key: "full_name", field_value: "Juan Pérez", confidence: 0.72, source: "ai" as const },
       ],
     });
-    const confirmationUpsertSpy = vi.fn().mockResolvedValue({ error: null });
-    const supabase = buildMockSupabase({ confirmationUpsertSpy });
+    const { insertSpy } = setupDbMocks();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
       NO_MATCHES
     );
 
-    const upsertCall = confirmationUpsertSpy.mock.calls.find(
-      (call) => call[0]?.field_key === "full_name" || call[0]?.[0]?.field_key === "full_name"
-    );
-    expect(upsertCall).toBeDefined();
+    // insertSpy is called with the values object for the insert.
+    const insertCall = insertSpy.mock.calls.find((call) => {
+      const data = call[0] as { field_name?: string } | Array<{ field_name?: string }>;
+      const row = Array.isArray(data) ? data[0] : data;
+      return row?.field_name === "full_name";
+    });
+    expect(insertCall).toBeDefined();
   });
 
   it("logs CONFIRMATION_REQUESTED audit event for medium-confidence field", async () => {
@@ -306,10 +336,8 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
         { field_key: "accident_date", field_value: "2024-03-15", confidence: 0.70, source: "ai" as const },
       ],
     });
-    const supabase = buildMockSupabase();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -333,10 +361,8 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
         { field_key: "full_name", field_value: "Juan Pérez", confidence: 0.72, source: "ai" as const },
       ],
     });
-    const supabase = buildMockSupabase();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -370,9 +396,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
       conflictsWithExtracted: ["full_name"],
     };
 
-    const confirmationUpsertSpy = vi.fn().mockResolvedValue({ error: null });
-    const caseUpdateSpy = vi.fn().mockResolvedValue({ error: null });
-    const supabase = buildMockSupabase({ confirmationUpsertSpy, caseUpdateSpy });
+    const { insertSpy, updateSpy } = setupDbMocks();
 
     // Make gap analyzer return confirmacion_pendiente for conflict scenario.
     vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
@@ -390,25 +414,23 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
     });
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
       [conflictingMatch]
     );
 
-    // Confirmation row should be upserted for the conflict
-    const upsertCall = confirmationUpsertSpy.mock.calls.find((call) => {
-      const data = call[0];
-      return (
-        (data?.field_key === "full_name" || data?.[0]?.field_key === "full_name")
-      );
+    // Confirmation row should be inserted for the conflict.
+    const insertCall = insertSpy.mock.calls.find((call) => {
+      const data = call[0] as { field_name?: string } | Array<{ field_name?: string }>;
+      const row = Array.isArray(data) ? data[0] : data;
+      return row?.field_name === "full_name";
     });
-    expect(upsertCall).toBeDefined();
+    expect(insertCall).toBeDefined();
 
-    // Status should include confirmacion_pendiente
-    const pendingUpdate = caseUpdateSpy.mock.calls.find(
-      (call) => call[0]?.status === "confirmacion_pendiente"
+    // Status should include confirmacion_pendiente.
+    const pendingUpdate = updateSpy.mock.calls.find(
+      (call) => (call[0] as { status?: string })?.status === "confirmacion_pendiente"
     );
     expect(pendingUpdate).toBeDefined();
   });
@@ -429,10 +451,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
       conflictsWithExtracted: ["full_name"],
     };
 
-    const supabase = buildMockSupabase();
-
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -465,10 +484,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
       conflictsWithExtracted: ["full_name"],
     };
 
-    const supabase = buildMockSupabase();
-
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -497,10 +513,7 @@ describe("orchestratePostExtraction — missing required fields (AC10)", () => {
       status: "info_faltante",
     });
 
-    const supabase = buildMockSupabase();
-
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -524,19 +537,17 @@ describe("orchestratePostExtraction — missing required fields (AC10)", () => {
       status: "info_faltante",
     });
 
-    const caseUpdateSpy = vi.fn().mockResolvedValue({ error: null });
-    const supabase = buildMockSupabase({ caseUpdateSpy });
+    const { updateSpy } = setupDbMocks();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
       NO_MATCHES
     );
 
-    const infoFaltanteUpdate = caseUpdateSpy.mock.calls.find(
-      (call) => call[0]?.status === "info_faltante"
+    const infoFaltanteUpdate = updateSpy.mock.calls.find(
+      (call) => (call[0] as { status?: string })?.status === "info_faltante"
     );
     expect(infoFaltanteUpdate).toBeDefined();
   });
@@ -550,10 +561,7 @@ describe("orchestratePostExtraction — missing required fields (AC10)", () => {
       status: "info_faltante",
     });
 
-    const supabase = buildMockSupabase();
-
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -576,10 +584,7 @@ describe("orchestratePostExtraction — missing required fields (AC10)", () => {
       status: "info_faltante",
     });
 
-    const supabase = buildMockSupabase();
-
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -602,8 +607,7 @@ describe("orchestratePostExtraction — missing required fields (AC10)", () => {
 describe("orchestratePostExtraction — complete claim", () => {
   it("sets case status to listo_para_core when gap analysis returns complete", async () => {
     const claim = extractEmailClaimMock();
-    const caseUpdateSpy = vi.fn().mockResolvedValue({ error: null });
-    const supabase = buildMockSupabase({ caseUpdateSpy });
+    const { updateSpy } = setupDbMocks();
 
     // Default mock: listo_para_core
     vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
@@ -614,25 +618,22 @@ describe("orchestratePostExtraction — complete claim", () => {
     });
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
       NO_MATCHES
     );
 
-    const coreUpdate = caseUpdateSpy.mock.calls.find(
-      (call) => call[0]?.status === "listo_para_core"
+    const coreUpdate = updateSpy.mock.calls.find(
+      (call) => (call[0] as { status?: string })?.status === "listo_para_core"
     );
     expect(coreUpdate).toBeDefined();
   });
 
   it("does NOT dispatch missing_information_request for complete claim", async () => {
     const claim = extractEmailClaimMock();
-    const supabase = buildMockSupabase();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -651,10 +652,9 @@ describe("orchestratePostExtraction — complete claim", () => {
 describe("orchestratePostExtraction — confirmation_received (AC12)", () => {
   it("dispatches confirmation_received for any is_claim=true case", async () => {
     const claim = extractEmailClaimMock();
-    const supabase = buildMockSupabase({ outboundMessagesRows: [] });
+    setupDbMocks({ outboundMessagesRows: [] });
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -671,13 +671,10 @@ describe("orchestratePostExtraction — confirmation_received (AC12)", () => {
 
   it("does NOT dispatch confirmation_received if already sent (idempotency)", async () => {
     const claim = extractEmailClaimMock();
-    // Simulate existing confirmation_received outbound_messages row
-    const supabase = buildMockSupabase({
-      outboundMessagesRows: [{ id: "existing-msg-id" }],
-    });
+    // Simulate existing confirmation_received outbound_messages row.
+    setupDbMocks({ outboundMessagesRows: [{ id: "existing-msg-id" }] });
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -692,10 +689,9 @@ describe("orchestratePostExtraction — confirmation_received (AC12)", () => {
 
   it("dispatches confirmation_received even for medium-severity claim", async () => {
     const claim = extractEmailClaimMock({ severity: "medium" });
-    const supabase = buildMockSupabase({ outboundMessagesRows: [] });
+    setupDbMocks({ outboundMessagesRows: [] });
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -710,10 +706,9 @@ describe("orchestratePostExtraction — confirmation_received (AC12)", () => {
 
   it("confirmation_received email body references caseId and not DNI (AC24 contract)", async () => {
     const claim = extractEmailClaimMock();
-    const supabase = buildMockSupabase({ outboundMessagesRows: [] });
+    setupDbMocks({ outboundMessagesRows: [] });
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -732,80 +727,48 @@ describe("orchestratePostExtraction — confirmation_received (AC12)", () => {
 });
 
 // ── Test suite: checkConfirmationAlreadySent error branches ───────────────────
-// These tests cover lines 357-358 (DB error) and 363 (catch block) in orchestrate.ts
-// by providing a Supabase mock that returns an error or throws for outbound_messages.
+// These tests cover the DB error and catch branches in checkConfirmationAlreadySent
+// by configuring the db.select mock to return an error or throw.
 
 describe("orchestratePostExtraction — checkConfirmationAlreadySent error paths", () => {
-  it("sends confirmation_received when outbound_messages DB check returns error (fail open)", async () => {
-    // When the idempotency check errors, we fail open and send the email
+  it("sends confirmation_received when outbound_messages DB check throws (fail open)", async () => {
     const claim = extractEmailClaimMock();
 
-    const supabase = {
-      from: (table: string) => {
-        if (table === "outbound_messages") {
+    const mockDbTyped = db as MockDb;
+
+    // Override select to throw for outbound_messages queries.
+    mockDbTyped.select.mockImplementation(() => ({
+      from: (table: unknown) => {
+        const tableName = getTableName(table);
+        if (tableName === "outbound_messages") {
           return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({
-                  limit: () =>
-                    Promise.resolve({ data: null, error: { code: "PGRST001" } }),
-                }),
-              }),
+            where: () => ({
+              limit: () => Promise.reject(new Error("DB connection lost")),
             }),
           };
         }
-        // No other tables needed for this path
+        // claim_field_confirmations — return empty (no existing row).
         return {
-          update: () => ({ eq: () => Promise.resolve({ error: null }) }),
-          upsert: () => Promise.resolve({ error: null }),
-          select: () => ({ eq: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }) }) }),
+          where: () => ({
+            limit: () => Promise.resolve([]),
+          }),
         };
       },
-    };
+    }));
 
-    await orchestratePostExtraction(
-      supabase as any,
-      CASE_ID,
-      TENANT_ID,
-      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
-      NO_MATCHES
-    );
+    mockDbTyped.insert.mockImplementation(() => ({
+      values: vi.fn().mockResolvedValue([]),
+    }));
 
-    // Fail open: confirmation_received should still be dispatched
-    const confirmationCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
-      (call) => call[0].template === "confirmation_received"
-    );
-    expect(confirmationCall).toBeDefined();
-  });
+    mockDbTyped.update.mockImplementation(() => ({
+      set: () => ({
+        where: vi.fn().mockResolvedValue([]),
+      }),
+    }));
 
-  it("sends confirmation_received when outbound_messages check throws exception (catch branch)", async () => {
-    const claim = extractEmailClaimMock();
-
-    const supabase = {
-      from: (table: string) => {
-        if (table === "outbound_messages") {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({
-                  limit: () => Promise.reject(new Error("DB connection lost")),
-                }),
-              }),
-            }),
-          };
-        }
-        return {
-          update: () => ({ eq: () => Promise.resolve({ error: null }) }),
-          upsert: () => Promise.resolve({ error: null }),
-          select: () => ({ eq: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }) }) }),
-        };
-      },
-    };
-
-    // Should not throw — catch block returns false (fail open)
+    // Should not throw — catch block returns false (fail open).
     await expect(
       orchestratePostExtraction(
-        supabase as any,
         CASE_ID,
         TENANT_ID,
         { extractedClaim: claim, senderEmail: SENDER_EMAIL },
@@ -813,7 +776,25 @@ describe("orchestratePostExtraction — checkConfirmationAlreadySent error paths
       )
     ).resolves.toBeUndefined();
 
-    // Fail open: confirmation_received dispatched
+    // Fail open: confirmation_received dispatched.
+    const confirmationCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
+      (call) => call[0].template === "confirmation_received"
+    );
+    expect(confirmationCall).toBeDefined();
+  });
+
+  it("sends confirmation_received when outbound_messages check returns empty (no error path)", async () => {
+    // This covers the normal path where DB returns no rows — email is dispatched.
+    const claim = extractEmailClaimMock();
+    setupDbMocks({ outboundMessagesRows: [] });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
     const confirmationCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
       (call) => call[0].template === "confirmation_received"
     );
@@ -822,7 +803,7 @@ describe("orchestratePostExtraction — checkConfirmationAlreadySent error paths
 });
 
 // ── Test suite: getStoredFieldValue non-full_name branch ──────────────────────
-// Line 387: when fieldKey is NOT "full_name", getStoredFieldValue returns "".
+// When fieldKey is NOT "full_name", getStoredFieldValue returns "".
 // This is exercised when a conflict is detected on a non-full_name field (e.g. "email").
 
 describe("orchestratePostExtraction — getStoredFieldValue non-full_name field", () => {
@@ -842,28 +823,28 @@ describe("orchestratePostExtraction — getStoredFieldValue non-full_name field"
       conflictsWithExtracted: ["email"], // non-full_name conflict
     };
 
-    const confirmationUpsertSpy = vi.fn().mockResolvedValue({ error: null });
-    const supabase = buildMockSupabase({ confirmationUpsertSpy });
+    const { insertSpy } = setupDbMocks();
 
     await orchestratePostExtraction(
-      supabase as any,
       CASE_ID,
       TENANT_ID,
       { extractedClaim: claim, senderEmail: SENDER_EMAIL },
       [conflictOnEmail]
     );
 
-    // Confirm that a confirmation row was upserted for the email field
-    const emailConflictUpsert = confirmationUpsertSpy.mock.calls.find((call) => {
-      const data = call[0];
+    // Confirm that a confirmation row was inserted for the email field.
+    const emailConflictInsert = insertSpy.mock.calls.find((call) => {
+      const data = call[0] as { field_name?: string } | Array<{ field_name?: string }>;
       const row = Array.isArray(data) ? data[0] : data;
-      return row?.field_key === "email";
+      return row?.field_name === "email";
     });
-    expect(emailConflictUpsert).toBeDefined();
-    // conflict_with_value should be "" for non-full_name fields (getStoredFieldValue fallback)
-    const row = Array.isArray(emailConflictUpsert?.[0])
-      ? emailConflictUpsert[0][0]
-      : emailConflictUpsert?.[0];
+    expect(emailConflictInsert).toBeDefined();
+
+    // conflict_with_value should be "" for non-full_name fields (getStoredFieldValue fallback).
+    const insertData = emailConflictInsert?.[0] as
+      | { conflict_with_value?: string }
+      | Array<{ conflict_with_value?: string }>;
+    const row = Array.isArray(insertData) ? insertData[0] : insertData;
     expect(row?.conflict_with_value ?? "").toBe("");
   });
 });

@@ -3,9 +3,19 @@
 import { formatDate } from "@/lib/utils";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { esAR, type TranslationKey } from "@/lib/i18n";
-import type { Database } from "@/lib/supabase/types";
 
-type AuditLogRow = Database["public"]["Tables"]["audit_log"]["Row"];
+interface AuditLogRow {
+  id: number;
+  tenant_id: string;
+  actor_id: string | null;
+  event_type: string;
+  target_type: string | null;
+  target_id: string | null;
+  payload: Record<string, unknown>;
+  ip: string | null;
+  ua: string | null;
+  created_at: string;
+}
 
 interface AuditTimelineProps {
   events: AuditLogRow[];

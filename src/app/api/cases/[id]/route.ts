@@ -5,10 +5,16 @@
  * AC10: Wrong-tenant case returns 404 NOT_FOUND (never 403) — IDOR prevention.
  * AC14: Detail returns extracted_fields[], missing_docs[], audit_log[] (last 20, desc).
  * AC15: PATCH writes audit_log entry; wrong-tenant PATCH returns 404.
+ *
+ * RLS is gone — every query filters explicitly by the caller's tenant_id.
  */
 
 import { type NextRequest } from "next/server";
-import { createServerClient } from "@/lib/supabase/server";
+import { and, eq } from "drizzle-orm";
+import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { cases } from "@/lib/db/schema";
 import { CasePatchSchema } from "@/lib/schemas/cases";
 import { getCaseDetail } from "@/server/cases/get";
 import { patchCase } from "@/server/cases/patch";
@@ -20,28 +26,26 @@ import {
   buildUserKey,
   getClientIp,
 } from "@/lib/rate-limit/index";
-import type { Database } from "@/lib/supabase/types";
+import type { CaseRow } from "@/lib/db/types";
 import { z } from "zod";
-
-type UserRow = Database["public"]["Tables"]["users"]["Row"];
 
 // ── Shared: resolve authenticated user + their public.users row ───────────────
 
-async function resolveUser(supabase: Awaited<ReturnType<typeof createServerClient>>) {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+async function resolveContext(): Promise<RoleContext | null> {
+  try {
+    return await requireRole(...ALL_ROLES);
+  } catch {
+    return null;
+  }
+}
 
-  if (!user) return null;
-
-   
-  const { data: userRowRaw } = await (supabase as any)
-    .from("users")
-    .select("*")
-    .eq("id", user.id)
-    .single();
-
-  return userRowRaw as UserRow | null;
+/** Drizzle numeric → string; convert confidence_min back to number for the JSON shape. */
+function serializeCase(row: CaseRow) {
+  return {
+    ...row,
+    confidence_min:
+      row.confidence_min === null ? null : Number(row.confidence_min),
+  };
 }
 
 // ── Route params schema ───────────────────────────────────────────────────────
@@ -57,12 +61,11 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
-  const supabase = await createServerClient();
-  const userRow = await resolveUser(supabase);
-
-  if (!userRow) {
+  const ctx = await resolveContext();
+  if (!ctx) {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
+  const { userRow } = ctx;
 
   // ── 2. Rate limit ─────────────────────────────────────────────────────────
   const rlKey = buildUserKey(userRow.id, "cases-get");
@@ -80,14 +83,23 @@ export async function GET(
 
   const { id: caseId } = parsedParams.data;
 
-  // ── 4. Fetch case detail (RLS-scoped) ────────────────────────────────────
+  // ── 4. Fetch case detail (explicit tenant_id filter) ─────────────────────
   try {
-    const detail = await getCaseDetail(supabase, caseId);
+    const detail = await getCaseDetail(userRow.tenant_id, caseId);
     if (!detail) {
       // Case not found OR belongs to different tenant — always 404, never 403.
       return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
     }
-    return ok(detail);
+    // numeric columns come back as strings from Drizzle — convert so the JSON
+    // shape matches the previous PostgREST response (numbers).
+    return ok({
+      ...detail,
+      case: serializeCase(detail.case),
+      extracted_fields: detail.extracted_fields.map((f) => ({
+        ...f,
+        confidence: Number(f.confidence),
+      })),
+    });
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
     console.error("[GET /api/cases/:id] error:", errName);
@@ -102,15 +114,14 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> }
 ) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
-  const supabase = await createServerClient();
-  const userRow = await resolveUser(supabase);
-
-  if (!userRow) {
+  const ctx = await resolveContext();
+  if (!ctx) {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
+  const { userRow } = ctx;
 
   // Viewers are read-only.
-  if ((userRow as { role?: string }).role === "viewer") {
+  if (userRow.role === "viewer") {
     return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
   }
 
@@ -131,27 +142,28 @@ export async function DELETE(
   const { id: caseId } = parsedParams.data;
 
   // ── 4. Verify case exists and belongs to tenant (IDOR) ────────────────────
-  const { data: existing } = await (supabase as any)
-    .from("cases")
-    .select("id, tenant_id")
-    .eq("id", caseId)
-    .single();
+  let existing: { id: string } | null;
+  try {
+    existing = firstRow(
+      await db
+        .select({ id: cases.id })
+        .from(cases)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
+        .limit(1)
+    );
+  } catch {
+    existing = null;
+  }
 
-  if (!existing || existing.tenant_id !== userRow.tenant_id) {
+  if (!existing) {
     return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
   }
 
-  // ── 5. Hard delete (RLS ensures tenant isolation) ─────────────────────────
+  // ── 5. Hard delete (explicit tenant_id filter ensures isolation) ──────────
   try {
-    const { error: deleteError } = await (supabase as any)
-      .from("cases")
-      .delete()
-      .eq("id", caseId);
-
-    if (deleteError) {
-      console.error("[DELETE /api/cases/:id] db error:", deleteError.message);
-      return err(new AppError("INTERNAL_ERROR"));
-    }
+    await db
+      .delete(cases)
+      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)));
 
     return ok({ deleted: true });
   } catch (error) {
@@ -168,15 +180,14 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
-  const supabase = await createServerClient();
-  const userRow = await resolveUser(supabase);
-
-  if (!userRow) {
+  const ctx = await resolveContext();
+  if (!ctx) {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
+  const { userRow } = ctx;
 
   // Viewers are read-only.
-  if ((userRow as { role?: string }).role === "viewer") {
+  if (userRow.role === "viewer") {
     return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
   }
 
@@ -224,8 +235,8 @@ export async function PATCH(
   // ── 5. Apply patch (FSM validation + ownership + audit log) ──────────────
   try {
     const ua = request.headers.get("user-agent");
-    const result = await patchCase(supabase, caseId, parsed.data, userRow, ip, ua);
-    return ok(result);
+    const result = await patchCase(caseId, parsed.data, userRow, ip, ua);
+    return ok({ case: serializeCase(result.case) });
   } catch (error) {
     if (error instanceof AppError) {
       return err(error);

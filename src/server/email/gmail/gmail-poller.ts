@@ -41,7 +41,9 @@
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { db } from "@/lib/db";
+import { cases, claimAttachments, claimMessages } from "@/lib/db/schema";
+import { firstRow } from "@/lib/db/helpers";
 import { getGmailClient } from "./gmail-client";
 import { listEnabledGmailAccounts, type GmailAccount } from "./accounts";
 import {
@@ -210,7 +212,6 @@ async function dispatchExtractionWorker(
  * Returns the inserted row's UUID, or null on failure.
  */
 async function insertClaimMessage(
-  supabase: SupabaseClient,
   opts: {
     caseId: string;
     tenantId: string;
@@ -247,36 +248,38 @@ async function insertClaimMessage(
     value: h.value ?? "",
   }));
 
-  const { data, error } = await (supabase as any)
-    .from("claim_messages")
-    .insert({
-      case_id: caseId,
-      tenant_id: tenantId,
-      direction: "inbound",
-      provider: "gmail",
-      provider_message_id: providerMessageId,
-      thread_id: threadId,
-      in_reply_to: inReplyTo,
-      from_addr: fromAddr,
-      to_addr: toAddr,
-      subject,
-      body_text: bodyText,
-      body_html: bodyHtml,
-      headers: normalisedHeaders,  // jsonb — full Gmail headers array
-      raw_payload: rawPayload,     // jsonb — verbatim Gmail Message JSON
-      status: "received",
-      received_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
+  try {
+    const inserted = firstRow(
+      await db
+        .insert(claimMessages)
+        .values({
+          case_id: caseId,
+          tenant_id: tenantId,
+          direction: "inbound",
+          provider: "gmail",
+          provider_message_id: providerMessageId,
+          thread_id: threadId,
+          in_reply_to: inReplyTo,
+          from_addr: fromAddr,
+          to_addr: toAddr,
+          subject,
+          body_text: bodyText,
+          body_html: bodyHtml,
+          headers: normalisedHeaders,  // jsonb — full Gmail headers array
+          raw_payload: rawPayload,     // jsonb — verbatim Gmail Message JSON
+          status: "received",
+          received_at: new Date().toISOString(),
+        })
+        .returning({ id: claimMessages.id })
+    );
 
-  if (error) {
+    return inserted?.id ?? null;
+  } catch (err) {
     // AC10: log error code only — body/headers may contain PII.
-    console.error("[gmail-poller] claim_messages insert error:", error.code); // crew-debug-ok
+    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
+    console.error("[gmail-poller] claim_messages insert error:", code); // crew-debug-ok
     return null;
   }
-
-  return (data as { id: string }).id;
 }
 
 /**
@@ -284,7 +287,6 @@ async function insertClaimMessage(
  * Non-fatal — errors are logged, not thrown.
  */
 async function processAttachments(
-  supabase: SupabaseClient,
   gmail: ReturnType<typeof getGmailClient>,
   opts: {
     tenantId: string;
@@ -308,7 +310,6 @@ async function processAttachments(
   if (adapted.length === 0) return;
 
   const results = await rehostAttachments({
-    supabase,
     attachments: adapted,
     tenantId,
     caseId,
@@ -321,24 +322,22 @@ async function processAttachments(
     const result = results[i];
     if (!result) continue;
 
-    const attachmentRow: Record<string, unknown> = {
-      case_id: caseId,
-      tenant_id: tenantId,
-      claim_message_id: claimMessageId,
-      original_filename: attachment.Name,
-      content_type: attachment.ContentType,
-      size_bytes: attachment.ContentLength,
-      storage_path: result.stored ? result.storagePath : null,
-      content_hash: result.stored ? result.contentHash : null,
-      rejected_reason: result.stored ? null : result.reason,
-    };
-
-    const { error: attachErr } = await (supabase as any)
-      .from("claim_attachments")
-      .insert(attachmentRow);
-
-    if (attachErr) {
-      console.error("[gmail-poller] claim_attachments insert:", attachErr.code); // crew-debug-ok
+    try {
+      await db.insert(claimAttachments).values({
+        case_id: caseId,
+        tenant_id: tenantId,
+        claim_message_id: claimMessageId,
+        file_name: attachment.Name,
+        content_type: attachment.ContentType,
+        size_bytes: attachment.ContentLength,
+        storage_path: result.stored ? result.storagePath : null,
+        content_hash: result.stored ? result.contentHash : null,
+        rejected_reason: result.stored ? null : result.reason,
+      });
+    } catch (attachErr) {
+      const code = (attachErr as { code?: string })?.code ??
+        (attachErr instanceof Error ? attachErr.name : "UnknownError");
+      console.error("[gmail-poller] claim_attachments insert:", code); // crew-debug-ok
     }
 
     // Emit audit events (non-fatal).
@@ -378,17 +377,12 @@ async function processAttachments(
  * Throws if a fatal error occurs that should abort processing of this message.
  */
 async function processMessage(
-  supabase: SupabaseClient,
   gmail: ReturnType<typeof getGmailClient>,
   gmailMessageId: string,
   tenantId: string
 ): Promise<{ outcome: "processed"; caseId: string } | { outcome: "skipped" }> {
   // ── a) Deduplicate ─────────────────────────────────────────────────────────
-  const isDuplicate = await checkDuplicate(
-    supabase as any,
-    tenantId,
-    gmailMessageId
-  );
+  const isDuplicate = await checkDuplicate(tenantId, gmailMessageId);
   if (isDuplicate) {
     return { outcome: "skipped" };
   }
@@ -434,39 +428,49 @@ async function processMessage(
     caseId = threadCaseId;
   } else {
     // Create a new case for this email.
-    const { data: newCase, error: caseError } = await (supabase as any)
-      .from("cases")
-      .insert({
-        tenant_id: tenantId,
-        channel: "email",
-        status: "recibido",
-        email_message_id: gmailMessageId,
-        email_thread_id: threadId,
-        is_claim: true,
-        claim_type: null,
-      })
-      .select("id")
-      .single();
-
-    if (caseError || !newCase) {
+    let newCase: { id: string } | null;
+    try {
+      newCase = firstRow(
+        await db
+          .insert(cases)
+          .values({
+            tenant_id: tenantId,
+            channel: "email",
+            status: "recibido",
+            email_message_id: gmailMessageId,
+            email_thread_id: threadId,
+            is_claim: true,
+            claim_type: null,
+          })
+          .returning({ id: cases.id })
+      );
+    } catch (caseErr) {
+      const code = (caseErr as { code?: string })?.code;
       // 23505 = unique_violation: case already exists for this email_message_id.
       // Treat as already-processed (a previous partial run created the case
       // but not the claim_message). Return "skipped" so the watermark advances.
-      if (caseError?.code === "23505") {
+      if (code === "23505") {
         return { outcome: "skipped" };
       }
       // AC10: log code only.
       console.error( // crew-debug-ok
-        "[gmail-poller] Failed to create case:", caseError?.code
+        "[gmail-poller] Failed to create case:", code
       );
-      throw new Error(`case_insert_failed: ${caseError?.code ?? "no_data"}`);
+      throw new Error(`case_insert_failed: ${code ?? "unknown"}`);
     }
 
-    caseId = (newCase as { id: string }).id;
+    if (!newCase) {
+      console.error( // crew-debug-ok
+        "[gmail-poller] Failed to create case:", "no_data"
+      );
+      throw new Error(`case_insert_failed: no_data`);
+    }
+
+    caseId = newCase.id;
   }
 
   // ── f) Insert claim_messages ───────────────────────────────────────────────
-  const claimMessageId = await insertClaimMessage(supabase, {
+  const claimMessageId = await insertClaimMessage({
     caseId,
     tenantId,
     providerMessageId: gmailMessageId,
@@ -487,7 +491,7 @@ async function processMessage(
 
   // ── g) Rehost attachments ──────────────────────────────────────────────────
   if (payload?.parts && payload.parts.length > 0) {
-    await processAttachments(supabase, gmail, {
+    await processAttachments(gmail, {
       tenantId,
       caseId,
       claimMessageId,
@@ -530,16 +534,14 @@ async function processMessage(
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Main polling function — called by the cron route.
+ * Main polling function — called by the cron route and the Gmail webhook.
  *
- * Uses the service-role Supabase client to read/write poll state and claim data.
- * The injected `supabase` client must bypass RLS (service-role).
+ * Runs as a system actor (no user context); every DB write is explicitly
+ * scoped to the resolved tenant_id.
  *
- * @param supabase  Service-role Supabase client.
- * @returns         { processed, skipped, errors, fallback, history_id }
+ * @returns { processed, skipped, errors, fallback, history_id }
  */
 export async function pollGmail(
-  supabase: SupabaseClient,
   account?: GmailPollAccount
 ): Promise<PollResult> {
   // ── Tenant resolution (IC4) ────────────────────────────────────────────────
@@ -559,7 +561,7 @@ export async function pollGmail(
   const gmail = getGmailClient(account?.refreshToken);
 
   // ── Load poll state ────────────────────────────────────────────────────────
-  const pollState = await getOrCreatePollState(supabase, gmailEmail);
+  const pollState = await getOrCreatePollState(gmailEmail);
 
   let messageIds: string[] = [];
   let latestHistoryId = pollState.historyId;
@@ -635,7 +637,7 @@ export async function pollGmail(
       } catch (listErr) {
         const code = listErr instanceof Error ? listErr.name : "UnknownError";
         console.error("[gmail-poller] messages.list fallback error:", code); // crew-debug-ok
-        await recordPollError(supabase, pollState.id, `messages_list_failed: ${code}`);
+        await recordPollError(pollState.id, `messages_list_failed: ${code}`);
         return {
           processed: 0,
           skipped: 0,
@@ -649,7 +651,7 @@ export async function pollGmail(
       // Non-404 error — fatal for this poll run.
       const code = err instanceof Error ? err.name : "UnknownError";
       console.error("[gmail-poller] history.list error:", code); // crew-debug-ok
-      await recordPollError(supabase, pollState.id, `history_list_failed: ${code}`);
+      await recordPollError(pollState.id, `history_list_failed: ${code}`);
       return {
         processed: 0,
         skipped: 0,
@@ -690,7 +692,7 @@ export async function pollGmail(
     } catch (listErr) {
       const code = listErr instanceof Error ? listErr.name : "UnknownError";
       console.error("[gmail-poller] messages.list first-run error:", code); // crew-debug-ok
-      await recordPollError(supabase, pollState.id, `first_run_list_failed: ${code}`);
+      await recordPollError(pollState.id, `first_run_list_failed: ${code}`);
       return {
         processed: 0,
         skipped: 0,
@@ -711,7 +713,7 @@ export async function pollGmail(
   // Process in order (oldest first — messageIds from history are in order).
   for (const messageId of messageIds) {
     try {
-      const result = await processMessage(supabase, gmail, messageId, tenantId);
+      const result = await processMessage(gmail, messageId, tenantId);
       if (result.outcome === "processed") {
         processed++;
         newCaseIds.push(result.caseId);
@@ -726,7 +728,6 @@ export async function pollGmail(
         "[gmail-poller] message error:", code, "msgId:", messageId
       );
       await recordPollError(
-        supabase,
         pollState.id,
         `message_failed: ${messageId}: ${code}`
       );
@@ -743,7 +744,7 @@ export async function pollGmail(
 
   if (shouldAdvance && latestHistoryId !== pollState.historyId) {
     try {
-      await advancePollState(supabase, pollState.id, latestHistoryId);
+      await advancePollState(pollState.id, latestHistoryId);
     } catch (advanceErr) {
       const code = advanceErr instanceof Error ? advanceErr.name : "UnknownError";
       console.error("[gmail-poller] advancePollState error:", code); // crew-debug-ok
@@ -761,10 +762,8 @@ export async function pollGmail(
   };
 }
 
-export async function pollAllGmailAccounts(
-  supabase: SupabaseClient
-): Promise<PollAllResult> {
-  const configuredAccounts = await listEnabledGmailAccounts(supabase);
+export async function pollAllGmailAccounts(): Promise<PollAllResult> {
+  const configuredAccounts = await listEnabledGmailAccounts();
   const accounts: Array<GmailPollAccount & { label: string }> =
     configuredAccounts.length > 0
       ? configuredAccounts.map((account: GmailAccount) => ({
@@ -784,7 +783,7 @@ export async function pollAllGmailAccounts(
 
   const results: Array<PollResult & { account: string }> = [];
   for (const account of accounts) {
-    const result = await pollGmail(supabase, account);
+    const result = await pollGmail(account);
     results.push({ ...result, account: account.label });
   }
 

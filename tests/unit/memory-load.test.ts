@@ -3,13 +3,30 @@
  *
  * AC13: Memory hints loaded + applied in extraction worker.
  *
- * All DB calls are mocked — no real Supabase connection needed.
+ * All DB calls are mocked via vi.mock("@/lib/db") — no real DB connection needed.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { loadMemoryHints } from "@/server/memory/load";
+// vi.mock() must be at module top level — Vitest hoists these calls.
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: vi.fn(),
+    update: vi.fn(),
+  },
+  tables: {
+    claimMemory: {
+      id: "id",
+      tenant_id: "tenant_id",
+      memory_type: "memory_type",
+      key: "key",
+      value: "value",
+      confidence: "confidence",
+      source: "source",
+      last_used_at: "last_used_at",
+    },
+  },
+}));
 
-// ── Mock audit/log so writeAuditLog doesn't try to call Supabase ──────────────
+// ── Mock audit/log so writeAuditLog doesn't try to call the DB ─────────────────
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: vi.fn().mockResolvedValue(undefined),
   AuditEvent: {
@@ -17,7 +34,11 @@ vi.mock("@/lib/audit/log", () => ({
   },
 }));
 
-// ── Mock Supabase builder ─────────────────────────────────────────────────────
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { db } from "@/lib/db";
+import { loadMemoryHints } from "@/server/memory/load";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 type MemoryRow = {
   id: string;
@@ -29,38 +50,46 @@ type MemoryRow = {
   last_used_at: string | null;
 };
 
-function buildMockSupabase(rows: MemoryRow[], shouldError = false) {
-  const updateMock = vi.fn().mockReturnValue({
-    in: vi.fn().mockResolvedValue({ error: null }),
-  });
+/**
+ * Configure db.select mock for loadMemoryHints.
+ *
+ * loadMemoryHints does:
+ *   db.select({...}).from(t).where(and(...)).orderBy(...).limit(N)
+ *
+ * updateLastUsedAt does:
+ *   db.update(t).set({...}).where(inArray(...))
+ */
+function setupSelectMock(rows: MemoryRow[], shouldError = false) {
+  vi.mocked(db.select).mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        orderBy: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue(
+            shouldError ? (() => { throw { code: "TEST_ERROR" }; })() : rows
+          ),
+        }),
+      }),
+    }),
+  } as any);
 
-  // Build a chainable object that resolves at .limit()
-  const buildSelectChain = () => {
-    const result = Promise.resolve({
-      data: shouldError ? null : rows,
-      error: shouldError ? { code: "TEST_ERROR" } : null,
-    });
-    const chain: any = {
-      eq: () => chain,
-      in: () => chain,
-      or: () => chain,
-      order: () => chain,
-      limit: () => result,
-    };
-    return chain;
-  };
+  // updateLastUsedAt: db.update(t).set({...}).where(inArray(...))
+  vi.mocked(db.update).mockReturnValue({
+    set: vi.fn().mockReturnValue({
+      where: vi.fn().mockResolvedValue(undefined),
+    }),
+  } as any);
+}
 
-  return {
-    from: (table: string) => {
-      if (table === "claim_memory") {
-        return {
-          select: () => buildSelectChain(),
-          update: updateMock,
-        };
-      }
-      return {};
-    },
-  } as any;
+function setupSelectMockError() {
+  vi.mocked(db.select).mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        orderBy: vi.fn().mockReturnValue({
+          limit: vi.fn().mockRejectedValue({ code: "TEST_ERROR" }),
+        }),
+      }),
+    }),
+  } as any);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -71,34 +100,26 @@ describe("loadMemoryHints", () => {
   });
 
   it("returns [] when no sender identifiers provided", async () => {
-    const supabase = buildMockSupabase([]);
-    const hints = await loadMemoryHints(supabase, "tenant-1");
+    const hints = await loadMemoryHints("tenant-1");
     expect(hints).toEqual([]);
+    // db.select should NOT be called — we return early
+    expect(db.select).not.toHaveBeenCalled();
   });
 
   it("returns [] when senderEmail is empty string", async () => {
-    const supabase = buildMockSupabase([]);
-    const hints = await loadMemoryHints(supabase, "tenant-1", "");
+    const hints = await loadMemoryHints("tenant-1", "");
     expect(hints).toEqual([]);
+    expect(db.select).not.toHaveBeenCalled();
   });
 
   it("returns [] when no rows found for sender", async () => {
-    const supabase = buildMockSupabase([]);
-    const hints = await loadMemoryHints(supabase, "tenant-1", "unknown@example.com");
+    setupSelectMock([]);
+    const hints = await loadMemoryHints("tenant-1", "unknown@example.com");
     expect(hints).toEqual([]);
   });
 
   it("returns hints sorted by confidence desc (highest first)", async () => {
     const rows: MemoryRow[] = [
-      {
-        id: "m1",
-        memory_type: "sender_profile",
-        key: "sender@example.com",
-        value: { full_name: "Juan Pérez" },
-        confidence: 0.72,
-        source: "auto_extracted",
-        last_used_at: null,
-      },
       {
         id: "m2",
         memory_type: "field_correction",
@@ -108,14 +129,21 @@ describe("loadMemoryHints", () => {
         source: "human_confirmation",
         last_used_at: "2024-01-15T10:00:00Z",
       },
+      {
+        id: "m1",
+        memory_type: "sender_profile",
+        key: "sender@example.com",
+        value: { full_name: "Juan Pérez" },
+        confidence: 0.72,
+        source: "auto_extracted",
+        last_used_at: null,
+      },
     ];
 
-    // The mock returns rows in the given order — the ordering is enforced by the DB.
-    // We return them with high-confidence first to simulate the ORDER BY confidence DESC.
-    const sortedRows = [rows[1], rows[0]]; // high confidence first
-    const supabase = buildMockSupabase(sortedRows);
+    // Return them high-confidence first to simulate ORDER BY confidence DESC.
+    setupSelectMock(rows);
 
-    const hints = await loadMemoryHints(supabase, "tenant-1", "sender@example.com");
+    const hints = await loadMemoryHints("tenant-1", "sender@example.com");
 
     expect(hints).toHaveLength(2);
     expect(hints[0].confidence).toBe(0.90);
@@ -136,8 +164,8 @@ describe("loadMemoryHints", () => {
       },
     ];
 
-    const supabase = buildMockSupabase(rows);
-    const hints = await loadMemoryHints(supabase, "tenant-1", "claimant@example.com");
+    setupSelectMock(rows);
+    const hints = await loadMemoryHints("tenant-1", "claimant@example.com");
 
     expect(hints).toHaveLength(1);
     expect(hints[0]).toMatchObject({
@@ -164,11 +192,10 @@ describe("loadMemoryHints", () => {
       },
     ];
 
-    const supabase = buildMockSupabase(rows);
-    await loadMemoryHints(supabase, "tenant-1", "sender@example.com", undefined, "case-abc");
+    setupSelectMock(rows);
+    await loadMemoryHints("tenant-1", "sender@example.com", undefined, "case-abc");
 
-    // writeAuditLog is called fire-and-forget — it's a void promise so we check it was called
-    // after a tick to let the fire-and-forget settle.
+    // writeAuditLog is called fire-and-forget — check after a tick to let it settle.
     await Promise.resolve();
 
     expect(writeAuditLog).toHaveBeenCalledWith(
@@ -180,8 +207,8 @@ describe("loadMemoryHints", () => {
   });
 
   it("returns [] on DB error without throwing", async () => {
-    const supabase = buildMockSupabase([], true);
-    const hints = await loadMemoryHints(supabase, "tenant-1", "error@example.com");
+    setupSelectMockError();
+    const hints = await loadMemoryHints("tenant-1", "error@example.com");
     expect(hints).toEqual([]);
   });
 
@@ -198,9 +225,8 @@ describe("loadMemoryHints", () => {
       },
     ];
 
-    const supabase = buildMockSupabase(rows);
+    setupSelectMock(rows);
     const hints = await loadMemoryHints(
-      supabase,
       "tenant-1",
       undefined,
       "+541112345678"

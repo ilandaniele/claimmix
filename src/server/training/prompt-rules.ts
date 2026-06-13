@@ -9,7 +9,8 @@
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, asc, eq } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
 
 export type PromptRuleType =
   | "extraction"
@@ -37,27 +38,28 @@ const MAX_RULES_CHARS = 6_000;
  * prompt is deterministic for caching/debugging).
  */
 export async function loadActivePromptRules(
-  supabase: SupabaseClient,
   tenantId: string
 ): Promise<PromptRule[]> {
   try {
-    const { data, error } = await (supabase as any)
-      .from("agent_prompt_rules")
-      .select("id,title,rule_text,rule_type")
-      .eq("tenant_id", tenantId)
-      .eq("active", true)
-      .order("created_at", { ascending: true })
+    const t = tables.agentPromptRules;
+    const data = await db
+      .select({
+        id: t.id,
+        title: t.title,
+        rule_text: t.rule_text,
+        rule_type: t.rule_type,
+      })
+      .from(t)
+      .where(and(eq(t.tenant_id, tenantId), eq(t.active, true)))
+      .orderBy(asc(t.created_at))
       .limit(MAX_ACTIVE_RULES);
 
-    if (error || !data) {
-      if (error && error.code !== "42P01") {
-        console.error("[prompt-rules] load error:", error.code); // crew-debug-ok
-      }
-      return [];
-    }
-
     return data as PromptRule[];
-  } catch {
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    if (code && code !== "42P01") {
+      console.error("[prompt-rules] load error:", code); // crew-debug-ok
+    }
     // Never break extraction because rules could not be loaded.
     return [];
   }

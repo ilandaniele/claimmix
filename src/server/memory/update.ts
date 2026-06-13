@@ -10,11 +10,13 @@
  * Security / PII:
  *   - Sender email is the lookup key and never written to stdout.
  *   - All audit payloads go through redactObject() before logging.
- *   - Service-role writes use the caller-provided supabase client.
+ *   - Writes go through the shared Drizzle db client (tenant filter always applied).
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { redactObject } from "@/lib/audit/redact";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
@@ -50,7 +52,6 @@ type SeedableField = (typeof SEEDABLE_FIELDS)[number];
  *       from the extraction worker or any automatic path.
  * AC21: Logs FIELD_CONFIRMED audit event with redacted old/new values.
  *
- * @param supabase       - Supabase service-role client.
  * @param tenantId       - UUID of the tenant.
  * @param fieldName      - The field key being confirmed (e.g. 'full_name').
  * @param confirmedValue - The analyst-confirmed value for the field.
@@ -60,7 +61,6 @@ type SeedableField = (typeof SEEDABLE_FIELDS)[number];
  * @param oldValue       - Previous value (for audit trail, will be redacted).
  */
 export async function updateMemoryFromConfirmation(
-  supabase: SupabaseClient,
   tenantId: string,
   fieldName: string,
   confirmedValue: string,
@@ -71,18 +71,26 @@ export async function updateMemoryFromConfirmation(
 ): Promise<void> {
   try {
     const now = new Date().toISOString();
+    const t = tables.claimMemory;
 
     // ── 1. Fetch existing row (if any) ────────────────────────────────────────
-    const { data: existing, error: fetchError } = await (supabase as any)
-      .from("claim_memory")
-      .select("id,value,use_count")
-      .eq("tenant_id", tenantId)
-      .eq("memory_type", "field_correction")
-      .eq("key", senderEmail)
-      .maybeSingle();
-
-    if (fetchError) {
-      console.error("[memory/update] fetch error:", fetchError.code);
+    let existing: { id: string; value: unknown; use_count: number } | null = null;
+    try {
+      existing = firstRow(
+        await db
+          .select({ id: t.id, value: t.value, use_count: t.use_count })
+          .from(t)
+          .where(
+            and(
+              eq(t.tenant_id, tenantId),
+              eq(t.memory_type, "field_correction"),
+              eq(t.key, senderEmail)
+            )
+          )
+          .limit(1)
+      );
+    } catch (e) {
+      console.error("[memory/update] fetch error:", (e as { code?: string })?.code);
       // Continue — we'll still attempt the upsert.
     }
 
@@ -100,26 +108,32 @@ export async function updateMemoryFromConfirmation(
     const useCount = (existing?.use_count ?? 0) + 1;
 
     // ── 3. Upsert into claim_memory ───────────────────────────────────────────
-    const upsertRow = {
-      tenant_id: tenantId,
-      memory_type: "field_correction",
-      key: senderEmail,
-      value: updatedValue,
-      confidence: CONFIRMATION_CONFIDENCE,
-      source: "human_confirmation",
-      use_count: useCount,
-      last_used_at: now,
-    };
-
-    const { error: upsertError } = await (supabase as any)
-      .from("claim_memory")
-      .upsert(upsertRow, {
-        onConflict: "tenant_id,memory_type,key",
-        ignoreDuplicates: false,
-      });
-
-    if (upsertError) {
-      console.error("[memory/update] upsert error:", upsertError.code);
+    // Unique key: idx_claim_memory_tenant_type_key (tenant_id, memory_type, key).
+    try {
+      await db
+        .insert(t)
+        .values({
+          tenant_id: tenantId,
+          memory_type: "field_correction",
+          key: senderEmail,
+          value: updatedValue,
+          confidence: CONFIRMATION_CONFIDENCE,
+          source: "human_confirmation",
+          use_count: useCount,
+          last_used_at: now,
+        })
+        .onConflictDoUpdate({
+          target: [t.tenant_id, t.memory_type, t.key],
+          set: {
+            value: updatedValue,
+            confidence: CONFIRMATION_CONFIDENCE,
+            source: "human_confirmation",
+            use_count: useCount,
+            last_used_at: now,
+          },
+        });
+    } catch (e) {
+      console.error("[memory/update] upsert error:", (e as { code?: string })?.code);
       // Do not throw — audit log still attempted below.
     }
 
@@ -160,14 +174,12 @@ export async function updateMemoryFromConfirmation(
  * AC14: Seeded entries are inserted with low confidence and no confirmed_at.
  *       They are only upgraded to CONFIRMATION_CONFIDENCE after human confirmation.
  *
- * @param supabase        - Supabase service-role client.
  * @param tenantId        - UUID of the tenant.
  * @param senderEmail     - Sender's email address (lookup key — PII).
  * @param extractedFields - Array of extracted fields from the AI extractor.
  * @param caseId          - UUID of the case (for audit log).
  */
 export async function seedMemoryFromExtraction(
-  supabase: SupabaseClient,
   tenantId: string,
   senderEmail: string,
   extractedFields: ExtractedField[],
@@ -201,26 +213,29 @@ export async function seedMemoryFromExtraction(
 
     // ── Upsert sender_profile row ─────────────────────────────────────────────
     // Only inserts if no existing row — existing confirmed memory is NOT overwritten.
-    const upsertRow = {
-      tenant_id: tenantId,
-      memory_type: "sender_profile",
-      key: senderEmail,
-      value: profileValue,
-      confidence: seedConfidence,
-      source: "auto_extracted",
-      last_used_at: now,
-    };
-
-    const { error: upsertError } = await (supabase as any)
-      .from("claim_memory")
-      .upsert(upsertRow, {
-        onConflict: "tenant_id,memory_type,key",
-        // ignoreDuplicates=true: do NOT overwrite an existing confirmed row.
-        ignoreDuplicates: true,
-      });
-
-    if (upsertError) {
-      console.error("[memory/update] seedMemoryFromExtraction upsert error:", upsertError.code);
+    // Unique key: idx_claim_memory_tenant_type_key (tenant_id, memory_type, key).
+    try {
+      const t = tables.claimMemory;
+      await db
+        .insert(t)
+        .values({
+          tenant_id: tenantId,
+          memory_type: "sender_profile",
+          key: senderEmail,
+          value: profileValue,
+          confidence: seedConfidence,
+          source: "auto_extracted",
+          last_used_at: now,
+        })
+        // ON CONFLICT DO NOTHING: do NOT overwrite an existing confirmed row.
+        .onConflictDoNothing({
+          target: [t.tenant_id, t.memory_type, t.key],
+        });
+    } catch (e) {
+      console.error(
+        "[memory/update] seedMemoryFromExtraction upsert error:",
+        (e as { code?: string })?.code
+      );
     }
 
     console.info(

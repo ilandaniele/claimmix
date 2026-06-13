@@ -8,12 +8,17 @@
  * are UUIDs/sanitized, no user-controlled text).
  *
  * Auth: any authenticated role (viewers can inspect extracted JSON).
- * RLS scopes the tenant; wrong-tenant case → 404.
+ * Explicit tenant_id filters scope the tenant (RLS is gone);
+ * wrong-tenant case → 404.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createServerClient } from "@/lib/supabase/server";
+import { and, eq } from "drizzle-orm";
+import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import { cases, extractedFields } from "@/lib/db/schema";
 import { err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { getLatestAgentRun } from "@/server/training/agent-runs";
@@ -38,11 +43,8 @@ export async function GET(
 ) {
   try {
     // ── 1. Auth ──────────────────────────────────────────────────────────────
-    const supabase = await createServerClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return err(new AppError("MISSING_SESSION"));
+    const { user, userRow } = await requireRole(...ALL_ROLES);
+    const tenantId = userRow.tenant_id;
 
     // ── 2. Rate limit ────────────────────────────────────────────────────────
     const rl = await rateLimit(
@@ -59,18 +61,25 @@ export async function GET(
     }
     const caseId = parsed.data.id;
 
-    // ── 4. Case (RLS-scoped — IDOR-safe 404) ─────────────────────────────────
-    const { data: caseRow } = await (supabase as any)
-      .from("cases")
-      .select("id,tenant_id,claim_type,status")
-      .eq("id", caseId)
-      .maybeSingle();
+    // ── 4. Case (explicit tenant filter — IDOR-safe 404) ─────────────────────
+    const caseRow = firstRow(
+      await db
+        .select({
+          id: cases.id,
+          tenant_id: cases.tenant_id,
+          claim_type: cases.claim_type,
+          status: cases.status,
+        })
+        .from(cases)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
+        .limit(1)
+    );
     if (!caseRow) {
       return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
     }
 
     // ── 5. Latest agent run for THIS case (fresh, never another email's) ─────
-    const run = await getLatestAgentRun(supabase as any, caseId);
+    const run = await getLatestAgentRun(tenantId, caseId);
     if (!run) {
       return err(
         new AppError(
@@ -81,10 +90,21 @@ export async function GET(
     }
 
     // Current (analyst-corrected) extracted values complement the raw output.
-    const { data: extractedFields } = await (supabase as any)
-      .from("extracted_fields")
-      .select("field_key,field_value,confidence,extracted_at")
-      .eq("case_id", caseId);
+    const fieldRows = await db
+      .select({
+        field_key: extractedFields.field_key,
+        field_value: extractedFields.field_value,
+        confidence: extractedFields.confidence,
+        extracted_at: extractedFields.extracted_at,
+      })
+      .from(extractedFields)
+      .where(
+        and(
+          eq(extractedFields.case_id, caseId),
+          eq(extractedFields.tenant_id, tenantId)
+        )
+      )
+      .catch(() => []);
 
     const output = run.output_payload ?? ({} as Record<string, unknown>);
 
@@ -107,7 +127,11 @@ export async function GET(
         trainability_reasons: run.trainability_reasons,
         blocking_reasons: run.blocking_reasons,
       },
-      confirmed_extracted_fields: extractedFields ?? [],
+      // numeric → string under Drizzle; convert to preserve the JSON shape.
+      confirmed_extracted_fields: fieldRows.map((f) => ({
+        ...f,
+        confidence: Number(f.confidence),
+      })),
       raw_agent_output: output,
       created_at: run.created_at,
     };

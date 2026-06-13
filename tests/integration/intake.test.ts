@@ -11,30 +11,40 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Hoisted mocks (vi.hoisted runs before module evaluation) ──────────────────
 
-const { mockGetUser, mockFrom, mockServiceFrom, mockCheckBudget } = vi.hoisted(() => {
+const { mockGetSession, mockDbSelect, mockDbInsert, mockCheckBudget } = vi.hoisted(() => {
   return {
-    mockGetUser: vi.fn(),
-    mockFrom: vi.fn(),
-    mockServiceFrom: vi.fn(),
+    mockGetSession: vi.fn(),
+    mockDbSelect: vi.fn(),
+    mockDbInsert: vi.fn(),
     mockCheckBudget: vi.fn(),
   };
 });
 
 // ── Mock modules ──────────────────────────────────────────────────────────────
 
-vi.mock("@/lib/supabase/server", () => ({
-  createServerClient: vi.fn().mockResolvedValue({
-    auth: { getUser: mockGetUser },
-    from: mockFrom,
-  }),
+vi.mock("@/lib/auth/session", () => ({
+  getSessionContext: mockGetSession,
 }));
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn().mockReturnValue({
-    from: mockServiceFrom,
-    auth: { getUser: vi.fn() },
-  }),
-}));
+vi.mock("@/lib/db", () => {
+  const chain: any = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
+    select: vi.fn().mockReturnThis(),
+    insert: vi.fn().mockReturnThis(),
+    values: vi.fn().mockReturnThis(),
+    returning: vi.fn().mockResolvedValue([{ id: "case-uuid-001" }]),
+    then: vi.fn(),
+  };
+
+  return {
+    db: {
+      select: mockDbSelect,
+      insert: mockDbInsert,
+    },
+  };
+});
 
 vi.mock("@/server/ai/budget", () => ({
   checkBudget: mockCheckBudget,
@@ -101,37 +111,27 @@ const MOCK_USER_ROW = {
   created_at: new Date().toISOString(),
 };
 
-function setupAuthMocks() {
-  mockGetUser.mockResolvedValue({ data: { user: MOCK_USER } });
-  mockFrom.mockReturnValue({
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    single: vi.fn().mockResolvedValue({ data: MOCK_USER_ROW, error: null }),
+function setupDbMocks() {
+  // db.select() chain returns user row
+  mockDbSelect.mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue([MOCK_USER_ROW]),
+      }),
+    }),
   });
 
-  // Service client mock: insert case returns new case id.
-  mockServiceFrom.mockImplementation((table: string) => {
-    if (table === "cases") {
-      return {
-        insert: vi.fn().mockReturnThis(),
-        select: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({
-          data: { id: "case-uuid-001" },
-          error: null,
-        }),
-      };
-    }
-    if (table === "raw_messages") {
-      return {
-        insert: vi.fn().mockResolvedValue({ error: null }),
-      };
-    }
-    return {
-      insert: vi.fn().mockResolvedValue({ error: null }),
-      select: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: null, error: null }),
-    };
+  // db.insert() chain for cases returns new case id
+  mockDbInsert.mockReturnValue({
+    values: vi.fn().mockReturnValue({
+      returning: vi.fn().mockResolvedValue([{ id: "case-uuid-001" }]),
+    }),
   });
+}
+
+function setupAuthMocks() {
+  mockGetSession.mockResolvedValue({ user: MOCK_USER });
+  setupDbMocks();
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -195,7 +195,7 @@ describe("POST /api/intake/simulate", () => {
   // ── AC4: Unauthenticated ──────────────────────────────────────────────────────
 
   it("returns 401 when unauthenticated", async () => {
-    mockGetUser.mockResolvedValue({ data: { user: null } });
+    mockGetSession.mockResolvedValue(null);
     const req = makeRequest({ scenario_id: "choque-01" });
     const res = await POST(req);
     expect(res.status).toBe(401);

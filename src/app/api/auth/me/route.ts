@@ -2,65 +2,53 @@
  * GET   /api/auth/me — current analyst's profile.
  *         { id, email, full_name, role, tenant_id, locale }
  * PATCH /api/auth/me — update own preferences. Body: { locale: "es-AR" | "en-US" }.
- *         Persists the UI language per account (applied on any device at login).
- *         RLS: users_update_own (id = auth.uid()).
  *
  * Returns 401 if there is no active session.
  */
 
+import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createServerClient } from "@/lib/supabase/server";
-import type { Database } from "@/lib/supabase/types";
 
-type UserRow = Database["public"]["Tables"]["users"]["Row"];
+import { getSessionContext } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { users } from "@/lib/db/schema";
 
 const PatchMeSchema = z.object({
   locale: z.enum(["es-AR", "en-US"]),
 });
 
 export async function GET() {
-  const supabase = await createServerClient();
-
-  // getUser() validates JWT with Supabase Auth API — never use getSession().
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError || !user) {
+  const session = await getSessionContext();
+  if (!session?.user) {
     return NextResponse.json(
       { error: { code: "MISSING_SESSION", message: "Se requiere autenticación." } },
       { status: 401 }
     );
   }
 
-  // Fetch the analyst's public.users profile (tenant_id, role, full_name).
-  const { data: userRowRaw, error: dbError } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", user.id)
-    .single();
+  const [userRow] = await db
+    .select({
+      id: users.id,
+      tenant_id: users.tenant_id,
+      full_name: users.full_name,
+      role: users.role,
+      locale: users.locale,
+    })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
 
-  if (dbError || !userRowRaw) {
-    // User exists in auth.users but not in public.users — account not fully set up.
-    console.error("[me] User profile not found for auth user:", user.id);
+  if (!userRow) {
     return NextResponse.json(
-      {
-        error: {
-          code: "NOT_FOUND",
-          message: "El perfil del analista no fue encontrado.",
-        },
-      },
+      { error: { code: "NOT_FOUND", message: "El perfil del analista no fue encontrado." } },
       { status: 404 }
     );
   }
 
-  const userRow = userRowRaw as UserRow;
-
   return NextResponse.json({
     id: userRow.id,
-    email: user.email,
+    email: session.user.email,
     full_name: userRow.full_name,
     role: userRow.role,
     tenant_id: userRow.tenant_id,
@@ -69,14 +57,8 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const supabase = await createServerClient();
-
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError || !user) {
+  const session = await getSessionContext();
+  if (!session?.user) {
     return NextResponse.json(
       { error: { code: "MISSING_SESSION", message: "Se requiere autenticación." } },
       { status: 401 }
@@ -98,23 +80,10 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  const { error: updateError } = await (supabase as any)
-    .from("users")
-    .update({ locale: parsed.data.locale })
-    .eq("id", user.id);
-
-  if (updateError) {
-    // 42703 = column missing (migration 0016 not applied) — preference simply
-    // won't persist across devices yet; the cookie still works. Not a 500.
-    if (updateError.code === "42703") {
-      return NextResponse.json({ ok: true, persisted: false });
-    }
-    console.error("[me PATCH]", updateError.code);
-    return NextResponse.json(
-      { error: { code: "INTERNAL_ERROR", message: "No se pudo guardar la preferencia." } },
-      { status: 500 }
-    );
-  }
+  await db
+    .update(users)
+    .set({ locale: parsed.data.locale })
+    .where(eq(users.id, session.user.id));
 
   return NextResponse.json({ ok: true, persisted: true });
 }

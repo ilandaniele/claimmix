@@ -2,7 +2,7 @@
  * Unit tests for AI extractor field-copy + identity guard.
  *
  * Tests the field-copy logic inside runEmailExtractionWorker:
- *   - Lines 661-668 of src/server/worker/extract.ts
+ *   - Lines 780-787 of src/server/worker/extract.ts
  *
  * AC11: Worker copies extracted full_name → cases.policyholder_name
  *       (trimmed, sliced to 200 chars) when case field is NULL.
@@ -17,7 +17,7 @@
  *   - vi.mock (static, hoisted) for all external modules.
  *   - @/server/ai/mock-extractor is mocked so tests can control exactly what
  *     extracted_fields the worker sees on each run.
- *   - The mock Supabase client (injected via createServiceClient mock) captures
+ *   - The mock db module (injected via @/lib/db mock) captures
  *     the cases.update() payload for assertion.
  *
  * Note: extract.ts is excluded from coverage by vitest.config.ts. Tests
@@ -30,8 +30,21 @@ import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 // ── Static module mocks ───────────────────────────────────────────────────────
 // vi.mock() calls are hoisted to the top of the file by Vitest.
 
-vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: vi.fn(),
+// Mock the entire @/lib/db module — drizzle requires DATABASE_URL at init time.
+vi.mock("@/lib/db", () => {
+  const mockDb = {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  };
+  return { db: mockDb, tables: {} };
+});
+
+vi.mock("@/lib/db/helpers", () => ({
+  firstRow: (rows: unknown[]) => rows[0] ?? null,
+  ilikeAny: vi.fn(),
+  countRows: vi.fn(),
 }));
 
 vi.mock("@/lib/audit/log", () => ({
@@ -84,10 +97,62 @@ vi.mock("@/server/ai/severity-classifier", () => ({
   requiresSpecialist: vi.fn().mockReturnValue(false),
 }));
 
+vi.mock("@/server/ai/provider", () => ({
+  resolveExtractionEngine: vi.fn().mockResolvedValue("mock"),
+}));
+
+vi.mock("@/server/agents/training", () => ({
+  loadAgentTraining: vi.fn().mockResolvedValue(""),
+}));
+
+vi.mock("@/server/training/prompt-rules", () => ({
+  loadActivePromptRules: vi.fn().mockResolvedValue([]),
+  formatPromptRules: vi.fn().mockReturnValue(""),
+}));
+
+vi.mock("@/server/training/examples", () => ({
+  loadApprovedExamples: vi.fn().mockResolvedValue([]),
+  formatApprovedExamples: vi.fn().mockReturnValue(""),
+}));
+
+vi.mock("@/server/training/prompt-version", () => ({
+  getActivePromptVersion: vi.fn().mockResolvedValue({ id: null, version: 1, systemPrompt: null }),
+}));
+
+vi.mock("@/server/training/trainability", () => ({
+  assessTrainability: vi.fn().mockReturnValue({ trainable: false }),
+}));
+
+vi.mock("@/server/training/agent-runs", () => ({
+  logAgentRun: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/server/memory/load", () => ({
+  loadMemoryHints: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@/server/ai/hydrate-fields", () => ({
+  hydrateFieldsFromExtracted: vi.fn().mockReturnValue([]),
+  scrubPiiFromSummary: vi.fn().mockImplementation((c: unknown) => c),
+}));
+
+vi.mock("@/lib/email/claim-parser", () => ({
+  mergeExtractedFields: vi.fn().mockImplementation((a: unknown[], _b: unknown[]) => a),
+  parseEmailClaimFields: vi.fn().mockReturnValue([]),
+}));
+
+vi.mock("@/lib/schemas/cases", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/schemas/cases")>();
+  return {
+    ...actual,
+    ClaimTypeSchema: { safeParse: vi.fn().mockReturnValue({ success: false }) },
+  };
+});
+
 /**
  * Mock the mock-extractor module. extractEmailClaimMock is replaced with a
- * vi.fn() whose implementation is set per-test via mockReturnValue / mockResolvedValue.
- * The worker calls extractEmailClaimMock() when shouldUseMock() is true (no OPENAI_API_KEY).
+ * vi.fn() whose implementation is set per-test via mockReturnValue.
+ * The worker calls extractEmailClaimMock() when engine === "mock".
  */
 vi.mock("@/server/ai/mock-extractor", () => ({
   extractEmailClaimMock: vi.fn(),
@@ -96,7 +161,7 @@ vi.mock("@/server/ai/mock-extractor", () => ({
 
 // ── Imports (after vi.mock declarations) ─────────────────────────────────────
 
-import { createServiceClient } from "@/lib/supabase/service";
+import { db } from "@/lib/db";
 import { checkBudget } from "@/server/ai/budget";
 import { isValidTransition } from "@/server/cases/fsm";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
@@ -110,6 +175,13 @@ import { runEmailExtractionWorker } from "@/server/worker/extract";
 
 const CASE_ID   = "fc-test-0000-0000-0000-000000000001";
 const TENANT_ID = "fc-test-0000-0000-0000-000000000002";
+
+type MockDb = {
+  select: ReturnType<typeof vi.fn>;
+  insert: ReturnType<typeof vi.fn>;
+  update: ReturnType<typeof vi.fn>;
+  delete: ReturnType<typeof vi.fn>;
+};
 
 /**
  * Build a minimal valid ExtractedClaim with the given extracted_fields.
@@ -139,98 +211,95 @@ function makeExtractedClaim(extractedFields: Record<string, string>): ExtractedC
 }
 
 /**
- * Build a chainable mock Supabase client.
+ * Configure the Drizzle db mocks for a worker run.
  *
- * caseRow: what the cases SELECT .single() returns.
- * caseUpdateSpy: spy that captures each cases.update(payload) call.
+ * caseRow: what the cases SELECT .limit(1) returns.
+ * caseUpdateSpy: spy that captures each cases.update(.set(payload)...) call.
+ *
+ * The worker uses db.select() for:
+ *   1. cases fetch — returns [caseRow]
+ *   2. raw_messages fetch — returns [rawMsg]
+ *   3. known_claim_patterns — returns []
+ *   4. missingDocs existing check — returns []
+ *
+ * We use a call counter inside from() to differentiate them.
  */
-function buildMockClient(
+function buildDbMocks(
   caseRow: Record<string, unknown>,
   caseUpdateSpy: ReturnType<typeof vi.fn>
 ) {
-  return {
-    from: (table: string) => {
-      if (table === "cases") {
-        return {
-          // SELECT branch: fetch case row.
-          select: (_cols: string) => ({
-            eq: (_c: string, _v: string) => ({
-              eq: (_c2: string, _v2: string) => ({
-                single: () =>
-                  Promise.resolve({ data: caseRow, error: null }),
-              }),
-            }),
-          }),
-          // UPDATE branch: called once at the end of the pipeline.
-          update: (payload: Record<string, unknown>) => ({
-            eq: (_col: string, _val: string) => {
-              caseUpdateSpy(payload);
-              return Promise.resolve({ error: null });
-            },
-          }),
-        };
-      }
+  const mockDbTyped = db as MockDb;
 
-      if (table === "raw_messages") {
-        return {
-          select: (_cols: string) => ({
-            eq: (_c: string, _v: string) => ({
-              order: (_col: string, _opts: any) => ({
-                limit: (_n: number) => ({
-                  single: () =>
-                    Promise.resolve({
-                      data: {
-                        body: "Stub email body for field-copy tests.",
-                        subject: "Reclamo",
-                        from_addr: "cliente@example.com",
-                      },
-                      error: null,
-                    }),
-                }),
-              }),
-            }),
-          }),
-        };
-      }
+  let selectCallCount = 0;
 
-      // All other tables (claim_memory, known_claim_patterns, extracted_fields,
-      // missing_docs, outbound_messages, claim_messages) return empty results.
+  mockDbTyped.select.mockImplementation(() => {
+    selectCallCount++;
+    const callNum = selectCallCount;
+
+    if (callNum === 1) {
+      // cases fetch — .where(...).limit(1)
       return {
-        select: (_cols: string) => ({
-          eq: (_c: string, _v: string) => ({
-            eq: (_c2: string, _v2: string) => ({
-              order: (_col: string, _opts: any) => ({
-                limit: (_n: number) => Promise.resolve({ data: [], error: null }),
-              }),
-              single: () => Promise.resolve({ data: null, error: null }),
-            }),
-            limit: (_n: number) => ({
-              single: () => Promise.resolve({ data: null, error: null }),
-            }),
-            order: (_col: string, _opts: any) => ({
-              limit: (_n: number) => Promise.resolve({ data: [], error: null }),
-            }),
-            or: (_expr: string) => ({
-              eq: (_c2: string, _v2: string) => ({
-                limit: (_n: number) => Promise.resolve({ data: [], error: null }),
-              }),
-            }),
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([caseRow]),
           }),
-          or: (_expr: string) => ({
-            eq: (_c2: string, _v2: string) => ({
-              limit: (_n: number) => Promise.resolve({ data: [], error: null }),
-            }),
-          }),
-          limit: (_n: number) => Promise.resolve({ data: [], error: null }),
         }),
-        upsert: (_data: any, _opts?: any) => Promise.resolve({ error: null }),
-        update: (_data: any) => ({
-          eq: (_c: string, _v: string) => Promise.resolve({ error: null }),
-        }),
-        insert: (_data: any) => Promise.resolve({ error: null }),
       };
-    },
-  };
+    }
+
+    if (callNum === 2) {
+      // raw_messages fetch — .where(...).orderBy(...).limit(1)
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([
+                {
+                  body: "Stub email body for field-copy tests.",
+                  subject: "Reclamo",
+                  from_addr: "cliente@example.com",
+                },
+              ]),
+            }),
+          }),
+        }),
+      };
+    }
+
+    // All other selects (known_claim_patterns, missingDocs, etc.) — return empty
+    return {
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]),
+          orderBy: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+        orderBy: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    };
+  });
+
+  mockDbTyped.update.mockImplementation(() => ({
+    set: vi.fn().mockImplementation((payload: unknown) => ({
+      where: vi.fn().mockImplementation(() => {
+        caseUpdateSpy(payload);
+        return Promise.resolve(undefined);
+      }),
+    })),
+  }));
+
+  mockDbTyped.insert.mockReturnValue({
+    values: vi.fn().mockReturnValue({
+      onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+    }),
+  });
+
+  mockDbTyped.delete.mockReturnValue({
+    where: vi.fn().mockResolvedValue(undefined),
+  });
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -258,11 +327,10 @@ async function runWorker(
   caseRow: Record<string, unknown>,
   extractedFields: Record<string, string>
 ): Promise<Array<Record<string, unknown>>> {
-  const caseUpdateSpy = vi.fn().mockResolvedValue({ error: null });
-  const client = buildMockClient(caseRow, caseUpdateSpy);
-  vi.mocked(createServiceClient).mockReturnValue(client as any);
+  const caseUpdateSpy = vi.fn();
+  buildDbMocks(caseRow, caseUpdateSpy);
 
-  // The worker calls extractEmailClaimMock() when shouldUseMock() = true.
+  // The worker calls extractEmailClaimMock() when engine === "mock".
   vi.mocked(extractEmailClaimMock).mockReturnValue(makeExtractedClaim(extractedFields));
 
   await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);

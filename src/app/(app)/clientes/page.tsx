@@ -8,7 +8,11 @@
  */
 
 import { Suspense } from "react";
-import { createServerClient } from "@/lib/supabase/server";
+import { getSessionContext } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { eq, and, ilike, desc, count } from "drizzle-orm";
+import { customers, users } from "@/lib/db/schema";
+import { redirect } from "next/navigation";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import Link from "next/link";
@@ -47,33 +51,30 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
 
   const PER_PAGE = 25;
 
-  const supabase = await createServerClient();
+  const session = await getSessionContext();
+  if (!session?.user) redirect("/login");
+  const [userRow] = await db
+    .select({ tenant_id: users.tenant_id })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+  if (!userRow) redirect("/login");
 
-  // Count + data queries in parallel (RLS-scoped)
-  let countQ = (supabase as any)
-    .from("customers")
-    .select("id", { count: "exact", head: true });
-  let dataQ = (supabase as any)
-    .from("customers")
-    .select("id,full_name,dni,email,phone,created_at")
-    .order("created_at", { ascending: false });
+  const whereClause = search
+    ? and(eq(customers.tenant_id, userRow.tenant_id), ilike(customers.full_name, `%${search}%`))
+    : eq(customers.tenant_id, userRow.tenant_id);
 
-  if (search) {
-    // Search by full_name ILIKE (DNI and email use exact match for PII safety)
-    countQ = countQ.ilike("full_name", `%${search}%`);
-    dataQ = dataQ.ilike("full_name", `%${search}%`);
-  }
-
-  const from = (page - 1) * PER_PAGE;
-  const to = from + PER_PAGE - 1;
-  dataQ = dataQ.range(from, to);
-
-  const [{ count }, { data: customers }] = await Promise.all([
-    countQ,
-    dataQ,
+  const [[{ total }], customersData] = await Promise.all([
+    db.select({ total: count() }).from(customers).where(whereClause),
+    db
+      .select({ id: customers.id, full_name: customers.full_name, dni: customers.dni, email: customers.email, phone: customers.phone, created_at: customers.created_at })
+      .from(customers)
+      .where(whereClause)
+      .orderBy(desc(customers.created_at))
+      .limit(PER_PAGE)
+      .offset((page - 1) * PER_PAGE),
   ]);
 
-  const total = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 
   return (
@@ -135,7 +136,7 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
 
       {/* Table */}
       <div className="flex-1 overflow-auto px-6 py-4">
-        {!customers || customers.length === 0 ? (
+        {!customersData || customersData.length === 0 ? (
           <div
             className="py-16 text-center text-sm text-slate-500"
             role="status"
@@ -168,7 +169,7 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
                 </tr>
               </thead>
               <tbody>
-                {(customers as Customer[]).map((customer) => (
+                {(customersData as Customer[]).map((customer) => (
                   <tr
                     key={customer.id}
                     className="border-b border-slate-100 hover:bg-slate-50 transition-colors"
@@ -203,11 +204,11 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
         )}
 
         {/* Pagination */}
-        {total > 0 && (
+        {Number(total) > 0 && (
           <div className="flex items-center justify-between pt-4 border-t border-slate-100">
             <p className="text-sm text-slate-500">
-              Mostrando {Math.min((page - 1) * PER_PAGE + 1, total)}–
-              {Math.min(page * PER_PAGE, total)} de {total} clientes
+              Mostrando {Math.min((page - 1) * PER_PAGE + 1, Number(total))}–
+              {Math.min(page * PER_PAGE, Number(total))} de {Number(total)} clientes
             </p>
             <div className="flex items-center gap-2">
               {page > 1 && (

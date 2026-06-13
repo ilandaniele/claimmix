@@ -49,8 +49,7 @@ jobs:
       - name: Type check
         run: pnpm type-check
         env:
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
 
   # ── 2. Lint ──────────────────────────────────────────────────────────────────
   lint:
@@ -116,8 +115,7 @@ jobs:
       - name: Run unit tests
         run: pnpm test:unit
         env:
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
           MOCK_AI: "true"
 
   # ── 4. Build ─────────────────────────────────────────────────────────────────
@@ -153,8 +151,8 @@ jobs:
       - name: Build
         run: pnpm build
         env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key' }}
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          BETTER_AUTH_SECRET: placeholder-secret-for-build-only
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN || '' }}
           MOCK_AI: "true"
 
@@ -191,18 +189,17 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run integration tests
-        # Skip gracefully when INTEGRATION_ENABLED is not set (no live Supabase credentials)
+        # Skip gracefully when INTEGRATION_ENABLED is not set (no live Neon credentials)
         run: |
           if [ "${{ secrets.INTEGRATION_ENABLED }}" = "true" ]; then
             pnpm test:integration
           else
             echo "[skip] Integration tests skipped — INTEGRATION_ENABLED secret not set."
-            echo "       Set INTEGRATION_ENABLED=true in GitHub Actions secrets to enable."
+            echo "       Set INTEGRATION_ENABLED=true + DATABASE_URL in GitHub Actions secrets to enable."
           fi
         env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key' }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || '' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'placeholder-secret' }}
           MOCK_AI: "true"
           INTEGRATION_ENABLED: ${{ secrets.INTEGRATION_ENABLED || 'false' }}
 
@@ -244,14 +241,14 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          if [ "${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" != "" ]; then
+          if [ "${{ secrets.DATABASE_URL }}" != "" ]; then
             pnpm test:e2e --project=chromium
           else
-            echo "[skip] E2E tests skipped — NEXT_PUBLIC_SUPABASE_URL secret not configured."
+            echo "[skip] E2E tests skipped — DATABASE_URL secret not configured."
           fi
         env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'placeholder-secret' }}
           MOCK_AI: "true"
 
       - name: Upload Playwright report
@@ -338,8 +335,8 @@ jobs:
       - name: Build for bundle analysis
         run: pnpm build
         env:
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          BETTER_AUTH_SECRET: placeholder-secret-for-build-only
           MOCK_AI: "true"
           ANALYZE: "true"
 
@@ -390,13 +387,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run Gmail polling integration tests (mock-only)
-        # intake-email.test.ts and intake-email-claim-messages.test.ts deleted in W5.
         # intake-email-gone.test.ts verifies the 410 stub (AC11).
         # gmail-poll.test.ts covers the full polling pipeline (AC1-AC4, AC7, AC8, AC13-AC14).
+        # All tests use mocked @/lib/db — no real DB connection needed.
         run: pnpm vitest run tests/integration/intake-email-gone.test.ts tests/integration/gmail-poll.test.ts tests/integration/rls-email.test.ts tests/integration/llm-email-probes.test.ts
         env:
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
           MOCK_AI: "true"
 
   # ── 10. License audit ────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@
  *      `claim_type IS NULL` filter.
  *
  * Strategy:
- *   - Mock all heavy dependencies (supabase, gmail client, server-only, etc.)
+ *   - Mock all heavy dependencies (db, gmail client, server-only, etc.)
  *     so we can call processMessage() indirectly via pollGmail().
  *   - Replace global.fetch with a vi.fn() and assert its call signature.
  *   - Simulate fetch rejection to verify error isolation (AC6).
@@ -31,6 +31,7 @@ const {
   mockThreadLookup,
   mockRehostAttachments,
   mockWriteAuditLog,
+  mockListEnabledGmailAccounts,
 } = vi.hoisted(() => ({
   mockGetWorkerBaseUrl: vi.fn().mockReturnValue("http://localhost:3000"),
   mockGetGmailClient: vi.fn(),
@@ -42,11 +43,33 @@ const {
   mockThreadLookup: vi.fn().mockResolvedValue({ existingCaseId: null }),
   mockRehostAttachments: vi.fn().mockResolvedValue([]),
   mockWriteAuditLog: vi.fn().mockResolvedValue(undefined),
+  mockListEnabledGmailAccounts: vi.fn().mockResolvedValue([]),
 }));
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
 vi.mock("server-only", () => ({}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    insert: vi.fn(),
+    select: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  },
+  tables: {},
+}));
+
+vi.mock("@/lib/db/schema", () => ({
+  cases: {},
+  claimMessages: {},
+  claimAttachments: {},
+  gmailPollState: {},
+}));
+
+vi.mock("@/lib/db/helpers", () => ({
+  firstRow: <T>(rows: T[]): T | null => rows[0] ?? null,
+}));
 
 vi.mock("@/server/email/dispatch-url", () => ({
   getWorkerBaseUrl: mockGetWorkerBaseUrl,
@@ -64,6 +87,10 @@ vi.mock("@/server/email/gmail/poll-state", () => ({
 
 vi.mock("@/server/email/gmail/gmail-attachment-adapter", () => ({
   adaptGmailAttachments: mockAdaptGmailAttachments,
+}));
+
+vi.mock("@/server/email/gmail/accounts", () => ({
+  listEnabledGmailAccounts: mockListEnabledGmailAccounts,
 }));
 
 vi.mock("@/server/email/dedupe", () => ({
@@ -90,6 +117,7 @@ vi.mock("@/lib/audit/log", () => ({
 // ── Import SUT after mocks ────────────────────────────────────────────────────
 
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
+import { db } from "@/lib/db";
 
 // ── Test constants ────────────────────────────────────────────────────────────
 
@@ -97,50 +125,58 @@ const TENANT_ID = "00000000-0000-0000-0000-000000000000";
 const CASE_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const MSG_ID = "gmail-msg-id-001";
 
-/** Minimal Supabase mock that returns a new case UUID on cases.insert */
-function makeSupabaseMock(overrides?: {
-  casesInsertError?: { code: string } | null;
-  messagesInsertError?: { code: string } | null;
-}): any {
-  const casesInsertError = overrides?.casesInsertError ?? null;
-  const messagesInsertError = overrides?.messagesInsertError ?? null;
+/**
+ * Build a minimal Drizzle db mock that returns a new case UUID on insert.
+ *
+ * The code uses:
+ *   db.insert(cases).values({...}).returning({ id: cases.id })  → [{ id }]
+ *   db.insert(claimMessages).values({...}).returning({ id: claimMessages.id }) → [{ id }]
+ *   db.insert(claimAttachments).values({...})                   → void
+ */
+function setupDbMock(overrides?: {
+  casesInsertRows?: Array<{ id: string }>;
+  messagesInsertRows?: Array<{ id: string }>;
+}) {
+  const casesInsertRows = overrides?.casesInsertRows ?? [{ id: CASE_ID }];
+  const messagesInsertRows = overrides?.messagesInsertRows ?? [
+    { id: "claim-msg-uuid-001" },
+  ];
 
-  return {
-    from: vi.fn().mockImplementation((table: string) => {
-      if (table === "cases") {
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({
-                data: casesInsertError ? null : { id: CASE_ID },
-                error: casesInsertError,
-              }),
-            }),
-          }),
-        };
+  let casesCallCount = 0;
+  let messagesCallCount = 0;
+
+  vi.mocked(db.insert).mockImplementation((table: unknown) => {
+    // Determine table by reference — since schema objects are mocked as plain
+    // objects, we use call order: first insert = cases, second = claimMessages.
+    // A more robust approach: track which table mock is passed.
+    // We use a counter per logical sequence per test.
+    const returning = vi.fn().mockImplementation(() => {
+      // We can't inspect `table` deeply because schema is mocked as {}.
+      // Instead we rely on insertion order in processMessage():
+      //   1st insert → cases
+      //   2nd insert → claimMessages
+      //   subsequent → claimAttachments (no returning needed)
+      if (casesCallCount === 0) {
+        casesCallCount++;
+        return Promise.resolve(casesInsertRows);
       }
-      if (table === "claim_messages") {
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({
-                data: messagesInsertError ? null : { id: "claim-msg-uuid-001" },
-                error: messagesInsertError,
-              }),
-            }),
-          }),
-        };
+      if (messagesCallCount === 0) {
+        messagesCallCount++;
+        return Promise.resolve(messagesInsertRows);
       }
-      // Default: no-op for other tables
-      return {
-        insert: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({ data: { id: "other-uuid" }, error: null }),
-          }),
+      return Promise.resolve([]);
+    });
+
+    return {
+      values: vi.fn().mockReturnValue({
+        returning,
+        onConflictDoNothing: vi.fn().mockResolvedValue(undefined),
+        onConflictDoUpdate: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([]),
         }),
-      };
-    }),
-  };
+      }),
+    } as any;
+  });
 }
 
 /**
@@ -208,6 +244,7 @@ beforeEach(() => {
   mockThreadLookup.mockResolvedValue({ existingCaseId: null });
   mockAdaptGmailAttachments.mockResolvedValue([]);
   mockWriteAuditLog.mockResolvedValue(undefined);
+  mockListEnabledGmailAccounts.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -226,8 +263,8 @@ describe("dispatchExtractionWorker — AC5: fetch POST with correct shape", () =
     const gmailMock = makeGmailMock();
     mockGetGmailClient.mockReturnValue(gmailMock);
 
-    const supabase = makeSupabaseMock();
-    await pollGmail(supabase);
+    setupDbMock();
+    await pollGmail();
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
@@ -245,8 +282,8 @@ describe("dispatchExtractionWorker — AC5: fetch POST with correct shape", () =
     const gmailMock = makeGmailMock();
     mockGetGmailClient.mockReturnValue(gmailMock);
 
-    const supabase = makeSupabaseMock();
-    await pollGmail(supabase);
+    setupDbMock();
+    await pollGmail();
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
@@ -267,8 +304,8 @@ describe("dispatchExtractionWorker — AC5: fetch POST with correct shape", () =
     const gmailMock = makeGmailMock();
     mockGetGmailClient.mockReturnValue(gmailMock);
 
-    const supabase = makeSupabaseMock();
-    await pollGmail(supabase);
+    setupDbMock();
+    await pollGmail();
 
     const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://my-project.vercel.app/api/worker/extract");
@@ -318,32 +355,36 @@ describe("dispatchExtractionWorker — AC5: fetch POST with correct shape", () =
 
     mockGetGmailClient.mockReturnValue(gmail);
 
-    // Return distinct case IDs for each insert
-    const supabase = {
-      from: vi.fn().mockImplementation((table: string) => {
-        if (table === "cases") {
-          return {
-            insert: vi.fn().mockReturnValue({
-              select: vi.fn().mockReturnValue({
-                single: vi
-                  .fn()
-                  .mockResolvedValueOnce({ data: { id: "case-001" }, error: null })
-                  .mockResolvedValueOnce({ data: { id: "case-002" }, error: null }),
-              }),
-            }),
-          };
-        }
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({ data: { id: "msg-row-uuid" }, error: null }),
-            }),
-          }),
-        };
-      }),
-    };
+    // Two messages → two cases + two claim_message inserts
+    setupDbMock({
+      casesInsertRows: [{ id: "case-001" }],
+      messagesInsertRows: [{ id: "msg-row-uuid" }],
+    });
 
-    await pollGmail(supabase);
+    // Override db.insert to return distinct case IDs per call
+    let insertCallCount = 0;
+    vi.mocked(db.insert).mockImplementation(() => {
+      const callIndex = insertCallCount++;
+      return {
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockImplementation(() => {
+            // Odd calls (0,2) = cases; even calls (1,3) = claim_messages
+            if (callIndex % 2 === 0) {
+              const caseId = callIndex === 0 ? "case-001" : "case-002";
+              return Promise.resolve([{ id: caseId }]);
+            } else {
+              return Promise.resolve([{ id: "msg-row-uuid" }]);
+            }
+          }),
+          onConflictDoNothing: vi.fn().mockResolvedValue(undefined),
+          onConflictDoUpdate: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      } as any;
+    });
+
+    await pollGmail();
 
     // fetch called once per processed message
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -360,8 +401,8 @@ describe("dispatchExtractionWorker — AC6: error isolation", () => {
     const gmailMock = makeGmailMock();
     mockGetGmailClient.mockReturnValue(gmailMock);
 
-    const supabase = makeSupabaseMock();
-    const result = await pollGmail(supabase);
+    setupDbMock();
+    const result = await pollGmail();
 
     // Poll loop must not crash — message is processed (claim row inserted)
     expect(result.processed).toBe(1);
@@ -380,8 +421,8 @@ describe("dispatchExtractionWorker — AC6: error isolation", () => {
     const gmailMock = makeGmailMock();
     mockGetGmailClient.mockReturnValue(gmailMock);
 
-    const supabase = makeSupabaseMock();
-    await pollGmail(supabase);
+    setupDbMock();
+    await pollGmail();
 
     // Wait a tick for the .catch() to run
     await new Promise((r) => setTimeout(r, 0));
@@ -454,31 +495,29 @@ describe("dispatchExtractionWorker — AC6: error isolation", () => {
 
     mockGetGmailClient.mockReturnValue(gmail);
 
-    const supabase = {
-      from: vi.fn().mockImplementation((table: string) => {
-        if (table === "cases") {
-          return {
-            insert: vi.fn().mockReturnValue({
-              select: vi.fn().mockReturnValue({
-                single: vi
-                  .fn()
-                  .mockResolvedValueOnce({ data: { id: "case-001" }, error: null })
-                  .mockResolvedValueOnce({ data: { id: "case-002" }, error: null }),
-              }),
-            }),
-          };
-        }
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({ data: { id: "msg-row-uuid" }, error: null }),
-            }),
+    // Two messages → two cases + two claim_message inserts
+    let insertCallCount = 0;
+    vi.mocked(db.insert).mockImplementation(() => {
+      const callIndex = insertCallCount++;
+      return {
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockImplementation(() => {
+            if (callIndex % 2 === 0) {
+              const caseId = callIndex === 0 ? "case-001" : "case-002";
+              return Promise.resolve([{ id: caseId }]);
+            } else {
+              return Promise.resolve([{ id: "msg-row-uuid" }]);
+            }
           }),
-        };
-      }),
-    };
+          onConflictDoNothing: vi.fn().mockResolvedValue(undefined),
+          onConflictDoUpdate: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      } as any;
+    });
 
-    const result = await pollGmail(supabase);
+    const result = await pollGmail();
 
     // Both messages processed — dispatch error on first did not abort the loop
     expect(result.processed).toBe(2);
@@ -497,33 +536,32 @@ describe("NB3 — initial case insert uses claim_type: null", () => {
     const gmailMock = makeGmailMock();
     mockGetGmailClient.mockReturnValue(gmailMock);
 
-    // Build a supabase mock that captures the insert payload for 'cases'.
+    // Capture the values() payload from the first insert (cases)
     let capturedInsertPayload: unknown = undefined;
-    const supabase = {
-      from: vi.fn().mockImplementation((table: string) => {
-        if (table === "cases") {
+    let insertCallCount = 0;
+
+    vi.mocked(db.insert).mockImplementation(() => {
+      const callIndex = insertCallCount++;
+      return {
+        values: vi.fn().mockImplementation((payload: unknown) => {
+          if (callIndex === 0) {
+            capturedInsertPayload = payload;
+          }
           return {
-            insert: vi.fn().mockImplementation((payload: unknown) => {
-              capturedInsertPayload = payload;
-              return {
-                select: vi.fn().mockReturnValue({
-                  single: vi.fn().mockResolvedValue({ data: { id: CASE_ID }, error: null }),
-                }),
-              };
+            returning: vi.fn().mockImplementation(() => {
+              if (callIndex === 0) return Promise.resolve([{ id: CASE_ID }]);
+              return Promise.resolve([{ id: "claim-msg-uuid" }]);
+            }),
+            onConflictDoNothing: vi.fn().mockResolvedValue(undefined),
+            onConflictDoUpdate: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([]),
             }),
           };
-        }
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({ data: { id: "claim-msg-uuid" }, error: null }),
-            }),
-          }),
-        };
-      }),
-    };
+        }),
+      } as any;
+    });
 
-    await pollGmail(supabase);
+    await pollGmail();
 
     // The insert payload must NOT carry a hard-coded claim_type value.
     expect(capturedInsertPayload).toBeDefined();

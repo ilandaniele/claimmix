@@ -30,17 +30,13 @@ export function generateNonce(): string {
  * style-src:
  *   'self' 'unsafe-inline' – Tailwind v4 generates inline styles at runtime;
  *   style nonces are not supported by Tailwind v4's PostCSS model.
- *
- * connect-src includes Supabase so Auth/Realtime/Storage calls work.
  */
 export function buildCsp(nonce: string): string {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-
   const directives: string[] = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     "style-src 'self' 'unsafe-inline'",
-    `connect-src 'self' ${supabaseUrl} wss://*.supabase.co https://o0.ingest.sentry.io`,
+    `connect-src 'self' https://o0.ingest.sentry.io`,
     "img-src 'self' data: https:",
     "font-src 'self' data:",
     "frame-ancestors 'none'",

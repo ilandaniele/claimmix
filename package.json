@@ -23,10 +23,13 @@
     "cleanup:cases": "tsx scripts/cleanup-cases.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1068.0",
+    "@aws-sdk/s3-request-presigner": "^3.1068.0",
+    "@neondatabase/serverless": "^1.1.0",
     "@sentry/nextjs": "^10.56.0",
-    "@supabase/ssr": "^0.10.3",
-    "@supabase/supabase-js": "^2.107.0",
     "@tanstack/react-table": "^8.21.3",
+    "better-auth": "^1.6.18",
+    "drizzle-orm": "^0.45.2",
     "google-auth-library": "9.15.1",
     "googleapis": "^148.0.0",
     "next": "16.2.7",
@@ -48,6 +51,7 @@
     "@vitejs/plugin-react": "^4.5.0",
     "@vitest/coverage-v8": "^4.1.8",
     "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.7",
     "jsdom": "^26.1.0",

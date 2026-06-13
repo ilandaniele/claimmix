@@ -1,8 +1,8 @@
 /**
  * Unit tests for src/server/email/rehost-attachments.ts
  *
- * Uses vi.mock to replace the Supabase client and uploadAttachment so no
- * real network calls are made.
+ * Uses vi.mock to replace @/lib/db (drizzle) and the storage bucket so no
+ * real network calls or DATABASE_URL env var are needed.
  *
  * AC7:  Valid attachment → returns { stored: true, storagePath, contentHash }
  * AC8:  Disallowed content-type → { stored: false, reason: 'content_type_not_allowed' }
@@ -13,6 +13,24 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createHash } from "crypto";
+
+// ── Mock @/lib/db BEFORE any import that might trigger DATABASE_URL check ─────
+//
+// The drizzle db object is used inside findExistingByHash() as:
+//   db.select(...).from(...).where(...).limit(1)
+// We build a chainable mock that returns [] (no existing row) by default.
+// Individual tests can override mockDbSelect to return a row.
+
+const mockDbLimit = vi.fn();
+const mockDbWhere = vi.fn().mockReturnValue({ limit: mockDbLimit });
+const mockDbFrom = vi.fn().mockReturnValue({ where: mockDbWhere });
+const mockDbSelect = vi.fn().mockReturnValue({ from: mockDbFrom });
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: (...args: any[]) => mockDbSelect(...args),
+  },
+}));
 
 // ── Mock the storage bucket module ────────────────────────────────────────────
 
@@ -30,19 +48,12 @@ import { rehostAttachments, type EmailAttachment } from "@/server/email/rehost-a
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Build a Supabase mock that returns no existing attachment by default. */
-function buildSupabaseMock(existingStoragePath: string | null = null) {
-  const maybeSingle = vi.fn().mockResolvedValue({
-    data: existingStoragePath ? { storage_path: existingStoragePath } : null,
-    error: null,
-  });
-  const limit = vi.fn().mockReturnValue({ maybeSingle });
-  const eq2 = vi.fn().mockReturnValue({ limit });
-  const eq1 = vi.fn().mockReturnValue({ eq: eq2 });
-  const select = vi.fn().mockReturnValue({ eq: eq1 });
-  const from = vi.fn().mockReturnValue({ select });
-
-  return { from } as any;
+/**
+ * Configure the drizzle chain so that db.select().from().where().limit()
+ * resolves with the given rows array.
+ */
+function setDbResult(rows: Array<{ storage_path: string }>) {
+  mockDbLimit.mockResolvedValue(rows);
 }
 
 /** Build a valid PDF attachment. */
@@ -82,6 +93,15 @@ describe("rehostAttachments", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Re-wire the drizzle chain after clearAllMocks resets all mock return values.
+    mockDbSelect.mockReturnValue({ from: mockDbFrom });
+    mockDbFrom.mockReturnValue({ where: mockDbWhere });
+    mockDbWhere.mockReturnValue({ limit: mockDbLimit });
+
+    // Default: no existing row found.
+    mockDbLimit.mockResolvedValue([]);
+
     // Default: computeContentHash calls through to real SHA-256.
     mockComputeContentHash.mockImplementation((data: Buffer) =>
       createHash("sha256").update(data).digest("hex")
@@ -92,12 +112,10 @@ describe("rehostAttachments", () => {
 
   it("AC7: valid PDF attachment → stored:true with storagePath and contentHash", async () => {
     const attachment = buildPdfAttachment();
-    const supabase = buildSupabaseMock(null); // no existing row
     mockUploadAttachment.mockResolvedValue({ storagePath: "tenant-1/case-1/msg-1/abc-policy.pdf" });
 
     const results = await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments: [attachment],
     });
 
@@ -112,12 +130,10 @@ describe("rehostAttachments", () => {
 
   it("AC7: uploadAttachment receives correct opts (tenantId, caseId, messageId, contentType)", async () => {
     const attachment = buildPdfAttachment();
-    const supabase = buildSupabaseMock(null);
     mockUploadAttachment.mockResolvedValue({ storagePath: "p" });
 
     await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments: [attachment],
     });
 
@@ -141,11 +157,9 @@ describe("rehostAttachments", () => {
       ContentType: "application/x-msdownload",
       ContentLength: 10,
     };
-    const supabase = buildSupabaseMock(null);
 
     const results = await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments: [attachment],
     });
 
@@ -168,11 +182,9 @@ describe("rehostAttachments", () => {
       ContentType: "application/pdf",
       ContentLength: bigBuffer.length,
     };
-    const supabase = buildSupabaseMock(null);
 
     const results = await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments: [attachment],
     });
 
@@ -189,11 +201,12 @@ describe("rehostAttachments", () => {
   it("AC10: existing attachment with same content_hash → reuses storagePath, no upload", async () => {
     const { attachment, hash } = buildAttachmentWithKnownHash();
     const existingPath = "tenant-1/case-1/old-msg/abcd-known.pdf";
-    const supabase = buildSupabaseMock(existingPath);
+
+    // Make the db query return an existing row.
+    setDbResult([{ storage_path: existingPath }]);
 
     const results = await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments: [attachment],
     });
 
@@ -213,15 +226,6 @@ describe("rehostAttachments", () => {
     const firstAttachment = buildPdfAttachment({ Name: "first.pdf" });
     const secondAttachment = buildPdfAttachment({ Name: "second.pdf" });
 
-    // Build two separate Supabase mocks (one per attachment query).
-    // The first query returns no existing row; the second won't be reached if timeout fires.
-    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
-    const limit = vi.fn().mockReturnValue({ maybeSingle });
-    const eq2 = vi.fn().mockReturnValue({ limit });
-    const eq1 = vi.fn().mockReturnValue({ eq: eq2 });
-    const select = vi.fn().mockReturnValue({ eq: eq1 });
-    const supabase = { from: vi.fn().mockReturnValue({ select }) } as any;
-
     // First upload succeeds immediately.
     // Second upload takes longer than the remaining budget.
     let callCount = 0;
@@ -237,10 +241,8 @@ describe("rehostAttachments", () => {
     });
 
     // Use a very short budget so the second attachment's remaining budget is ≤ 0.
-    // We simulate this by setting budgetMs=1 and using a slow dedupe query for the second.
     const results = await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments: [firstAttachment, secondAttachment],
       budgetMs: 1, // 1 ms — first upload should succeed, second should timeout immediately
     });
@@ -260,13 +262,11 @@ describe("rehostAttachments", () => {
       buildPdfAttachment({ Name: "c.pdf" }),
     ];
 
-    const supabase = buildSupabaseMock(null);
     mockUploadAttachment.mockResolvedValue({ storagePath: "p" });
 
     // budgetMs = 0 means all attachments start with remaining <= 0.
     const results = await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments,
       budgetMs: 0,
     });
@@ -285,12 +285,10 @@ describe("rehostAttachments", () => {
 
   it("upload failure → stored:false, reason=storage_upload_failed", async () => {
     const attachment = buildPdfAttachment();
-    const supabase = buildSupabaseMock(null);
     mockUploadAttachment.mockResolvedValue({ error: "STORAGE_UPLOAD_FAILED" });
 
     const results = await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments: [attachment],
     });
 
@@ -324,7 +322,6 @@ describe("rehostAttachments", () => {
     const second = makeAttachment("chunk2.pdf", 9 * MB);  // running: 18 MB — ok
     const third  = makeAttachment("chunk3.pdf", 9 * MB);  // running: 27 MB — exceeds 25 MB cap
 
-    const supabase = buildSupabaseMock(null);
     // Each successful upload returns a unique path.
     mockUploadAttachment
       .mockResolvedValueOnce({ storagePath: "tenant-1/case-1/msg-1/abc-chunk1.pdf" })
@@ -332,7 +329,6 @@ describe("rehostAttachments", () => {
 
     const results = await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments: [first, second, third],
       budgetMs: 30_000,  // generous budget — timeout must not fire here
     });
@@ -356,10 +352,8 @@ describe("rehostAttachments", () => {
   // ── Empty attachments list ────────────────────────────────────────────────────
 
   it("empty attachments list → returns empty array", async () => {
-    const supabase = buildSupabaseMock(null);
     const results = await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments: [],
     });
     expect(results).toHaveLength(0);
@@ -376,12 +370,10 @@ describe("rehostAttachments", () => {
       ContentType: "application/x-msdownload",
       ContentLength: 5,
     };
-    const supabase = buildSupabaseMock(null);
     mockUploadAttachment.mockResolvedValue({ storagePath: "p" });
 
     const results = await rehostAttachments({
       ...BASE_OPTS,
-      supabase,
       attachments: [pdf, exe],
     });
 

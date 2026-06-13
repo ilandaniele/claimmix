@@ -3,7 +3,7 @@
  *
  * AC1: Returns 200 with masked email + is_connected=true when healthy row exists.
  * AC2: Returns graceful empty when no row exists.
- * AC6: Returns 403 when user is not admin (analyst role).
+ * AC6: Returns 200 for analyst role — gmail-status is open to all authenticated users.
  * AC7: history_id is NOT in the response body at any depth.
  *
  * Runs against a mock Next.js request context using vi.mock for the db and
@@ -83,7 +83,7 @@ const TENANT_ID = "tenant-001";
 
 /**
  * Configure the db.select mock to handle two sequential select calls:
- *   1. requireAdmin() → users table lookup → returns the user row
+ *   1. requireRole() → users table lookup → returns the user row
  *   2. Route handler  → gmail_poll_state lookup → returns the status row
  *
  * Drizzle select chain:
@@ -184,15 +184,16 @@ describe("GET /api/admin/gmail-status", () => {
     });
   });
 
-  it("AC6: returns 403 FORBIDDEN when user has role=analyst", async () => {
+  it("AC6: returns 200 for analyst role (gmail-status open to all users)", async () => {
     setupSession("analyst");
     setupDbMock("analyst", null);
 
     const response = await GET();
     const body = await response.json();
 
-    expect(response.status).toBe(403);
-    expect(body.error.code).toBe("FORBIDDEN_ROLE");
+    expect(response.status).toBe(200);
+    expect(body.data).toBeDefined();
+    expect(body.data.is_connected).toBe(false);
   });
 
   it("returns 401 MISSING_SESSION when not authenticated", async () => {

@@ -36,7 +36,19 @@
  */
 
 import "server-only";
-import { createServiceClient } from "@/lib/supabase/service";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
+import {
+  cases,
+  claimMessages,
+  extractedFields,
+  knownClaimPatterns,
+  missingDocs,
+  outboundMessages,
+  rawMessages,
+} from "@/lib/db/schema";
+import type { CaseInsert } from "@/lib/db/types";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { analyzeGaps } from "@/server/ai/gap-analysis";
 import { checkBudget, recordUsage } from "@/server/ai/budget";
@@ -75,19 +87,36 @@ export async function runExtractionWorker(
   tenantId: string,
   userId: string | null
 ): Promise<void> {
-  const supabase = createServiceClient();
+  // ──0. Fetch case + raw message ──────────────────────────────────────────────
 
-  // ── 0. Fetch case + raw message ──────────────────────────────────────────────
+  let caseRow: {
+    id: string;
+    status: string;
+    claim_type: string | null;
+    tenant_id: string;
+    channel: string;
+  } | null;
+  try {
+    caseRow = firstRow(
+      await db
+        .select({
+          id: cases.id,
+          status: cases.status,
+          claim_type: cases.claim_type,
+          tenant_id: cases.tenant_id,
+          channel: cases.channel,
+        })
+        .from(cases)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
+        .limit(1)
+    );
+  } catch (err) {
+    console.error("[worker] Case not found:", caseId, dbErrCode(err));
+    return;
+  }
 
-  const { data: caseRow, error: caseError } = await (supabase as any)
-    .from("cases")
-    .select("id,status,claim_type,tenant_id,channel")
-    .eq("id", caseId)
-    .eq("tenant_id", tenantId)
-    .single();
-
-  if (caseError || !caseRow) {
-    console.error("[worker] Case not found:", caseId, caseError?.code);
+  if (!caseRow) {
+    console.error("[worker] Case not found:", caseId);
     return;
   }
 
@@ -114,17 +143,25 @@ export async function runExtractionWorker(
 
   // Fetch raw message body.
 
-  const { data: rawMsg, error: rawError } = await (supabase as any)
-    .from("raw_messages")
-    .select("body")
-    .eq("case_id", caseId)
-    .order("received_at", { ascending: false })
-    .limit(1)
-    .single();
+  let rawMsg: { body: string } | null;
+  try {
+    rawMsg = firstRow(
+      await db
+        .select({ body: rawMessages.body })
+        .from(rawMessages)
+        .where(
+          and(eq(rawMessages.case_id, caseId), eq(rawMessages.tenant_id, tenantId))
+        )
+        .orderBy(desc(rawMessages.received_at))
+        .limit(1)
+    );
+  } catch {
+    rawMsg = null;
+  }
 
-  if (rawError || !rawMsg) {
-    console.error("[worker] Raw message not found for case:", caseId, rawError?.code);
-    await escalateCase(supabase, caseId, tenantId, userId, "raw_message_missing", "raw_message_missing");
+  if (!rawMsg) {
+    console.error("[worker] Raw message not found for case:", caseId);
+    await escalateCase(caseId, tenantId, userId, "raw_message_missing", "raw_message_missing");
     return;
   }
 
@@ -149,19 +186,19 @@ export async function runExtractionWorker(
       payload: { reason: budgetResult.reason },
     });
     // Park case in escalado — human needs to re-trigger.
-    await updateCaseStatus(supabase, caseId, tenantId, "escalado", null);
+    await updateCaseStatus(caseId, tenantId, "escalado", null);
     return;
   }
 
   // ── 2. Select and run extractor (per-tenant provider: openai | gemini | mock) ─
-  const engine = await resolveExtractionEngine(supabase, tenantId);
+  const engine = await resolveExtractionEngine(tenantId);
   let extractedClaim;
 
   try {
     if (engine === "mock") {
       extractedClaim = runMockExtractor(rawMsg.body, claimType);
     } else if (engine === "gemini") {
-      extractedClaim = await runGeminiExtractor(rawMsg.body, claimType, caseId);
+      extractedClaim = await runGeminiExtractor(rawMsg.body, claimType, caseId, tenantId);
     } else {
       extractedClaim = await runOpenAIExtractor(rawMsg.body, claimType, caseId);
     }
@@ -176,7 +213,7 @@ export async function runExtractionWorker(
           error_name: e.name,
         })
       );
-      await escalateCase(supabase, caseId, tenantId, userId, "AI_OUTPUT_INVALID", "ai_output_invalid");
+      await escalateCase(caseId, tenantId, userId, "AI_OUTPUT_INVALID", "ai_output_invalid");
       return;
     }
     const name = e instanceof Error ? e.name : "UnknownError";
@@ -189,7 +226,7 @@ export async function runExtractionWorker(
         error_name: name,
       })
     );
-    await escalateCase(supabase, caseId, tenantId, userId, "extractor_error", "extractor_error");
+    await escalateCase(caseId, tenantId, userId, "extractor_error", "extractor_error");
     return;
   }
 
@@ -198,57 +235,33 @@ export async function runExtractionWorker(
 
   // ── 4. Write extracted_fields ────────────────────────────────────────────────
   if (extractedClaim.fields.length > 0) {
-    const fieldInserts = extractedClaim.fields.map((f) => ({
-      case_id: caseId,
-      tenant_id: tenantId,
-      field_key: f.field_key,
-      field_value: f.field_value,
-      confidence: parseFloat(f.confidence.toFixed(2)),
-    }));
-
-
-    const { error: fieldsError } = await (supabase as any)
-      .from("extracted_fields")
-      .upsert(fieldInserts, { onConflict: "case_id,field_key" });
-
-    if (fieldsError) {
-      console.error("[worker] Failed to write extracted_fields:", fieldsError.code, "case:", caseId);
+    try {
+      await upsertExtractedFields(caseId, tenantId, extractedClaim.fields);
+    } catch (err) {
+      console.error("[worker] Failed to write extracted_fields:", dbErrCode(err), "case:", caseId);
     }
   }
 
   // ── 5. Write missing_docs ────────────────────────────────────────────────────
   if (gapResult.missing_doc_keys.length > 0) {
-    const now = new Date().toISOString();
-    const missingInserts = gapResult.missing_doc_keys.map((docKey) => ({
-      case_id: caseId,
-      tenant_id: tenantId,
-      doc_key: docKey,
-      requested_at: null,
-      satisfied_at: null,
-    }));
-
-
-    const { error: missingError } = await (supabase as any)
-      .from("missing_docs")
-      .upsert(missingInserts, { onConflict: "case_id,doc_key" });
-
-    if (missingError) {
-      console.error("[worker] Failed to write missing_docs:", missingError.code, "case:", caseId);
+    try {
+      await insertMissingDocsIfAbsent(caseId, tenantId, gapResult.missing_doc_keys);
+    } catch (err) {
+      console.error("[worker] Failed to write missing_docs:", dbErrCode(err), "case:", caseId);
     }
 
     // Create outbound_messages stub (AC6).
-
-    const { error: outboundError } = await (supabase as any).from("outbound_messages").insert({
-      case_id: caseId,
-      tenant_id: tenantId,
-      channel: "email_sim",
-      template: "request_missing_docs",
-      rendered_body: `Se solicita la documentación faltante para el caso ${caseId}: ${gapResult.missing_doc_keys.join(", ")}`,
-      status: "queued",
-    });
-    void now; // suppress unused var lint
-    if (outboundError) {
-      console.error("[worker] Failed to create outbound_messages:", outboundError.code);
+    try {
+      await db.insert(outboundMessages).values({
+        case_id: caseId,
+        tenant_id: tenantId,
+        channel: "email_sim",
+        template: "request_missing_docs",
+        rendered_body: `Se solicita la documentación faltante para el caso ${caseId}: ${gapResult.missing_doc_keys.join(", ")}`,
+        status: "queued",
+      });
+    } catch (err) {
+      console.error("[worker] Failed to create outbound_messages:", dbErrCode(err));
     }
   }
 
@@ -258,12 +271,12 @@ export async function runExtractionWorker(
   // Safety: always validate FSM transition (LLM08 containment).
   if (!isValidTransition("procesando", newStatus)) {
     console.error("[worker] Invalid FSM transition attempt:", "procesando", "→", newStatus);
-    await escalateCase(supabase, caseId, tenantId, userId, "fsm_violation", "fsm_violation");
+    await escalateCase(caseId, tenantId, userId, "fsm_violation", "fsm_violation");
     return;
   }
 
   // ── 7. Update case status + confidence_min ───────────────────────────────────
-  await updateCaseStatus(supabase, caseId, tenantId, newStatus, gapResult.confidence_min);
+  await updateCaseStatus(caseId, tenantId, newStatus, gapResult.confidence_min);
 
   // ── 8. Audit log ─────────────────────────────────────────────────────────────
   const auditPayload: Record<string, unknown> = {
@@ -351,20 +364,28 @@ export async function runEmailExtractionWorker(
   tenantId: string,
   userId: string | null
 ): Promise<void> {
-  const supabase = createServiceClient();
-
   try {
     // ── a) Fetch case + raw_messages ──────────────────────────────────────────
 
-    const { data: caseRow, error: caseError } = await (supabase as any)
-      .from("cases")
-      .select("id,status,claim_type,tenant_id,channel,email_thread_id,policyholder_name,policy_number")
-      .eq("id", caseId)
-      .eq("tenant_id", tenantId)
-      .single();
+    const caseRow = firstRow(
+      await db
+        .select({
+          id: cases.id,
+          status: cases.status,
+          claim_type: cases.claim_type,
+          tenant_id: cases.tenant_id,
+          channel: cases.channel,
+          email_thread_id: cases.email_thread_id,
+          policyholder_name: cases.policyholder_name,
+          policy_number: cases.policy_number,
+        })
+        .from(cases)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
+        .limit(1)
+    );
 
-    if (caseError || !caseRow) {
-      console.error("[email-worker] Case not found:", caseId, caseError?.code);
+    if (!caseRow) {
+      console.error("[email-worker] Case not found:", caseId);
       return;
     }
 
@@ -392,31 +413,50 @@ export async function runEmailExtractionWorker(
     let claimMessageId: string | null = null;
     let providerMessageId: string | null = null;
 
-    const { data: rawMsg, error: rawError } = await (supabase as any)
-      .from("raw_messages")
-      .select("body,subject,from_addr")
-      .eq("case_id", caseId)
-      .order("received_at", { ascending: false })
-      .limit(1)
-      .single();
+    const rawMsg = firstRow(
+      await db
+        .select({
+          body: rawMessages.body,
+          subject: rawMessages.subject,
+          from_addr: rawMessages.from_addr,
+        })
+        .from(rawMessages)
+        .where(
+          and(eq(rawMessages.case_id, caseId), eq(rawMessages.tenant_id, tenantId))
+        )
+        .orderBy(desc(rawMessages.received_at))
+        .limit(1)
+    );
 
-    if (rawMsg && !rawError) {
+    if (rawMsg) {
       emailBody = rawMsg.body ?? "";
       emailSubject = rawMsg.subject ?? "";
       senderEmail = rawMsg.from_addr ?? "";
     } else {
       // Fallback: Gmail intake cases store messages in claim_messages.
-      const { data: claimMsg, error: claimError } = await (supabase as any)
-        .from("claim_messages")
-        .select("id,provider_message_id,body_text,subject,from_addr")
-        .eq("case_id", caseId)
-        .eq("direction", "inbound")
-        .order("received_at", { ascending: false })
-        .limit(1)
-        .single();
+      const claimMsg = firstRow(
+        await db
+          .select({
+            id: claimMessages.id,
+            provider_message_id: claimMessages.provider_message_id,
+            body_text: claimMessages.body_text,
+            subject: claimMessages.subject,
+            from_addr: claimMessages.from_addr,
+          })
+          .from(claimMessages)
+          .where(
+            and(
+              eq(claimMessages.case_id, caseId),
+              eq(claimMessages.tenant_id, tenantId),
+              eq(claimMessages.direction, "inbound")
+            )
+          )
+          .orderBy(desc(claimMessages.received_at))
+          .limit(1)
+      );
 
-      if (claimError || !claimMsg) {
-        console.error("[email-worker] Raw message not found:", caseId, claimError?.code); // crew-debug-ok
+      if (!claimMsg) {
+        console.error("[email-worker] Raw message not found:", caseId); // crew-debug-ok
         return;
       }
 
@@ -429,7 +469,7 @@ export async function runEmailExtractionWorker(
 
     // ── b) Load memory hints from claim_memory ───────────────────────────────
     const memoryHints = toPromptMemoryHints(
-      await loadClaimMemoryHints(supabase, tenantId, senderEmail, undefined, caseId)
+      await loadClaimMemoryHints(tenantId, senderEmail, undefined, caseId)
     );
     const memoryApplied = memoryHints.length > 0;
 
@@ -438,11 +478,11 @@ export async function runEmailExtractionWorker(
     // human-approved few-shot examples + active versioned tenant prompt.
     const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion] =
       await Promise.all([
-        loadKnownPatterns(supabase, tenantId),
-        loadAgentTraining(supabase, tenantId),
-        loadActivePromptRules(supabase, tenantId),
-        loadApprovedExamples(supabase, tenantId, caseRow.claim_type),
-        getActivePromptVersion(supabase, tenantId),
+        loadKnownPatterns(tenantId),
+        loadAgentTraining(tenantId),
+        loadActivePromptRules(tenantId),
+        loadApprovedExamples(tenantId, caseRow.claim_type),
+        getActivePromptVersion(tenantId),
       ]);
 
     const learning = {
@@ -475,7 +515,7 @@ export async function runEmailExtractionWorker(
     }
 
     // ── e) Run extractor (per-tenant provider: openai | gemini | mock) ───────
-    const engine = await resolveExtractionEngine(supabase, tenantId);
+    const engine = await resolveExtractionEngine(tenantId);
     let extractedClaim;
 
     if (engine === "mock") {
@@ -545,7 +585,7 @@ export async function runEmailExtractionWorker(
       emailText: fullText,
     });
 
-    await logAgentRun(supabase, {
+    await logAgentRun({
       tenantId,
       caseId,
       claimMessageId,
@@ -564,15 +604,15 @@ export async function runEmailExtractionWorker(
         extractedClaim.not_relevant_reason ||
         "El clasificador de IA determinó que este email no es un reclamo de seguro.";
 
-      await (supabase as any)
-        .from("cases")
-        .update({
+      await db
+        .update(cases)
+        .set({
           status: "no_relevante",
           is_claim: false,
           not_relevant_reason: reason.slice(0, 500),
           updated_at: new Date().toISOString(),
         })
-        .eq("id", caseId);
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
 
       await writeAuditLog({
         tenant_id: tenantId,
@@ -610,21 +650,10 @@ export async function runEmailExtractionWorker(
     );
 
     if (fieldsToWrite.length > 0) {
-      const fieldInserts = fieldsToWrite.map((f) => ({
-        case_id: caseId,
-        tenant_id: tenantId,
-        field_key: f.field_key,
-        field_value: f.field_value,
-        confidence: parseFloat(f.confidence.toFixed(2)),
-      }));
-
-
-      const { error: fieldsError } = await (supabase as any)
-        .from("extracted_fields")
-        .upsert(fieldInserts, { onConflict: "case_id,field_key" });
-
-      if (fieldsError) {
-        console.error("[email-worker] extracted_fields upsert error:", fieldsError.code);
+      try {
+        await upsertExtractedFields(caseId, tenantId, fieldsToWrite);
+      } catch (err) {
+        console.error("[email-worker] extracted_fields upsert error:", dbErrCode(err));
       }
     }
 
@@ -638,21 +667,10 @@ export async function runEmailExtractionWorker(
     ];
 
     if (missingFieldKeys.length > 0) {
-      const missingInserts = missingFieldKeys.map((docKey) => ({
-        case_id: caseId,
-        tenant_id: tenantId,
-        doc_key: docKey,
-        requested_at: null,
-        satisfied_at: null,
-      }));
-
-
-      const { error: missingError } = await (supabase as any)
-        .from("missing_docs")
-        .upsert(missingInserts, { onConflict: "case_id,doc_key" });
-
-      if (missingError) {
-        console.error("[email-worker] missing_docs upsert error:", missingError.code);
+      try {
+        await insertMissingDocsIfAbsent(caseId, tenantId, missingFieldKeys);
+      } catch (err) {
+        console.error("[email-worker] missing_docs upsert error:", dbErrCode(err));
       }
     }
 
@@ -675,7 +693,6 @@ export async function runEmailExtractionWorker(
       if (ef.claim_type)           extractedClaimFields.claim_type = ef.claim_type;
     }
     const customerMatches = await findCustomerMatches(
-      supabase,
       tenantId,
       extractedClaimFields
     );
@@ -688,7 +705,6 @@ export async function runEmailExtractionWorker(
     // ── j) Policy matching ────────────────────────────────────────────────────
     const policyNumber = extractedClaimFields.policy_number;
     const policyMatches = await findPolicyMatches(
-      supabase,
       tenantId,
       policyNumber,
       resolvedCustomerId
@@ -737,18 +753,18 @@ export async function runEmailExtractionWorker(
     }
 
     // ── l) Update case row ────────────────────────────────────────────────────
-    const caseUpdate: Record<string, unknown> = {
+    const caseUpdate: Partial<CaseInsert> = {
       is_claim: true,
       severity: finalSeverity,
       requires_specialist: needsSpecialist,
-      status: newStatus,
+      status: newStatus as CaseInsert["status"],
       updated_at: new Date().toISOString(),
     };
     const confidenceValues = fieldsToWrite.map((field) => field.confidence);
     if (confidenceValues.length > 0) {
-      caseUpdate.confidence_min = parseFloat(Math.min(...confidenceValues).toFixed(2));
+      caseUpdate.confidence_min = Math.min(...confidenceValues).toFixed(2);
     } else if (typeof extractedClaim.confidence === "number" && extractedClaim.confidence > 0) {
-      caseUpdate.confidence_min = parseFloat(extractedClaim.confidence.toFixed(2));
+      caseUpdate.confidence_min = extractedClaim.confidence.toFixed(2);
     }
 
     if (resolvedCustomerId) {
@@ -797,13 +813,13 @@ export async function runEmailExtractionWorker(
     // AC3: AI omitted claim_type (null/undefined/empty) → caseUpdate has no claim_type key
     // → existing cases.claim_type is preserved (no overwrite).
 
-    const { error: caseUpdateError } = await (supabase as any)
-      .from("cases")
-      .update(caseUpdate)
-      .eq("id", caseId);
-
-    if (caseUpdateError) {
-      console.error("[email-worker] Case update error:", caseUpdateError.code);
+    try {
+      await db
+        .update(cases)
+        .set(caseUpdate)
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+    } catch (err) {
+      console.error("[email-worker] Case update error:", dbErrCode(err));
     }
 
     // ── m) Specialist audit log — AC11 ────────────────────────────────────────
@@ -839,7 +855,6 @@ export async function runEmailExtractionWorker(
     // AC7, AC9, AC10, AC11, AC12.
     if (caseRow.channel === "email" || caseRow.channel === "email_sim") {
       await orchestratePostExtraction(
-        supabase,
         caseId,
         tenantId,
         {
@@ -933,125 +948,148 @@ function toPromptMemoryHints(
   });
 }
 
-async function loadMemoryHints(
-  supabase: ReturnType<typeof createServiceClient>,
-  tenantId: string,
-  senderEmail: string
-): Promise<Array<{ field_key: string; value: string; confirmed_at?: string }>> {
-  if (!senderEmail) return [];
-
-  try {
-
-    const { data, error } = await (supabase as any)
-      .from("claim_memory")
-      .select("confirmed_fields,full_name,dni,phone,default_policy_number")
-      .eq("tenant_id", tenantId)
-      .eq("sender_email", senderEmail)
-      .limit(1)
-      .single();
-
-    if (error || !data) return [];
-
-    const hints: Array<{ field_key: string; value: string; confirmed_at?: string }> = [];
-
-    // Extract confirmed fields (jsonb object: { field_key: { value, confirmed_at } }).
-    const confirmedFields = data.confirmed_fields as Record<string, { value: string; confirmed_at?: string }> | null;
-    if (confirmedFields) {
-      for (const [key, entry] of Object.entries(confirmedFields)) {
-        if (entry?.value) {
-          hints.push({ field_key: key, value: entry.value, confirmed_at: entry.confirmed_at });
-        }
-      }
-    }
-
-    // Also add flat columns as hints.
-    if (data.full_name) hints.push({ field_key: "full_name", value: data.full_name });
-    if (data.dni)       hints.push({ field_key: "dni",       value: data.dni });
-    if (data.phone)     hints.push({ field_key: "phone",     value: data.phone });
-    if (data.default_policy_number) {
-      hints.push({ field_key: "policy_number", value: data.default_policy_number });
-    }
-
-    // Deduplicate by field_key (confirmed_fields takes priority).
-    const seen = new Set<string>();
-    return hints.filter((h) => {
-      if (seen.has(h.field_key)) return false;
-      seen.add(h.field_key);
-      return true;
-    });
-  } catch {
-    return [];
-  }
-}
-
 // ── Helper: load known_claim_patterns ────────────────────────────────────────
 
-async function loadKnownPatterns(
-  supabase: ReturnType<typeof createServiceClient>,
-  tenantId: string
-): Promise<KnownPattern[]> {
+async function loadKnownPatterns(tenantId: string): Promise<KnownPattern[]> {
   try {
-
-    const { data, error } = await (supabase as any)
-      .from("known_claim_patterns")
-      .select("pattern_text,pattern_type,severity_hint,language")
-      .or(`tenant_id.is.null,tenant_id.eq.${tenantId}`)
-      .eq("enabled", true)
+    const data = await db
+      .select({
+        pattern_text: knownClaimPatterns.pattern_text,
+        pattern_type: knownClaimPatterns.pattern_type,
+        severity_hint: knownClaimPatterns.severity_hint,
+        language: knownClaimPatterns.language,
+      })
+      .from(knownClaimPatterns)
+      .where(
+        and(
+          // Global rows have tenant_id = NULL (visible to all tenants).
+          or(
+            isNull(knownClaimPatterns.tenant_id),
+            eq(knownClaimPatterns.tenant_id, tenantId)
+          ),
+          eq(knownClaimPatterns.enabled, true)
+        )
+      )
       .limit(200);
 
-    if (error) {
-      console.error("[email-worker] known_claim_patterns load error:", error.code);
-      return [];
-    }
-
-    return (data ?? []).map((row: any) => ({
+    return data.map((row) => ({
       pattern_text: row.pattern_text ?? "",
       pattern_type: row.pattern_type ?? "keyword",
       severity_hint: row.severity_hint ?? "medium",
       language: row.language ?? "es-AR",
     }));
-  } catch {
+  } catch (err) {
+    console.error("[email-worker] known_claim_patterns load error:", dbErrCode(err));
     return [];
   }
 }
 
 // ── Helpers (shared with legacy worker) ───────────────────────────────────────
 
-async function updateCaseStatus(
-  supabase: ReturnType<typeof createServiceClient>,
+/** Extract a loggable error code from a thrown DB error (PII-safe). */
+function dbErrCode(err: unknown): string {
+  return (
+    (err as { code?: string })?.code ??
+    (err instanceof Error ? err.name : "UnknownError")
+  );
+}
+
+/**
+ * Upsert extracted_fields rows on the (case_id, field_key) unique constraint
+ * (uq_extracted_field in 0001_init.sql). Throws on DB error — callers wrap.
+ */
+async function upsertExtractedFields(
   caseId: string,
-  _tenantId: string,
+  tenantId: string,
+  fields: Array<{ field_key: string; field_value: string; confidence: number }>
+): Promise<void> {
+  const fieldInserts = fields.map((f) => ({
+    case_id: caseId,
+    tenant_id: tenantId,
+    field_key: f.field_key,
+    field_value: f.field_value,
+    confidence: f.confidence.toFixed(2),
+  }));
+
+  await db
+    .insert(extractedFields)
+    .values(fieldInserts)
+    .onConflictDoUpdate({
+      target: [extractedFields.case_id, extractedFields.field_key],
+      set: {
+        field_value: sql`excluded.field_value`,
+        confidence: sql`excluded.confidence`,
+      },
+    });
+}
+
+/**
+ * Insert missing_docs rows that don't exist yet for this case.
+ *
+ * NOTE: missing_docs has no unique constraint on (case_id, doc_key) in the
+ * Neon schema, so the old `upsert(..., { onConflict: "case_id,doc_key" })` is
+ * emulated as insert-if-absent (existing rows — including satisfied ones —
+ * are left untouched). Throws on DB error — callers wrap.
+ */
+async function insertMissingDocsIfAbsent(
+  caseId: string,
+  tenantId: string,
+  docKeys: string[]
+): Promise<void> {
+  const existing = await db
+    .select({ doc_key: missingDocs.doc_key })
+    .from(missingDocs)
+    .where(
+      and(eq(missingDocs.case_id, caseId), eq(missingDocs.tenant_id, tenantId))
+    );
+
+  const existingKeys = new Set(existing.map((row) => row.doc_key));
+  const newKeys = docKeys.filter((docKey) => !existingKeys.has(docKey));
+  if (newKeys.length === 0) return;
+
+  await db.insert(missingDocs).values(
+    newKeys.map((docKey) => ({
+      case_id: caseId,
+      tenant_id: tenantId,
+      doc_key: docKey,
+      requested_at: null,
+      satisfied_at: null,
+    }))
+  );
+}
+
+async function updateCaseStatus(
+  caseId: string,
+  tenantId: string,
   newStatus: "listo" | "esperando" | "escalado",
   confidenceMin: number | null
 ): Promise<void> {
-  const updatePayload: Record<string, unknown> = {
+  const updatePayload: Partial<CaseInsert> = {
     status: newStatus,
     updated_at: new Date().toISOString(),
   };
   if (confidenceMin !== null) {
-    updatePayload.confidence_min = confidenceMin;
+    updatePayload.confidence_min = confidenceMin.toFixed(2);
   }
 
-
-  const { error } = await (supabase as any)
-    .from("cases")
-    .update(updatePayload)
-    .eq("id", caseId);
-
-  if (error) {
-    console.error("[worker] Failed to update case status:", error.code, "case:", caseId);
+  try {
+    await db
+      .update(cases)
+      .set(updatePayload)
+      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+  } catch (err) {
+    console.error("[worker] Failed to update case status:", dbErrCode(err), "case:", caseId);
   }
 }
 
 async function escalateCase(
-  supabase: ReturnType<typeof createServiceClient>,
   caseId: string,
   tenantId: string,
   userId: string | null,
   auditReason: string,
   errorCode: string
 ): Promise<void> {
-  await updateCaseStatus(supabase, caseId, tenantId, "escalado", null);
+  await updateCaseStatus(caseId, tenantId, "escalado", null);
   await writeAuditLog({
     tenant_id: tenantId,
     actor_id: userId,

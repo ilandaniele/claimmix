@@ -17,7 +17,10 @@
  */
 
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
+import { eq } from "drizzle-orm";
+import { db, tables } from "@/lib/db";
+import { firstRow } from "@/lib/db/helpers";
 
 export type AiProvider = "openai" | "gemini";
 export type ExtractionEngine = AiProvider | "mock";
@@ -28,13 +31,89 @@ function isAiProvider(value: unknown): value is AiProvider {
   return value === "openai" || value === "gemini";
 }
 
-/** True when the provider's API key is configured (non-empty). */
+// ── Key encryption (AES-256-GCM, same as Gmail token storage) ────────────────
+
+const KEY_ALGORITHM = "aes-256-gcm";
+
+function getEncryptionKey(): Buffer {
+  const secret = process.env.GMAIL_TOKEN_ENCRYPTION_KEY;
+  if (!secret) throw new Error("GMAIL_TOKEN_ENCRYPTION_KEY must be set to store API keys");
+  return createHash("sha256").update(secret).digest();
+}
+
+function encryptApiKey(key: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv(KEY_ALGORITHM, getEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(key, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [iv, tag, encrypted].map((b) => b.toString("base64url")).join(".");
+}
+
+function decryptApiKey(encryptedKey: string): string {
+  const [ivRaw, tagRaw, encryptedRaw] = encryptedKey.split(".");
+  if (!ivRaw || !tagRaw || !encryptedRaw) throw new Error("Invalid API key payload");
+  const decipher = createDecipheriv(KEY_ALGORITHM, getEncryptionKey(), Buffer.from(ivRaw, "base64url"));
+  decipher.setAuthTag(Buffer.from(tagRaw, "base64url"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedRaw, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
+// ── Per-tenant Gemini key helpers ─────────────────────────────────────────────
+
+/**
+ * Returns the Gemini API key for this tenant: DB-stored key takes precedence,
+ * then falls back to the global GEMINI_API_KEY env var.
+ */
+export async function getTenantGeminiKey(tenantId: string): Promise<string | null> {
+  try {
+    const row = await db
+      .select({ enc: tables.tenantAiSettings.gemini_api_key_encrypted })
+      .from(tables.tenantAiSettings)
+      .where(eq(tables.tenantAiSettings.tenant_id, tenantId))
+      .limit(1)
+      .then(firstRow);
+    if (row?.enc) return decryptApiKey(row.enc);
+  } catch {
+    // DB error — fall through to env
+  }
+  return process.env.GEMINI_API_KEY?.trim() || null;
+}
+
+/** Encrypt and persist a Gemini API key for this tenant. */
+export async function setTenantGeminiKey(tenantId: string, apiKey: string): Promise<void> {
+  const encrypted = encryptApiKey(apiKey);
+  const t = tables.tenantAiSettings;
+  await db
+    .insert(t)
+    .values({
+      tenant_id: tenantId,
+      provider: "openai",
+      gemini_api_key_encrypted: encrypted,
+      updated_at: new Date().toISOString(),
+    })
+    .onConflictDoUpdate({
+      target: t.tenant_id,
+      set: { gemini_api_key_encrypted: encrypted, updated_at: new Date().toISOString() },
+    });
+}
+
+// ── Provider key checks ───────────────────────────────────────────────────────
+
+/** True when the provider's API key is configured in env (non-empty). */
 export function hasProviderKey(provider: AiProvider): boolean {
   const key =
     provider === "gemini"
       ? process.env.GEMINI_API_KEY
       : process.env.OPENAI_API_KEY;
   return Boolean(key && key.trim());
+}
+
+/** True when the provider has a usable API key (DB or env). */
+export async function hasProviderKeyForTenant(tenantId: string, provider: AiProvider): Promise<boolean> {
+  if (provider === "openai") return hasProviderKey("openai");
+  return Boolean(await getTenantGeminiKey(tenantId));
 }
 
 /** Env-level default provider (AI_PROVIDER, default "openai"). */
@@ -48,18 +127,18 @@ export function getDefaultProvider(): AiProvider {
  * falling back to the env default. Never throws.
  */
 export async function getTenantAiProvider(
-  supabase: SupabaseClient,
   tenantId: string
 ): Promise<AiProvider> {
   try {
+    const data = firstRow(
+      await db
+        .select({ provider: tables.tenantAiSettings.provider })
+        .from(tables.tenantAiSettings)
+        .where(eq(tables.tenantAiSettings.tenant_id, tenantId))
+        .limit(1)
+    );
 
-    const { data, error } = await (supabase as any)
-      .from("tenant_ai_settings")
-      .select("provider")
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-
-    if (error || !data) return getDefaultProvider();
+    if (!data) return getDefaultProvider();
     return isAiProvider(data.provider) ? data.provider : getDefaultProvider();
   } catch {
     return getDefaultProvider();
@@ -71,18 +150,17 @@ export async function getTenantAiProvider(
  * accounting for mock mode and which API keys are configured.
  */
 export async function resolveExtractionEngine(
-  supabase: SupabaseClient,
   tenantId: string
 ): Promise<ExtractionEngine> {
   if (process.env.MOCK_AI === "true" || process.env.AI_MOCK === "true") {
     return "mock";
   }
 
-  const preferred = await getTenantAiProvider(supabase, tenantId);
-  if (hasProviderKey(preferred)) return preferred;
+  const preferred = await getTenantAiProvider(tenantId);
+  if (await hasProviderKeyForTenant(tenantId, preferred)) return preferred;
 
   const fallback: AiProvider = preferred === "openai" ? "gemini" : "openai";
-  if (hasProviderKey(fallback)) {
+  if (await hasProviderKeyForTenant(tenantId, fallback)) {
     console.warn(
       JSON.stringify({
         level: "warn",

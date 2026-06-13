@@ -31,6 +31,7 @@ import {
   buildSafeDefault,
 } from "./openai-extractor";
 import type { EmailClaimPayload } from "./openai-extractor";
+import { getTenantGeminiKey } from "./provider";
 
 /** Custom error for unrecoverable Gemini extraction failures (simulate flow). */
 export class GeminiExtractionError extends Error {
@@ -68,12 +69,13 @@ interface GeminiUsage {
  */
 async function callGemini(
   systemPrompt: string,
-  userMessage: string
+  userMessage: string,
+  apiKey?: string | null
 ): Promise<{ text: string | null; usage: GeminiUsage }> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  const key = apiKey ?? process.env.GEMINI_API_KEY;
+  if (!key) {
     throw new GeminiExtractionError(
-      "GEMINI_API_KEY is not set. Configure it or switch the tenant provider to OpenAI."
+      "GEMINI_API_KEY is not set. Configure it in Configuración or switch the tenant provider to OpenAI."
     );
   }
 
@@ -98,7 +100,7 @@ async function callGemini(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
+      "x-goog-api-key": key,
     },
     body: JSON.stringify(body),
   });
@@ -159,6 +161,7 @@ export async function extractEmailClaimGemini(
   const model = getGeminiModel();
   const logCaseId = caseId ?? "unknown";
   const logTenantId = tenantId ?? "unknown";
+  const tenantKey = tenantId ? await getTenantGeminiKey(tenantId) : null;
 
   const systemPrompt =
     buildEmailClaimPrompt(
@@ -180,7 +183,7 @@ export async function extractEmailClaimGemini(
 
   // ── Attempt 1 ─────────────────────────────────────────────────────────────
   try {
-    const { text, usage } = await callGemini(systemPrompt, userMessage);
+    const { text, usage } = await callGemini(systemPrompt, userMessage, tenantKey);
     totalPromptTokens = usage.promptTokens;
     totalCompletionTokens = usage.completionTokens;
 
@@ -222,7 +225,7 @@ export async function extractEmailClaimGemini(
       "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
 
     try {
-      const { text, usage } = await callGemini(stricterSystem, userMessage);
+      const { text, usage } = await callGemini(stricterSystem, userMessage, tenantKey);
       totalPromptTokens += usage.promptTokens;
       totalCompletionTokens += usage.completionTokens;
 
@@ -298,9 +301,11 @@ export async function extractEmailClaimGemini(
 export async function runGeminiExtractor(
   rawText: string,
   claimType: ClaimType,
-  caseId: string
+  caseId: string,
+  tenantId?: string
 ): Promise<ExtractedClaim> {
   const model = getGeminiModel();
+  const tenantKey = tenantId ? await getTenantGeminiKey(tenantId) : null;
   const systemPrompt = buildSystemPrompt(claimType) + schemaSuffix();
   const userMessage = buildUserMessage(rawText);
 
@@ -316,7 +321,7 @@ export async function runGeminiExtractor(
           "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
 
     try {
-      const { text, usage } = await callGemini(prompt, userMessage);
+      const { text, usage } = await callGemini(prompt, userMessage, tenantKey);
       totalPromptTokens += usage.promptTokens;
       totalCompletionTokens += usage.completionTokens;
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
 
 type ProviderId = "openai" | "gemini";
@@ -26,6 +26,19 @@ export function AiProviderPanel() {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
+  // Gemini key form state
+  const [showKeyForm, setShowKeyForm] = useState(false);
+  const [geminiKey, setGeminiKey] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+  const [keyError, setKeyError] = useState("");
+  const [keySaved, setKeySaved] = useState(false);
+  const keyInputRef = useRef<HTMLInputElement>(null);
+
+  function applyPayload(payload: SettingsResponse) {
+    setProvider(payload.provider);
+    setProviders(payload.providers);
+  }
+
   useEffect(() => {
     let cancelled = false;
     fetch("/api/admin/ai-settings", { cache: "no-store" })
@@ -35,9 +48,7 @@ export function AiProviderPanel() {
       })
       .then((body: { data?: SettingsResponse } & SettingsResponse) => {
         if (cancelled) return;
-        const payload = body.data ?? body;
-        setProvider(payload.provider);
-        setProviders(payload.providers);
+        applyPayload(body.data ?? body);
         setError("");
       })
       .catch(() => {
@@ -52,8 +63,21 @@ export function AiProviderPanel() {
     };
   }, [t]);
 
+  // Auto-focus key input when shown
+  useEffect(() => {
+    if (showKeyForm) keyInputRef.current?.focus();
+  }, [showKeyForm]);
+
   async function selectProvider(next: ProviderId) {
     if (next === provider || saving) return;
+    const info = providers?.[next];
+    if (!info?.configured) {
+      if (next === "gemini") {
+        setShowKeyForm(true);
+        return;
+      }
+      return;
+    }
     setSaving(true);
     setSaved(false);
     setError("");
@@ -74,12 +98,45 @@ export function AiProviderPanel() {
         setError(body?.error?.message ?? t("aiProvider.saveError"));
         return;
       }
+      const body = (await res.json()) as { data?: SettingsResponse } & SettingsResponse;
+      applyPayload(body.data ?? body);
       setSaved(true);
     } catch {
       setProvider(previous);
       setError(t("aiProvider.saveError"));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveGeminiKey() {
+    if (!geminiKey.trim() || savingKey) return;
+    setSavingKey(true);
+    setKeyError("");
+    setKeySaved(false);
+
+    try {
+      const res = await fetch("/api/admin/ai-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ geminiKey: geminiKey.trim() }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
+        setKeyError(body?.error?.message ?? t("aiProvider.keySaveError"));
+        return;
+      }
+      const body = (await res.json()) as { data?: SettingsResponse } & SettingsResponse;
+      applyPayload(body.data ?? body);
+      setGeminiKey("");
+      setShowKeyForm(false);
+      setKeySaved(true);
+    } catch {
+      setKeyError(t("aiProvider.keySaveError"));
+    } finally {
+      setSavingKey(false);
     }
   }
 
@@ -106,7 +163,8 @@ export function AiProviderPanel() {
         {PROVIDER_ORDER.map((id) => {
           const info = providers?.[id];
           const active = provider === id;
-          const disabled = saving || !info?.configured;
+          const configured = Boolean(info?.configured);
+          const disabled = saving || (!configured && id !== "gemini");
           return (
             <button
               key={id}
@@ -135,15 +193,77 @@ export function AiProviderPanel() {
               <p className="mt-2 font-mono text-[11px] text-slate-400">
                 {info?.model ?? "—"}
               </p>
-              {!info?.configured && (
+              {!configured && (
                 <p className="mt-1 text-[11px] font-medium text-amber-600">
                   {t("aiProvider.notConfigured")}
+                  {id === "gemini" && (
+                    <span className="ml-1 underline">
+                      — {t("aiProvider.configureKey")}
+                    </span>
+                  )}
                 </p>
               )}
             </button>
           );
         })}
       </div>
+
+      {/* Gemini API key input — shown when not configured or user clicked the card */}
+      {showKeyForm && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+          <label className="block text-sm font-medium text-slate-700">
+            {t("aiProvider.geminiKeyLabel")}
+          </label>
+          <div className="flex gap-2">
+            <input
+              ref={keyInputRef}
+              type="password"
+              value={geminiKey}
+              onChange={(e) => setGeminiKey(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveGeminiKey()}
+              placeholder={t("aiProvider.geminiKeyPlaceholder")}
+              className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-600"
+              disabled={savingKey}
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              onClick={saveGeminiKey}
+              disabled={!geminiKey.trim() || savingKey}
+              className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 hover:bg-slate-700"
+            >
+              {savingKey ? "…" : t("aiProvider.saveKey")}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowKeyForm(false); setKeyError(""); setGeminiKey(""); }}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              ✕
+            </button>
+          </div>
+          {keyError && (
+            <p className="text-xs text-red-600">{keyError}</p>
+          )}
+        </div>
+      )}
+
+      {/* Show "Add API key" link when Gemini is not configured and form is hidden */}
+      {!showKeyForm && !providers?.gemini.configured && (
+        <button
+          type="button"
+          onClick={() => setShowKeyForm(true)}
+          className="text-xs text-slate-500 underline hover:text-slate-700"
+        >
+          {t("aiProvider.configureKey")} (Gemini)
+        </button>
+      )}
+
+      {keySaved && !showKeyForm && (
+        <p className="text-xs text-emerald-600" role="status">
+          {t("aiProvider.keySaved")}
+        </p>
+      )}
 
       {saved && (
         <p className="text-xs text-emerald-600" role="status">

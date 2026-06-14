@@ -13,16 +13,21 @@ export function LanguageSwitcher() {
   const { locale, setLocale } = useLocale();
   const router = useRouter();
 
-  function handleSwitch(next: Locale) {
+  async function handleSwitch(next: Locale) {
     if (next === locale) return;
     setLocale(next);
-    // Persist per account (applied on any device at next login). Fire-and-forget:
-    // the cookie already covers this device even if the request fails.
-    void fetch("/api/auth/me", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ locale: next }),
-    }).catch(() => {});
+    // Await DB save BEFORE refreshing — otherwise the server re-renders the
+    // layout with the stale DB locale and the LocaleProvider prop-sync reverts
+    // the sidebar back to the old language.
+    try {
+      await fetch("/api/auth/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locale: next }),
+      });
+    } catch {
+      // Cookie already covers this device — ignore failures
+    }
     router.refresh();
   }
 

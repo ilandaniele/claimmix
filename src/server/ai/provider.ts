@@ -60,13 +60,51 @@ function decryptApiKey(encryptedKey: string): string {
   ]).toString("utf8");
 }
 
+// ── Per-user Gemini key helpers ───────────────────────────────────────────────
+
+/**
+ * Returns the Gemini API key for this user from user_ai_settings.
+ * Returns null if not set (does NOT fall back to tenant/env).
+ */
+export async function getUserGeminiKey(userId: string): Promise<string | null> {
+  try {
+    const row = await db
+      .select({ enc: tables.userAiSettings.gemini_api_key_encrypted })
+      .from(tables.userAiSettings)
+      .where(eq(tables.userAiSettings.user_id, userId))
+      .limit(1)
+      .then(firstRow);
+    if (row?.enc) return decryptApiKey(row.enc);
+  } catch {
+    // table missing or DB error — fall through
+  }
+  return null;
+}
+
+/** Encrypt and persist a Gemini API key for this user. */
+export async function setUserGeminiKey(userId: string, apiKey: string): Promise<void> {
+  const encrypted = encryptApiKey(apiKey);
+  const t = tables.userAiSettings;
+  await db
+    .insert(t)
+    .values({ user_id: userId, gemini_api_key_encrypted: encrypted, updated_at: new Date().toISOString() })
+    .onConflictDoUpdate({
+      target: t.user_id,
+      set: { gemini_api_key_encrypted: encrypted, updated_at: new Date().toISOString() },
+    });
+}
+
 // ── Per-tenant Gemini key helpers ─────────────────────────────────────────────
 
 /**
- * Returns the Gemini API key for this tenant: DB-stored key takes precedence,
- * then falls back to the global GEMINI_API_KEY env var.
+ * Returns the Gemini API key: user key takes precedence, then tenant DB key,
+ * then global GEMINI_API_KEY env var.
  */
-export async function getTenantGeminiKey(tenantId: string): Promise<string | null> {
+export async function getTenantGeminiKey(tenantId: string, userId?: string): Promise<string | null> {
+  if (userId) {
+    const userKey = await getUserGeminiKey(userId);
+    if (userKey) return userKey;
+  }
   try {
     const row = await db
       .select({ enc: tables.tenantAiSettings.gemini_api_key_encrypted })
@@ -110,10 +148,10 @@ export function hasProviderKey(provider: AiProvider): boolean {
   return Boolean(key && key.trim());
 }
 
-/** True when the provider has a usable API key (DB or env). */
-export async function hasProviderKeyForTenant(tenantId: string, provider: AiProvider): Promise<boolean> {
+/** True when the provider has a usable API key (user → tenant → env). */
+export async function hasProviderKeyForTenant(tenantId: string, provider: AiProvider, userId?: string): Promise<boolean> {
   if (provider === "openai") return hasProviderKey("openai");
-  return Boolean(await getTenantGeminiKey(tenantId));
+  return Boolean(await getTenantGeminiKey(tenantId, userId));
 }
 
 /** Env-level default provider (AI_PROVIDER, default "openai"). */
@@ -146,21 +184,24 @@ export async function getTenantAiProvider(
 }
 
 /**
- * Resolve which extraction engine to actually run for this tenant,
+ * Resolve which extraction engine to actually run for this tenant/user,
  * accounting for mock mode and which API keys are configured.
+ * Resolution order: user key → tenant key → env var.
  */
 export async function resolveExtractionEngine(
-  tenantId: string
+  tenantId: string,
+  userId?: string | null
 ): Promise<ExtractionEngine> {
   if (process.env.MOCK_AI === "true" || process.env.AI_MOCK === "true") {
     return "mock";
   }
 
+  const uid = userId ?? undefined;
   const preferred = await getTenantAiProvider(tenantId);
-  if (await hasProviderKeyForTenant(tenantId, preferred)) return preferred;
+  if (await hasProviderKeyForTenant(tenantId, preferred, uid)) return preferred;
 
   const fallback: AiProvider = preferred === "openai" ? "gemini" : "openai";
-  if (await hasProviderKeyForTenant(tenantId, fallback)) {
+  if (await hasProviderKeyForTenant(tenantId, fallback, uid)) {
     console.warn(
       JSON.stringify({
         level: "warn",

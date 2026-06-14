@@ -191,7 +191,7 @@ export async function runExtractionWorker(
   }
 
   // ── 2. Select and run extractor (per-tenant provider: openai | gemini | mock) ─
-  const engine = await resolveExtractionEngine(tenantId);
+  const engine = await resolveExtractionEngine(tenantId, userId);
   let extractedClaim;
 
   try {
@@ -515,7 +515,7 @@ export async function runEmailExtractionWorker(
     }
 
     // ── e) Run extractor (per-tenant provider: openai | gemini | mock) ───────
-    const engine = await resolveExtractionEngine(tenantId);
+    const engine = await resolveExtractionEngine(tenantId, userId);
     let extractedClaim;
 
     if (engine === "mock") {

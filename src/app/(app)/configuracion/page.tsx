@@ -23,6 +23,8 @@ import { GmailAccountsPanel } from "./GmailAccountsPanel";
 import { AgentTrainingPanel } from "./AgentTrainingPanel";
 import { PromptRulesPanel } from "./PromptRulesPanel";
 import { AiProviderPanel } from "./AiProviderPanel";
+import { UserAiKeyPanel } from "./UserAiKeyPanel";
+import { getUserGeminiKey } from "@/server/ai/provider";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import packageJson from "../../../../package.json";
@@ -98,6 +100,8 @@ export default async function ConfiguracionPage() {
   const role: string = userRow?.role ?? "analyst";
   const email: string = session.user.email ?? "—";
   const isAdmin = role === "admin" || role === "owner";
+
+  const userHasGeminiKey = Boolean(await getUserGeminiKey(session.user.id).catch(() => null));
 
   // AI thresholds — read from env with documented defaults
   const confidenceThreshold = Number(
@@ -185,6 +189,11 @@ export default async function ConfiguracionPage() {
             <AiProviderPanel />
           </Section>
         )}
+
+        {/* ── Mi API Key de Gemini (todos los usuarios) ─────────────────────── */}
+        <Section title="Mi clave de IA">
+          <UserAiKeyPanel initialHasKey={userHasGeminiKey} />
+        </Section>
 
         {/* ── Bandeja de entrada Gmail (todos los usuarios) ───────────────── */}
         <Section title={t("gmail.accounts.title")}>

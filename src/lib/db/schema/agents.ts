@@ -181,3 +181,13 @@ export const tenantAiSettings = pgTable("tenant_ai_settings", {
     .defaultNow()
     .notNull(),
 });
+
+export const userAiSettings = pgTable("user_ai_settings", {
+  user_id: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  gemini_api_key_encrypted: text("gemini_api_key_encrypted"),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+});

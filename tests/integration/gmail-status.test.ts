@@ -192,8 +192,7 @@ describe("GET /api/admin/gmail-status", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.data).toBeDefined();
-    expect(body.data.is_connected).toBe(false);
+    expect(body.is_connected).toBe(false);
   });
 
   it("returns 401 MISSING_SESSION when not authenticated", async () => {

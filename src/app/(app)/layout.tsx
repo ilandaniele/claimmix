@@ -66,7 +66,7 @@ export default async function AppLayout({
   return (
     <LocaleProvider locale={locale}>
       <ThemeProvider>
-        <div className="flex h-screen overflow-hidden bg-white">
+        <div className="flex h-screen overflow-hidden bg-[#F8FAFC] dark:bg-[#0B1120]">
           {/* Left sidebar */}
           <Sidebar />
 

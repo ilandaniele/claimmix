@@ -3,13 +3,23 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useT } from "@/lib/i18n/LocaleContext";
+import {
+  Inbox,
+  AlertTriangle,
+  Users,
+  BarChart2,
+  Settings,
+  Shield,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-interface NavItem {
+interface NavItemDef {
   label: string;
   href: string;
+  icon: LucideIcon;
 }
 
-function NavLink({ href, label }: NavItem) {
+function NavLink({ href, label, icon: Icon }: NavItemDef) {
   const pathname = usePathname();
   const isActive = pathname === href || pathname.startsWith(href + "/");
 
@@ -17,13 +27,21 @@ function NavLink({ href, label }: NavItem) {
     <Link
       href={href}
       className={[
-        "flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
+        "flex items-center gap-2.5 rounded-md px-3 py-2 transition-colors",
         isActive
-          ? "bg-slate-200 text-slate-900"
-          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+          ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
+          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100",
       ].join(" ")}
     >
-      {label}
+      <Icon
+        size={14}
+        className={
+          isActive
+            ? "text-indigo-600 dark:text-indigo-400"
+            : "text-slate-400 dark:text-slate-500"
+        }
+      />
+      <span className="text-[13px] font-medium">{label}</span>
     </Link>
   );
 }
@@ -31,55 +49,68 @@ function NavLink({ href, label }: NavItem) {
 export function Sidebar() {
   const t = useT();
 
-  const navSections = [
-    {
-      label: t("nav.operation"),
-      items: [
-        { label: t("nav.bandeja"), href: "/bandeja" },
-        { label: t("nav.escalados"), href: "/escalados" },
-        { label: t("nav.clientes"), href: "/clientes" },
-      ],
-    },
+  const operacionItems: NavItemDef[] = [
+    { label: t("nav.bandeja") || "Bandeja", href: "/bandeja", icon: Inbox },
+    { label: t("nav.escalados") || "Escalados", href: "/escalados", icon: AlertTriangle },
+    { label: t("nav.clientes") || "Clientes", href: "/clientes", icon: Users },
   ];
 
-  const navTopLevel: NavItem[] = [
-    { label: t("nav.analisis"), href: "/analisis" },
-    { label: t("nav.metricas"), href: "/metricas" },
-    { label: t("nav.admin"), href: "/admin/users" },
-    { label: t("nav.configuracion"), href: "/configuracion" },
+  const analisisItems: NavItemDef[] = [
+    { label: t("nav.metricas") || "Métricas", href: "/metricas", icon: BarChart2 },
+    { label: t("nav.admin") || "Usuarios", href: "/admin/users", icon: Shield },
   ];
 
   return (
     <nav
-      aria-label={t("nav.operation")}
-      className="flex h-full w-56 flex-col border-r border-slate-200 bg-slate-50"
+      aria-label="Navegación principal"
+      className="flex h-full w-[220px] flex-shrink-0 flex-col border-r border-[#EEF0F3] bg-white dark:border-[#1E2D45] dark:bg-[#0F1929]"
     >
       {/* Logo / brand */}
-      <div className="flex h-14 items-center border-b border-slate-200 px-4">
-        <span className="text-base font-semibold text-slate-900">ClaimMix</span>
+      <div className="flex h-14 items-center gap-2.5 px-4">
+        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-indigo-600 text-xs font-bold text-white">
+          CM
+        </div>
+        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+          ClaimMix
+        </span>
       </div>
 
       {/* Navigation links */}
-      <div className="flex-1 overflow-y-auto px-2 py-4">
-        {navSections.map((section) => (
-          <div key={section.label} className="mb-4">
-            <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-              {section.label}
-            </p>
-            <div className="space-y-0.5">
-              {section.items.map((item) => (
-                <NavLink key={item.href} {...item} />
-              ))}
-            </div>
+      <div className="flex flex-1 flex-col overflow-y-auto px-2 py-3">
+        {/* OPERACIÓN section */}
+        <div className="mb-4">
+          <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            OPERACIÓN
+          </p>
+          <div className="space-y-0.5">
+            {operacionItems.map((item) => (
+              <NavLink key={item.href} {...item} />
+            ))}
           </div>
-        ))}
+        </div>
 
-        <div className="my-3 border-t border-slate-200" />
+        {/* Spacer */}
+        <div className="flex-1" />
 
-        <div className="space-y-0.5">
-          {navTopLevel.map((item) => (
-            <NavLink key={item.href} {...item} />
-          ))}
+        {/* ANÁLISIS section */}
+        <div className="mb-2">
+          <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            ANÁLISIS
+          </p>
+          <div className="space-y-0.5">
+            {analisisItems.map((item) => (
+              <NavLink key={item.href} {...item} />
+            ))}
+          </div>
+        </div>
+
+        {/* Settings at bottom */}
+        <div className="space-y-0.5 pb-2">
+          <NavLink
+            href="/configuracion"
+            label={t("nav.configuracion") || "Configuración"}
+            icon={Settings}
+          />
         </div>
       </div>
     </nav>

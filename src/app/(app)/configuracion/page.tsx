@@ -18,7 +18,6 @@ import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { ConfiguracionClient } from "./ConfiguracionClient";
-import { GmailStatusSection } from "./GmailStatusSection";
 import { GmailAccountsPanel } from "./GmailAccountsPanel";
 import { AgentTrainingPanel } from "./AgentTrainingPanel";
 import { PromptRulesPanel } from "./PromptRulesPanel";
@@ -198,10 +197,6 @@ export default async function ConfiguracionPage() {
         {/* ── Bandeja de entrada Gmail (todos los usuarios) ───────────────── */}
         <Section title={t("gmail.accounts.title")}>
           <GmailAccountsPanel />
-        </Section>
-
-        <Section title={t("gmail.status.title")}>
-          <GmailStatusSection />
         </Section>
 
         {isAdmin && (

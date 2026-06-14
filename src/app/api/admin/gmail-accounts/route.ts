@@ -25,14 +25,19 @@ const ACCOUNT_COLUMNS = {
 
 export async function GET() {
   try {
-    const { db, userRow } = await requireRole(...ALL_ROLES);
+    const { db, user, userRow } = await requireRole(...ALL_ROLES);
+    const isAdmin = userRow.role === "admin" || userRow.role === "owner";
 
     let data;
     try {
       data = await db
         .select(ACCOUNT_COLUMNS)
         .from(t)
-        .where(eq(t.tenant_id, userRow.tenant_id))
+        .where(
+          isAdmin
+            ? eq(t.tenant_id, userRow.tenant_id)
+            : and(eq(t.tenant_id, userRow.tenant_id), eq(t.connected_by, user.id))
+        )
         .orderBy(asc(t.created_at));
     } catch (e) {
       const code = (e as { code?: string })?.code;
@@ -49,7 +54,8 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { db, userRow } = await requireRole(...ALL_ROLES);
+    const { db, user, userRow } = await requireRole(...ALL_ROLES);
+    const isAdmin = userRow.role === "admin" || userRow.role === "owner";
     const parsed = UpdateGmailAccountSchema.safeParse(await request.json());
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
@@ -65,10 +71,9 @@ export async function PATCH(request: NextRequest) {
             updated_at: new Date().toISOString(),
           })
           .where(
-            and(
-              eq(t.id, parsed.data.id),
-              eq(t.tenant_id, userRow.tenant_id)
-            )
+            isAdmin
+              ? and(eq(t.id, parsed.data.id), eq(t.tenant_id, userRow.tenant_id))
+              : and(eq(t.id, parsed.data.id), eq(t.tenant_id, userRow.tenant_id), eq(t.connected_by, user.id))
           )
           .returning(ACCOUNT_COLUMNS)
       );
@@ -93,14 +98,19 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { db, userRow } = await requireRole(...ALL_ROLES);
+    const { db, user, userRow } = await requireRole(...ALL_ROLES);
+    const isAdmin = userRow.role === "admin" || userRow.role === "owner";
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new AppError("VALIDATION_FAILED");
 
     try {
       await db
         .delete(t)
-        .where(and(eq(t.id, id), eq(t.tenant_id, userRow.tenant_id)));
+        .where(
+          isAdmin
+            ? and(eq(t.id, id), eq(t.tenant_id, userRow.tenant_id))
+            : and(eq(t.id, id), eq(t.tenant_id, userRow.tenant_id), eq(t.connected_by, user.id))
+        );
     } catch (e) {
       console.error(
         "[admin/gmail-accounts DELETE]",

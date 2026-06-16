@@ -239,8 +239,12 @@ export const esAR = {
   "audit.case.created": "Caso creado",
   "audit.case.closed": "Caso cerrado",
   "audit.case.status_changed": "Estado actualizado",
-  "audit.ai.extracted": "Extracción AI completada",
+  "audit.ai.extracted": "Extracción IA completada",
+  "audit.ai.extraction_complete": "Extracción IA completada",
   "audit.ai.escalated": "Caso escalado por baja confianza",
+  "audit.email.received": "Email recibido",
+  "audit.intake.agent_decision": "Decisión del agente",
+  "audit.attachment.rejected": "Adjunto rechazado",
 
   // ── Supplemental pages ─────────────────────────────────────────────────────
   "analisis.title": "Análisis",
@@ -333,6 +337,8 @@ export const esAR = {
   "case.detail.pendingCount": "pendiente(s)",
   "case.detail.coreReadyDescription": "Este caso está listo para ser enviado al sistema central. Revisá los campos confirmados antes de proceder.",
   "case.detail.noRawEmail": "Sin texto original disponible.",
+  "case.detail.agentAnalysis": "Análisis del agente",
+  "case.detail.auditReason": "Motivo",
 
   // ── Gmail status panel (W1) ─────────────────────────────────────────────────
   "gmail.status.title": "Bandeja de entrada Gmail",

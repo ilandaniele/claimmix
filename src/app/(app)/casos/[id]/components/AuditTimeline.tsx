@@ -77,7 +77,7 @@ export function AuditTimeline({ events }: AuditTimelineProps) {
             </time>
             {event.payload?.reason != null && (
               <p className="text-xs text-slate-500 mt-0.5">
-                Motivo:{" "}
+                {t("case.detail.auditReason")}:{" "}
                 <span className="font-medium">
                   {String(event.payload.reason as string | number | boolean)}
                 </span>

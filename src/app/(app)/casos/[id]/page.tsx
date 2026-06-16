@@ -389,7 +389,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
               id="agent-run-heading"
               className="text-sm font-semibold text-slate-900 mb-4"
             >
-              Análisis del agente
+              {t("case.detail.agentAnalysis")}
             </h2>
             <AgentRunPanel
               caseId={caseRow.id}

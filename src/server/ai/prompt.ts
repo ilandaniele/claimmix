@@ -332,6 +332,13 @@ KNOWN SEVERITY PATTERNS (for pattern-layer classification):
 ${severityPatternsJson}
 </severity_patterns>
 
+CUSTOM FIELDS FROM OPERATOR RULES:
+If the <agent_rules> or <agent_training> blocks instruct you to extract additional
+field keys not listed above (e.g. "extract \`numero_siniestro\`", "capture \`patente_vehicle\`"),
+extract those values from the email and add them to fields[] using the exact field_key
+name written in the rule. Only include them when the value is present in the email.
+Do NOT add them to extracted_fields (typed object) — fields[] only.
+
 OUTPUT: Return valid JSON matching the ExtractedClaimOutput schema. All fields are required.
 Fields with confidence < 0.60 MUST appear in missing_fields array, NOT in extracted_fields object.
 Fields with confidence 0.60–0.85 MUST appear in fields_pending_confirmation array.

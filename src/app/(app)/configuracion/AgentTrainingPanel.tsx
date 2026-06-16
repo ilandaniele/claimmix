@@ -118,7 +118,7 @@ export function AgentTrainingPanel() {
   function applyTemplate(template: Template) {
     setContent((prev) =>
       prev.trim()
-        ? `${prev.trim()}\n\n--- ${template.label} ---\n${template.content}`
+        ? `${prev.trim()}\n\n=== ${template.label} ===\n${template.content}`
         : template.content
     );
     setShowTemplates(false);
@@ -151,7 +151,7 @@ export function AgentTrainingPanel() {
           onClick={() => setShowTemplates((v) => !v)}
           className="flex w-full items-center justify-between px-3 py-2.5 text-left text-xs font-medium text-slate-600 hover:text-slate-900"
         >
-          <span>Templates de entrenamiento</span>
+          <span>Plantillas de entrenamiento</span>
           <svg
             className={`h-3.5 w-3.5 transition-transform ${showTemplates ? "rotate-180" : ""}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
@@ -178,7 +178,7 @@ export function AgentTrainingPanel() {
               </div>
             ))}
             <div className="px-3 py-2 text-xs text-slate-400">
-              Al hacer clic en "Usar" el template se agrega al texto actual. Podés combinar varios.
+              Al hacer clic en "Usar" la plantilla se agrega al texto actual. Podés combinar varias.
             </div>
           </div>
         )}

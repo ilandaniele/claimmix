@@ -34,7 +34,7 @@ export type SendResult =
   | { errorCode: string };
 
 export interface EmailProvider {
-  readonly name: "gmail";
+  readonly name: "gmail" | "smtp";
   send(opts: SendEmailOptions): Promise<SendResult>;
 }
 

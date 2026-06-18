@@ -16,19 +16,25 @@
 import "server-only";
 import type { EmailProvider } from "../provider";
 import { GmailSender } from "./gmail-sender";
+import { SmtpSender } from "../smtp/smtp-sender";
 
 let _provider: EmailProvider | null = null;
 
 /**
  * Returns the configured EmailProvider singleton.
  *
- * On first call (when no provider has been set via setEmailProvider()), lazy-inits
- * GmailSender which reads GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN
- * from the environment. Throws if any of those vars are missing.
+ * Resolution order:
+ *   1. SMTP_HOST + SMTP_USER + SMTP_PASS set → SmtpSender (custom SMTP)
+ *   2. Fallback → GmailSender (legacy Gmail API)
  */
 export function getEmailProvider(): EmailProvider {
   if (!_provider) {
-    _provider = new GmailSender();
+    const smtpConfigured =
+      process.env.SMTP_HOST &&
+      process.env.SMTP_USER &&
+      process.env.SMTP_PASS;
+
+    _provider = smtpConfigured ? new SmtpSender() : new GmailSender();
   }
   return _provider;
 }

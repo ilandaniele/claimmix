@@ -70,7 +70,12 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     return { error: "RENDER_FAILED" };
   }
 
-  const fromAddress = process.env.GMAIL_FROM_ADDRESS ?? "";
+  const fromAddress =
+    process.env.SMTP_FROM ??
+    process.env.GMAIL_FROM_ADDRESS ??
+    "";
+
+  const provider = getEmailProvider();
 
   // ── 2. INSERT claim_messages row (status='queued') — AC4/AC5 ──────────────
   let claimMessageId: string | undefined;
@@ -82,7 +87,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
           tenant_id: tenantId,
           case_id: caseId,
           direction: "outbound",
-          provider: "gmail",
+          provider: provider.name,
           provider_message_id: null, // set after send
           thread_id: threadId ?? null,
           in_reply_to: inReplyToMessageId ?? null,
@@ -131,15 +136,13 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     console.error("[dispatch] Failed to insert outbound_messages:", code); // crew-debug-ok
   }
 
-  // ── 4. Send via EmailProvider (Gmail) ─────────────────────────────────────
+  // ── 4. Send via EmailProvider ─────────────────────────────────────────────
   // AC16: Build In-Reply-To / References headers when threading.
   const threadingHeaders: Array<{ Name: string; Value: string }> = [];
   if (inReplyToMessageId) {
     threadingHeaders.push({ Name: "In-Reply-To", Value: inReplyToMessageId });
     threadingHeaders.push({ Name: "References", Value: inReplyToMessageId });
   }
-
-  const provider = getEmailProvider();
 
   const sendResult = await provider.send({
     to,

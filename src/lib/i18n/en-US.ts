@@ -237,7 +237,11 @@ export const enUS: Record<TranslationKey, string> = {
   "audit.case.closed": "Case closed",
   "audit.case.status_changed": "Status updated",
   "audit.ai.extracted": "AI extraction completed",
+  "audit.ai.extraction_complete": "AI extraction completed",
   "audit.ai.escalated": "Case escalated due to low confidence",
+  "audit.email.received": "Email received",
+  "audit.intake.agent_decision": "Agent decision",
+  "audit.attachment.rejected": "Attachment rejected",
 
   // ── Supplemental pages ─────────────────────────────────────────────────────
   "analisis.title": "Analysis",
@@ -330,6 +334,8 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.pendingCount": "pending",
   "case.detail.coreReadyDescription": "This case is ready to be sent to the core system. Review the confirmed fields before proceeding.",
   "case.detail.noRawEmail": "No original text available.",
+  "case.detail.agentAnalysis": "Agent analysis",
+  "case.detail.auditReason": "Reason",
 
   // ── Gmail status panel ─────────────────────────────────────────────────────
   "gmail.status.title": "Gmail inbox",

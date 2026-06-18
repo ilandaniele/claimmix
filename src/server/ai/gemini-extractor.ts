@@ -156,12 +156,13 @@ function errMeta(e: unknown): { name: string; status: number | null; code: strin
 export async function extractEmailClaimGemini(
   payload: EmailClaimPayload,
   tenantId?: string,
-  caseId?: string
+  caseId?: string,
+  userId?: string | null
 ): Promise<ExtractedClaim> {
   const model = getGeminiModel();
   const logCaseId = caseId ?? "unknown";
   const logTenantId = tenantId ?? "unknown";
-  const tenantKey = tenantId ? await getTenantGeminiKey(tenantId) : null;
+  const tenantKey = tenantId ? await getTenantGeminiKey(tenantId, userId ?? undefined) : null;
 
   const systemPrompt =
     buildEmailClaimPrompt(
@@ -302,10 +303,11 @@ export async function runGeminiExtractor(
   rawText: string,
   claimType: ClaimType,
   caseId: string,
-  tenantId?: string
+  tenantId?: string,
+  userId?: string | null
 ): Promise<ExtractedClaim> {
   const model = getGeminiModel();
-  const tenantKey = tenantId ? await getTenantGeminiKey(tenantId) : null;
+  const tenantKey = tenantId ? await getTenantGeminiKey(tenantId, userId ?? undefined) : null;
   const systemPrompt = buildSystemPrompt(claimType) + schemaSuffix();
   const userMessage = buildUserMessage(rawText);
 

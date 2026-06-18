@@ -198,7 +198,7 @@ export async function runExtractionWorker(
     if (engine === "mock") {
       extractedClaim = runMockExtractor(rawMsg.body, claimType);
     } else if (engine === "gemini") {
-      extractedClaim = await runGeminiExtractor(rawMsg.body, claimType, caseId, tenantId);
+      extractedClaim = await runGeminiExtractor(rawMsg.body, claimType, caseId, tenantId, userId);
     } else {
       extractedClaim = await runOpenAIExtractor(rawMsg.body, claimType, caseId);
     }
@@ -532,7 +532,7 @@ export async function runEmailExtractionWorker(
       };
       extractedClaim =
         engine === "gemini"
-          ? await extractEmailClaimGemini(emailPayload, tenantId, caseId)
+          ? await extractEmailClaimGemini(emailPayload, tenantId, caseId, userId)
           : await extractEmailClaim(emailPayload, tenantId, caseId);
     }
 

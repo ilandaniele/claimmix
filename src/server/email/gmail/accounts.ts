@@ -114,6 +114,51 @@ export async function listEnabledGmailAccounts(): Promise<GmailAccount[]> {
   return accounts;
 }
 
+/**
+ * Returns the single active Gmail account for a tenant.
+ * Returns null if no enabled account exists.
+ */
+export async function getGmailAccountForTenant(
+  tenantId: string
+): Promise<GmailAccount | null> {
+  try {
+    const data = firstRow(
+      await db
+        .select({
+          id: gmailAccounts.id,
+          tenant_id: gmailAccounts.tenant_id,
+          email: gmailAccounts.email,
+          refresh_token_encrypted: gmailAccounts.refresh_token_encrypted,
+          enabled: gmailAccounts.enabled,
+        })
+        .from(gmailAccounts)
+        .where(
+          and(
+            eq(gmailAccounts.tenant_id, tenantId),
+            eq(gmailAccounts.enabled, true)
+          )
+        )
+        .limit(1)
+    );
+
+    if (!data) return null;
+
+    return {
+      id: data.id,
+      tenantId: data.tenant_id,
+      email: data.email,
+      refreshToken: decryptRefreshToken(data.refresh_token_encrypted),
+      enabled: data.enabled,
+    };
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code !== "42P01") {
+      console.error("[gmail-accounts] fetch for tenant error:", code ?? "unknown");
+    }
+    return null;
+  }
+}
+
 export async function getGmailAccountByEmail(
   email: string
 ): Promise<GmailAccount | null> {

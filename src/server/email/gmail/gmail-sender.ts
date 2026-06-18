@@ -99,9 +99,11 @@ function buildRawEmail(opts: SendEmailOptions): string {
 export class GmailSender implements EmailProvider {
   readonly name = "gmail" as const;
 
+  constructor(private readonly refreshToken?: string) {}
+
   async send(opts: SendEmailOptions): Promise<SendResult> {
     try {
-      const gmail = getGmailClient();
+      const gmail = getGmailClient(this.refreshToken);
       const rawEmail = buildRawEmail(opts);
       const encodedMessage = encodeBase64Url(rawEmail);
 

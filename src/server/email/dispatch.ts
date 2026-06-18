@@ -27,7 +27,8 @@ import { db } from "@/lib/db";
 import { claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { renderTemplate, type EmailTemplate } from "./render";
-import { getEmailProvider } from "./gmail/index";
+import { getGmailAccountForTenant } from "./gmail/accounts";
+import { GmailSender } from "./gmail/gmail-sender";
 import { isSendSuccess } from "./provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
@@ -70,12 +71,15 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     return { error: "RENDER_FAILED" };
   }
 
-  const fromAddress =
-    process.env.SMTP_FROM ??
-    process.env.GMAIL_FROM_ADDRESS ??
-    "";
+  // Look up the tenant's connected Gmail account — fail fast if none configured.
+  const gmailAccount = await getGmailAccountForTenant(tenantId);
+  if (!gmailAccount) {
+    console.error("[dispatch] No Gmail account configured for tenant", tenantId); // crew-debug-ok
+    return { error: "NO_GMAIL_ACCOUNT" };
+  }
 
-  const provider = getEmailProvider();
+  const fromAddress = gmailAccount.email;
+  const provider = new GmailSender(gmailAccount.refreshToken);
 
   // ── 2. INSERT claim_messages row (status='queued') — AC4/AC5 ──────────────
   let claimMessageId: string | undefined;

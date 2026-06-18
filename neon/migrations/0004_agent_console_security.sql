@@ -124,7 +124,6 @@ DECLARE
     'claim_attachments',
     'claim_field_confirmations',
     'claim_memory',
-    'gmail_poll_state',
     'gmail_watch_state',
     'gmail_accounts',
     'agent_training',
@@ -139,6 +138,9 @@ DECLARE
   ];
 BEGIN
   FOREACH table_name IN ARRAY tables_with_tenant LOOP
+    IF to_regclass(format('public.%I', table_name)) IS NULL THEN
+      CONTINUE;
+    END IF;
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', table_name);
     EXECUTE format('DROP POLICY IF EXISTS claimmix_tenant_isolation ON public.%I', table_name);
     EXECUTE format(
@@ -151,6 +153,28 @@ BEGIN
     );
   END LOOP;
 END $$;
+
+-- gmail_poll_state is keyed by Gmail account email rather than tenant_id.
+-- Scope it through the tenant-owned gmail_accounts row with the same email.
+ALTER TABLE public.gmail_poll_state ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS claimmix_gmail_poll_state_isolation ON public.gmail_poll_state;
+CREATE POLICY claimmix_gmail_poll_state_isolation ON public.gmail_poll_state
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.gmail_accounts ga
+      WHERE ga.email = gmail_poll_state.gmail_account_email
+        AND public.claimmix_tenant_matches(ga.tenant_id)
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1
+      FROM public.gmail_accounts ga
+      WHERE ga.email = gmail_poll_state.gmail_account_email
+        AND public.claimmix_tenant_matches(ga.tenant_id)
+    )
+  );
 
 -- known_claim_patterns can contain global rows (tenant_id IS NULL), so it needs
 -- a policy that allows global reads and tenant-owned writes.

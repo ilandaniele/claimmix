@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FilterTabs } from "./components/FilterTabs";
 import { TypeFilterChips } from "./components/TypeFilterChips";
 import {
@@ -15,7 +15,6 @@ import { ToastContainer, useToast } from "./components/Toast";
 import {
   useCasesRealtime,
   mergeCaseUpdate,
-  computeStatusCounts,
   formatCaseNumber,
 } from "./components/useCasesRealtime";
 import type { CaseRow, CaseListResult } from "@/server/cases/list";
@@ -161,6 +160,7 @@ export function DashboardClient({
   allStatusCounts,
 }: DashboardClientProps) {
   const t = useT();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const activeStatus = (searchParams.get("status") as CaseStatus) || undefined;
   const activeType = (searchParams.get("type") as ClaimType) || undefined;
@@ -181,6 +181,11 @@ export function DashboardClient({
     setTotal(initialData.meta.total);
   }, [initialData]);
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStatusCountsBase(allStatusCounts);
+  }, [allStatusCounts]);
+
   const { toasts, addToast, dismissToast } = useToast();
   const [showSimulateModal, setShowSimulateModal] = useState(false);
 
@@ -192,6 +197,7 @@ export function DashboardClient({
   const executeDelete = useCallback(
     async (ids: string[], onDone: () => void) => {
       try {
+        const deletedRows = cases.filter((c) => ids.includes(c.id));
         const results = await Promise.all(
           ids.map(async (id) => {
             const res = await fetch(`/api/cases/${id}`, { method: "DELETE" });
@@ -205,6 +211,19 @@ export function DashboardClient({
         if (deletedIds.length > 0) {
           setCases((prev) => prev.filter((c) => !deletedIds.includes(c.id)));
           setTotal((prev) => Math.max(0, prev - deletedIds.length));
+          setStatusCountsBase((prev) =>
+            prev.map((item) => {
+              if (item.status === "todos") {
+                return { ...item, count: Math.max(0, item.count - deletedIds.length) };
+              }
+              const deletedForStatus = deletedRows.filter(
+                (row) => row.status === item.status && deletedIds.includes(row.id)
+              ).length;
+              return deletedForStatus > 0
+                ? { ...item, count: Math.max(0, item.count - deletedForStatus) }
+                : item;
+            })
+          );
           addToast(
             deletedIds.length === 1
               ? t("bandeja.deleteSuccess")
@@ -229,7 +248,7 @@ export function DashboardClient({
         addToast(t("bandeja.deleteError"), "error");
       }
     },
-    [addToast, t]
+    [addToast, cases, t]
   );
 
   // ── Entry point called by CasesTable ──────────────────────────────────────
@@ -310,7 +329,8 @@ export function DashboardClient({
   useCasesRealtime({ onInsert: handleInsert, onUpdate: handleUpdate });
 
   // ── Filtering & pagination ─────────────────────────────────────────────────
-  const filteredCases = cases.filter((c) => {
+  const PER_PAGE = initialData.meta.per_page;
+  const visibleCases = cases.filter((c) => {
     if (activeStatus && c.status !== activeStatus) return false;
     if (activeType && c.claim_type !== activeType) return false;
     if (activeChannel && (c as any).channel !== activeChannel) return false;
@@ -319,29 +339,15 @@ export function DashboardClient({
     if (activeIsClaim === "false" && (c as any).is_claim !== false) return false;
     return true;
   });
-
-  const PER_PAGE = initialData.meta.per_page;
-  const paginatedCases = filteredCases.slice(
-    (activePage - 1) * PER_PAGE,
-    activePage * PER_PAGE
-  );
-  const filteredTotal = filteredCases.length;
+  const visibleTotal = total;
 
   function handlePageChange(newPage: number) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("page", String(newPage));
-    window.history.pushState(null, "", `?${params.toString()}`);
-    window.dispatchEvent(new PopStateEvent("popstate"));
+    router.push(`/bandeja?${params.toString()}`);
   }
 
-  const realtimeCounts = computeStatusCounts(cases);
-  const tabCounts = statusCountsBase.map((item) => {
-    const realtimeCount = realtimeCounts.get(item.status);
-    return {
-      status: item.status,
-      count: realtimeCount !== undefined ? realtimeCount : item.count,
-    };
-  });
+  const tabCounts = statusCountsBase;
 
   return (
     <>
@@ -390,13 +396,13 @@ export function DashboardClient({
 
         {/* Cases table */}
         <div className="flex-1 overflow-auto px-6 py-4">
-          <CasesTable cases={paginatedCases} onDeleteMany={handleDeleteMany} />
+          <CasesTable cases={visibleCases} onDeleteMany={handleDeleteMany} />
 
-          {filteredTotal > 0 && (
+          {visibleTotal > 0 && (
             <Pagination
               page={activePage}
               perPage={PER_PAGE}
-              total={filteredTotal}
+              total={visibleTotal}
               onPageChange={handlePageChange}
             />
           )}

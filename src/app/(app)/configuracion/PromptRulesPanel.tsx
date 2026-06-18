@@ -149,44 +149,50 @@ export function PromptRulesPanel() {
     <div className="space-y-5">
       {/* Create rule form */}
       <form onSubmit={handleCreate} className="space-y-3">
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,auto)]">
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Título de la regla"
             maxLength={200}
-            className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
+            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500"
           />
-          <select
-            value={ruleType}
-            onChange={(e) => setRuleType(e.target.value)}
-            className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-            aria-label="Tipo de regla"
-          >
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Tipo de regla">
             {Object.entries(RULE_TYPE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
+              <button
+                key={value}
+                type="button"
+                onClick={() => setRuleType(value)}
+                aria-pressed={ruleType === value}
+                className={[
+                  "rounded-md border px-3 py-2 text-xs font-medium transition-colors",
+                  ruleType === value
+                    ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-800",
+                ].join(" ")}
+              >
                 {label}
-              </option>
+              </button>
             ))}
-          </select>
+          </div>
         </div>
         <textarea
           value={ruleText}
           onChange={(e) => setRuleText(e.target.value)}
           placeholder={PLACEHOLDER_EXAMPLES}
           maxLength={2000}
-          className="min-h-24 w-full rounded-md border border-slate-200 px-3 py-2 text-sm leading-relaxed text-slate-900 focus:border-slate-400 focus:outline-none"
+          className="min-h-24 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500"
         />
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Las reglas activas se incluyen en el prompt del agente para las
             próximas extracciones. Cada cambio queda auditado.
           </p>
           <button
             type="submit"
             disabled={submitting}
-            className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
           >
             {submitting ? "Guardando…" : "Agregar regla"}
           </button>
@@ -194,19 +200,19 @@ export function PromptRulesPanel() {
       </form>
 
       {successMsg && (
-        <div role="status" className="rounded-md bg-green-50 px-3 py-2 text-xs text-green-700">
+        <div role="status" className="rounded-md bg-green-50 px-3 py-2 text-xs text-green-700 dark:bg-green-950/50 dark:text-green-200">
           {successMsg}
         </div>
       )}
       {errorMsg && (
-        <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+        <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/50 dark:text-red-200">
           {errorMsg}
         </div>
       )}
 
       {/* Rules list */}
       {rules.length === 0 ? (
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-400 dark:text-slate-500">
           Todavía no hay reglas de entrenamiento.
         </p>
       ) : (
@@ -214,23 +220,23 @@ export function PromptRulesPanel() {
           {rules.map((rule) => (
             <li
               key={rule.id}
-              className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3"
+              className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3 dark:border-slate-700 dark:bg-slate-950/30"
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-slate-800">
+                  <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
                     {rule.title}
                   </span>
-                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                     {RULE_TYPE_LABELS[rule.rule_type] ?? rule.rule_type}
                   </span>
                   {!rule.active && (
-                    <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
+                    <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950/50 dark:text-amber-200">
                       Inactiva
                     </span>
                   )}
                 </div>
-                <p className="mt-1 text-xs text-slate-600 whitespace-pre-wrap">
+                <p className="mt-1 text-xs text-slate-600 whitespace-pre-wrap dark:text-slate-300">
                   {rule.rule_text}
                 </p>
               </div>
@@ -240,7 +246,7 @@ export function PromptRulesPanel() {
                 disabled={togglingId === rule.id}
                 className={`flex-shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
                   rule.active
-                    ? "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    ? "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     : "bg-green-600 text-white hover:bg-green-700"
                 }`}
               >

@@ -65,27 +65,42 @@ export function TrainingExamplesPanel() {
     <div className="space-y-3">
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
       {examples.length === 0 ? (
-        <p className="text-sm text-slate-400">Sin ejemplos.</p>
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
+          <p className="font-medium text-slate-800 dark:text-slate-100">
+            Todavía no hay ejemplos de entrenamiento.
+          </p>
+          <p className="mt-1">
+            Abrí un caso procesado, revisá o corregí los campos del análisis y usá
+            <span className="font-medium"> Confirmar como ejemplo de entrenamiento seguro</span>.
+            Los ejemplos aprobados aparecen acá y habilitan el fine-tuning.
+          </p>
+          <a
+            href="/bandeja?is_claim=true"
+            className="mt-3 inline-flex rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            Ver casos
+          </a>
+        </div>
       ) : (
-        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
           {examples.map((example) => (
-            <li key={example.id} className="px-4 py-3">
+            <li key={example.id} className="px-4 py-3 dark:bg-slate-950/20">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium text-slate-800">
+                    <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
                       {example.input_payload?.subject || "(sin asunto)"}
                     </span>
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                       {example.status}
                     </span>
                     {example.claim_type && (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                         {example.claim_type}
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 line-clamp-2 text-xs text-slate-500">
+                  <p className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">
                     {example.input_payload?.body || ""}
                   </p>
                 </div>
@@ -94,7 +109,7 @@ export function TrainingExamplesPanel() {
                     type="button"
                     onClick={() => setStatus(example, "approved")}
                     disabled={example.status === "approved"}
-                    className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50"
+                    className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                   >
                     Aprobar
                   </button>
@@ -102,7 +117,7 @@ export function TrainingExamplesPanel() {
                     type="button"
                     onClick={() => setStatus(example, "rejected")}
                     disabled={example.status === "rejected"}
-                    className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50"
+                    className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                   >
                     Rechazar
                   </button>

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS public.agent_custom_fields (
     CHECK (key ~ '^[a-z][a-z0-9_]{1,63}$')
 );
 
+DROP TRIGGER IF EXISTS trg_agent_custom_fields_updated_at ON public.agent_custom_fields;
 CREATE TRIGGER trg_agent_custom_fields_updated_at
   BEFORE UPDATE ON public.agent_custom_fields
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();

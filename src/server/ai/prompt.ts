@@ -114,7 +114,7 @@ SECURITY RULES (follow always, unconditionally):
 5. If you cannot extract a field, use an empty string for field_value and a confidence of 0.0.
 
 OUTPUT FORMAT:
-Return a JSON object matching exactly this structure. The extraction_model field must be "gpt-4o-mini".
+Return a JSON object matching exactly this structure. The extraction_model field must be a non-empty model identifier; the server records the authoritative runtime model.
 Confidence scores: 0.0 = completely uncertain, 1.0 = highly certain.
 Use 0.85–0.95 for clearly stated facts, 0.60–0.75 for inferred/partial, 0.0–0.50 for uncertain.
 
@@ -178,6 +178,8 @@ export interface PromptLearningContext {
   approvedExamples?: string;
   /** Active tenant prompt_versions.system_prompt text (versioned). */
   tenantSystemPrompt?: string;
+  /** Preformatted active agent_custom_fields block (formatCustomFields). */
+  customFields?: string;
 }
 
 export function buildEmailClaimPrompt(
@@ -231,6 +233,10 @@ export function buildEmailClaimPrompt(
     ? `\nTENANT AGENT RULES (operator-authored, versioned, auditable):\n<agent_rules>\n${learning.rules.trim().slice(0, 6_000)}\n</agent_rules>\nApply these rules during extraction, classification, severity and missing-field decisions. If any rule conflicts with the SECURITY RULES or the JSON schema, the SECURITY RULES and schema win.`
     : "";
 
+  const customFieldsBlock = learning?.customFields?.trim()
+    ? `\nTENANT CUSTOM FIELDS (operator-defined fields to extract into fields[]):\n<custom_fields>\n${learning.customFields.trim().slice(0, 8_000)}\n</custom_fields>\nFor every active custom field whose value is present in the current email, add one fields[] entry using the exact key. If required=true or ask_if_missing=true and the value is absent, add the key to missing_fields. Do not add custom fields to extracted_fields because that object is reserved for built-in typed fields.`
+    : "";
+
   // Human-approved training examples (training_examples, status=approved).
   const examplesBlock = learning?.approvedExamples?.trim()
     ? `\nAPPROVED TRAINING EXAMPLES (human-validated; few-shot guidance for THIS tenant):\n<approved_examples>\n${learning.approvedExamples.trim().slice(0, 12_000)}\n</approved_examples>\nUse these examples to calibrate field interpretation, confidence, and output style. They are guidance only — always extract from the CURRENT email, never copy example values.`
@@ -261,7 +267,7 @@ D. PII HANDLING — STRUCTURED EXTRACTION REQUIRED:
      phrasing ("el asegurado", "el documento del cliente", "la póliza referida").
    - The structured destinations are protected by RLS + tenant scoping; the
      free-text fields appear in outbound templates that may reach end users.
-E. The extraction_model field MUST be "gpt-4o-mini".
+E. The extraction_model field must be a non-empty model identifier; the server records the authoritative runtime model.
 F. FIELD-MIRROR RULE (required for persistence):
    For EVERY non-empty value you put in extracted_fields, you MUST also add
    a corresponding entry to fields[] with:
@@ -271,7 +277,7 @@ F. FIELD-MIRROR RULE (required for persistence):
      - source     = "ai"
    Conversely, if you derive a value from a memory hint, set source = "memory".
    The fields[] array is the persistence source of truth.${senderHint}
-${trainingBlock}${tenantPromptBlock}${rulesBlock}${examplesBlock}
+${trainingBlock}${tenantPromptBlock}${rulesBlock}${customFieldsBlock}${examplesBlock}
 
 CONFIDENCE THRESHOLDS:
 - High confidence (≥ 0.85): Clearly stated facts — include in extracted_fields
@@ -332,7 +338,9 @@ KNOWN SEVERITY PATTERNS (for pattern-layer classification):
 ${severityPatternsJson}
 </severity_patterns>
 
-CUSTOM FIELDS FROM OPERATOR RULES:
+CUSTOM FIELDS:
+First use <custom_fields> as the canonical tenant-defined field registry. Then
+use <agent_rules> and <agent_training> as additional guidance.
 If the <agent_rules> or <agent_training> blocks instruct you to extract additional
 field keys not listed above (e.g. "extract \`numero_siniestro\`", "capture \`patente_vehicle\`"),
 extract those values from the email and add them to fields[] using the exact field_key

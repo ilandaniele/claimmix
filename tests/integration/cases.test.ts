@@ -13,7 +13,7 @@
  * AC15: PATCH case status writes audit_log; wrong-tenant PATCH returns 404.
  *
  * NOTE: These tests run against a live Next.js server.
- * Run with INTEGRATION_ENABLED=true and a seeded Supabase instance.
+ * Run with INTEGRATION_ENABLED=true and a seeded Neon instance.
  * They are excluded from the unit test run (vitest.config.ts).
  */
 

@@ -11,7 +11,7 @@
  *   - The Gmail section is conditionally rendered server-side only for role='admin'.
  *   - Expect the "Bandeja de entrada Gmail" heading to NOT be present.
  *
- * Scenario 1 and 2 require a live Supabase session with role-differentiated test accounts.
+ * Scenario 1 and 2 require a live Neon session with role-differentiated test accounts.
  * They are skipped in CI unless PLAYWRIGHT_ADMIN_EMAIL / PLAYWRIGHT_ANALYST_EMAIL are set.
  *
  * API access control tests (no auth required) run unconditionally.
@@ -63,12 +63,12 @@ test.describe("Gmail status API — unauthenticated access control", () => {
   });
 });
 
-// ── Scenario 1: Admin sees Gmail status panel (requires live Supabase + admin account) ──
+// ── Scenario 1: Admin sees Gmail status panel (requires live Neon + admin account) ──
 
 test.describe("Gmail status panel — admin user visibility (Scenario 1)", () => {
   // Skip if admin credentials are not configured in the test environment.
   // To enable: set PLAYWRIGHT_ADMIN_EMAIL and PLAYWRIGHT_ADMIN_PASSWORD env vars.
-  test.skip(!HAS_ADMIN_CREDS, "Skipped: PLAYWRIGHT_ADMIN_EMAIL not set — requires admin Supabase account");
+  test.skip(!HAS_ADMIN_CREDS, "Skipped: PLAYWRIGHT_ADMIN_EMAIL not set — requires admin Neon account");
 
   test("admin user sees 'Bandeja de entrada Gmail' section in /configuracion", async ({ page }) => {
     // Sign in as admin
@@ -94,12 +94,12 @@ test.describe("Gmail status panel — admin user visibility (Scenario 1)", () =>
   });
 });
 
-// ── Scenario 2: Analyst does NOT see Gmail status panel (requires live Supabase + analyst account) ──
+// ── Scenario 2: Analyst does NOT see Gmail status panel (requires live Neon + analyst account) ──
 
 test.describe("Gmail status panel — analyst user invisibility (Scenario 2)", () => {
   // Skip if analyst credentials are not configured in the test environment.
   // To enable: set PLAYWRIGHT_ANALYST_EMAIL and PLAYWRIGHT_ANALYST_PASSWORD env vars.
-  test.skip(!HAS_ANALYST_CREDS, "Skipped: PLAYWRIGHT_ANALYST_EMAIL not set — requires analyst Supabase account");
+  test.skip(!HAS_ANALYST_CREDS, "Skipped: PLAYWRIGHT_ANALYST_EMAIL not set — requires analyst Neon account");
 
   test("analyst user does NOT see 'Bandeja de entrada Gmail' section in /configuracion", async ({ page }) => {
     // Sign in as analyst

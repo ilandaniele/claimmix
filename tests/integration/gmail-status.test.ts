@@ -39,7 +39,7 @@ const { mockGetSessionContext, mockDbSelect, fakeUsersTable, fakeGmailPollStateT
     };
   });
 
-// ── Mock session (replaces Supabase auth.getUser) ─────────────────────────────
+// ── Mock session (replaces Neon auth.getUser) ─────────────────────────────
 
 vi.mock("@/lib/auth/session", () => ({
   getSessionContext: mockGetSessionContext,

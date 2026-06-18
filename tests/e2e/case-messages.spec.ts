@@ -10,7 +10,7 @@
  *   - Navigate to a case detail page with no claim_messages rows.
  *   - Expect "Mensajes recibidos" heading to NOT be present.
  *
- * Scenarios 1 and 2 require a live Supabase session + test case IDs with known data.
+ * Scenarios 1 and 2 require a live Neon session + test case IDs with known data.
  * They are skipped in CI unless PLAYWRIGHT_TEST_EMAIL and PLAYWRIGHT_EMAIL_CASE_ID are set.
  *
  * API access control tests (no auth required) run unconditionally.

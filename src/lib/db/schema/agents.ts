@@ -1,7 +1,7 @@
 /**
  * Agent learning tables: agent_training, prompt_versions, agent_runs,
- * training_examples, agent_feedback, agent_prompt_rules, model_training_jobs,
- * tenant_ai_settings.
+ * training_examples, agent_feedback, agent_prompt_rules, agent_custom_fields,
+ * model_training_jobs, tenant_ai_settings.
  *
  * Source of truth: neon/migrations/0001_init.sql. These TS definitions are for
  * query building / type inference only — CHECK constraints, indexes and
@@ -151,6 +151,29 @@ export const agentPromptRules = pgTable("agent_prompt_rules", {
   updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }),
 });
 
+export const agentCustomFields = pgTable("agent_custom_fields", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenant_id: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
+  label: text("label").notNull(),
+  description: text("description").notNull().default(""),
+  field_type: text("field_type").notNull().default("text"),
+  claim_type: text("claim_type"),
+  required: boolean("required").notNull().default(false),
+  ask_if_missing: boolean("ask_if_missing").notNull().default(false),
+  enum_values: jsonb("enum_values").notNull().default(sql`'[]'::jsonb`),
+  active: boolean("active").notNull().default(true),
+  created_by: uuid("created_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }),
+});
+
 export const modelTrainingJobs = pgTable("model_training_jobs", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   tenant_id: uuid("tenant_id")
@@ -160,6 +183,13 @@ export const modelTrainingJobs = pgTable("model_training_jobs", {
   provider: text("provider").notNull().default("openai"),
   base_model: text("base_model").notNull().default(""),
   fine_tuned_model_id: text("fine_tuned_model_id"),
+  openai_fine_tuning_job_id: text("openai_fine_tuning_job_id"),
+  training_file_id: text("training_file_id"),
+  validation_file_id: text("validation_file_id"),
+  result_files: jsonb("result_files").notNull().default(sql`'[]'::jsonb`),
+  error_message: text("error_message"),
+  training_jsonl: text("training_jsonl"),
+  validation_jsonl: text("validation_jsonl"),
   training_example_count: integer("training_example_count").notNull().default(0),
   eval_result: jsonb("eval_result"),
   created_by: uuid("created_by").references(() => users.id, {
@@ -168,7 +198,12 @@ export const modelTrainingJobs = pgTable("model_training_jobs", {
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
+  started_at: timestamp("started_at", { withTimezone: true, mode: "string" }),
   completed_at: timestamp("completed_at", { withTimezone: true, mode: "string" }),
+  activated_by: uuid("activated_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  activated_at: timestamp("activated_at", { withTimezone: true, mode: "string" }),
 });
 
 export const tenantAiSettings = pgTable("tenant_ai_settings", {
@@ -176,6 +211,18 @@ export const tenantAiSettings = pgTable("tenant_ai_settings", {
     .primaryKey()
     .references(() => tenants.id, { onDelete: "cascade" }),
   provider: text("provider").notNull().default("openai"),
+  openai_model: text("openai_model").notNull().default("gpt-4o-mini"),
+  gemini_model: text("gemini_model").notNull().default("gemini-2.5-flash"),
+  active_model_provider: text("active_model_provider").notNull().default("openai"),
+  active_model: text("active_model"),
+  previous_model: text("previous_model"),
+  model_activated_by: uuid("model_activated_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  model_activated_at: timestamp("model_activated_at", {
+    withTimezone: true,
+    mode: "string",
+  }),
   gemini_api_key_encrypted: text("gemini_api_key_encrypted"),
   updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" })
     .defaultNow()

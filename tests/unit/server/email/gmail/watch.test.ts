@@ -11,8 +11,8 @@
  *
  * Strategy:
  * - Mock getGmailClient() to return a controlled gmail object.
- * - Mock setWatchState() to verify call arguments without hitting Supabase.
- * - Mock createServiceClient() so no real Supabase client is constructed.
+ * - Mock setWatchState() to verify call arguments without hitting Neon.
+ * - No real database client is constructed.
  * - All mocks are reset between tests via beforeEach.
  */
 

@@ -23,6 +23,7 @@ import type { ClaimType } from "@/lib/schemas/cases";
 import { buildSystemPrompt, buildUserMessage, buildEmailClaimPrompt } from "./prompt";
 import type { MemoryHint, KnownPattern, PromptLearningContext } from "./prompt";
 import { computeCostUsd, recordUsage } from "./budget";
+import { getDefaultOpenAIModel, getTenantOpenAIModel } from "./provider";
 
 /** Custom error for unrecoverable AI extraction failures. */
 export class OpenAIExtractionError extends Error {
@@ -49,7 +50,7 @@ function getClient(): OpenAI {
 
 /** Returns the configured OpenAI model. Override with OPENAI_MODEL env var. */
 function getModel(): string {
-  return process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+  return getDefaultOpenAIModel();
 }
 
 /**
@@ -85,10 +86,11 @@ export function parseResponse(content: string | null, claimType: ClaimType, mode
 export async function runOpenAIExtractor(
   rawText: string,
   claimType: ClaimType,
-  caseId: string
+  caseId: string,
+  tenantId?: string
 ): Promise<ExtractedClaim> {
   const client = getClient();
-  const model = getModel();
+  const model = await getTenantOpenAIModel(tenantId);
   const systemPrompt = buildSystemPrompt(claimType);
   const userMessage = buildUserMessage(rawText);
 
@@ -256,7 +258,7 @@ export async function extractEmailClaim(
   caseId?: string
 ): Promise<ExtractedClaim> {
   const client = getClient();
-  const model = getModel();
+  const model = await getTenantOpenAIModel(tenantId);
   const logCaseId = caseId ?? "unknown";
   const logTenantId = tenantId ?? "unknown";
 

@@ -9,7 +9,7 @@
  * All error responses use the unified format:
  *   { error: { code, message, details? } }
  *
- * NEVER include stack traces or internal Supabase errors in the response body.
+ * NEVER include stack traces or internal Neon errors in the response body.
  */
 
 import { NextResponse } from "next/server";

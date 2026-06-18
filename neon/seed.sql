@@ -4,10 +4,7 @@
 -- OPTIONAL. Run only on dev/demo databases, never in production:
 --   psql "$DATABASE_URL" -f neon/seed.sql
 --
--- The Supabase seed (supabase/seed.sql) also created auth users, demo cases,
--- raw messages, extracted fields, missing docs and audit-log rows. Those are
--- NOT ported here: users are now created through Better Auth signup, and the
--- demo cases referenced those auth users. Only the demo tenant row is kept.
+-- Users are created through Better Auth signup. Only the demo tenant row is kept.
 -- Reference config (required_docs_config, global known_claim_patterns) is
 -- seeded by neon/migrations/0001_init.sql itself.
 -- =============================================================================

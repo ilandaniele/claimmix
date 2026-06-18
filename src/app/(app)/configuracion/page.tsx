@@ -3,7 +3,7 @@
  *
  * Sections:
  *   1. Cuenta: analyst name, email (read-only), role badge
- *   2. Cambiar contraseña: form that calls Supabase updateUser
+ *   2. Cambiar contraseña: Better Auth password form
  *   3. Umbrales de IA: confidence threshold + monthly budget cap (read-only for non-admin)
  *   4. Información del sistema: app version, Node version (server env), region
  *
@@ -19,9 +19,6 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { ConfiguracionClient } from "./ConfiguracionClient";
 import { GmailAccountsPanel } from "./GmailAccountsPanel";
-import { AgentTrainingPanel } from "./AgentTrainingPanel";
-import { PromptRulesPanel } from "./PromptRulesPanel";
-import { AiProviderPanel } from "./AiProviderPanel";
 import { UserAiKeyPanel } from "./UserAiKeyPanel";
 import { getUserGeminiKey } from "@/server/ai/provider";
 import { getT } from "@/lib/i18n";
@@ -183,11 +180,6 @@ export default async function ConfiguracionPage() {
         </Section>
 
         {/* ── Modelo de IA (admin only) ─────────────────────────────────────── */}
-        {isAdmin && (
-          <Section title={t("aiProvider.title")}>
-            <AiProviderPanel />
-          </Section>
-        )}
 
         {/* ── Mi API Key de Gemini (todos los usuarios) ─────────────────────── */}
         <Section title="Mi clave de IA">
@@ -199,18 +191,8 @@ export default async function ConfiguracionPage() {
           <GmailAccountsPanel />
         </Section>
 
-        {isAdmin && (
-          <Section title={t("configuracion.agentTraining.title")}>
-            <AgentTrainingPanel />
-          </Section>
-        )}
 
         {/* ── Consola de entrenamiento del agente (reglas) ──────────────────── */}
-        {isAdmin && (
-          <Section title="Consola de entrenamiento del agente">
-            <PromptRulesPanel />
-          </Section>
-        )}
 
         {/* ── Información del sistema ───────────────────────────────────────── */}
         <Section title="Información del sistema">

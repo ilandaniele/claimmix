@@ -10,7 +10,7 @@
  * These tests mock @/lib/db (Drizzle) and @/lib/auth/session to simulate
  * the behavior where cross-tenant queries return no rows.
  *
- * True DB RLS tests require RLS_INTEGRATION_ENABLED=true + live Supabase.
+ * True DB RLS tests require RLS_INTEGRATION_ENABLED=true + live Neon.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

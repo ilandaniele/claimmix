@@ -41,12 +41,6 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  images: {
-    remotePatterns: [
-      // Add Supabase storage domain when file uploads are added.
-      // { protocol: 'https', hostname: '*.supabase.co' },
-    ],
-  },
 };
 
 export default nextConfig;

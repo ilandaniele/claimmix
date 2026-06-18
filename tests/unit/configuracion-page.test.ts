@@ -2,14 +2,14 @@
  * Unit tests for Configuración page logic.
  *
  * Tests pure helpers: password validation, role labels, threshold formatting.
- * The password change itself uses the Supabase browser client (tested via E2E).
+ * The password change itself uses the Neon browser client (tested via E2E).
  *
  * AC18 (W7): Configuración page — account section, password change, AI thresholds.
  */
 
 import { describe, it, expect } from "vitest";
 
-// ── Password validation (client-side, before Supabase call) ──────────────────
+// ── Password validation (client-side, before Neon call) ──────────────────
 
 function validatePasswordChange(
   newPassword: string,

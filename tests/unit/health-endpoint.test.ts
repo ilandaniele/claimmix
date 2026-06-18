@@ -2,7 +2,7 @@
  * Unit tests for /api/admin/health endpoint logic.
  *
  * Tests the AI mode detection and response shape logic.
- * DB ping is tested via integration tests (requires Supabase).
+ * DB ping is tested via integration tests (requires Neon).
  *
  * Deployment validation (W7): health endpoint returns correct AI mode,
  * version, and region fields.

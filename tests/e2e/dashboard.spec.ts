@@ -8,9 +8,9 @@
  * These tests use the Playwright webServer auto-start with MOCK_AI=true.
  * The dev server is started automatically by playwright.config.ts.
  *
- * Note: Without a live Supabase backend, the dashboard will show the
+ * Note: Without a live Neon backend, the dashboard will show the
  * login redirect. Tests are written to verify structure when auth is available.
- * Full integration with real Supabase is covered in tests/integration/cases.test.ts.
+ * Full integration with real Neon is covered in tests/integration/cases.test.ts.
  */
 
 import { test, expect } from "@playwright/test";
@@ -21,7 +21,7 @@ test.describe("Bandeja — unauthenticated redirect", () => {
     await context.clearCookies();
     await page.goto("/bandeja");
     // Should redirect to login (proxy.ts enforces auth)
-    // Note: with a real Supabase backend, this always redirects.
+    // Note: with a real Neon backend, this always redirects.
     // With a placeholder backend, getUser() may fail silently and let through.
     const url = page.url();
     const isAtLogin = url.includes("/login");
@@ -39,11 +39,11 @@ test.describe("Bandeja — unauthenticated redirect", () => {
 
 test.describe("Bandeja — page structure (auth-gated)", () => {
   /**
-   * To test the authenticated dashboard, we'd need to set up a Supabase session.
+   * To test the authenticated dashboard, we'd need to set up a Neon session.
    * These tests verify the structure when authenticated by testing against
    * the login page redirect and the page structure.
    *
-   * In a real environment with Supabase configured, these tests would:
+   * In a real environment with Neon configured, these tests would:
    * 1. Navigate to /login, fill credentials, submit
    * 2. Verify redirect to /bandeja
    * 3. Verify case table, filter tabs, simulate button presence
@@ -77,7 +77,7 @@ test.describe("Bandeja — page structure (auth-gated)", () => {
     const res = await page.request.get("/api/admin/health");
     expect(res.status()).toBe(200);
     const body = await res.json();
-    // Status may be "ok" (with Supabase) or "degraded" (without Supabase — placeholder)
+    // Status may be "ok" (with Neon) or "degraded" (without Neon — placeholder)
     // Either way, the health endpoint should return 200 and include the status field
     expect(["ok", "degraded"]).toContain(body.status);
     expect(body).toHaveProperty("db");

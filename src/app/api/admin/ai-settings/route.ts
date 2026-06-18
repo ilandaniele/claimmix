@@ -24,9 +24,11 @@ import {
   hasProviderKey,
   hasProviderKeyForTenant,
   getTenantGeminiKey,
+  getTenantOpenAIModel,
+  getTenantGeminiModel,
+  setTenantModelDefaults,
   setTenantGeminiKey,
 } from "@/server/ai/provider";
-import { getGeminiModel } from "@/server/ai/gemini-extractor";
 
 export const dynamic = "force-dynamic";
 
@@ -34,9 +36,11 @@ const PatchSchema = z
   .object({
     provider: z.enum(["openai", "gemini"]).optional(),
     geminiKey: z.string().min(1).max(500).optional(),
+    openaiModel: z.string().trim().min(1).max(120).optional(),
+    geminiModel: z.string().trim().min(1).max(120).optional(),
   })
-  .refine((d) => d.provider !== undefined || d.geminiKey !== undefined, {
-    message: "Provide at least one of: provider, geminiKey",
+  .refine((d) => Object.keys(d).length > 0, {
+    message: "Provide at least one setting to update",
   });
 
 async function providerStatus(tenantId: string) {
@@ -44,11 +48,11 @@ async function providerStatus(tenantId: string) {
   return {
     openai: {
       configured: hasProviderKey("openai"),
-      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      model: await getTenantOpenAIModel(tenantId),
     },
     gemini: {
       configured: Boolean(geminiKey),
-      model: getGeminiModel(),
+      model: await getTenantGeminiModel(tenantId),
     },
   };
 }
@@ -75,11 +79,19 @@ export async function PATCH(request: NextRequest) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
     }
 
-    const { provider, geminiKey } = parsed.data;
+    const { provider, geminiKey, openaiModel, geminiModel } = parsed.data;
 
     // Save Gemini key if provided
     if (geminiKey) {
       await setTenantGeminiKey(userRow.tenant_id, geminiKey);
+    }
+
+    if (provider || openaiModel || geminiModel) {
+      await setTenantModelDefaults(userRow.tenant_id, {
+        provider,
+        openaiModel,
+        geminiModel,
+      });
     }
 
     // Switch provider if requested

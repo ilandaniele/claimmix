@@ -31,7 +31,7 @@ import {
   buildSafeDefault,
 } from "./openai-extractor";
 import type { EmailClaimPayload } from "./openai-extractor";
-import { getTenantGeminiKey } from "./provider";
+import { getDefaultGeminiModel, getTenantGeminiKey, getTenantGeminiModel } from "./provider";
 
 /** Custom error for unrecoverable Gemini extraction failures (simulate flow). */
 export class GeminiExtractionError extends Error {
@@ -46,7 +46,7 @@ const GEMINI_API_BASE =
 
 /** Returns the configured Gemini model. Override with GEMINI_MODEL env var. */
 export function getGeminiModel(): string {
-  return process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  return getDefaultGeminiModel();
 }
 
 /** Compact schema block appended to the system prompt — Gemini has no
@@ -70,7 +70,8 @@ interface GeminiUsage {
 async function callGemini(
   systemPrompt: string,
   userMessage: string,
-  apiKey?: string | null
+  apiKey?: string | null,
+  modelOverride?: string
 ): Promise<{ text: string | null; usage: GeminiUsage }> {
   const key = apiKey ?? process.env.GEMINI_API_KEY;
   if (!key) {
@@ -79,7 +80,7 @@ async function callGemini(
     );
   }
 
-  const model = getGeminiModel();
+  const model = modelOverride ?? getGeminiModel();
 
   const body: Record<string, unknown> = {
     systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -159,7 +160,7 @@ export async function extractEmailClaimGemini(
   caseId?: string,
   userId?: string | null
 ): Promise<ExtractedClaim> {
-  const model = getGeminiModel();
+  const model = await getTenantGeminiModel(tenantId);
   const logCaseId = caseId ?? "unknown";
   const logTenantId = tenantId ?? "unknown";
   const tenantKey = tenantId ? await getTenantGeminiKey(tenantId, userId ?? undefined) : null;
@@ -184,7 +185,7 @@ export async function extractEmailClaimGemini(
 
   // ── Attempt 1 ─────────────────────────────────────────────────────────────
   try {
-    const { text, usage } = await callGemini(systemPrompt, userMessage, tenantKey);
+    const { text, usage } = await callGemini(systemPrompt, userMessage, tenantKey, model);
     totalPromptTokens = usage.promptTokens;
     totalCompletionTokens = usage.completionTokens;
 
@@ -226,7 +227,7 @@ export async function extractEmailClaimGemini(
       "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
 
     try {
-      const { text, usage } = await callGemini(stricterSystem, userMessage, tenantKey);
+      const { text, usage } = await callGemini(stricterSystem, userMessage, tenantKey, model);
       totalPromptTokens += usage.promptTokens;
       totalCompletionTokens += usage.completionTokens;
 
@@ -306,7 +307,7 @@ export async function runGeminiExtractor(
   tenantId?: string,
   userId?: string | null
 ): Promise<ExtractedClaim> {
-  const model = getGeminiModel();
+  const model = await getTenantGeminiModel(tenantId);
   const tenantKey = tenantId ? await getTenantGeminiKey(tenantId, userId ?? undefined) : null;
   const systemPrompt = buildSystemPrompt(claimType) + schemaSuffix();
   const userMessage = buildUserMessage(rawText);
@@ -323,7 +324,7 @@ export async function runGeminiExtractor(
           "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
 
     try {
-      const { text, usage } = await callGemini(prompt, userMessage, tenantKey);
+      const { text, usage } = await callGemini(prompt, userMessage, tenantKey, model);
       totalPromptTokens += usage.promptTokens;
       totalCompletionTokens += usage.completionTokens;
 

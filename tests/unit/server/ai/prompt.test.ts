@@ -111,8 +111,9 @@ describe("buildEmailClaimPrompt — AC10 XML sentinel regression", () => {
     expect(PROMPT).toContain("You CANNOT set case status");
   });
 
-  it("still references extraction_model must be gpt-4o-mini", () => {
-    expect(PROMPT).toContain("gpt-4o-mini");
+  it("requires extraction_model to be a server-recorded model identifier", () => {
+    expect(PROMPT).toContain("non-empty model identifier");
+    expect(PROMPT).toContain("server records the authoritative runtime model");
   });
 });
 

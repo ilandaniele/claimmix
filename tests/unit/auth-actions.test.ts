@@ -1,7 +1,7 @@
 /**
  * Unit tests for authentication Zod schemas and utility functions.
  *
- * Tests the validation logic without requiring a real Supabase connection.
+ * Tests the validation logic without requiring a real Neon connection.
  */
 
 import { describe, it, expect } from "vitest";

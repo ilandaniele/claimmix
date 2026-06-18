@@ -196,7 +196,7 @@ export const AuditEvent = {
   OUTBOUND_EMAIL_FAILED: "email.outbound_failed",
 
   /**
-   * ATTACHMENT_REHOSTED: Attachment successfully uploaded to Supabase Storage.
+   * ATTACHMENT_REHOSTED: Attachment successfully uploaded to object storage.
    * Payload: { storage_path, size_bytes, content_hash_prefix } — first 12 hex chars only.
    * AC7.
    */
@@ -232,6 +232,9 @@ export const AuditEvent = {
   PROMPT_RULE_CREATED: "training.prompt_rule_created",
   PROMPT_RULE_UPDATED: "training.prompt_rule_updated",
   PROMPT_RULE_TOGGLED: "training.prompt_rule_toggled",
+  CUSTOM_FIELD_CREATED: "training.custom_field_created",
+  CUSTOM_FIELD_UPDATED: "training.custom_field_updated",
+  CUSTOM_FIELD_TOGGLED: "training.custom_field_toggled",
 
   /**
    * FINETUNE_JOB_QUEUED: enough approved examples accumulated — a draft
@@ -239,6 +242,11 @@ export const AuditEvent = {
    * Payload: { job_id, training_example_count }.
    */
   FINETUNE_JOB_QUEUED: "training.finetune_job_queued",
+  FINETUNE_JOB_STARTED: "training.finetune_job_started",
+  FINETUNE_JOB_SYNCED: "training.finetune_job_synced",
+  FINETUNE_JOB_APPROVED: "training.finetune_job_approved",
+  FINETUNE_MODEL_DEPLOYED: "training.finetune_model_deployed",
+  FINETUNE_MODEL_ROLLED_BACK: "training.finetune_model_rolled_back",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

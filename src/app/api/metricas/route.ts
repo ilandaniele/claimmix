@@ -125,7 +125,7 @@ export async function GET() {
     const byType: Record<string, number> = {};
     for (const row of byTypeRows) {
       // NULL claim_type buckets under the "null" key — matches the previous
-      // supabase-js behaviour where obj[null] coerces to obj["null"].
+      // Neon-js behaviour where obj[null] coerces to obj["null"].
       const key = row.claim_type ?? "null";
       byType[key] = (byType[key] ?? 0) + 1;
     }

@@ -14,7 +14,7 @@ would be the production-grade solution but adds operational complexity.
 
 For MVP: use Next.js Route Handler with `waitUntil()` from the Vercel runtime to run the
 extraction worker in-process asynchronously. The intake endpoint returns 202 immediately;
-the case appears in the dashboard via Supabase Realtime when the worker finishes.
+the case appears in the dashboard when polling picks up the finished worker state.
 
 ```typescript
 // src/app/api/intake/simulate/route.ts

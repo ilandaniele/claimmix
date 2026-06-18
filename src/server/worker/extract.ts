@@ -52,10 +52,7 @@ import type { CaseInsert } from "@/lib/db/types";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { analyzeGaps } from "@/server/ai/gap-analysis";
 import { checkBudget, recordUsage } from "@/server/ai/budget";
-import { runMockExtractor, extractEmailClaimMock } from "@/server/ai/mock-extractor";
-import { runOpenAIExtractor, extractEmailClaim, OpenAIExtractionError } from "@/server/ai/openai-extractor";
-import { runGeminiExtractor, extractEmailClaimGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
-import { resolveExtractionEngine } from "@/server/ai/provider";
+import { ClaimAgentError, runClaimTextAgent, runEmailClaimAgent } from "@/server/ai/claim-agent";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
@@ -64,6 +61,7 @@ import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { loadAgentTraining } from "@/server/agents/training";
 import { loadActivePromptRules, formatPromptRules } from "@/server/training/prompt-rules";
 import { loadApprovedExamples, formatApprovedExamples } from "@/server/training/examples";
+import { loadActiveCustomFields, formatCustomFields } from "@/server/training/custom-fields";
 import { getActivePromptVersion } from "@/server/training/prompt-version";
 import { assessTrainability } from "@/server/training/trainability";
 import { logAgentRun } from "@/server/training/agent-runs";
@@ -191,26 +189,25 @@ export async function runExtractionWorker(
   }
 
   // ── 2. Select and run extractor (per-tenant provider: openai | gemini | mock) ─
-  const engine = await resolveExtractionEngine(tenantId, userId);
   let extractedClaim;
 
   try {
-    if (engine === "mock") {
-      extractedClaim = runMockExtractor(rawMsg.body, claimType);
-    } else if (engine === "gemini") {
-      extractedClaim = await runGeminiExtractor(rawMsg.body, claimType, caseId, tenantId, userId);
-    } else {
-      extractedClaim = await runOpenAIExtractor(rawMsg.body, claimType, caseId);
-    }
+    extractedClaim = await runClaimTextAgent({
+      rawText: rawMsg.body,
+      claimType,
+      caseId,
+      tenantId,
+      userId,
+    });
   } catch (e) {
-    if (e instanceof OpenAIExtractionError || e instanceof GeminiExtractionError) {
+    if (e instanceof ClaimAgentError) {
       console.error(
         JSON.stringify({
           level: "error",
           service: "claimmix",
           msg: "worker.ai_output_invalid",
           case_id: caseId,
-          error_name: e.name,
+          error_name: e.cause instanceof Error ? e.cause.name : e.name,
         })
       );
       await escalateCase(caseId, tenantId, userId, "AI_OUTPUT_INVALID", "ai_output_invalid");
@@ -476,19 +473,21 @@ export async function runEmailExtractionWorker(
     // ── c) Load known_claim_patterns + operator learning context ─────────────
     // Learning context = freeform training blob + active prompt rules +
     // human-approved few-shot examples + active versioned tenant prompt.
-    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion] =
+    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields] =
       await Promise.all([
         loadKnownPatterns(tenantId),
         loadAgentTraining(tenantId),
         loadActivePromptRules(tenantId),
         loadApprovedExamples(tenantId, caseRow.claim_type),
         getActivePromptVersion(tenantId),
+        loadActiveCustomFields(tenantId, caseRow.claim_type),
       ]);
 
     const learning = {
       rules: formatPromptRules(promptRules),
       approvedExamples: formatApprovedExamples(approvedExamples),
       tenantSystemPrompt: promptVersion.systemPrompt ?? undefined,
+      customFields: formatCustomFields(customFields),
     };
 
     // ── d) Budget check ───────────────────────────────────────────────────────
@@ -515,26 +514,23 @@ export async function runEmailExtractionWorker(
     }
 
     // ── e) Run extractor (per-tenant provider: openai | gemini | mock) ───────
-    const engine = await resolveExtractionEngine(tenantId, userId);
     let extractedClaim;
 
-    if (engine === "mock") {
-      extractedClaim = extractEmailClaimMock();
-    } else {
-      const emailPayload = {
-        subject: emailSubject,
-        body: emailBody,
-        memoryHints,
-        knownPatterns,
-        senderEmail,
-        agentTraining,
-        learning,
-      };
-      extractedClaim =
-        engine === "gemini"
-          ? await extractEmailClaimGemini(emailPayload, tenantId, caseId, userId)
-          : await extractEmailClaim(emailPayload, tenantId, caseId);
-    }
+    const emailPayload = {
+      subject: emailSubject,
+      body: emailBody,
+      memoryHints,
+      knownPatterns,
+      senderEmail,
+      agentTraining,
+      learning,
+    };
+    extractedClaim = await runEmailClaimAgent({
+      payload: emailPayload,
+      tenantId,
+      caseId,
+      userId,
+    });
 
     // ── e2) Defensive hydration: mirror typed extracted_fields into fields[] + scrub PII ──
     // This is a defensive layer — the primary fix is in the prompt (RULE D / RULE F).

@@ -11,7 +11,7 @@
  *   2. Valid test credentials in PLAYWRIGHT_TEST_EMAIL / PLAYWRIGHT_TEST_PASSWORD.
  *
  * If credentials are not set, sign-in flow tests are skipped to avoid
- * false failures in CI without a Supabase project.
+ * false failures in CI without a Neon project.
  */
 
 import { test, expect } from "@playwright/test";
@@ -85,7 +85,7 @@ test.describe("Auth redirect guard (AC2)", () => {
 
 test.describe.configure({ mode: "serial" });
 
-test.describe("Sign-in flow (AC4) — requires Supabase credentials", () => {
+test.describe("Sign-in flow (AC4) — requires Neon credentials", () => {
   test.skip(!HAS_TEST_CREDS, "Skipped: PLAYWRIGHT_TEST_EMAIL not set");
 
   test("analyst can sign in with valid credentials", async ({ page }) => {

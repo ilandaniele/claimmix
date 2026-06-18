@@ -2,7 +2,7 @@
 -- Two-tenant isolation fixture for RLS integration tests
 -- =============================================================================
 -- Used by tests/integration/rls.test.ts to verify cross-tenant isolation.
--- Run against a local Supabase instance (supabase start).
+-- Run against a local Neon instance (Neon start).
 --
 -- Creates:
 --   - Tenant T1 with analyst user U1 and 2 cases
@@ -17,7 +17,7 @@ INSERT INTO public.tenants (id, name) VALUES
   ('aaaaaaaa-0000-0000-0000-000000000002', 'Aseguradora Beta')
 ON CONFLICT (id) DO NOTHING;
 
--- Auth users (local Supabase only)
+-- Auth users (local Neon only)
 INSERT INTO auth.users (
   id, email, encrypted_password, email_confirmed_at,
   created_at, updated_at, raw_app_meta_data, raw_user_meta_data

@@ -78,7 +78,7 @@ export type UploadAttachmentResult =
  * the same filename is sent twice in different messages.
  *
  * IfNoneMatch: "*" — duplicate uploads to the same key fail fast with a 412
- * PreconditionFailed (equivalent of Supabase upsert: false), which the caller
+ * PreconditionFailed (equivalent of Neon upsert: false), which the caller
  * converts to { stored: false, reason: 'storage_upload_failed' }.
  * Deduplication by content_hash (AC10) prevents reaching this path for true duplicates.
  */
@@ -98,7 +98,7 @@ export async function uploadAttachment(
         Key: storagePath,
         Body: data,
         ContentType: contentType,
-        // Fail when the key already exists (replicates Supabase upsert: false).
+        // Fail when the key already exists (replicates Neon upsert: false).
         IfNoneMatch: "*",
       })
     );

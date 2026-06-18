@@ -1,7 +1,7 @@
 /**
  * Unit tests for admin users page role guard and helper logic.
  *
- * The API route itself is tested via integration tests (requires Supabase).
+ * The API route itself is tested via integration tests (requires Neon).
  * These unit tests cover pure logic: role validation, user formatting, badge logic.
  *
  * AC17 (W7): Admin/users page — role guard + user table.

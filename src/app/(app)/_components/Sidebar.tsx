@@ -10,6 +10,7 @@ import {
   BarChart2,
   Settings,
   Shield,
+  Brain,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -57,6 +58,7 @@ export function Sidebar() {
 
   const analisisItems: NavItemDef[] = [
     { label: t("nav.metricas") || "Métricas", href: "/metricas", icon: BarChart2 },
+    { label: "Agente", href: "/agente", icon: Brain },
     { label: t("nav.admin") || "Usuarios", href: "/admin/users", icon: Shield },
   ];
 

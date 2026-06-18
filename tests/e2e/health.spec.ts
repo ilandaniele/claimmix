@@ -1,6 +1,6 @@
 /**
  * E2E: GET /api/admin/health → 200.
- * AC2: health endpoint confirms Supabase connectivity check.
+ * AC2: health endpoint confirms Neon connectivity check.
  * AC16: security headers present on all responses.
  */
 
@@ -63,7 +63,7 @@ test.describe("Health endpoint", () => {
 test.describe("Login page redirect for unauthenticated users", () => {
   test("GET / redirects to /login or /bandeja", async ({ page }) => {
     // Without a session, the middleware should redirect to /login.
-    // In E2E without real Supabase, it may stay on the page — just check no crash.
+    // In E2E without real Neon, it may stay on the page — just check no crash.
     const response = await page.goto("/");
     // Accept either 200 (landed somewhere) or 3xx redirect — no 500.
     expect(response?.status()).toBeLessThan(500);

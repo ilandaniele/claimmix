@@ -1,7 +1,7 @@
 /**
  * useCasesRealtime — polling hook for the cases dashboard.
  *
- * Replaces the former Supabase Realtime (postgres_changes) subscription with
+ * Replaces the former realtime database subscription with
  * plain polling against the existing GET /api/cases endpoint:
  *   - Every ~5 seconds: fetch the current filter view (per_page=100, newest first).
  *   - New ids vs. the previous snapshot  → onInsert(row)  (toast "Nuevo siniestro...")

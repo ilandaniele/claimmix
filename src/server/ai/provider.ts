@@ -148,6 +148,87 @@ export function hasProviderKey(provider: AiProvider): boolean {
   return Boolean(key && key.trim());
 }
 
+export function getDefaultOpenAIModel(): string {
+  return process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+}
+
+export function getDefaultGeminiModel(): string {
+  return process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+}
+
+export async function getTenantOpenAIModel(tenantId?: string | null): Promise<string> {
+  if (!tenantId) return getDefaultOpenAIModel();
+  try {
+    const row = await db
+      .select({
+        openai_model: tables.tenantAiSettings.openai_model,
+        active_model_provider: tables.tenantAiSettings.active_model_provider,
+        active_model: tables.tenantAiSettings.active_model,
+      })
+      .from(tables.tenantAiSettings)
+      .where(eq(tables.tenantAiSettings.tenant_id, tenantId))
+      .limit(1)
+      .then(firstRow);
+
+    if (row?.active_model_provider === "openai" && row.active_model?.trim()) {
+      return row.active_model.trim();
+    }
+    return row?.openai_model?.trim() || getDefaultOpenAIModel();
+  } catch {
+    return getDefaultOpenAIModel();
+  }
+}
+
+export async function getTenantGeminiModel(tenantId?: string | null): Promise<string> {
+  if (!tenantId) return getDefaultGeminiModel();
+  try {
+    const row = await db
+      .select({
+        gemini_model: tables.tenantAiSettings.gemini_model,
+        active_model_provider: tables.tenantAiSettings.active_model_provider,
+        active_model: tables.tenantAiSettings.active_model,
+      })
+      .from(tables.tenantAiSettings)
+      .where(eq(tables.tenantAiSettings.tenant_id, tenantId))
+      .limit(1)
+      .then(firstRow);
+
+    if (row?.active_model_provider === "gemini" && row.active_model?.trim()) {
+      return row.active_model.trim();
+    }
+    return row?.gemini_model?.trim() || getDefaultGeminiModel();
+  } catch {
+    return getDefaultGeminiModel();
+  }
+}
+
+export async function setTenantModelDefaults(
+  tenantId: string,
+  values: { provider?: AiProvider; openaiModel?: string; geminiModel?: string }
+): Promise<void> {
+  const t = tables.tenantAiSettings;
+  const now = new Date().toISOString();
+  const insertValues = {
+    tenant_id: tenantId,
+    provider: values.provider ?? "openai",
+    openai_model: values.openaiModel?.trim() || getDefaultOpenAIModel(),
+    gemini_model: values.geminiModel?.trim() || getDefaultGeminiModel(),
+    updated_at: now,
+  };
+  await db
+    .insert(t)
+    .values(insertValues)
+    .onConflictDoUpdate({
+      target: t.tenant_id,
+      set: {
+        ...(values.provider ? { provider: values.provider } : {}),
+        ...(values.openaiModel ? { openai_model: values.openaiModel.trim() } : {}),
+        ...(values.geminiModel ? { gemini_model: values.geminiModel.trim() } : {}),
+        updated_at: now,
+      },
+    });
+}
+
 /** True when the provider has a usable API key (user → tenant → env). */
 export async function hasProviderKeyForTenant(tenantId: string, provider: AiProvider, userId?: string): Promise<boolean> {
   if (provider === "openai") return hasProviderKey("openai");

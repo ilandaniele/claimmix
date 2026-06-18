@@ -1,6 +1,6 @@
 /**
  * Pure utility functions for realtime case management.
- * Extracted from useCasesRealtime.ts to be testable without Supabase browser client.
+ * Extracted from useCasesRealtime.ts to be testable without Neon browser client.
  *
  * No browser dependencies — safe to import in unit tests.
  */

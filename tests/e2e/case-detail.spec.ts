@@ -5,10 +5,10 @@
  * AC15: Status transition actions + close confirmation flow.
  *
  * Like the dashboard tests, these run against the real dev server.
- * Without a live Supabase session, the detail page redirects to /login.
+ * Without a live Neon session, the detail page redirects to /login.
  * Tests verify auth guards and API access control.
  *
- * Full integration with real Supabase is covered in tests/integration/cases.test.ts.
+ * Full integration with real Neon is covered in tests/integration/cases.test.ts.
  */
 
 import { test, expect } from "@playwright/test";

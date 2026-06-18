@@ -81,7 +81,7 @@ export async function PATCH(
     }
 
     // Tenant-scoped fetch first (IDOR-safe 404). A DB error here degrades to
-    // NOT_FOUND, matching the previous (error-ignoring) supabase behavior.
+    // NOT_FOUND, matching the previous (error-ignoring) Neon behavior.
     let existing: { id: string; active: boolean } | null;
     try {
       existing = firstRow(

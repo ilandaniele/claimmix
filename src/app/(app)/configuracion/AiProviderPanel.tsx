@@ -23,8 +23,11 @@ export function AiProviderPanel() {
   const [providers, setProviders] = useState<Record<ProviderId, ProviderInfo> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingModels, setSavingModels] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [openaiModel, setOpenaiModel] = useState("");
+  const [geminiModel, setGeminiModel] = useState("");
 
   // Gemini key form state
   const [showKeyForm, setShowKeyForm] = useState(false);
@@ -37,6 +40,8 @@ export function AiProviderPanel() {
   function applyPayload(payload: SettingsResponse) {
     setProvider(payload.provider);
     setProviders(payload.providers);
+    setOpenaiModel(payload.providers.openai.model);
+    setGeminiModel(payload.providers.gemini.model);
   }
 
   useEffect(() => {
@@ -140,6 +145,38 @@ export function AiProviderPanel() {
     }
   }
 
+  async function saveModels() {
+    if (savingModels) return;
+    setSavingModels(true);
+    setSaved(false);
+    setError("");
+
+    try {
+      const res = await fetch("/api/admin/ai-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          openaiModel: openaiModel.trim(),
+          geminiModel: geminiModel.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
+        setError(body?.error?.message ?? t("aiProvider.saveError"));
+        return;
+      }
+      const body = (await res.json()) as { data?: SettingsResponse } & SettingsResponse;
+      applyPayload(body.data ?? body);
+      setSaved(true);
+    } catch {
+      setError(t("aiProvider.saveError"));
+    } finally {
+      setSavingModels(false);
+    }
+  }
+
   const labels: Record<ProviderId, { name: string; helper: string }> = {
     openai: { name: "OpenAI", helper: t("aiProvider.openaiHelper") },
     gemini: { name: "Google Gemini", helper: t("aiProvider.geminiHelper") },
@@ -209,6 +246,29 @@ export function AiProviderPanel() {
       </div>
 
       {/* Gemini API key input — shown when not configured or user clicked the card */}
+      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+        <input
+          value={openaiModel}
+          onChange={(e) => setOpenaiModel(e.target.value)}
+          className="rounded-md border border-slate-200 px-3 py-2 font-mono text-xs text-slate-800"
+          placeholder="gpt-4o-mini"
+        />
+        <input
+          value={geminiModel}
+          onChange={(e) => setGeminiModel(e.target.value)}
+          className="rounded-md border border-slate-200 px-3 py-2 font-mono text-xs text-slate-800"
+          placeholder="gemini-2.5-flash"
+        />
+        <button
+          type="button"
+          onClick={saveModels}
+          disabled={savingModels || !openaiModel.trim() || !geminiModel.trim()}
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          {savingModels ? "..." : "Guardar modelos"}
+        </button>
+      </div>
+
       {showKeyForm && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
           <label className="block text-sm font-medium text-slate-700">

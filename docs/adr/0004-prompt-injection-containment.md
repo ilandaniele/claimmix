@@ -34,7 +34,7 @@ If retry fails: case goes to `escalado` with reason `AI_OUTPUT_INVALID`.
 ### Layer 4 — FSM enforces status transitions (ADR 0003)
 Even if all three layers above fail, the AI worker can ONLY call:
 ```typescript
-await supabase.from("cases").update({ status: nextStatus }).eq("id", caseId)
+await Neon.from("cases").update({ status: nextStatus }).eq("id", caseId)
 // where nextStatus is one of: "listo" | "esperando" | "escalado"
 ```
 The worker has no code path to write `status = "cerrado"`. `cerrado` requires

@@ -221,7 +221,7 @@ async function findExistingWhatsAppCase(
 
     return data?.id ?? null;
   } catch {
-    // Supabase swallowed query errors here (data would be null) — preserve that.
+    // Neon swallowed query errors here (data would be null) — preserve that.
     return null;
   }
 }
@@ -303,6 +303,6 @@ async function insertWhatsAppMessage(
       received_at: now,
     });
   } catch {
-    // The supabase call ignored insert errors here — preserve that behaviour.
+    // The Neon call ignored insert errors here — preserve that behaviour.
   }
 }

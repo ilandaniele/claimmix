@@ -10,7 +10,7 @@
  * Strategy:
  * - vi.mock "google-auth-library" to control OAuth2Client.verifyIdToken.
  * - vi.mock "@/server/email/gmail/gmail-poller" to control pollGmail.
- * - vi.mock "@/lib/supabase/service" to avoid real Supabase calls.
+ * - vi.mock "@/lib/Neon/service" to avoid real Neon calls.
  * - Each test imports the route handler fresh via dynamic import in the
  *   beforeEach/describe scope so module-level singletons (_oidcClient,
  *   _warnedSkipVerify) reset between env var changes.
@@ -268,9 +268,9 @@ describe("POST /api/webhooks/gmail", () => {
   describe("AC7: pollGmail throws — ACK with 200 anyway", () => {
     it("AC7: returns 200 { ok: true, error: <name> } when pollGmail rejects", async () => {
       // PUBSUB_AUDIENCE not set — skip verify so we reach pollGmail.
-      const supabaseErr = new Error("supabase_unreachable");
-      supabaseErr.name = "supabase_unreachable";
-      mockPollGmail.mockRejectedValue(supabaseErr);
+      const NeonErr = new Error("Neon_unreachable");
+      NeonErr.name = "Neon_unreachable";
+      mockPollGmail.mockRejectedValue(NeonErr);
 
       const { POST } = await import("@/app/api/webhooks/gmail/route");
       const req = buildRequest(buildEnvelope());
@@ -280,12 +280,12 @@ describe("POST /api/webhooks/gmail", () => {
 
       expect(res.status).toBe(200);
       expect(body.ok).toBe(true);
-      expect(body.error).toBe("supabase_unreachable");
+      expect(body.error).toBe("Neon_unreachable");
     });
 
     it("AC7: response body does NOT contain stack trace or PII", async () => {
-      const err = new Error("supabase_unreachable");
-      err.name = "supabase_unreachable";
+      const err = new Error("Neon_unreachable");
+      err.name = "Neon_unreachable";
       mockPollGmail.mockRejectedValue(err);
 
       const { POST } = await import("@/app/api/webhooks/gmail/route");

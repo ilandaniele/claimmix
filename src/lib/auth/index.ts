@@ -36,7 +36,7 @@ export const auth = betterAuth({
   },
   emailAndPassword: {
     enabled: true,
-    // Parity with the previous Supabase setup (admin.createUser email_confirm: true).
+    // Parity with the previous Neon setup (admin.createUser email_confirm: true).
     requireEmailVerification: false,
   },
   socialProviders: {

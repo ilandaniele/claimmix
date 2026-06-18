@@ -20,10 +20,15 @@
  *   GIVEN dispatchOutboundEmail({ ..., inReplyToMessageId: 'in-1' }) is called
  *   THEN provider.send() receives headers with In-Reply-To: 'in-1' and References: 'in-1'
  *
- * Uses setEmailProvider() / resetEmailProvider() DI from W2 to inject a mock provider.
+ * Mocks the tenant Gmail account lookup and GmailSender class.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const gmailMocks = vi.hoisted(() => ({
+  send: vi.fn(),
+  getGmailAccountForTenant: vi.fn(),
+}));
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -33,6 +38,19 @@ vi.mock("@/lib/audit/log", () => ({
     OUTBOUND_EMAIL_SENT: "email.outbound_sent",
     OUTBOUND_EMAIL_FAILED: "email.outbound_failed",
   },
+}));
+
+vi.mock("@/server/email/gmail/accounts", () => ({
+  getGmailAccountForTenant: gmailMocks.getGmailAccountForTenant,
+}));
+
+vi.mock("@/server/email/gmail/gmail-sender", () => ({
+  GmailSender: vi.fn().mockImplementation(function GmailSender() {
+    return {
+    name: "gmail",
+    send: gmailMocks.send,
+    };
+  }),
 }));
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -130,24 +148,25 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     vi.clearAllMocks();
     process.env.GMAIL_FROM_ADDRESS = FROM_ADDR;
     process.env.DEFAULT_TENANT_ID = TENANT_ID;
+    gmailMocks.getGmailAccountForTenant.mockResolvedValue({
+      id: "gmail-account-w5-001",
+      tenantId: TENANT_ID,
+      email: FROM_ADDR,
+      refreshToken: "refresh-token-w5",
+      enabled: true,
+    });
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     delete process.env.GMAIL_FROM_ADDRESS;
     delete process.env.DEFAULT_TENANT_ID;
-
-    // Reset provider singleton so mock doesn't bleed between tests.
-    const { resetEmailProvider } = await import("@/server/email/gmail/index");
-    resetEmailProvider();
     vi.resetModules();
   });
 
   // ── AC4 ─────────────────────────────────────────────────────────────────────
 
   it("AC4: inserts claim_messages row with direction=outbound, status=queued before send", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-1" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -179,9 +198,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   });
 
   it("AC4: updates claim_messages with provider_message_id=out-1 and status=sent on success", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-1" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -207,9 +224,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   });
 
   it("AC4: audit_log contains OUTBOUND_EMAIL_SENT with provider_message_id=out-1", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-1" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -234,9 +249,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   });
 
   it("AC4: dispatch returns { providerMessageId: 'out-1' } on success", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-1" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -257,9 +270,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   // ── AC5 ─────────────────────────────────────────────────────────────────────
 
   it("AC5: promise resolves (does not throw) when provider.send returns errorCode", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -279,9 +290,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   });
 
   it("AC5: returns { error: 'GMAIL_SEND_FAILED' } on failure", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -299,9 +308,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   });
 
   it("AC5: claim_messages row has status=failed and error_code=GMAIL_SEND_FAILED", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -325,9 +332,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   });
 
   it("AC5: audit_log contains OUTBOUND_EMAIL_FAILED with payload.error=GMAIL_SEND_FAILED", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -353,9 +358,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   // ── AC16 ────────────────────────────────────────────────────────────────────
 
   it("AC16: provider.send receives In-Reply-To and References headers when inReplyToMessageId is set", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-1" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -370,8 +373,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
       inReplyToMessageId: "in-1",
     });
 
-    expect(mockSend).toHaveBeenCalledOnce();
-    const sendOpts = mockSend.mock.calls[0][0] as Record<string, unknown>;
+    expect(gmailMocks.send).toHaveBeenCalledOnce();
+    const sendOpts = gmailMocks.send.mock.calls[0][0] as Record<string, unknown>;
     const headers = sendOpts.headers as Array<{ Name: string; Value: string }>;
 
     expect(Array.isArray(headers)).toBe(true);
@@ -380,9 +383,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   });
 
   it("AC16: provider.send receives no headers array when inReplyToMessageId is not set", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-2" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-2" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -397,8 +398,8 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
       // no inReplyToMessageId
     });
 
-    expect(mockSend).toHaveBeenCalledOnce();
-    const sendOpts = mockSend.mock.calls[0][0] as Record<string, unknown>;
+    expect(gmailMocks.send).toHaveBeenCalledOnce();
+    const sendOpts = gmailMocks.send.mock.calls[0][0] as Record<string, unknown>;
     // When no threading, headers should be undefined (not an empty array)
     expect(sendOpts.headers).toBeUndefined();
   });
@@ -406,9 +407,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   // ── Dual-write guard (outbound_messages still written) ───────────────────────
 
   it("outbound_messages row is also inserted (dual-write window preserved)", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-1" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -432,9 +431,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   });
 
   it("outbound_messages row updated to status=sent on provider success", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ providerMessageId: "out-1" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-1" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
@@ -457,9 +454,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
   });
 
   it("outbound_messages row updated to status=failed on provider error", async () => {
-    const mockSend = vi.fn().mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
-    const { setEmailProvider } = await import("@/server/email/gmail/index");
-    setEmailProvider({ name: "gmail", send: mockSend });
+    gmailMocks.send.mockResolvedValue({ errorCode: "GMAIL_SEND_FAILED" });
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));

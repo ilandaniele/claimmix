@@ -1,7 +1,7 @@
 /**
  * Required documents configuration — in-memory version of the required_docs_config seed table.
  *
- * T17: Table-driven gap analysis. This mirrors supabase/migrations/0003_seed_required_docs.sql
+ * T17: Table-driven gap analysis. This mirrors Neon/migrations/0003_seed_required_docs.sql
  * so the gap-analysis logic works correctly in unit tests without a live DB.
  *
  * Spec required docs per claim type:

@@ -221,9 +221,18 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
     );
   }
 
-  const runFields = (run.output_payload.fields ?? []).filter(
+  const persistedFields = data.extracted_fields
+    .filter((f) => f.field_value && f.field_value.trim() !== "")
+    .map((f) => ({
+      field_key: f.field_key,
+      field_value: f.field_value,
+      confidence: f.confidence ?? 0,
+      source: "persisted",
+    }));
+  const rawRunFields = (run.output_payload.fields ?? []).filter(
     (f) => f.field_value && f.field_value.trim() !== ""
   );
+  const runFields = persistedFields.length > 0 ? persistedFields : rawRunFields;
   const pendingKeys =
     data.pending_confirmations.length > 0
       ? data.pending_confirmations.map((c) => c.field_key)

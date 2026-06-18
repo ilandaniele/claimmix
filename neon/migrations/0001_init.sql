@@ -1,26 +1,11 @@
 -- =============================================================================
--- ClaimMix — Neon (plain Postgres 17) consolidated init migration
+-- ClaimMix - Neon (plain Postgres 17) consolidated init migration
 -- =============================================================================
--- Provenance: adapted from supabase/all.sql (migrations 0001–0013 + inline
--- gmail_accounts block) merged with supabase/migrations/0014_agent_learning.sql,
--- 0015_tenant_ai_settings.sql and 0016_user_locale.sql, so this file is the
--- FINAL schema as of 0016.
+-- Neon is the only supported database target. Better Auth tables are included
+-- in this schema. Tenant isolation is enforced by explicit tenant_id filters
+-- in application code and by Postgres RLS scaffolding in later Neon migrations.
 --
--- Differences vs. the Supabase original:
---   * ALL Row Level Security (ENABLE/FORCE RLS + CREATE POLICY) removed —
---     tenant isolation is enforced at the application layer now.
---   * current_tenant_id() and everything referencing auth.uid()/auth.jwt()
---     removed (no Supabase auth schema on Neon).
---   * No GRANT/REVOKE for anon/authenticated/service_role roles.
---   * No storage schema / supabase_realtime artifacts (the claim-attachments
---     bucket is replaced by app-level object storage).
---   * Better Auth tables ("user", session, account, verification) added at the
---     top; public.users.id now references "user"(id) instead of auth.users(id).
---   * users.role already widened to ('owner','admin','specialist','analyst',
---     'viewer') and users.locale included (0014/0016 merged in).
---   * New index idx_cases_tenant_updated_at for the case-list polling endpoint.
---   * Reference/config seeds kept (required_docs_config, global
---     known_claim_patterns). Demo data lives in neon/seed.sql (optional).
+-- Demo data lives in neon/seed.sql (optional).
 --
 -- Runnable top-to-bottom in a single transaction on a fresh database, e.g.:
 --   psql "$DATABASE_URL" -1 -f neon/migrations/0001_init.sql

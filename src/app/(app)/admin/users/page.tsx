@@ -18,9 +18,11 @@ interface UserRow {
   id: string;
   full_name: string;
   email: string;
-  role: string;
+  role: UserRole;
   created_at: string;
 }
+
+type UserRole = "owner" | "admin" | "specialist" | "analyst" | "viewer";
 
 export default async function AdminUsersPage() {
   let ctx: Awaited<ReturnType<typeof requireAdmin>>;
@@ -51,7 +53,7 @@ export default async function AdminUsersPage() {
     id: r.id,
     full_name: r.full_name,
     email: r.email ?? "",
-    role: r.role,
+    role: r.role as UserRole,
     created_at: r.created_at,
   }));
 
@@ -59,16 +61,20 @@ export default async function AdminUsersPage() {
     <div className="px-6 py-8 max-w-5xl">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">
-            Gestión de analistas
+          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            Gestión de usuarios
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Usuarios registrados en el sistema
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Invitá usuarios y asigná roles operativos o administradores.
           </p>
         </div>
       </div>
 
-      <AdminUsersClient initialUsers={initialUsers} />
+      <AdminUsersClient
+        initialUsers={initialUsers}
+        currentUserId={ctx.user.id}
+        currentUserRole={userRow.role}
+      />
     </div>
   );
 }

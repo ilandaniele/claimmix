@@ -32,8 +32,17 @@ export function TopBar({ fullName, role }: TopBarProps) {
   }
 
   const initials = getInitials(fullName);
-  const isAdmin = role === "admin";
-  const roleLabel = isAdmin ? t("role.admin") || "Administrador" : t("role.analyst") || "Analista";
+  const isAdmin = role === "admin" || role === "owner";
+  const roleLabel =
+    role === "owner"
+      ? "Owner"
+      : role === "admin"
+        ? t("role.admin") || "Administrador"
+        : role === "specialist"
+          ? "Especialista"
+          : role === "viewer"
+            ? "Visor"
+            : t("role.analyst") || "Analista";
 
   return (
     <header className="flex h-12 flex-shrink-0 items-center justify-end border-b border-[#EEF0F3] bg-white px-4 dark:border-[#1E2D45] dark:bg-[#0F1929]">

@@ -12,8 +12,8 @@
 
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { eq, and, gte, lt, count } from "drizzle-orm";
-import { cases, users } from "@/lib/db/schema";
+import { eq, and, gte, lt, count, sql } from "drizzle-orm";
+import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { redirect } from "next/navigation";
 
@@ -31,7 +31,48 @@ interface MetricasData {
   by_status: Record<string, number>;
   by_type: Record<string, number>;
   top_analysts: Array<{ full_name: string; closed_count: number }>;
+  ai_usage: {
+    month: AiUsageSummary;
+    all_time: AiUsageSummary;
+    by_user: AiUsageByUser[];
+    by_model: AiUsageByModel[];
+  };
   period: { start: string; end: string };
+}
+
+interface AiUsageSummary {
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+interface AiUsageByUser extends AiUsageSummary {
+  user_id: string | null;
+  full_name: string;
+  email: string;
+}
+
+interface AiUsageByModel extends AiUsageSummary {
+  model: string;
+}
+
+function normalizeUsage(row?: {
+  calls?: number | string | null;
+  prompt_tokens?: number | string | null;
+  completion_tokens?: number | string | null;
+  cost_usd?: number | string | null;
+}): AiUsageSummary {
+  const promptTokens = Number(row?.prompt_tokens ?? 0);
+  const completionTokens = Number(row?.completion_tokens ?? 0);
+  return {
+    calls: Number(row?.calls ?? 0),
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens,
+    cost_usd: Number(row?.cost_usd ?? 0),
+  };
 }
 
 async function fetchMetricas(): Promise<MetricasData | null> {
@@ -51,8 +92,17 @@ async function fetchMetricas(): Promise<MetricasData | null> {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
 
-    const [casesThisMonth, byStatusRows, byTypeRows, [escalatedRow], topAnalystsRows] =
-      await Promise.all([
+    const [
+      casesThisMonth,
+      byStatusRows,
+      byTypeRows,
+      [escalatedRow],
+      topAnalystsRows,
+      [usageMonthRow],
+      [usageAllTimeRow],
+      usageByUserRows,
+      usageByModelRows,
+    ] = await Promise.all([
         db
           .select({ id: cases.id, status: cases.status, created_at: cases.created_at, closed_at: cases.closed_at })
           .from(cases)
@@ -88,6 +138,62 @@ async function fetchMetricas(): Promise<MetricasData | null> {
             gte(cases.closed_at, monthStart),
             lt(cases.closed_at, monthEnd),
           )),
+        db
+          .select({
+            calls: count(),
+            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+          })
+          .from(aiUsage)
+          .where(and(
+            eq(aiUsage.tenant_id, userRow.tenant_id),
+            gte(aiUsage.created_at, monthStart),
+            lt(aiUsage.created_at, monthEnd),
+          )),
+        db
+          .select({
+            calls: count(),
+            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+          })
+          .from(aiUsage)
+          .where(eq(aiUsage.tenant_id, userRow.tenant_id)),
+        db
+          .select({
+            user_id: aiUsage.user_id,
+            full_name: users.full_name,
+            email: authUsers.email,
+            calls: count(),
+            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+          })
+          .from(aiUsage)
+          .leftJoin(users, eq(users.id, aiUsage.user_id))
+          .leftJoin(authUsers, eq(authUsers.id, aiUsage.user_id))
+          .where(and(
+            eq(aiUsage.tenant_id, userRow.tenant_id),
+            gte(aiUsage.created_at, monthStart),
+            lt(aiUsage.created_at, monthEnd),
+          ))
+          .groupBy(aiUsage.user_id, users.full_name, authUsers.email),
+        db
+          .select({
+            model: aiUsage.model,
+            calls: count(),
+            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+          })
+          .from(aiUsage)
+          .where(and(
+            eq(aiUsage.tenant_id, userRow.tenant_id),
+            gte(aiUsage.created_at, monthStart),
+            lt(aiUsage.created_at, monthEnd),
+          ))
+          .groupBy(aiUsage.model),
       ]);
 
     const totalCasesMonth = casesThisMonth.length;
@@ -138,6 +244,23 @@ async function fetchMetricas(): Promise<MetricasData | null> {
       .slice(0, 5)
       .map((a) => ({ full_name: a.name, closed_count: a.count }));
 
+    const usageByUser: AiUsageByUser[] = usageByUserRows
+      .map((row) => ({
+        user_id: row.user_id,
+        full_name: row.full_name ?? "Sistema",
+        email: row.email ?? (row.user_id ? "" : "Procesos automáticos"),
+        ...normalizeUsage(row),
+      }))
+      .sort((a, b) => b.total_tokens - a.total_tokens)
+      .slice(0, 8);
+
+    const usageByModel: AiUsageByModel[] = usageByModelRows
+      .map((row) => ({
+        model: row.model,
+        ...normalizeUsage(row),
+      }))
+      .sort((a, b) => b.total_tokens - a.total_tokens);
+
     return {
       summary: {
         total_cases_month: totalCasesMonth,
@@ -148,6 +271,12 @@ async function fetchMetricas(): Promise<MetricasData | null> {
       by_status: byStatus,
       by_type: byType,
       top_analysts: topAnalysts,
+      ai_usage: {
+        month: normalizeUsage(usageMonthRow),
+        all_time: normalizeUsage(usageAllTimeRow),
+        by_user: usageByUser,
+        by_model: usageByModel,
+      },
       period: { start: monthStart, end: monthEnd },
     };
   } catch (e) {
@@ -170,6 +299,19 @@ function formatMinutes(minutes: number | null): string {
 function formatCurrentMonth(): string {
   const now = new Date();
   return now.toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("es-AR").format(Math.round(value));
+}
+
+function formatUsd(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(value);
 }
 
 // ── Status bar chart ──────────────────────────────────────────────────────────
@@ -221,7 +363,8 @@ export default async function MetricasPage() {
   const hasData =
     data &&
     (data.summary.total_cases_month > 0 ||
-      Object.values(data.by_status).some((v) => v > 0));
+      Object.values(data.by_status).some((v) => v > 0) ||
+      data.ai_usage.all_time.total_tokens > 0);
 
   const totalByStatus = Object.values(data?.by_status ?? {}).reduce(
     (a, b) => a + b,
@@ -275,6 +418,137 @@ export default async function MetricasPage() {
           </div>
 
           {/* ── Charts row ───────────────────────────────────────────────────── */}
+          <section className="mb-8">
+            <div className="mb-4">
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                Uso de IA
+              </h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Tokens consumidos y costo estimado del tenant.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <UsageStat
+                label="Tokens este mes"
+                value={formatNumber(data!.ai_usage.month.total_tokens)}
+                helper={`${formatNumber(data!.ai_usage.month.prompt_tokens)} prompt / ${formatNumber(data!.ai_usage.month.completion_tokens)} respuesta`}
+              />
+              <UsageStat
+                label="Costo este mes"
+                value={formatUsd(data!.ai_usage.month.cost_usd)}
+                helper={`${formatNumber(data!.ai_usage.month.calls)} ejecuciones`}
+              />
+              <UsageStat
+                label="Tokens históricos"
+                value={formatNumber(data!.ai_usage.all_time.total_tokens)}
+                helper={`${formatNumber(data!.ai_usage.all_time.prompt_tokens)} prompt / ${formatNumber(data!.ai_usage.all_time.completion_tokens)} respuesta`}
+              />
+              <UsageStat
+                label="Costo histórico"
+                value={formatUsd(data!.ai_usage.all_time.cost_usd)}
+                helper={`${formatNumber(data!.ai_usage.all_time.calls)} ejecuciones`}
+              />
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70">
+                <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-100">
+                    Tokens por usuario este mes
+                  </h3>
+                </div>
+                {data!.ai_usage.by_user.length === 0 ? (
+                  <div className="px-5 py-8 text-center text-sm text-slate-400">
+                    Sin consumo de IA este mes.
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400">
+                        <th className="px-5 py-3 text-left">Usuario</th>
+                        <th className="px-5 py-3 text-right">Tokens</th>
+                        <th className="px-5 py-3 text-right">Costo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data!.ai_usage.by_user.map((row) => (
+                        <tr
+                          key={row.user_id ?? "system"}
+                          className="border-b border-slate-50 last:border-0 dark:border-slate-800"
+                        >
+                          <td className="px-5 py-3">
+                            <div className="font-medium text-slate-800 dark:text-slate-100">
+                              {row.full_name}
+                            </div>
+                            {row.email && (
+                              <div className="text-xs text-slate-500 dark:text-slate-400">
+                                {row.email}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-5 py-3 text-right text-slate-700 dark:text-slate-200">
+                            {formatNumber(row.total_tokens)}
+                            <div className="text-xs text-slate-400">
+                              {formatNumber(row.calls)} ejec.
+                            </div>
+                          </td>
+                          <td className="px-5 py-3 text-right text-slate-700 dark:text-slate-200">
+                            {formatUsd(row.cost_usd)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70">
+                <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-100">
+                    Tokens por modelo este mes
+                  </h3>
+                </div>
+                {data!.ai_usage.by_model.length === 0 ? (
+                  <div className="px-5 py-8 text-center text-sm text-slate-400">
+                    Sin consumo de IA este mes.
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400">
+                        <th className="px-5 py-3 text-left">Modelo</th>
+                        <th className="px-5 py-3 text-right">Tokens</th>
+                        <th className="px-5 py-3 text-right">Costo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data!.ai_usage.by_model.map((row) => (
+                        <tr
+                          key={row.model}
+                          className="border-b border-slate-50 last:border-0 dark:border-slate-800"
+                        >
+                          <td className="px-5 py-3 font-mono text-xs text-slate-700 dark:text-slate-200">
+                            {row.model}
+                          </td>
+                          <td className="px-5 py-3 text-right text-slate-700 dark:text-slate-200">
+                            {formatNumber(row.total_tokens)}
+                            <div className="text-xs text-slate-400">
+                              {formatNumber(row.calls)} ejec.
+                            </div>
+                          </td>
+                          <td className="px-5 py-3 text-right text-slate-700 dark:text-slate-200">
+                            {formatUsd(row.cost_usd)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </section>
+
           <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
             {/* Cases by status */}
             <div className="rounded-lg border border-slate-200 bg-white p-5">
@@ -434,6 +708,28 @@ function SummaryCard({
         {label}
       </p>
       <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+    </div>
+  );
+}
+
+function UsageStat({
+  label,
+  value,
+  helper,
+}: {
+  label: string;
+  value: string;
+  helper: string;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900/70">
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100">
+        {value}
+      </p>
+      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{helper}</p>
     </div>
   );
 }

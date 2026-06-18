@@ -19,10 +19,27 @@
  * }
  */
 
-import { and, eq, gte, lt } from "drizzle-orm";
+import { and, eq, gte, lt, count, sql } from "drizzle-orm";
 import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
-import { cases, users } from "@/lib/db/schema";
+import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
+
+function normalizeUsage(row?: {
+  calls?: number | string | null;
+  prompt_tokens?: number | string | null;
+  completion_tokens?: number | string | null;
+  cost_usd?: number | string | null;
+}) {
+  const promptTokens = Number(row?.prompt_tokens ?? 0);
+  const completionTokens = Number(row?.completion_tokens ?? 0);
+  return {
+    calls: Number(row?.calls ?? 0),
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens,
+    cost_usd: Number(row?.cost_usd ?? 0),
+  };
+}
 
 export async function GET() {
   try {
@@ -35,8 +52,17 @@ export async function GET() {
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
 
     // ── Parallel queries (all explicitly tenant-scoped) ──────────────────────
-    const [casesThisMonth, byStatusRows, byTypeRows, escalatedCount, topAnalystRows] =
-      await Promise.all([
+    const [
+      casesThisMonth,
+      byStatusRows,
+      byTypeRows,
+      escalatedCount,
+      topAnalystRows,
+      [usageMonthRow],
+      [usageAllTimeRow],
+      usageByUserRows,
+      usageByModelRows,
+    ] = await Promise.all([
         // Total cases created this month
         db
           .select({
@@ -91,6 +117,68 @@ export async function GET() {
               lt(cases.closed_at, monthEnd)
             )
           ),
+        db
+          .select({
+            calls: count(),
+            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+          })
+          .from(aiUsage)
+          .where(
+            and(
+              eq(aiUsage.tenant_id, tenantId),
+              gte(aiUsage.created_at, monthStart),
+              lt(aiUsage.created_at, monthEnd)
+            )
+          ),
+        db
+          .select({
+            calls: count(),
+            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+          })
+          .from(aiUsage)
+          .where(eq(aiUsage.tenant_id, tenantId)),
+        db
+          .select({
+            user_id: aiUsage.user_id,
+            full_name: users.full_name,
+            email: authUsers.email,
+            calls: count(),
+            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+          })
+          .from(aiUsage)
+          .leftJoin(users, eq(users.id, aiUsage.user_id))
+          .leftJoin(authUsers, eq(authUsers.id, aiUsage.user_id))
+          .where(
+            and(
+              eq(aiUsage.tenant_id, tenantId),
+              gte(aiUsage.created_at, monthStart),
+              lt(aiUsage.created_at, monthEnd)
+            )
+          )
+          .groupBy(aiUsage.user_id, users.full_name, authUsers.email),
+        db
+          .select({
+            model: aiUsage.model,
+            calls: count(),
+            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+          })
+          .from(aiUsage)
+          .where(
+            and(
+              eq(aiUsage.tenant_id, tenantId),
+              gte(aiUsage.created_at, monthStart),
+              lt(aiUsage.created_at, monthEnd)
+            )
+          )
+          .groupBy(aiUsage.model),
       ]);
 
     // ── Summary: total cases this month ──────────────────────────────────────
@@ -151,6 +239,23 @@ export async function GET() {
       .slice(0, 5)
       .map((a) => ({ full_name: a.name, closed_count: a.count }));
 
+    const usageByUser = usageByUserRows
+      .map((row) => ({
+        user_id: row.user_id,
+        full_name: row.full_name ?? "Sistema",
+        email: row.email ?? (row.user_id ? "" : "Procesos automáticos"),
+        ...normalizeUsage(row),
+      }))
+      .sort((a, b) => b.total_tokens - a.total_tokens)
+      .slice(0, 8);
+
+    const usageByModel = usageByModelRows
+      .map((row) => ({
+        model: row.model,
+        ...normalizeUsage(row),
+      }))
+      .sort((a, b) => b.total_tokens - a.total_tokens);
+
     return ok({
       summary: {
         total_cases_month: totalCasesMonth,
@@ -161,6 +266,12 @@ export async function GET() {
       by_status: byStatus,
       by_type: byType,
       top_analysts: topAnalysts,
+      ai_usage: {
+        month: normalizeUsage(usageMonthRow),
+        all_time: normalizeUsage(usageAllTimeRow),
+        by_user: usageByUser,
+        by_model: usageByModel,
+      },
       period: {
         start: monthStart,
         end: monthEnd,

@@ -11,6 +11,7 @@ import {
   Settings,
   Shield,
   Brain,
+  Lock,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -18,11 +19,27 @@ interface NavItemDef {
   label: string;
   href: string;
   icon: LucideIcon;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
-function NavLink({ href, label, icon: Icon }: NavItemDef) {
+function NavLink({ href, label, icon: Icon, disabled, disabledReason }: NavItemDef) {
   const pathname = usePathname();
   const isActive = pathname === href || pathname.startsWith(href + "/");
+
+  if (disabled) {
+    return (
+      <div
+        aria-disabled="true"
+        title={disabledReason}
+        className="flex cursor-not-allowed items-center gap-2.5 rounded-md px-3 py-2 text-slate-300 dark:text-slate-600"
+      >
+        <Icon size={14} className="text-slate-300 dark:text-slate-600" />
+        <span className="text-[13px] font-medium">{label}</span>
+        <Lock size={12} className="ml-auto text-slate-300 dark:text-slate-600" />
+      </div>
+    );
+  }
 
   return (
     <Link
@@ -47,8 +64,9 @@ function NavLink({ href, label, icon: Icon }: NavItemDef) {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ role }: { role: string }) {
   const t = useT();
+  const canUseAgent = role === "owner" || role === "admin";
 
   const operacionItems: NavItemDef[] = [
     { label: t("nav.bandeja") || "Bandeja", href: "/bandeja", icon: Inbox },
@@ -58,7 +76,13 @@ export function Sidebar() {
 
   const analisisItems: NavItemDef[] = [
     { label: t("nav.metricas") || "Métricas", href: "/metricas", icon: BarChart2 },
-    { label: "Agente", href: "/agente", icon: Brain },
+    {
+      label: "Agente",
+      href: "/agente",
+      icon: Brain,
+      disabled: !canUseAgent,
+      disabledReason: "Solo administradores pueden abrir la consola del agente.",
+    },
     { label: t("nav.admin") || "Usuarios", href: "/admin/users", icon: Shield },
   ];
 

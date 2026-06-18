@@ -70,6 +70,13 @@ export async function POST(request: NextRequest) {
     }
 
     const { full_name, email, role } = parsed.data;
+    if (role === "owner" && adminRow.role !== "owner") {
+      throw new AppError(
+        "FORBIDDEN_ROLE",
+        "Solo un owner puede crear usuarios owner."
+      );
+    }
+
     // Generate a temporary password if none provided
     const password = parsed.data.password ?? crypto.randomUUID().replace(/-/g, "");
 

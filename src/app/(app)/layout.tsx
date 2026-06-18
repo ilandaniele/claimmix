@@ -68,7 +68,7 @@ export default async function AppLayout({
       <ThemeProvider>
         <div className="flex h-screen overflow-hidden bg-[#F8FAFC] dark:bg-[#0B1120]">
           {/* Left sidebar */}
-          <Sidebar />
+          <Sidebar role={role} />
 
           {/* Main content area */}
           <div className="flex flex-1 flex-col overflow-hidden">

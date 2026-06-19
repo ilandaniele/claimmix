@@ -8,6 +8,7 @@ import { PromptRulesPanel } from "../configuracion/PromptRulesPanel";
 import { CustomFieldsPanel } from "./CustomFieldsPanel";
 import { TrainingExamplesPanel } from "./TrainingExamplesPanel";
 import { FineTuneJobsPanel } from "./FineTuneJobsPanel";
+import { AgentExportPanel } from "./AgentExportPanel";
 
 type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento";
 
@@ -19,11 +20,13 @@ const TABS = [
   { id: "entrenamiento", label: "Fine-tuning opcional", icon: Brain },
 ] as const;
 
-export function AgentConsoleClient() {
+export function AgentConsoleClient({ role }: { role: string }) {
   const [tab, setTab] = useState<TabId>("modelos");
 
   return (
     <div className="space-y-5">
+      <AgentExportPanel role={role} />
+
       <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">
         {TABS.map(({ id, label, icon: Icon }) => {
           const active = tab === id;

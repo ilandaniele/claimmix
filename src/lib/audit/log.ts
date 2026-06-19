@@ -248,6 +248,7 @@ export const AuditEvent = {
   FINETUNE_JOB_APPROVED: "training.finetune_job_approved",
   FINETUNE_MODEL_DEPLOYED: "training.finetune_model_deployed",
   FINETUNE_MODEL_ROLLED_BACK: "training.finetune_model_rolled_back",
+  AGENT_MEMORY_CONFIG_EXPORTED: "agent.memory_config_exported",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

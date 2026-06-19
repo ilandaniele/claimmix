@@ -60,3 +60,6 @@ example-email*.txt
 # Supabase local state (project-ref, temp files)
 supabase/.temp/
 .git-commit-msg.txt
+
+# Local agent tool state
+.claude/

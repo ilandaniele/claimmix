@@ -5,8 +5,10 @@ import { AppError } from "@/lib/errors";
 import { AgentConsoleClient } from "./AgentConsoleClient";
 
 export default async function AgentConsolePage() {
+  let role = "admin";
   try {
-    await requireAdmin();
+    const { userRow } = await requireAdmin();
+    role = userRow.role;
   } catch (e) {
     if (e instanceof AppError && e.code === "MISSING_SESSION") redirect("/login");
     redirect("/bandeja");
@@ -17,7 +19,7 @@ export default async function AgentConsolePage() {
       <div className="mb-5">
         <h1 className="text-xl font-semibold text-slate-900">Consola del agente</h1>
       </div>
-      <AgentConsoleClient />
+      <AgentConsoleClient role={role} />
     </div>
   );
 }

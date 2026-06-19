@@ -14,8 +14,8 @@
  *   - Duplicates rejected (unique per agent_run / claim_message) → 409-like 400.
  *   - Unsafe runs (invalid JSON / suspected prompt injection) always refused.
  *   - Audit event TRAINING_EXAMPLE_APPROVED written.
- *   - May create a DRAFT model_training_jobs row when the batch threshold is
- *     reached — fine-tuning is batched and never automatic.
+ *   - The approved example is available to future prompts immediately.
+ *   - Fine-tuning is optional and created manually from the Agent Console.
  */
 
 import { NextRequest } from "next/server";

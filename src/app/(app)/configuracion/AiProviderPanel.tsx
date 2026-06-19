@@ -15,7 +15,7 @@ type SettingsResponse = {
   providers: Record<ProviderId, ProviderInfo>;
 };
 
-const PROVIDER_ORDER: ProviderId[] = ["openai", "gemini"];
+const PROVIDER_ORDER: ProviderId[] = ["gemini", "openai"];
 
 export function AiProviderPanel() {
   const t = useT();
@@ -124,7 +124,7 @@ export function AiProviderPanel() {
       const res = await fetch("/api/admin/ai-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ geminiKey: geminiKey.trim() }),
+        body: JSON.stringify({ geminiKey: geminiKey.trim(), provider: "gemini" }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {

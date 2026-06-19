@@ -18,8 +18,10 @@ import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-rol
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
+import { CaseStatusSchema } from "@/lib/schemas/cases";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
+import { isTerminalStatus } from "@/server/cases/fsm";
 import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -91,8 +93,14 @@ export async function POST(
   }
 
   if (!caseRow) return err(new AppError("NOT_FOUND"));
-  if (caseRow.status === "cerrado") {
-    return err(new AppError("FSM_INVALID_TRANSITION", "No se puede re-analizar un caso cerrado."));
+  const statusParsed = CaseStatusSchema.safeParse(caseRow.status);
+  if (statusParsed.success && isTerminalStatus(statusParsed.data)) {
+    return err(
+      new AppError(
+        "FSM_INVALID_TRANSITION",
+        "No se puede re-analizar un caso en estado terminal."
+      )
+    );
   }
 
   // ── Budget check ──────────────────────────────────────────────────────────────
@@ -103,10 +111,21 @@ export async function POST(
 
   // ── Reset case to procesando ──────────────────────────────────────────────────
   try {
-    await db
+    const resetCase = firstRow(
+      await db
       .update(cases)
       .set({ status: "procesando", updated_at: new Date().toISOString() })
-      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)));
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
+        .returning({ id: cases.id, status: cases.status })
+    );
+    if (!resetCase || resetCase.status !== "procesando") {
+      return err(
+        new AppError(
+          "INTERNAL_ERROR",
+          "No se pudo reiniciar el caso para re-analisis."
+        )
+      );
+    }
   } catch (e) {
     const code = (e as { code?: string })?.code ?? (e instanceof Error ? e.name : "UnknownError");
     console.error("[re-analyze] Failed to reset case:", code, caseId);

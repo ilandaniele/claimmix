@@ -14,6 +14,7 @@ import {
   startFineTuneJob,
   syncFineTuneJob,
 } from "@/server/training/fine-tuning";
+import { getTenantAiProvider } from "@/server/ai/provider";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,14 @@ export async function PATCH(
     const parsed = PatchSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
+    }
+
+    const provider = await getTenantAiProvider(userRow.tenant_id);
+    if (provider !== "openai") {
+      throw new AppError(
+        "VALIDATION_FAILED",
+        "OpenAI fine-tuning es opcional y solo esta disponible cuando OpenAI es el proveedor activo."
+      );
     }
 
     try {

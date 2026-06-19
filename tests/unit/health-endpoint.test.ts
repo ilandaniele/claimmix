@@ -15,9 +15,16 @@ import packageJson from "../../package.json";
 
 function getAiMode(
   mockAiEnv: string | undefined,
-  openAiKey: string | undefined
-): "mock" | "openai" {
-  return mockAiEnv === "true" || !openAiKey ? "mock" : "openai";
+  openAiKey: string | undefined,
+  geminiKey?: string | undefined,
+  preferredProvider?: string | undefined
+): "mock" | "gemini" | "openai" {
+  if (mockAiEnv === "true") return "mock";
+  if (preferredProvider === "openai" && openAiKey) return "openai";
+  if (preferredProvider === "gemini" && geminiKey) return "gemini";
+  if (geminiKey) return "gemini";
+  if (openAiKey) return "openai";
+  return "mock";
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -33,9 +40,15 @@ describe("health endpoint AI mode detection", () => {
     expect(getAiMode(undefined, "")).toBe("mock");
   });
 
+  it("returns gemini when Gemini key is present", () => {
+    expect(getAiMode("false", undefined, "g-key")).toBe("gemini");
+    expect(getAiMode(undefined, "sk-some-key", "g-key")).toBe("gemini");
+  });
+
   it("returns openai when MOCK_AI!=true and key is present", () => {
     expect(getAiMode("false", "sk-some-key")).toBe("openai");
     expect(getAiMode(undefined, "sk-some-key")).toBe("openai");
+    expect(getAiMode(undefined, "sk-some-key", "g-key", "openai")).toBe("openai");
   });
 });
 
@@ -59,8 +72,8 @@ describe("health endpoint response fields", () => {
     }
   });
 
-  it("ai field is limited to mock | openai", () => {
-    const validValues = ["mock", "openai"];
+  it("ai field is limited to mock | gemini | openai", () => {
+    const validValues = ["mock", "gemini", "openai"];
     const aiValue = getAiMode("true", undefined);
     expect(validValues).toContain(aiValue);
   });

@@ -5,9 +5,8 @@
  *   1. Immediate: approved examples are retrieved as few-shot context for
  *      future extractions of the same tenant (loadApprovedExamples).
  *   2. Prompt learning: agent_prompt_rules (see prompt-rules.ts).
- *   3. Optional fine-tuning: BATCH ONLY — when enough approved examples exist
- *      a model_training_jobs row is created in 'draft'. Nothing trains or
- *      deploys automatically; evals + manual approval gate deployment.
+ *   3. Optional fine-tuning: OpenAI-only advanced workflow. Draft jobs are
+ *      created manually from the Fine-tuning tab, never during approval.
  *
  * Security invariants:
  *   - Examples are created ONLY by approveTrainingExample(), which is called
@@ -146,7 +145,7 @@ export interface ApproveTrainingExampleParams {
  *   values current at approval time (extracted_fields reflects corrections).
  * - Dedupe via unique indexes; 23505 → "duplicate".
  * - Writes a TRAINING_EXAMPLE_APPROVED audit event.
- * - May queue a draft fine-tuning job (batch threshold) — never trains.
+ * - Does not queue fine-tuning; the example is available to prompts immediately.
  */
 export async function approveTrainingExample(
   params: ApproveTrainingExampleParams
@@ -292,8 +291,8 @@ export async function approveTrainingExample(
     payload: { agent_run_id: agentRunId, training_example_id: exampleId },
   });
 
-  // ── 6. Batch fine-tuning queue (draft only — see module header) ────────────
-  const queuedFineTuneJobId = await maybeQueueFineTuneJob(tenantId, approvedBy);
+  // Fine-tuning is optional/manual; approved examples are prompt context now.
+  const queuedFineTuneJobId = null;
 
   return { ok: true, exampleId, queuedFineTuneJobId };
 }

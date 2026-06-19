@@ -13,6 +13,7 @@ import {
   listFineTuneJobs,
   rollbackFineTunedModel,
 } from "@/server/training/fine-tuning";
+import { getTenantAiProvider } from "@/server/ai/provider";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,14 @@ export async function POST(request: NextRequest) {
     const parsed = PostSchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
+    }
+
+    const provider = await getTenantAiProvider(userRow.tenant_id);
+    if (provider !== "openai") {
+      throw new AppError(
+        "VALIDATION_FAILED",
+        "OpenAI fine-tuning es opcional y solo esta disponible cuando OpenAI es el proveedor activo."
+      );
     }
 
     if (parsed.data.action === "rollback") {

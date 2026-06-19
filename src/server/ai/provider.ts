@@ -5,7 +5,7 @@
  *   1. MOCK_AI / AI_MOCK env → "mock" (demo mode, no real LLM calls)
  *   2. tenant_ai_settings.provider for the tenant (set from Configuración)
  *   3. AI_PROVIDER env var
- *   4. default "openai"
+ *   4. default "gemini"
  *
  * Whatever is selected, a provider without its API key configured is never
  * used: the resolver falls back to the other provider when possible, and to
@@ -25,7 +25,8 @@ import { firstRow } from "@/lib/db/helpers";
 export type AiProvider = "openai" | "gemini";
 export type ExtractionEngine = AiProvider | "mock";
 
-export const AI_PROVIDERS: readonly AiProvider[] = ["openai", "gemini"] as const;
+export const AI_PROVIDERS: readonly AiProvider[] = ["gemini", "openai"] as const;
+const DEFAULT_AI_PROVIDER: AiProvider = "gemini";
 
 function isAiProvider(value: unknown): value is AiProvider {
   return value === "openai" || value === "gemini";
@@ -127,7 +128,10 @@ export async function setTenantGeminiKey(tenantId: string, apiKey: string): Prom
     .insert(t)
     .values({
       tenant_id: tenantId,
-      provider: "openai",
+      provider: DEFAULT_AI_PROVIDER,
+      active_model_provider: DEFAULT_AI_PROVIDER,
+      active_model: null,
+      gemini_model: getDefaultGeminiModel(),
       gemini_api_key_encrypted: encrypted,
       updated_at: new Date().toISOString(),
     })
@@ -208,11 +212,14 @@ export async function setTenantModelDefaults(
 ): Promise<void> {
   const t = tables.tenantAiSettings;
   const now = new Date().toISOString();
+  const provider = values.provider ?? DEFAULT_AI_PROVIDER;
   const insertValues = {
     tenant_id: tenantId,
-    provider: values.provider ?? "openai",
+    provider,
     openai_model: values.openaiModel?.trim() || getDefaultOpenAIModel(),
     gemini_model: values.geminiModel?.trim() || getDefaultGeminiModel(),
+    active_model_provider: provider,
+    active_model: null,
     updated_at: now,
   };
   await db
@@ -221,7 +228,13 @@ export async function setTenantModelDefaults(
     .onConflictDoUpdate({
       target: t.tenant_id,
       set: {
-        ...(values.provider ? { provider: values.provider } : {}),
+        ...(values.provider
+          ? {
+              provider: values.provider,
+              active_model_provider: values.provider,
+              active_model: null,
+            }
+          : {}),
         ...(values.openaiModel ? { openai_model: values.openaiModel.trim() } : {}),
         ...(values.geminiModel ? { gemini_model: values.geminiModel.trim() } : {}),
         updated_at: now,
@@ -235,10 +248,10 @@ export async function hasProviderKeyForTenant(tenantId: string, provider: AiProv
   return Boolean(await getTenantGeminiKey(tenantId, userId));
 }
 
-/** Env-level default provider (AI_PROVIDER, default "openai"). */
+/** Env-level default provider (AI_PROVIDER, default "gemini"). */
 export function getDefaultProvider(): AiProvider {
   const env = process.env.AI_PROVIDER?.trim().toLowerCase();
-  return isAiProvider(env) ? env : "openai";
+  return isAiProvider(env) ? env : DEFAULT_AI_PROVIDER;
 }
 
 /**

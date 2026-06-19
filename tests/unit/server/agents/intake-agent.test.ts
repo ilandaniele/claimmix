@@ -196,6 +196,23 @@ describe("runIntakeAgent", () => {
     expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-002", "tenant-001", null);
   });
 
+  it("chooses email extraction for email_sim cases", async () => {
+    setupSelectResults([
+      [{ id: "case-sim-001", tenant_id: "tenant-001", channel: "email_sim", status: "procesando" }],
+    ]);
+
+    const result = await runIntakeAgent({
+      caseId: "case-sim-001",
+      tenantId: "tenant-001",
+      userId: "user-001",
+      source: "simulate",
+    });
+
+    expect(result.action).toBe("extract_email");
+    expect(result.ok).toBe(true);
+    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-sim-001", "tenant-001", "user-001");
+  });
+
   it("returns case_not_found when db returns no rows", async () => {
     setupSelectResults([[]]);
 

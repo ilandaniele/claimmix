@@ -133,7 +133,7 @@ const {
       status: "procesando",
       claim_type: "choque",
       tenant_id: "tenant-001",
-      channel: "email_sim",
+      channel: "legacy_sim",
     }),
   };
 
@@ -283,7 +283,7 @@ const MOCK_CASE_DATA = {
   status: "procesando",
   claim_type: "choque",
   tenant_id: "tenant-001",
-  channel: "email_sim",
+  channel: "legacy_sim",
 };
 
 // ── Helper: build mock extraction results ─────────────────────────────────────

@@ -118,8 +118,13 @@ export async function runExtractionWorker(
     return;
   }
 
-  // Route to email intake worker for real email cases.
-  if (caseRow.channel === "email") {
+  // Route supported intake channels to the modern worker so every run is logged.
+  if (
+    caseRow.channel === "email" ||
+    caseRow.channel === "email_sim" ||
+    caseRow.channel === "whatsapp" ||
+    caseRow.channel === "whatsapp_sim"
+  ) {
     await runEmailExtractionWorker(caseId, tenantId, userId);
     return;
   }
@@ -731,6 +736,7 @@ export async function runEmailExtractionWorker(
     // For cases coming from info_faltante (thread reply), validate the transition.
     const currentStatus = caseRow.status as string;
     const isValidNewStatus = currentStatus === "recibido" ||
+      currentStatus === "procesando" ||
       isValidTransition(currentStatus as any, newStatus as any);
 
     if (!isValidNewStatus && currentStatus !== newStatus) {

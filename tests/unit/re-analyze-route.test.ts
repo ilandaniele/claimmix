@@ -104,12 +104,14 @@ function makeSelectChain(rows: unknown[]) {
 
 /**
  * Build db.update chain that resolves successfully.
- * The route does: db.update(cases).set({...}).where(...)
+ * The route does: db.update(cases).set({...}).where(...).returning(...)
  */
-function makeUpdateChain() {
+function makeUpdateChain(rows: unknown[] = [{ id: CASE_ID, status: "procesando" }]) {
   const chain: any = {
     set: vi.fn().mockReturnValue({
-      where: vi.fn().mockResolvedValue([]),
+      where: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue(rows),
+      }),
     }),
   };
   return chain;
@@ -186,10 +188,69 @@ describe("POST /api/cases/:id/re-analyze", () => {
     });
   });
 
+  it("re-analyzes an escalated case after resetting it to procesando", async () => {
+    mockDb.select.mockReturnValue(
+      makeSelectChain([{ id: CASE_ID, status: "escalado" }])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(202);
+    expect(mockDb.update).toHaveBeenCalledTimes(1);
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: { previous_status: "escalado" },
+      })
+    );
+
+    await afterCallbacks[0]();
+    expect(mockRunIntakeAgent).toHaveBeenCalledWith({
+      caseId: CASE_ID,
+      tenantId: TENANT_ID,
+      userId: USER_ID,
+      source: "manual",
+    });
+  });
+
+  it("returns a clear error when the reset update does not affect the case", async () => {
+    mockDb.update.mockReturnValue(makeUpdateChain([]));
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "INTERNAL_ERROR" },
+    });
+    expect(mockAfter).not.toHaveBeenCalled();
+    expect(mockRunIntakeAgent).not.toHaveBeenCalled();
+  });
+
   it("does not schedule the agent for closed cases", async () => {
     // Return a closed case
     mockDb.select.mockReturnValue(
       makeSelectChain([{ id: CASE_ID, status: "cerrado" }])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "FSM_INVALID_TRANSITION" },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockAfter).not.toHaveBeenCalled();
+    expect(mockRunIntakeAgent).not.toHaveBeenCalled();
+  });
+
+  it("does not schedule the agent for non-relevant terminal cases", async () => {
+    mockDb.select.mockReturnValue(
+      makeSelectChain([{ id: CASE_ID, status: "no_relevante" }])
     );
 
     const res = await POST(makeRequest(), {

@@ -67,12 +67,13 @@ export function TrainingExamplesPanel() {
       {examples.length === 0 ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
           <p className="font-medium text-slate-800 dark:text-slate-100">
-            Todavía no hay ejemplos de entrenamiento.
+            Todavia no hay ejemplos aprobados.
           </p>
           <p className="mt-1">
-            Abrí un caso procesado, revisá o corregí los campos del análisis y usá
+            Abri un caso procesado, revisa o corrige los campos del analisis y usa
             <span className="font-medium"> Confirmar como ejemplo de entrenamiento seguro</span>.
-            Los ejemplos aprobados aparecen acá y habilitan el fine-tuning.
+            Los ejemplos aprobados se usan como contexto en las proximas ejecuciones del agente
+            Gemini/OpenAI. El fine-tuning es opcional.
           </p>
           <a
             href="/bandeja?is_claim=true"

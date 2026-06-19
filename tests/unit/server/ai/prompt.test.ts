@@ -138,3 +138,40 @@ describe("buildEmailClaimPrompt — fields to extract section", () => {
     expect(PROMPT).toContain("phone");
   });
 });
+
+describe("buildEmailClaimPrompt - Gemini training-memory context", () => {
+  const learningPrompt = buildEmailClaimPrompt(
+    SUBJECT,
+    BODY,
+    [],
+    [],
+    "n10jasper@gmail.com",
+    "",
+    {
+      rules: "RULE: Extract numero_siniestro when present.",
+      approvedExamples: "EXAMPLE 1 (human-approved): EXPECTED OUTPUT: {\"numero_siniestro\":\"91520998-2\"}",
+      customFields: "- key: numero_siniestro; label: Numero de siniestro; required=true",
+      tenantSystemPrompt: "Prefer Zurich policy context when present.",
+    }
+  );
+
+  it("injects active prompt rules", () => {
+    expect(learningPrompt).toContain("<agent_rules>");
+    expect(learningPrompt).toContain("Extract numero_siniestro");
+  });
+
+  it("injects approved examples as few-shot context", () => {
+    expect(learningPrompt).toContain("<approved_examples>");
+    expect(learningPrompt).toContain("human-approved");
+  });
+
+  it("injects active custom fields", () => {
+    expect(learningPrompt).toContain("<custom_fields>");
+    expect(learningPrompt).toContain("numero_siniestro");
+  });
+
+  it("injects the active tenant system prompt", () => {
+    expect(learningPrompt).toContain("<tenant_prompt>");
+    expect(learningPrompt).toContain("Zurich policy context");
+  });
+});

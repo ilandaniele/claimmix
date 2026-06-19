@@ -67,7 +67,7 @@ export const agentRuns = pgTable("agent_runs", {
     onDelete: "set null",
   }),
   provider_message_id: text("provider_message_id"),
-  model_provider: text("model_provider").notNull().default("openai"),
+  model_provider: text("model_provider").notNull().default("gemini"),
   model_name: text("model_name").notNull(),
   prompt_version_id: uuid("prompt_version_id").references(() => promptVersions.id, {
     onDelete: "set null",
@@ -210,10 +210,10 @@ export const tenantAiSettings = pgTable("tenant_ai_settings", {
   tenant_id: uuid("tenant_id")
     .primaryKey()
     .references(() => tenants.id, { onDelete: "cascade" }),
-  provider: text("provider").notNull().default("openai"),
+  provider: text("provider").notNull().default("gemini"),
   openai_model: text("openai_model").notNull().default("gpt-4o-mini"),
   gemini_model: text("gemini_model").notNull().default("gemini-2.5-flash"),
-  active_model_provider: text("active_model_provider").notNull().default("openai"),
+  active_model_provider: text("active_model_provider").notNull().default("gemini"),
   active_model: text("active_model"),
   previous_model: text("previous_model"),
   model_activated_by: uuid("model_activated_by").references(() => users.id, {

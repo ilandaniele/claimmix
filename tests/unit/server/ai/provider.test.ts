@@ -2,7 +2,7 @@
  * Unit tests for the per-tenant AI provider resolution (provider.ts).
  *
  * Covers:
- *  - env default (AI_PROVIDER, fallback "openai")
+ *  - env default (AI_PROVIDER, fallback "gemini")
  *  - tenant_ai_settings row wins over env default
  *  - missing table / query error → env default (defensive)
  *  - resolveExtractionEngine: mock mode, key-based fallback, no-keys → mock
@@ -88,9 +88,9 @@ function setDbError() {
 
 // ---------- tests ----------
 describe("getDefaultProvider", () => {
-  it("defaults to openai when AI_PROVIDER is unset", () => {
+  it("defaults to gemini when AI_PROVIDER is unset", () => {
     delete process.env.AI_PROVIDER;
-    expect(getDefaultProvider()).toBe("openai");
+    expect(getDefaultProvider()).toBe("gemini");
   });
 
   it("honors AI_PROVIDER=gemini (case-insensitive)", () => {
@@ -98,9 +98,9 @@ describe("getDefaultProvider", () => {
     expect(getDefaultProvider()).toBe("gemini");
   });
 
-  it("falls back to openai for invalid values", () => {
+  it("falls back to gemini for invalid values", () => {
     process.env.AI_PROVIDER = "claude";
-    expect(getDefaultProvider()).toBe("openai");
+    expect(getDefaultProvider()).toBe("gemini");
   });
 });
 
@@ -134,7 +134,7 @@ describe("getTenantAiProvider", () => {
   it("falls back to env default on query error (table missing)", async () => {
     delete process.env.AI_PROVIDER;
     setDbError();
-    expect(await getTenantAiProvider(TENANT)).toBe("openai");
+    expect(await getTenantAiProvider(TENANT)).toBe("gemini");
   });
 
   it("never throws even when the db throws synchronously", async () => {
@@ -142,7 +142,7 @@ describe("getTenantAiProvider", () => {
     mockDbChain.select.mockImplementation(() => {
       throw new Error("relation does not exist");
     });
-    expect(await getTenantAiProvider(TENANT)).toBe("openai");
+    expect(await getTenantAiProvider(TENANT)).toBe("gemini");
     // Restore for afterEach to work correctly.
     mockDbChain.select.mockReturnValue(mockDbChain);
   });
@@ -150,7 +150,7 @@ describe("getTenantAiProvider", () => {
   it("ignores invalid stored values", async () => {
     delete process.env.AI_PROVIDER;
     setDbResult([{ provider: "llama" }]);
-    expect(await getTenantAiProvider(TENANT)).toBe("openai");
+    expect(await getTenantAiProvider(TENANT)).toBe("gemini");
   });
 });
 
@@ -177,6 +177,16 @@ describe("resolveExtractionEngine", () => {
     delete process.env.OPENAI_API_KEY;
     process.env.GEMINI_API_KEY = "g-test";
     setDbResult([{ provider: "openai" }]);
+    expect(await resolveExtractionEngine(TENANT)).toBe("gemini");
+  });
+
+  it("uses gemini by default when only the Gemini key is configured", async () => {
+    process.env.MOCK_AI = "false";
+    process.env.AI_MOCK = "false";
+    delete process.env.AI_PROVIDER;
+    delete process.env.OPENAI_API_KEY;
+    process.env.GEMINI_API_KEY = "g-test";
+    setDbResult([]);
     expect(await resolveExtractionEngine(TENANT)).toBe("gemini");
   });
 

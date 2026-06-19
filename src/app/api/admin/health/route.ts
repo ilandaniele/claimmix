@@ -5,7 +5,7 @@
  * Proxy.ts includes /api/admin/health in PUBLIC_PREFIXES.
  *
  * Returns:
- *   200  { status: "ok", db: "connected", ai: "mock"|"openai", version, region }
+ *   200  { status: "ok", db: "connected", ai: "mock"|"gemini"|"openai", version, region }
  *   200  { status: "degraded", db: "error", ... }  (200 so LB doesn't cycle)
  *
  * AC16 (security): env checks return booleans only — never exposes key values.
@@ -19,10 +19,16 @@ import packageJson from "../../../../../package.json";
 
 export async function GET() {
   // ── AI mode ──────────────────────────────────────────────────────────────────
-  const aiMode: "mock" | "openai" =
-    process.env.MOCK_AI === "true" || !process.env.OPENAI_API_KEY
-      ? "mock"
-      : "openai";
+  const preferredProvider = process.env.AI_PROVIDER?.trim().toLowerCase();
+  const geminiConfigured = Boolean(process.env.GEMINI_API_KEY?.trim());
+  const openaiConfigured = Boolean(process.env.OPENAI_API_KEY?.trim());
+  let aiMode: "mock" | "gemini" | "openai" = "mock";
+  if (process.env.MOCK_AI !== "true" && process.env.AI_MOCK !== "true") {
+    if (preferredProvider === "openai" && openaiConfigured) aiMode = "openai";
+    else if (preferredProvider === "gemini" && geminiConfigured) aiMode = "gemini";
+    else if (geminiConfigured) aiMode = "gemini";
+    else if (openaiConfigured) aiMode = "openai";
+  }
 
   // ── DB ping ───────────────────────────────────────────────────────────────────
   let dbStatus: "connected" | "error" = "connected";
@@ -46,6 +52,7 @@ export async function GET() {
   // env: boolean presence checks — NEVER expose actual key values (AC16)
   const env = {
     database_url: !!process.env.DATABASE_URL,
+    gemini_api_key: !!process.env.GEMINI_API_KEY,
     openai_api_key: !!process.env.OPENAI_API_KEY,
     sentry_dsn: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
   };

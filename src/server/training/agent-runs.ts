@@ -48,7 +48,7 @@ export async function logAgentRun(
   const modelProvider = claim.extraction_model?.startsWith("mock")
     ? "mock"
     : claim.extraction_model?.startsWith("gemini")
-      ? "google"
+      ? "gemini"
       : "openai";
 
   // Output payload: full validated extractor output. Token/cost metadata is

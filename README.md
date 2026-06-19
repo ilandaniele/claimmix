@@ -39,6 +39,7 @@ psql "$DATABASE_URL" -1 -f neon/migrations/0001_init.sql
 psql "$DATABASE_URL" -1 -f neon/migrations/0002_gemini_key.sql
 psql "$DATABASE_URL" -1 -f neon/migrations/0003_user_ai_settings.sql
 psql "$DATABASE_URL" -1 -f neon/migrations/0004_agent_console_security.sql
+psql "$DATABASE_URL" -1 -f neon/migrations/0005_gemini_default.sql
 ```
 
 Optional seed data lives in `neon/seed.sql`.
@@ -50,9 +51,10 @@ Optional seed data lives in `neon/seed.sql`.
 | `DATABASE_URL` | yes | Neon Postgres connection string |
 | `BETTER_AUTH_SECRET` | yes | Better Auth secret |
 | `BETTER_AUTH_URL` | yes | Public app URL for Better Auth |
-| `OPENAI_API_KEY` | no | OpenAI provider key |
+| `AI_PROVIDER` | no | `gemini` or `openai`; defaults to `gemini` |
+| `OPENAI_API_KEY` | no | Optional OpenAI provider key |
 | `OPENAI_MODEL` | no | Default OpenAI model, defaults to `gpt-4o-mini` |
-| `GEMINI_API_KEY` | no | Global Gemini provider key |
+| `GEMINI_API_KEY` | no | Global Gemini provider key used by the default provider |
 | `GEMINI_MODEL` | no | Default Gemini model, defaults to `gemini-2.5-flash` |
 | `MOCK_AI` | no | Set `true` to use deterministic mock agent output |
 | `GMAIL_CLIENT_ID` | email | Google OAuth client ID |
@@ -76,7 +78,7 @@ Admins use `/agente` to manage:
 - Tenant custom fields
 - Prompt rules
 - Approved training examples
-- OpenAI fine-tuning jobs and manual model activation
+- Optional OpenAI fine-tuning jobs and manual model activation
 
 Gemini and OpenAI are treated as agent providers behind the same validated claim-output contract. The workflow still validates all model output before any database write.
 

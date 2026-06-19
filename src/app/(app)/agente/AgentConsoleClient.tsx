@@ -13,10 +13,10 @@ type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento";
 
 const TABS = [
   { id: "modelos", label: "Modelos", icon: Settings2 },
-  { id: "campos", label: "Campos", icon: SlidersHorizontal },
-  { id: "reglas", label: "Reglas", icon: ListChecks },
-  { id: "ejemplos", label: "Ejemplos", icon: CheckCircle2 },
-  { id: "entrenamiento", label: "Fine-tuning", icon: Brain },
+  { id: "campos", label: "Campos personalizados", icon: SlidersHorizontal },
+  { id: "reglas", label: "Reglas de prompt", icon: ListChecks },
+  { id: "ejemplos", label: "Ejemplos aprobados", icon: CheckCircle2 },
+  { id: "entrenamiento", label: "Fine-tuning opcional", icon: Brain },
 ] as const;
 
 export function AgentConsoleClient() {

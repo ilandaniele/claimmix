@@ -23,7 +23,7 @@ import { cases, rawMessages, users } from "@/lib/db/schema";
 import { getSessionContext } from "@/lib/auth/session";
 import { SimulateIntakeSchema } from "@/lib/schemas/intake";
 import { getScenarioById } from "@/server/intake/scenarios";
-import { runExtractionWorker } from "@/server/worker/extract";
+import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
@@ -227,7 +227,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   // after() keeps the Vercel function alive until the worker finishes.
   scheduleAfterResponse(async () => {
     try {
-      await runExtractionWorker(caseId, userRow.tenant_id, userRow.id);
+      await runIntakeAgent({
+        caseId,
+        tenantId: userRow.tenant_id,
+        userId: userRow.id,
+        source: "simulate",
+      });
     } catch (e: unknown) {
       const name = e instanceof Error ? e.name : "UnknownError";
       console.error("[intake/simulate] Worker error:", name, "case:", caseId);

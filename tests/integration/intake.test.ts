@@ -11,12 +11,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Hoisted mocks (vi.hoisted runs before module evaluation) ──────────────────
 
-const { mockGetSession, mockDbSelect, mockDbInsert, mockCheckBudget } = vi.hoisted(() => {
+const {
+  afterCallbacks,
+  mockAfter,
+  mockGetSession,
+  mockDbSelect,
+  mockDbInsert,
+  mockCheckBudget,
+  mockRunIntakeAgent,
+} = vi.hoisted(() => {
+  const afterCallbacks: Array<() => unknown | Promise<unknown>> = [];
   return {
+    afterCallbacks,
+    mockAfter: vi.fn((callback: () => unknown | Promise<unknown>) => {
+      afterCallbacks.push(callback);
+    }),
     mockGetSession: vi.fn(),
     mockDbSelect: vi.fn(),
     mockDbInsert: vi.fn(),
     mockCheckBudget: vi.fn(),
+    mockRunIntakeAgent: vi.fn(),
   };
 });
 
@@ -25,6 +39,14 @@ const { mockGetSession, mockDbSelect, mockDbInsert, mockCheckBudget } = vi.hoist
 vi.mock("@/lib/auth/session", () => ({
   getSessionContext: mockGetSession,
 }));
+
+vi.mock("next/server", async () => {
+  const actual = await vi.importActual<typeof import("next/server")>("next/server");
+  return {
+    ...actual,
+    after: mockAfter,
+  };
+});
 
 vi.mock("@/lib/db", () => {
   const chain: any = {
@@ -54,8 +76,8 @@ vi.mock("@/server/ai/budget", () => ({
   COST_PER_COMPLETION_TOKEN: 0.0000006,
 }));
 
-vi.mock("@/server/worker/extract", () => ({
-  runExtractionWorker: vi.fn().mockResolvedValue(undefined),
+vi.mock("@/server/agents/intake-agent", () => ({
+  runIntakeAgent: mockRunIntakeAgent,
 }));
 
 vi.mock("@/lib/audit/log", () => ({
@@ -139,7 +161,9 @@ function setupAuthMocks() {
 describe("POST /api/intake/simulate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    afterCallbacks.length = 0;
     mockCheckBudget.mockResolvedValue({ exceeded: false });
+    mockRunIntakeAgent.mockResolvedValue({ ok: true, action: "extract_email" });
     setupAuthMocks();
   });
 
@@ -158,6 +182,24 @@ describe("POST /api/intake/simulate", () => {
     expect(body.case_id).toBeDefined();
     expect(body.status).toBe("procesando");
     expect(body.message).toBe("Procesando...");
+  });
+
+  it("schedules the modern intake agent for simulated cases", async () => {
+    const req = makeRequest({ scenario_id: "choque-01" });
+    const res = await POST(req);
+    expect(res.status).toBe(202);
+
+    expect(mockAfter).toHaveBeenCalledTimes(1);
+    expect(afterCallbacks).toHaveLength(1);
+
+    await afterCallbacks[0]();
+
+    expect(mockRunIntakeAgent).toHaveBeenCalledWith({
+      caseId: "case-uuid-001",
+      tenantId: "tenant-001",
+      userId: "user-001",
+      source: "simulate",
+    });
   });
 
   it("returns 202 with case_id for robo scenario", async () => {

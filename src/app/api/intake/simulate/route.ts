@@ -35,6 +35,12 @@ import {
   getClientIp,
 } from "@/lib/rate-limit/index";
 import type { ClaimType } from "@/lib/schemas/cases";
+import {
+  getSimulationWorkerDelayMs,
+  sleep,
+} from "@/server/intake/simulation-throttle";
+
+export const maxDuration = 180;
 
 function scheduleAfterResponse(task: () => Promise<void>): void {
   try {
@@ -162,6 +168,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // ── 6. Create case + raw_message in DB ───────────────────────────────────────
   let caseId: string;
+  let caseCreatedAt: string | null = null;
   try {
     const newCase = firstRow(
       await db
@@ -176,13 +183,14 @@ export async function POST(request: NextRequest): Promise<Response> {
           assigned_to: userRow.id,
           channel: "email_sim",
         })
-        .returning({ id: cases.id })
+        .returning({ id: cases.id, created_at: cases.created_at })
     );
     if (!newCase) {
       console.error("[intake/simulate] Failed to create case: no_row");
       return err(new AppError("INTERNAL_ERROR"));
     }
     caseId = newCase.id;
+    caseCreatedAt = newCase.created_at ?? null;
   } catch (e) {
     const code = (e as { code?: string })?.code;
     console.error("[intake/simulate] Failed to create case:", code);
@@ -227,6 +235,13 @@ export async function POST(request: NextRequest): Promise<Response> {
   // after() keeps the Vercel function alive until the worker finishes.
   scheduleAfterResponse(async () => {
     try {
+      const delayMs = await getSimulationWorkerDelayMs({
+        tenantId: userRow.tenant_id,
+        caseId,
+        caseCreatedAt,
+      });
+      if (delayMs > 0) await sleep(delayMs);
+
       await runIntakeAgent({
         caseId,
         tenantId: userRow.tenant_id,

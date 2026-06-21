@@ -167,12 +167,7 @@ async function callGemini(
     generationConfig: {
       temperature: 0,
       maxOutputTokens: 8192,
-      responseFormat: {
-        text: {
-          mimeType: "application/json",
-          schema: OPENAI_JSON_SCHEMA.json_schema.schema,
-        },
-      },
+      responseMimeType: "application/json",
       // 2.5-series models think by default; thinking tokens count against
       // maxOutputTokens and add latency — disable for deterministic extraction.
       ...(model.startsWith("gemini-2.5")

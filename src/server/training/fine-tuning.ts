@@ -1,8 +1,10 @@
 /**
- * Batched OpenAI fine-tuning lifecycle for the claim agent.
+ * Batched model-training lifecycle for the claim agent.
  *
- * Jobs are tenant-scoped and manually activated. No approved example can deploy
- * a model by itself.
+ * OpenAI jobs can be uploaded to the provider. Gemini Developer API does not
+ * currently expose public fine-tuning, so Gemini jobs are context packs: JSONL
+ * plus metadata assembled from approved examples for backup, evaluation, and
+ * prompt-memory portability. No Gemini context-pack action calls OpenAI.
  */
 
 import "server-only";
@@ -13,7 +15,15 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import { getDefaultOpenAIModel, getTenantOpenAIModel } from "@/server/ai/provider";
+import {
+  getDefaultGeminiModel,
+  getDefaultOpenAIModel,
+  getTenantAiProvider,
+  getTenantGeminiModel,
+  getTenantOpenAIModel,
+  setTenantModelDefaults,
+  type AiProvider,
+} from "@/server/ai/provider";
 
 const OPEN_JOB_STATUSES = ["draft", "queued", "running", "eval_pending", "approved"];
 
@@ -103,6 +113,108 @@ async function approvedExamplesForTenant(tenantId: string) {
     });
 }
 
+function geminiContextEvalResult(input: {
+  trainingCount: number;
+  validationCount: number;
+  model: string;
+}) {
+  return {
+    mode: "gemini_context_pack",
+    provider: "gemini",
+    model: input.model,
+    external_fine_tuning_supported: false,
+    used_by_agent_as: "few_shot_context",
+    training_count: input.trainingCount,
+    validation_count: input.validationCount,
+    notes:
+      "Gemini API/AI Studio fine-tuning is not called. Approved examples remain active as agent memory/context.",
+  };
+}
+
+async function createOrRefreshGeminiContextJob(
+  tenantId: string,
+  userId: string,
+  existingJobId?: string
+) {
+  const jsonl = await buildFineTuneJsonl(tenantId);
+  if (jsonl.trainingCount < 1) throw new Error("NO_APPROVED_EXAMPLES");
+
+  const t = tables.modelTrainingJobs;
+  const model = (await getTenantGeminiModel(tenantId)) || getDefaultGeminiModel();
+  const now = new Date().toISOString();
+
+  let targetId = existingJobId;
+  if (!targetId) {
+    const existing = firstRow(
+      await db
+        .select({ id: t.id })
+        .from(t)
+        .where(and(eq(t.tenant_id, tenantId), eq(t.provider, "gemini"), inArray(t.status, OPEN_JOB_STATUSES)))
+        .limit(1)
+    );
+    targetId = existing?.id;
+  }
+
+  const values = {
+    status: "approved",
+    provider: "gemini",
+    base_model: model,
+    fine_tuned_model_id: null,
+    openai_fine_tuning_job_id: null,
+    training_file_id: "gemini-context-jsonl",
+    validation_file_id: jsonl.validationJsonl ? "gemini-context-validation-jsonl" : null,
+    result_files: [],
+    error_message: null,
+    training_jsonl: jsonl.trainingJsonl,
+    validation_jsonl: jsonl.validationJsonl || null,
+    training_example_count: jsonl.trainingCount + jsonl.validationCount,
+    eval_result: geminiContextEvalResult({
+      trainingCount: jsonl.trainingCount,
+      validationCount: jsonl.validationCount,
+      model,
+    }),
+    started_at: now,
+    completed_at: now,
+  };
+
+  const job = targetId
+    ? firstRow(
+        await db
+          .update(t)
+          .set(values)
+          .where(and(eq(t.id, targetId), eq(t.tenant_id, tenantId), eq(t.provider, "gemini")))
+          .returning({ id: t.id })
+      )
+    : firstRow(
+        await db
+          .insert(t)
+          .values({
+            tenant_id: tenantId,
+            created_by: userId,
+            ...values,
+          })
+          .returning({ id: t.id })
+      );
+
+  if (!job) throw new Error("INSERT_FAILED");
+
+  await writeAuditLog({
+    tenant_id: tenantId,
+    actor_id: userId,
+    event_type: AuditEvent.FINETUNE_JOB_QUEUED,
+    target_type: "model_training_job",
+    target_id: job.id,
+    payload: {
+      job_id: job.id,
+      provider: "gemini",
+      mode: "context_pack",
+      training_example_count: jsonl.trainingCount + jsonl.validationCount,
+    },
+  });
+
+  return job;
+}
+
 export async function listFineTuneJobs(tenantId: string) {
   const t = tables.modelTrainingJobs;
   return db
@@ -130,15 +242,24 @@ export async function listFineTuneJobs(tenantId: string) {
     .limit(50);
 }
 
-export async function createDraftFineTuneJob(tenantId: string, userId: string) {
+export async function createDraftFineTuneJob(
+  tenantId: string,
+  userId: string,
+  provider?: AiProvider
+) {
   const examples = await approvedExamplesForTenant(tenantId);
   if (examples.length < 1) throw new Error("NO_APPROVED_EXAMPLES");
+
+  const selectedProvider = provider ?? (await getTenantAiProvider(tenantId));
+  if (selectedProvider === "gemini") {
+    return createOrRefreshGeminiContextJob(tenantId, userId);
+  }
 
   const t = tables.modelTrainingJobs;
   const open = await db
     .select({ id: t.id })
     .from(t)
-    .where(and(eq(t.tenant_id, tenantId), inArray(t.status, OPEN_JOB_STATUSES)))
+    .where(and(eq(t.tenant_id, tenantId), eq(t.provider, "openai"), inArray(t.status, OPEN_JOB_STATUSES)))
     .limit(1);
   if (open.length > 0) return open[0];
 
@@ -164,7 +285,7 @@ export async function createDraftFineTuneJob(tenantId: string, userId: string) {
     event_type: AuditEvent.FINETUNE_JOB_QUEUED,
     target_type: "model_training_job",
     target_id: job.id,
-    payload: { job_id: job.id, training_example_count: examples.length },
+    payload: { job_id: job.id, provider: "openai", training_example_count: examples.length },
   });
   return job;
 }
@@ -187,12 +308,15 @@ export async function startFineTuneJob(tenantId: string, userId: string, jobId: 
   const t = tables.modelTrainingJobs;
   const job = firstRow(
     await db
-      .select({ id: t.id, status: t.status, base_model: t.base_model })
+      .select({ id: t.id, status: t.status, provider: t.provider, base_model: t.base_model })
       .from(t)
       .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
       .limit(1)
   );
   if (!job) throw new Error("NOT_FOUND");
+  if (job.provider === "gemini") {
+    return createOrRefreshGeminiContextJob(tenantId, userId, jobId);
+  }
   if (!["draft", "failed"].includes(job.status)) throw new Error("JOB_NOT_STARTABLE");
 
   const jsonl = await buildFineTuneJsonl(tenantId);
@@ -252,12 +376,20 @@ export async function syncFineTuneJob(tenantId: string, userId: string, jobId: s
   const t = tables.modelTrainingJobs;
   const job = firstRow(
     await db
-      .select({ id: t.id, openai_fine_tuning_job_id: t.openai_fine_tuning_job_id })
+      .select({
+        id: t.id,
+        provider: t.provider,
+        openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
+      })
       .from(t)
       .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
       .limit(1)
   );
-  if (!job?.openai_fine_tuning_job_id) throw new Error("NOT_FOUND");
+  if (!job) throw new Error("NOT_FOUND");
+  if (job.provider === "gemini") {
+    return createOrRefreshGeminiContextJob(tenantId, userId, jobId);
+  }
+  if (!job.openai_fine_tuning_job_id) throw new Error("NOT_FOUND");
 
   const openaiJob = await getClient().fineTuning.jobs.retrieve(job.openai_fine_tuning_job_id);
   const status = mapOpenAIStatus(openaiJob.status);
@@ -302,6 +434,7 @@ export async function approveFineTuneJob(tenantId: string, userId: string, jobId
       .select({
         id: t.id,
         status: t.status,
+        provider: t.provider,
         fine_tuned_model_id: t.fine_tuned_model_id,
         eval_result: t.eval_result,
       })
@@ -309,6 +442,25 @@ export async function approveFineTuneJob(tenantId: string, userId: string, jobId
       .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
       .limit(1)
   );
+  if (!job) throw new Error("NOT_FOUND");
+  if (job.provider === "gemini") {
+    const updated = firstRow(
+      await db
+        .update(t)
+        .set({ status: "approved", completed_at: new Date().toISOString() })
+        .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId), eq(t.provider, "gemini")))
+        .returning({ id: t.id, status: t.status, fine_tuned_model_id: t.fine_tuned_model_id })
+    );
+    await writeAuditLog({
+      tenant_id: tenantId,
+      actor_id: userId,
+      event_type: AuditEvent.FINETUNE_JOB_APPROVED,
+      target_type: "model_training_job",
+      target_id: jobId,
+      payload: { job_id: jobId, provider: "gemini", mode: "context_pack" },
+    });
+    return updated;
+  }
   if (!job?.fine_tuned_model_id) throw new Error("NO_MODEL");
   if (job.status !== "eval_pending") throw new Error("JOB_NOT_APPROVABLE");
 
@@ -348,11 +500,38 @@ export async function activateFineTunedModel(tenantId: string, userId: string, j
   const settings = tables.tenantAiSettings;
   const job = firstRow(
     await db
-      .select({ id: mtj.id, status: mtj.status, fine_tuned_model_id: mtj.fine_tuned_model_id })
+      .select({
+        id: mtj.id,
+        status: mtj.status,
+        provider: mtj.provider,
+        base_model: mtj.base_model,
+        fine_tuned_model_id: mtj.fine_tuned_model_id,
+      })
       .from(mtj)
       .where(and(eq(mtj.id, jobId), eq(mtj.tenant_id, tenantId)))
       .limit(1)
   );
+  if (!job) throw new Error("NOT_FOUND");
+  if (job.provider === "gemini") {
+    await setTenantModelDefaults(tenantId, {
+      provider: "gemini",
+      geminiModel: job.base_model || getDefaultGeminiModel(),
+    });
+    const now = new Date().toISOString();
+    await db
+      .update(mtj)
+      .set({ status: "deployed", activated_by: userId, activated_at: now })
+      .where(and(eq(mtj.id, jobId), eq(mtj.tenant_id, tenantId), eq(mtj.provider, "gemini")));
+    await writeAuditLog({
+      tenant_id: tenantId,
+      actor_id: userId,
+      event_type: AuditEvent.FINETUNE_MODEL_DEPLOYED,
+      target_type: "model_training_job",
+      target_id: jobId,
+      payload: { job_id: jobId, provider: "gemini", mode: "context_pack" },
+    });
+    return { model: job.base_model || getDefaultGeminiModel(), provider: "gemini" };
+  }
   if (!job?.fine_tuned_model_id) throw new Error("NO_MODEL");
   if (job.status !== "approved") throw new Error("JOB_NOT_APPROVED");
 

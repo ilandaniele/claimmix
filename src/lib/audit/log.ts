@@ -99,6 +99,13 @@ export const AuditEvent = {
   EMAIL_RECEIVED: "email.received",
 
   /**
+   * EMAIL_FILTERED: inbound email was classified as clearly non-claim before
+   * case creation, so no AI extraction was run.
+   * Payload: { message_id, reason, category } -- no subject/body/from address.
+   */
+  EMAIL_FILTERED: "email.filtered",
+
+  /**
    * WEBHOOK_REJECTED: HMAC signature verification failed.
    * Emitted before any DB write — no PII in payload.
    * AC2.

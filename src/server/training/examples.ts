@@ -5,8 +5,8 @@
  *   1. Immediate: approved examples are retrieved as few-shot context for
  *      future extractions of the same tenant (loadApprovedExamples).
  *   2. Prompt learning: agent_prompt_rules (see prompt-rules.ts).
- *   3. Optional fine-tuning: OpenAI-only advanced workflow. Draft jobs are
- *      created manually from the Fine-tuning tab, never during approval.
+ *   3. Optional training package: Gemini context packs by default, with OpenAI
+ *      fine-tuning still available only when explicitly selected.
  *
  * Security invariants:
  *   - Examples are created ONLY by approveTrainingExample(), which is called
@@ -299,10 +299,10 @@ export async function approveTrainingExample(
 
 // ── Batched fine-tuning queue ─────────────────────────────────────────────────
 
-/** Minimum approved examples before a fine-tune job is even drafted. */
+/** Minimum approved examples before a training package is drafted. */
 function getFineTuneMinExamples(): number {
   const raw = Number(process.env.FINETUNE_MIN_EXAMPLES);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 50;
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 20;
 }
 
 /** Job states that count as "already in flight" — prevents duplicate drafts. */
@@ -348,8 +348,8 @@ export async function maybeQueueFineTuneJob(
         .values({
           tenant_id: tenantId,
           status: "draft",
-          provider: "openai",
-          base_model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+          provider: "gemini",
+          base_model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
           training_example_count: approvedCount,
           created_by: createdBy,
         })
@@ -366,7 +366,11 @@ export async function maybeQueueFineTuneJob(
       event_type: AuditEvent.FINETUNE_JOB_QUEUED,
       target_type: "model_training_job",
       target_id: jobId,
-      payload: { job_id: jobId, training_example_count: approvedCount },
+      payload: {
+        job_id: jobId,
+        provider: "gemini",
+        training_example_count: approvedCount,
+      },
     });
 
     return jobId;

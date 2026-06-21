@@ -54,6 +54,77 @@ function getModel(): string {
 }
 
 /**
+ * Extract the first balanced JSON object from a model response.
+ *
+ * Gemini can occasionally wrap otherwise valid JSON in prose or markdown fences,
+ * especially under rate pressure. We still validate with Zod after parsing, so
+ * this only makes the parser tolerant to transport formatting noise.
+ */
+export function extractJsonObjectText(content: string | null): string | null {
+  if (!content) return null;
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  const text = (fenced?.[1] ?? trimmed).trim();
+
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (start === -1) {
+      if (char === "{") {
+        start = i;
+        depth = 1;
+      }
+      continue;
+    }
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (char === "{") depth++;
+    if (char === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+
+  return null;
+}
+
+function parseModelJson(content: string | null): Record<string, unknown> | null {
+  const jsonText = extractJsonObjectText(content);
+  if (!jsonText) return null;
+  try {
+    const parsed = JSON.parse(jsonText);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Parse and validate the model response content as an ExtractedClaim.
  * Returns null if parsing or validation fails.
  * Exported for reuse by other providers (gemini-extractor).
@@ -61,7 +132,8 @@ function getModel(): string {
 export function parseResponse(content: string | null, claimType: ClaimType, model?: string): ExtractedClaim | null {
   if (!content) return null;
   try {
-    const raw = JSON.parse(content);
+    const raw = parseModelJson(content);
+    if (!raw) return null;
     if (!raw.extraction_model) raw.extraction_model = model ?? getModel();
     const parsed = ExtractedClaimSchema.safeParse(raw);
     if (!parsed.success) {
@@ -433,7 +505,8 @@ export async function extractEmailClaim(
 export function parseEmailResponse(content: string | null, model?: string): ExtractedClaim | null {
   if (!content) return null;
   try {
-    const raw = JSON.parse(content);
+    const raw = parseModelJson(content);
+    if (!raw) return null;
     if (!raw.extraction_model) raw.extraction_model = model ?? getModel();
     // Ensure required array/object defaults.
     if (!Array.isArray(raw.fields)) raw.fields = [];

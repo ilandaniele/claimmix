@@ -56,6 +56,7 @@ import { checkDuplicate } from "@/server/email/dedupe";
 import { threadLookup } from "@/server/email/thread-lookup";
 import { rehostAttachments } from "@/server/email/rehost-attachments";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
+import { classifyInboundEmailForIntake } from "@/server/email/relevance-prefilter";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import type { gmail_v1 } from "googleapis";
 
@@ -203,6 +204,22 @@ async function dispatchExtractionWorker(
       "case:",
       caseId
     ); // crew-debug-ok
+  }
+}
+
+async function markMessageRead(
+  gmail: ReturnType<typeof getGmailClient>,
+  gmailMessageId: string
+): Promise<void> {
+  try {
+    await gmail.users.messages.modify({
+      userId: "me",
+      id: gmailMessageId,
+      requestBody: { removeLabelIds: ["UNREAD"] },
+    });
+  } catch (err) {
+    const code = err instanceof Error ? err.name : "UnknownError";
+    console.error("[gmail-poller] mark-as-read error:", code, "msgId:", gmailMessageId); // crew-debug-ok
   }
 }
 
@@ -422,6 +439,34 @@ async function processMessage(
   );
 
   // ── e) Resolve case (existing thread or new case) ──────────────────────────
+  if (!threadCaseId) {
+    const prefilter = classifyInboundEmailForIntake({
+      fromAddr,
+      subject,
+      bodyText,
+      bodyHtml,
+      headers: allHeaders,
+    });
+
+    if (prefilter.action === "skip") {
+      await markMessageRead(gmail, gmailMessageId);
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.EMAIL_FILTERED,
+        target_type: "gmail_message",
+        target_id: null,
+        payload: {
+          action: "prefilter_skip",
+          message_id: gmailMessageId,
+          reason: prefilter.reason,
+          category: prefilter.category,
+        },
+      });
+      return { outcome: "skipped" };
+    }
+  }
+
   let caseId: string;
 
   if (threadCaseId) {

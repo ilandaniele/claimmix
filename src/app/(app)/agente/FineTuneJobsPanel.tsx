@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 type FineTuneJob = {
   id: string;
   status: string;
+  provider: ProviderId;
   base_model: string;
   fine_tuned_model_id: string | null;
   openai_fine_tuning_job_id: string | null;
@@ -81,10 +82,6 @@ export function FineTuneJobsPanel() {
   const openAiSelected = activeProvider === "openai";
 
   async function createDraft() {
-    if (!openAiSelected) {
-      setError("Fine-tuning esta disponible solo cuando OpenAI es el proveedor activo.");
-      return;
-    }
     setBusy("draft");
     setError("");
     try {
@@ -129,8 +126,8 @@ export function FineTuneJobsPanel() {
   }
 
   async function action(job: FineTuneJob, actionName: "start" | "sync" | "approve" | "activate") {
-    if (!openAiSelected) {
-      setError("Fine-tuning esta disponible solo cuando OpenAI es el proveedor activo.");
+    if (job.provider === "openai" && !openAiSelected) {
+      setError("Los trabajos de OpenAI solo se pueden iniciar o activar con OpenAI como proveedor activo.");
       return;
     }
     setBusy(`${job.id}:${actionName}`);
@@ -158,16 +155,16 @@ export function FineTuneJobsPanel() {
     <div className="space-y-4">
       <div className="space-y-1">
         <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
-          OpenAI fine-tuning opcional
+          Entrenamiento del agente
         </p>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Gemini usa ejemplos aprobados como contexto inmediato. Esta seccion solo prepara y activa fine-tuning de OpenAI.
+          Gemini usa ejemplos aprobados, reglas y memoria como contexto activo sin costo de fine-tuning externo. OpenAI queda disponible solo si lo elegis como proveedor.
         </p>
       </div>
 
-      {!openAiSelected && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-          Proveedor activo: Gemini. Cambia a OpenAI para usar fine-tuning opcional.
+      {activeProvider === "gemini" && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+          Proveedor activo: Gemini. Crear trabajo arma un paquete contextual JSONL para evaluar, respaldar y reutilizar la memoria del agente.
         </div>
       )}
 
@@ -175,10 +172,10 @@ export function FineTuneJobsPanel() {
         <button
           type="button"
           onClick={createDraft}
-          disabled={busy !== null || !openAiSelected}
+          disabled={busy !== null}
           className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
         >
-          Crear trabajo
+          {activeProvider === "gemini" ? "Crear paquete Gemini" : "Crear trabajo OpenAI"}
         </button>
         <button
           type="button"
@@ -190,8 +187,7 @@ export function FineTuneJobsPanel() {
         </button>
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        Para crear un trabajo primero necesitas ejemplos aprobados. Este panel arma el JSONL
-        y permite iniciar fine-tuning solo cuando OpenAI es el proveedor activo.
+        Para crear un paquete primero necesitas ejemplos aprobados. Gemini no llama APIs de fine-tuning; el JSONL exportado documenta los ejemplos que ya alimentan al agente.
       </p>
 
       {error && (
@@ -203,10 +199,10 @@ export function FineTuneJobsPanel() {
       {jobs.length === 0 ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
           <p className="font-medium text-slate-800 dark:text-slate-100">
-            No hay trabajos de OpenAI fine-tuning.
+            No hay paquetes de entrenamiento.
           </p>
           <p className="mt-1">
-            Los ejemplos aprobados ya estan disponibles como contexto del agente. Crear trabajo genera un borrador avanzado para OpenAI.
+            Los ejemplos aprobados ya estan disponibles como contexto del agente. Crear paquete genera un JSONL portable para Gemini.
           </p>
         </div>
       ) : (
@@ -217,6 +213,9 @@ export function FineTuneJobsPanel() {
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{job.id.slice(0, 8)}</span>
+                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200">
+                      {job.provider === "gemini" ? "Gemini context" : "OpenAI fine-tune"}
+                    </span>
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {job.status}
                     </span>
@@ -233,38 +232,61 @@ export function FineTuneJobsPanel() {
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => action(job, "start")}
-                    disabled={busy !== null || !openAiSelected || !["draft", "failed"].includes(job.status)}
-                    className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                  >
-                    Iniciar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => action(job, "sync")}
-                    disabled={busy !== null || !openAiSelected || !job.openai_fine_tuning_job_id}
-                    className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                  >
-                    Sincronizar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => action(job, "approve")}
-                    disabled={busy !== null || !openAiSelected || job.status !== "eval_pending" || !job.fine_tuned_model_id}
-                    className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                  >
-                    Aprobar eval
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => action(job, "activate")}
-                    disabled={busy !== null || !openAiSelected || job.status !== "approved" || !job.fine_tuned_model_id}
-                    className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                  >
-                    Activar
-                  </button>
+                  {job.provider === "gemini" ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => action(job, "start")}
+                        disabled={busy !== null}
+                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                      >
+                        Actualizar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => action(job, "activate")}
+                        disabled={busy !== null || activeProvider === "gemini"}
+                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                      >
+                        Activar Gemini
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => action(job, "start")}
+                        disabled={busy !== null || !openAiSelected || !["draft", "failed"].includes(job.status)}
+                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                      >
+                        Iniciar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => action(job, "sync")}
+                        disabled={busy !== null || !openAiSelected || !job.openai_fine_tuning_job_id}
+                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                      >
+                        Sincronizar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => action(job, "approve")}
+                        disabled={busy !== null || !openAiSelected || job.status !== "eval_pending" || !job.fine_tuned_model_id}
+                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                      >
+                        Aprobar eval
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => action(job, "activate")}
+                        disabled={busy !== null || !openAiSelected || job.status !== "approved" || !job.fine_tuned_model_id}
+                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                      >
+                        Activar
+                      </button>
+                    </>
+                  )}
                   {job.training_file_id && (
                     <a
                       href={`/api/admin/fine-tuning/jobs/${job.id}/export?kind=train`}

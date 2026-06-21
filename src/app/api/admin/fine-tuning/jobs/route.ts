@@ -40,20 +40,19 @@ export async function POST(request: NextRequest) {
     }
 
     const provider = await getTenantAiProvider(userRow.tenant_id);
-    if (provider !== "openai") {
-      throw new AppError(
-        "VALIDATION_FAILED",
-        "OpenAI fine-tuning es opcional y solo esta disponible cuando OpenAI es el proveedor activo."
-      );
-    }
-
     if (parsed.data.action === "rollback") {
+      if (provider !== "openai") {
+        throw new AppError(
+          "VALIDATION_FAILED",
+          "Rollback solo aplica a modelos fine-tuned de OpenAI. Gemini usa paquetes contextuales."
+        );
+      }
       const result = await rollbackFineTunedModel(userRow.tenant_id, user.id);
       return ok({ result });
     }
 
     try {
-      const job = await createDraftFineTuneJob(userRow.tenant_id, user.id);
+      const job = await createDraftFineTuneJob(userRow.tenant_id, user.id, provider);
       return ok({ job }, 201);
     } catch (e) {
       if (e instanceof Error && e.message === "NO_APPROVED_EXAMPLES") {

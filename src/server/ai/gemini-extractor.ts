@@ -9,9 +9,10 @@
  *
  * Same security posture as the OpenAI extractor:
  * LLM01: prompts built by buildEmailClaimPrompt / buildSystemPrompt (XML sentinels).
- * LLM02: JSON output requested via responseMimeType + schema embedded in the
- *        prompt; output validated against ExtractedClaimSchema before any DB
- *        write (parseEmailResponse / parseResponse are shared with OpenAI).
+ * LLM02: JSON output requested via Gemini structured output plus schema
+ *        embedded in the prompt; output validated against ExtractedClaimSchema
+ *        before any DB write (parseEmailResponse / parseResponse are shared
+ *        with OpenAI).
  * LLM06: Logs only case_id/tenant_id + token counts — never email bodies/PII.
  *        The API key travels in the x-goog-api-key header, never in the URL.
  *
@@ -44,6 +45,15 @@ export class GeminiExtractionError extends Error {
 const GEMINI_API_BASE =
   "https://generativelanguage.googleapis.com/v1beta/models";
 
+const DEFAULT_GEMINI_MIN_REQUEST_INTERVAL_MS =
+  process.env.NODE_ENV === "test" ? 0 : 1_200;
+const DEFAULT_GEMINI_RETRY_BASE_MS =
+  process.env.NODE_ENV === "test" ? 0 : 1_000;
+const DEFAULT_GEMINI_MAX_RETRIES = 2;
+
+let geminiRequestQueue: Promise<void> = Promise.resolve();
+let lastGeminiRequestAt = 0;
+
 /** Returns the configured Gemini model. Override with GEMINI_MODEL env var. */
 export function getGeminiModel(): string {
   return getDefaultGeminiModel();
@@ -56,6 +66,75 @@ function schemaSuffix(): string {
   return `\n\nOUTPUT JSON SCHEMA — return ONE JSON object matching this schema exactly (no markdown, no code fences, no extra text):\n${JSON.stringify(
     OPENAI_JSON_SCHEMA.json_schema.schema
   )}`;
+}
+
+function getNumberEnv(name: string, fallback: number, max: number): number {
+  const raw = Number(process.env[name]);
+  if (!Number.isFinite(raw) || raw < 0) return fallback;
+  return Math.min(Math.floor(raw), max);
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForGeminiSlot(): Promise<void> {
+  const minIntervalMs = getNumberEnv(
+    "GEMINI_MIN_REQUEST_INTERVAL_MS",
+    DEFAULT_GEMINI_MIN_REQUEST_INTERVAL_MS,
+    60_000
+  );
+  if (minIntervalMs <= 0) return;
+
+  const run = geminiRequestQueue.then(async () => {
+    const elapsed = Date.now() - lastGeminiRequestAt;
+    if (elapsed < minIntervalMs) {
+      await sleep(minIntervalMs - elapsed);
+    }
+    lastGeminiRequestAt = Date.now();
+  });
+  geminiRequestQueue = run.catch(() => undefined);
+  await run;
+}
+
+function isRetryableGeminiStatus(status: number): boolean {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function retryAfterMs(headers: Headers, attempt: number): number {
+  const retryAfter = headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, 30_000);
+    const dateMs = Date.parse(retryAfter);
+    if (Number.isFinite(dateMs)) return Math.min(Math.max(dateMs - Date.now(), 0), 30_000);
+  }
+
+  const baseMs = getNumberEnv(
+    "GEMINI_RETRY_BASE_MS",
+    DEFAULT_GEMINI_RETRY_BASE_MS,
+    30_000
+  );
+  return Math.min(baseMs * 2 ** attempt, 30_000);
+}
+
+async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
+  const maxRetries = getNumberEnv(
+    "GEMINI_MAX_RETRIES",
+    DEFAULT_GEMINI_MAX_RETRIES,
+    5
+  );
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    await waitForGeminiSlot();
+    const res = await fetch(url, init);
+    if (res.ok) return res;
+    if (!isRetryableGeminiStatus(res.status) || attempt >= maxRetries) return res;
+    await sleep(retryAfterMs(res.headers, attempt));
+  }
+
+  return fetch(url, init);
 }
 
 interface GeminiUsage {
@@ -88,7 +167,12 @@ async function callGemini(
     generationConfig: {
       temperature: 0,
       maxOutputTokens: 8192,
-      responseMimeType: "application/json",
+      responseFormat: {
+        text: {
+          mimeType: "application/json",
+          schema: OPENAI_JSON_SCHEMA.json_schema.schema,
+        },
+      },
       // 2.5-series models think by default; thinking tokens count against
       // maxOutputTokens and add latency — disable for deterministic extraction.
       ...(model.startsWith("gemini-2.5")
@@ -97,7 +181,7 @@ async function callGemini(
     },
   };
 
-  const res = await fetch(`${GEMINI_API_BASE}/${model}:generateContent`, {
+  const res = await fetchGemini(`${GEMINI_API_BASE}/${model}:generateContent`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

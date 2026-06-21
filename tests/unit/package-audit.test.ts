@@ -40,8 +40,8 @@ describe("package.json audit — W5 Gmail migration", () => {
     expect(Object.keys(pkg.dependencies || {})).toContain("googleapis");
   });
 
-  it("googleapis version satisfies ^148.0.0", () => {
+  it("googleapis version satisfies ^173.0.0", () => {
     const version: string = pkg.dependencies?.googleapis ?? "";
-    expect(version).toMatch(/^\^?1[0-9][0-9]+\./);
+    expect(version).toMatch(/^\^?173\./);
   });
 });

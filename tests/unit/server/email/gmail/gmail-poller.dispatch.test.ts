@@ -109,6 +109,7 @@ vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: mockWriteAuditLog,
   AuditEvent: {
     EMAIL_RECEIVED: "EMAIL_RECEIVED",
+    EMAIL_FILTERED: "EMAIL_FILTERED",
     ATTACHMENT_REHOSTED: "ATTACHMENT_REHOSTED",
     ATTACHMENT_REJECTED: "ATTACHMENT_REJECTED",
   },
@@ -525,6 +526,49 @@ describe("dispatchExtractionWorker — AC6: error isolation", () => {
 
     // fetch was still called for both messages
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Gmail relevance prefilter", () => {
+  it("skips automated non-claim mail before case creation and worker dispatch", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+
+    const gmailMock = makeGmailMock();
+    (gmailMock.users.messages.get as any).mockResolvedValue({
+      data: {
+        id: MSG_ID,
+        threadId: "thread-meta-001",
+        historyId: "99999",
+        payload: {
+          headers: [
+            { name: "From", value: "Meta for Business <notification@facebookmail.com>" },
+            { name: "To", value: "claims@claimmix.com" },
+            { name: "Subject", value: "Meta for Business notification" },
+            { name: "In-Reply-To", value: "" },
+            { name: "References", value: "" },
+          ],
+          mimeType: "text/plain",
+          body: { data: "" },
+          parts: [],
+        },
+      },
+    });
+    mockGetGmailClient.mockReturnValue(gmailMock);
+
+    const result = await pollGmail();
+
+    expect(result.processed).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(gmailMock.users.messages.modify).toHaveBeenCalledOnce();
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "EMAIL_FILTERED",
+        target_type: "gmail_message",
+      })
+    );
   });
 });
 

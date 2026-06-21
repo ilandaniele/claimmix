@@ -73,7 +73,7 @@ export function TrainingExamplesPanel() {
             Abri un caso procesado, revisa o corrige los campos del analisis y usa
             <span className="font-medium"> Confirmar como ejemplo de entrenamiento seguro</span>.
             Los ejemplos aprobados se usan como contexto en las proximas ejecuciones del agente
-            Gemini/OpenAI. El fine-tuning es opcional.
+            Gemini/OpenAI. El paquete de entrenamiento es opcional y portable.
           </p>
           <a
             href="/bandeja?is_claim=true"

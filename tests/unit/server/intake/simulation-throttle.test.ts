@@ -14,6 +14,11 @@ const originalEnv = {
   SIMULATE_WORKER_DELAY_MS: process.env.SIMULATE_WORKER_DELAY_MS,
   SIMULATE_WORKER_MAX_DELAY_MS: process.env.SIMULATE_WORKER_MAX_DELAY_MS,
   SIMULATE_WORKER_LOOKBACK_MS: process.env.SIMULATE_WORKER_LOOKBACK_MS,
+  SIMULATE_WORKER_TURN_POLL_MS: process.env.SIMULATE_WORKER_TURN_POLL_MS,
+  SIMULATE_WORKER_TURN_MAX_WAIT_MS:
+    process.env.SIMULATE_WORKER_TURN_MAX_WAIT_MS,
+  SIMULATE_WORKER_MIN_GAP_MS: process.env.SIMULATE_WORKER_MIN_GAP_MS,
+  SIMULATE_WORKER_STALE_AFTER_MS: process.env.SIMULATE_WORKER_STALE_AFTER_MS,
 };
 
 describe("simulation worker throttle", () => {
@@ -22,9 +27,14 @@ describe("simulation worker throttle", () => {
     process.env.SIMULATE_WORKER_DELAY_MS = "5000";
     process.env.SIMULATE_WORKER_MAX_DELAY_MS = "12000";
     process.env.SIMULATE_WORKER_LOOKBACK_MS = "900000";
+    process.env.SIMULATE_WORKER_TURN_POLL_MS = "1000";
+    process.env.SIMULATE_WORKER_TURN_MAX_WAIT_MS = "5000";
+    process.env.SIMULATE_WORKER_MIN_GAP_MS = "0";
+    process.env.SIMULATE_WORKER_STALE_AFTER_MS = "600000";
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     for (const [key, value] of Object.entries(originalEnv)) {
       if (value === undefined) {
         delete process.env[key];
@@ -87,5 +97,54 @@ describe("simulation worker throttle", () => {
 
     expect(delayMs).toBe(0);
     expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("counts earlier pending simulated workers", async () => {
+    mockDbSelect.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([{ queued_count: 2 }]),
+      }),
+    });
+
+    const { getEarlierPendingSimulationCount } = await import(
+      "@/server/intake/simulation-throttle"
+    );
+
+    const blockers = await getEarlierPendingSimulationCount({
+      tenantId: "tenant-001",
+      caseId: "22222222-2222-4222-8222-222222222222",
+      caseCreatedAt: "2026-06-21T21:53:00.000Z",
+    });
+
+    expect(blockers).toBe(2);
+  });
+
+  it("waits until earlier pending simulated workers clear", async () => {
+    vi.useFakeTimers();
+    const counts = [2, 0];
+    mockDbSelect.mockImplementation(() => ({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([{ queued_count: counts.shift() ?? 0 }]),
+      }),
+    }));
+
+    const { waitForSimulationTurn } = await import(
+      "@/server/intake/simulation-throttle"
+    );
+
+    const promise = waitForSimulationTurn({
+      tenantId: "tenant-001",
+      caseId: "22222222-2222-4222-8222-222222222222",
+      caseCreatedAt: "2026-06-21T21:53:00.000Z",
+    });
+
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(promise).resolves.toMatchObject({
+      timedOut: false,
+      blockers: 0,
+    });
+    expect(mockDbSelect).toHaveBeenCalledTimes(2);
   });
 });

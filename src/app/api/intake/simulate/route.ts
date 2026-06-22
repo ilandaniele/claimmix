@@ -35,10 +35,7 @@ import {
   getClientIp,
 } from "@/lib/rate-limit/index";
 import type { ClaimType } from "@/lib/schemas/cases";
-import {
-  getSimulationWorkerDelayMs,
-  sleep,
-} from "@/server/intake/simulation-throttle";
+import { waitForSimulationTurn } from "@/server/intake/simulation-throttle";
 
 export const maxDuration = 180;
 
@@ -235,12 +232,23 @@ export async function POST(request: NextRequest): Promise<Response> {
   // after() keeps the Vercel function alive until the worker finishes.
   scheduleAfterResponse(async () => {
     try {
-      const delayMs = await getSimulationWorkerDelayMs({
+      const turn = await waitForSimulationTurn({
         tenantId: userRow.tenant_id,
         caseId,
         caseCreatedAt,
       });
-      if (delayMs > 0) await sleep(delayMs);
+      if (turn.timedOut) {
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            service: "claimmix",
+            msg: "intake.simulate.queue_wait_timed_out",
+            case_id: caseId,
+            blockers: turn.blockers,
+            waited_ms: turn.waitedMs,
+          })
+        );
+      }
 
       await runIntakeAgent({
         caseId,

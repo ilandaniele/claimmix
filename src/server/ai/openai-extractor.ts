@@ -54,74 +54,120 @@ function getModel(): string {
 }
 
 /**
- * Extract the first balanced JSON object from a model response.
+ * Extract balanced JSON object candidates from a model response.
  *
- * Gemini can occasionally wrap otherwise valid JSON in prose or markdown fences,
- * especially under rate pressure. We still validate with Zod after parsing, so
- * this only makes the parser tolerant to transport formatting noise.
+ * Gemini can occasionally wrap otherwise valid JSON in prose, markdown fences,
+ * or a small reasoning object before the final answer. Each candidate is still
+ * validated with Zod before use; this only makes parsing tolerant to formatting
+ * noise from the transport/model layer.
  */
-export function extractJsonObjectText(content: string | null): string | null {
-  if (!content) return null;
+export function extractJsonObjectTexts(content: string | null): string[] {
+  if (!content) return [];
   const trimmed = content.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return [];
 
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   const text = (fenced?.[1] ?? trimmed).trim();
+  const candidates: string[] = [];
 
-  let start = -1;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
+  for (let start = 0; start < text.length; start++) {
+    if (text[start] !== "{") continue;
 
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
 
-    if (start === -1) {
-      if (char === "{") {
-        start = i;
-        depth = 1;
+    for (let i = start; i < text.length; i++) {
+      const char = text[i];
+
+      if (escaped) {
+        escaped = false;
+        continue;
       }
-      continue;
-    }
 
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
 
-    if (char === "\\") {
-      escaped = true;
-      continue;
-    }
+      if (char === "\"") {
+        inString = !inString;
+        continue;
+      }
 
-    if (char === "\"") {
-      inString = !inString;
-      continue;
-    }
+      if (inString) continue;
 
-    if (inString) continue;
-
-    if (char === "{") depth++;
-    if (char === "}") {
-      depth--;
-      if (depth === 0) return text.slice(start, i + 1);
+      if (char === "{") depth++;
+      if (char === "}") {
+        depth--;
+        if (depth === 0) {
+          candidates.push(text.slice(start, i + 1));
+          start = i;
+          break;
+        }
+      }
     }
   }
 
-  return null;
+  return candidates;
 }
 
-function parseModelJson(content: string | null): Record<string, unknown> | null {
-  const jsonText = extractJsonObjectText(content);
-  if (!jsonText) return null;
-  try {
-    const parsed = JSON.parse(jsonText);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
+/**
+ * Extract the first balanced JSON object from a model response.
+ *
+ * Kept for callers/tests that only need a single JSON object. Production parse
+ * paths use extractJsonObjectTexts() and schema validation to choose the first
+ * usable extraction object.
+ */
+export function extractJsonObjectText(content: string | null): string | null {
+  return extractJsonObjectTexts(content)[0] ?? null;
+}
+
+function parseModelJsonCandidates(content: string | null): Record<string, unknown>[] {
+  return extractJsonObjectTexts(content).flatMap((jsonText) => {
+    try {
+      const parsed = JSON.parse(jsonText);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? [parsed as Record<string, unknown>]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function looksLikeExtractionCandidate(raw: Record<string, unknown>): boolean {
+  return [
+    "is_claim",
+    "confidence",
+    "extracted_fields",
+    "fields",
+    "missing_fields",
+    "severity",
+    "not_relevant_reason",
+    "summary",
+  ].some((key) => Object.prototype.hasOwnProperty.call(raw, key));
+}
+
+function withEmailDefaults(
+  rawCandidate: Record<string, unknown>,
+  model?: string
+): Record<string, unknown> {
+  const raw = { ...rawCandidate };
+  if (!raw.extraction_model) raw.extraction_model = model ?? getModel();
+  if (!Array.isArray(raw.fields)) raw.fields = [];
+  if (!raw.field_confidences) raw.field_confidences = {};
+  if (!Array.isArray(raw.missing_fields)) raw.missing_fields = [];
+  if (!Array.isArray(raw.fields_pending_confirmation)) raw.fields_pending_confirmation = [];
+  if (!Array.isArray(raw.possible_customer_matches)) raw.possible_customer_matches = [];
+  if (!Array.isArray(raw.possible_policy_matches)) raw.possible_policy_matches = [];
+  if (typeof raw.prompt_tokens !== "number") raw.prompt_tokens = 0;
+  if (typeof raw.completion_tokens !== "number") raw.completion_tokens = 0;
+  if (typeof raw.cost_usd !== "number") raw.cost_usd = 0;
+  if (typeof raw.summary !== "string") raw.summary = "";
+  if (typeof raw.suggested_reply !== "string") raw.suggested_reply = "";
+  if (!raw.not_relevant_reason) raw.not_relevant_reason = undefined;
+  return raw;
 }
 
 /**
@@ -132,15 +178,26 @@ function parseModelJson(content: string | null): Record<string, unknown> | null 
 export function parseResponse(content: string | null, claimType: ClaimType, model?: string): ExtractedClaim | null {
   if (!content) return null;
   try {
-    const raw = parseModelJson(content);
-    if (!raw) return null;
-    if (!raw.extraction_model) raw.extraction_model = model ?? getModel();
-    const parsed = ExtractedClaimSchema.safeParse(raw);
-    if (!parsed.success) {
-      console.error("[openai-extractor] Schema validation failed:", parsed.error.issues.length, "issues");
-      return null;
+    const candidates = parseModelJsonCandidates(content);
+    let issueCount = 0;
+    for (const rawCandidate of candidates) {
+      const raw = { ...rawCandidate };
+      if (!raw.extraction_model) raw.extraction_model = model ?? getModel();
+      const parsed = ExtractedClaimSchema.safeParse(raw);
+      if (parsed.success) return parsed.data;
+      issueCount += parsed.error.issues.length;
     }
-    return parsed.data;
+
+    if (candidates.length > 0) {
+      console.error(
+        "[openai-extractor] Schema validation failed:",
+        issueCount,
+        "issues across",
+        candidates.length,
+        "JSON candidate(s)"
+      );
+    }
+    return null;
   } catch {
     return null;
   }
@@ -505,33 +562,27 @@ export async function extractEmailClaim(
 export function parseEmailResponse(content: string | null, model?: string): ExtractedClaim | null {
   if (!content) return null;
   try {
-    const raw = parseModelJson(content);
-    if (!raw) return null;
-    if (!raw.extraction_model) raw.extraction_model = model ?? getModel();
-    // Ensure required array/object defaults.
-    if (!Array.isArray(raw.fields)) raw.fields = [];
-    if (!raw.field_confidences) raw.field_confidences = {};
-    if (!Array.isArray(raw.missing_fields)) raw.missing_fields = [];
-    if (!Array.isArray(raw.fields_pending_confirmation)) raw.fields_pending_confirmation = [];
-    if (!Array.isArray(raw.possible_customer_matches)) raw.possible_customer_matches = [];
-    if (!Array.isArray(raw.possible_policy_matches)) raw.possible_policy_matches = [];
-    if (typeof raw.prompt_tokens !== "number") raw.prompt_tokens = 0;
-    if (typeof raw.completion_tokens !== "number") raw.completion_tokens = 0;
-    if (typeof raw.cost_usd !== "number") raw.cost_usd = 0;
-    if (typeof raw.summary !== "string") raw.summary = "";
-    if (typeof raw.suggested_reply !== "string") raw.suggested_reply = "";
-    if (!raw.not_relevant_reason) raw.not_relevant_reason = undefined;
+    const candidates = parseModelJsonCandidates(content);
+    let issueCount = 0;
+    for (const rawCandidate of candidates) {
+      if (!looksLikeExtractionCandidate(rawCandidate)) continue;
+      const parsed = ExtractedClaimSchema.safeParse(
+        withEmailDefaults(rawCandidate, model)
+      );
+      if (parsed.success) return parsed.data;
+      issueCount += parsed.error.issues.length;
+    }
 
-    const parsed = ExtractedClaimSchema.safeParse(raw);
-    if (!parsed.success) {
+    if (candidates.length > 0) {
       console.error(
         "[openai-extractor] Email schema validation failed:",
-        parsed.error.issues.length,
-        "issues"
+        issueCount,
+        "issues across",
+        candidates.length,
+        "JSON candidate(s)"
       );
-      return null;
     }
-    return parsed.data;
+    return null;
   } catch {
     return null;
   }

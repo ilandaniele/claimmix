@@ -157,7 +157,7 @@ jobs:
           MOCK_AI: "true"
 
   # ── 5. Integration tests ─────────────────────────────────────────────────────
-  # Runs when INTEGRATION_ENABLED secret is set; skipped otherwise (no live Supabase).
+  # Runs when INTEGRATION_ENABLED secret is set; skipped otherwise (no live Neon DB).
   # To enable: set INTEGRATION_ENABLED=true in GitHub Actions secrets.
   integration-tests:
     name: Integration tests
@@ -204,8 +204,8 @@ jobs:
           INTEGRATION_ENABLED: ${{ secrets.INTEGRATION_ENABLED || 'false' }}
 
   # ── 6. E2E tests ─────────────────────────────────────────────────────────────
-  # Requires a live Supabase project (secrets). Skipped when not configured.
-  # continue-on-error: true — E2E is informational in PRs without live Supabase.
+  # Requires a live Neon DB (secrets). Skipped when not configured.
+  # continue-on-error: true — E2E is informational in PRs without live Neon secrets.
   e2e-tests:
     name: E2E tests (Playwright)
     runs-on: ubuntu-latest
@@ -257,6 +257,7 @@ jobs:
         with:
           name: playwright-report
           path: playwright-report/
+          if-no-files-found: ignore
           retention-days: 7
 
   # ── 7. Security audit ────────────────────────────────────────────────────────

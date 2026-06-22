@@ -15,7 +15,8 @@ import { db } from "@/lib/db";
 import { eq, and, gte, lt, count, sql } from "drizzle-orm";
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
+import { connection } from "next/server";
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
@@ -77,6 +78,7 @@ function normalizeUsage(row?: {
 
 async function fetchMetricas(): Promise<MetricasData | null> {
   try {
+    await connection();
     const session = await getSessionContext();
     if (!session?.user) return null;
 
@@ -280,6 +282,7 @@ async function fetchMetricas(): Promise<MetricasData | null> {
       period: { start: monthStart, end: monthEnd },
     };
   } catch (e) {
+    unstable_rethrow(e);
     if (e instanceof AppError) throw e;
     console.error("[metricas] fetch error:", e instanceof Error ? e.name : "unknown");
     return null;

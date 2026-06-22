@@ -227,6 +227,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
     [t, onDeleteMany, selectedIds, allSelected, someSelected, toggleAll, toggleOne]
   );
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table intentionally opts out of React Compiler memoization.
   const table = useReactTable({
     data: cases,
     columns,

@@ -16,6 +16,9 @@ function resolveBaseURL(): string {
   return "http://localhost:3000";
 }
 
+const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -39,14 +42,17 @@ export const auth = betterAuth({
     // Parity with the previous Neon setup (admin.createUser email_confirm: true).
     requireEmailVerification: false,
   },
-  socialProviders: {
-    google: {
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-      prompt: "select_account",
-      accessType: "offline",
-    },
-  },
+  socialProviders:
+    googleClientId && googleClientSecret
+      ? {
+          google: {
+            clientId: googleClientId,
+            clientSecret: googleClientSecret,
+            prompt: "select_account",
+            accessType: "offline",
+          },
+        }
+      : {},
   session: {
     // Signed cookie cache: avoids a Neon round-trip on every getSession call.
     cookieCache: { enabled: true, maxAge: 300 },

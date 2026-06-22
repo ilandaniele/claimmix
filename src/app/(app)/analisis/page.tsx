@@ -11,7 +11,8 @@ import { db } from "@/lib/db";
 import { eq, and, gte, count } from "drizzle-orm";
 import { cases, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
+import { connection } from "next/server";
 
 // ── Status and type labels ─────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ interface AnalisisData {
 
 async function fetchAnalisis(): Promise<AnalisisData | null> {
   try {
+    await connection();
     const session = await getSessionContext();
     if (!session?.user) return null;
 
@@ -95,6 +97,7 @@ async function fetchAnalisis(): Promise<AnalisisData | null> {
       recent_30_days: recent30Row?.n ?? 0,
     };
   } catch (e) {
+    unstable_rethrow(e);
     if (e instanceof AppError) throw e;
     console.error("[analisis] fetch error:", e instanceof Error ? e.name : "unknown");
     return null;

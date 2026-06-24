@@ -248,7 +248,31 @@ describe("POST /api/cases/:id/re-analyze", () => {
     expect(mockRunIntakeAgent).not.toHaveBeenCalled();
   });
 
-  it("does not schedule the agent for non-relevant terminal cases", async () => {
+  it("allows admin to re-analyze no_relevante cases (provider-error recovery)", async () => {
+    // Admin is the default in beforeEach (role: "admin")
+    mockDb.select.mockReturnValue(
+      makeSelectChain([{ id: CASE_ID, status: "no_relevante" }])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(202);
+    await expect(res.json()).resolves.toMatchObject({
+      case_id: CASE_ID,
+      status: "procesando",
+    });
+    expect(mockDb.update).toHaveBeenCalledTimes(1);
+    expect(mockAfter).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not allow non-admin analysts to re-analyze no_relevante cases", async () => {
+    mockRequireRole.mockResolvedValue({
+      db: mockDb,
+      user: { id: USER_ID },
+      userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "analyst" },
+    });
     mockDb.select.mockReturnValue(
       makeSelectChain([{ id: CASE_ID, status: "no_relevante" }])
     );

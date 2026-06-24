@@ -45,11 +45,11 @@ describe("SimulateModal", () => {
     expect(screen.getByText("Simular nuevo siniestro")).toBeInTheDocument();
   });
 
-  it("renders all 20 scenarios in the dropdown", () => {
+  it("renders all scenarios in the dropdown", () => {
     render(<SimulateModal {...defaultProps} />);
     const select = screen.getByLabelText("Escenario");
     const options = select.querySelectorAll("option");
-    expect(options).toHaveLength(20);
+    expect(options).toHaveLength(SCENARIOS.length);
   });
 
   it("shows first scenario selected by default", () => {

@@ -78,7 +78,19 @@ export function ProviderUsagePanel() {
   }
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    fetch("/api/admin/provider-usage", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("load_failed"))))
+      .then((body: UsageData) => {
+        if (!cancelled) { setData(body); setError(""); }
+      })
+      .catch(() => {
+        if (!cancelled) setError("No se pudieron cargar las estadísticas de uso.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   if (loading) return <p className="text-sm text-slate-500">Cargando estadísticas...</p>;

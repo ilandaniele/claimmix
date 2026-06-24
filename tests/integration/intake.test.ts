@@ -349,21 +349,29 @@ describe("POST /api/intake/simulate", () => {
 // ── Scenarios data validation ─────────────────────────────────────────────────
 
 describe("simulation scenarios", () => {
-  it("has exactly 20 scenarios", async () => {
+  it("has 75 scenarios", async () => {
     const { SCENARIOS } = await import("@/server/intake/scenarios");
-    expect(SCENARIOS).toHaveLength(20);
+    expect(SCENARIOS).toHaveLength(75);
   });
 
-  it("has 5 scenarios for each claim type", async () => {
+  it("has the expected scenario counts per claim type", async () => {
     const { SCENARIOS } = await import("@/server/intake/scenarios");
     const counts = SCENARIOS.reduce<Record<string, number>>((acc, s) => {
       acc[s.case_type] = (acc[s.case_type] ?? 0) + 1;
       return acc;
     }, {});
-    expect(counts["choque"]).toBe(5);
-    expect(counts["robo"]).toBe(5);
-    expect(counts["granizo"]).toBe(5);
-    expect(counts["incendio"]).toBe(5);
+    // Core types (includes edge/partial scenarios with the same type)
+    expect(counts["choque"]).toBe(15);
+    expect(counts["robo"]).toBe(13);
+    expect(counts["granizo"]).toBe(11);
+    expect(counts["incendio"]).toBe(11);
+    // New claim types (5 each)
+    expect(counts["cristales"]).toBe(5);
+    expect(counts["rc"]).toBe(5);
+    expect(counts["robo_contenido"]).toBe(5);
+    expect(counts["accidente_personal"]).toBe(5);
+    // Non-relevant / other
+    expect(counts["other"]).toBe(5);
   });
 
   it("all scenarios have unique IDs", async () => {

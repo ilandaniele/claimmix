@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Brain, CheckCircle2, ListChecks, Settings2, SlidersHorizontal } from "lucide-react";
+import { Activity, Brain, CheckCircle2, ListChecks, Settings2, SlidersHorizontal } from "lucide-react";
 
 import { AiProviderPanel } from "../configuracion/AiProviderPanel";
 import { PromptRulesPanel } from "../configuracion/PromptRulesPanel";
@@ -9,8 +9,9 @@ import { CustomFieldsPanel } from "./CustomFieldsPanel";
 import { TrainingExamplesPanel } from "./TrainingExamplesPanel";
 import { FineTuneJobsPanel } from "./FineTuneJobsPanel";
 import { AgentExportPanel } from "./AgentExportPanel";
+import { ProviderUsagePanel } from "./ProviderUsagePanel";
 
-type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento";
+type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento" | "uso";
 
 const TABS = [
   { id: "modelos", label: "Modelos", icon: Settings2 },
@@ -18,6 +19,7 @@ const TABS = [
   { id: "reglas", label: "Reglas de prompt", icon: ListChecks },
   { id: "ejemplos", label: "Ejemplos aprobados", icon: CheckCircle2 },
   { id: "entrenamiento", label: "Fine-tuning opcional", icon: Brain },
+  { id: "uso", label: "Uso del proveedor", icon: Activity },
 ] as const;
 
 export function AgentConsoleClient({ role }: { role: string }) {
@@ -55,6 +57,7 @@ export function AgentConsoleClient({ role }: { role: string }) {
         {tab === "reglas" && <PromptRulesPanel />}
         {tab === "ejemplos" && <TrainingExamplesPanel />}
         {tab === "entrenamiento" && <FineTuneJobsPanel />}
+        {tab === "uso" && <ProviderUsagePanel />}
       </div>
     </div>
   );

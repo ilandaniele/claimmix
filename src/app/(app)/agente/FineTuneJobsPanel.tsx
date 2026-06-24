@@ -24,6 +24,34 @@ type SettingsResponse = {
   provider: ProviderId;
 };
 
+// ─── Vertex AI types ──────────────────────────────────────────────────────────
+
+type VertexJob = {
+  id: string;
+  status: string;
+  base_model: string;
+  training_example_count: number;
+  validation_example_count: number | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  activated_at: string | null;
+  vertex_tuning_job_name: string | null;
+  vertex_tuned_model_endpoint: string | null;
+};
+
+type VertexConfig = {
+  enabled: boolean;
+  project: string | null;
+  location: string | null;
+  base_model: string | null;
+  bucket: string | null;
+  min_examples: number;
+};
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
 async function fetchJobs(): Promise<FineTuneJob[]> {
   const res = await fetch("/api/admin/fine-tuning/jobs", { cache: "no-store" });
   if (!res.ok) throw new Error("load_failed");
@@ -42,6 +70,250 @@ async function readErrorMessage(res: Response, fallback: string): Promise<string
   const body = await res.json().catch(() => null);
   return body?.error?.message ?? body?.message ?? fallback;
 }
+
+// ─── Vertex AI panel ──────────────────────────────────────────────────────────
+
+function VertexAiSection() {
+  const [jobs, setJobs] = useState<VertexJob[]>([]);
+  const [config, setConfig] = useState<VertexConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  async function reload() {
+    const res = await fetch("/api/admin/fine-tuning/vertex", { cache: "no-store" });
+    if (!res.ok) throw new Error("load_failed");
+    const body = await res.json();
+    setJobs(body.jobs ?? []);
+    setConfig(body.config ?? null);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/fine-tuning/vertex", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((body) => {
+        if (!cancelled) {
+          setJobs(body.jobs ?? []);
+          setConfig(body.config ?? null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError("No se pudo cargar Vertex AI.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function vtxPost(
+    body: Record<string, unknown>,
+    label: string,
+    fallback: string
+  ) {
+    setBusy(label);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/fine-tuning/vertex", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res, fallback));
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : fallback);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function vtxJobPost(
+    jobId: string,
+    actionName: "activate" | "rollback",
+    fallback: string
+  ) {
+    setBusy(`${jobId}:${actionName}`);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/fine-tuning/vertex/${jobId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: actionName }),
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res, fallback));
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : fallback);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (loading) return <p className="text-xs text-slate-500">Cargando Vertex AI...</p>;
+
+  const enabled = config?.enabled ?? false;
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+          Vertex AI Gemini — fine-tuning supervisado
+        </p>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Entrenamiento real vía Google Cloud. Requiere{" "}
+          <code className="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-800">
+            VERTEX_AI_TUNING_ENABLED=true
+          </code>{" "}
+          y configuración de GCP.
+        </p>
+      </div>
+
+      {!enabled && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          Vertex AI no está habilitado. Configurá las variables de entorno en el servidor para activarlo.
+        </div>
+      )}
+
+      {enabled && config && (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-950/30 dark:text-slate-300">
+          <span className="font-medium">Proyecto:</span> {config.project ?? "—"}{" "}
+          <span className="ml-3 font-medium">Región:</span> {config.location ?? "—"}{" "}
+          <span className="ml-3 font-medium">Modelo base:</span> {config.base_model ?? "—"}{" "}
+          <span className="ml-3 font-medium">Mín. ejemplos:</span> {config.min_examples}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy !== null || !enabled}
+          onClick={() => vtxPost({ action: "draft" }, "draft", "No se pudo crear el borrador.")}
+          className="rounded-md bg-violet-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+        >
+          Crear borrador
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/50 dark:text-red-200">
+          {error}
+        </div>
+      )}
+
+      {jobs.length === 0 ? (
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          No hay trabajos de Vertex AI.{" "}
+          {enabled ? "Creá un borrador para comenzar." : "Habilitá Vertex AI primero."}
+        </p>
+      ) : (
+        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+          {jobs.map((job) => {
+            const isStartable = ["draft", "failed"].includes(job.status);
+            const isSyncable = !!job.vertex_tuning_job_name;
+            const isActivatable = job.status === "approved" && !!job.vertex_tuned_model_endpoint;
+            return (
+              <li key={job.id} className="px-4 py-3 dark:bg-slate-950/20">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                        {job.id.slice(0, 8)}
+                      </span>
+                      <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs text-violet-700 dark:bg-violet-950/60 dark:text-violet-200">
+                        Vertex AI
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                        {job.status}
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {job.training_example_count} ejemplos
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="font-mono">{job.base_model}</span>
+                      {job.vertex_tuning_job_name && (
+                        <span className="ml-2 font-mono text-slate-400 dark:text-slate-500">
+                          {job.vertex_tuning_job_name.split("/").at(-1)}
+                        </span>
+                      )}
+                    </div>
+                    {job.vertex_tuned_model_endpoint && (
+                      <p className="mt-0.5 font-mono text-xs text-emerald-600 dark:text-emerald-400">
+                        {job.vertex_tuned_model_endpoint}
+                      </p>
+                    )}
+                    {job.activated_at && (
+                      <p className="mt-0.5 text-xs text-emerald-600 dark:text-emerald-400">
+                        Activo desde {new Date(job.activated_at).toLocaleDateString()}
+                      </p>
+                    )}
+                    {job.error_message && (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-300">{job.error_message}</p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={busy !== null || !enabled || !isStartable}
+                      onClick={() =>
+                        vtxPost(
+                          { action: "start", jobId: job.id },
+                          `${job.id}:start`,
+                          "No se pudo iniciar el trabajo."
+                        )
+                      }
+                      className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                    >
+                      Iniciar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy !== null || !enabled || !isSyncable}
+                      onClick={() =>
+                        vtxPost(
+                          { action: "sync", jobId: job.id },
+                          `${job.id}:sync`,
+                          "No se pudo sincronizar."
+                        )
+                      }
+                      className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                    >
+                      Sincronizar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy !== null || !enabled || !isActivatable}
+                      onClick={() =>
+                        vtxJobPost(job.id, "activate", "No se pudo activar el modelo.")
+                      }
+                      className="rounded-md border border-emerald-300 px-2.5 py-1 text-xs text-emerald-700 disabled:opacity-50 dark:border-emerald-700 dark:text-emerald-300"
+                    >
+                      Activar modelo
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy !== null || !enabled}
+                      onClick={() =>
+                        vtxJobPost(job.id, "rollback", "No se pudo hacer rollback.")
+                      }
+                      className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                    >
+                      Rollback
+                    </button>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ─── Main panel ───────────────────────────────────────────────────────────────
 
 export function FineTuneJobsPanel() {
   const [jobs, setJobs] = useState<FineTuneJob[]>([]);
@@ -152,155 +424,164 @@ export function FineTuneJobsPanel() {
   if (loading) return <p className="text-sm text-slate-500">Cargando...</p>;
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-1">
-        <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
-          Entrenamiento del agente
-        </p>
+    <div className="space-y-6">
+      {/* ── Context-pack / OpenAI section ── */}
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+            Entrenamiento del agente
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Gemini usa ejemplos aprobados, reglas y memoria como contexto activo sin costo de fine-tuning externo. OpenAI queda disponible solo si lo elegis como proveedor.
+          </p>
+        </div>
+
+        {activeProvider === "gemini" && (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+            Proveedor activo: Gemini. Crear trabajo arma un paquete contextual JSONL para evaluar, respaldar y reutilizar la memoria del agente.
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={createDraft}
+            disabled={busy !== null}
+            className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+          >
+            {activeProvider === "gemini" ? "Crear paquete Gemini" : "Crear trabajo OpenAI"}
+          </button>
+          <button
+            type="button"
+            onClick={rollback}
+            disabled={busy !== null || !openAiSelected}
+            className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+          >
+            Rollback
+          </button>
+        </div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Gemini usa ejemplos aprobados, reglas y memoria como contexto activo sin costo de fine-tuning externo. OpenAI queda disponible solo si lo elegis como proveedor.
+          Para crear un paquete primero necesitas ejemplos aprobados. Gemini no llama APIs de fine-tuning; el JSONL exportado documenta los ejemplos que ya alimentan al agente.
         </p>
-      </div>
 
-      {activeProvider === "gemini" && (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-          Proveedor activo: Gemini. Crear trabajo arma un paquete contextual JSONL para evaluar, respaldar y reutilizar la memoria del agente.
-        </div>
-      )}
+        {error && (
+          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/50 dark:text-red-200">
+            {error}
+          </div>
+        )}
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={createDraft}
-          disabled={busy !== null}
-          className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
-        >
-          {activeProvider === "gemini" ? "Crear paquete Gemini" : "Crear trabajo OpenAI"}
-        </button>
-        <button
-          type="button"
-          onClick={rollback}
-          disabled={busy !== null || !openAiSelected}
-          className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-        >
-          Rollback
-        </button>
-      </div>
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Para crear un paquete primero necesitas ejemplos aprobados. Gemini no llama APIs de fine-tuning; el JSONL exportado documenta los ejemplos que ya alimentan al agente.
-      </p>
-
-      {error && (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/50 dark:text-red-200">
-          {error}
-        </div>
-      )}
-
-      {jobs.length === 0 ? (
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
-          <p className="font-medium text-slate-800 dark:text-slate-100">
-            No hay paquetes de entrenamiento.
-          </p>
-          <p className="mt-1">
-            Los ejemplos aprobados ya estan disponibles como contexto del agente. Crear paquete genera un JSONL portable para Gemini.
-          </p>
-        </div>
-      ) : (
-        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
-          {jobs.map((job) => (
-            <li key={job.id} className="px-4 py-3 dark:bg-slate-950/20">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{job.id.slice(0, 8)}</span>
-                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200">
-                      {job.provider === "gemini" ? "Gemini context" : "OpenAI fine-tune"}
-                    </span>
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      {job.status}
-                    </span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">{job.training_example_count} ejemplos</span>
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="font-mono">{job.base_model}</span>
-                    {job.fine_tuned_model_id && (
-                      <span className="ml-2 font-mono">{job.fine_tuned_model_id}</span>
+        {jobs.length === 0 ? (
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
+            <p className="font-medium text-slate-800 dark:text-slate-100">
+              No hay paquetes de entrenamiento.
+            </p>
+            <p className="mt-1">
+              Los ejemplos aprobados ya estan disponibles como contexto del agente. Crear paquete genera un JSONL portable para Gemini.
+            </p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+            {jobs.map((job) => (
+              <li key={job.id} className="px-4 py-3 dark:bg-slate-950/20">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{job.id.slice(0, 8)}</span>
+                      <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200">
+                        {job.provider === "gemini" ? "Gemini context" : "OpenAI fine-tune"}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                        {job.status}
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{job.training_example_count} ejemplos</span>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="font-mono">{job.base_model}</span>
+                      {job.fine_tuned_model_id && (
+                        <span className="ml-2 font-mono">{job.fine_tuned_model_id}</span>
+                      )}
+                    </div>
+                    {job.error_message && (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-300">{job.error_message}</p>
                     )}
                   </div>
-                  {job.error_message && (
-                    <p className="mt-1 text-xs text-red-600 dark:text-red-300">{job.error_message}</p>
-                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {job.provider === "gemini" ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => action(job, "start")}
+                          disabled={busy !== null}
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                        >
+                          Actualizar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => action(job, "activate")}
+                          disabled={busy !== null || activeProvider === "gemini"}
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                        >
+                          Activar Gemini
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => action(job, "start")}
+                          disabled={busy !== null || !openAiSelected || !["draft", "failed"].includes(job.status)}
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                        >
+                          Iniciar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => action(job, "sync")}
+                          disabled={busy !== null || !openAiSelected || !job.openai_fine_tuning_job_id}
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                        >
+                          Sincronizar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => action(job, "approve")}
+                          disabled={busy !== null || !openAiSelected || job.status !== "eval_pending" || !job.fine_tuned_model_id}
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                        >
+                          Aprobar eval
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => action(job, "activate")}
+                          disabled={busy !== null || !openAiSelected || job.status !== "approved" || !job.fine_tuned_model_id}
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                        >
+                          Activar
+                        </button>
+                      </>
+                    )}
+                    {job.training_file_id && (
+                      <a
+                        href={`/api/admin/fine-tuning/jobs/${job.id}/export?kind=train`}
+                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 dark:border-slate-700 dark:text-slate-200"
+                      >
+                        JSONL
+                      </a>
+                    )}
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {job.provider === "gemini" ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => action(job, "start")}
-                        disabled={busy !== null}
-                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                      >
-                        Actualizar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => action(job, "activate")}
-                        disabled={busy !== null || activeProvider === "gemini"}
-                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                      >
-                        Activar Gemini
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => action(job, "start")}
-                        disabled={busy !== null || !openAiSelected || !["draft", "failed"].includes(job.status)}
-                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                      >
-                        Iniciar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => action(job, "sync")}
-                        disabled={busy !== null || !openAiSelected || !job.openai_fine_tuning_job_id}
-                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                      >
-                        Sincronizar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => action(job, "approve")}
-                        disabled={busy !== null || !openAiSelected || job.status !== "eval_pending" || !job.fine_tuned_model_id}
-                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                      >
-                        Aprobar eval
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => action(job, "activate")}
-                        disabled={busy !== null || !openAiSelected || job.status !== "approved" || !job.fine_tuned_model_id}
-                        className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                      >
-                        Activar
-                      </button>
-                    </>
-                  )}
-                  {job.training_file_id && (
-                    <a
-                      href={`/api/admin/fine-tuning/jobs/${job.id}/export?kind=train`}
-                      className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 dark:border-slate-700 dark:text-slate-200"
-                    >
-                      JSONL
-                    </a>
-                  )}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* ── Divider ── */}
+      <div className="border-t border-slate-200 dark:border-slate-700" />
+
+      {/* ── Vertex AI section ── */}
+      <VertexAiSection />
     </div>
   );
 }

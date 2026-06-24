@@ -95,12 +95,18 @@ export async function POST(
   if (!caseRow) return err(new AppError("NOT_FOUND"));
   const statusParsed = CaseStatusSchema.safeParse(caseRow.status);
   if (statusParsed.success && isTerminalStatus(statusParsed.data)) {
-    return err(
-      new AppError(
-        "FSM_INVALID_TRANSITION",
-        "No se puede re-analizar un caso en estado terminal."
-      )
-    );
+    // Admins can re-analyze cases stuck in no_relevante due to provider errors.
+    // Regular analysts cannot re-open terminal cases.
+    const isAdmin = userRow.role === "admin";
+    const isNoRelevante = statusParsed.data === "no_relevante";
+    if (!isAdmin || !isNoRelevante) {
+      return err(
+        new AppError(
+          "FSM_INVALID_TRANSITION",
+          "No se puede re-analizar un caso en estado terminal. Los administradores pueden re-analizar casos 'no_relevante' atascados por errores técnicos."
+        )
+      );
+    }
   }
 
   // ── Budget check ──────────────────────────────────────────────────────────────

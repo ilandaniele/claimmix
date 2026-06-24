@@ -238,3 +238,28 @@ export const userAiSettings = pgTable("user_ai_settings", {
     .defaultNow()
     .notNull(),
 });
+
+/**
+ * Provider usage event log — tracks every AI call made by the app per tenant.
+ * Used for quota visibility, rate-limit error tracking, and latency monitoring.
+ * No PII is stored here — only aggregate metrics and error codes.
+ */
+export const providerUsageEvents = pgTable("provider_usage_events", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenant_id: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(), // "gemini" | "openai" | "mock"
+  model: text("model").notNull(),
+  operation: text("operation").notNull().default("extraction"), // "extraction" | "email_extraction" | "simulate"
+  status: text("status").notNull(), // "success" | "error" | "rate_limited" | "quota_exceeded" | "invalid_json" | "timeout"
+  latency_ms: integer("latency_ms"),
+  error_code: text("error_code"), // HTTP status or error name
+  error_message: text("error_message"),
+  retry_count: integer("retry_count").notNull().default(0),
+  prompt_tokens: integer("prompt_tokens").notNull().default(0),
+  completion_tokens: integer("completion_tokens").notNull().default(0),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+});

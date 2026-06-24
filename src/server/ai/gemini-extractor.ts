@@ -26,6 +26,7 @@ import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { ClaimType } from "@/lib/schemas/cases";
 import { buildSystemPrompt, buildUserMessage, buildEmailClaimPrompt } from "./prompt";
 import { recordUsage } from "./budget";
+import { logProviderUsage } from "./provider-usage";
 import {
   parseResponse,
   parseEmailResponse,
@@ -263,10 +264,23 @@ export async function extractEmailClaimGemini(
   let totalCompletionTokens = 0;
 
   // ── Attempt 1 ─────────────────────────────────────────────────────────────
+  const t1 = Date.now();
   try {
     const { text, usage } = await callGemini(systemPrompt, userMessage, tenantKey, model);
+    const latency1 = Date.now() - t1;
     totalPromptTokens = usage.promptTokens;
     totalCompletionTokens = usage.completionTokens;
+
+    result = parseEmailResponse(text, model);
+
+    const status1 = result ? "success" : "invalid_json";
+    if (tenantId) {
+      await logProviderUsage({
+        tenantId, provider: "gemini", model, operation: "email_extraction",
+        status: status1, latencyMs: latency1,
+        promptTokens: usage.promptTokens, completionTokens: usage.completionTokens,
+      });
+    }
 
     console.info(
       JSON.stringify({
@@ -277,14 +291,24 @@ export async function extractEmailClaimGemini(
         case_id: logCaseId,
         tenant_id: logTenantId,
         model,
+        status: status1,
+        latency_ms: latency1,
         prompt_tokens: totalPromptTokens,
         completion_tokens: totalCompletionTokens,
       })
     );
-
-    result = parseEmailResponse(text, model);
   } catch (e) {
+    const latency1 = Date.now() - t1;
     const meta = errMeta(e);
+    const errStatus = meta.status === 429 ? "rate_limited" : "error";
+    if (tenantId) {
+      await logProviderUsage({
+        tenantId, provider: "gemini", model, operation: "email_extraction",
+        status: errStatus, latencyMs: latency1,
+        errorCode: String(meta.status ?? meta.code ?? "error"),
+        errorMessage: e instanceof Error ? e.message.slice(0, 500) : undefined,
+      });
+    }
     console.error(
       JSON.stringify({
         level: "error",
@@ -305,10 +329,24 @@ export async function extractEmailClaimGemini(
       systemPrompt +
       "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
 
+    const t2 = Date.now();
     try {
       const { text, usage } = await callGemini(stricterSystem, userMessage, tenantKey, model);
+      const latency2 = Date.now() - t2;
       totalPromptTokens += usage.promptTokens;
       totalCompletionTokens += usage.completionTokens;
+
+      result = parseEmailResponse(text, model);
+
+      const status2 = result ? "success" : "invalid_json";
+      if (tenantId) {
+        await logProviderUsage({
+          tenantId, provider: "gemini", model, operation: "email_extraction",
+          status: status2, latencyMs: latency2,
+          promptTokens: usage.promptTokens, completionTokens: usage.completionTokens,
+          retryCount: 1,
+        });
+      }
 
       console.info(
         JSON.stringify({
@@ -318,14 +356,25 @@ export async function extractEmailClaimGemini(
           provider: "gemini",
           case_id: logCaseId,
           model,
+          status: status2,
+          latency_ms: latency2,
           prompt_tokens: usage.promptTokens,
           completion_tokens: usage.completionTokens,
         })
       );
-
-      result = parseEmailResponse(text, model);
     } catch (e) {
+      const latency2 = Date.now() - t2;
       const meta = errMeta(e);
+      const errStatus2 = meta.status === 429 ? "rate_limited" : "error";
+      if (tenantId) {
+        await logProviderUsage({
+          tenantId, provider: "gemini", model, operation: "email_extraction",
+          status: errStatus2, latencyMs: latency2,
+          errorCode: String(meta.status ?? meta.code ?? "error"),
+          errorMessage: e instanceof Error ? e.message.slice(0, 500) : undefined,
+          retryCount: 1,
+        });
+      }
       console.error(
         JSON.stringify({
           level: "error",
@@ -360,17 +409,24 @@ export async function extractEmailClaimGemini(
     };
   }
 
-  // Both attempts failed — safe default (LLM02 containment), same as OpenAI path.
-  console.warn(
+  // Both attempts failed — throw instead of returning is_claim:false safe default.
+  // Returning buildSafeDefault() (is_claim:false) would incorrectly mark cases as
+  // no_relevante due to a provider/network/quota error, not a genuine classification.
+  // The caller (runEmailExtractionWorker) catches GeminiExtractionError and sets
+  // the case to 'escalado' so it can be re-analyzed once the provider recovers.
+  console.error(
     JSON.stringify({
-      level: "warn",
+      level: "error",
       service: "claimmix",
-      msg: "ai.email_extraction.both_attempts_failed.safe_default",
+      msg: "ai.email_extraction.both_attempts_failed.provider_error",
       provider: "gemini",
       case_id: logCaseId,
     })
   );
-  return { ...buildSafeDefault(), extraction_model: model };
+  throw new GeminiExtractionError(
+    `Gemini extraction technical failure after 2 attempts for case ${logCaseId}`,
+    { provider_error: true, case_id: logCaseId }
+  );
 }
 
 // ── Simulate-flow extractor ────────────────────────────────────────────────────

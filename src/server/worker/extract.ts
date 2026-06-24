@@ -53,6 +53,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { analyzeGaps } from "@/server/ai/gap-analysis";
 import { checkBudget, recordUsage } from "@/server/ai/budget";
 import { ClaimAgentError, runClaimTextAgent, runEmailClaimAgent } from "@/server/ai/claim-agent";
+import { GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
@@ -909,6 +910,35 @@ export async function runEmailExtractionWorker(
     );
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
+
+    // GeminiExtractionError = provider/network/quota failure, NOT a genuine
+    // is_claim=false classification. Set escalado so it can be re-analyzed once
+    // the provider recovers. Do not let the case become no_relevante by accident.
+    if (err instanceof GeminiExtractionError) {
+      try {
+        await db
+          .update(cases)
+          .set({ status: "escalado", updated_at: new Date().toISOString() })
+          .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+
+        await writeAuditLog({
+          tenant_id: tenantId,
+          actor_id: userId,
+          event_type: AuditEvent.AI_EXTRACTED,
+          target_type: "case",
+          target_id: caseId,
+          payload: {
+            new_status: "escalado",
+            reason: "provider_error",
+            error_code: "gemini_extraction_failed",
+            error_name: errName,
+          },
+        });
+      } catch {
+        // best-effort escalation — don't rethrow
+      }
+    }
+
     console.error(
       JSON.stringify({
         level: "error",
@@ -916,6 +946,7 @@ export async function runEmailExtractionWorker(
         msg: "email_worker.unhandled_error",
         case_id: caseId,
         error_name: errName,
+        is_provider_error: err instanceof GeminiExtractionError,
       })
     );
     // Do not rethrow — fire-and-forget callers must not crash.

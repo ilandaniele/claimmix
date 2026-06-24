@@ -114,6 +114,10 @@ function extractDeclaredDamage(text: string, claimType: ClaimType): ExtractedFie
     robo: ["robo", "sustracción", "robado", "faltaba", "faltaba", "desapareció"],
     granizo: ["granizo", "granizos", "granizada", "abollon", "abollón"],
     incendio: ["incendio", "fuego", "quemado", "carbonizado", "humo"],
+    cristales: ["vidrio", "cristal", "parabrisas", "luneta", "ventanilla", "roto", "fisura"],
+    rc: ["tercero", "tercer", "responsabilidad", "otro vehículo", "conductor", "daños a"],
+    robo_contenido: ["robaron", "me llevaron", "sustrajeron", "bolso", "notebook", "cámara", "objetos"],
+    accidente_personal: ["fractura", "lesión", "herida", "hospital", "guardia", "médico", "yeso"],
     other: [],
   };
 
@@ -292,6 +296,11 @@ const EXTRACTORS: Record<ClaimType, (text: string) => ExtractedField[]> = {
   robo: extractRobo,
   granizo: extractGranizo,
   incendio: extractIncendio,
+  // New types: use the generic extractor which still captures date, location, plate, damage.
+  cristales: extractOther,
+  rc: extractOther,
+  robo_contenido: extractOther,
+  accidente_personal: extractOther,
   other: extractOther,
 };
 

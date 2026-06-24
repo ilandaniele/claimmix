@@ -39,6 +39,22 @@ export const REQUIRED_DOCS_CONFIG: Record<ClaimType, readonly RequiredDoc[]> = {
     { doc_key: "fotos_danos", label_es: "Fotos de los daños por incendio", required: true },
     { doc_key: "denuncia_policial", label_es: "Denuncia policial", required: true },
   ],
+  cristales: [
+    { doc_key: "fotos_danos", label_es: "Fotos del vidrio dañado", required: true },
+    { doc_key: "denuncia_policial", label_es: "Denuncia policial (si aplica)", required: false },
+  ],
+  rc: [
+    { doc_key: "fotos_danos", label_es: "Fotos de los daños a tercero", required: true },
+    { doc_key: "denuncia_policial", label_es: "Denuncia policial o acta policial", required: true },
+    { doc_key: "licencia_conducir", label_es: "Licencia de conducir", required: true },
+  ],
+  robo_contenido: [
+    { doc_key: "denuncia_policial", label_es: "Denuncia policial", required: true },
+    { doc_key: "fotos_danos", label_es: "Fotos del interior del vehículo", required: true },
+  ],
+  accidente_personal: [
+    { doc_key: "certificado_medico", label_es: "Certificado médico / alta hospitalaria", required: true },
+  ],
   // "other" claim types have no pre-configured required docs — reviewed case by case.
   other: [],
 };

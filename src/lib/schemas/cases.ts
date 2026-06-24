@@ -12,6 +12,10 @@ export const ClaimTypeSchema = z.enum([
   "robo",
   "granizo",
   "incendio",
+  "cristales",        // windshield / glass damage
+  "rc",               // responsabilidad civil — third-party liability
+  "robo_contenido",   // theft of belongings from inside the vehicle
+  "accidente_personal", // personal injury (occupant, pedestrian)
   "other",
 ]);
 export type ClaimType = z.infer<typeof ClaimTypeSchema>;

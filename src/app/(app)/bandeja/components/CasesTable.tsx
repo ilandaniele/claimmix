@@ -61,6 +61,10 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
     robo: t("type.robo"),
     granizo: t("type.granizo"),
     incendio: t("type.incendio"),
+    cristales: t("type.cristales"),
+    rc: t("type.rc"),
+    robo_contenido: t("type.robo_contenido"),
+    accidente_personal: t("type.accidente_personal"),
     other: t("type.other"),
   };
 

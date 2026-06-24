@@ -21,6 +21,10 @@ export function TypeFilterChips({ activeType }: TypeFilterChipsProps) {
     { key: "robo", label: t("type.robo") },
     { key: "granizo", label: t("type.granizo") },
     { key: "incendio", label: t("type.incendio") },
+    { key: "cristales", label: t("type.cristales") },
+    { key: "rc", label: t("type.rc") },
+    { key: "robo_contenido", label: t("type.robo_contenido") },
+    { key: "accidente_personal", label: t("type.accidente_personal") },
   ];
 
   const handleChipClick = useCallback(

@@ -69,6 +69,7 @@ import { logAgentRun } from "@/server/training/agent-runs";
 import { loadMemoryHints as loadClaimMemoryHints } from "@/server/memory/load";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
+import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle";
 import { mergeExtractedFields, parseEmailClaimFields } from "@/lib/email/claim-parser";
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
@@ -381,6 +382,7 @@ export async function runEmailExtractionWorker(
           email_thread_id: cases.email_thread_id,
           policyholder_name: cases.policyholder_name,
           policy_number: cases.policy_number,
+          created_at: cases.created_at,
         })
         .from(cases)
         .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
@@ -405,6 +407,31 @@ export async function runEmailExtractionWorker(
         })
       );
       return;
+    }
+
+    // ── Throttle real email extractions ──────────────────────────────────────
+    // Prevents burst of 30+ simultaneous Gemini calls when many emails arrive
+    // at once (e.g. Monday morning). Uses GEMINI_WORKER_CONCURRENCY (default 1)
+    // to limit how many run in parallel. Simulation already has its own semaphore;
+    // this covers channel="email" (real Gmail intake only).
+    if (caseRow.channel === "email") {
+      const throttle = await waitForEmailExtractionTurn({
+        tenantId,
+        caseId,
+        caseCreatedAt: caseRow.created_at,
+      });
+      if (throttle.timedOut) {
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            service: "claimmix",
+            msg: "email_worker.throttle_timeout",
+            case_id: caseId,
+            waited_ms: throttle.waitedMs,
+            blockers: throttle.blockers,
+          })
+        );
+      }
     }
 
     // Fetch message body — try raw_messages (simulate flow) first, then

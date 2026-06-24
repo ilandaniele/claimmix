@@ -64,6 +64,10 @@ export const esAR = {
   "type.robo": "Robo",
   "type.granizo": "Granizo",
   "type.incendio": "Incendio",
+  "type.cristales": "Cristales",
+  "type.rc": "Resp. Civil",
+  "type.robo_contenido": "Robo de contenido",
+  "type.accidente_personal": "Accidente personal",
   "type.other": "Otro",
 
   // ── Dashboard tabs ─────────────────────────────────────────────────────────

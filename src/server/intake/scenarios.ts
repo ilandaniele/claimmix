@@ -1,18 +1,23 @@
 /**
- * 55 realistic Argentine insurance claim scenarios for intake simulation.
+ * 75 realistic Argentine insurance claim scenarios for intake simulation.
  *
  * Distribution:
- *   10 × choque   (street accidents, various provinces)
- *   10 × robo     (vehicle theft, with and without police report)
- *   10 × granizo  (hail damage events)
- *   10 × incendio (fire damage)
- *    5 × other    (no-relevante: non-claim emails)
- *    5 × other    (parcial: partial info — missing key fields)
- *    5 × other    (edge cases: forwarded threads, contradictions, complexity)
+ *   10 × choque          (street accidents, various provinces)
+ *   10 × robo            (vehicle theft, with and without police report)
+ *   10 × granizo         (hail damage events)
+ *   10 × incendio        (fire damage)
+ *    5 × cristales       (windshield / glass damage)
+ *    5 × rc              (responsabilidad civil — third-party liability)
+ *    5 × robo_contenido  (theft of belongings from inside the vehicle)
+ *    5 × accidente_personal (personal injury — occupant or pedestrian)
+ *    5 × other           (no-relevante: non-claim emails)
+ *    5 × other           (parcial: partial info — missing key fields)
+ *    5 × other           (edge cases: forwarded threads, contradictions, complexity)
  *
  * Each scenario has:
  *   id:               unique identifier
- *   case_type:        "choque" | "robo" | "granizo" | "incendio" | "other"
+ *   case_type:        "choque" | "robo" | "granizo" | "incendio" | "cristales" |
+ *                     "rc" | "robo_contenido" | "accidente_personal" | "other"
  *   policyholder_name: insured person's name (PII — stored, never logged)
  *   policy_number:    policy number (PII — stored, never logged)
  *   raw_text:         realistic Argentine Spanish email body
@@ -1438,6 +1443,500 @@ DNI 37.456.789`,
       denuncia_policial: "si",
       police_report_number: "2025-CABA-09234",
       fotos_lugar: "si",
+    },
+  },
+
+  // ── CRISTALES ─────────────────────────────────────────────────────────────
+
+  {
+    id: "cristales-01",
+    case_type: "cristales",
+    policyholder_name: "Valentina Rocío Sosa",
+    policy_number: "POL-2025-071",
+    raw_text: `Buenos días,
+
+Les escribo porque ayer a la mañana, 10/06/2025, encontré el parabrisas de mi auto completamente roto. Mi vehículo es un Renault Sandero 2021, patente MNO 234, estacionado en Av. Santa Fe 4200, Palermo, CABA.
+
+Al parecer cayó una piedra desde una obra en construcción que hay sobre la vereda. El parabrisas tiene una fisura diagonal enorme, imposible de parchear — va a necesitar reemplazo completo. No hay daños en la carrocería, solo el vidrio frontal.
+
+Hice la denuncia policial en la Comisaría 14B (número 2025-14B-00831) aunque no hay testigos directos. Tengo fotos del vidrio roto y de la obra que está al lado.
+
+¿Tienen convenio con alguna vidriería? Prefiero no llevar el auto al taller si hay forma más rápida.
+
+Valentina Sosa
+DNI 31.234.567`,
+    expected_fields: {
+      incident_date: "10/06/2025",
+      incident_location: "Av. Santa Fe 4200, Palermo, CABA",
+      vehicle_plate: "MNO 234",
+      denuncia_policial: "si",
+      police_report_number: "2025-14B-00831",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "cristales-02",
+    case_type: "cristales",
+    policyholder_name: "Gastón Marcelo Ibáñez",
+    policy_number: "POL-2025-072",
+    raw_text: `Buenas tardes.
+
+El jueves 12/06/2025 me rompieron el vidrio del acompañante. Estaba mi Toyota Hilux 2022 patente PQR 567 estacionada en Güemes 800, San Isidro, Provincia de Buenos Aires. Cuando volví al vehículo encontré el vidrio lateral derecho hecho añicos en el piso.
+
+No se llevaron nada (probablemente los espantó alguien), pero el vidrio está destruido. Hice la denuncia en la Seccional 2 de San Isidro, número 2025-SIS-04456. Adjunto foto del vidrio roto y del interior del vehículo para mostrar que no falta nada.
+
+Espero respuesta para coordinar el reemplazo.
+
+Gastón Ibáñez
+Cel: 11-4567-8901`,
+    expected_fields: {
+      incident_date: "12/06/2025",
+      incident_location: "Güemes 800, San Isidro",
+      vehicle_plate: "PQR 567",
+      denuncia_policial: "si",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "cristales-03",
+    case_type: "cristales",
+    policyholder_name: "Camila Beatriz Suárez",
+    policy_number: "POL-2025-073",
+    raw_text: `Estimados,
+
+Viajando ayer por la Ruta 9 entre Zárate y Campana, un camión que venía en sentido contrario levantó una piedra que impactó directamente en mi parabrisas. Fecha: 14/06/2025, aproximadamente a las 17:30 hs.
+
+Mi vehículo es un Volkswagen Polo 2023, patente STU 890. El impacto generó un punto de quiebre central con fisuras que se están extendiendo — el vidrio es irrecuperable según me dijo el tallerista que lo evaluó hoy.
+
+No pude identificar al camión (no vi la patente). Tengo fotos del impacto y del estado actual del parabrisas. También tengo la declaración del tallerista por escrito si la necesitan.
+
+¿Cómo procedo para el reemplazo? ¿Tienen taller habilitado en Zárate o Campana?
+
+Camila Suárez
+DNI 35.678.901`,
+    expected_fields: {
+      incident_date: "14/06/2025",
+      incident_location: "Ruta 9, entre Zárate y Campana",
+      vehicle_plate: "STU 890",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "cristales-04",
+    case_type: "cristales",
+    policyholder_name: "Ricardo Horacio Méndez",
+    policy_number: "POL-2025-074",
+    raw_text: `Hola, buenas.
+
+Les aviso que el sábado 07/06/2025 a la noche me apareció el luneta trasero roto. Mi auto es un Peugeot 208 2020, patente VWX 123, estaba en la calle Mitre 550, Villa Carlos Paz, Córdoba.
+
+Creo que fue vandalismo, aunque no tengo prueba concreta. No había nada adentro del auto. La grieta es muy grande y no se puede circular con el vidrio así. Fui a la policía y me dijeron que hiciera la denuncia online en la web de la provincia, lo hice pero no tengo número todavía porque el sistema tarda.
+
+¿Qué necesitan para iniciar el trámite? Tengo fotos del luneta.
+
+Ricardo Méndez`,
+    expected_fields: {
+      incident_date: "07/06/2025",
+      incident_location: "calle Mitre 550, Villa Carlos Paz, Córdoba",
+      vehicle_plate: "VWX 123",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "cristales-05",
+    case_type: "cristales",
+    policyholder_name: "Florencia Agustina Álvarez",
+    policy_number: "POL-2025-075",
+    raw_text: `Buenos días.
+
+Tengo que reportar daño en el vidrio del conductor de mi Chevrolet Cruze 2019, patente YZA 456. El incidente fue el 16/06/2025 en el estacionamiento del Shopping Abasto, CABA.
+
+Un auto al salir de la cochera golpeó la puerta delantera izquierda y el vidrio se partió. El conductor se detuvo y me dio sus datos: Omar González, DNI 25.111.222, patente BCD 789. Intercambiamos datos y él se comprometió a avisar a su seguro también.
+
+El vidrio está partido en la esquina superior izquierda y tiene una fisura que llega hasta el centro. Adjunto fotos y los datos del otro conductor.
+
+Florencia Álvarez
+DNI 33.456.789`,
+    expected_fields: {
+      incident_date: "16/06/2025",
+      incident_location: "Shopping Abasto, CABA",
+      vehicle_plate: "YZA 456",
+      fotos_danos: "si",
+    },
+  },
+
+  // ── RESPONSABILIDAD CIVIL ─────────────────────────────────────────────────
+
+  {
+    id: "rc-01",
+    case_type: "rc",
+    policyholder_name: "Pablo Sebastián Torres",
+    policy_number: "POL-2025-076",
+    raw_text: `Estimada aseguradora:
+
+Me dirijo a ustedes para informarles un siniestro de responsabilidad civil ocurrido el 20/06/2025 a las 08:15 hs en la intersección de Av. Callao y Corrientes, CABA.
+
+Circulaba con mi Fiat Cronos 2022, patente EFG 012, por Corrientes cuando al cruzar Callao con semáforo en verde impacté a un Renault Logan patente HIJ 345 que cruzó en rojo. Los daños en el vehículo de tercero son: paragolpes delantero destrozado, faro izquierdo roto y el capot levantado. El conductor del otro vehículo, Jorge Martínez DNI 27.890.123, alega dolor cervical y fue trasladado en ambulancia al Hospital Ramos Mejía.
+
+Mi vehículo tiene daños menores en la parte trasera derecha.
+
+Realicé la denuncia policial en la Comisaría 5 (número 2025-C5-10023). Hay cámara de tránsito en esa esquina que debería haber registrado el siniestro.
+
+Pablo Torres
+DNI 32.456.789`,
+    expected_fields: {
+      incident_date: "20/06/2025",
+      incident_location: "Av. Callao y Corrientes, CABA",
+      vehicle_plate: "EFG 012",
+      denuncia_policial: "si",
+      police_report_number: "2025-C5-10023",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "rc-02",
+    case_type: "rc",
+    policyholder_name: "Natalia Verónica Paredes",
+    policy_number: "POL-2025-077",
+    raw_text: `Buenas tardes.
+
+Les escribo porque el martes 17/06/2025 mientras maniobraba para estacionar en Av. del Libertador 2500, Martínez, Buenos Aires, golpeé sin querer la bicicleta y la moto de un delivery que estaba parado en la banquina. La moto Honda Wave patente KLM 678 tiene el espejo retrovisor roto y el manubrio doblado. El ciclista no tuvo lesiones.
+
+El rider (Ezequiel Ríos, DNI 40.123.456) se mostró bastante molesto pero firmamos un acuerdo en el lugar. Le tomé los datos y le dije que avisaría a la aseguradora. Tengo fotos de ambos vehículos y del acuerdo firmado.
+
+Mi auto es un Nissan March 2021, patente NOP 901.
+
+¿Cómo avanzo para que la aseguradora cubra los daños al tercero?
+
+Natalia Paredes
+Cel: 11-2345-6789`,
+    expected_fields: {
+      incident_date: "17/06/2025",
+      incident_location: "Av. del Libertador 2500, Martínez, Buenos Aires",
+      vehicle_plate: "NOP 901",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "rc-03",
+    case_type: "rc",
+    policyholder_name: "Diego Ariel Ramírez",
+    policy_number: "POL-2025-078",
+    raw_text: `Hola.
+
+El domingo 22/06/2025 a la tarde estaba saliendo de mi casa en La Plata, calle 13 entre 45 y 46, y al retroceder golpeé un Volkswagen Gol rojo patente QRS 234 que estaba estacionado mal pegado a mi salida. El impacto fue leve en mi vehículo (Renault Duster 2020 patente TUV 567) pero el Gol quedó con el paragolpes trasero hundido.
+
+Intenté contactar al dueño del otro auto pero nadie respondió. Dejé una nota con mi nombre y teléfono en el parabrisas. Más tarde me llamó el dueño (Sebastián Herrera, DNI 38.456.789) y acordamos derivar todo a los seguros.
+
+¿Qué documentación necesitan de mi parte? Tengo fotos de ambos vehículos.
+
+Diego Ramírez
+DNI 29.345.678`,
+    expected_fields: {
+      incident_date: "22/06/2025",
+      incident_location: "calle 13 entre 45 y 46, La Plata",
+      vehicle_plate: "TUV 567",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "rc-04",
+    case_type: "rc",
+    policyholder_name: "Mariana Lucía Ferreyra",
+    policy_number: "POL-2025-079",
+    raw_text: `Estimados señores:
+
+Me comunico para denunciar un siniestro de RC ocurrido el 18/06/2025. Iba circulando por la Autopista Panamericana ramal Pilar, km 37, cuando por la lluvia intensa perdí el control del vehículo y colisioné con el guardarrail y posteriormente con un Ford Ranger patente WXY 890 que circulaba a mi derecha.
+
+Mi vehículo es un Honda Civic 2021, patente ZAB 123. Los daños a tercero: lateral izquierdo del Ranger con abolladura profunda. La conductora del Ranger (Luciana Vega, DNI 36.789.012) no sufrió lesiones pero quedó muy asustada.
+
+Intervino la policía vial (acta número 2025-PV-07823). Estamos todas bien. Yo también tengo daños en la parte delantera de mi auto.
+
+Mariana Ferreyra
+DNI 34.567.890`,
+    expected_fields: {
+      incident_date: "18/06/2025",
+      incident_location: "Autopista Panamericana km 37, ramal Pilar",
+      vehicle_plate: "ZAB 123",
+      denuncia_policial: "si",
+      police_report_number: "2025-PV-07823",
+    },
+  },
+
+  {
+    id: "rc-05",
+    case_type: "rc",
+    policyholder_name: "Hernán Ezequiel Blanco",
+    policy_number: "POL-2025-080",
+    raw_text: `Buenos días,
+
+Soy asegurado con póliza POL-2025-080. El viernes 13/06/2025 tuve un incidente menor en la playa de estacionamiento del Hipermercado Carrefour de Av. Constituyentes 5100, CABA.
+
+Al estacionar el vehículo, choqué el paragolpes trasero de un Peugeot 308 plateado que estaba al lado. Los daños en el Peugeot son superficiales (arañazo y deformación leve). El propietario del otro vehículo, Luis Pacheco DNI 44.234.567, estuvo presente y sacamos fotos juntos. Firmamos un formulario de datos.
+
+Mi auto es un Kia Sportage 2023, patente CDE 456. Los daños en mi vehículo son insignificantes (ni se nota).
+
+¿Tengo que hacer denuncia policial para un daño así de menor? ¿Cómo activo la cobertura de RC?
+
+Hernán Blanco`,
+    expected_fields: {
+      incident_date: "13/06/2025",
+      incident_location: "Hipermercado Carrefour, Av. Constituyentes 5100, CABA",
+      vehicle_plate: "CDE 456",
+      fotos_danos: "si",
+    },
+  },
+
+  // ── ROBO DE CONTENIDO ────────────────────────────────────────────────────
+
+  {
+    id: "robo_contenido-01",
+    case_type: "robo_contenido",
+    policyholder_name: "Sofía Alejandra Reyes",
+    policy_number: "POL-2025-081",
+    raw_text: `Estimados,
+
+Les informo un robo en el interior de mi vehículo ocurrido el 11/06/2025 en horas de la madrugada. Mi Volkswagen Vento 2022, patente FGH 789, estaba estacionado en la calle Maipú 400, San Martín, Buenos Aires.
+
+Al llegar a la mañana encontré el vidrio del acompañante roto y los siguientes objetos robados:
+- Notebook Dell Inspiron (valuada en aprox. $350.000)
+- Tablet Samsung Galaxy Tab A
+- Bolso de trabajo con documentos (los repuse, pero perdí tiempo)
+- Cargador del auto
+
+Realicé la denuncia en la Comisaría de San Martín, número 2025-SM-02341. Tengo fotos del vidrio roto y del interior del auto. El asiento donde estaba el bolso tiene vidrios.
+
+Sofía Reyes
+DNI 36.543.210`,
+    expected_fields: {
+      incident_date: "11/06/2025",
+      incident_location: "calle Maipú 400, San Martín, Buenos Aires",
+      vehicle_plate: "FGH 789",
+      denuncia_policial: "si",
+      police_report_number: "2025-SM-02341",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "robo_contenido-02",
+    case_type: "robo_contenido",
+    policyholder_name: "Agustín Nahuel Quiroga",
+    policy_number: "POL-2025-082",
+    raw_text: `Hola, buenas noches.
+
+Me robaron cosas del auto. Fue el sábado 14/06/2025 entre las 21 y las 23 hs mientras estaba en un restaurant en Calle Belgrano 1200, Mendoza. Mi Toyota Corolla 2020, patente IJK 012, estaba en la playa de estacionamiento cubierta del lugar.
+
+Me llevaron: la radio del auto (era original de fábrica), un par de anteojos de sol marca Ray Ban, y una mochila con ropa. Reventaron el picaporte de la puerta trasera para entrar, no rompieron vidrios.
+
+Fui a la Comisaría 7 de Mendoza y me dieron el acta número 2025-M7-06712. El estacionamiento tiene cámaras, le pedí al encargado que guarde las imágenes.
+
+Agustín Quiroga
+Cel: 261-4567-8901`,
+    expected_fields: {
+      incident_date: "14/06/2025",
+      incident_location: "Calle Belgrano 1200, Mendoza",
+      vehicle_plate: "IJK 012",
+      denuncia_policial: "si",
+      police_report_number: "2025-M7-06712",
+    },
+  },
+
+  {
+    id: "robo_contenido-03",
+    case_type: "robo_contenido",
+    policyholder_name: "Luciana del Carmen Vega",
+    policy_number: "POL-2025-083",
+    raw_text: `Buenas tardes, equipo de siniestros.
+
+El lunes 09/06/2025 a la noche me entraron al auto y me robaron la butaca de bebé que tenía instalada en el asiento trasero y la bolsa del pañalero. Mi Citroën C3 2023, patente LMN 345, estaba frente a mi casa en Juramento 2800, Belgrano, CABA.
+
+Rompieron el vidrio trasero izquierdo para entrar. Entiendo que la butaca era carísima (pague $180.000 hace 6 meses). La denuncia está hecha en la Comisaría 38 bajo el número 2025-38-00456.
+
+¿La cobertura de robo de contenido incluye accesorios del auto como la butaca de bebé, o solo objetos personales? Tengo factura de compra de la butaca.
+
+Luciana Vega
+DNI 38.901.234`,
+    expected_fields: {
+      incident_date: "09/06/2025",
+      incident_location: "Juramento 2800, Belgrano, CABA",
+      vehicle_plate: "LMN 345",
+      denuncia_policial: "si",
+      police_report_number: "2025-38-00456",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "robo_contenido-04",
+    case_type: "robo_contenido",
+    policyholder_name: "Federico Leandro Campos",
+    policy_number: "POL-2025-084",
+    raw_text: `Estimada área de siniestros:
+
+Necesito reportar robo en el interior de mi vehículo. El martes 17/06/2025 fui al gimnasio en Av. San Martín 3400, Rosario. Dejé el auto estacionado afuera, un Ford Fiesta 2018 patente OPQ 678, y cuando salí 90 minutos después encontré la ventanilla del conductor rota.
+
+Me robaron: la mochila del gimnasio con ropa y zapatillas Nike nuevas (compradas hace 2 semanas, tengo factura), un cargador portátil, y los auriculares inalámbricos Sony. Valor estimado total: $120.000 pesos.
+
+Denuncia en Comisaría 5 de Rosario, número 2025-R5-08903. Tengo las facturas de las zapatillas y los auriculares.
+
+¿Pueden indicarme el límite de cobertura para robo de contenido de mi póliza?
+
+Federico Campos`,
+    expected_fields: {
+      incident_date: "17/06/2025",
+      incident_location: "Av. San Martín 3400, Rosario",
+      vehicle_plate: "OPQ 678",
+      denuncia_policial: "si",
+      police_report_number: "2025-R5-08903",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "robo_contenido-05",
+    case_type: "robo_contenido",
+    policyholder_name: "Romina Paola Heredia",
+    policy_number: "POL-2025-085",
+    raw_text: `Hola.
+
+El domingo 15/06/2025 fui a la feria de San Telmo y estacioné mi Hyundai i10 2021 patente RST 901 en Defensa y Humberto I, CABA. Al volver encontré la ventanilla trasera derecha rota y me habían entrado.
+
+Me robaron: una cámara de fotos Canon (casi nueva, aprox. $280.000), el estuche con accesorios, y una bolsa con compras de la feria. No dejaron nada. El auto en sí no tiene daños más allá del vidrio.
+
+Fui a la comisaría de San Telmo pero me dijeron que tenía que ir a la Comisaría 4 de CABA. Fui y me dieron el acta 2025-C4-01234. Adjunto fotos del vidrio roto y de la factura de la cámara.
+
+¿El vidrio también lo cubre la póliza o es aparte?
+
+Romina Heredia
+DNI 39.012.345`,
+    expected_fields: {
+      incident_date: "15/06/2025",
+      incident_location: "Defensa y Humberto I, San Telmo, CABA",
+      vehicle_plate: "RST 901",
+      denuncia_policial: "si",
+      police_report_number: "2025-C4-01234",
+      fotos_danos: "si",
+    },
+  },
+
+  // ── ACCIDENTE PERSONAL ───────────────────────────────────────────────────
+
+  {
+    id: "accidente_personal-01",
+    case_type: "accidente_personal",
+    policyholder_name: "Claudia Fernández de López",
+    policy_number: "POL-2025-086",
+    raw_text: `Buenas tardes.
+
+Les escribo para informar un accidente personal que sufrí el 19/06/2025 a las 07:45 hs, cuando me disponía a subir a mi vehículo (Toyota Etios 2019, patente UVW 234) frente a mi domicilio en Yerbal 2300, Caballito, CABA.
+
+Al pisar el borde de la vereda resbalé y caí sobre la calzada. Me fracturé el radio de la muñeca derecha (fractura conminuta, según el diagnóstico del Hospital Álvarez donde fui de urgencia). Estoy con yeso y me dieron 21 días de reposo. Trabajo como contadora, así que el impacto laboral es importante.
+
+El accidente ocurrió en el marco del uso del vehículo asegurado. ¿Mi póliza cubre accidente personal del conductor? Tengo el alta hospitalaria y el diagnóstico médico.
+
+Claudia Fernández
+DNI 30.123.456`,
+    expected_fields: {
+      incident_date: "19/06/2025",
+      incident_location: "Yerbal 2300, Caballito, CABA",
+      vehicle_plate: "UVW 234",
+      fotos_danos: "no",
+    },
+  },
+
+  {
+    id: "accidente_personal-02",
+    case_type: "accidente_personal",
+    policyholder_name: "Jorge Enrique Salcedo",
+    policy_number: "POL-2025-087",
+    raw_text: `Hola, buenos días.
+
+Necesito reportar un accidente personal que tuve el 21/06/2025. Viajaba como pasajero en el asiento del acompañante de mi propio auto (Fiat Cronos 2020, patente XYZ 567, lo conducía mi hijo) cuando frené de golpe en Avenida Vélez Sársfield 4800, Córdoba, y me golpeé la cabeza contra el parabrisas.
+
+Fui a la guardia del Hospital Italiano de Córdoba donde me hicieron tomografía. Por suerte no hay hemorragia pero me diagnosticaron conmoción cerebral leve y me dieron 7 días de reposo. Tengo 62 años.
+
+¿Cómo activo la cobertura de accidente de ocupante? ¿Aplica aunque no sea yo quien conducía?
+
+Jorge Salcedo
+DNI 21.234.567`,
+    expected_fields: {
+      incident_date: "21/06/2025",
+      incident_location: "Avenida Vélez Sársfield 4800, Córdoba",
+      vehicle_plate: "XYZ 567",
+    },
+  },
+
+  {
+    id: "accidente_personal-03",
+    case_type: "accidente_personal",
+    policyholder_name: "Mariela Susana Ríos",
+    policy_number: "POL-2025-088",
+    raw_text: `Buenos días.
+
+El 23/06/2025 a las 19 hs, circulaba en mi Volkswagen Polo 2022 patente ABC 890, por Calle Bolívar 1400, Neuquén capital, cuando un ciclista cruzó de repente y tuve que frenar de golpe para no atropellarlo. Mi pasajera, que es mi madre (María Ríos, 68 años, DNI 15.678.901), no tenía el cinturón bien puesto y se golpeó el costado contra la puerta.
+
+La llevamos a la guardia del Hospital Castro Rendón donde le diagnosticaron fractura de tres costillas. La tienen internada para observación. Yo estoy bien.
+
+¿La cobertura de ocupantes alcanza a los pasajeros o solo al conductor?
+
+Mariela Ríos
+DNI 37.890.123`,
+    expected_fields: {
+      incident_date: "23/06/2025",
+      incident_location: "Calle Bolívar 1400, Neuquén",
+      vehicle_plate: "ABC 890",
+    },
+  },
+
+  {
+    id: "accidente_personal-04",
+    case_type: "accidente_personal",
+    policyholder_name: "Esteban Ariel Montoya",
+    policy_number: "POL-2025-089",
+    raw_text: `Estimados.
+
+Soy titular de la póliza POL-2025-089. El 08/06/2025 sufrí un accidente mientras trabajaba: estaba descargando materiales de mi camioneta Ford Ranger 2021, patente DEF 123, en una obra en Palermo, CABA (calle Thames 2300) y se me cayó una caja encima del pie. Me fracturé el quinto metatarsiano derecho.
+
+Atención en el Sanatorio Güemes, diagnóstico de fractura confirmada por rx, 30 días de inmovilización. Soy albañil y no puedo trabajar.
+
+¿Esto entra en la cobertura de accidente personal de mi póliza vehicular? Tengo la historia clínica y las radiografías.
+
+Esteban Montoya
+DNI 28.456.789`,
+    expected_fields: {
+      incident_date: "08/06/2025",
+      incident_location: "calle Thames 2300, Palermo, CABA",
+      vehicle_plate: "DEF 123",
+    },
+  },
+
+  {
+    id: "accidente_personal-05",
+    case_type: "accidente_personal",
+    policyholder_name: "Daniela Roxana Villalba",
+    policy_number: "POL-2025-090",
+    raw_text: `Buenas tardes equipo de siniestros.
+
+El miércoles 18/06/2025 tuve un accidente en la ruta. Viajaba en mi Chevrolet Spin 2021, patente GHI 456, por la Ruta 34 entre Salta y Rosario de la Frontera. Un camión me pasó y la turbulencia del viento me hizo desviar — perdí el control momentáneamente y el auto rozó la banquina.
+
+No hay daños en el auto (solo rayones en el guardabarro), pero yo me golpeé el codo contra la ventanilla al maniobrar. Me atendieron en el Hospital de Rosario de la Frontera. Tengo una fisura en el olécranon derecho. Me dieron 15 días de reposo y kinesio.
+
+Tengo el certificado médico. ¿Cómo activo el seguro de accidente personal?
+
+Daniela Villalba
+DNI 40.234.567`,
+    expected_fields: {
+      incident_date: "18/06/2025",
+      incident_location: "Ruta 34 entre Salta y Rosario de la Frontera",
+      vehicle_plate: "GHI 456",
     },
   },
 ];

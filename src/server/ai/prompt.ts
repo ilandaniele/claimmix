@@ -85,6 +85,52 @@ const FIELD_HINTS: Record<ClaimType, string> = {
     - denuncia_policial: "si" if a police report is mentioned, "no" otherwise
   `.trim(),
 
+  cristales: `
+    Extract these fields (field_key: description):
+    - incident_date: Date the glass/windshield damage occurred (ISO 8601 if possible, else as written)
+    - incident_location: Location where the damage occurred
+    - vehicle_plate: License plate of the vehicle with glass damage
+    - declared_damage: Description of the glass damage (which window, severity, cause)
+    - denuncia_policial: "si" if a police report is mentioned, "no" otherwise
+    - police_report_number: Police report number (if mentioned), empty string if not
+    - fotos_danos: "si" if photos of damage are mentioned, "no" otherwise
+  `.trim(),
+
+  rc: `
+    Extract these fields (field_key: description):
+    - incident_date: Date of the accident (ISO 8601 if possible, else as written)
+    - incident_location: Location of the accident
+    - vehicle_plate: License plate of the insured's vehicle
+    - party_b_plate: License plate of the third-party vehicle (if mentioned)
+    - party_b_name: Name of the third-party driver or affected person (if mentioned)
+    - declared_damage: Description of damage caused to the third party
+    - denuncia_policial: "si" if a police report or police intervention is mentioned, "no" otherwise
+    - police_report_number: Police report number (if mentioned), empty string if not
+    - fotos_danos: "si" if photos of damage are mentioned, "no" otherwise
+    - licencia_conducir: "si" if driver's license is mentioned, "no" otherwise
+  `.trim(),
+
+  robo_contenido: `
+    Extract these fields (field_key: description):
+    - incident_date: Date the theft occurred (ISO 8601 if possible, else as written)
+    - incident_location: Location where the vehicle was parked when items were stolen
+    - vehicle_plate: License plate of the vehicle where items were stolen from
+    - declared_damage: List of items stolen and approximate value (as stated by the insured)
+    - denuncia_policial: "si" if a police report is mentioned, "no" otherwise
+    - police_report_number: Police report number (if mentioned), empty string if not
+    - fotos_danos: "si" if photos of the vehicle interior or broken glass are mentioned, "no" otherwise
+  `.trim(),
+
+  accidente_personal: `
+    Extract these fields (field_key: description):
+    - incident_date: Date of the personal injury accident (ISO 8601 if possible, else as written)
+    - incident_location: Location where the accident occurred
+    - vehicle_plate: License plate of the vehicle involved (if any)
+    - declared_damage: Description of the injury (type of injury, diagnosis, medical treatment)
+    - injured_person: Name of the injured person (if different from the insured)
+    - certificado_medico: "si" if a medical certificate, hospital discharge, or diagnosis is mentioned, "no" otherwise
+  `.trim(),
+
   other: `
     Extract all available fields from the claim text:
     - incident_date: Date of the incident (ISO 8601 if possible, else as written)

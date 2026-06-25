@@ -16,7 +16,10 @@ type CustomField = {
 };
 
 const FIELD_TYPES = ["text", "number", "date", "boolean", "enum", "email", "phone"];
-const CLAIM_TYPES = ["", "choque", "robo", "granizo", "incendio", "other"];
+const CLAIM_TYPES = [
+  "", "choque", "robo", "granizo", "incendio", "other",
+  "cristales", "rc", "robo_contenido", "accidente_personal",
+];
 
 async function fetchFields(): Promise<CustomField[]> {
   const res = await fetch("/api/admin/custom-fields", { cache: "no-store" });

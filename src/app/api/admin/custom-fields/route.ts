@@ -16,7 +16,10 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 export const dynamic = "force-dynamic";
 
 const FieldTypeSchema = z.enum(["text", "number", "date", "boolean", "enum", "email", "phone"]);
-const ClaimTypeSchema = z.enum(["choque", "robo", "granizo", "incendio", "other"]);
+const ClaimTypeSchema = z.enum([
+  "choque", "robo", "granizo", "incendio", "other",
+  "cristales", "rc", "robo_contenido", "accidente_personal",
+]);
 
 const CreateCustomFieldSchema = z.object({
   key: z.string().trim().regex(/^[a-z][a-z0-9_]{1,63}$/),

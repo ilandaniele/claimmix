@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Activity, Brain, CheckCircle2, ListChecks, Settings2, SlidersHorizontal } from "lucide-react";
+import { Activity, Brain, CheckCircle2, ListChecks, Settings2, SlidersHorizontal, Layers } from "lucide-react";
 
 import { AiProviderPanel } from "../configuracion/AiProviderPanel";
 import { PromptRulesPanel } from "../configuracion/PromptRulesPanel";
@@ -10,8 +10,9 @@ import { TrainingExamplesPanel } from "./TrainingExamplesPanel";
 import { FineTuneJobsPanel } from "./FineTuneJobsPanel";
 import { AgentExportPanel } from "./AgentExportPanel";
 import { ProviderUsagePanel } from "./ProviderUsagePanel";
+import { BatchSimulatePanel } from "./BatchSimulatePanel";
 
-type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento" | "uso";
+type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento" | "uso" | "lote";
 
 const TABS = [
   { id: "modelos", label: "Modelos", icon: Settings2 },
@@ -20,6 +21,7 @@ const TABS = [
   { id: "ejemplos", label: "Ejemplos aprobados", icon: CheckCircle2 },
   { id: "entrenamiento", label: "Fine-tuning opcional", icon: Brain },
   { id: "uso", label: "Uso del proveedor", icon: Activity },
+  { id: "lote", label: "Simulación en lote", icon: Layers },
 ] as const;
 
 export function AgentConsoleClient({ role }: { role: string }) {
@@ -58,6 +60,7 @@ export function AgentConsoleClient({ role }: { role: string }) {
         {tab === "ejemplos" && <TrainingExamplesPanel />}
         {tab === "entrenamiento" && <FineTuneJobsPanel />}
         {tab === "uso" && <ProviderUsagePanel />}
+        {tab === "lote" && <BatchSimulatePanel />}
       </div>
     </div>
   );

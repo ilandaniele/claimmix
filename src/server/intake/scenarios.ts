@@ -1,18 +1,18 @@
 /**
- * 75 realistic Argentine insurance claim scenarios for intake simulation.
+ * 95 realistic Argentine insurance claim scenarios for intake simulation.
  *
  * Distribution:
- *   10 × choque          (street accidents, various provinces)
- *   10 × robo            (vehicle theft, with and without police report)
- *   10 × granizo         (hail damage events)
- *   10 × incendio        (fire damage)
- *    5 × cristales       (windshield / glass damage)
- *    5 × rc              (responsabilidad civil — third-party liability)
- *    5 × robo_contenido  (theft of belongings from inside the vehicle)
- *    5 × accidente_personal (personal injury — occupant or pedestrian)
+ *   15 × choque          (street accidents + moto + ruta + edge/parcial)
+ *   13 × robo            (vehicle theft + violent + edge/parcial)
+ *   11 × granizo         (hail damage + NOA + edge/parcial)
+ *   11 × incendio        (fire + electrical + edge/parcial)
+ *    7 × cristales       (windshield / glass damage + camión/camioneta)
+ *    7 × rc              (responsabilidad civil + moto + peatón)
+ *    7 × robo_contenido  (theft of belongings + camioneta)
+ *    7 × accidente_personal (personal injury + grave + cyclist)
  *    5 × other           (no-relevante: non-claim emails)
  *    5 × other           (parcial: partial info — missing key fields)
- *    5 × other           (edge cases: forwarded threads, contradictions, complexity)
+ *    5 × other           (edge cases: forwarded threads, contradictions)
  *
  * Each scenario has:
  *   id:               unique identifier
@@ -1939,6 +1939,485 @@ DNI 40.234.567`,
       vehicle_plate: "GHI 456",
     },
   },
+
+  // ── Choque con moto (3) ──────────────────────────────────────────────────────
+
+  {
+    id: "moto-choque-01",
+    case_type: "choque",
+    policyholder_name: "Gustavo Ariel Romero",
+    policy_number: "POL-2025-101",
+    raw_text: `Hola buenas. Les escribo porque tuve un accidente el jueves pasado en Tucumán.
+
+Soy Gustavo Romero, póliza POL-2025-101. Manejo una Honda XR 150 2022, patente B 347 KRT. Iba por Av. Aconquija hacia el trabajo, era como las 8 menos cuarto de la mañana, y un taxi que dobló de Catamarca sin respetar el paso me enganchó el costado derecho de la moto. Me caí pero me puse el casco así que solo me quedé con raspones en el brazo.
+
+La moto tiene el caño de escape doblado, el espejo roto, el pedal de freno doblado y la cubierta trasera desgarra. El taxi se fue aunque le saqué foto a la patente: MFG 134.
+
+Declaré en la comisaría seccional 4ª, número de denuncia 445-B/2025.
+
+¿Pueden llamarme mañana? 381-555-0047
+Gustavo`,
+    expected_fields: {
+      incident_date: "jueves",
+      incident_location: "Av. Aconquija, Tucumán",
+      vehicle_plate: "B 347 KRT",
+    },
+  },
+
+  {
+    id: "moto-choque-02",
+    case_type: "choque",
+    policyholder_name: "Romina Beatriz Aguero",
+    policy_number: "POL-2025-102",
+    raw_text: `Equipo de siniestros: acabo de vivir una situación muy difícil y necesito iniciar el trámite.
+
+Anoche, 22/06/2025 cerca de las 22:30 hs, circulaba con mi moto Yamaha FZ 250 (patente TAN 887) por la calle Balcarce al 1300 en Salta capital cuando un auto Corsa que estaba estacionado abrió la puerta sin mirar. Me fui de frente. La moto está muy golpeada — espejo, carenado delantero, tablero todo roto, y el manubrio torcido. Yo fui a la guardia del Nuevo San Bernardo con politraumatismos leves, me dieron radiografías y todo bien, sin fracturas.
+
+El conductor del auto (un joven, me dio el dato de que se llama Rodrigo Soto, dni 45 algo) colaboró en el momento y llamó al 911. La policía vino y levantó el acta.
+
+Mi póliza es POL-2025-102. ¿Cómo arranco? Tengo la denuncia policial y el alta médica.
+
+Muchas gracias,
+Romina Aguero`,
+    expected_fields: {
+      incident_date: "22/06/2025",
+      incident_location: "Balcarce 1300, Salta",
+      vehicle_plate: "TAN 887",
+    },
+  },
+
+  {
+    id: "moto-choque-03",
+    case_type: "choque",
+    policyholder_name: "Diego Sebastián Peralta",
+    policy_number: "POL-2025-103",
+    raw_text: `Buenos días. Diego Peralta, póliza POL-2025-103, les escribo desde Mar del Plata.
+
+El sábado 21/06 a las 14 hs aprox estaba circulando en mi moto Bajaj Rouser NS200 (KSM 221) por la diagonal Alberdi cuando un VW Gol dobló desde Rivadavia sin señal y me pegó de lleno. El impacto me tiró a la calzada — tengo fractura en el metacarpiano de la mano izquierda. La moto quedó con el marco delantero doblado, horquilla rota, farol destrozado.
+
+La persona culpable es Luis Fernando Botto, domicilio en Olavarría 2340, Mar del Plata. Me quedé con su celular y los datos del auto. Hay un video de un comercio cercano que captó todo.
+
+¿Cuáles son los pasos? Ya hice la denuncia policial.
+Diego — 0223-555-1122`,
+    expected_fields: {
+      incident_date: "21/06/2025",
+      incident_location: "diagonal Alberdi, Mar del Plata",
+      vehicle_plate: "KSM 221",
+    },
+  },
+
+  // ── Choque en ruta (2) ───────────────────────────────────────────────────────
+
+  {
+    id: "ruta-choque-01",
+    case_type: "choque",
+    policyholder_name: "Fernando Ezequiel Vargas",
+    policy_number: "POL-2025-104",
+    raw_text: `Buenas tardes. Necesito reportar un siniestro vial ocurrido el lunes 23/06/2025.
+
+Soy Fernando Vargas, póliza POL-2025-104. Viajaba en mi camioneta Toyota Hilux 2020 (patente PP 897 TK) por la Ruta Nacional 40 a la altura del km 312, entre San Juan capital y Calingasta, alrededor de las 15 hs. La ruta tiene mucha piedra suelta en esa zona — una piedra grande golpeó el parabrisas y lo partió completamente. Al instante perdí visibilidad y frené bruscamente. Un auto que venía detrás mío no pudo frenar y me chocó desde atrás.
+
+Daños en mi camioneta: parabrisas roto, paragolpes trasero destrozado, caja trasera abollada.
+
+Hice la denuncia en la seccional de Calingasta. Tengo fotos y hay testigos.
+
+Gracias,
+Fernando Vargas
+Tel: 264-555-9988`,
+    expected_fields: {
+      incident_date: "23/06/2025",
+      incident_location: "RN 40 km 312, San Juan",
+      vehicle_plate: "PP 897 TK",
+    },
+  },
+
+  {
+    id: "ruta-choque-02",
+    case_type: "choque",
+    policyholder_name: "María Eugenia Saavedra",
+    policy_number: "POL-2025-105",
+    raw_text: `Hola equipo, les comento lo que nos pasó.
+
+María Eugenia Saavedra, póliza POL-2025-105. El miércoles temprano, sobre las 6 de la mañana, viajábamos con mi marido en nuestro Ford Ranger 2021 doble cabina (DSQ 034) por la Ruta 22 en Neuquén, viniendo desde Cipolletti hacia Neuquén capital. La ruta estaba con niebla muy intensa. De repente apareció una vaca en la calzada — no la vimos hasta que ya estábamos encima. El impacto fue frontal con el animal.
+
+El capot está completamente destruido, el radiador reventó, el motor está golpeado (el auto no arrancó más), airbags abiertos. Mi marido y yo tuvimos golpes leves, nada grave.
+
+La vaca era de un campo lindero sin alambrado. La policía de Neuquén levantó el acta. Tenemos toda la documentación.
+
+¿Cómo procedo? El auto quedó varado en el camino.
+María Eugenia Saavedra`,
+    expected_fields: {
+      incident_date: "miércoles",
+      incident_location: "Ruta 22, Neuquén",
+      vehicle_plate: "DSQ 034",
+    },
+  },
+
+  // ── Robo violento (3) ────────────────────────────────────────────────────────
+
+  {
+    id: "robo-violento-01",
+    case_type: "robo",
+    policyholder_name: "Carlos Alberto Méndez",
+    policy_number: "POL-2025-106",
+    raw_text: `Estimados siniestros. Les escribo muy angustiado porque me robaron el auto anoche.
+
+Carlos Méndez, póliza POL-2025-106. El domingo 22/06/2025 a las 23 hs aproximadamente estaba estacionando en la puerta de mi casa en Quilmes Oeste (calle Rivadavia 2840) cuando dos personas armadas me interceptaron. Me apuntaron con un arma y me exigieron que bajara del auto. Me sacaron el VW Polo 2023 plata, patente VZY 134. No hubo forcejeo — entregué las llaves de inmediato porque tenían armas.
+
+Fui a la comisaría 1ª de Quilmes esa misma noche. Número de denuncia 0098/2025. También hice la denuncia en la Fiscalía.
+
+El auto fue robado con el maletín de trabajo y algunos efectos personales adentro.
+
+¿Cuáles son los próximos pasos? Necesito orientación urgente.
+Carlos Méndez — 011-155-678-9012`,
+    expected_fields: {
+      incident_date: "22/06/2025",
+      incident_location: "Rivadavia 2840, Quilmes Oeste",
+      vehicle_plate: "VZY 134",
+    },
+  },
+
+  {
+    id: "robo-violento-02",
+    case_type: "robo",
+    policyholder_name: "Silvana Patricia Leguizamón",
+    policy_number: "POL-2025-107",
+    raw_text: `Buenas días. Silvana Leguizamón, póliza 107/2025.
+
+Me robaron el auto el martes de madrugada (01:30 hs del 24/06/2025) en La Matanza. Estaba en una estación de servicio Shell de la Ruta 3 cargando nafta cuando me abordaron desde atrás. Eran tres personas, uno de ellos tenía un cuchillo. Me hicieron subir al auto y me llevaron unos kilómetros antes de dejarme en la calle. Se llevaron mi Renault Sandero Stepway 2022 gris (OQP 567).
+
+Estoy bien físicamente pero muy shockeada. Hice la denuncia inmediatamente en la comisaría del Municipio de La Matanza.
+
+El auto tenía adentro mi notebook y bolsos personales.
+
+Les dejo el número de denuncia cuando lo tenga, todavía lo están tramitando.
+
+Silvana`,
+    expected_fields: {
+      incident_date: "24/06/2025",
+      incident_location: "Ruta 3, La Matanza",
+      vehicle_plate: "OQP 567",
+    },
+  },
+
+  {
+    id: "robo-violento-03",
+    case_type: "robo",
+    policyholder_name: "Héctor Manuel Britos",
+    policy_number: "POL-2025-108",
+    raw_text: `Hola. Quiero saber cómo iniciar el reclamo porque me entraron a robar el auto en el garage de mi casa.
+
+Soy Héctor Britos, número de póliza POL-2025-108. El sábado 20 de junio fui a trabajar y cuando volví a las 19 hs encontré la puerta del garage forzada. El candado estaba reventado. Mi Peugeot 408 2021 blanco (POL 567) no estaba. Los ladrones también se llevaron herramientas del garage.
+
+Denuncié en la comisaría del barrio, expediente 2025/4421. Tengo las fotos del candado roto y el garage.
+
+No tuve contacto con los ladrones — fue durante el día cuando no estaba.
+
+Espero instrucciones.
+Héctor Britos, San Juan capital, tel 264-444-5678`,
+    expected_fields: {
+      incident_date: "20/06/2025",
+      incident_location: "San Juan capital",
+      vehicle_plate: "POL 567",
+    },
+  },
+
+  // ── Granizo NOA (2) ──────────────────────────────────────────────────────────
+
+  {
+    id: "granizo-noa-01",
+    case_type: "granizo",
+    policyholder_name: "Beatriz Noemí Gutiérrez",
+    policy_number: "POL-2025-109",
+    raw_text: `Equipo de siniestros, buenas tardes.
+
+Beatriz Gutiérrez, póliza POL-2025-109. Vivo en Tucumán capital, barrio Yerba Buena.
+
+Ayer jueves 19/06/2025 cayó una tormenta de granizo muy fuerte entre las 16 y las 17 hs. Mi auto Volkswagen Virtus 2023 estaba estacionado en la calle (Av. Solano Vera al 1200) porque el garage lo usaba mi marido. El granizo fue muy grueso — el tamaño de las piedras era como una moneda de 1 peso o más grande.
+
+Daños: el techo completamente abolladísimo con cientos de marcas, el capot igual, el parabrisas con una fisura en diagonal de lado a lado, los retrovisores astillados, y el baúl también con abolladuras.
+
+Patente: MLE 492, VW Virtus Highline gris oscuro.
+
+Tengo fotos y videos del granizo y del estado del auto.
+
+Beatriz G.
+Tel: 381-422-7788`,
+    expected_fields: {
+      incident_date: "19/06/2025",
+      incident_location: "Av. Solano Vera 1200, Tucumán",
+      vehicle_plate: "MLE 492",
+    },
+  },
+
+  {
+    id: "granizo-noa-02",
+    case_type: "granizo",
+    policyholder_name: "Roberto Nicolás Cuevas",
+    policy_number: "POL-2025-110",
+    raw_text: `Buenas, quiero reportar daños por granizo.
+
+Roberto Cuevas, póliza POL-2025-110, de San Juan.
+
+El sábado pasado (21/06/2025) estaba en el trabajo y mi camioneta Toyota Hilux SR 2020 (patente ADB 218) quedó en el estacionamiento del Hipermercado Libertad en el centro. A eso de las 14:30 cayó una tormenta impresionante con granizo muy grande, de los que no se ven seguido por acá.
+
+Cuando fui al estacionamiento encontré la camioneta literalmente destruida: techo hundido, capot hundido en varios puntos, parabrisas con tres fisuras, luneta trasera rota, y las puertas con marcas. El vidrio de una ventanilla lateral también se rompió y entró agua adentro, lo que mojó toda la tapicería.
+
+¿Hay que llevarla a algún taller o ustedes mandan un inspector?
+
+Roberto Cuevas
+264-555-7799`,
+    expected_fields: {
+      incident_date: "21/06/2025",
+      incident_location: "Hipermercado Libertad, San Juan",
+      vehicle_plate: "ADB 218",
+    },
+  },
+
+  // ── Incendio eléctrico (2) ───────────────────────────────────────────────────
+
+  {
+    id: "incendio-electrico-01",
+    case_type: "incendio",
+    policyholder_name: "Lorena Vanesa Ortiz",
+    policy_number: "POL-2025-111",
+    raw_text: `Hola equipo siniestros. Soy Lorena Ortiz, póliza POL-2025-111 de Paraná, Entre Ríos.
+
+El jueves 19/06 a la mañana, como a las 10 hs, estaba arrancando mi auto Honda HR-V 2019 (patente TQM 882) cuando empezó a salir humo del panel de instrumentos y a oler a quemado. Apagué el contacto de inmediato y salí del auto. Llamé al 911 y vinieron los bomberos de la Guardia Central.
+
+Los bomberos extinguieron el principio de incendio que se originó en el tablero — dijeron que fue un cortocircuito eléctrico. El daño es en el tablero de instrumentos, cableado del habitáculo, y la pantalla infotainment. Por suerte el motor no se comprometió y el incendio fue parcial.
+
+Tengo el informe de los bomberos. ¿Necesito también la denuncia policial? Porque el auto no fue robado, fue una falla eléctrica.
+
+Muchas gracias,
+Lorena Ortiz — 343-555-0134`,
+    expected_fields: {
+      incident_date: "19/06/2025",
+      incident_location: "Paraná, Entre Ríos",
+      vehicle_plate: "TQM 882",
+    },
+  },
+
+  {
+    id: "incendio-electrico-02",
+    case_type: "incendio",
+    policyholder_name: "Matías Ernesto Vallejos",
+    policy_number: "POL-2025-112",
+    raw_text: `Estimados, necesito reportar un incendio en mi vehículo.
+
+Matías Vallejos, póliza POL-2025-112. Soy de Corrientes capital.
+
+El lunes 16/06/2025 dejé el auto Fiat Cronos 2022 (patente HBE 329) cargando en el estacionamiento del shopping. Cuando fui a retirarlo, a las 21 hs, el auto estaba incendiado. Al parecer arrancó por el maletero — me dijeron que posiblemente un problema con el cargador de celular que dejé enchufado o un corto en los cables de la bocina que mandé a colocar hace poco.
+
+Los bomberos apagaron el fuego pero el daño es total: toda la parte trasera quemada, el asiento trasero, parte del techo interior, la tapa del maletero. El motor y la parte delantera están bien pero el resto del interior está destruido.
+
+Tengo el informe de bomberos del 16/06 y la filmación de las cámaras del shopping.
+
+Matías Vallejos
+379-555-2244`,
+    expected_fields: {
+      incident_date: "16/06/2025",
+      incident_location: "Corrientes capital",
+      vehicle_plate: "HBE 329",
+    },
+  },
+
+  // ── Robo de contenido — camioneta (2) ────────────────────────────────────────
+
+  {
+    id: "robo-contenido-camioneta-01",
+    case_type: "robo_contenido",
+    policyholder_name: "Juan Ignacio Salinas",
+    policy_number: "POL-2025-113",
+    raw_text: `Hola equipo. Les escribo para reportar un robo del interior de mi camioneta.
+
+Juan Salinas, póliza POL-2025-113, Santa Rosa, La Pampa.
+
+El miércoles 18/06/2025 dejé mi Chevrolet S10 2021 (patente MNO 456) estacionada en la calle frente al Hospital Lucio Molas mientras fui a una consulta médica (estuve dentro unas 2 horas). Cuando salí, encontré el vidrio de la ventanilla del acompañante roto. Me robaron:
+
+- Una notebook Dell Inspiron (trabajo)
+- Una cámara de fotos Nikon D3500
+- Una mochila con documentación de campo (trabajo en agrimensura)
+- $45.000 en efectivo que tenía en la guantera
+
+El auto no tiene daños más allá del vidrio roto. Hice la denuncia en la comisaría 2ª de Santa Rosa, acta 2025/3892.
+
+¿Qué debo presentar?
+Juan Salinas — 2954-555-0078`,
+    expected_fields: {
+      incident_date: "18/06/2025",
+      incident_location: "Santa Rosa, La Pampa",
+      vehicle_plate: "MNO 456",
+    },
+  },
+
+  {
+    id: "robo-contenido-camioneta-02",
+    case_type: "robo_contenido",
+    policyholder_name: "Patricia Ángela Soto",
+    policy_number: "POL-2025-114",
+    raw_text: `Buenas tardes. Tengo que reportar un robo que me hicieron.
+
+Patricia Soto, póliza POL-2025-114. Soy de Yerba Buena, Tucumán.
+
+El jueves a la noche (20/06/2025 como 20:30 hs) estacioné mi Renault Duster 2022 (ZDP 119) en el estacionamiento de un supermercado DIA en Av. Aconquija. Cuando volví al auto (estuve unos 45 minutos dentro del super), encontré la puerta trasera forzada — la cerradura está rota. Me robaron:
+
+- Dos bolsos con ropa de temporada que iba a llevar a la lavandería
+- Un par de zapatillas Nike nuevas (las había comprado ese día)
+- Una cartera de cuero marrón con $20.000 en efectivo
+- El encendedor de mi marido (era un recuerdo de familia)
+
+No se llevaron el auto, solo los objetos del interior.
+
+Hice la denuncia policial.
+
+Patricia Soto
+381-666-4455`,
+    expected_fields: {
+      incident_date: "20/06/2025",
+      incident_location: "Av. Aconquija, Yerba Buena, Tucumán",
+      vehicle_plate: "ZDP 119",
+    },
+  },
+
+  // ── Accidente personal grave (2) ─────────────────────────────────────────────
+
+  {
+    id: "accidente-personal-grave-01",
+    case_type: "accidente_personal",
+    policyholder_name: "Oscar Reinaldo Torres",
+    policy_number: "POL-2025-115",
+    raw_text: `Hola. Les escribo yo porque mi marido Oscar Torres (póliza POL-2025-115) no puede hacerlo — está en reposo.
+
+El 17/06/2025 Oscar tuvo un accidente grave manejando su camioneta VW Amarok 2020 (SAS 776) en Corrientes capital. Iba por Av. 3 de Abril cuando un auto se pasó en rojo y le pegó de costado. El impacto fue muy fuerte — Oscar tuvo fractura en dos costillas del lado derecho, lesión en el hombro (desgarro del manguito rotador) y un corte en la frente que requirió puntos.
+
+Estuvo 4 días internado en el hospital Escuela José F. de San Martín. Le dieron el alta pero tiene 45 días de reposo.
+
+¿Cómo se activa el seguro de accidente personal? ¿Cubre la incapacidad laboral temporaria?
+
+Agradezco la respuesta,
+Susana Pereira (esposa) — 379-444-3322`,
+    expected_fields: {
+      incident_date: "17/06/2025",
+      incident_location: "Av. 3 de Abril, Corrientes",
+      vehicle_plate: "SAS 776",
+    },
+  },
+
+  {
+    id: "accidente-personal-grave-02",
+    case_type: "accidente_personal",
+    policyholder_name: "Claudia Marcela Ríos",
+    policy_number: "POL-2025-116",
+    raw_text: `Buenas tardes. Claudia Ríos, póliza POL-2025-116.
+
+Tuve un accidente el martes 24/06/2025 en mi bicicleta. Sé que la póliza cubre accidente personal independientemente del vehículo involucrado — eso me dijeron cuando la saqué.
+
+Estaba cruzando Av. San Martín en General Pico, La Pampa, cuando una camioneta que venía rápido me pasó muy cerca y me asusté — frené de golpe y me caí. Me golpeé la rodilla derecha contra el pavimento. En la guardia del Hospital me dijeron que tengo una lesión en el menisco y me derivaron a traumatología.
+
+Tengo turno con el traumatólogo el viernes. Me dijeron que posiblemente necesite artroscopía. Estoy trabajando con mucho dolor — soy maestra.
+
+¿Esto está cubierto por el seguro de accidente? ¿Qué documentación necesitan?
+
+Claudia Ríos — 2952-555-6611`,
+    expected_fields: {
+      incident_date: "24/06/2025",
+      incident_location: "Av. San Martín, General Pico, La Pampa",
+    },
+  },
+
+  // ── Cristales — camión y camioneta (2) ──────────────────────────────────────
+
+  {
+    id: "cristales-camion-01",
+    case_type: "cristales",
+    policyholder_name: "Horacio Damián Acosta",
+    policy_number: "POL-2025-117",
+    raw_text: `Hola. Horacio Acosta, póliza POL-2025-117. Quiero reportar rotura de vidrios.
+
+Soy camionero, manejo un Volvo FH 2019 (patente CIT 449, semi con acoplado). El lunes 23/06 circulaba por la Autopista Rosario-Córdoba a la altura del km 47 cuando el camión que venía adelante mío pasó por un pozo y una piedra grande salió disparada y me impactó de lleno en el parabrisas. Tengo una grieta diagonal enorme que va de un extremo al otro — el parabrisas hay que cambiarlo completamente.
+
+El vidrio de una ventanilla lateral también tiene una fisura pero puede esperar — el urgente es el parabrisas porque no puedo trabajar con él así.
+
+¿Cubren camiones de trabajo? Necesito que me autoricen el reemplazo a la brevedad porque cada día que no trabajo pierdo dinero.
+
+Horacio Acosta
+Tel: 341-444-8833`,
+    expected_fields: {
+      incident_date: "23/06/2025",
+      incident_location: "Autopista Rosario-Córdoba km 47",
+      vehicle_plate: "CIT 449",
+    },
+  },
+
+  {
+    id: "cristales-camioneta-02",
+    case_type: "cristales",
+    policyholder_name: "Ana Cecilia Noriega",
+    policy_number: "POL-2025-118",
+    raw_text: `Estimados, buenos días. Ana Noriega, póliza POL-2025-118.
+
+El sábado a la tarde mi camioneta Toyota SW4 2021 (patente DFT 302) estaba estacionada en la calle frente a mi casa en el barrio Palermo Chico de Córdoba capital. Cuando salí a buscarla a las 20 hs para ir a cenar, encontré el vidrio de la ventanilla trasera derecha roto — parece que alguien le tiró algo, probablemente un chico jugando, porque no se llevaron nada del interior.
+
+También el parabrisas tiene una rajadura en la esquina inferior derecha pero esa viene de antes y la tenía medio olvidada — aprovecharía para arreglarla también.
+
+Hice la denuncia policial igual, por las dudas.
+
+¿Pueden mandar alguien o tengo que ir a un taller?
+Ana Noriega — 0351-444-9900`,
+    expected_fields: {
+      incident_date: "sábado",
+      incident_location: "Palermo Chico, Córdoba",
+      vehicle_plate: "DFT 302",
+    },
+  },
+
+  // ── RC — camioneta vs moto, moto vs peatón (2) ──────────────────────────────
+
+  {
+    id: "rc-camioneta-moto-01",
+    case_type: "rc",
+    policyholder_name: "Alejandro José Funes",
+    policy_number: "POL-2025-119",
+    raw_text: `Hola equipo de siniestros. Alejandro Funes, póliza POL-2025-119. Les escribo con mucho pesar porque tuve un accidente donde lastimé a alguien.
+
+El viernes 20/06/2025 a las 19 hs aproximadamente circulaba en mi camioneta Ford Ranger 2022 (NMQ 885) por la intersección de Güemes y Yrigoyen en Resistencia, Chaco. Al doblar a la derecha no vi a una motocicleta (Honda Wave 110) que venía por Yrigoyen. El impacto fue inevitable — el motociclista cayó y tuvo fractura en la tibia izquierda. Lo llevamos en ambulancia al Hospital Perrando.
+
+Colaboré en todo momento, llamé al 911 y di mis datos. El motociclista se llama Ernesto Aquino. Hubo un testigo.
+
+¿Qué cubre la póliza en este caso? ¿Me van a representar legalmente?
+
+Alejandro Funes
+0362-555-7744`,
+    expected_fields: {
+      incident_date: "20/06/2025",
+      incident_location: "Güemes y Yrigoyen, Resistencia, Chaco",
+      vehicle_plate: "NMQ 885",
+    },
+  },
+
+  {
+    id: "rc-moto-peaton-01",
+    case_type: "rc",
+    policyholder_name: "Valentina Susana Ibáñez",
+    policy_number: "POL-2025-120",
+    raw_text: `Buenas. Soy Valentina Ibáñez, póliza POL-2025-120, y tuve un incidente muy feo.
+
+El martes 24/06/2025 a las 8:15 hs iba en mi moto Honda PCX 150 (patente FKL 228) por Av. Colón en Córdoba cuando una persona mayor cruzó la calle sin mirar en el medio de la cuadra (no por senda peatonal). Intenté frenar pero no llegué — la golpeé con el guardabarro delantero. Cayó al piso. Los policías de tránsito llegaron enseguida.
+
+La señora es doña Nélida Coronel, 73 años. La llevaron al Hospital de Urgencias con posible fractura de cadera. Yo estoy bien, la moto tiene el guardabarro roto nomás.
+
+Sé que la ley es complicada en estos casos. ¿Qué hago? Ya fui a la comisaría y declaré.
+
+Valentina Ibáñez
+0351-555-8866`,
+    expected_fields: {
+      incident_date: "24/06/2025",
+      incident_location: "Av. Colón, Córdoba",
+      vehicle_plate: "FKL 228",
+    },
+  },
+
 ];
 
 /** Lookup map for O(1) access by scenario ID. */

@@ -50,7 +50,7 @@ const DEFAULT_GEMINI_MIN_REQUEST_INTERVAL_MS =
   process.env.NODE_ENV === "test" ? 0 : 1_200;
 const DEFAULT_GEMINI_RETRY_BASE_MS =
   process.env.NODE_ENV === "test" ? 0 : 1_000;
-const DEFAULT_GEMINI_MAX_RETRIES = 2;
+const DEFAULT_GEMINI_MAX_RETRIES = 3;
 
 let geminiRequestQueue: Promise<void> = Promise.resolve();
 let lastGeminiRequestAt = 0;
@@ -103,13 +103,15 @@ function isRetryableGeminiStatus(status: number): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
-function retryAfterMs(headers: Headers, attempt: number): number {
+function retryAfterMs(headers: Headers, attempt: number, status: number): number {
+  // For 429 rate-limit errors allow up to 2 minutes; for 5xx errors cap at 30s.
+  const capMs = status === 429 ? 120_000 : 30_000;
   const retryAfter = headers.get("retry-after");
   if (retryAfter) {
     const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, 30_000);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, capMs);
     const dateMs = Date.parse(retryAfter);
-    if (Number.isFinite(dateMs)) return Math.min(Math.max(dateMs - Date.now(), 0), 30_000);
+    if (Number.isFinite(dateMs)) return Math.min(Math.max(dateMs - Date.now(), 0), capMs);
   }
 
   const baseMs = getNumberEnv(
@@ -117,7 +119,7 @@ function retryAfterMs(headers: Headers, attempt: number): number {
     DEFAULT_GEMINI_RETRY_BASE_MS,
     30_000
   );
-  return Math.min(baseMs * 2 ** attempt, 30_000);
+  return Math.min(baseMs * 2 ** attempt, capMs);
 }
 
 async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
@@ -132,7 +134,7 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
     const res = await fetch(url, init);
     if (res.ok) return res;
     if (!isRetryableGeminiStatus(res.status) || attempt >= maxRetries) return res;
-    await sleep(retryAfterMs(res.headers, attempt));
+    await sleep(retryAfterMs(res.headers, attempt, res.status));
   }
 
   return fetch(url, init);

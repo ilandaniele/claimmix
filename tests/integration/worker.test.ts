@@ -246,6 +246,7 @@ vi.mock("@/server/training/trainability", () => ({
 
 vi.mock("@/server/training/agent-runs", () => ({
   logAgentRun: vi.fn().mockResolvedValue(undefined),
+  logAgentRunError: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/server/memory/load", () => ({

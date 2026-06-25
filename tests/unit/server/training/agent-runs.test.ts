@@ -22,7 +22,7 @@ vi.mock("@/lib/db/helpers", () => ({
   firstRow: <T>(rows: T[]): T | null => rows[0] ?? null,
 }));
 
-import { logAgentRun } from "@/server/training/agent-runs";
+import { logAgentRun, logAgentRunError } from "@/server/training/agent-runs";
 
 describe("logAgentRun", () => {
   beforeEach(() => {
@@ -37,7 +37,7 @@ describe("logAgentRun", () => {
     });
   });
 
-  it("stores gemini as the model provider for Gemini extraction models", async () => {
+  it("stores gemini as the model_provider for Gemini extraction models", async () => {
     const id = await logAgentRun({
       tenantId: "tenant-001",
       caseId: "case-001",
@@ -74,5 +74,126 @@ describe("logAgentRun", () => {
       model_provider: "gemini",
       model_name: "gemini-2.5-flash",
     });
+  });
+});
+
+describe("logAgentRunError", () => {
+  beforeEach(() => {
+    captured.row = null;
+    mockDbInsert.mockReturnValue({
+      values: vi.fn((row: Record<string, unknown>) => {
+        captured.row = row;
+        return {
+          returning: vi.fn().mockResolvedValue([{ id: "err-run-001" }]),
+        };
+      }),
+    });
+  });
+
+  it("always sets is_trainable_suggestion to false", async () => {
+    await logAgentRunError({
+      tenantId: "tenant-001",
+      caseId: "case-001",
+      input: { subject: "Siniestro", body: "Error de proveedor." },
+      errorName: "GeminiExtractionError",
+    });
+
+    expect(captured.row).toMatchObject({ is_trainable_suggestion: false });
+  });
+
+  it("sets blocking_reasons to [\"provider_error\"]", async () => {
+    await logAgentRunError({
+      tenantId: "tenant-001",
+      caseId: "case-001",
+      input: { subject: "Siniestro", body: "Error de proveedor." },
+      errorName: "GeminiExtractionError",
+    });
+
+    expect(captured.row).toMatchObject({ blocking_reasons: ["provider_error"] });
+  });
+
+  it("always records model_provider as gemini", async () => {
+    await logAgentRunError({
+      tenantId: "tenant-001",
+      caseId: "case-001",
+      input: { subject: "Siniestro", body: "Error de proveedor." },
+      errorName: "GeminiExtractionError",
+    });
+
+    expect(captured.row).toMatchObject({ model_provider: "gemini" });
+  });
+
+  it("stores error name in output_payload", async () => {
+    await logAgentRunError({
+      tenantId: "tenant-001",
+      caseId: "case-001",
+      input: { subject: "Siniestro", body: "Error de proveedor." },
+      errorName: "GeminiExtractionError",
+    });
+
+    expect((captured.row?.output_payload as Record<string, unknown>)?.error).toBe("provider_error");
+    expect((captured.row?.output_payload as Record<string, unknown>)?.error_name).toBe("GeminiExtractionError");
+  });
+
+  it("stores the email input payload for later audit", async () => {
+    await logAgentRunError({
+      tenantId: "tenant-001",
+      caseId: "case-err-42",
+      input: { subject: "Choque", body: "Me chocaron ayer.", sender_email: "test@example.com" },
+      errorName: "GeminiExtractionError",
+    });
+
+    expect(captured.row?.input_payload).toMatchObject({
+      subject: "Choque",
+      body: "Me chocaron ayer.",
+      sender_email: "test@example.com",
+    });
+    expect(captured.row?.case_id).toBe("case-err-42");
+  });
+
+  it("returns the new row id on success", async () => {
+    const id = await logAgentRunError({
+      tenantId: "tenant-001",
+      caseId: "case-001",
+      input: { subject: "S", body: "B" },
+      errorName: "GeminiExtractionError",
+    });
+
+    expect(id).toBe("err-run-001");
+  });
+
+  it("returns null gracefully when the DB insert throws", async () => {
+    mockDbInsert.mockReturnValue({
+      values: vi.fn().mockReturnValue({
+        returning: vi.fn().mockRejectedValue(new Error("DB connection error")),
+      }),
+    });
+
+    const id = await logAgentRunError({
+      tenantId: "tenant-001",
+      caseId: "case-001",
+      input: { subject: "S", body: "B" },
+      errorName: "GeminiExtractionError",
+    });
+
+    expect(id).toBeNull();
+  });
+
+  it("returns null silently on 42P01 (table not yet migrated)", async () => {
+    const pgErr = Object.assign(new Error("relation does not exist"), { code: "42P01" });
+    mockDbInsert.mockReturnValue({
+      values: vi.fn().mockReturnValue({
+        returning: vi.fn().mockRejectedValue(pgErr),
+      }),
+    });
+
+    const id = await logAgentRunError({
+      tenantId: "tenant-001",
+      caseId: "case-001",
+      input: { subject: "S", body: "B" },
+      errorName: "GeminiExtractionError",
+    });
+
+    expect(id).toBeNull();
   });
 });

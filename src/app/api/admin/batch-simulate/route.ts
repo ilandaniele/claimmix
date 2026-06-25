@@ -16,13 +16,11 @@
 
 import { type NextRequest, after } from "next/server";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
-import { cases, rawMessages, users } from "@/lib/db/schema";
+import { cases, rawMessages } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
-import { getRandomScenario } from "@/server/intake/scenarios";
+import { getRandomScenario, getScenarioById } from "@/server/intake/scenarios";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
@@ -72,16 +70,19 @@ export async function POST(request: NextRequest): Promise<Response> {
     // ── Create all N cases synchronously ───────────────────────────────────────
     const caseIds: string[] = [];
 
-    for (let i = 0; i < count; i++) {
-      const claimTypeResolved: ClaimType = claim_type ?? "choque";
-      const scenario = scenario_id
-        ? undefined
-        : getRandomScenario(claimTypeResolved);
+    // Resolve a fixed scenario if scenario_id is supplied; otherwise pick randomly each iteration.
+    const fixedScenario = scenario_id ? getScenarioById(scenario_id) : undefined;
+    if (scenario_id && !fixedScenario) {
+      throw new AppError("VALIDATION_FAILED", `ID de escenario inválido: ${scenario_id}.`);
+    }
 
-      const rawText = scenario?.raw_text ?? `Simulación batch #${i + 1}`;
-      const finalClaimType: ClaimType = scenario?.case_type ?? claimTypeResolved;
-      const policyholderName = scenario?.policyholder_name ?? null;
-      const policyNumber = scenario?.policy_number ?? null;
+    for (let i = 0; i < count; i++) {
+      const scenario = fixedScenario ?? getRandomScenario(claim_type);
+
+      const rawText = scenario.raw_text;
+      const finalClaimType: ClaimType = scenario.case_type;
+      const policyholderName = scenario.policyholder_name;
+      const policyNumber = scenario.policy_number;
 
       try {
         const newCase = firstRow(
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           from_addr: policyholderName
             ? `${policyholderName.toLowerCase().replace(/\s+/g, ".")}@example.com`
             : null,
-          subject: `[batch_sim] Siniestro - ${finalClaimType} - ${scenario?.id ?? "custom"}`,
+          subject: `[batch_sim] Siniestro - ${finalClaimType} - ${scenario.id}`,
           body: rawText,
         }).catch(() => undefined);
       } catch {

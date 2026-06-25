@@ -45,14 +45,20 @@ export function BatchSimulatePanel() {
         body: JSON.stringify(body),
       });
 
-      const data = await res.json();
+      let data: Record<string, unknown> | null = null;
+      try {
+        data = await res.json();
+      } catch {
+        // non-JSON error body (e.g. HTML error page from proxy)
+      }
 
       if (!res.ok) {
-        setError(data?.error?.message ?? "Error al iniciar el lote.");
+        const msg = (data as { error?: { message?: string } } | null)?.error?.message;
+        setError(msg ?? `Error ${res.status} al iniciar el lote.`);
         return;
       }
 
-      setResult(data);
+      setResult(data as unknown as BatchResult);
     } catch {
       setError("Error de red al iniciar el lote.");
     } finally {

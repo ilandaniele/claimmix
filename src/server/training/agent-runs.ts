@@ -110,6 +110,67 @@ export async function logAgentRun(
   }
 }
 
+export interface LogAgentRunErrorParams {
+  tenantId: string;
+  caseId: string | null;
+  claimMessageId?: string | null;
+  providerMessageId?: string | null;
+  modelName?: string;
+  input: {
+    subject: string;
+    body: string;
+    sender_email?: string;
+  };
+  errorName: string;
+}
+
+/**
+ * Insert a failed agent_runs row when the provider throws before extraction
+ * completes. Makes the failure visible in the training panel and audit trail
+ * without requiring a successful ExtractedClaim.
+ */
+export async function logAgentRunError(
+  params: LogAgentRunErrorParams
+): Promise<string | null> {
+  const row = {
+    tenant_id: params.tenantId,
+    case_id: params.caseId,
+    claim_message_id: params.claimMessageId ?? null,
+    provider_message_id: params.providerMessageId ?? null,
+    model_provider: "gemini",
+    model_name: params.modelName ?? "gemini",
+    prompt_version: "builtin-v1",
+    input_payload: {
+      subject: params.input.subject,
+      body: params.input.body,
+      sender_email: params.input.sender_email ?? null,
+    },
+    output_payload: { error: "provider_error", error_name: params.errorName },
+    confidence_payload: {},
+    missing_fields: [],
+    is_trainable_suggestion: false,
+    trainability_score: "0",
+    trainability_reasons: [],
+    blocking_reasons: ["provider_error"],
+  };
+
+  try {
+    const data = firstRow(
+      await db
+        .insert(tables.agentRuns)
+        .values(row)
+        .returning({ id: tables.agentRuns.id })
+    );
+    return data?.id ?? null;
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    if (code !== "42P01") {
+      console.error("[agent-runs] error-run insert error:", code ?? "no_data"); // crew-debug-ok
+    }
+    return null;
+  }
+}
+
 /** Shape returned by getLatestAgentRun — everything the preview UI needs. */
 export interface AgentRunRow {
   id: string;

@@ -65,7 +65,7 @@ import { loadApprovedExamples, formatApprovedExamples } from "@/server/training/
 import { loadActiveCustomFields, formatCustomFields } from "@/server/training/custom-fields";
 import { getActivePromptVersion } from "@/server/training/prompt-version";
 import { assessTrainability } from "@/server/training/trainability";
-import { logAgentRun } from "@/server/training/agent-runs";
+import { logAgentRun, logAgentRunError } from "@/server/training/agent-runs";
 import { loadMemoryHints as loadClaimMemoryHints } from "@/server/memory/load";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
@@ -368,6 +368,13 @@ export async function runEmailExtractionWorker(
   tenantId: string,
   userId: string | null
 ): Promise<void> {
+  // Declared before try so the catch block can log them if Gemini fails mid-extraction.
+  let emailBody = "";
+  let emailSubject = "";
+  let senderEmail = "";
+  let claimMessageId: string | null = null;
+  let providerMessageId: string | null = null;
+
   try {
     // ── a) Fetch case + raw_messages ──────────────────────────────────────────
 
@@ -436,12 +443,6 @@ export async function runEmailExtractionWorker(
 
     // Fetch message body — try raw_messages (simulate flow) first, then
     // claim_messages (Gmail intake flow). Gmail cases write to claim_messages only.
-
-    let emailBody = "";
-    let emailSubject = "";
-    let senderEmail = "";
-    let claimMessageId: string | null = null;
-    let providerMessageId: string | null = null;
 
     const rawMsg = firstRow(
       await db
@@ -960,6 +961,15 @@ export async function runEmailExtractionWorker(
             error_code: "gemini_extraction_failed",
             error_name: errName,
           },
+        });
+
+        await logAgentRunError({
+          tenantId,
+          caseId,
+          claimMessageId,
+          providerMessageId,
+          input: { subject: emailSubject, body: emailBody, sender_email: senderEmail },
+          errorName: errName,
         });
       } catch {
         // best-effort escalation — don't rethrow

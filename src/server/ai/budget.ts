@@ -39,6 +39,19 @@ export function computeCostUsd(promptTokens: number, completionTokens: number, m
   return promptTokens * rates.input + completionTokens * rates.output;
 }
 
+/**
+ * Estimate the cost of a Vertex AI supervised fine-tuning job for Gemini Flash.
+ * Formula: examples × avg_tokens/example × default_epochs / 1000 × price/1K tokens.
+ * Assumptions: 1000 tokens/example, 3 epochs, $0.008/1K training tokens.
+ */
+export function estimateVertexTuningCostUsd(exampleCount: number): number {
+  const AVG_TOKENS_PER_EXAMPLE = 1000;
+  const DEFAULT_EPOCHS = 3;
+  const PRICE_PER_1K_TOKENS = 0.008;
+  const totalTokens = exampleCount * AVG_TOKENS_PER_EXAMPLE * DEFAULT_EPOCHS;
+  return (totalTokens / 1000) * PRICE_PER_1K_TOKENS;
+}
+
 export interface BudgetCheckResult {
   /** True if any cap (monthly or daily) has been exceeded. */
   exceeded: boolean;

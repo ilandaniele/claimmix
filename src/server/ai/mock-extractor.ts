@@ -350,6 +350,9 @@ export function runMockExtractor(
     not_relevant_reason: undefined,
     summary: "",
     suggested_reply: "",
+    fraud_risk_level: "none",
+    fraud_indicators: [],
+    injury_severity: null,
   };
 }
 
@@ -420,6 +423,9 @@ export function extractEmailClaimMock(
     severity: "medium",
     requires_specialist: false,
     not_relevant_reason: undefined,
+    fraud_risk_level: "none",
+    fraud_indicators: [],
+    injury_severity: null,
     summary: "Siniestro de choque reportado por Juan Pérez el 15/03/2024 en Av. Corrientes 1234.",
     suggested_reply: "",
   };

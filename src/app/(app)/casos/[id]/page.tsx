@@ -487,6 +487,14 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                       </dd>
                     </div>
                   )}
+                  {caseRow.injury_severity && caseRow.injury_severity !== "none" && (
+                    <div>
+                      <dt className="text-slate-500">Severidad lesiones</dt>
+                      <dd className="mt-0.5">
+                        <InjurySeverityBadge severity={caseRow.injury_severity} />
+                      </dd>
+                    </div>
+                  )}
                   {attachments.length > 0 && (
                     <div>
                       <dt className="text-slate-500">{t("case.detail.attachments")}</dt>
@@ -497,6 +505,57 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                   )}
                 </dl>
               </section>
+
+              {/* Análisis de fraude — solo cuando hay indicadores */}
+              {caseRow.fraud_risk_level && caseRow.fraud_risk_level !== "none" && (
+                <section
+                  aria-labelledby="fraud-analysis-heading"
+                  className={`rounded-xl border p-5 shadow-sm ${
+                    caseRow.fraud_risk_level === "high"
+                      ? "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30"
+                      : caseRow.fraud_risk_level === "medium"
+                      ? "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30"
+                      : "border-yellow-100 bg-yellow-50 dark:border-yellow-900 dark:bg-yellow-950/20"
+                  }`}
+                >
+                  <div className="flex items-center gap-3 mb-3">
+                    <h2
+                      id="fraud-analysis-heading"
+                      className={`text-sm font-semibold ${
+                        caseRow.fraud_risk_level === "high"
+                          ? "text-red-900 dark:text-red-100"
+                          : "text-amber-900 dark:text-amber-100"
+                      }`}
+                    >
+                      Alertas de fraude
+                    </h2>
+                    <FraudRiskBadge level={caseRow.fraud_risk_level} />
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                    Análisis automático — solo orientativo. La decisión final la toma el ajustador.
+                  </p>
+                  {Array.isArray(caseRow.fraud_indicators) && caseRow.fraud_indicators.length > 0 ? (
+                    <ul className="space-y-2">
+                      {(caseRow.fraud_indicators as Array<{ type: string; description: string }>).map(
+                        (indicator, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm">
+                            <span className={`mt-0.5 shrink-0 text-xs font-mono rounded px-1.5 py-0.5 ${
+                              caseRow.fraud_risk_level === "high"
+                                ? "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200"
+                                : "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
+                            }`}>
+                              {indicator.type.replace(/_/g, " ")}
+                            </span>
+                            <span className="text-slate-700 dark:text-slate-300">{indicator.description}</span>
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-slate-500">Sin detalles adicionales.</p>
+                  )}
+                </section>
+              )}
 
               {/* Section B: Field confirmations panel (AC21) */}
               <section
@@ -671,6 +730,39 @@ async function RawEmailAccordion({ caseId }: { caseId: string }) {
         )
       )}
     </div>
+  );
+}
+
+function FraudRiskBadge({ level }: { level: string }) {
+  const styles: Record<string, string> = {
+    high:   "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-100",
+    medium: "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-100",
+    low:    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/60 dark:text-yellow-100",
+  };
+  const labels: Record<string, string> = {
+    high: "Riesgo alto", medium: "Riesgo medio", low: "Riesgo bajo",
+  };
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[level] ?? styles.low}`}>
+      {labels[level] ?? level}
+    </span>
+  );
+}
+
+function InjurySeverityBadge({ severity }: { severity: string }) {
+  const styles: Record<string, string> = {
+    fatal:  "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-100",
+    severe: "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-100",
+    minor:  "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-100",
+    none:   "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+  };
+  const labels: Record<string, string> = {
+    fatal: "Fatal", severe: "Graves", minor: "Leves", none: "Sin lesiones",
+  };
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[severity] ?? styles.none}`}>
+      {labels[severity] ?? severity}
+    </span>
   );
 }
 

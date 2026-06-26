@@ -71,6 +71,17 @@ async function readErrorMessage(res: Response, fallback: string): Promise<string
   return body?.error?.message ?? body?.message ?? fallback;
 }
 
+// ─── Vertex AI cost helpers ───────────────────────────────────────────────────
+
+function estimateVertexCost(exampleCount: number): number {
+  // $0.008/1K tokens × 1000 tokens/example × 3 epochs
+  return (exampleCount * 1000 * 3) / 1000 * 0.008;
+}
+
+function fmtUsd(amount: number): string {
+  return amount < 0.01 ? "<$0.01" : `$${amount.toFixed(2)}`;
+}
+
 // ─── Vertex AI panel ──────────────────────────────────────────────────────────
 
 function VertexAiSection() {
@@ -79,6 +90,7 @@ function VertexAiSection() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [confirmStart, setConfirmStart] = useState<string | null>(null);
 
   async function reload() {
     const res = await fetch("/api/admin/fine-tuning/vertex", { cache: "no-store" });
@@ -155,6 +167,12 @@ function VertexAiSection() {
 
   const enabled = config?.enabled ?? false;
 
+  const startedJobs = jobs.filter((j) => !["draft"].includes(j.status));
+  const totalEstimatedCost = startedJobs.reduce(
+    (sum, j) => sum + estimateVertexCost(j.training_example_count),
+    0
+  );
+
   return (
     <div className="space-y-3">
       <div className="space-y-1">
@@ -166,7 +184,7 @@ function VertexAiSection() {
           <code className="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-800">
             VERTEX_AI_TUNING_ENABLED=true
           </code>{" "}
-          y configuración de GCP.
+          y configuración de GCP. Precio estimado: $0.008/1K tokens de entrenamiento.
         </p>
       </div>
 
@@ -182,6 +200,21 @@ function VertexAiSection() {
           <span className="ml-3 font-medium">Región:</span> {config.location ?? "—"}{" "}
           <span className="ml-3 font-medium">Modelo base:</span> {config.base_model ?? "—"}{" "}
           <span className="ml-3 font-medium">Mín. ejemplos:</span> {config.min_examples}
+        </div>
+      )}
+
+      {/* ── Spend summary ── */}
+      {startedJobs.length > 0 && (
+        <div className="flex items-center gap-3 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-xs dark:border-violet-900 dark:bg-violet-950/30">
+          <span className="font-medium text-violet-800 dark:text-violet-200">
+            Gasto estimado total
+          </span>
+          <span className="rounded-full bg-violet-100 px-2 py-0.5 font-mono font-semibold text-violet-800 dark:bg-violet-900/60 dark:text-violet-100">
+            {fmtUsd(totalEstimatedCost)}
+          </span>
+          <span className="text-slate-500 dark:text-slate-400">
+            {startedJobs.length} trabajo{startedJobs.length !== 1 ? "s" : ""} iniciado{startedJobs.length !== 1 ? "s" : ""}
+          </span>
         </div>
       )}
 
@@ -213,6 +246,9 @@ function VertexAiSection() {
             const isStartable = ["draft", "failed"].includes(job.status);
             const isSyncable = !!job.vertex_tuning_job_name;
             const isActivatable = job.status === "approved" && !!job.vertex_tuned_model_endpoint;
+            const jobCost = estimateVertexCost(job.training_example_count);
+            const isPendingConfirm = confirmStart === job.id;
+
             return (
               <li key={job.id} className="px-4 py-3 dark:bg-slate-950/20">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -229,6 +265,17 @@ function VertexAiSection() {
                       </span>
                       <span className="text-xs text-slate-500 dark:text-slate-400">
                         {job.training_example_count} ejemplos
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                          jobCost > 5
+                            ? "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-200"
+                            : jobCost > 1
+                            ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-200"
+                            : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-200"
+                        }`}
+                      >
+                        {fmtUsd(jobCost)} est.
                       </span>
                     </div>
                     <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -252,18 +299,47 @@ function VertexAiSection() {
                     {job.error_message && (
                       <p className="mt-1 text-xs text-red-600 dark:text-red-300">{job.error_message}</p>
                     )}
+
+                    {/* ── Cost confirmation banner ── */}
+                    {isPendingConfirm && (
+                      <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-950/40">
+                        <span className="text-xs text-amber-800 dark:text-amber-200">
+                          Esto iniciará un trabajo de fine-tuning en Google Cloud con un costo estimado de{" "}
+                          <strong>{fmtUsd(jobCost)}</strong>.
+                        </span>
+                        <button
+                          type="button"
+                          disabled={busy !== null}
+                          onClick={() => {
+                            setConfirmStart(null);
+                            vtxPost(
+                              { action: "start", jobId: job.id },
+                              `${job.id}:start`,
+                              "No se pudo iniciar el trabajo."
+                            );
+                          }}
+                          className="shrink-0 rounded-md bg-amber-700 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                        >
+                          Confirmar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmStart(null)}
+                          className="shrink-0 rounded-md border border-amber-300 px-2.5 py-1 text-xs text-amber-700 dark:border-amber-700 dark:text-amber-300"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       disabled={busy !== null || !enabled || !isStartable}
-                      onClick={() =>
-                        vtxPost(
-                          { action: "start", jobId: job.id },
-                          `${job.id}:start`,
-                          "No se pudo iniciar el trabajo."
-                        )
-                      }
+                      onClick={() => {
+                        if (isPendingConfirm) return;
+                        setConfirmStart(job.id);
+                      }}
                       className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                     >
                       Iniciar

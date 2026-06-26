@@ -612,6 +612,9 @@ export function buildSafeDefault(): ExtractedClaim {
     not_relevant_reason: "No se pudo procesar el email — error de extracción AI.",
     summary: "",
     suggested_reply: "",
+    fraud_risk_level: "none",
+    fraud_indicators: [],
+    injury_severity: null,
     parse_failed: true,
   };
 }

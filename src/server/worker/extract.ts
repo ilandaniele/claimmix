@@ -628,7 +628,28 @@ export async function runEmailExtractionWorker(
       trainability,
     });
 
-    // ── g) Handle is_claim=false — AC5 ───────────────────────────────────────
+    // ── g) Handle parse failure (technical error, not a classification) ──────
+    // parse_failed=true means the model returned unparseable output — this is
+    // a provider/schema error, NOT a genuine is_claim=false classification.
+    // Set escalado so a human can re-trigger, never no_relevante.
+    if (extractedClaim.parse_failed === true) {
+      await db
+        .update(cases)
+        .set({ status: "escalado", updated_at: new Date().toISOString() })
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: userId,
+        event_type: AuditEvent.AI_EXTRACTED,
+        target_type: "case",
+        target_id: caseId,
+        payload: { new_status: "escalado", reason: "parse_failed", error_code: "ai_parse_error" },
+      });
+      console.warn(JSON.stringify({ level: "warn", service: "claimmix", msg: "email_worker.parse_failed_escalated", case_id: caseId }));
+      return;
+    }
+
+    // ── h) Handle is_claim=false — AC5 ───────────────────────────────────────
     if (extractedClaim.is_claim === false) {
       const reason =
         extractedClaim.not_relevant_reason ||
@@ -843,6 +864,19 @@ export async function runEmailExtractionWorker(
     }
     // AC3: AI omitted claim_type (null/undefined/empty) → caseUpdate has no claim_type key
     // → existing cases.claim_type is preserved (no overwrite).
+
+    // ── Fraud risk assessment ─────────────────────────────────────────────────
+    if (extractedClaim.fraud_risk_level && extractedClaim.fraud_risk_level !== "none") {
+      (caseUpdate as Record<string, unknown>).fraud_risk_level = extractedClaim.fraud_risk_level;
+    }
+    if (Array.isArray(extractedClaim.fraud_indicators) && extractedClaim.fraud_indicators.length > 0) {
+      (caseUpdate as Record<string, unknown>).fraud_indicators = extractedClaim.fraud_indicators;
+    }
+
+    // ── Granular injury severity ──────────────────────────────────────────────
+    if (extractedClaim.injury_severity != null) {
+      (caseUpdate as Record<string, unknown>).injury_severity = extractedClaim.injury_severity;
+    }
 
     try {
       await db

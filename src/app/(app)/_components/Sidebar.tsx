@@ -12,6 +12,7 @@ import {
   Shield,
   Brain,
   Lock,
+  Play,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -76,6 +77,7 @@ export function Sidebar({ role }: { role: string }) {
 
   const analisisItems: NavItemDef[] = [
     { label: t("nav.metricas") || "Métricas", href: "/metricas", icon: BarChart2 },
+    { label: "Demo", href: "/demo", icon: Play },
     {
       label: "Agente",
       href: "/agente",

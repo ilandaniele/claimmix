@@ -203,6 +203,41 @@ export const ExtractedClaimSchema = z.object({
    * suggested (or approved) as a training example.
    */
   parse_failed: z.boolean().optional(),
+
+  // ── Fraud risk assessment ─────────────────────────────────────────────────
+
+  /**
+   * Overall fraud risk level determined by the extractor based on
+   * inconsistencies, behavioral signals, and claim patterns.
+   */
+  fraud_risk_level: z.enum(["none", "low", "medium", "high"]).default("none"),
+
+  /**
+   * Specific fraud indicators found in the claim.
+   * Each indicator has a type and a human-readable description.
+   */
+  fraud_indicators: z.array(
+    z.object({
+      type: z.enum([
+        "timeline_inconsistency",
+        "location_inconsistency",
+        "damage_inconsistency",
+        "documentation_gap",
+        "repeat_claimant",
+        "behavior_signal",
+        "other",
+      ]),
+      description: z.string().max(500),
+    })
+  ).default([]),
+
+  // ── Granular injury severity ──────────────────────────────────────────────
+
+  /**
+   * Granular injury severity derived from claim content.
+   * null = not applicable (no injury claim) or could not determine.
+   */
+  injury_severity: z.enum(["none", "minor", "severe", "fatal"]).nullable().default(null),
 });
 
 export type ExtractedClaim = z.infer<typeof ExtractedClaimSchema>;
@@ -305,6 +340,20 @@ export const OPENAI_JSON_SCHEMA = {
         not_relevant_reason: { type: "string" },
         summary: { type: "string" },
         suggested_reply: { type: "string" },
+        fraud_risk_level: { type: "string", enum: ["none", "low", "medium", "high"] },
+        fraud_indicators: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string" },
+              description: { type: "string" },
+            },
+            required: ["type", "description"],
+            additionalProperties: false,
+          },
+        },
+        injury_severity: { type: ["string", "null"] },
       },
       required: [
         "extraction_model",
@@ -325,6 +374,9 @@ export const OPENAI_JSON_SCHEMA = {
         "not_relevant_reason",
         "summary",
         "suggested_reply",
+        "fraud_risk_level",
+        "fraud_indicators",
+        "injury_severity",
       ],
       additionalProperties: false,
     },

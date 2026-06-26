@@ -106,6 +106,11 @@ export const cases = pgTable("cases", {
   customer_id: uuid("customer_id"),
   // FK to public.policies(id) ON DELETE SET NULL — plain uuid, same reason.
   policy_id: uuid("policy_id"),
+  // Fraud risk assessment (set by AI extractor, migration 0009)
+  fraud_risk_level: text("fraud_risk_level").default("none"),
+  fraud_indicators: jsonb("fraud_indicators").default(sql`'[]'::jsonb`),
+  // Granular injury severity (migration 0009)
+  injury_severity: text("injury_severity"),
 });
 
 export const rawMessages = pgTable("raw_messages", {

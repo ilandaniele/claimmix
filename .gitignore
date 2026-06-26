@@ -63,3 +63,8 @@ supabase/.temp/
 
 # Local agent tool state
 .claude/
+
+# GCP service account keys — never commit credentials
+*-sa-key.json
+*-service-account.json
+*.gcp-key.json

@@ -273,7 +273,7 @@ async function createVertexTuningJob(
   validationUri: string | null,
   token: string
 ): Promise<VertexTuningJobResponse> {
-  const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/tuningJobs`;
+  const url = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${project}/locations/${location}/tuningJobs`;
 
   const body: Record<string, unknown> = {
     baseModel,
@@ -308,7 +308,7 @@ async function getVertexTuningJob(
   vertexJobId: string,
   token: string
 ): Promise<VertexTuningJobResponse> {
-  const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/tuningJobs/${vertexJobId}`;
+  const url = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${project}/locations/${location}/tuningJobs/${vertexJobId}`;
 
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },

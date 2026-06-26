@@ -349,9 +349,9 @@ describe("POST /api/intake/simulate", () => {
 // ── Scenarios data validation ─────────────────────────────────────────────────
 
 describe("simulation scenarios", () => {
-  it("has 95 scenarios", async () => {
+  it("has 107 scenarios", async () => {
     const { SCENARIOS } = await import("@/server/intake/scenarios");
-    expect(SCENARIOS).toHaveLength(95);
+    expect(SCENARIOS).toHaveLength(107);
   });
 
   it("has the expected scenario counts per claim type", async () => {
@@ -366,10 +366,10 @@ describe("simulation scenarios", () => {
     expect(counts["granizo"]).toBe(13);  // 11 original + 2 new NOA
     expect(counts["incendio"]).toBe(13); // 11 original + 2 new eléctrico
     // Extended claim types
-    expect(counts["cristales"]).toBe(7);             // 5 original + 2 new
-    expect(counts["rc"]).toBe(7);                    // 5 original + 2 new
-    expect(counts["robo_contenido"]).toBe(7);        // 5 original + 2 new
-    expect(counts["accidente_personal"]).toBe(7);    // 5 original + 2 new
+    expect(counts["cristales"]).toBe(10);            // 5 original + 2 new + 3 ext
+    expect(counts["rc"]).toBe(10);                   // 5 original + 2 new + 3 ext
+    expect(counts["robo_contenido"]).toBe(10);       // 5 original + 2 new + 3 ext
+    expect(counts["accidente_personal"]).toBe(10);   // 5 original + 2 new + 3 ext
     // Non-relevant / other (unchanged)
     expect(counts["other"]).toBe(5);
   });

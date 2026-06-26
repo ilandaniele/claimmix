@@ -54,6 +54,26 @@ Teléfono: 011-15-4499-3321.
 Gracias,
 Carlos Rodríguez`,
   },
+  accidente: {
+    label: "Accidente personal",
+    subject: "Accidente personal - Caída en escalera - Póliza 9812-D",
+    body: `Buenas tardes,
+
+Me dirijo a ustedes para reportar un accidente personal que sufrí el 24/06/2026 a las 11:15hs.
+
+Mi nombre es Ana Morales, DNI 31.200.300, titular de la póliza N° 9812-D. El accidente ocurrió en las escaleras del edificio de mi trabajo ubicado en Florida 560, piso 3, CABA.
+
+Me resbalé en un escalón mojado (habían limpiado y no había señal de advertencia) y caí. Resultado: fractura de radio distal en la muñeca derecha y esguince de tobillo izquierdo. Fui atendida de urgencia en el Hospital Italiano de Buenos Aires (turno de guardia, nro. de atención 2026-HI-44812).
+
+El traumatólogo indicó yeso durante 6 semanas y no puedo trabajar en ese período. Soy diseñadora gráfica independiente.
+
+Adjunto: alta de guardia, radiografías, informe del traumatólogo.
+
+Teléfono: 011-15-5544-9921.
+
+Atentamente,
+Ana Morales`,
+  },
 } as const;
 
 type ExampleKey = keyof typeof EXAMPLES;
@@ -395,7 +415,7 @@ export function DemoPublic() {
               id="demo-subject"
               type="text"
               value={subject}
-              onChange={(e) => { setSubject(e.target.value); setActiveExample("choque"); }}
+              onChange={(e) => { setSubject(e.target.value); }}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               placeholder="Asunto del email..."
               disabled={stage === "loading"}
@@ -409,7 +429,7 @@ export function DemoPublic() {
             <textarea
               id="demo-body"
               value={body}
-              onChange={(e) => { setBody(e.target.value); setActiveExample("choque"); }}
+              onChange={(e) => { setBody(e.target.value); }}
               rows={14}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
               placeholder="Pegá el email del asegurado aquí..."
@@ -451,7 +471,7 @@ export function DemoPublic() {
               <div className="text-center">
                 <div className="text-3xl mb-3">🤖</div>
                 <p className="text-sm font-medium text-slate-500">Seleccioná un ejemplo o pegá un email</p>
-                <p className="text-xs text-slate-400 mt-1">y hacé clic en "Analizar con IA"</p>
+                <p className="text-xs text-slate-400 mt-1">y hacé clic en &quot;Analizar con IA&quot;</p>
               </div>
             </div>
           )}

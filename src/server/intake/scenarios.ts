@@ -2396,6 +2396,312 @@ Alejandro Funes
     },
   },
 
+  // ── Cristales — extras para 10 total ────────────────────────────────────────
+
+  {
+    id: "cristales-ext-01",
+    case_type: "cristales",
+    policyholder_name: "Daniela Lorena Meza",
+    policy_number: "POL-2025-122",
+    raw_text: `Buenas noches,
+
+Soy Daniela Meza, póliza POL-2025-122. Ayer a la tarde encontré el vidrio trasero de mi auto completamente destrozado. El vehículo es un Chevrolet Cruze 2020, patente VWX 112, estacionado en la calle Arenales 890, La Plata, Buenos Aires.
+
+No sé exactamente qué pasó. No había granizo ni tormenta. Hay marcas en el portón que sugieren que alguien lo rompió intencionalmente, posiblemente para robar, pero cuando lo encontré no faltaba nada del interior.
+
+Realicé la denuncia en la Comisaría Cuarta de La Plata (número de actuación: 2025-LP4-11203). Tengo fotos del vidrio roto y del interior intacto.
+
+El auto lo uso para trabajar. Necesito saber el plazo para la reparación.
+
+Daniela Meza
+Tel: 0221-15-444-5512`,
+    expected_fields: {
+      incident_date: "sin fecha exacta",
+      incident_location: "Arenales 890, La Plata",
+      vehicle_plate: "VWX 112",
+      denuncia_policial: "si",
+    },
+  },
+
+  {
+    id: "cristales-ext-02",
+    case_type: "cristales",
+    policyholder_name: "Martín Ezequiel Córdoba",
+    policy_number: "POL-2025-123",
+    raw_text: `Estimados señores de siniestros:
+
+Me dirijo a ustedes para reportar la rotura del parabrisas de mi vehículo, ocurrida el 18/06/2025 en la Autopista Buenos Aires–Rosario, kilómetro 123, sentido norte.
+
+Soy Martín Córdoba, DNI 29.876.543, titular de la póliza POL-2025-123. Mi auto es un Peugeot 208 2022, patente YZA 334. Un camión de carga que viajaba delante levantó una piedra del asfalto que impactó de lleno en el centro del parabrisas. No hubo contacto entre vehículos ni personas lesionadas.
+
+Seguí manejando porque la fisura no impedía la visión, pero se extendió. Hoy el vidrio tiene una grieta de extremo a extremo — según el CESVI no tiene reparación posible.
+
+Adjunto foto tomada en el momento del impacto (tenía dashcam) y foto del estado actual.
+
+¿Cuál es el procedimiento? Tengo una vidriería de confianza en Rosario.
+
+Martín Córdoba
+Cel: 0341-15-660-1134`,
+    expected_fields: {
+      incident_date: "18/06/2025",
+      incident_location: "Autopista Bs.As.–Rosario km 123",
+      vehicle_plate: "YZA 334",
+      fotos_danos: "si",
+    },
+  },
+
+  {
+    id: "cristales-ext-03",
+    case_type: "cristales",
+    policyholder_name: "Luciana Paola Fernández",
+    policy_number: "POL-2025-124",
+    raw_text: `Hola, necesito denunciar un siniestro.
+
+Soy Luciana Fernández, póliza POL-2025-124. Ayer a la noche (21/06/2025 aproximadamente a las 23:00 hs) el vidrio del asiento trasero izquierdo de mi auto apareció roto. El auto es un Ford Ka+ 2019, patente BCD 445, estacionado en Mitre 200, Mendoza capital.
+
+Anoche hubo mucho viento (ráfagas de zonda) pero no granizo. Puede ser que algún ramo de árbol o pedazo de rama haya impactado. No tengo cámara en la zona. No hay testigos.
+
+Hice la denuncia preventiva en la Subcomisaría 1ra de Mendoza (actuación nro. 2025-MZA-07760) aunque reconozco que no sé bien qué causó la rotura.
+
+El vidrio tiene que cambiarse completo. ¿Me pueden orientar sobre talleres adheridos en Mendoza?
+
+Gracias,
+Luciana Fernández
+2614-555-0091`,
+    expected_fields: {
+      incident_date: "21/06/2025",
+      incident_location: "Mitre 200, Mendoza",
+      vehicle_plate: "BCD 445",
+      denuncia_policial: "si",
+    },
+  },
+
+  // ── RC — extras para 10 total ────────────────────────────────────────────────
+
+  {
+    id: "rc-ext-01",
+    case_type: "rc",
+    policyholder_name: "Horacio Damián Villalba",
+    policy_number: "POL-2025-125",
+    raw_text: `Buenos días. Escribo para reportar un siniestro de responsabilidad civil.
+
+Horacio Villalba, DNI 24.123.456, póliza POL-2025-125. El miércoles 19/06/2025 a las 7:30 hs circulaba en mi Volkswagen Vento 2021 (patente EFG 667) por el carril central de la Autopista Panamericana, ramal Tigre, altura km 28. El tráfico frenó de improviso y no alcancé a frenar — impacté contra la parte trasera de un Toyota Etios gris que iba delante mío.
+
+Los daños en el Etios son: paragolpes trasero destruido, farolero derecho roto y baúl levemente deformado. Mi auto tiene daños en el paragolpes delantero y radiador. Nadie resultó herido.
+
+Intercambiamos datos. El damnificado es Rodrigo Casas, DNI 30.456.789, domicilio en Av. Maipú 1200, San Isidro. Llamamos al 911, vino patrulla y labraron el acta 2025-PAN-00312.
+
+Por favor indíquenme cómo proceder para cubrir los daños del otro auto.
+
+Horacio Villalba — 011-15-3311-4422`,
+    expected_fields: {
+      incident_date: "19/06/2025",
+      incident_location: "Autopista Panamericana km 28, ramal Tigre",
+      vehicle_plate: "EFG 667",
+      denuncia_policial: "si",
+    },
+  },
+
+  {
+    id: "rc-ext-02",
+    case_type: "rc",
+    policyholder_name: "Silvia Graciela Torres",
+    policy_number: "POL-2025-126",
+    raw_text: `Estimado equipo,
+
+Tengo que reportar un incidente de responsabilidad civil que me avergüenza bastante.
+
+Soy Silvia Torres, póliza POL-2025-126. Ayer 22/06/2025 estaba saliendo del supermercado Jumbo de Palermo (Av. Bullrich 345) y al abrir la puerta del conductor de mi Renault Kangoo 2020 (patente HIJ 889) la puerta golpeó el auto del costado, un Fiat Cronos blanco.
+
+El golpe fue más fuerte de lo que pensé — le dejó una hendidura de unos 30 cm en la puerta trasera del conductor. Esperé al dueño, que tardó unos 20 minutos. Se llama Diego Peralta, me dio sus datos y también él tiene seguro.
+
+Nadie llamó a la policía porque no fue un accidente de tránsito convencional, pasó en el estacionamiento privado.
+
+¿Cómo activo la cobertura de RC para los daños del otro vehículo? Quiero resolver esto rápido.
+
+Silvia Torres
+Tel: 011-4499-5522`,
+    expected_fields: {
+      incident_date: "22/06/2025",
+      incident_location: "Av. Bullrich 345, Palermo (estacionamiento Jumbo)",
+      vehicle_plate: "HIJ 889",
+    },
+  },
+
+  {
+    id: "rc-ext-03",
+    case_type: "rc",
+    policyholder_name: "Federico Ariel Guzmán",
+    policy_number: "POL-2025-127",
+    raw_text: `Hola buenas tardes. Soy Federico Guzmán, DNI 27.654.321, póliza POL-2025-127.
+
+Necesito reportar un accidente de tránsito donde un tercer vehículo también resultó dañado.
+
+El 23/06/2025 a las 14:45 hs iba circulando en mi Hyundai Tucson 2023 (patente KLM 001) por la calle Rivadavia 3600 en el barrio de Almagro, CABA. Salió un ciclista del carril bici sin ceder el paso — para esquivarlo maniobré hacia la izquierda y choqué de costado a un Fiat Palio rojo estacionado junto al cordón.
+
+El Palio sufrió daños importantes en el lateral derecho. El ciclista no resultó herido. Mi vehículo tiene rayones en el lateral izquierdo y el espejo roto.
+
+El dueño del Palio es Ángel Saavedra, DNI 33.221.100. Vine patrullero, acta 2025-ALM-01122.
+
+¿Necesitan que yo declare o alcanza con el acta policial para tramitar el RC?
+
+Federico Guzmán — 011-15-6655-7733`,
+    expected_fields: {
+      incident_date: "23/06/2025",
+      incident_location: "Rivadavia 3600, Almagro, CABA",
+      vehicle_plate: "KLM 001",
+      denuncia_policial: "si",
+    },
+  },
+
+  // ── Robo contenido — extras para 10 total ───────────────────────────────────
+
+  {
+    id: "robo-contenido-ext-01",
+    case_type: "robo_contenido",
+    policyholder_name: "Pablo Andrés Soria",
+    policy_number: "POL-2025-128",
+    raw_text: `Buenas tardes,
+
+Pablo Soria, póliza POL-2025-128. Soy plomero y ayer, 20/06/2025, me robaron la camioneta con todas las herramientas de trabajo adentro.
+
+El vehículo es una Renault Kangoo Express 2019, patente NOP 223, que suelo usar como depósito móvil de herramientas. La tenía estacionada en la calle Corrientes 4500, Villa Crespo, CABA. Entre las 18:00 y las 20:30 hs me la robaron. Cuando volví no estaba.
+
+Las herramientas robadas incluyen: llave de cadena, tubo hidráulico, taladro percutor Bosch, nivel digital, kit de manómetros, cables y mangueras. El valor estimado supera los $400.000.
+
+Hice la denuncia en la Comisaría 15 de Villa Crespo, número 2025-CV15-00988. También denuncié el robo del vehículo pero entiendo que eso sería por otra póliza (robo de vehículo). Lo que me interesa acá es el contenido.
+
+¿El seguro del auto cubre también las herramientas?
+
+Pablo Soria — 011-15-8844-6633`,
+    expected_fields: {
+      incident_date: "20/06/2025",
+      incident_location: "Corrientes 4500, Villa Crespo, CABA",
+      vehicle_plate: "NOP 223",
+      denuncia_policial: "si",
+    },
+  },
+
+  {
+    id: "robo-contenido-ext-02",
+    case_type: "robo_contenido",
+    policyholder_name: "Natalia Beatriz Cano",
+    policy_number: "POL-2025-129",
+    raw_text: `Estimados:
+
+Soy Natalia Cano, DNI 32.100.200, póliza POL-2025-129. Tengo un pequeño estudio de fotografía y el domingo 22/06/2025 entraron a robar.
+
+Forzaron la ventana trasera del local ubicado en Lavalle 1800, piso 2, CABA. Se llevaron: una cámara Nikon Z6II con lente 24-70mm, un trípode Manfrotto, dos flashes de estudio Godox, una notebook Dell Inspiron 15, y aproximadamente $60.000 en efectivo que tenía en la caja del estudio.
+
+La puerta principal no fue forzada — parece que entraron por la ventana que da al patio. Los vecinos del piso 1 escucharon ruidos alrededor de las 3 AM pero no vieron a nadie.
+
+Hice la denuncia en la Seccional 18, número 2025-S18-05521. Tengo el inventario completo del equipo robado con fotos de cada ítem y los comprobantes de compra de la cámara y la notebook.
+
+¿Qué documentación adicional necesitan?
+
+Natalia Cano — 011-4377-2200`,
+    expected_fields: {
+      incident_date: "22/06/2025",
+      incident_location: "Lavalle 1800, CABA",
+      denuncia_policial: "si",
+    },
+  },
+
+  {
+    id: "robo-contenido-ext-03",
+    case_type: "robo_contenido",
+    policyholder_name: "Gustavo Leandro Paredes",
+    policy_number: "POL-2025-130",
+    raw_text: `Hola,
+
+Gustavo Paredes, póliza POL-2025-130. Necesito reportar un robo que me dejó sin muchas cosas importantes.
+
+El 24/06/2025 por la tarde, mientras estaba en el trabajo, entraron a robar a mi casa en Bv. Oroño 2300, planta baja, Rosario. Rompieron la cerradura de la puerta del fondo.
+
+Robaron: TV LG OLED 55", notebook Lenovo ThinkPad, reloj Seiko automático, $45.000 en efectivo, una tablet iPad Air y una mochila de montaña con equipamiento de trekking (carpa, bolsa de dormir, ropa térmica).
+
+Mi esposa llegó primero y llamó a la policía. Vinieron efectivos de la 7ma Seccional de Rosario y labraron el acta 2025-ROS7-02214. El informe pericial determinó que forzaron la cerradura.
+
+Tengo los tickets de la TV, el reloj y la notebook. Para los demás elementos no conservo comprobantes.
+
+¿Puedo incluir todos los elementos en el reclamo aunque no tenga tickets de todos?
+
+Gustavo Paredes — 0341-15-755-4499`,
+    expected_fields: {
+      incident_date: "24/06/2025",
+      incident_location: "Bv. Oroño 2300, Rosario",
+      denuncia_policial: "si",
+    },
+  },
+
+  // ── Accidente personal — extras para 10 total ───────────────────────────────
+
+  {
+    id: "accidente-personal-ext-01",
+    case_type: "accidente_personal",
+    policyholder_name: "Ramiro Ignacio Molina",
+    policy_number: "POL-2025-131",
+    raw_text: `Buenos días. Soy Ramiro Molina, DNI 28.333.444, póliza POL-2025-131.
+
+El martes 18/06/2025 tuve un accidente en mi lugar de trabajo. Soy contador y trabajo en una oficina en el piso 7 de Torre Madero, Av. Alicia Moreau de Justo 1150, CABA. Al bajar una escalera de servicio que estaba mojada (habían limpiado el piso), me resbalé y caí varios escalones. Traté de agarrarme de la baranda pero no pude.
+
+En la guardia del Hospital Italiano me diagnosticaron fractura de muñeca derecha (radio distal) y esguince de tobillo izquierdo. Me pusieron yeso en la muñeca — 6 semanas. No puedo trabajar con normalidad.
+
+No hay ART porque soy empleado en relación de dependencia con antigüedad y la empresa no activó correctamente el seguro laboral. Por eso estoy reclamando a través del seguro personal.
+
+¿El accidente en lugar de trabajo lo cubre la póliza de accidente personal?
+
+Ramiro Molina — 011-15-2255-6677`,
+    expected_fields: {
+      incident_date: "18/06/2025",
+      incident_location: "Torre Madero, CABA",
+    },
+  },
+
+  {
+    id: "accidente-personal-ext-02",
+    case_type: "accidente_personal",
+    policyholder_name: "Jorge Luis Palavecino",
+    policy_number: "POL-2025-132",
+    raw_text: `Buenas tardes, gente de siniestros. Jorge Palavecino, póliza POL-2025-132.
+
+El 20/06/2025 tuve un accidente mientras trabajaba en mi campo en Villa Mercedes, San Luis. Estaba operando el tractor (John Deere 5075E) y la articulación del enganche trasero se trabó. Cuando bajé a revisarlo, el tractor rodó hacia atrás (estaba en una pendiente leve) y me atrapó el pie izquierdo entre la rueda y el suelo.
+
+Me trasladaron en ambulancia al Hospital Regional de Villa Mercedes. Diagnóstico: fractura de dos metatarsos del pie izquierdo, más contusión severa. Voy a estar inmovilizado al menos 8 semanas.
+
+Trabajo en el campo solo, sin empleados. No hay ART aplicable. Tengo el informe médico de urgencias y las radiografías.
+
+¿La póliza de accidente personal cubre este tipo de accidente de trabajo rural?
+
+Jorge Palavecino — 02657-15-44-5511`,
+    expected_fields: {
+      incident_date: "20/06/2025",
+      incident_location: "Villa Mercedes, San Luis",
+    },
+  },
+
+  {
+    id: "accidente-personal-ext-03",
+    case_type: "accidente_personal",
+    policyholder_name: "Verónica Susana Acosta",
+    policy_number: "POL-2025-133",
+    raw_text: `Hola. Verónica Acosta, DNI 35.667.890, póliza POL-2025-133.
+
+El domingo 23/06/2025 tuve un accidente doméstico bastante grave. Estaba cambiando una lamparita en el techo de la cocina subida a una silla, y la silla se corrió — caí de espaldas sobre la mesada. Me golpeé fuerte la espalda y la cabeza.
+
+Llamé a mi marido que me llevó a la guardia del Hospital Austral en Pilar, Buenos Aires. Me hicieron tomografía: tengo una contusión costoverterbal y dos costillas fisuradas (7ma y 8va). Me dieron un corsé y reposo absoluto por 3 semanas mínimo. El traumatólogo habló de 6 a 8 semanas de recuperación total.
+
+Trabajo como contadora independiente (monotributista). Estos días sin poder trabajar son una pérdida real.
+
+¿Cómo avanzo con el seguro de accidente personal? Tengo el alta de guardia, tomografía e informe del traumatólogo.
+
+Verónica Acosta — 0230-555-4433`,
+    expected_fields: {
+      incident_date: "23/06/2025",
+      incident_location: "domicilio propio, Pilar, Buenos Aires",
+    },
+  },
+
   {
     id: "rc-moto-peaton-01",
     case_type: "rc",

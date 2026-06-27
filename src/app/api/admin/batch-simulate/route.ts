@@ -30,7 +30,7 @@ import { rateLimit, getClientIp } from "@/lib/rate-limit/index";
 import type { ClaimType } from "@/lib/schemas/cases";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 600;
+export const maxDuration = 300;
 
 const BatchSimulateSchema = z.object({
   count: z.number().int().min(1).max(50),

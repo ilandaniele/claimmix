@@ -104,8 +104,11 @@ function isRetryableGeminiStatus(status: number): boolean {
 }
 
 function retryAfterMs(headers: Headers, attempt: number, status: number): number {
-  // For 429 rate-limit errors allow up to 2 minutes; for 5xx errors cap at 30s.
-  const capMs = status === 429 ? 120_000 : 30_000;
+  // Cap 429 retries at 10s so the Vercel after() worker (maxDuration=180s) has
+  // time to run the GeminiExtractionError catch + escalate the case.
+  // Daily quota exhaustion (RESOURCE_EXHAUSTED) won't recover in minutes anyway —
+  // failing fast lets the case escalate so a human can re-trigger it.
+  const capMs = status === 429 ? 10_000 : 30_000;
   const retryAfter = headers.get("retry-after");
   if (retryAfter) {
     const seconds = Number(retryAfter);

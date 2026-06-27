@@ -544,6 +544,11 @@ export async function runEmailExtractionWorker(
         target_id: caseId,
         payload: { reason: budgetResult.reason },
       });
+      // Escalate so a human can re-trigger once budget resets — never leave the case in procesando.
+      await db
+        .update(cases)
+        .set({ status: "escalado", updated_at: new Date().toISOString() })
+        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
       return;
     }
 

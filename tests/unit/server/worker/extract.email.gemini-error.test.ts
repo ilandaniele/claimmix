@@ -334,3 +334,44 @@ describe("GEMINI-ERR: logAgentRunError is still called when logAgentRunError its
     ).resolves.toBeUndefined();
   });
 });
+
+describe("BUDGET-EXCEEDED: case is escalated when internal budget guard fires", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.MOCK_AI;
+    setupDbMock();
+    mockCheckBudget.mockResolvedValue({ exceeded: true, reason: "monthly_cap" });
+    mockFindCustomerMatches.mockResolvedValue([]);
+    mockFindPolicyMatches.mockResolvedValue([]);
+    mockLogAgentRunError.mockResolvedValue("err-run-id");
+    mockLogAgentRun.mockResolvedValue(undefined);
+    // Gemini should never be called when budget is exceeded
+    mockExtractEmailClaimGemini.mockRejectedValue(new Error("should not be called"));
+  });
+
+  it("sets case status to 'escalado' when budget is exceeded", async () => {
+    await runEmailExtractionWorker("case-budget-exceeded", "tenant-001", "user-001");
+
+    const escaladoUpdate = capturedCaseUpdates.find((u) => u.status === "escalado");
+    expect(escaladoUpdate).toBeDefined();
+  });
+
+  it("does not call Gemini extractor when budget is exceeded", async () => {
+    await runEmailExtractionWorker("case-budget-exceeded", "tenant-001", "user-001");
+
+    expect(mockExtractEmailClaimGemini).not.toHaveBeenCalled();
+  });
+
+  it("does not call logAgentRun or logAgentRunError (no extraction attempted)", async () => {
+    await runEmailExtractionWorker("case-budget-exceeded", "tenant-001", "user-001");
+
+    expect(mockLogAgentRun).not.toHaveBeenCalled();
+    expect(mockLogAgentRunError).not.toHaveBeenCalled();
+  });
+
+  it("does not throw — worker is fire-and-forget", async () => {
+    await expect(
+      runEmailExtractionWorker("case-budget-exceeded", "tenant-001", "user-001")
+    ).resolves.toBeUndefined();
+  });
+});

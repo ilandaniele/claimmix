@@ -361,7 +361,23 @@ FIELDS TO EXTRACT (use empty string + confidence=0 if not found):
 - accident_date: Date of incident (ISO 8601 preferred)
 - accident_location: Address or location of the incident
 - accident_description: Description of what happened
-- claim_type: One of: choque, robo, granizo, incendio, or other
+- claim_type: One of: choque, robo, granizo, incendio, cristales, rc, robo_contenido, accidente_personal, or other.
+  Classify using these rules (evaluate in order; pick the FIRST that matches):
+  • accidente_personal — the claim is primarily about a PERSON's bodily injury
+    (lesiones, fractura, herido, internación, certificado médico), regardless of how it happened.
+  • rc (responsabilidad civil) — the insured is reporting damage/harm they CAUSED TO A THIRD
+    PARTY (another vehicle, a pedestrian, or someone's property), and the purpose is to cover
+    that third party's loss / the insured's liability. Signals: a clearly named damnificado
+    (tercero), "le ocasioné/causé daños a", "responsabilidad civil", door-ding to a parked car,
+    hitting a pedestrian or another vehicle where THE OTHER PARTY's damage is the subject.
+    KEY DISTINCTION vs choque: choque = the claim is about repairing the INSURED's OWN vehicle.
+    rc = the claim is about the damage the insured caused to SOMEONE ELSE. If a third party is
+    damaged and the email is about compensating them, choose rc, NOT choque.
+  • cristales — damage limited to glass/cristales (parabrisas, luneta, ventanilla), no collision.
+  • robo_contenido — theft of belongings/contents FROM a vehicle (objetos, herramientas,
+    pertenencias), where the vehicle itself was NOT stolen. (robo = the whole vehicle was stolen.)
+  • granizo — hail damage. incendio — fire. choque — collision damaging the insured's vehicle.
+  • robo — theft of the entire vehicle. other — anything that fits none of the above.
 
 INJURY SEVERITY CLASSIFICATION:
 Classify the injury severity of people involved (not vehicle damage). Set injury_severity to:

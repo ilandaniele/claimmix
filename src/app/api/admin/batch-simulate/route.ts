@@ -69,6 +69,14 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     // ── Create all N cases synchronously ───────────────────────────────────────
     const caseIds: string[] = [];
+    // Per-case creation failures, surfaced in the response so the caller can retry
+    // the exact cases that failed instead of guessing from `accepted < requested`.
+    const failedCases: Array<{
+      index: number;
+      scenario_id: string;
+      claim_type: ClaimType;
+      code: string | null;
+    }> = [];
 
     // Resolve a fixed scenario if scenario_id is supplied; otherwise pick randomly each iteration.
     const fixedScenario = scenario_id ? getScenarioById(scenario_id) : undefined;
@@ -101,7 +109,15 @@ export async function POST(request: NextRequest): Promise<Response> {
             .returning({ id: cases.id, created_at: cases.created_at })
         );
 
-        if (!newCase) continue;
+        if (!newCase) {
+          failedCases.push({
+            index: i,
+            scenario_id: scenario.id,
+            claim_type: finalClaimType,
+            code: "no_row",
+          });
+          continue;
+        }
         caseIds.push(newCase.id);
 
         await adminDb.insert(rawMessages).values({
@@ -117,7 +133,13 @@ export async function POST(request: NextRequest): Promise<Response> {
       } catch (e) {
         // Skip this case but surface why — a silent catch here previously made
         // a broken cases INSERT look like `accepted: 0` with no explanation.
-        const code = (e as { code?: string })?.code;
+        const code = (e as { code?: string })?.code ?? null;
+        failedCases.push({
+          index: i,
+          scenario_id: scenario.id,
+          claim_type: finalClaimType,
+          code,
+        });
         console.error(
           "[batch-simulate] Failed to create case:",
           code,
@@ -139,6 +161,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         batch: true,
         requested: count,
         accepted: caseIds.length,
+        failed: failedCases.length,
         claim_type: claim_type ?? null,
         delay_ms,
       },
@@ -176,6 +199,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     return accepted({
       accepted: caseIds.length,
       case_ids: caseIds,
+      failed: failedCases.length,
+      failed_cases: failedCases,
       message: `${caseIds.length} simulaciones en cola. Se procesarán en segundo plano.`,
     });
   } catch (e) {

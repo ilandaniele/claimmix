@@ -329,4 +329,64 @@ describe("POST /api/admin/batch-simulate", () => {
     await afterCallbacks[0]();
     expect(mockRunIntakeAgent).toHaveBeenCalledTimes(3);
   });
+
+  // ── Failed-case surfacing (no more silent catch) ───────────────────────────────
+
+  it("surfaces per-case insert failures in failed_cases instead of swallowing them", async () => {
+    // DB mock where the cases INSERT .returning() rejects with a PG-style error.
+    const failingDb = {
+      insert: vi.fn().mockImplementation(() => ({
+        values: vi.fn().mockImplementation(() => ({
+          returning: vi.fn().mockRejectedValue(
+            Object.assign(new Error("check violation"), { code: "23514" })
+          ),
+          catch: vi.fn().mockResolvedValue(undefined),
+        })),
+      })),
+    };
+    mockRequireAdmin.mockResolvedValue({
+      db: failingDb,
+      user: { id: USER_ID },
+      userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "admin" },
+    });
+
+    const res = await POST(makeRequest({ count: 2 }));
+    expect(res.status).toBe(202);
+    const body = await res.json();
+
+    expect(body.accepted).toBe(0);
+    expect(body.failed).toBe(2);
+    expect(body.failed_cases).toHaveLength(2);
+    expect(body.failed_cases[0]).toMatchObject({
+      index: 0,
+      scenario_id: "choque-01",
+      claim_type: "choque",
+      code: "23514",
+    });
+  });
+
+  it("reports failed count in the audit log payload", async () => {
+    const failingDb = {
+      insert: vi.fn().mockImplementation(() => ({
+        values: vi.fn().mockImplementation(() => ({
+          returning: vi.fn().mockRejectedValue(
+            Object.assign(new Error("boom"), { code: "23514" })
+          ),
+          catch: vi.fn().mockResolvedValue(undefined),
+        })),
+      })),
+    };
+    mockRequireAdmin.mockResolvedValue({
+      db: failingDb,
+      user: { id: USER_ID },
+      userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "admin" },
+    });
+
+    await POST(makeRequest({ count: 3 }));
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ accepted: 0, failed: 3 }),
+      })
+    );
+  });
 });

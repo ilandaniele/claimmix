@@ -114,8 +114,18 @@ export async function POST(request: NextRequest): Promise<Response> {
           subject: `[batch_sim] Siniestro - ${finalClaimType} - ${scenario.id}`,
           body: rawText,
         }).catch(() => undefined);
-      } catch {
-        // skip individual case creation failures
+      } catch (e) {
+        // Skip this case but surface why — a silent catch here previously made
+        // a broken cases INSERT look like `accepted: 0` with no explanation.
+        const code = (e as { code?: string })?.code;
+        console.error(
+          "[batch-simulate] Failed to create case:",
+          code,
+          "claim_type:",
+          finalClaimType,
+          "scenario:",
+          scenario.id
+        );
       }
     }
 

@@ -133,8 +133,19 @@ function buildExpectedOutput(
 }
 
 /**
- * Converts a single training example into a Gemini-format JSONL line.
- * Gemini supervised tuning requires role "model" (not "assistant").
+ * Converts a single training example into a Vertex AI Gemini supervised-tuning
+ * JSONL line.
+ *
+ * Vertex AI Gemini tuning requires the GenerateContent dataset format:
+ *   { "systemInstruction": { "role": "system", "parts": [{ "text": ... }] },
+ *     "contents": [ { "role": "user",  "parts": [{ "text": ... }] },
+ *                   { "role": "model", "parts": [{ "text": ... }] } ] }
+ *
+ * It does NOT accept the OpenAI ChatCompletions `{ messages: [{ role, content }] }`
+ * shape — uploading that fails the tuning job with:
+ *   "Converting from 'ChatCompletions' to 'GenerateContent' dataset format is
+ *    currently not supported for this model."
+ * (observed on tuningJob 9110414817876770816, baseModel gemini-2.5-flash).
  */
 function toGeminiJsonlLine(example: {
   input_payload: Record<string, unknown>;
@@ -149,20 +160,23 @@ function toGeminiJsonlLine(example: {
       ? example.input_payload.body
       : "";
   return JSON.stringify({
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are the ClaimMix claim intake agent. Return only valid JSON matching the production extraction schema.",
-      },
+    systemInstruction: {
+      role: "system",
+      parts: [
+        {
+          text: "You are the ClaimMix claim intake agent. Return only valid JSON matching the production extraction schema.",
+        },
+      ],
+    },
+    contents: [
       {
         role: "user",
-        content: `Subject: ${subject}\n\nBody:\n${body}`,
+        parts: [{ text: `Subject: ${subject}\n\nBody:\n${body}` }],
       },
       {
-        // Gemini tuning uses "model" role for the expected assistant turn
+        // Gemini tuning uses the "model" role for the expected assistant turn.
         role: "model",
-        content: JSON.stringify(buildExpectedOutput(example.expected_output)),
+        parts: [{ text: JSON.stringify(buildExpectedOutput(example.expected_output)) }],
       },
     ],
   });

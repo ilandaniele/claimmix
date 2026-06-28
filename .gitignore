@@ -64,6 +64,9 @@ supabase/.temp/
 # Local agent tool state
 .claude/
 
+# MCP server config — may carry API tokens (e.g. WhatsApp Cloud API). Keep local.
+.mcp.json
+
 # GCP service account keys — never commit credentials
 *-sa-key.json
 *-service-account.json

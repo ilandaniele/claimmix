@@ -1,11 +1,16 @@
 /**
  * GET /api/cron/reap-stuck — escalate cases stuck in `procesando`.
  *
- * Safety net for the Vercel `after()` eviction problem: when a big simulate
- * batch exceeds the function's wall-clock budget, later cases never get their
- * AI agent run and sit in `procesando` indefinitely. This sweep transitions any
+ * Daily safety-net sweep for the Vercel `after()` eviction problem: when a big
+ * simulate batch exceeds the function's wall-clock budget, later cases never get
+ * their AI agent run and sit in `procesando` indefinitely. This transitions any
  * such case (older than SIMULATE_STUCK_REAP_AFTER_MS, default 20 min) to
  * `escalado` so it can be re-analyzed and so the simulation queue stays clear.
+ *
+ * Runs once daily (Hobby-plan safe — Hobby caps crons at once per day). The
+ * primary, real-time mechanism is the opportunistic reaper call that simulate
+ * and batch-simulate run synchronously before queuing a new batch; this cron is
+ * just a backstop for when no new simulations run for a long stretch.
  *
  * Auth: Authorization: Bearer <CRON_SECRET> (constant-time compared), same as
  * the gmail-poll cron. Vercel cron invocations include this header automatically.

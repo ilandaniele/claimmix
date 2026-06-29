@@ -1,14 +1,18 @@
 # ClaimMix
 
-ClaimMix is an AI-powered FNOL claims management system for insurance teams. It receives inbound Gmail claim emails, creates cases, runs a tenant-configurable claim agent, persists extracted fields and missing documentation, and keeps analysts in a focused operational dashboard.
+ClaimMix is an AI-powered FNOL claims management system for insurance teams. It receives inbound claim messages (Gmail **and WhatsApp**), creates cases, runs a tenant-configurable claim agent, persists extracted fields and missing documentation, and keeps analysts in a focused operational dashboard.
+
+> **📋 Current status, deployment facts, and open blockers live in
+> [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).** Read it first when picking up the project.
 
 ## Stack
 
-- Next.js App Router
+- Next.js App Router (deployed on Vercel — Hobby plan)
 - Better Auth
 - Neon Postgres with Drizzle
 - Gmail API and Google Pub/Sub
-- OpenAI and Google Gemini agent providers
+- WhatsApp Business Cloud API (official Meta — see [`docs/whatsapp-setup.md`](docs/whatsapp-setup.md))
+- OpenAI and Google Gemini agent providers (+ Vertex AI fine-tuning)
 - S3-compatible attachment storage
 - Vitest and Playwright
 
@@ -30,16 +34,18 @@ MOCK_AI=true
 
 ## Database
 
-Migrations live in `neon/migrations/`.
+Migrations live in `neon/migrations/` (`0001`–`0009` as of 2026-06-29).
 
-Apply them with your Postgres tool of choice:
+> ⚠️ **Migrations are applied BY HAND and are NOT tracked.** Deploys do **not**
+> run them. After adding a migration you must apply it to Neon yourself, and when
+> something DB-shaped breaks after a deploy, **diff the live Neon schema against
+> `src/lib/db/schema/*`** rather than trusting these files. (Migrations 0006/0008/0009
+> were once shipped in code but never applied, which broke all `cases` INSERTs.)
+
+Apply them in order with your Postgres tool of choice, e.g.:
 
 ```bash
-psql "$DATABASE_URL" -1 -f neon/migrations/0001_init.sql
-psql "$DATABASE_URL" -1 -f neon/migrations/0002_gemini_key.sql
-psql "$DATABASE_URL" -1 -f neon/migrations/0003_user_ai_settings.sql
-psql "$DATABASE_URL" -1 -f neon/migrations/0004_agent_console_security.sql
-psql "$DATABASE_URL" -1 -f neon/migrations/0005_gemini_default.sql
+for f in neon/migrations/0*.sql; do psql "$DATABASE_URL" -1 -f "$f"; done
 ```
 
 Optional seed data lives in `neon/seed.sql`.

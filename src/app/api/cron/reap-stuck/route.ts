@@ -1,0 +1,52 @@
+/**
+ * GET /api/cron/reap-stuck — escalate cases stuck in `procesando`.
+ *
+ * Safety net for the Vercel `after()` eviction problem: when a big simulate
+ * batch exceeds the function's wall-clock budget, later cases never get their
+ * AI agent run and sit in `procesando` indefinitely. This sweep transitions any
+ * such case (older than SIMULATE_STUCK_REAP_AFTER_MS, default 20 min) to
+ * `escalado` so it can be re-analyzed and so the simulation queue stays clear.
+ *
+ * Auth: Authorization: Bearer <CRON_SECRET> (constant-time compared), same as
+ * the gmail-poll cron. Vercel cron invocations include this header automatically.
+ */
+
+import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
+import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    console.error("[cron/reap-stuck] CRON_SECRET is not configured"); // crew-debug-ok
+    return NextResponse.json(
+      { error: { code: "INTERNAL", message: "Server misconfiguration." } },
+      { status: 500 }
+    );
+  }
+
+  const authHeader = req.headers.get("authorization") ?? "";
+  const expected = `Bearer ${secret}`;
+  let isAuthorized = false;
+  try {
+    const expectedBuf = Buffer.from(expected, "utf-8");
+    const actualBuf = Buffer.from(authHeader, "utf-8");
+    if (expectedBuf.length === actualBuf.length) {
+      isAuthorized = timingSafeEqual(expectedBuf, actualBuf);
+    }
+  } catch {
+    isAuthorized = false;
+  }
+
+  if (!isAuthorized) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHORIZED", message: "Invalid or missing Authorization header." } },
+      { status: 401 }
+    );
+  }
+
+  const result = await reapStuckProcessingCases();
+  return NextResponse.json({ ok: true, ...result });
+}

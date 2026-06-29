@@ -25,6 +25,7 @@ import { SimulateIntakeSchema } from "@/lib/schemas/intake";
 import { getScenarioById } from "@/server/intake/scenarios";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
+import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -161,6 +162,14 @@ export async function POST(request: NextRequest): Promise<Response> {
       }),
       { status: 429, headers: { "Content-Type": "application/json" } }
     );
+  }
+
+  // Opportunistically clear cases stuck in `procesando` from an earlier batch
+  // whose after() callbacks were evicted, so they don't crowd the throttle.
+  try {
+    await reapStuckProcessingCases({ tenantId: userRow.tenant_id });
+  } catch {
+    // never block a new simulation on reaper failure
   }
 
   // ── 6. Create case + raw_message in DB ───────────────────────────────────────

@@ -68,6 +68,10 @@ vi.mock("@/lib/db", () => {
   };
 });
 
+vi.mock("@/server/intake/reap-stuck", () => ({
+  reapStuckProcessingCases: vi.fn().mockResolvedValue({ reaped: 0, caseIds: [] }),
+}));
+
 vi.mock("@/server/ai/budget", () => ({
   checkBudget: mockCheckBudget,
   recordUsage: vi.fn().mockResolvedValue(undefined),

@@ -362,21 +362,31 @@ FIELDS TO EXTRACT (use empty string + confidence=0 if not found):
 - accident_location: Address or location of the incident
 - accident_description: Description of what happened
 - claim_type: One of: choque, robo, granizo, incendio, cristales, rc, robo_contenido, accidente_personal, or other.
-  Classify using these rules (evaluate in order; pick the FIRST that matches):
+
+  ⚠️ DECISIVE TEST FOR COLLISIONS (apply this BEFORE anything else when there is a crash/golpe/impacto):
+  Ask "¿quién sufrió el daño que se está reclamando?"
+    • "Yo choqué y se dañó MI auto" (the insured claims for their OWN vehicle/property) → choque
+    • "Yo choqué y le dañé a UN TERCERO" (the insured CAUSED damage to someone else — another
+      vehicle, a pedestrian/ciclista, a parked car, a wall/propiedad ajena — and that third party
+      is the damnificado who reclaims) → **rc** (responsabilidad civil), NOT choque.
+  Do not default collisions to choque. If a tercero damnificado is present and their loss is the
+  subject of the claim, it is rc even though a collision occurred. Examples that are rc, not choque:
+  golpe de puerta a un ciclista; chocar y abollar un auto estacionado; embestir un poste/pared
+  ajena; atropellar a un peatón causándole daños.
+
+  Then classify using these rules (evaluate in order; pick the FIRST that matches):
   • accidente_personal — the claim is primarily about a PERSON's bodily injury
     (lesiones, fractura, herido, internación, certificado médico), regardless of how it happened.
-  • rc (responsabilidad civil) — the insured is reporting damage/harm they CAUSED TO A THIRD
-    PARTY (another vehicle, a pedestrian, or someone's property), and the purpose is to cover
-    that third party's loss / the insured's liability. Signals: a clearly named damnificado
-    (tercero), "le ocasioné/causé daños a", "responsabilidad civil", door-ding to a parked car,
-    hitting a pedestrian or another vehicle where THE OTHER PARTY's damage is the subject.
-    KEY DISTINCTION vs choque: choque = the claim is about repairing the INSURED's OWN vehicle.
-    rc = the claim is about the damage the insured caused to SOMEONE ELSE. If a third party is
-    damaged and the email is about compensating them, choose rc, NOT choque.
+  • rc (responsabilidad civil) — see the DECISIVE TEST above: damage the insured CAUSED TO A THIRD
+    PARTY, where covering that third party's loss / the insured's liability is the purpose. Signals:
+    a named damnificado (tercero), "le ocasioné/causé daños a", "responsabilidad civil", "daños a
+    terceros", door-ding to a parked car, hitting a pedestrian/cyclist or another vehicle where THE
+    OTHER PARTY's damage is the subject.
   • cristales — damage limited to glass/cristales (parabrisas, luneta, ventanilla), no collision.
   • robo_contenido — theft of belongings/contents FROM a vehicle (objetos, herramientas,
     pertenencias), where the vehicle itself was NOT stolen. (robo = the whole vehicle was stolen.)
-  • granizo — hail damage. incendio — fire. choque — collision damaging the insured's vehicle.
+  • granizo — hail damage. incendio — fire.
+  • choque — collision damaging the INSURED's OWN vehicle (no third-party claim — see DECISIVE TEST).
   • robo — theft of the entire vehicle. other — anything that fits none of the above.
 
 INJURY SEVERITY CLASSIFICATION:

@@ -22,6 +22,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { getRandomScenario, getScenarioById } from "@/server/intake/scenarios";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
+import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { checkBudget } from "@/server/ai/budget";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
@@ -65,6 +66,18 @@ export async function POST(request: NextRequest): Promise<Response> {
     const budgetResult = await checkBudget(userRow.tenant_id, userRow.id);
     if (budgetResult.exceeded) {
       throw new AppError("AI_BUDGET_EXCEEDED", "Presupuesto de IA agotado para este mes.");
+    }
+
+    // Clear cases stuck in `procesando` from a prior batch whose after() callbacks
+    // were evicted — otherwise they linger and (briefly) crowd the throttle. This
+    // runs synchronously in the request, so it works regardless of cron cadence.
+    try {
+      const reaped = await reapStuckProcessingCases({ tenantId: userRow.tenant_id });
+      if (reaped.reaped > 0) {
+        console.warn(`[batch-simulate] reaped ${reaped.reaped} stuck procesando case(s) before queuing`);
+      }
+    } catch {
+      // never block a new batch on reaper failure
     }
 
     // ── Create all N cases synchronously ───────────────────────────────────────

@@ -81,6 +81,10 @@ vi.mock("@/server/intake/scenarios", () => ({
   getScenarioById: mockGetScenarioById,
 }));
 
+vi.mock("@/server/intake/reap-stuck", () => ({
+  reapStuckProcessingCases: vi.fn().mockResolvedValue({ reaped: 0, caseIds: [] }),
+}));
+
 // ── DB mock ───────────────────────────────────────────────────────────────────
 
 let caseInsertSeq = 0;

@@ -9,6 +9,7 @@ import "server-only";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 import { extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
+import { checkBudget } from "@/server/ai/budget";
 import { rateLimit, getClientIp } from "@/lib/rate-limit/index";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -53,6 +54,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     return err(new AppError("VALIDATION_FAILED", parsed.error.issues[0]?.message ?? "Datos inválidos."));
   }
 
+  // Hard cost ceiling for the anonymous endpoint: the in-memory IP limiter is
+  // per-instance on serverless, so the tenant daily-token / monthly-cost budget
+  // is the backstop that actually bounds abuse spend.
+  const budget = await checkBudget(DEMO_TENANT_ID, null);
+  if (budget.exceeded) {
+    return err(new AppError("RATE_LIMITED", "La demo alcanzó su cupo diario. Volvé mañana."));
+  }
+
   let result;
   try {
     result = await extractEmailClaimGemini(
@@ -62,7 +71,17 @@ export async function POST(request: NextRequest): Promise<Response> {
       DEMO_USER_ID
     );
   } catch (e) {
-    return err(new AppError("INTERNAL_ERROR", e instanceof Error ? e.message : "Error al contactar Gemini."));
+    // Log detail server-side; never echo provider internals (quota state, model
+    // names, key hints) to anonymous callers.
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "demo.public_analyze.provider_error",
+        error_name: e instanceof Error ? e.name : "UnknownError",
+      })
+    );
+    return err(new AppError("INTERNAL_ERROR", "No pudimos analizar el reclamo en este momento. Probá de nuevo en unos minutos."));
   }
 
   return ok(result);

@@ -71,3 +71,6 @@ supabase/.temp/
 *-sa-key.json
 *-service-account.json
 *.gcp-key.json
+
+# local scratch notes — may contain sensitive context
+prompt.txt

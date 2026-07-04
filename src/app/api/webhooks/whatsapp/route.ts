@@ -25,6 +25,7 @@
 
 import { after, type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { timingSafeStringEqual } from "@/lib/security/compare";
 import { createWhatsAppIntake, runIntakeAgent } from "@/server/agents/intake-agent";
 import {
   parseCloudApiMessages,
@@ -46,7 +47,7 @@ const WhatsAppWebhookSchema = z.object({
 function hasBearer(request: NextRequest): boolean {
   const secret = process.env.WHATSAPP_WEBHOOK_SECRET;
   if (!secret) return false;
-  return request.headers.get("authorization") === `Bearer ${secret}`;
+  return timingSafeStringEqual(request.headers.get("authorization"), `Bearer ${secret}`);
 }
 
 function resolveTenantId(bodyTenantId?: string): string | null {

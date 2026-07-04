@@ -19,6 +19,7 @@
 
 import "server-only";
 import { createHmac, timingSafeEqual } from "crypto";
+import { timingSafeStringEqual } from "@/lib/security/compare";
 
 const GRAPH_API_BASE = "https://graph.facebook.com";
 
@@ -76,7 +77,7 @@ export function resolveWebhookChallenge(
   const mode = params.get("hub.mode");
   const token = params.get("hub.verify_token");
   const challenge = params.get("hub.challenge");
-  if (mode === "subscribe" && token && verifyToken && token === verifyToken) {
+  if (mode === "subscribe" && token && verifyToken && timingSafeStringEqual(token, verifyToken)) {
     return challenge ?? "";
   }
   return null;

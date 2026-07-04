@@ -245,8 +245,10 @@ async function uploadToGcs(
   const encodedPath = encodeURIComponent(objectPath);
   const url = `https://storage.googleapis.com/upload/storage/v1/b/${bucket}/o?uploadType=media&name=${encodedPath}`;
 
+  // GCS JSON API simple media upload requires POST. PUT on this endpoint returns
+  // 404 (no matching route) — confirmed against the live bucket 2026-06-30.
   const response = await fetch(url, {
-    method: "PUT",
+    method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/jsonl",

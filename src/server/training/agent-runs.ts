@@ -16,6 +16,7 @@ import "server-only";
 import { and, desc, eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
+import { getDefaultGeminiModel } from "@/server/ai/provider";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { TrainabilityAssessment } from "./trainability";
 
@@ -122,6 +123,10 @@ export interface LogAgentRunErrorParams {
     sender_email?: string;
   };
   errorName: string;
+  /** HTTP status from the provider (e.g. 429), when known. */
+  errorStatus?: number | null;
+  /** Provider error code (e.g. "RESOURCE_EXHAUSTED"), when known. */
+  errorCode?: string | null;
 }
 
 /**
@@ -138,14 +143,23 @@ export async function logAgentRunError(
     claim_message_id: params.claimMessageId ?? null,
     provider_message_id: params.providerMessageId ?? null,
     model_provider: "gemini",
-    model_name: params.modelName ?? "gemini",
+    // Fall back to the configured model, not a bare "gemini" — the generic name
+    // made provider failures look like a model-resolution bug when they weren't.
+    model_name: params.modelName ?? getDefaultGeminiModel(),
     prompt_version: "builtin-v1",
     input_payload: {
       subject: params.input.subject,
       body: params.input.body,
       sender_email: params.input.sender_email ?? null,
     },
-    output_payload: { error: "provider_error", error_name: params.errorName },
+    // Persist the real provider status/code (e.g. 429 / RESOURCE_EXHAUSTED) so the
+    // root cause is visible in the DB, not only in Vercel logs.
+    output_payload: {
+      error: "provider_error",
+      error_name: params.errorName,
+      error_status: params.errorStatus ?? null,
+      error_code: params.errorCode ?? null,
+    },
     confidence_payload: {},
     missing_fields: [],
     is_trainable_suggestion: false,

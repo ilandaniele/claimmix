@@ -982,6 +982,13 @@ export async function runEmailExtractionWorker(
     // is_claim=false classification. Set escalado so it can be re-analyzed once
     // the provider recovers. Do not let the case become no_relevante by accident.
     if (err instanceof GeminiExtractionError) {
+      // The error carries the real provider status/code (e.g. 429 /
+      // RESOURCE_EXHAUSTED) on its cause — surface it instead of a generic label.
+      const cause = (err as GeminiExtractionError).cause as
+        | { status?: number; code?: string }
+        | undefined;
+      const errStatus = typeof cause?.status === "number" ? cause.status : null;
+      const errCode = typeof cause?.code === "string" ? cause.code : null;
       try {
         await db
           .update(cases)
@@ -997,7 +1004,8 @@ export async function runEmailExtractionWorker(
           payload: {
             new_status: "escalado",
             reason: "provider_error",
-            error_code: "gemini_extraction_failed",
+            error_code: errCode ?? "gemini_extraction_failed",
+            error_status: errStatus,
             error_name: errName,
           },
         });
@@ -1009,6 +1017,8 @@ export async function runEmailExtractionWorker(
           providerMessageId,
           input: { subject: emailSubject, body: emailBody, sender_email: senderEmail },
           errorName: errName,
+          errorStatus: errStatus,
+          errorCode: errCode,
         });
       } catch {
         // best-effort escalation — don't rethrow

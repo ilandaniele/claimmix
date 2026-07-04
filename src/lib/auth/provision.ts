@@ -9,6 +9,7 @@ interface NewAuthUser {
   id: string;
   name: string;
   email: string;
+  emailVerified?: boolean;
 }
 
 /**
@@ -16,8 +17,16 @@ interface NewAuthUser {
  * ADMIN_EMAILS). Case-insensitive. Applies to both the app profile role
  * (users.role — what requireAdmin checks) and the Better Auth role
  * ("user".role — what the better-auth admin plugin checks).
+ *
+ * SECURITY: requires a VERIFIED email. email/password signup runs with
+ * requireEmailVerification=false, so `user.email` on that path is attacker-
+ * controlled and unproven. Without the emailVerified gate, anyone could
+ * pre-register an allowlisted address that has no account yet and be granted
+ * admin. Google sign-in sets emailVerified=true (Google proves ownership), so
+ * the intended admins still auto-promote.
  */
-function isAllowlistedAdmin(email: string | null | undefined): boolean {
+function isAllowlistedAdmin(email: string | null | undefined, emailVerified: boolean | undefined): boolean {
+  if (!emailVerified) return false;
   const raw = process.env.ADMIN_EMAILS;
   if (!raw || !email) return false;
   const allowed = raw
@@ -58,7 +67,7 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
     );
   }
 
-  const isAdmin = isAllowlistedAdmin(user.email);
+  const isAdmin = isAllowlistedAdmin(user.email, user.emailVerified);
 
   await db.insert(users).values({
     id: user.id,

@@ -3,12 +3,28 @@ import "server-only";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
+import { authUsers, users } from "@/lib/db/schema";
 
 interface NewAuthUser {
   id: string;
   name: string;
   email: string;
+}
+
+/**
+ * Emails that are provisioned as admins on first sign-in (comma-separated in
+ * ADMIN_EMAILS). Case-insensitive. Applies to both the app profile role
+ * (users.role — what requireAdmin checks) and the Better Auth role
+ * ("user".role — what the better-auth admin plugin checks).
+ */
+function isAllowlistedAdmin(email: string | null | undefined): boolean {
+  const raw = process.env.ADMIN_EMAILS;
+  if (!raw || !email) return false;
+  const allowed = raw
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  return allowed.includes(email.trim().toLowerCase());
 }
 
 export function resolveDefaultTenantId(): string | null {
@@ -42,10 +58,22 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
     );
   }
 
+  const isAdmin = isAllowlistedAdmin(user.email);
+
   await db.insert(users).values({
     id: user.id,
     tenant_id: tenantId,
     full_name: user.name || user.email || "Analyst",
-    role: "analyst",
+    role: isAdmin ? "admin" : "analyst",
   });
+
+  if (isAdmin) {
+    // Keep the Better Auth role in sync so the admin plugin agrees with
+    // requireAdmin. Best-effort: profile row above is the source of truth.
+    try {
+      await db.update(authUsers).set({ role: "admin" }).where(eq(authUsers.id, user.id));
+    } catch {
+      // non-fatal — admin plugin role can be aligned manually
+    }
+  }
 }

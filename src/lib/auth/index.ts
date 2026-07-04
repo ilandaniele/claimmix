@@ -53,6 +53,17 @@ export const auth = betterAuth({
           },
         }
       : {},
+  account: {
+    accountLinking: {
+      // Users created via email/password must be able to "Continuar con Google"
+      // with the same address: Google verifies the email, so linking the OAuth
+      // account onto the existing user is safe. Without this, Better Auth
+      // rejects the Google sign-in for an email that already has a credential
+      // account instead of linking it.
+      enabled: true,
+      trustedProviders: ["google"],
+    },
+  },
   session: {
     // Signed cookie cache: avoids a Neon round-trip on every getSession call.
     cookieCache: { enabled: true, maxAge: 300 },

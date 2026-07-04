@@ -65,21 +65,66 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
    migration drift that caused the 0006–0009 INSERT outage.
 
 ### 🙋 Blocked on the user (cannot be automated)
-- **Gemini paid plan** (#1 blocker): free tier 1500 RPD runs out fast. Log in as
-  `veltra.soporte@gmail.com` (admin), add the paid key in **Configuración**
-  (per-user key logic already supports this).
+- 🔴 **PROD EXTRACTION IS DOWN — every AI key is broken** (#1 blocker, verified live
+  2026-07-02; 97/97 agent runs failed in the last 24 h):
+  1. `AQ.Ab8…` (colleague's key, currently in Vercel prod `GEMINI_API_KEY`): **DEAD** —
+     `401 UNAUTHENTICATED "The bound service account is deleted or disabled"`. It is a
+     service-account-bound key whose SA was deleted; unrecoverable from our side.
+  2. `AIzaSy…` (Ilan's key, in `.env.local`): blocked —
+     `429 "Your prepayment credits are depleted. Please go to AI Studio at
+     https://ai.studio/projects"`. This key is on a PREPAY billing setup with $0
+     balance. **Funding the credits makes THIS key work — likely the fastest fix.**
+  3. `OPENAI_API_KEY` (assumed fallback): **INVALID** — OpenAI returns
+     `401 Incorrect API key`. There is NO working fallback; also note the resolver
+     only auto-falls-back to OpenAI when no Gemini key is present at all.
+  **Fix (user, pick one):** (a) fund prepay credits at https://ai.studio/projects for
+  the `AIzaSy…` key's project, or (b) mint a new key on a billing-funded project
+  (e.g. `claimmix`, which pays for Vertex). Then install it as Vercel prod
+  `GEMINI_API_KEY` + redeploy. Optionally also replace `OPENAI_API_KEY` with a valid
+  key to have a real fallback.
+  **GOTCHA (still applies):** key resolution is **user → tenant → env** (`provider.ts`);
+  stale tenant/user keys in the DB override env. Verified clean 2026-07-02 (all
+  `gemini_api_key_encrypted = null`), so env is the single source of truth — until
+  someone re-adds a key via Configuración.
+- 🟡 **Security hygiene (2026-07-02 audit):** repo is clean — `.env.local` and
+  `*-sa-key.json` git-ignored, no secrets tracked or in git history; `prompt.txt` added
+  to `.gitignore`. BUT the `veltra.soporte@gmail.com` app password was pasted into a
+  chat session (lives in transcripts) → **rotate that password**. The dead `AQ.` key was
+  also pasted around; it's dead, so no action needed once replaced.
 - **WhatsApp go-live:** create a Meta Business app + WhatsApp product, get a
   permanent token + App Secret + phone_number_id, set the `WHATSAPP_*` env vars in
   Vercel, register the callback URL `https://claimmix.vercel.app/api/webhooks/whatsapp`,
   subscribe to `messages`. Use a **dedicated** number, not a personal WhatsApp line.
   Full guide: `docs/whatsapp-setup.md`.
-- **Re-trigger fine-tuning** once there's paid quota AND training data for `rc` /
-  `robo_contenido` (still ~0 examples). The JSONL bug that failed the first job is fixed.
-- Minor: delete the stray `_healthcheck_claude.txt` left in the `claimmix-vertex-training` GCS bucket.
+- ~~**Re-trigger fine-tuning**~~ ✅ **DONE 2026-06-30 — first successful tuned model.**
+  Job `2eb72bbc-…` (Vertex `tuningJobs/2998492462349025280`) → `JOB_STATE_SUCCEEDED`,
+  model `…/models/562968095363170304@1`, base gemini-2.5-flash, 116 examples. DB row is
+  `eval_pending` (activation is a deliberate human step — not auto-activated). Fixed a
+  real bug to get here: `uploadToGcs` used `PUT` (→404); GCS simple-upload needs `POST`.
+  To improve weak classes, re-run once the Gemini key is truly paid + more `rc`/
+  `robo_contenido`/`accidente_personal`/`cristales` data is approved, then fine-tune again.
+- Minor: stray objects in the `claimmix-vertex-training` GCS bucket (`_healthcheck_claude.txt`,
+  `_probe_*`, plus this run's tuning JSONL) — SA lacks `objects.delete`; clean via Console.
 
-## Training state (as of 2026-06-29)
-- ~100 approved examples. Good coverage on choque/robo/granizo/incendio; `rc` and
-  `robo_contenido` are ~0 (need re-simulation with quota + the sharpened RC prompt).
+## Training state (as of 2026-06-30, after this session)
+- **116 approved examples** (live DB count). By type: choque 38, robo 19, incendio 17,
+  granizo 17, **rc 10** (was 0 — filled this session), cristales 5, robo_contenido 4,
+  accidente_personal 3, other 3. `rc` (the worst gap) is now covered; robo_contenido /
+  accidente_personal / cristales are still thin because the free-tier Gemini quota ran
+  out mid-run. Generation method: ran each distinct weak-class scenario through the real
+  worker locally (paid-ish key) and auto-approved ONLY runs where extraction succeeded
+  AND predicted claim_type matched the seed. A naive first pass approved 24 failed
+  (`escalado`/429) runs — those were detected and deleted.
+- **Old failed Vertex job synced (2026-06-30):** job `9110414817876770816` was confirmed
+  `JOB_STATE_FAILED` (the ChatCompletions→GenerateContent JSONL bug, now fixed). Its DB
+  row (`8029ee95-…`) was stuck in `queued` and was BLOCKING new drafts via the open-job
+  guard (`createVertexAiTuningDraft`, statuses draft/queued/running/eval_pending/approved).
+  Marked it `failed` → new drafts unblocked.
+- **Fine-tuning can only be triggered where the SA key lives.** `GOOGLE_APPLICATION_CREDENTIALS`
+  (claimmix-vertex-sa-key.json) + `VERTEX_AI_TUNING_ENABLED=true` + project/location/bucket
+  are in `.env.local` (LOCAL), NOT on Vercel — so run the draft→start from local, or add the
+  SA creds to Vercel. Trigger path: admin UI / `POST /api/admin/fine-tuning/vertex`
+  (`action:"draft"` then `action:"start"`).
 
 ## Env vars to know
 `DATABASE_URL`, `BETTER_AUTH_SECRET`, `GEMINI_API_KEY`, `VERTEX_AI_GEMINI_BASE_MODEL`

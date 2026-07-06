@@ -22,12 +22,20 @@
  */
 
 import { type NextRequest, NextResponse } from "next/server";
-import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, inArray, isNull, or } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { timingSafeStringEqual } from "@/lib/security/compare";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 
-/** Statuses considered "open" for reprocessing. */
-const OPEN_STATUSES = ["recibido", "listo", "info_faltante"] as const;
+/**
+ * Statuses considered "open" for reprocessing. Includes "escalado" so cases
+ * parked by provider failures (e.g. Gemini quota/key errors during simulation
+ * batches) have an automatic retry path once the provider recovers.
+ */
+const OPEN_STATUSES = ["recibido", "listo", "info_faltante", "escalado"] as const;
+
+/** Channels eligible for reprocessing — simulated cases retry like real ones. */
+const CHANNELS = ["email", "email_sim"] as const;
 
 /** Max cases dispatched per call. */
 const BATCH_LIMIT = 50;
@@ -41,11 +49,11 @@ function isAuthorized(request: NextRequest): boolean {
   const internalHeader = request.headers.get("x-internal-worker");
   if (internalHeader === "true") return true;
 
-  // Option B: Vercel cron secret.
+  // Option B: Vercel cron secret (constant-time compare).
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
     const authHeader = request.headers.get("authorization");
-    if (authHeader === `Bearer ${cronSecret}`) return true;
+    if (timingSafeStringEqual(authHeader, `Bearer ${cronSecret}`)) return true;
   }
 
   return false;
@@ -75,7 +83,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .from(t)
       .where(
         and(
-          eq(t.channel, "email"),
+          inArray(t.channel, [...CHANNELS]),
           inArray(t.status, [...OPEN_STATUSES]),
           or(isNull(t.severity), isNull(t.claim_type))
         )

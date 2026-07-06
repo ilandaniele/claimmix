@@ -61,6 +61,23 @@ export interface DispatchResult {
 export async function dispatchOutboundEmail(options: DispatchOptions): Promise<DispatchResult> {
   const { caseId, tenantId, to, template, data, inReplyToMessageId, threadId } = options;
 
+  // Simulation cases (batch-simulate / simulate) use IANA-reserved example.*
+  // sender addresses. Never attempt real delivery to them — the rest of the
+  // post-extraction flow (confirmations, status transitions) still runs; only
+  // the outbound send is skipped.
+  if (/@example\.(com|org|net)$/i.test(to.trim())) {
+    console.info(
+      JSON.stringify({
+        level: "info",
+        service: "claimmix",
+        msg: "dispatch.skipped_simulated_recipient",
+        case_id: caseId,
+        template,
+      })
+    );
+    return { error: "SIMULATED_RECIPIENT_SKIPPED" };
+  }
+
   // ── 1. Render template ─────────────────────────────────────────────────────
   let rendered: { subject: string; html: string; text: string };
   try {

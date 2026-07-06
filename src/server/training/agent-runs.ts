@@ -117,6 +117,8 @@ export interface LogAgentRunErrorParams {
   claimMessageId?: string | null;
   providerMessageId?: string | null;
   modelName?: string;
+  /** Provider that failed ("gemini" | "openai"). Defaults to "gemini". */
+  modelProvider?: string;
   input: {
     subject: string;
     body: string;
@@ -142,7 +144,7 @@ export async function logAgentRunError(
     case_id: params.caseId,
     claim_message_id: params.claimMessageId ?? null,
     provider_message_id: params.providerMessageId ?? null,
-    model_provider: "gemini",
+    model_provider: params.modelProvider ?? "gemini",
     // Fall back to the configured model, not a bare "gemini" — the generic name
     // made provider failures look like a model-resolution bug when they weren't.
     model_name: params.modelName ?? getDefaultGeminiModel(),

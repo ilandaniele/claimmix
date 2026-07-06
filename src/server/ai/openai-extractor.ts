@@ -552,7 +552,7 @@ export async function extractEmailClaim(
       case_id: logCaseId,
     })
   );
-  return buildSafeDefault();
+  return buildSafeDefault(model);
 }
 
 /**
@@ -591,10 +591,14 @@ export function parseEmailResponse(content: string | null, model?: string): Extr
 /**
  * Safe default for parse failures — treats email as non-claim to avoid false positives.
  * Exported for reuse by other providers (gemini-extractor).
+ *
+ * Pass the tenant-resolved model when available; the env-var default is only a
+ * last resort (it can differ from the tenant's configured model — e.g. env
+ * OPENAI_MODEL=gpt-4o vs tenant gpt-4o-mini — which made failure logs lie).
  */
-export function buildSafeDefault(): ExtractedClaim {
+export function buildSafeDefault(model?: string): ExtractedClaim {
   return {
-    extraction_model: getModel(),
+    extraction_model: model ?? getModel(),
     fields: [],
     prompt_tokens: 0,
     completion_tokens: 0,

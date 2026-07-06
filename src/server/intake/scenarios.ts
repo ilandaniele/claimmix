@@ -1,18 +1,18 @@
 /**
- * 95 realistic Argentine insurance claim scenarios for intake simulation.
+ * 107 realistic Argentine insurance claim scenarios for intake simulation.
+ * (Count verified against the SCENARIOS array 2026-07-04 — update this header
+ * when adding scenarios.)
  *
  * Distribution:
  *   20 × choque          (street accidents + moto + ruta + edge/parcial)
  *   16 × robo            (vehicle theft + violent + edge/parcial)
  *   13 × granizo         (hail damage + NOA + edge/parcial)
  *   13 × incendio        (fire + electrical + edge/parcial)
- *    7 × cristales       (windshield / glass damage + camión/camioneta)
- *    7 × rc              (responsabilidad civil + moto + peatón)
- *    7 × robo_contenido  (theft of belongings + camioneta)
- *    7 × accidente_personal (personal injury + grave + cyclist)
- *    5 × other           (no-relevante: non-claim emails)
- *    5 × other           (parcial: partial info — missing key fields)
- *    5 × other           (edge cases: forwarded threads, contradictions)
+ *   10 × cristales       (windshield / glass damage + camión/camioneta)
+ *   10 × rc              (responsabilidad civil + moto + peatón)
+ *   10 × robo_contenido  (theft of belongings + camioneta)
+ *   10 × accidente_personal (personal injury + grave + cyclist)
+ *    5 × other           (no-relevante, parcial, edge cases)
  *
  * Each scenario has:
  *   id:               unique identifier

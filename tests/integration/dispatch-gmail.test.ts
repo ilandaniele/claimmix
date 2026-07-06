@@ -57,7 +57,9 @@ vi.mock("@/server/email/gmail/gmail-sender", () => ({
 
 const CASE_ID = "case-uuid-w5-001";
 const TENANT_ID = "tenant-w5-001";
-const TO_ADDR = "claimant@example.com";
+// NOT @example.* — dispatchOutboundEmail deliberately skips IANA-reserved
+// simulation domains, so fixtures must use a realistic address.
+const TO_ADDR = "claimant@acme-seguros.com.ar";
 const FROM_ADDR = "claims@company.com";
 const CLAIM_MSG_ID = "claim-msg-uuid-out-001";
 const OUTBOUND_MSG_ID = "outbound-msg-uuid-001";
@@ -161,6 +163,29 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     delete process.env.GMAIL_FROM_ADDRESS;
     delete process.env.DEFAULT_TENANT_ID;
     vi.resetModules();
+  });
+
+  // ── Simulated recipients are never emailed ──────────────────────────────────
+
+  it("skips delivery entirely for @example.com recipients (simulation cases)", async () => {
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-1" });
+
+    const dbMock = buildDbMock();
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
+
+    const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
+    const result = await dispatchOutboundEmail({
+      caseId: CASE_ID,
+      tenantId: TENANT_ID,
+      to: "maria.gomez@example.com",
+      template: "confirmation_received",
+      data: { caseId: CASE_ID },
+    });
+
+    expect(result).toEqual({ error: "SIMULATED_RECIPIENT_SKIPPED" });
+    expect(gmailMocks.send).not.toHaveBeenCalled();
+    expect(dbMock._inserts["claim_messages"].length).toBe(0);
+    expect(dbMock._inserts["outbound_messages"].length).toBe(0);
   });
 
   // ── AC4 ─────────────────────────────────────────────────────────────────────

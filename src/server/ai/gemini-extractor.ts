@@ -267,6 +267,9 @@ export async function extractEmailClaimGemini(
   let result: ExtractedClaim | null = null;
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
+  // Last attempt's error status/code — propagated on the final throw so the
+  // worker can persist the real cause (429/RESOURCE_EXHAUSTED, 401, ...).
+  let lastErrMeta: { name: string; status: number | null; code: string | null } | null = null;
 
   // ── Attempt 1 ─────────────────────────────────────────────────────────────
   const t1 = Date.now();
@@ -305,6 +308,7 @@ export async function extractEmailClaimGemini(
   } catch (e) {
     const latency1 = Date.now() - t1;
     const meta = errMeta(e);
+    lastErrMeta = meta;
     const errStatus = meta.status === 429 ? "rate_limited" : "error";
     if (tenantId) {
       await logProviderUsage({
@@ -370,6 +374,7 @@ export async function extractEmailClaimGemini(
     } catch (e) {
       const latency2 = Date.now() - t2;
       const meta = errMeta(e);
+      lastErrMeta = meta;
       const errStatus2 = meta.status === 429 ? "rate_limited" : "error";
       if (tenantId) {
         await logProviderUsage({
@@ -426,11 +431,18 @@ export async function extractEmailClaimGemini(
       msg: "ai.email_extraction.both_attempts_failed.provider_error",
       provider: "gemini",
       case_id: logCaseId,
+      status: lastErrMeta?.status ?? null,
+      code: lastErrMeta?.code ?? null,
     })
   );
   throw new GeminiExtractionError(
     `Gemini extraction technical failure after 2 attempts for case ${logCaseId}`,
-    { provider_error: true, case_id: logCaseId }
+    {
+      provider_error: true,
+      case_id: logCaseId,
+      status: lastErrMeta?.status ?? undefined,
+      code: lastErrMeta?.code ?? undefined,
+    }
   );
 }
 
@@ -455,6 +467,7 @@ export async function runGeminiExtractor(
   let result: ExtractedClaim | null = null;
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
+  let lastErrMeta: { name: string; status: number | null; code: string | null } | null = null;
 
   for (let attempt = 1; attempt <= 2 && !result; attempt++) {
     const prompt =
@@ -484,6 +497,7 @@ export async function runGeminiExtractor(
       result = parseResponse(text, claimType, model);
     } catch (e) {
       const meta = errMeta(e);
+      lastErrMeta = meta;
       console.error(
         JSON.stringify({
           level: "error",
@@ -510,6 +524,12 @@ export async function runGeminiExtractor(
   }
 
   throw new GeminiExtractionError(
-    `AI extraction failed after 2 attempts for case ${caseId}`
+    `AI extraction failed after 2 attempts for case ${caseId}`,
+    {
+      provider_error: true,
+      case_id: caseId,
+      status: lastErrMeta?.status ?? undefined,
+      code: lastErrMeta?.code ?? undefined,
+    }
   );
 }

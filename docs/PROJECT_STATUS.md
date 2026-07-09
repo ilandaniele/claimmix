@@ -54,7 +54,9 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 - WhatsApp **Cloud API** webhook (official Meta, ban-safe) — code live; needs Meta creds to function.
 - Stuck-`procesando` reaper (`reap-stuck.ts`) + daily cron + opportunistic call in simulate/batch-simulate.
 - Public demo at `/demo`.
-- Admin account `veltra.soporte@gmail.com` (role admin) for adding the paid Gemini key.
+- Admin account for the paid Gemini key: **`veltra.info1@gmail.com`** (via "Continuar con Google").
+  `veltra.soporte@gmail.com` was blocked by Google (2026-07) and decommissioned — neutralized in
+  the DB (cases reassigned, session/account cleared, demoted; profile kept as tombstone for FK/audit).
 
 ### 🔧 Optional improvements (not broken, worth doing)
 1. **Big batches still lose cases.** The reaper makes stuck cases *recoverable*

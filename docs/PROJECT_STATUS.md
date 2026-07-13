@@ -67,23 +67,27 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
    migration drift that caused the 0006–0009 INSERT outage.
 
 ### 🙋 Blocked on the user (cannot be automated)
-- 🔴 **PROD EXTRACTION IS DOWN — every AI key is broken** (#1 blocker, verified live
-  2026-07-02; 97/97 agent runs failed in the last 24 h):
-  1. `AQ.Ab8…` (colleague's key, currently in Vercel prod `GEMINI_API_KEY`): **DEAD** —
-     `401 UNAUTHENTICATED "The bound service account is deleted or disabled"`. It is a
-     service-account-bound key whose SA was deleted; unrecoverable from our side.
-  2. `AIzaSy…` (Ilan's key, in `.env.local`): blocked —
-     `429 "Your prepayment credits are depleted. Please go to AI Studio at
-     https://ai.studio/projects"`. This key is on a PREPAY billing setup with $0
-     balance. **Funding the credits makes THIS key work — likely the fastest fix.**
-  3. `OPENAI_API_KEY` (assumed fallback): **INVALID** — OpenAI returns
-     `401 Incorrect API key`. There is NO working fallback; also note the resolver
-     only auto-falls-back to OpenAI when no Gemini key is present at all.
-  **Fix (user, pick one):** (a) fund prepay credits at https://ai.studio/projects for
-  the `AIzaSy…` key's project, or (b) mint a new key on a billing-funded project
-  (e.g. `claimmix`, which pays for Vertex). Then install it as Vercel prod
-  `GEMINI_API_KEY` + redeploy. Optionally also replace `OPENAI_API_KEY` with a valid
-  key to have a real fallback.
+- 🔴 **PROD EXTRACTION DOWN — ROOT CAUSE FOUND (2026-07-13): Gemini API in Argentina is
+  PREPAY-only.** Every key on every billing account returned `429 "Your prepayment
+  credits are depleted"`. A postpay card does NOT fund this API in AR; you must buy
+  prepay credits. (Postpay IS available for **Vertex AI** — see the alternative below.)
+  - **New clean setup done:** Google Cloud project **ClaimMix** (`claimmix-502016`,
+    number `895285071884`), billing linked with an Argentine card, new key
+    `AQ.Ab8RN6Ksvlhyy…` created via AI Studio, staged in `.env.local`. DB verified clean
+    (0 stale keys, provider=gemini). Backlog ready: **~1,170 escalado** cases waiting
+    (534 email + 636 sim), incl. the weak classes we needed (robo_contenido 94,
+    accidente_personal 90, cristales 54, rc 39) → fixes fine-tuning balance.
+  - **THE ONE REMAINING STEP (user):** load ~USD 10 prepay at https://ai.studio/projects
+    → ClaimMix → prepay. No code change needed.
+  - **On "cargado": run `node scripts/activate-gemini.mjs`** — verifies the key works,
+    checks DB, and reprocesses the escalado backlog. Then set the key in Vercel prod
+    (`vercel login` first) + redeploy.
+  - **Postpay alternative:** migrate extraction to **Vertex AI** (postpay, already runs
+    fine-tuning on project `claimmix`). Code change; offered, not done.
+  - **Anti-block:** ONE country/card (Argentine), small prepay, small data batches.
+    Card/country mixing + free-tier bursts got veltra.soporte blocked before.
+  - `OPENAI_API_KEY` remains **INVALID** (401) — it's an optional fallback only; Gemini
+    is primary + Vertex is fine-tuning (standing decision). Not a priority.
   **GOTCHA (still applies):** key resolution is **user → tenant → env** (`provider.ts`);
   stale tenant/user keys in the DB override env. Verified clean 2026-07-02 (all
   `gemini_api_key_encrypted = null`), so env is the single source of truth — until

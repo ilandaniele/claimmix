@@ -40,7 +40,7 @@ function getExportDefaultOpenAIModel(): string {
 }
 
 function getExportDefaultGeminiModel(): string {
-  return process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  return process.env.GEMINI_MODEL ?? "gemini-flash-latest";
 }
 
 export function normalizeAgentExportFormat(raw: string | null): AgentExportFormat | null {

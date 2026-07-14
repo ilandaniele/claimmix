@@ -157,7 +157,10 @@ export function getDefaultOpenAIModel(): string {
 }
 
 export function getDefaultGeminiModel(): string {
-  return process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  // gemini-flash-latest (not a pinned 2.5/2.0 name): pinned older models get
+  // "no longer available to new users" 404s on freshly-created keys. -latest
+  // always resolves to the current Flash, immune to that deprecation trap.
+  return process.env.GEMINI_MODEL ?? "gemini-flash-latest";
 }
 
 export async function getTenantOpenAIModel(tenantId?: string | null): Promise<string> {

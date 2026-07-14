@@ -113,6 +113,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // ── Reset to 'procesando' so the worker actually runs ─────────────────────────
+  // The worker only processes recibido/procesando/info_faltante and SKIPS
+  // escalado/listo. Since this endpoint now re-drives escalado cases (provider
+  // failures), flip them to procesando first — otherwise they're silently
+  // skipped with wrong_status and the retry is a no-op.
+  try {
+    await db
+      .update(t)
+      .set({ status: "procesando", updated_at: new Date().toISOString() })
+      .where(inArray(t.id, cases.map((row) => row.id)));
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        level: "warn",
+        service: "claimmix",
+        msg: "reprocess_unclassified.reset_failed",
+        error_code: (e as { code?: string })?.code ?? "unknown",
+      })
+    );
+  }
+
   // ── Dispatch /api/worker/extract for each case ────────────────────────────────
   const workerUrl = `${getWorkerBaseUrl()}/api/worker/extract`;
   const caseIds: string[] = [];

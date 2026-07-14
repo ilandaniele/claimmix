@@ -167,6 +167,13 @@ async function callGemini(
 
   const model = modelOverride ?? getGeminiModel();
 
+  // Modern Gemini models (2.5+, 3.x, and the *-latest aliases) THINK by default.
+  // Thinking tokens are billed (often 10-50× the visible output) and add latency
+  // — pure waste for deterministic JSON extraction. Disable it for every
+  // thinking-capable model, not just gemini-2.5* (a gemini-flash-latest default
+  // with thinking ON burned ~$0.78/call and drained a $10 prepay in 16 calls).
+  // Legacy non-thinking models (gemini-2.0*, deprecated) are the only exception.
+  const isThinkingModel = !model.startsWith("gemini-2.0");
   const body: Record<string, unknown> = {
     systemInstruction: { parts: [{ text: systemPrompt }] },
     contents: [{ role: "user", parts: [{ text: userMessage }] }],
@@ -174,11 +181,7 @@ async function callGemini(
       temperature: 0,
       maxOutputTokens: 8192,
       responseMimeType: "application/json",
-      // 2.5-series models think by default; thinking tokens count against
-      // maxOutputTokens and add latency — disable for deterministic extraction.
-      ...(model.startsWith("gemini-2.5")
-        ? { thinkingConfig: { thinkingBudget: 0 } }
-        : {}),
+      ...(isThinkingModel ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
     },
   };
 

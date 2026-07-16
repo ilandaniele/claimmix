@@ -163,7 +163,7 @@ interface GeminiUsage {
 //
 // Enable with GEMINI_TRANSPORT=vertex (needs GOOGLE_CLOUD_PROJECT +
 // GOOGLE_APPLICATION_CREDENTIALS, the same SA already used for fine-tuning).
-function useVertexTransport(): boolean {
+function isVertexTransport(): boolean {
   return process.env.GEMINI_TRANSPORT?.trim().toLowerCase() === "vertex";
 }
 
@@ -202,7 +202,7 @@ async function callGemini(
   apiKey?: string | null,
   modelOverride?: string
 ): Promise<{ text: string | null; usage: GeminiUsage }> {
-  const vertex = useVertexTransport();
+  const vertex = isVertexTransport();
   // Vertex has its own model catalog (no *-latest aliases) — never forward the
   // AI-Studio-flavoured model name to it, it would 404.
   const model = vertex ? getVertexModel() : (modelOverride ?? getGeminiModel());
@@ -312,7 +312,7 @@ export async function extractEmailClaimGemini(
   // Transport-aware: on Vertex the tenant/AI-Studio model name is not used
   // (different catalog), so resolve the real one here — otherwise logs and
   // agent_runs would record a model that was never actually called.
-  const model = useVertexTransport()
+  const model = isVertexTransport()
     ? getVertexModel()
     : await getTenantGeminiModel(tenantId);
   const logCaseId = caseId ?? "unknown";
@@ -531,7 +531,7 @@ export async function runGeminiExtractor(
   // Transport-aware: on Vertex the tenant/AI-Studio model name is not used
   // (different catalog), so resolve the real one here — otherwise logs and
   // agent_runs would record a model that was never actually called.
-  const model = useVertexTransport()
+  const model = isVertexTransport()
     ? getVertexModel()
     : await getTenantGeminiModel(tenantId);
   const tenantKey = tenantId ? await getTenantGeminiKey(tenantId, userId ?? undefined) : null;

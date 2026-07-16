@@ -21,6 +21,7 @@
  */
 
 import "server-only";
+import { GoogleAuth } from "google-auth-library";
 import { OPENAI_JSON_SCHEMA } from "@/lib/schemas/extracted-claim";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { ClaimType } from "@/lib/schemas/cases";
@@ -148,6 +149,49 @@ interface GeminiUsage {
   completionTokens: number;
 }
 
+// ── Transport: AI Studio (API key) vs Vertex AI (service account) ─────────────
+//
+// Same GenerateContent request/response shape on both — only the URL and auth
+// differ, so the extractor logic below is transport-agnostic.
+//
+// Why Vertex matters: in some regions (e.g. Argentina) the AI Studio Gemini API
+// is PREPAY-ONLY — no usable free tier, and calls 429 with "prepayment credits
+// are depleted" until you top up. Vertex bills POSTPAY (ON_DEMAND) against the
+// project's existing billing account, so there is no prepay wall. Vertex also
+// still serves the pinned gemini-2.5-* models that AI Studio now 404s for
+// newly-created keys.
+//
+// Enable with GEMINI_TRANSPORT=vertex (needs GOOGLE_CLOUD_PROJECT +
+// GOOGLE_APPLICATION_CREDENTIALS, the same SA already used for fine-tuning).
+function useVertexTransport(): boolean {
+  return process.env.GEMINI_TRANSPORT?.trim().toLowerCase() === "vertex";
+}
+
+/**
+ * Vertex model names differ from AI Studio's: there are no `*-latest` aliases
+ * (they 404), and the pinned gemini-2.5-* names ARE available. Default to
+ * flash-lite — cheapest tier that handles deterministic JSON extraction.
+ */
+function getVertexModel(): string {
+  return process.env.VERTEX_EXTRACTION_MODEL?.trim() || "gemini-2.5-flash-lite";
+}
+
+let _vertexAuth: GoogleAuth | null = null;
+async function getVertexToken(): Promise<string> {
+  if (!_vertexAuth) {
+    _vertexAuth = new GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    });
+  }
+  const client = await _vertexAuth.getClient();
+  const res = await client.getAccessToken();
+  const token = typeof res === "string" ? res : res?.token;
+  if (!token) {
+    throw new GeminiExtractionError("Vertex: could not obtain a service-account access token");
+  }
+  return token;
+}
+
 /**
  * Single generateContent call. Returns the raw text + token usage.
  * Throws on HTTP/network errors (caller handles retry).
@@ -158,14 +202,34 @@ async function callGemini(
   apiKey?: string | null,
   modelOverride?: string
 ): Promise<{ text: string | null; usage: GeminiUsage }> {
-  const key = apiKey ?? process.env.GEMINI_API_KEY;
-  if (!key) {
-    throw new GeminiExtractionError(
-      "GEMINI_API_KEY is not set. Configure it in Configuración or switch the tenant provider to OpenAI."
-    );
-  }
+  const vertex = useVertexTransport();
+  // Vertex has its own model catalog (no *-latest aliases) — never forward the
+  // AI-Studio-flavoured model name to it, it would 404.
+  const model = vertex ? getVertexModel() : (modelOverride ?? getGeminiModel());
 
-  const model = modelOverride ?? getGeminiModel();
+  let endpoint: string;
+  let authHeaders: Record<string, string>;
+
+  if (vertex) {
+    const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
+    const location = process.env.GOOGLE_CLOUD_LOCATION?.trim() || "us-central1";
+    if (!project) {
+      throw new GeminiExtractionError(
+        "GEMINI_TRANSPORT=vertex requires GOOGLE_CLOUD_PROJECT to be set."
+      );
+    }
+    endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:generateContent`;
+    authHeaders = { Authorization: `Bearer ${await getVertexToken()}` };
+  } else {
+    const key = apiKey ?? process.env.GEMINI_API_KEY;
+    if (!key) {
+      throw new GeminiExtractionError(
+        "GEMINI_API_KEY is not set. Configure it in Configuración or switch the tenant provider to OpenAI."
+      );
+    }
+    endpoint = `${GEMINI_API_BASE}/${model}:generateContent`;
+    authHeaders = { "x-goog-api-key": key };
+  }
 
   // Modern Gemini models (2.5+, 3.x, and the *-latest aliases) THINK by default.
   // Thinking tokens are billed (often 10-50× the visible output) and add latency
@@ -185,12 +249,9 @@ async function callGemini(
     },
   };
 
-  const res = await fetchGemini(`${GEMINI_API_BASE}/${model}:generateContent`, {
+  const res = await fetchGemini(endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": key,
-    },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify(body),
   });
 
@@ -248,7 +309,12 @@ export async function extractEmailClaimGemini(
   caseId?: string,
   userId?: string | null
 ): Promise<ExtractedClaim> {
-  const model = await getTenantGeminiModel(tenantId);
+  // Transport-aware: on Vertex the tenant/AI-Studio model name is not used
+  // (different catalog), so resolve the real one here — otherwise logs and
+  // agent_runs would record a model that was never actually called.
+  const model = useVertexTransport()
+    ? getVertexModel()
+    : await getTenantGeminiModel(tenantId);
   const logCaseId = caseId ?? "unknown";
   const logTenantId = tenantId ?? "unknown";
   const tenantKey = tenantId ? await getTenantGeminiKey(tenantId, userId ?? undefined) : null;
@@ -462,7 +528,12 @@ export async function runGeminiExtractor(
   tenantId?: string,
   userId?: string | null
 ): Promise<ExtractedClaim> {
-  const model = await getTenantGeminiModel(tenantId);
+  // Transport-aware: on Vertex the tenant/AI-Studio model name is not used
+  // (different catalog), so resolve the real one here — otherwise logs and
+  // agent_runs would record a model that was never actually called.
+  const model = useVertexTransport()
+    ? getVertexModel()
+    : await getTenantGeminiModel(tenantId);
   const tenantKey = tenantId ? await getTenantGeminiKey(tenantId, userId ?? undefined) : null;
   const systemPrompt = buildSystemPrompt(claimType) + schemaSuffix();
   const userMessage = buildUserMessage(rawText);

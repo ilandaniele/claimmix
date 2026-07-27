@@ -7,7 +7,8 @@
  * URL search params supported:
  *   status: CaseStatus (filter tab)
  *   type:   ClaimType  (filter chip)
- *   page:   number     (pagination)
+ *   page:     number   (pagination)
+ *   per_page: number   (page size — must be one of PER_PAGE_OPTIONS)
  *
  * Protected by proxy.ts — unauthenticated access redirects to /login.
  */
@@ -21,7 +22,7 @@ import { countRows, firstRow } from "@/lib/db/helpers";
 import { cases, users } from "@/lib/db/schema";
 import { listCases } from "@/server/cases/list";
 import { SCENARIOS } from "@/server/intake/scenarios";
-import { DashboardClient } from "./DashboardClient";
+import { DashboardClient, PER_PAGE_OPTIONS } from "./DashboardClient";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 
 const VALID_STATUSES: CaseStatus[] = [
@@ -72,6 +73,15 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const page =
     typeof pageParam === "string" ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
 
+  // Page size is user-selectable; only accept the sizes the picker offers so a
+  // hand-edited URL can't ask for an unbounded page (listCases caps at 100).
+  const perPageParam = params["per_page"];
+  const per_page =
+    typeof perPageParam === "string" &&
+    (PER_PAGE_OPTIONS as readonly number[]).includes(parseInt(perPageParam, 10))
+      ? parseInt(perPageParam, 10)
+      : 20;
+
   const channel =
     typeof channelParam === "string" &&
     (VALID_CHANNELS as readonly string[]).includes(channelParam)
@@ -105,7 +115,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     status,
     type,
     page,
-    per_page: 20,
+    per_page,
     sort: "created_at",
     order: "desc",
     // Email-intake filters (AC18)

@@ -288,6 +288,10 @@ export const esAR = {
   "pagination.next": "Siguiente",
   "pagination.of": "de",
   "pagination.results": "resultados",
+  "pagination.perPage": "Por página",
+  "pagination.page": "Página",
+  "pagination.first": "Primera página",
+  "pagination.last": "Última página",
 
   // ── Severity labels ─────────────────────────────────────────────────────────
   "severity.low": "Bajo",

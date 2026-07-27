@@ -104,42 +104,124 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }: DeleteConfirmDialog
 
 // ── Pagination ────────────────────────────────────────────────────────────────
 
+/** Page-size options offered in the inbox. `listCases` caps per_page at 100. */
+export const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const;
+
+/**
+ * Page numbers to render, collapsing long ranges with ellipses so the control
+ * stays one line: always first/last, plus a window around the current page.
+ * e.g. 1 … 6 [7] 8 … 42
+ */
+function pageItems(current: number, totalPages: number): (number | "…")[] {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  const items: (number | "…")[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(totalPages - 1, current + 1);
+  if (start > 2) items.push("…");
+  for (let p = start; p <= end; p++) items.push(p);
+  if (end < totalPages - 1) items.push("…");
+  items.push(totalPages);
+  return items;
+}
+
 interface PaginationProps {
   page: number;
   perPage: number;
   total: number;
   onPageChange: (page: number) => void;
+  onPerPageChange: (perPage: number) => void;
 }
 
-function Pagination({ page, perPage, total, onPageChange }: PaginationProps) {
+function Pagination({ page, perPage, total, onPageChange, onPerPageChange }: PaginationProps) {
   const t = useT();
-  const from = (page - 1) * perPage + 1;
-  const to = Math.min(page * perPage, total);
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
+  const current = Math.min(page, totalPages);
+  const from = total === 0 ? 0 : (current - 1) * perPage + 1;
+  const to = Math.min(current * perPage, total);
+
+  const navBtn =
+    "rounded-md px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors";
 
   return (
-    <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-      <p className="text-sm text-slate-500">
-        {t("bandeja.showing")} {from}-{to} {t("pagination.of")} {total} {t("bandeja.claims")}
-      </p>
-      <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-3 pt-4 border-t border-slate-100 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center gap-3">
+        <p className="text-sm text-slate-500">
+          {t("bandeja.showing")} {from}-{to} {t("pagination.of")} {total} {t("bandeja.claims")}
+        </p>
+        <label className="flex items-center gap-1.5 text-sm text-slate-500">
+          <span className="sr-only sm:not-sr-only">{t("pagination.perPage")}</span>
+          <select
+            value={perPage}
+            onChange={(e) => onPerPageChange(Number(e.target.value))}
+            aria-label={t("pagination.perPage")}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 hover:border-slate-300 focus:border-slate-400 focus:outline-none"
+          >
+            {PER_PAGE_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="flex items-center gap-1">
         <button
-          onClick={() => onPageChange(page - 1)}
-          disabled={page <= 1}
-          className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          onClick={() => onPageChange(1)}
+          disabled={current <= 1}
+          className={navBtn}
+          aria-label={t("pagination.first")}
+        >
+          «
+        </button>
+        <button
+          onClick={() => onPageChange(current - 1)}
+          disabled={current <= 1}
+          className={navBtn}
           aria-label={t("pagination.previous")}
         >
           {t("pagination.previous")}
         </button>
-        <span className="text-sm text-slate-500">
-          {page} / {Math.max(1, Math.ceil(total / perPage))}
-        </span>
+
+        {pageItems(current, totalPages).map((item, i) =>
+          item === "…" ? (
+            <span key={`gap-${i}`} className="px-1 text-sm text-slate-400" aria-hidden="true">
+              …
+            </span>
+          ) : (
+            <button
+              key={item}
+              onClick={() => onPageChange(item)}
+              aria-current={item === current ? "page" : undefined}
+              aria-label={`${t("pagination.page")} ${item}`}
+              className={
+                item === current
+                  ? "rounded-md bg-slate-900 px-2.5 py-1.5 text-sm font-semibold text-white"
+                  : navBtn
+              }
+            >
+              {item}
+            </button>
+          )
+        )}
+
         <button
-          onClick={() => onPageChange(page + 1)}
-          disabled={to >= total}
-          className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          onClick={() => onPageChange(current + 1)}
+          disabled={current >= totalPages}
+          className={navBtn}
           aria-label={t("pagination.next")}
         >
           {t("pagination.next")}
+        </button>
+        <button
+          onClick={() => onPageChange(totalPages)}
+          disabled={current >= totalPages}
+          className={navBtn}
+          aria-label={t("pagination.last")}
+        >
+          »
         </button>
       </div>
     </div>
@@ -347,6 +429,15 @@ export function DashboardClient({
     router.push(`/bandeja?${params.toString()}`);
   }
 
+  function handlePerPageChange(newPerPage: number) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("per_page", String(newPerPage));
+    // Row 1 of the new page size is always on page 1 — staying on the old page
+    // number can land past the end of the shorter list.
+    params.set("page", "1");
+    router.push(`/bandeja?${params.toString()}`);
+  }
+
   const tabCounts = statusCountsBase;
 
   return (
@@ -404,6 +495,7 @@ export function DashboardClient({
               perPage={PER_PAGE}
               total={visibleTotal}
               onPageChange={handlePageChange}
+              onPerPageChange={handlePerPageChange}
             />
           )}
         </div>

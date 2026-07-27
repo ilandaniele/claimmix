@@ -74,3 +74,6 @@ supabase/.temp/
 
 # local scratch notes — may contain sensitive context
 prompt.txt
+
+# training exports (large data dumps, regenerate with scripts/export-training.mjs)
+training-export/

@@ -285,6 +285,10 @@ export const enUS: Record<TranslationKey, string> = {
   "pagination.next": "Next",
   "pagination.of": "of",
   "pagination.results": "results",
+  "pagination.perPage": "Per page",
+  "pagination.page": "Page",
+  "pagination.first": "First page",
+  "pagination.last": "Last page",
 
   // ── Severity labels ─────────────────────────────────────────────────────────
   "severity.low": "Low",

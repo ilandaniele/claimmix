@@ -240,7 +240,8 @@ async function createWhatsAppCase(
           channel: "whatsapp",
           status: "recibido",
           email_thread_id: threadId,
-          is_claim: true,
+          // Unknown until the extractor decides — see the same fix in gmail-poller.
+          is_claim: null,
           claim_type: null,
         })
         .returning({ id: tables.cases.id })

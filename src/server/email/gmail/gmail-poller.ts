@@ -484,7 +484,10 @@ async function processMessage(
             status: "recibido",
             email_message_id: gmailMessageId,
             email_thread_id: threadId,
-            is_claim: true,
+            // Unknown until the extractor decides. Seeding `true` here made every
+            // un-analysed inbox message (newsletters, promos) read as "¿Es reclamo?
+            // Sí" in the UI, and the value stuck forever when extraction failed.
+            is_claim: null,
             claim_type: null,
           })
           .returning({ id: cases.id })

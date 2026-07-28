@@ -353,9 +353,9 @@ describe("POST /api/intake/simulate", () => {
 // ── Scenarios data validation ─────────────────────────────────────────────────
 
 describe("simulation scenarios", () => {
-  it("has 147 scenarios", async () => {
+  it("has 163 scenarios", async () => {
     const { SCENARIOS } = await import("@/server/intake/scenarios");
-    expect(SCENARIOS).toHaveLength(147);
+    expect(SCENARIOS).toHaveLength(163);
   });
 
   it("has the expected scenario counts per claim type", async () => {
@@ -376,7 +376,7 @@ describe("simulation scenarios", () => {
     expect(counts["robo_contenido"]).toBe(20);
     expect(counts["accidente_personal"]).toBe(20);
     // Non-relevant / other (unchanged)
-    expect(counts["other"]).toBe(5);
+    expect(counts["other"]).toBe(21); // 5 base + 16 negative (scenarios-negative.ts)
   });
 
   it("all scenarios have unique IDs", async () => {

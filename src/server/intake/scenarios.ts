@@ -29,6 +29,7 @@
 
 import type { ClaimType } from "@/lib/schemas/cases";
 import { EXTRA_SCENARIOS } from "./scenarios-extra";
+import { NEGATIVE_SCENARIOS } from "./scenarios-negative";
 
 export interface SimulationScenario {
   id: string;
@@ -2731,7 +2732,11 @@ Valentina Ibáñez
  * All simulation scenarios: the base set plus the variety pack for the weak
  * claim types (see scenarios-extra.ts for why those exist).
  */
-export const SCENARIOS: SimulationScenario[] = [...BASE_SCENARIOS, ...EXTRA_SCENARIOS];
+export const SCENARIOS: SimulationScenario[] = [
+  ...BASE_SCENARIOS,
+  ...EXTRA_SCENARIOS,
+  ...NEGATIVE_SCENARIOS,
+];
 
 /** Lookup map for O(1) access by scenario ID. */
 export const SCENARIOS_BY_ID: ReadonlyMap<string, SimulationScenario> = new Map(

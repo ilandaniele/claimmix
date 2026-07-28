@@ -169,11 +169,17 @@ function isVertexTransport(): boolean {
 
 /**
  * Vertex model names differ from AI Studio's: there are no `*-latest` aliases
- * (they 404), and the pinned gemini-2.5-* names ARE available. Default to
- * flash-lite — cheapest tier that handles deterministic JSON extraction.
+ * (they 404), and the pinned gemini-2.5-* names ARE available.
+ *
+ * Default is flash, NOT flash-lite. Lite is ~3x cheaper but cannot reliably
+ * emit the full extraction schema for complex claims: measured 0/3 on
+ * responsabilidad-civil scenarios (multiple parties, injuries, third-party
+ * damage) versus 3/3 for flash, failing with invalid_json on both attempts so
+ * the case escalates. RC claims are the high-value ones — losing them to save
+ * ~$0.001 per extraction is a bad trade.
  */
 function getVertexModel(): string {
-  return process.env.VERTEX_EXTRACTION_MODEL?.trim() || "gemini-2.5-flash-lite";
+  return process.env.VERTEX_EXTRACTION_MODEL?.trim() || "gemini-2.5-flash";
 }
 
 let _vertexAuth: GoogleAuth | null = null;

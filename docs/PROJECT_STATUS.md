@@ -1,7 +1,13 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-06-29. This file is the single source of truth for "where things stand."
+_Last updated: 2026-08-07. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
+
+> **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
+> through **Vertex AI** (postpay, no prepay wall), 83 extractions in the last 3 days with
+> **zero errors**, and the agent is trained on **206 approved examples** without needing
+> fine-tuning. Nothing is broken. What's left is commercial, not technical: a real
+> WhatsApp number, Meta business verification, and multi-tenant onboarding.
 
 ## What ClaimMix is
 
@@ -12,7 +18,8 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 - **Stack:** Next.js 16 (App Router), React 19, TypeScript, Drizzle ORM, Neon
   Postgres, Better Auth, pnpm. Deployed on **Vercel (Hobby plan)**.
 - **Prod URL:** https://claimmix.vercel.app
-- **AI:** Gemini default (`gemini-2.5-flash`), OpenAI optional fallback, `MOCK_AI=true` for local.
+- **AI:** Gemini `gemini-2.5-flash` **via Vertex AI** (`GEMINI_TRANSPORT=vertex`),
+  OpenAI optional fallback (currently an invalid key), `MOCK_AI=true` for local.
 
 ## Key paths
 
@@ -51,7 +58,13 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 - batch-simulate returns `failed_cases` + logs per-case INSERT failures.
 - RC-vs-choque classification prompt (decisive "who suffered the claimed damage?" test).
 - Vertex fine-tuning JSONL fixed (Gemini **GenerateContent** format, not OpenAI ChatCompletions).
-- WhatsApp **Cloud API** webhook (official Meta, ban-safe) — code live; needs Meta creds to function.
+- WhatsApp **Cloud API** — **LIVE and verified end-to-end** (2026-07). A real message
+  from a phone created a case and extracted (`choque`, titular, póliza). Webhook +
+  `messages` subscription were registered through the **Graph API**, not the dashboard:
+  that is the ban-safe route — automating the Facebook UI is what risks the account.
+  All 7 `WHATSAPP_*` vars are in Vercel, including a **permanent** system-user token
+  (`expires_at: 0`) so it no longer dies every 24 h. Still on Meta's **test number**
+  (+1 555-174-3395), which only accepts allow-listed senders.
 - Stuck-`procesando` reaper (`reap-stuck.ts`) + daily cron + opportunistic call in simulate/batch-simulate.
 - Public demo at `/demo`.
 - Admin account for the paid Gemini key: **`veltra.info1@gmail.com`** (via "Continuar con Google").
@@ -66,42 +79,76 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 2. **Migration runner + `schema_migrations` tracking** — prevents the hand-applied
    migration drift that caused the 0006–0009 INSERT outage.
 
-### 🙋 Blocked on the user (cannot be automated)
-- 🔴 **PROD EXTRACTION DOWN — ROOT CAUSE FOUND (2026-07-13): Gemini API in Argentina is
-  PREPAY-only.** Every key on every billing account returned `429 "Your prepayment
-  credits are depleted"`. A postpay card does NOT fund this API in AR; you must buy
-  prepay credits. (Postpay IS available for **Vertex AI** — see the alternative below.)
-  - **New clean setup done:** Google Cloud project **ClaimMix** (`claimmix-502016`,
-    number `895285071884`), billing linked with an Argentine card, new key
-    `AQ.Ab8RN6Ksvlhyy…` created via AI Studio, staged in `.env.local`. DB verified clean
-    (0 stale keys, provider=gemini). Backlog ready: **~1,170 escalado** cases waiting
-    (534 email + 636 sim), incl. the weak classes we needed (robo_contenido 94,
-    accidente_personal 90, cristales 54, rc 39) → fixes fine-tuning balance.
-  - **THE ONE REMAINING STEP (user):** load ~USD 10 prepay at https://ai.studio/projects
-    → ClaimMix → prepay. No code change needed.
-  - **On "cargado": run `node scripts/activate-gemini.mjs`** — verifies the key works,
-    checks DB, and reprocesses the escalado backlog. Then set the key in Vercel prod
-    (`vercel login` first) + redeploy.
-  - **Postpay alternative:** migrate extraction to **Vertex AI** (postpay, already runs
-    fine-tuning on project `claimmix`). Code change; offered, not done.
-  - **Anti-block:** ONE country/card (Argentine), small prepay, small data batches.
-    Card/country mixing + free-tier bursts got veltra.soporte blocked before.
-  - `OPENAI_API_KEY` remains **INVALID** (401) — it's an optional fallback only; Gemini
-    is primary + Vertex is fine-tuning (standing decision). Not a priority.
-  **GOTCHA (still applies):** key resolution is **user → tenant → env** (`provider.ts`);
-  stale tenant/user keys in the DB override env. Verified clean 2026-07-02 (all
-  `gemini_api_key_encrypted = null`), so env is the single source of truth — until
-  someone re-adds a key via Configuración.
+### 🤖 The AI path — RESOLVED, running unattended (verified 2026-08-07)
+Extraction runs on **Vertex AI**, not the AI Studio key. That switch is what ended
+months of outages: the AI Studio Gemini API is **prepay-only in Argentina** (every key
+on every billing account returned `429 "prepayment credits are depleted"`; a postpay
+card does not fund it). Vertex bills **postpay** against the project's existing billing
+account — no prepay wall — and still serves the pinned `gemini-2.5-*` models that AI
+Studio now 404s for newly-created keys.
+
+- **Config** (`GEMINI_TRANSPORT=vertex`, set in Vercel prod + `.env.local`):
+  `GOOGLE_CLOUD_PROJECT=claimmix`, `GOOGLE_CLOUD_LOCATION=us-central1`,
+  `VERTEX_EXTRACTION_MODEL=gemini-2.5-flash`, and `GOOGLE_SERVICE_ACCOUNT_JSON`
+  (the SA JSON **inline** — serverless has no filesystem, so the key-file path in
+  `GOOGLE_APPLICATION_CREDENTIALS` cannot work on Vercel).
+- **Model is `flash`, deliberately not `flash-lite`.** Lite measured 0/3 on
+  responsabilidad-civil scenarios (invalid_json on both attempts → case escalates);
+  flash 3/3. RC claims are the high-value ones.
+- **Cost ~USD 0.002/extraction** with thinking disabled. Thinking must stay off for
+  every model, not just `gemini-2.5*` — a `-latest` default with thinking ON billed
+  ~$0.78/call and drained a $10 prepay in 16 extractions.
+- **Health, last 3 days:** 83 extractions, `gemini-2.5-flash`, **zero errors**. The
+  Gmail poller ingests real inbox mail daily and the agent classified **264/264**
+  correctly as `no_relevante`.
+- `OPENAI_API_KEY` is **INVALID** (401) — optional fallback only; Gemini primary +
+  Vertex fine-tuning is the standing decision. Not a priority.
+- **GOTCHA (still applies):** key resolution is **user → tenant → env**
+  (`provider.ts`); stale tenant/user keys in the DB override env. Verified clean
+  (all `gemini_api_key_encrypted = null`) — until someone re-adds one via Configuración.
+
+### 🧠 Training state (2026-08-07) — **206 approved examples**
+| class | n | | class | n |
+|---|---|---|---|---|
+| negatives (not a claim) | 40 | | cristales | 18 |
+| choque | 38 | | granizo | 17 |
+| robo | 19 | | incendio | 17 |
+| rc / accidente_personal / robo_contenido | 18 each | | other | 3 |
+
+The agent is trained and working **without** fine-tuning: approved examples feed the
+few-shot layer on every extraction, plus 20 `agent_prompt_rules`.
+
+Negatives went 3 → 40 and were the biggest gap: the agent had almost no signal for
+"reject this", the expensive failure mode (a promo booked as a claim wastes an analyst
+and pollutes the set). 15 are synthetic (`scenarios-negative.ts`) and 25 are **real
+inbox mail, one per distinct sender domain** — including hard cases that carry claim
+vocabulary without being claims: a bank's *"Recibimos tu Reclamo 0055604264"*, spam
+titled *"Claim your FREE $20"*, health-insurer marketing.
+
+Guarded against over-correction: after loading the negatives, verified 4/4 — real
+choque and RC claims still classify `is_claim=true`, bank-"Reclamo" and "Claim" spam
+still `false`.
+
+**Back it up before touching the DB:** `node scripts/export-training.mjs` →
+`training-export/`. Approved examples are the only asset here that cannot be
+regenerated. Latest dump: `training-examples-2026-08-07.json` (206 + 20 rules).
 - 🟡 **Security hygiene (2026-07-02 audit):** repo is clean — `.env.local` and
   `*-sa-key.json` git-ignored, no secrets tracked or in git history; `prompt.txt` added
   to `.gitignore`. BUT the `veltra.soporte@gmail.com` app password was pasted into a
   chat session (lives in transcripts) → **rotate that password**. The dead `AQ.` key was
   also pasted around; it's dead, so no action needed once replaced.
-- **WhatsApp go-live:** create a Meta Business app + WhatsApp product, get a
-  permanent token + App Secret + phone_number_id, set the `WHATSAPP_*` env vars in
-  Vercel, register the callback URL `https://claimmix.vercel.app/api/webhooks/whatsapp`,
-  subscribe to `messages`. Use a **dedicated** number, not a personal WhatsApp line.
-  Full guide: `docs/whatsapp-setup.md`.
+- **WhatsApp — real number.** Everything else is done (see above); only the production
+  number is left. Registering `+54 9 11 2318-4512` failed because it still had a
+  WhatsApp account attached, and a fresh chip never received the SMS code. Next
+  attempt: use **voice-call verification** instead of SMS (more reliable in AR), on a
+  chip confirmed to receive normal calls/SMS first. Then **business verification**
+  (Meta → Security Center → CUIT/AFIP docs, takes days) so any customer can write in,
+  not just allow-listed test senders. Hand the new **Phone Number ID** over and the
+  Vercel swap is a one-liner. Full guide: `docs/whatsapp-setup.md`.
+- **Multi-tenant onboarding (the business model):** key resolution is user → tenant →
+  env, so each insurer pastes **their own** Gemini key in Configuración and pays their
+  own consumption — our cost per client is $0. Supported in code; not yet documented
+  or rehearsed with a second tenant.
 - ~~**Re-trigger fine-tuning**~~ ✅ **DONE 2026-06-30 — first successful tuned model.**
   Job `2eb72bbc-…` (Vertex `tuningJobs/2998492462349025280`) → `JOB_STATE_SUCCEEDED`,
   model `…/models/562968095363170304@1`, base gemini-2.5-flash, 116 examples. DB row is
@@ -141,3 +188,22 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 ## Verify / build commands
 `pnpm type-check` · `pnpm lint` (max 5 warnings) · `pnpm test:unit` · `pnpm build`.
 CI (GitHub Actions) runs all of these + CodeQL on every push to `main`.
+
+**CI audit note:** the blocking dependency gate runs `pnpm audit --prod`. One dev-only
+advisory is unfixable — eslint → minimatch@3 → brace-expansion@1, patched only in
+`>=5.0.8`, an API minimatch@3 cannot consume ("expand is not a function"). It never
+ships, so a second non-blocking step keeps dev advisories visible.
+
+## Operational scripts (`scripts/`)
+| Script | What it does |
+|---|---|
+| `export-training.mjs` | Dumps approved examples + prompt rules to `training-export/*.json`. **Run before any DB cleanup** — the approved set is the only thing here that cannot be regenerated. |
+| `reset-cases-keep-training.mjs` | Wipes every case but keeps the trained agent. Dry-run by default; `--apply` to execute. |
+| `cleanup-junk-cases.mjs` | Deletes only dead-end cases (`no_relevante` / unrecovered `escalado`) that back no approved example. Dry-run by default. |
+| `activate-gemini.mjs` | Legacy: verifies the AI Studio key and re-drives the escalado backlog. Superseded by the Vertex transport; kept for the prepay path. |
+
+⚠️ **Never `DELETE FROM cases` directly.** `training_examples` hangs off cases by *two*
+cascading paths — `case_id`, and `agent_run_id` → `agent_runs.case_id` — so a plain
+delete silently destroys the whole training set. `reset-cases-keep-training.mjs` detaches
+both (`case_id` is nullable on each) before deleting, and rolls back if the approved
+count moves.

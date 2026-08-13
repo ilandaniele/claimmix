@@ -25,9 +25,40 @@ import {
 } from "drizzle-orm/pg-core";
 import { authUsers } from "./auth";
 
+/**
+ * A tenant is one insurer or broker, and these columns are its contract.
+ *
+ * The billable unit is a CLAIM, not a token: `monthly_fee_usd` covers
+ * `included_claims` per calendar month, and every claim past that costs
+ * `overage_price_usd`. Cost is tracked separately in `ai_usage` — this is the
+ * revenue side, and the two together are what /api/admin/billing reports.
+ *
+ * Defaults describe a pilot (free, 300 claims), so a tenant created without
+ * commercial terms is never accidentally billed.
+ */
 export const tenants = pgTable("tenants", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
+  plan: text("plan", {
+    enum: ["piloto", "operativo", "profesional", "corporativo", "enterprise"],
+  })
+    .notNull()
+    .default("piloto"),
+  billing_status: text("billing_status", {
+    enum: ["trial", "active", "suspended", "churned"],
+  })
+    .notNull()
+    .default("trial"),
+  monthly_fee_usd: numeric("monthly_fee_usd", { precision: 10, scale: 2 })
+    .notNull()
+    .default("0"),
+  included_claims: integer("included_claims").notNull().default(300),
+  overage_price_usd: numeric("overage_price_usd", { precision: 10, scale: 4 })
+    .notNull()
+    .default("0"),
+  contact_email: text("contact_email"),
+  trial_ends_at: timestamp("trial_ends_at", { withTimezone: true, mode: "string" }),
+  activated_at: timestamp("activated_at", { withTimezone: true, mode: "string" }),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),

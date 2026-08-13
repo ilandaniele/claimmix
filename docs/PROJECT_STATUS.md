@@ -1,13 +1,14 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-08-07. This file is the single source of truth for "where things stand."
+_Last updated: 2026-08-13. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
 > through **Vertex AI** (postpay, no prepay wall), 83 extractions in the last 3 days with
 > **zero errors**, and the agent is trained on **206 approved examples** without needing
 > fine-tuning. Nothing is broken. What's left is commercial, not technical: a real
-> WhatsApp number, Meta business verification, and multi-tenant onboarding.
+> WhatsApp number and Meta business verification. Tenant onboarding + per-claim
+> billing now exist in code (2026-08-13) but **migration 0010 is still unapplied**.
 
 ## What ClaimMix is
 
@@ -48,6 +49,10 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
   table, no runner; deploys do NOT apply them. When something DB-shaped breaks
   after a deploy, query the LIVE Neon schema and diff vs `src/lib/db/schema/*` —
   do not trust the migration files. Migrations 0001–0009 are all applied (verified 2026-06-28).
+  ⚠️ **`0010_tenant_commercial_terms.sql` is NOT applied yet** (written 2026-08-13).
+  Until it runs, `/api/admin/billing` and `scripts/create-tenant.mjs` both fail —
+  the script checks for `tenants.plan` up front and tells you so. Apply with psql
+  against `DATABASE_URL`; it is idempotent (`IF NOT EXISTS` throughout).
 - **Neon DATABASE_URL** is in `.env.local` (prod). `vercel env pull` returns blank
   values for secrets — use `vercel env ls` to check presence.
 
@@ -71,13 +76,46 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
   `veltra.soporte@gmail.com` was blocked by Google (2026-07) and decommissioned — neutralized in
   the DB (cases reassigned, session/account cleared, demoted; profile kept as tombstone for FK/audit).
 
+### 💰 Commercial plumbing (added 2026-08-13, needs migration 0010)
+The technical product was sellable; the *database* was not. `tenants` held only
+(id, name, created_at), there was **no code anywhere that creates a tenant**, and
+while cost per tenant was measured (`ai_usage.cost_usd`) nothing recorded what a
+client had agreed to pay. Closed that:
+
+- `neon/migrations/0010_tenant_commercial_terms.sql` — plan, billing_status,
+  monthly_fee_usd, included_claims, overage_price_usd, contact_email,
+  trial_ends_at, activated_at, with CHECK constraints and an index on
+  `cases (tenant_id, created_at)` for the billing query. **Apply by hand.**
+- `src/lib/billing/plans.ts` — the price ladder plus `computeInvoice` /
+  `computeMargin` as pure functions (17 unit tests; money rounds to cents once,
+  garbage input clamps to 0 rather than emitting a credit).
+- `GET /api/admin/billing?month=YYYY-MM` — billable claims, invoice breakdown,
+  measured AI cost, and margin for the caller's own tenant.
+- `scripts/create-tenant.mjs` — onboard a client with the plan's terms applied.
+
+**Billable unit is a claim the agent recognised as a claim** (`is_claim = true`).
+Mail correctly rejected as not-a-claim is deliberately NOT billed — charging for
+filtered spam would turn the filter into a revenue source instead of a feature.
+Cases with no verdict (failed / still processing) are not billed either. The
+endpoint returns all four buckets so an invoice can be defended line by line.
+
+A tenant's own stored terms are authoritative, not the catalog: a signed contract
+must not change retroactively because someone edited the price list.
+
 ### 🔧 Optional improvements (not broken, worth doing)
 1. **Big batches still lose cases.** The reaper makes stuck cases *recoverable*
    (`escalado`) but does not *process* them, so a large `batch-simulate` still
    drops part of the distribution. Real fix: chunk/cap batches to fit
    `maxDuration`, or process per-case via the worker route.
 2. **Migration runner + `schema_migrations` tracking** — prevents the hand-applied
-   migration drift that caused the 0006–0009 INSERT outage.
+   migration drift that caused the 0006–0009 INSERT outage. 0010 is the second
+   migration now riding on someone remembering to run it.
+3. **No admin UI for tenants or billing.** Both are API/script only. Fine for the
+   first few clients, not for ten.
+4. **Billing has no invoice history.** `/api/admin/billing` recomputes from
+   `cases` on every call, so a past month's invoice changes if old cases are
+   edited or deleted. Snapshot each period once it closes before issuing real
+   invoices.
 
 ### 🤖 The AI path — RESOLVED, running unattended (verified 2026-08-07)
 Extraction runs on **Vertex AI**, not the AI Studio key. That switch is what ended
@@ -147,8 +185,9 @@ regenerated. Latest dump: `training-examples-2026-08-07.json` (206 + 20 rules).
   Vercel swap is a one-liner. Full guide: `docs/whatsapp-setup.md`.
 - **Multi-tenant onboarding (the business model):** key resolution is user → tenant →
   env, so each insurer pastes **their own** Gemini key in Configuración and pays their
-  own consumption — our cost per client is $0. Supported in code; not yet documented
-  or rehearsed with a second tenant.
+  own consumption — our cost per client is $0. Creating the tenant is now scripted
+  (`create-tenant.mjs`), but the flow has **never been rehearsed end-to-end with a
+  second tenant** — do that on a throwaway tenant before a real client, not during one.
 - ~~**Re-trigger fine-tuning**~~ ✅ **DONE 2026-06-30 — first successful tuned model.**
   Job `2eb72bbc-…` (Vertex `tuningJobs/2998492462349025280`) → `JOB_STATE_SUCCEEDED`,
   model `…/models/562968095363170304@1`, base gemini-2.5-flash, 116 examples. DB row is
@@ -201,6 +240,7 @@ ships, so a second non-blocking step keeps dev advisories visible.
 | `reset-cases-keep-training.mjs` | Wipes every case but keeps the trained agent. Dry-run by default; `--apply` to execute. |
 | `cleanup-junk-cases.mjs` | Deletes only dead-end cases (`no_relevante` / unrecovered `escalado`) that back no approved example. Dry-run by default. |
 | `activate-gemini.mjs` | Legacy: verifies the AI Studio key and re-drives the escalado backlog. Superseded by the Vertex transport; kept for the prepay path. |
+| `create-tenant.mjs` | Onboards a client: creates the tenant with its plan's commercial terms. Dry-run by default; `--apply` to execute. Needs migration 0010. Prints the remaining manual steps (SIGNUP_ALLOWED_EMAILS, the client's own Gemini key). |
 
 ⚠️ **Never `DELETE FROM cases` directly.** `training_examples` hangs off cases by *two*
 cascading paths — `case_id`, and `agent_run_id` → `agent_runs.case_id` — so a plain

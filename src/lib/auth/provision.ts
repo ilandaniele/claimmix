@@ -36,6 +36,42 @@ function isAllowlistedAdmin(email: string | null | undefined, emailVerified: boo
   return allowed.includes(email.trim().toLowerCase());
 }
 
+/**
+ * Whether this email may be provisioned into the default tenant at all.
+ *
+ * SECURITY — this is the tenant's front door. /registro is a public route and
+ * Google sign-in is open, and both funnel through provisionUserProfile, which
+ * used to drop *any* new account into GOOGLE_DEFAULT_TENANT_ID as an "analyst".
+ * /bandeja only checks for a session (no role gate) and GET /api/cases accepts
+ * ALL_ROLES, so a stranger who registered could read every claim in the
+ * production tenant — names, DNI, policy numbers, addresses.
+ *
+ * Allowed entries in SIGNUP_ALLOWED_EMAILS (comma-separated), plus everything
+ * in ADMIN_EMAILS:
+ *   - a full address        analista@aseguradora.com
+ *   - a whole domain        @aseguradora.com   (onboarding an insurer's staff)
+ *
+ * Deliberately CLOSED when neither variable is set: an unconfigured deploy must
+ * not hand out access to real claims. Existing users are unaffected — this hook
+ * only runs on user creation and returns early when a profile already exists.
+ * To add someone, list them here or have an admin create the user from
+ * /admin/users (which provisions into the admin's own tenant).
+ */
+function isSignupAllowed(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const entries = [process.env.SIGNUP_ALLOWED_EMAILS, process.env.ADMIN_EMAILS]
+    .filter(Boolean)
+    .join(",")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (entries.length === 0) return false;
+
+  const addr = email.trim().toLowerCase();
+  const domain = addr.slice(addr.indexOf("@"));
+  return entries.some((e) => (e.startsWith("@") ? e === domain : e === addr));
+}
+
 export function resolveDefaultTenantId(): string | null {
   return (
     process.env.GOOGLE_DEFAULT_TENANT_ID ??
@@ -51,6 +87,11 @@ export function resolveDefaultTenantId(): string | null {
  * email/password signup and first-time Google sign-in. The admin create-user
  * flow updates tenant/role afterwards; the existence guard keeps this hook
  * idempotent.
+ *
+ * Membership in the tenant is the profile row: an account without one resolves
+ * no tenant, so every page redirects to /login and every API returns 401. That
+ * makes withholding it the fail-safe way to refuse an unapproved signup — no
+ * half-granted access, and an admin can still attach the person later.
  */
 export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
   const existing = await db
@@ -59,6 +100,21 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
     .where(eq(users.id, user.id))
     .limit(1);
   if (existing.length > 0) return;
+
+  if (!isSignupAllowed(user.email)) {
+    // No profile row → no tenant → no access to any claim. The Better Auth
+    // account survives so an admin can approve the person from /admin/users.
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        service: "claimmix",
+        msg: "auth.signup.not_allowlisted",
+        // LLM06 / PII: log the domain only, never the full address.
+        email_domain: user.email?.slice(user.email.indexOf("@")) ?? null,
+      }),
+    );
+    return;
+  }
 
   const tenantId = resolveDefaultTenantId();
   if (!tenantId) {

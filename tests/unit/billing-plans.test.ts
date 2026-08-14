@@ -169,4 +169,25 @@ describe("plan guards", () => {
       );
     }
   });
+
+  it("never charges more per extra claim than the plan's own included rate", () => {
+    // The rule that makes growth safe for the client: an extra claim costs no
+    // more than a claim inside the allowance, so nobody has a reason to throttle
+    // volume — or to feel punished — while waiting to move up a tier.
+    //
+    // Pinned as a test because it is a deliberate commercial choice and an easy
+    // one to lose: a competing pricing proposal reviewed in 2026-08 did the
+    // opposite (overage above the in-plan rate), which quietly penalises the
+    // clients who grow fastest.
+    for (const plan of PLANS) {
+      const { monthly_fee_usd, included_claims, overage_price_usd } = PLAN_CATALOG[plan];
+      if (included_claims === 0) continue;
+
+      const inPlanRate = monthly_fee_usd / included_claims;
+      expect(
+        overage_price_usd,
+        `${plan}: overage ${overage_price_usd} exceeds in-plan rate ${inPlanRate.toFixed(4)}`
+      ).toBeLessThanOrEqual(inPlanRate + 1e-9);
+    }
+  });
 });

@@ -49,10 +49,21 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
   table, no runner; deploys do NOT apply them. When something DB-shaped breaks
   after a deploy, query the LIVE Neon schema and diff vs `src/lib/db/schema/*` —
   do not trust the migration files. Migrations 0001–0009 are all applied (verified 2026-06-28).
+  ✅ **There is a runner now: `scripts/migrate.mjs`** (2026-08-13). It keeps a
+  `schema_migrations` ledger, checksums every applied file to catch a migration
+  edited after the fact, and runs each one in its own transaction.
+  **First run on this database must be the baseline**, because 0001–0009 are
+  already applied by hand and must not re-execute:
+  ```
+  node scripts/migrate.mjs --baseline 0009 --apply   # adopt, do not run
+  node scripts/migrate.mjs                            # status
+  node scripts/migrate.mjs --apply                    # runs 0010
+  ```
+  It refuses to run when the ledger is empty but `cases` already exists, so the
+  baseline cannot be skipped by accident.
   ⚠️ **`0010_tenant_commercial_terms.sql` is NOT applied yet** (written 2026-08-13).
   Until it runs, `/api/admin/billing` and `scripts/create-tenant.mjs` both fail —
-  the script checks for `tenants.plan` up front and tells you so. Apply with psql
-  against `DATABASE_URL`; it is idempotent (`IF NOT EXISTS` throughout).
+  the script checks for `tenants.plan` up front and tells you so.
 - **Neon DATABASE_URL** is in `.env.local` (prod). `vercel env pull` returns blank
   values for secrets — use `vercel env ls` to check presence.
 
@@ -107,9 +118,9 @@ must not change retroactively because someone edited the price list.
    (`escalado`) but does not *process* them, so a large `batch-simulate` still
    drops part of the distribution. Real fix: chunk/cap batches to fit
    `maxDuration`, or process per-case via the worker route.
-2. **Migration runner + `schema_migrations` tracking** — prevents the hand-applied
-   migration drift that caused the 0006–0009 INSERT outage. 0010 is the second
-   migration now riding on someone remembering to run it.
+2. ~~**Migration runner + `schema_migrations` tracking**~~ ✅ **DONE 2026-08-13**
+   (`scripts/migrate.mjs`, see Infra facts). Still needs its first baseline run
+   against prod.
 3. **No admin UI for tenants or billing.** Both are API/script only. Fine for the
    first few clients, not for ten.
 4. **Billing has no invoice history.** `/api/admin/billing` recomputes from
@@ -241,6 +252,7 @@ ships, so a second non-blocking step keeps dev advisories visible.
 | `cleanup-junk-cases.mjs` | Deletes only dead-end cases (`no_relevante` / unrecovered `escalado`) that back no approved example. Dry-run by default. |
 | `activate-gemini.mjs` | Legacy: verifies the AI Studio key and re-drives the escalado backlog. Superseded by the Vertex transport; kept for the prepay path. |
 | `create-tenant.mjs` | Onboards a client: creates the tenant with its plan's commercial terms. Dry-run by default; `--apply` to execute. Needs migration 0010. Prints the remaining manual steps (SIGNUP_ALLOWED_EMAILS, the client's own Gemini key). |
+| `migrate.mjs` | Applies pending SQL migrations and records them in `schema_migrations`. Status by default; `--apply` to run; `--baseline NNNN` to adopt already-hand-applied ones without executing. Detects a migration edited after it ran. |
 
 ⚠️ **Never `DELETE FROM cases` directly.** `training_examples` hangs off cases by *two*
 cascading paths — `case_id`, and `agent_run_id` → `agent_runs.case_id` — so a plain

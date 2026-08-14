@@ -21,50 +21,17 @@ import { ok, err } from "@/lib/api/respond";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db, tables } from "@/lib/db";
 import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
+import { resolveBillingPeriod } from "@/lib/billing/period";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
-
-/**
- * Resolves `?month=YYYY-MM` to a UTC half-open range [start, next).
- *
- * Returns null on anything malformed rather than silently falling back to the
- * current month — a typo'd month must not quietly produce a different
- * period's invoice. Month 12 rolls the year over via Date.UTC's own
- * normalisation.
- */
-function monthRange(raw: string | null): { start: string; next: string; month: string } | null {
-  const now = new Date();
-  let year: number;
-  let month: number; // 1-12
-
-  if (raw === null || raw === "") {
-    year = now.getUTCFullYear();
-    month = now.getUTCMonth() + 1;
-  } else {
-    const m = /^(\d{4})-(\d{2})$/.exec(raw);
-    if (!m) return null;
-    year = Number(m[1]);
-    month = Number(m[2]);
-    if (month < 1 || month > 12) return null;
-    if (year < 2020 || year > 2100) return null;
-  }
-
-  const start = new Date(Date.UTC(year, month - 1, 1));
-  const next = new Date(Date.UTC(year, month, 1));
-  return {
-    start: start.toISOString(),
-    next: next.toISOString(),
-    month: `${year}-${String(month).padStart(2, "0")}`,
-  };
-}
 
 export async function GET(request: Request) {
   try {
     const { userRow } = await requireAdmin();
     const tenantId = userRow.tenant_id;
 
-    const range = monthRange(new URL(request.url).searchParams.get("month"));
+    const range = resolveBillingPeriod(new URL(request.url).searchParams.get("month"));
     if (!range) {
       return err(new Error("INVALID_MONTH: expected format YYYY-MM"));
     }

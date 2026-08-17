@@ -183,9 +183,25 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     });
 
     expect(result).toEqual({ error: "SIMULATED_RECIPIENT_SKIPPED" });
+
+    // Delivery is still skipped — that is the whole point of the guard.
     expect(gmailMocks.send).not.toHaveBeenCalled();
-    expect(dbMock._inserts["claim_messages"].length).toBe(0);
-    expect(dbMock._inserts["outbound_messages"].length).toBe(0);
+
+    // But what the agent WOULD have said is now recorded, so seeding test data
+    // actually exercises the post-extraction flow instead of leaving no trace.
+    // The mock labels tables by order of first appearance rather than identity,
+    // so assert on the row's content instead of which bucket it landed in.
+    const recorded = Object.values(dbMock._inserts).flat();
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      case_id: CASE_ID,
+      tenant_id: TENANT_ID,
+      channel: "email",
+      template: "confirmation_received",
+      status: "skipped_simulated",
+    });
+    // It must never read as a real reply.
+    expect(recorded[0]).not.toMatchObject({ status: "sent" });
   });
 
   // ── AC4 ─────────────────────────────────────────────────────────────────────

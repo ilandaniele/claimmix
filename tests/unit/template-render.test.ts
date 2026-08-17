@@ -117,6 +117,50 @@ describe("renderTemplate — confirmation_received", () => {
     expect(typeof result.text).toBe("string");
     expect(result.text.length).toBeGreaterThan(50);
   });
+
+  it("says 'siniestro' rather than the raw enum member 'other'", () => {
+    // "Registramos exitosamente tu reclamo de other" reached a real inbox.
+    const result = renderTemplate("confirmation_received", {
+      caseId: "x",
+      claimType: "other",
+    });
+    expect(result.html).not.toContain("other");
+    expect(result.text).not.toContain("other");
+    expect(result.html).toContain("reclamo de <strong>siniestro</strong>");
+  });
+
+  it("covers the claim types the old label table had missed", () => {
+    for (const [type, label] of [
+      ["cristales", "rotura de cristales"],
+      ["rc", "daños a terceros"],
+      ["robo_contenido", "robo de pertenencias del vehículo"],
+      ["accidente_personal", "accidente con lesiones"],
+    ] as const) {
+      const result = renderTemplate("confirmation_received", { caseId: "x", claimType: type });
+      expect(result.html, type).toContain(label);
+    }
+  });
+
+  it("drops the policy line when masking leaves nothing recognizable", () => {
+    // POL-4471-A has no trailing 4-digit run, so the mask collapses to "****"
+    // and the rendered line read "Póliza asociada: ****" — which tells the
+    // claimant nothing and looks like the field failed to fill in.
+    const result = renderTemplate("confirmation_received", {
+      caseId: "x",
+      policyNumber: "POL-4471-A",
+    });
+    expect(result.html).not.toContain("Póliza asociada");
+    expect(result.text).not.toContain("Póliza asociada");
+    expect(result.html).not.toContain("4471");
+  });
+
+  it("still shows the policy line when the mask keeps real digits", () => {
+    const result = renderTemplate("confirmation_received", {
+      caseId: "x",
+      policyNumber: "POL-12345678",
+    });
+    expect(result.html).toContain("Póliza asociada");
+  });
 });
 
 describe("renderTemplate — missing_information_request", () => {
@@ -159,6 +203,21 @@ describe("renderTemplate — missing_information_request", () => {
     expect(result.text).toContain("Teléfono de contacto");
     expect(result.text).toContain("case-1");
   });
+
+  it("names the keys the extractor invents, not the keys themselves", () => {
+    // The old local table stopped at eight canonical keys and printed
+    // "Proporcioná el valor para el campo: dni_asegurado" for everything else.
+    const result = renderTemplate("missing_information_request", {
+      caseId: "case-7",
+      missingFields: ["dni_asegurado", "hora_siniestro", "provincia_siniestro"],
+    });
+    expect(result.html).not.toContain("dni_asegurado");
+    expect(result.html).not.toContain("hora_siniestro");
+    expect(result.text).not.toContain("provincia_siniestro");
+    expect(result.html).toContain("DNI del asegurado");
+    expect(result.html).toContain("Hora aproximada");
+    expect(result.html).toContain("Provincia");
+  });
 });
 
 describe("renderTemplate — data_confirmation_request", () => {
@@ -186,6 +245,30 @@ describe("renderTemplate — data_confirmation_request", () => {
     });
     expect(result.html).not.toContain(rawPolicy);
     expect(result.html).toContain("****5678");
+  });
+
+  it("asks about a claim type in words, not as an enum member", () => {
+    // A claimant was asked to confirm that their claim type was "other" — a
+    // value they cannot confirm or correct, because it is not a thing that
+    // happened to them.
+    const result = renderTemplate("data_confirmation_request", {
+      caseId: "case-4",
+      fieldKey: "claim_type",
+      proposedValue: "other",
+    });
+    expect(result.html).not.toContain("other");
+    expect(result.text).not.toContain("other");
+    expect(result.html).toContain("siniestro");
+  });
+
+  it("names an invented field key in Spanish", () => {
+    const result = renderTemplate("data_confirmation_request", {
+      caseId: "case-5",
+      fieldKey: "telefono_contacto",
+      proposedValue: "291 456 7788",
+    });
+    expect(result.html).not.toContain("telefono_contacto");
+    expect(result.html).toContain("Teléfono de contacto");
   });
 
   it("does not mask non-sensitive fields like full_name", () => {

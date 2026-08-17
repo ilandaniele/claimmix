@@ -112,9 +112,11 @@ describe("replyToWhatsAppIntake", () => {
     expect(body).not.toContain("foto_vidrio");
   });
 
-  it("falls back to the raw key rather than dropping a document silently", async () => {
-    // A doc with no row in required_docs_config: asking awkwardly beats not
-    // asking, because an unasked document stalls the claim forever.
+  it("humanizes a key nobody has seen before instead of printing it raw", async () => {
+    // The extractor invents keys, so the label table can never be complete.
+    // An unknown one must still be asked for — dropping it stalls the claim
+    // forever — but "• constancia_rara" on someone's phone is the database
+    // leaking out. Humanized is the floor, not the target.
     queueSelects(
       [{ is_claim: true, claim_type: "choque" }],
       [{ doc_key: "constancia_rara" }],
@@ -124,7 +126,78 @@ describe("replyToWhatsAppIntake", () => {
     await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
 
     const [, body] = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(body).toContain("• constancia_rara");
+    expect(body).toContain("• Constancia rara");
+    expect(body).not.toContain("constancia_rara");
+  });
+
+  it("never lets a snake_case key reach the claimant", async () => {
+    // The exact list from the first real WhatsApp reply sent to a phone.
+    queueSelects(
+      [{ is_claim: true, claim_type: "choque" }],
+      [
+        { doc_key: "dni_asegurado" },
+        { doc_key: "telefono_contacto" },
+        { doc_key: "hora_siniestro" },
+        { doc_key: "provincia_siniestro" },
+      ],
+      []
+    );
+
+    await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    const [, body] = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(body).not.toMatch(/[a-záéíóúñ]_[a-záéíóúñ]/i);
+    expect(body).toContain("• DNI del asegurado");
+    expect(body).toContain("• Teléfono de contacto");
+    expect(body).toContain("• Hora aproximada");
+    expect(body).toContain("• Provincia");
+  });
+
+  it("asks for facts and for files in different words", async () => {
+    // Telling someone to send their phone number "como foto o archivo" is the
+    // same tell as printing the raw key.
+    queueSelects(
+      [{ is_claim: true, claim_type: "choque" }],
+      [{ doc_key: "telefono_contacto" }, { doc_key: "fotos_danos" }],
+      []
+    );
+
+    await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    const [, body] = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(body).toContain("Necesitamos que nos cuentes:");
+    expect(body).toContain("Y que nos mandes:");
+    expect(body.indexOf("Teléfono de contacto")).toBeLessThan(
+      body.indexOf("Fotos de los daños")
+    );
+  });
+
+  it("does not offer to receive photos when it only asked for facts", async () => {
+    queueSelects(
+      [{ is_claim: true, claim_type: "choque" }],
+      [{ doc_key: "hora_siniestro" }, { doc_key: "provincia_siniestro" }],
+      []
+    );
+
+    await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    const [, body] = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(body).not.toContain("Y que nos mandes:");
+    expect(body).not.toMatch(/foto|archivo/i);
+    expect(body).toContain("Podés responder por acá mismo.");
+  });
+
+  it("prefers the tenant's own wording for a document it configured", async () => {
+    queueSelects(
+      [{ is_claim: true, claim_type: "choque" }],
+      [{ doc_key: "fotos_danos" }],
+      [{ doc_key: "fotos_danos", label_es: "Fotografías de los daños" }]
+    );
+
+    await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    const [, body] = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(body).toContain("• Fotografías de los daños");
   });
 
   it("asks for at most five things, not the thirteen extraction found", async () => {

@@ -11,6 +11,7 @@
  * Subject: "Confirmar datos de reclamo - Caso #{caseId}"
  */
 
+import { displayFieldValue, labelForField } from "@/lib/labels/claim-fields";
 import { maskDni, maskPolicyNumber } from "@/server/email/render";
 
 export interface DataConfirmationRequestData {
@@ -21,27 +22,19 @@ export interface DataConfirmationRequestData {
   conflictWithValue?: string | null;
 }
 
-const FIELD_LABELS: Record<string, string> = {
-  policy_number: "Número de póliza",
-  accident_date: "Fecha del siniestro",
-  accident_location: "Lugar del siniestro",
-  accident_description: "Descripción del siniestro",
-  dni: "DNI del titular",
-  full_name: "Nombre completo",
-  phone: "Teléfono de contacto",
-  claim_type: "Tipo de siniestro",
-};
-
 const SENSITIVE_FIELDS = new Set(["dni", "policy_number"]);
 
 /**
- * Mask a value if the field key is sensitive.
- * Returns the original value for non-sensitive fields.
+ * Mask a sensitive value, and translate an enum value into Spanish.
+ *
+ * Both matter here. A claimant was asked to confirm that the type of their
+ * claim was "other" — the raw enum member, which means nothing to them and
+ * cannot be confirmed or corrected because it is not a thing that happened.
  */
 function maskFieldValue(fieldKey: string, value: string): string {
   if (fieldKey === "dni") return maskDni(value);
   if (fieldKey === "policy_number") return maskPolicyNumber(value);
-  return value;
+  return displayFieldValue(fieldKey, value);
 }
 
 export function renderDataConfirmationRequest(
@@ -52,8 +45,7 @@ export function renderDataConfirmationRequest(
   text: string;
 } {
   const subject = `Confirmar datos de reclamo - Caso #${data.caseId}`;
-  const fieldLabel =
-    FIELD_LABELS[data.fieldKey] ?? data.fieldKey;
+  const fieldLabel = labelForField(data.fieldKey).label;
   const isSensitive = SENSITIVE_FIELDS.has(data.fieldKey);
   const displayValue = maskFieldValue(data.fieldKey, data.proposedValue);
 

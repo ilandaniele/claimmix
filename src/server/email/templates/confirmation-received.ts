@@ -10,24 +10,13 @@
  * Subject: "Recibimos tu reclamo - Caso #{caseId}"
  */
 
+import { labelForClaimType } from "@/lib/labels/claim-fields";
 import { maskDni, maskPolicyNumber } from "@/server/email/render";
 
 export interface ConfirmationReceivedData {
   caseId: string;
   claimType?: string | null;
   policyNumber?: string | null;
-}
-
-const CLAIM_TYPE_LABELS: Record<string, string> = {
-  choque: "choque de vehículo",
-  robo: "robo de vehículo",
-  granizo: "daño por granizo",
-  incendio: "incendio",
-};
-
-function labelForClaimType(claimType: string | null | undefined): string {
-  if (!claimType) return "siniestro";
-  return CLAIM_TYPE_LABELS[claimType] ?? claimType;
 }
 
 export function renderConfirmationReceived(data: ConfirmationReceivedData): {
@@ -37,9 +26,12 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
 } {
   const subject = `Recibimos tu reclamo - Caso #${data.caseId}`;
   const claimLabel = labelForClaimType(data.claimType);
-  const maskedPolicy = data.policyNumber
-    ? maskPolicyNumber(data.policyNumber)
-    : null;
+  // maskPolicyNumber only keeps digits it can safely show, so a number like
+  // POL-4471-A collapses to "****". Printing "Póliza asociada: ****" tells the
+  // claimant nothing and reads like the field failed to populate — if the mask
+  // left nothing recognizable, the line is worth less than the space it takes.
+  const masked = data.policyNumber ? maskPolicyNumber(data.policyNumber) : null;
+  const maskedPolicy = masked && /\d/.test(masked) ? masked : null;
 
   const policyLine = maskedPolicy
     ? `<p>Póliza asociada: <strong>${maskedPolicy}</strong></p>`

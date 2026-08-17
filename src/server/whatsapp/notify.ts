@@ -23,6 +23,7 @@ import { and, eq, isNull, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { cases, missingDocs, outboundMessages, requiredDocsConfig } from "@/lib/db/schema";
+import { labelForField, type FieldKind } from "@/lib/labels/claim-fields";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 
 export type WhatsAppReplyTemplate =
@@ -70,20 +71,47 @@ const ACK_SPECIALIST =
  */
 const MAX_ITEMS_PER_MESSAGE = 5;
 
-function renderMissingDocs(shownLabels: string[], remaining: number): string {
-  const list = shownLabels.map((l) => `• ${l}`).join("\n");
+/**
+ * Compose the "we need a few things" message.
+ *
+ * Two things the first version got wrong, both visible in a real reply sent to
+ * a real phone. It printed the raw key (`• dni_asegurado`), and it told the
+ * claimant to send all of it "como foto o archivo" — when four of the four
+ * items were facts to type, not files to photograph. Facts and documents are
+ * now asked for separately, and each in the verb that fits.
+ */
+function renderMissingDocs(
+  items: Array<{ label: string; kind: FieldKind }>,
+  remaining: number
+): string {
+  const datos = items.filter((i) => i.kind === "dato");
+  const documentos = items.filter((i) => i.kind === "documento");
+
+  const bullets = (list: typeof items) => list.map((i) => `• ${i.label}`).join("\n");
+
+  const blocks: string[] = [];
+  if (datos.length > 0) {
+    blocks.push(`Necesitamos que nos cuentes:\n\n${bullets(datos)}`);
+  }
+  if (documentos.length > 0) {
+    blocks.push(`Y que nos mandes:\n\n${bullets(documentos)}`);
+  }
 
   const opener =
     remaining > 0
-      ? "Recibimos tu denuncia y ya quedó registrada. Para empezar necesitamos que nos envíes:"
-      : "Recibimos tu denuncia y ya quedó registrada. Para poder avanzar necesitamos que nos envíes:";
+      ? "Recibimos tu denuncia y ya quedó registrada. Para empezar:"
+      : "Recibimos tu denuncia y ya quedó registrada. Para poder avanzar:";
+
+  // Only mention photos when we actually asked for one.
+  const how =
+    documentos.length > 0
+      ? "Podés responder por acá mismo; las fotos o archivos mandalos por este chat."
+      : "Podés responder por acá mismo.";
 
   const closer =
-    remaining > 0
-      ? "\n\nPodés mandarlos por acá mismo, como foto o archivo. Después te pedimos el resto."
-      : "\n\nPodés mandarlos por acá mismo, como foto o archivo.";
+    remaining > 0 ? `${how} Después te pedimos el resto.` : how;
 
-  return `${opener}\n\n${list}${closer}`;
+  return `${opener}\n\n${blocks.join("\n\n")}\n\n${closer}`;
 }
 
 /**
@@ -164,10 +192,10 @@ export async function replyToWhatsAppIntake(opts: {
         template = "wa_ack_complete";
         body = ACK_COMPLETE;
       } else {
-        // Human-readable labels live in required_docs_config, keyed by claim
-        // type. Fall back to the raw key rather than dropping a document from
-        // the list — an ugly line is better than a claim that stalls because we
-        // never asked for something.
+        // The tenant's own wording wins when it has one; everything else goes
+        // through the shared label table. Nothing reaches the claimant as a
+        // raw key — required_docs_config only covers documents configured per
+        // claim type, and most gaps the extractor reports are not in it.
         const labelRows = row.claim_type
           ? await db
               .select({ doc_key: requiredDocsConfig.doc_key, label_es: requiredDocsConfig.label_es })
@@ -180,10 +208,10 @@ export async function replyToWhatsAppIntake(opts: {
               )
           : [];
 
-        const labelByKey = new Map(labelRows.map((r) => [r.doc_key, r.label_es]));
+        const overrideByKey = new Map(labelRows.map((r) => [r.doc_key, r.label_es]));
         template = "wa_ack_missing_docs";
         body = renderMissingDocs(
-          docKeysAsked.map((k) => labelByKey.get(k) ?? k),
+          docKeysAsked.map((k) => labelForField(k, overrideByKey.get(k))),
           pendingKeys.length - docKeysAsked.length
         );
       }

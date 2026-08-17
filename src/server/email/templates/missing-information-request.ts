@@ -10,55 +10,22 @@
  * Subject: "Información adicional requerida - Caso #{caseId}"
  */
 
+import { labelForField } from "@/lib/labels/claim-fields";
+
 export interface MissingInformationRequestData {
   caseId: string;
   missingFields: string[];
 }
 
-/** Human-readable label and instruction per field key (es-AR). */
-const FIELD_INSTRUCTIONS: Record<string, { label: string; instruction: string }> = {
-  policy_number: {
-    label: "Número de póliza",
-    instruction: "Indicá el número de póliza de tu seguro (ej: POL-12345).",
-  },
-  accident_date: {
-    label: "Fecha del siniestro",
-    instruction: "Indicá la fecha en que ocurrió el siniestro (ej: 15/05/2024).",
-  },
-  accident_location: {
-    label: "Lugar del siniestro",
-    instruction: "Indicá la dirección o localidad donde ocurrió el siniestro.",
-  },
-  accident_description: {
-    label: "Descripción del siniestro",
-    instruction: "Describí brevemente qué ocurrió durante el siniestro.",
-  },
-  dni: {
-    label: "DNI del titular",
-    instruction: "Indicá el número de DNI del titular de la póliza.",
-  },
-  full_name: {
-    label: "Nombre completo",
-    instruction: "Indicá tu nombre y apellido completo.",
-  },
-  phone: {
-    label: "Teléfono de contacto",
-    instruction: "Indicá un número de teléfono donde podamos contactarte.",
-  },
-  claim_type: {
-    label: "Tipo de siniestro",
-    instruction:
-      "Indicá el tipo de siniestro (choque, robo, granizo, incendio, etc.).",
-  },
-};
-
+/**
+ * Labels come from the shared table so email and WhatsApp name the same gap the
+ * same way. The old local copy stopped at eight canonical keys and fell through
+ * to "Proporcioná el valor para el campo: dni_asegurado" for everything the
+ * extractor invented, which is most of them.
+ */
 function getFieldInstruction(fieldKey: string): { label: string; instruction: string } {
-  return (
-    FIELD_INSTRUCTIONS[fieldKey] ?? {
-      label: fieldKey,
-      instruction: `Proporcioná el valor para el campo: ${fieldKey}.`,
-    }
-  );
+  const { label, instruction } = labelForField(fieldKey);
+  return { label, instruction };
 }
 
 export function renderMissingInformationRequest(

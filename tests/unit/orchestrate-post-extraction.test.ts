@@ -371,23 +371,52 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
     expect(pending).toBeDefined();
   });
 
-  it("asks about the least certain field when several are uncertain", async () => {
-    // Only one field is asked about per email, so it should be the one we
-    // understand worst — not whichever happens to come first in the list.
+  it("never asks someone to confirm the sentence they wrote", async () => {
+    // A real email did this: Campo "Qué pasó", quoting back the claimant's own
+    // words. Free text is the one thing that needs no confirming.
     const base = extractEmailClaimMock().fields.filter(
-      (f) => f.field_key !== "claim_type" && f.field_key !== "accident_description"
+      (f) => f.field_key !== "accident_description"
     );
     const claim = extractEmailClaimMock({
-      fields_pending_confirmation: ["accident_description"],
+      fields_pending_confirmation: ["accident_description", "descripcion_hecho"],
       fields: [
         ...base,
         {
           field_key: "accident_description",
-          field_value: "Tuve un problema con el auto",
+          field_value: "Tuve un problema con el auto anteayer",
           confidence: 0.7,
           source: "ai" as const,
         },
-        { field_key: "claim_type", field_value: "other", confidence: 0.6, source: "ai" as const },
+      ],
+    });
+    setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "data_confirmation_request");
+    expect(ask).toBeUndefined();
+  });
+
+  it("asks about the classification before anything it merely read", async () => {
+    // This model hands back whole groups at exactly 0.70, so ordering by
+    // confidence decided nothing and the tie fell to emission order. claim_type
+    // is the only field we deduced, and the required documents hang off it.
+    const base = extractEmailClaimMock().fields.filter(
+      (f) => f.field_key !== "claim_type" && f.field_key !== "accident_location"
+    );
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: ["accident_location"],
+      fields: [
+        ...base,
+        { field_key: "accident_location", field_value: "Bahía Blanca", confidence: 0.7, source: "ai" as const },
+        { field_key: "claim_type", field_value: "other", confidence: 0.7, source: "ai" as const },
       ],
     });
     vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
@@ -410,6 +439,70 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
       .mocked(dispatchOutboundEmail)
       .mock.calls.find((c) => c[0].template === "data_confirmation_request");
     expect(ask?.[0].data.fieldKey).toBe("claim_type");
+  });
+
+  it("writes one row when the same field arrives under two spellings", async () => {
+    // `phone` and `telefono_contacto` carry the same number in the same
+    // extraction. Two rows means two questions about one thing.
+    const base = extractEmailClaimMock().fields.filter((f) => f.field_key !== "phone");
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: ["phone", "telefono_contacto"],
+      fields: [
+        ...base,
+        { field_key: "phone", field_value: "+598 99 413 456", confidence: 0.7, source: "ai" as const },
+        { field_key: "telefono_contacto", field_value: "+598 99 413 456", confidence: 0.8, source: "ai" as const },
+      ],
+    });
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const rows = insertSpy.mock.calls
+      .map((c) => (Array.isArray(c[0]) ? c[0][0] : c[0]) as { field_name?: string })
+      .filter((r) => r?.field_name === "phone" || r?.field_name === "telefono_contacto");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].field_name).toBe("phone");
+  });
+
+  it("does not stack a confirmation request on top of a missing-info request", async () => {
+    // Two "necesitamos algo tuyo" emails arriving together is the same pile-up
+    // removed from the escalation path. The row is still written — the
+    // uncertainty stays on the record for the analyst.
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: ["claim_type"],
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "claim_type"),
+        { field_key: "claim_type", field_value: "other", confidence: 0.7, source: "ai" as const },
+      ],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["accident_date"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+    expect(templates).toContain("missing_information_request");
+    expect(templates).not.toContain("data_confirmation_request");
+
+    const row = insertSpy.mock.calls
+      .map((c) => (Array.isArray(c[0]) ? c[0][0] : c[0]) as { field_name?: string })
+      .find((r) => r?.field_name === "claim_type");
+    expect(row).toBeDefined();
   });
 
   it("does not call a case ready while an unanswered question is in flight", async () => {

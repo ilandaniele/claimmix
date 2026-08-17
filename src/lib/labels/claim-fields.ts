@@ -321,6 +321,86 @@ function lowerFirst(s: string): string {
   return s.charAt(0).toLowerCase() + s.slice(1);
 }
 
+// ── Field identity ────────────────────────────────────────────────────────────
+
+/**
+ * Spanish keys the extractor emits alongside the canonical ones.
+ *
+ * A single email routinely produces both `accident_description` and
+ * `descripcion_hecho` holding the same sentence, and both `phone` and
+ * `telefono_contacto` holding the same number. Left alone that becomes three
+ * pending-confirmation rows for two actual questions.
+ */
+const FIELD_ALIASES: Record<string, string> = {
+  nombre_asegurado: "full_name",
+  dni_asegurado: "dni",
+  telefono_contacto: "phone",
+  numero_poliza: "policy_number",
+  fecha_siniestro: "accident_date",
+  lugar_siniestro: "accident_location",
+  descripcion_hecho: "accident_description",
+  tipo_siniestro: "claim_type",
+};
+
+/** The one key that stands for this field, whichever alias arrived. */
+export function canonicalFieldKey(fieldKey: string): string {
+  return FIELD_ALIASES[fieldKey] ?? fieldKey;
+}
+
+// ── What is worth asking someone to confirm ───────────────────────────────────
+
+/** Narrative fields — the claimant's own words, echoed back. */
+const NARRATIVE_HINTS = [
+  "descripcion",
+  "description",
+  "detalle",
+  "relato",
+  "observacion",
+  "comentario",
+  "resumen",
+  "summary",
+];
+
+/**
+ * Whether a confirmation request about this field is worth sending.
+ *
+ * False for free text. A real email asked someone to confirm the field "Qué
+ * pasó" by quoting back the sentence they had just written — there is nothing
+ * to confirm in your own words, and the request reads as though nobody read
+ * them. What is worth confirming is something we *derived*: a classification we
+ * inferred, or a structured value we may have misread.
+ */
+export function isWorthConfirming(fieldKey: string): boolean {
+  const key = canonicalFieldKey(fieldKey).toLowerCase();
+  return !NARRATIVE_HINTS.some((h) => key.includes(h));
+}
+
+/**
+ * Which field to ask about first when several are uncertain.
+ *
+ * Ordering by confidence alone does not work: this model hands back whole
+ * groups of fields at exactly 0.70, and a tie fell back to whatever order the
+ * extractor happened to emit. Rank by how much an answer is worth instead.
+ * `claim_type` leads because it is the only one we *deduced* rather than read —
+ * everything downstream (required documents, routing) hangs off it.
+ */
+const CONFIRMATION_RANK: Record<string, number> = {
+  claim_type: 0,
+  accident_date: 1,
+  policy_number: 2,
+  dni: 2,
+  full_name: 3,
+  phone: 4,
+  email: 4,
+  accident_location: 5,
+};
+
+const DEFAULT_CONFIRMATION_RANK = 6;
+
+export function confirmationRank(fieldKey: string): number {
+  return CONFIRMATION_RANK[canonicalFieldKey(fieldKey)] ?? DEFAULT_CONFIRMATION_RANK;
+}
+
 // ── Claim types ───────────────────────────────────────────────────────────────
 
 /**

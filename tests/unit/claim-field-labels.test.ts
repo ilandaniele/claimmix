@@ -12,6 +12,9 @@ import { describe, it, expect } from "vitest";
 import {
   displayFieldValue,
   labelForClaimType,
+  canonicalFieldKey,
+  isWorthConfirming,
+  confirmationRank,
   labelForField,
 } from "@/lib/labels/claim-fields";
 
@@ -124,5 +127,45 @@ describe("displayFieldValue", () => {
   it("leaves ordinary values untouched", () => {
     expect(displayFieldValue("full_name", "Martín Sosa")).toBe("Martín Sosa");
     expect(displayFieldValue("accident_date", "2026-08-15")).toBe("2026-08-15");
+  });
+});
+
+describe("canonicalFieldKey", () => {
+  it("collapses the Spanish aliases the extractor emits alongside canonical keys", () => {
+    expect(canonicalFieldKey("telefono_contacto")).toBe("phone");
+    expect(canonicalFieldKey("descripcion_hecho")).toBe("accident_description");
+    expect(canonicalFieldKey("nombre_asegurado")).toBe("full_name");
+    expect(canonicalFieldKey("fecha_siniestro")).toBe("accident_date");
+  });
+
+  it("leaves a key that is already canonical, or unknown, alone", () => {
+    expect(canonicalFieldKey("phone")).toBe("phone");
+    expect(canonicalFieldKey("provincia_siniestro")).toBe("provincia_siniestro");
+  });
+});
+
+describe("isWorthConfirming", () => {
+  it("refuses to quote someone's own words back at them", () => {
+    expect(isWorthConfirming("accident_description")).toBe(false);
+    expect(isWorthConfirming("descripcion_hecho")).toBe(false);
+    expect(isWorthConfirming("observaciones")).toBe(false);
+  });
+
+  it("allows anything we derived or may have misread", () => {
+    expect(isWorthConfirming("claim_type")).toBe(true);
+    expect(isWorthConfirming("accident_date")).toBe(true);
+    expect(isWorthConfirming("policy_number")).toBe(true);
+  });
+});
+
+describe("confirmationRank", () => {
+  it("puts the deduced classification ahead of anything transcribed", () => {
+    expect(confirmationRank("claim_type")).toBeLessThan(confirmationRank("accident_date"));
+    expect(confirmationRank("accident_date")).toBeLessThan(confirmationRank("phone"));
+    expect(confirmationRank("phone")).toBeLessThan(confirmationRank("provincia_siniestro"));
+  });
+
+  it("ranks an alias exactly as its canonical key", () => {
+    expect(confirmationRank("telefono_contacto")).toBe(confirmationRank("phone"));
   });
 });

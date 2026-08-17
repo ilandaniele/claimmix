@@ -32,6 +32,11 @@ import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
+import {
+  canonicalFieldKey,
+  confirmationRank,
+  isWorthConfirming,
+} from "@/lib/labels/claim-fields";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
@@ -120,28 +125,20 @@ export async function orchestratePostExtraction(
   // Union of both opinions: if either side thinks a field is uncertain, ask.
   // Conflicts are excluded — branch D owns those and has the stored value to
   // show alongside.
-  const confidenceByKey = new Map(
-    extractedClaim.fields.map((f) => [f.field_key, f.confidence])
+  const uncertainKeys = [
+    ...(extractedClaim.fields_pending_confirmation ?? []),
+    ...gapResult.fieldsNeedingConfirmation
+      .filter((f) => f.reason !== "conflict")
+      .map((f) => f.fieldName),
+  ];
+
+  const pendingConfirmationFields = collectConfirmableFields(
+    uncertainKeys,
+    extractedClaim.fields
   );
 
-  const pendingConfirmationFields = [
-    ...new Set([
-      ...(extractedClaim.fields_pending_confirmation ?? []),
-      ...gapResult.fieldsNeedingConfirmation
-        .filter((f) => f.reason !== "conflict")
-        .map((f) => f.fieldName),
-    ]),
-  ].sort(
-    // Least certain first. Only one field is asked about per email, so it
-    // should be the one we understand worst — claim_type at 0.60 before a
-    // description at 0.70.
-    (a, b) => (confidenceByKey.get(a) ?? 1) - (confidenceByKey.get(b) ?? 1)
-  );
-
-  for (const fieldKey of pendingConfirmationFields) {
-    const extractedFieldEntry = extractedClaim.fields.find((f) => f.field_key === fieldKey);
-    const proposedValue = extractedFieldEntry?.field_value ?? "";
-    const confidence = extractedFieldEntry?.confidence ?? 0;
+  for (const field of pendingConfirmationFields) {
+    const { fieldKey, proposedValue, confidence } = field;
 
     // Insert claim_field_confirmations row (upsert to avoid duplicates).
     await upsertFieldConfirmation(caseId, tenantId, {
@@ -214,13 +211,22 @@ export async function orchestratePostExtraction(
     }
   }
 
-  // Also dispatch data_confirmation_request for medium-confidence pending fields
-  // if no conflict email was dispatched yet (avoid spamming multiple emails).
-  if (pendingConfirmationFields.length > 0 && !confirmationEmailDispatched) {
-    const firstPendingField = pendingConfirmationFields[0];
-    const extractedEntry = extractedClaim.fields.find(
-      (f) => f.field_key === firstPendingField
-    );
+  // Also dispatch data_confirmation_request for medium-confidence pending
+  // fields — but only when this is the one thing we are asking for.
+  //
+  // Skipped when required fields are missing: branch E is about to send
+  // missing_information_request, and two "necesitamos algo tuyo" emails landing
+  // together is the same pile-up we removed from the escalation path. The rows
+  // above are still written, so the uncertainty is on the record for an analyst
+  // and the next round can ask once the bigger gap is closed.
+  const missingInfoEmailComing = gapResult.missingRequiredFields.length > 0;
+
+  if (
+    pendingConfirmationFields.length > 0 &&
+    !confirmationEmailDispatched &&
+    !missingInfoEmailComing
+  ) {
+    const target = pendingConfirmationFields[0];
 
     await dispatchOutboundEmail({
       caseId,
@@ -229,8 +235,8 @@ export async function orchestratePostExtraction(
       template: "data_confirmation_request",
       data: {
         caseId,
-        fieldKey: firstPendingField,
-        proposedValue: extractedEntry?.field_value ?? "",
+        fieldKey: target.fieldKey,
+        proposedValue: target.proposedValue,
         conflictWithValue: null,
       },
       inReplyToMessageId,
@@ -331,6 +337,65 @@ export async function orchestratePostExtraction(
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+interface ConfirmableField {
+  fieldKey: string;
+  proposedValue: string;
+  confidence: number;
+}
+
+/**
+ * Turn a pile of uncertain field keys into the questions actually worth asking,
+ * best first.
+ *
+ * Three things happen here, each from a request that went out to a real inbox:
+ *
+ *  - Narrative fields are dropped. One email asked someone to confirm "Qué
+ *    pasó" by quoting back the sentence they had just written.
+ *  - Aliases collapse. The extractor emits `accident_description` and
+ *    `descripcion_hecho` with identical text, so two rows appeared for one
+ *    question; the higher-confidence copy wins.
+ *  - Order is by how much the answer is worth, then by confidence. Sorting on
+ *    confidence alone was useless: the model returns whole groups at exactly
+ *    0.70, and the tie silently fell back to emission order.
+ */
+function collectConfirmableFields(
+  uncertainKeys: string[],
+  extracted: ExtractedClaim["fields"]
+): ConfirmableField[] {
+  const byCanonical = new Map<string, ConfirmableField>();
+
+  for (const rawKey of uncertainKeys) {
+    if (!isWorthConfirming(rawKey)) continue;
+
+    const canonical = canonicalFieldKey(rawKey);
+
+    // The value may be filed under either spelling — take the most confident.
+    const candidates = extracted.filter(
+      (f) => canonicalFieldKey(f.field_key) === canonical
+    );
+    const best = candidates.reduce<ExtractedClaim["fields"][number] | null>(
+      (acc, f) => (acc === null || f.confidence > acc.confidence ? f : acc),
+      null
+    );
+
+    const existing = byCanonical.get(canonical);
+    const confidence = best?.confidence ?? 0;
+    if (existing && existing.confidence >= confidence) continue;
+
+    byCanonical.set(canonical, {
+      fieldKey: canonical,
+      proposedValue: best?.field_value ?? "",
+      confidence,
+    });
+  }
+
+  return [...byCanonical.values()].sort(
+    (a, b) =>
+      confirmationRank(a.fieldKey) - confirmationRank(b.fieldKey) ||
+      a.confidence - b.confidence
+  );
+}
 
 /** Extract a loggable error code from a thrown DB error (PII-safe). */
 function errCode(err: unknown): string {

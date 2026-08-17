@@ -145,6 +145,43 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
         ),
       },
       {
+        // Whether the claimant has been written back to, on whatever channel
+        // they used. A claim nobody has answered is a different kind of
+        // problem from one that was acknowledged and is simply waiting, and
+        // until now the inbox gave no way to tell them apart.
+        accessorKey: "replied_at",
+        header: t("table.col.replied"),
+        cell: ({ getValue, row }) => {
+          const at = getValue<string | null>();
+
+          // Non-claims are answered by design with silence, so "sin responder"
+          // would read as a backlog item when it is the correct outcome.
+          if (row.original.is_claim === false) {
+            return <span className="text-sm text-slate-400">—</span>;
+          }
+
+          if (!at) {
+            return (
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                {t("table.replied.pending")}
+              </span>
+            );
+          }
+
+          return (
+            <span
+              className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800"
+              title={new Intl.DateTimeFormat(locale, {
+                dateStyle: "medium",
+                timeStyle: "short",
+              }).format(new Date(at))}
+            >
+              {t("table.replied.yes")}
+            </span>
+          );
+        },
+      },
+      {
         accessorKey: "confidence_min",
         header: t("table.col.confidence"),
         cell: ({ getValue }) => (

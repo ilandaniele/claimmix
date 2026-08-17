@@ -11,7 +11,7 @@
  * AC12: Pagination per_page is capped at 100.
  */
 
-import { and, asc, desc, eq, inArray, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { countRows, ilikeAny } from "@/lib/db/helpers";
 import { cases, extractedFields } from "@/lib/db/schema";
@@ -134,6 +134,18 @@ export async function listCases(
         core_external_id: cases.core_external_id,
         core_error_message: cases.core_error_message,
         core_sent_at: cases.core_sent_at,
+        // Whether the claimant has actually been written back to, on whichever
+        // channel they used. Computed from the outbound ledger instead of a
+        // column on `cases` so it cannot drift from what was really sent, and
+        // so it covers email and WhatsApp with one expression.
+        // Only 'sent' counts — a queued or failed message is not a reply.
+        replied_at: sql<string | null>`(
+          select max(om.created_at)
+            from outbound_messages om
+           where om.case_id = ${cases.id}
+             and om.tenant_id = ${cases.tenant_id}
+             and om.status = 'sent'
+        )`,
       })
       .from(cases)
       .where(where)

@@ -175,6 +175,40 @@ describe("replyToWhatsAppIntake", () => {
     expect(updated).toBe(false);
   });
 
+  it("sends someone reporting a serious claim to a specialist, not a document list", async () => {
+    // Mirrors branch B of the email orchestrator. Someone reporting an injury
+    // should not be answered with "mandanos cinco fotos".
+    queueSelects([{ is_claim: true, claim_type: "choque", severity: "critical" }]);
+
+    const r = await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    expect(r.template).toBe("wa_specialist_escalation");
+    const [, body] = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(body).toContain("especialista");
+    expect(body).not.toContain("•");
+  });
+
+  it("escalates on high severity too, not only critical", async () => {
+    queueSelects([{ is_claim: true, claim_type: "incendio", severity: "high" }]);
+
+    const r = await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    expect(r.template).toBe("wa_specialist_escalation");
+  });
+
+  it("still asks for documents on an ordinary claim", async () => {
+    // The escalation branch must not swallow the normal path.
+    queueSelects(
+      [{ is_claim: true, claim_type: "cristales", severity: "low" }],
+      [{ doc_key: "vtv" }],
+      [{ doc_key: "vtv", label_es: "Oblea de la VTV" }]
+    );
+
+    const r = await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    expect(r.template).toBe("wa_ack_missing_docs");
+  });
+
   it("promises nothing specific when extraction produced no verdict", async () => {
     // is_claim null = failed or escalated. We do not know what this is yet.
     queueSelects([{ is_claim: null, claim_type: null }]);

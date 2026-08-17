@@ -174,6 +174,16 @@ export interface EmailCase {
   core_external_id: string | null;
   core_error_message: string | null;
   core_sent_at: string | null;
+  /**
+   * When the agent last successfully wrote back to the claimant, on whatever
+   * channel the case came in on. Null means nobody has answered them yet.
+   *
+   * Derived from outbound_messages rather than stored on the case, so it can
+   * never drift from what was actually sent. An analyst looking at the inbox
+   * needs this at a glance: a claim sitting unanswered for a day is a very
+   * different problem from one that was acknowledged and is simply waiting.
+   */
+  replied_at: string | null;
   fields_pending_confirmation: string[];
   // Customer/policy FK columns (0006)
   customer_id: string | null;

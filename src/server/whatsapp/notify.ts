@@ -28,7 +28,8 @@ import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 export type WhatsAppReplyTemplate =
   | "wa_ack_complete"
   | "wa_ack_missing_docs"
-  | "wa_ack_received";
+  | "wa_ack_received"
+  | "wa_specialist_escalation";
 
 export interface WhatsAppReplyResult {
   sent: boolean;
@@ -44,6 +45,20 @@ const ACK_COMPLETE =
 
 const ACK_RECEIVED =
   "Recibimos tu mensaje y ya lo registramos. Un analista lo va a revisar a la brevedad.";
+
+/**
+ * A serious claim gets a person, and the claimant is told so.
+ *
+ * Email has escalated high and critical severity to a specialist since the
+ * beginning (confirmations/orchestrate, branch B) and tells the claimant. On
+ * WhatsApp the same crash produced a routine acknowledgement, which is the
+ * wrong thing to send someone reporting an injury or a fire — and asking them
+ * for five documents in that moment is worse.
+ */
+const ACK_SPECIALIST =
+  "Recibimos tu denuncia y ya quedó registrada. Por las características de lo que nos contás, " +
+  "la derivamos a un especialista que se va a comunicar con vos a la brevedad. " +
+  "Si necesitás asistencia urgente, llamá a la línea de emergencias de tu póliza.";
 
 /**
  * How many things we are willing to ask for in one message.
@@ -94,7 +109,11 @@ export async function replyToWhatsAppIntake(opts: {
 
   try {
     const [row] = await db
-      .select({ is_claim: cases.is_claim, claim_type: cases.claim_type })
+      .select({
+        is_claim: cases.is_claim,
+        claim_type: cases.claim_type,
+        severity: cases.severity,
+      })
       .from(cases)
       .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
       .limit(1);
@@ -115,6 +134,13 @@ export async function replyToWhatsAppIntake(opts: {
       // is. Acknowledge receipt and promise nothing specific.
       template = "wa_ack_received";
       body = ACK_RECEIVED;
+    } else if (row.severity === "high" || row.severity === "critical") {
+      // Mirrors branch B of the email orchestrator. Checked BEFORE the missing
+      // documents branch on purpose: someone reporting an injury or a fire
+      // should hear that a specialist is coming, not receive a list of five
+      // documents to photograph. An analyst chases the paperwork afterwards.
+      template = "wa_specialist_escalation";
+      body = ACK_SPECIALIST;
     } else {
       const pending = await db
         .select({ doc_key: missingDocs.doc_key })

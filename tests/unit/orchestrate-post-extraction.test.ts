@@ -6,8 +6,8 @@
  * AC7:  Medium-confidence field → inserts claim_field_confirmations row + logs CONFIRMATION_REQUESTED
  * AC9:  Customer conflict → sets confirmacion_pendiente + dispatches data_confirmation_request
  * AC10: Missing required fields → dispatches missing_information_request + status=info_faltante
- * AC11: High/critical severity → dispatches specialist_escalation + confirmation_received
- * AC12: confirmation_received always dispatched when is_claim=true
+ * AC11: High/critical severity → dispatches specialist_escalation (no confirmation_received)
+ * AC12: confirmation_received dispatched when is_claim=true and not escalated
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -280,7 +280,11 @@ describe("orchestratePostExtraction — high severity (AC11)", () => {
     expect(statusUpdate).toBeDefined();
   });
 
-  it("also dispatches confirmation_received for high severity claim (AC12)", async () => {
+  it("does NOT pile a generic confirmation on top of the escalation", async () => {
+    // The escalation email already acknowledges receipt, gives the case number
+    // and promises a specialist within 24h. Adding "recibimos tu denuncia"
+    // sends a third simultaneous email to someone who just reported a fire,
+    // and it says strictly less than the one they already have.
     const claim = extractEmailClaimMock({ severity: "high", requires_specialist: true });
     setupDbMocks({ outboundMessagesRows: [] });
 
@@ -291,11 +295,33 @@ describe("orchestratePostExtraction — high severity (AC11)", () => {
       NO_MATCHES
     );
 
-    const confirmationCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
-      (call) => call[0].template === "confirmation_received"
+    const templates = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.map((call) => call[0].template);
+
+    expect(templates).toContain("specialist_escalation");
+    expect(templates).not.toContain("confirmation_received");
+  });
+
+  it("still acknowledges receipt — the escalation email is the acknowledgement", async () => {
+    // Suppressing the confirmation must not leave the claimant with silence.
+    const claim = extractEmailClaimMock({ severity: "critical", requires_specialist: true });
+    setupDbMocks({ outboundMessagesRows: [] });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
     );
-    expect(confirmationCall).toBeDefined();
-    expect(confirmationCall?.[0].to).toBe(SENDER_EMAIL);
+
+    const escalation = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((call) => call[0].template === "specialist_escalation");
+
+    expect(escalation).toBeDefined();
+    expect(escalation?.[0].to).toBe(SENDER_EMAIL);
+    expect(escalation?.[0].data.caseId).toBe(CASE_ID);
   });
 });
 

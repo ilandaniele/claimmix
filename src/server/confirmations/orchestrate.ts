@@ -6,17 +6,18 @@
  *
  * Decision tree:
  *   A. is_claim=false → return early (no email)
- *   B. High/critical severity → specialist_escalation + confirmation_received
+ *   B. High/critical severity → specialist_escalation (and no confirmation_received)
  *   C. fields_pending_confirmation → insert claim_field_confirmations rows + data_confirmation_request
  *   D. Conflict in customer matches → claim_field_confirmations conflict rows + data_confirmation_request
  *   E. Gap analysis → missing_information_request (info_faltante) OR update status
- *   F. ALWAYS send confirmation_received for is_claim=true (AC12)
+ *   F. confirmation_received for is_claim=true, unless already escalated (AC12)
  *
  * AC7:  Medium-confidence field → claim_field_confirmations row + data_confirmation_request
  * AC9:  Conflict with stored customer → claim_field_confirmations conflict row + data_confirmation_request
  * AC10: Missing required fields → missing_information_request + status=info_faltante
  * AC11: High/critical severity → specialist_escalation + status=requiere_especialista
- * AC12: confirmation_received always dispatched for is_claim=true
+ * AC12: confirmation_received dispatched for is_claim=true, except when the case
+ *       was escalated — the escalation email already acknowledges receipt
  *
  * LLM08: This module cannot set terminal states; only sets AI_ALLOWED_STATUSES.
  * LLM06: PII (email addresses) is never logged — only case_id and field_key.
@@ -262,11 +263,18 @@ export async function orchestratePostExtraction(
     }
   }
 
-  // ── F. Always send confirmation_received for valid claims — AC12 ──────────
-  // Check if a confirmation_received email has already been sent for this case.
-  const alreadySent = await checkConfirmationAlreadySent(caseId, tenantId);
-
-  if (!alreadySent) {
+  // ── F. Send confirmation_received for valid claims — AC12 ─────────────────
+  //
+  // Not when the case was escalated. Branch B already told the claimant we
+  // received it, gave them the case number and said a specialist will call
+  // within 24h — a generic "recibimos tu denuncia" on top of that is the third
+  // simultaneous email someone gets right after reporting a fire or an injury,
+  // and it says less than the one they already have. The escalation IS the
+  // acknowledgement.
+  //
+  // Nothing is lost by skipping it: everything confirmation_received carries
+  // (case id, receipt) is in the escalation email, which also outranks it.
+  if (!isHighSeverity && !(await checkConfirmationAlreadySent(caseId, tenantId))) {
     // Extract claim_type and policy_number from fields for the email template.
     const claimTypeField = extractedClaim.fields.find((f) => f.field_key === "claim_type");
     const policyField = extractedClaim.fields.find((f) => f.field_key === "policy_number");

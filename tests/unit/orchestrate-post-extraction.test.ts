@@ -328,6 +328,120 @@ describe("orchestratePostExtraction — high severity (AC11)", () => {
 // ── Test suite: Medium-confidence field — AC7 ─────────────────────────────────
 
 describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
+  it("asks even when only the gap analyzer thinks the field is uncertain", async () => {
+    // The bug this covers, seen in production: the gap analyzer put the case in
+    // confirmacion_pendiente because claim_type came back at 0.60, but the
+    // extractor left fields_pending_confirmation empty, so no email went out.
+    // The board read "waiting on the claimant" about a question nobody asked,
+    // and the case would have sat there forever.
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: [],
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "claim_type"),
+        { field_key: "claim_type", field_value: "other", confidence: 0.6, source: "ai" as const },
+      ],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        { fieldName: "claim_type", suggestedValue: "other", reason: "medium_confidence" },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+    const { updateSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "data_confirmation_request");
+    expect(ask).toBeDefined();
+    expect(ask?.[0].data.fieldKey).toBe("claim_type");
+
+    // And the status it lands in must be one the sent email justifies.
+    const pending = updateSpy.mock.calls.find(
+      (c) => (c[0] as { status?: string })?.status === "confirmacion_pendiente"
+    );
+    expect(pending).toBeDefined();
+  });
+
+  it("asks about the least certain field when several are uncertain", async () => {
+    // Only one field is asked about per email, so it should be the one we
+    // understand worst — not whichever happens to come first in the list.
+    const base = extractEmailClaimMock().fields.filter(
+      (f) => f.field_key !== "claim_type" && f.field_key !== "accident_description"
+    );
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: ["accident_description"],
+      fields: [
+        ...base,
+        {
+          field_key: "accident_description",
+          field_value: "Tuve un problema con el auto",
+          confidence: 0.7,
+          source: "ai" as const,
+        },
+        { field_key: "claim_type", field_value: "other", confidence: 0.6, source: "ai" as const },
+      ],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        { fieldName: "claim_type", suggestedValue: "other", reason: "medium_confidence" },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "data_confirmation_request");
+    expect(ask?.[0].data.fieldKey).toBe("claim_type");
+  });
+
+  it("does not call a case ready while an unanswered question is in flight", async () => {
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: ["full_name"],
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "full_name"),
+        { field_key: "full_name", field_value: "J. Pérez", confidence: 0.7, source: "ai" as const },
+      ],
+    });
+    // The analyzer ran before the email existed, so on its own it says ready.
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [],
+      isComplete: true,
+      status: "listo_para_core",
+    });
+    const { updateSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ready = updateSpy.mock.calls.find(
+      (c) => (c[0] as { status?: string })?.status === "listo_para_core"
+    );
+    expect(ready).toBeUndefined();
+  });
+
   it("inserts claim_field_confirmations row for medium-confidence field", async () => {
     const claim = extractEmailClaimMock({
       fields_pending_confirmation: ["full_name"],

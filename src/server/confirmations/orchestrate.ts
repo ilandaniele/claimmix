@@ -102,8 +102,41 @@ export async function orchestratePostExtraction(
     });
   }
 
+  // ── Gap analysis runs first: it is the authority on what is uncertain ─────
+  //
+  // It used to run at step E, after the confirmation branches had already
+  // decided who to ask. That left two independent opinions about the same
+  // question. The gap analyzer recomputes the medium-confidence band from the
+  // extracted fields; the extractor also emits its own
+  // `fields_pending_confirmation` list. In production they disagreed: a case
+  // landed in `confirmacion_pendiente` because the analyzer saw claim_type at
+  // 0.60, while no email went out because the extractor had left its list
+  // empty. The board said "waiting on the claimant" about a question nobody
+  // had been asked, and the case would have sat there forever.
+  const gapResult = await analyzeEmailClaimGaps(caseId, extractedClaim.fields, tenantId);
+
   // ── C. Medium-confidence fields → confirmation rows — AC7 ─────────────────
-  const pendingConfirmationFields = extractedClaim.fields_pending_confirmation ?? [];
+  //
+  // Union of both opinions: if either side thinks a field is uncertain, ask.
+  // Conflicts are excluded — branch D owns those and has the stored value to
+  // show alongside.
+  const confidenceByKey = new Map(
+    extractedClaim.fields.map((f) => [f.field_key, f.confidence])
+  );
+
+  const pendingConfirmationFields = [
+    ...new Set([
+      ...(extractedClaim.fields_pending_confirmation ?? []),
+      ...gapResult.fieldsNeedingConfirmation
+        .filter((f) => f.reason !== "conflict")
+        .map((f) => f.fieldName),
+    ]),
+  ].sort(
+    // Least certain first. Only one field is asked about per email, so it
+    // should be the one we understand worst — claim_type at 0.60 before a
+    // description at 0.70.
+    (a, b) => (confidenceByKey.get(a) ?? 1) - (confidenceByKey.get(b) ?? 1)
+  );
 
   for (const fieldKey of pendingConfirmationFields) {
     const extractedFieldEntry = extractedClaim.fields.find((f) => f.field_key === fieldKey);
@@ -203,14 +236,14 @@ export async function orchestratePostExtraction(
       inReplyToMessageId,
     });
     confirmationEmailDispatched = true;
+
+    // The case is now genuinely waiting on the claimant, so say so. Without
+    // this the status came from whatever the gap analyzer computed, which
+    // knows nothing about the email we just sent.
+    await setStatus(caseId, tenantId, "confirmacion_pendiente");
   }
 
-  // ── E. Gap analysis — AC10 ───────────────────────────────────────────────
-  const gapResult = await analyzeEmailClaimGaps(
-    caseId,
-    extractedClaim.fields,
-    tenantId
-  );
+  // ── E. Act on the gap analysis — AC10 ────────────────────────────────────
 
   if (gapResult.missingRequiredFields.length > 0) {
     // Missing required fields → dispatch missing_information_request.
@@ -257,8 +290,10 @@ export async function orchestratePostExtraction(
     await setStatus(caseId, tenantId, "confirmacion_pendiente");
   } else if (gapResult.status === "listo_para_core") {
     // All required fields present + no pending confirmations.
-    // Only set listo_para_core if not escalated.
-    if (!isHighSeverity) {
+    // Not when escalated, and not when we just asked the claimant to confirm
+    // something — the gap analysis ran before that email existed, so on its own
+    // it would call the case ready while an unanswered question is in flight.
+    if (!isHighSeverity && !confirmationEmailDispatched) {
       await setStatus(caseId, tenantId, "listo_para_core");
     }
   }

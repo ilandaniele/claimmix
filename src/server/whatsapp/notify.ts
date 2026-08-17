@@ -45,13 +45,30 @@ const ACK_COMPLETE =
 const ACK_RECEIVED =
   "Recibimos tu mensaje y ya lo registramos. Un analista lo va a revisar a la brevedad.";
 
-function renderMissingDocs(labels: string[]): string {
-  const list = labels.map((l) => `• ${l}`).join("\n");
-  return (
-    "Recibimos tu denuncia y ya quedó registrada. Para poder avanzar necesitamos que nos envíes:\n\n" +
-    `${list}\n\n` +
-    "Podés mandarlos por acá mismo, como foto o archivo."
-  );
+/**
+ * How many things we are willing to ask for in one message.
+ *
+ * Extraction routinely flags a dozen or more gaps — a real WhatsApp claim came
+ * back with thirteen, including witnesses and the time of day. Sending someone
+ * who just crashed their car a list of thirteen demands is the fastest way to
+ * get no reply at all. Ask for a handful, get those, ask again.
+ */
+const MAX_ITEMS_PER_MESSAGE = 5;
+
+function renderMissingDocs(shownLabels: string[], remaining: number): string {
+  const list = shownLabels.map((l) => `• ${l}`).join("\n");
+
+  const opener =
+    remaining > 0
+      ? "Recibimos tu denuncia y ya quedó registrada. Para empezar necesitamos que nos envíes:"
+      : "Recibimos tu denuncia y ya quedó registrada. Para poder avanzar necesitamos que nos envíes:";
+
+  const closer =
+    remaining > 0
+      ? "\n\nPodés mandarlos por acá mismo, como foto o archivo. Después te pedimos el resto."
+      : "\n\nPodés mandarlos por acá mismo, como foto o archivo.";
+
+  return `${opener}\n\n${list}${closer}`;
 }
 
 /**
@@ -110,9 +127,14 @@ export async function replyToWhatsAppIntake(opts: {
           )
         );
 
-      docKeysAsked = pending.map((d) => d.doc_key);
+      const pendingKeys = pending.map((d) => d.doc_key);
 
-      if (docKeysAsked.length === 0) {
+      // Only the items that actually appear in the message count as asked for.
+      // Stamping requested_at on all thirteen would tell a later reminder the
+      // claimant had already been chased for things nobody ever mentioned.
+      docKeysAsked = pendingKeys.slice(0, MAX_ITEMS_PER_MESSAGE);
+
+      if (pendingKeys.length === 0) {
         template = "wa_ack_complete";
         body = ACK_COMPLETE;
       } else {
@@ -134,7 +156,10 @@ export async function replyToWhatsAppIntake(opts: {
 
         const labelByKey = new Map(labelRows.map((r) => [r.doc_key, r.label_es]));
         template = "wa_ack_missing_docs";
-        body = renderMissingDocs(docKeysAsked.map((k) => labelByKey.get(k) ?? k));
+        body = renderMissingDocs(
+          docKeysAsked.map((k) => labelByKey.get(k) ?? k),
+          pendingKeys.length - docKeysAsked.length
+        );
       }
     }
 

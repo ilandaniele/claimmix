@@ -127,6 +127,34 @@ describe("replyToWhatsAppIntake", () => {
     expect(body).toContain("• constancia_rara");
   });
 
+  it("asks for at most five things, not the thirteen extraction found", async () => {
+    // A real claim came back with thirteen gaps. Sending someone who just
+    // crashed their car a list of thirteen demands gets no reply at all.
+    const keys = Array.from({ length: 13 }, (_, i) => ({ doc_key: `doc_${i}` }));
+    queueSelects([{ is_claim: true, claim_type: "choque" }], keys, []);
+
+    await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    const [, body] = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect((body.match(/•/g) ?? []).length).toBe(5);
+    expect(body).toContain("Para empezar");
+    expect(body).toContain("Después te pedimos el resto");
+  });
+
+  it("does not promise a follow-up when everything fits in one message", async () => {
+    queueSelects(
+      [{ is_claim: true, claim_type: "choque" }],
+      [{ doc_key: "dni" }, { doc_key: "vtv" }],
+      []
+    );
+
+    await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    const [, body] = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect((body.match(/•/g) ?? []).length).toBe(2);
+    expect(body).not.toContain("Después te pedimos el resto");
+  });
+
   it("marks the requested documents so a later reminder does not repeat them", async () => {
     queueSelects(
       [{ is_claim: true, claim_type: "choque" }],

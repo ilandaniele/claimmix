@@ -27,6 +27,7 @@ import { after, type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 import { createWhatsAppIntake, runIntakeAgent } from "@/server/agents/intake-agent";
+import { replyToWhatsAppIntake } from "@/server/whatsapp/notify";
 import {
   parseCloudApiMessages,
   resolveWebhookChallenge,
@@ -54,14 +55,34 @@ function resolveTenantId(bodyTenantId?: string): string | null {
   return bodyTenantId ?? process.env.WHATSAPP_TENANT_ID ?? process.env.GMAIL_TENANT_ID ?? null;
 }
 
-/** Schedules the bounded intake agent after the response is flushed. */
-function scheduleAgent(caseId: string, tenantId: string): void {
+/**
+ * Schedules the bounded intake agent after the response is flushed, then
+ * answers the sender.
+ *
+ * The reply runs AFTER extraction on purpose: only then do we know whether this
+ * is a claim at all and which documents are missing, which is the difference
+ * between a useful message and a generic "recibimos tu mensaje".
+ *
+ * `replyTo` is passed only for newly created cases. Someone who sends three
+ * messages in a row about the same crash must not get three acknowledgements.
+ */
+function scheduleAgent(
+  caseId: string,
+  tenantId: string,
+  replyTo?: string | null
+): void {
   after(async () => {
     try {
       await runIntakeAgent({ caseId, tenantId, source: "whatsapp" });
     } catch (err) {
       const name = err instanceof Error ? err.name : "UnknownError";
       console.error("[webhooks/whatsapp] Agent error:", name, "case:", caseId); // crew-debug-ok
+      return; // no extraction result — nothing worth saying to the claimant yet
+    }
+
+    if (replyTo) {
+      // Already swallows its own errors; intake must survive a messaging failure.
+      await replyToWhatsAppIntake({ caseId, tenantId, to: replyTo });
     }
   });
 }
@@ -123,7 +144,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       try {
         const stored = await ingest(tenantId, msg);
         caseIds.push(stored.caseId);
-        scheduleAgent(stored.caseId, tenantId);
+        scheduleAgent(stored.caseId, tenantId, stored.created ? msg.from : null);
       } catch (err) {
         const name = err instanceof Error ? err.name : "UnknownError";
         console.error("[webhooks/whatsapp] Intake error:", name, "from:", msg.from); // crew-debug-ok
@@ -183,6 +204,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       providerMessageId: parsed.data.provider_message_id,
       threadId: parsed.data.thread_id,
     });
+    // No `replyTo` here, deliberately: this path serves simulation and BSP
+    // adapters, and a batch of simulated claims must never send real WhatsApp
+    // messages to the numbers it makes up. Only the signed Meta path answers.
     scheduleAgent(stored.caseId, tenantId);
 
     return NextResponse.json(

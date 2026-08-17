@@ -86,8 +86,25 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
         rendered_body: preview.html,
         status: "skipped_simulated",
       });
-    } catch {
-      // Preview is a convenience; never let it break the simulation flow.
+    } catch (err) {
+      // Must not break the simulation flow — but must not vanish either. The
+      // first version of this swallowed the error silently, and a CHECK
+      // constraint rejecting the new status meant every preview was dropped
+      // with nothing to show for it. A swallowed write is invisible twice
+      // over: no row, and no reason why.
+      const code =
+        (err as { code?: string })?.code ??
+        (err instanceof Error ? err.name : "DBError");
+      console.error(
+        JSON.stringify({
+          level: "error",
+          service: "claimmix",
+          msg: "dispatch.simulated_preview_failed",
+          case_id: caseId,
+          template,
+          code,
+        })
+      );
     }
 
     console.info(

@@ -22,12 +22,12 @@
  */
 
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { renderTemplate, type EmailTemplate } from "./render";
-import { getGmailAccountForTenant } from "./gmail/accounts";
+import { getGmailAccountByEmail, getGmailAccountForTenant } from "./gmail/accounts";
 import { GmailSender } from "./gmail/gmail-sender";
 import { isSendSuccess } from "./provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
@@ -47,6 +47,53 @@ export interface DispatchOptions {
 export interface DispatchResult {
   providerMessageId?: string;
   error?: string;
+}
+
+/** `"Santiago Jasper <s@gmail.com>"` → `"s@gmail.com"`. */
+function bareAddress(value: string): string {
+  const angled = value.match(/<([^>]+)>/);
+  return (angled ? angled[1] : value).trim().toLowerCase();
+}
+
+/**
+ * Which of the tenant's mailboxes should send this reply.
+ *
+ * The one the claimant wrote to. A tenant can have several connected, and
+ * answering from whichever the database happened to return first means someone
+ * who mailed siniestros@ gets an answer from an unrelated address — it breaks
+ * threading in their client and reads like a mistake, or a scam.
+ *
+ * Falls back to the tenant default when there is no inbound message to learn
+ * from (a case created by simulation, say) or when that mailbox is no longer
+ * connected.
+ */
+async function resolveSendingAccount(caseId: string, tenantId: string) {
+  try {
+    const inbound = firstRow(
+      await db
+        .select({ to_addr: claimMessages.to_addr })
+        .from(claimMessages)
+        .where(
+          and(
+            eq(claimMessages.case_id, caseId),
+            eq(claimMessages.tenant_id, tenantId),
+            eq(claimMessages.direction, "inbound")
+          )
+        )
+        .orderBy(asc(claimMessages.received_at))
+        .limit(1)
+    );
+
+    if (inbound?.to_addr) {
+      const account = await getGmailAccountByEmail(bareAddress(inbound.to_addr));
+      if (account?.enabled) return account;
+    }
+  } catch (err) {
+    const code = (err as { code?: string })?.code ?? "DBError";
+    console.error("[dispatch] Could not resolve inbound mailbox:", code); // crew-debug-ok
+  }
+
+  return getGmailAccountForTenant(tenantId);
 }
 
 /**
@@ -129,8 +176,9 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     return { error: "RENDER_FAILED" };
   }
 
-  // Look up the tenant's connected Gmail account — fail fast if none configured.
-  const gmailAccount = await getGmailAccountForTenant(tenantId);
+  // Reply from the mailbox the claimant actually wrote to — see
+  // resolveSendingAccount. Falls back to the tenant default.
+  const gmailAccount = await resolveSendingAccount(caseId, tenantId);
   if (!gmailAccount) {
     console.error("[dispatch] No Gmail account configured for tenant", tenantId); // crew-debug-ok
     return { error: "NO_GMAIL_ACCOUNT" };

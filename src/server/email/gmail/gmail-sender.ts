@@ -36,6 +36,33 @@ function makeBoundary(): string {
 }
 
 /**
+ * RFC 2047 encoded-word for a header value that is not pure ASCII.
+ *
+ * Header bytes are ASCII by definition; a raw "ó" in the Subject line ships
+ * UTF-8 bytes that the receiving client reads as latin-1, which is how
+ * "Información adicional requerida" arrived in a real inbox as
+ * "InformaciÃƒÂ³n adicional requerida". Bodies were never affected — they
+ * declare charset="UTF-8" — so this stayed hidden until the first subject with
+ * an accent in it.
+ */
+function encodeHeaderValue(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  if (!/[^\x00-\x7F]/.test(value)) return value;
+  return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
+}
+
+/**
+ * Base64 body part, wrapped at 76 characters per RFC 2045.
+ *
+ * The parts used to declare `quoted-printable` while carrying raw UTF-8, which
+ * is a lie the receiver is entitled to act on: any literal "=" in the body —
+ * a query string, say — is a QP escape sequence to a strict parser.
+ */
+function encodeBody(value: string): string {
+  return (Buffer.from(value, "utf8").toString("base64").match(/.{1,76}/g) ?? []).join("\r\n");
+}
+
+/**
  * Build an RFC 2822 raw email string from SendEmailOptions.
  *
  * When opts.htmlBody is provided, builds a multipart/alternative message.
@@ -59,22 +86,22 @@ function buildRawEmail(opts: SendEmailOptions): string {
     const lines: string[] = [
       `From: ${from}`,
       `To: ${to}`,
-      `Subject: ${subject}`,
+      `Subject: ${encodeHeaderValue(subject)}`,
       `MIME-Version: 1.0`,
       `Content-Type: multipart/alternative; boundary="${boundary}"`,
       ...extraHeaderLines,
       ``,
       `--${boundary}`,
       `Content-Type: text/plain; charset="UTF-8"`,
-      `Content-Transfer-Encoding: quoted-printable`,
+      `Content-Transfer-Encoding: base64`,
       ``,
-      opts.textBody ?? "",
+      encodeBody(opts.textBody ?? ""),
       ``,
       `--${boundary}`,
       `Content-Type: text/html; charset="UTF-8"`,
-      `Content-Transfer-Encoding: quoted-printable`,
+      `Content-Transfer-Encoding: base64`,
       ``,
-      opts.htmlBody,
+      encodeBody(opts.htmlBody),
       ``,
       `--${boundary}--`,
     ];
@@ -85,11 +112,13 @@ function buildRawEmail(opts: SendEmailOptions): string {
   const lines: string[] = [
     `From: ${from}`,
     `To: ${to}`,
-    `Subject: ${subject}`,
+    `Subject: ${encodeHeaderValue(subject)}`,
+    `MIME-Version: 1.0`,
     `Content-Type: text/plain; charset="UTF-8"`,
+    `Content-Transfer-Encoding: base64`,
     ...extraHeaderLines,
     ``,
-    opts.textBody ?? "",
+    encodeBody(opts.textBody ?? ""),
   ];
   return lines.join("\r\n");
 }

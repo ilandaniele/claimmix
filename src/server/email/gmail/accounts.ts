@@ -115,8 +115,19 @@ export async function listEnabledGmailAccounts(): Promise<GmailAccount[]> {
 }
 
 /**
- * Returns the single active Gmail account for a tenant.
+ * Returns the default active Gmail account for a tenant.
  * Returns null if no enabled account exists.
+ *
+ * The ORDER BY is not cosmetic. A tenant can have several mailboxes connected,
+ * and `limit(1)` with no ordering asks Postgres for "any row" — which it
+ * honours, returning whatever the heap hands over first. Reconnecting one
+ * account rewrote its row, changed the physical order, and the very next reply
+ * to a claimant went out from a different mailbox than every reply before it.
+ * Oldest-connected wins: arbitrary, but the same arbitrary answer every time.
+ *
+ * Callers that know which mailbox received the message should use
+ * getGmailAccountByEmail instead — replying from the address someone wrote to
+ * beats replying from the tenant default.
  */
 export async function getGmailAccountForTenant(
   tenantId: string
@@ -138,6 +149,7 @@ export async function getGmailAccountForTenant(
             eq(gmailAccounts.enabled, true)
           )
         )
+        .orderBy(asc(gmailAccounts.created_at), asc(gmailAccounts.id))
         .limit(1)
     );
 

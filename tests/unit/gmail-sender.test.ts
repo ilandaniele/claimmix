@@ -349,7 +349,71 @@ describe("GmailSender", () => {
     expect(decoded).toContain("Content-Type: multipart/alternative");
     expect(decoded).toContain("Content-Type: text/plain");
     expect(decoded).toContain("Content-Type: text/html");
-    expect(decoded).toContain("Plain text");
-    expect(decoded).toContain("<p>HTML content</p>");
+
+    // Parts are base64 now, and say so. They used to declare quoted-printable
+    // while carrying raw bytes, which is a lie a strict parser may act on: any
+    // literal "=" in the body is a QP escape sequence.
+    expect(decoded).toContain("Content-Transfer-Encoding: base64");
+    expect(decoded).not.toContain("quoted-printable");
+
+    const parts = decodeParts(decoded);
+    expect(parts.some((p) => p.includes("Plain text"))).toBe(true);
+    expect(parts.some((p) => p.includes("<p>HTML content</p>"))).toBe(true);
+  });
+
+  it("encodes a subject with accents instead of shipping raw bytes", async () => {
+    // "Información adicional requerida" reached a real inbox as
+    // "InformaciÃƒÂ³n adicional requerida": header bytes are ASCII by
+    // definition, so the UTF-8 was read as latin-1 by the receiving client.
+    mockMessagesSend.mockResolvedValueOnce({ data: { id: "gmail-msg-id-8" } });
+
+    const { GmailSender } = await import("@/server/email/gmail/gmail-sender");
+    await new GmailSender().send({
+      to: "claimant@example.com",
+      from: "claims@test.com",
+      subject: "Información adicional requerida",
+      textBody: "cuerpo",
+    });
+
+    const callArg = mockMessagesSend.mock.calls[0][0] as { requestBody: { raw: string } };
+    const decoded = Buffer.from(callArg.requestBody.raw, "base64url").toString("utf-8");
+
+    const subjectLine = decoded
+      .split("\r\n")
+      .find((l) => l.startsWith("Subject:"))!;
+    expect(subjectLine).toMatch(/^Subject: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=$/);
+
+    const encoded = subjectLine.match(/=\?UTF-8\?B\?([^?]+)\?=/)![1];
+    expect(Buffer.from(encoded, "base64").toString("utf-8")).toBe(
+      "Información adicional requerida"
+    );
+  });
+
+  it("leaves a pure-ASCII subject alone", async () => {
+    mockMessagesSend.mockResolvedValueOnce({ data: { id: "gmail-msg-id-9" } });
+
+    const { GmailSender } = await import("@/server/email/gmail/gmail-sender");
+    await new GmailSender().send({
+      to: "claimant@example.com",
+      from: "claims@test.com",
+      subject: "Recibimos tu reclamo - Caso #abc",
+      textBody: "cuerpo",
+    });
+
+    const callArg = mockMessagesSend.mock.calls[0][0] as { requestBody: { raw: string } };
+    const decoded = Buffer.from(callArg.requestBody.raw, "base64url").toString("utf-8");
+    expect(decoded).toContain("Subject: Recibimos tu reclamo - Caso #abc");
   });
 });
+
+/** Decode every base64 body part of a raw MIME message. */
+function decodeParts(raw: string): string[] {
+  return raw
+    .split(/\r\n\r\n/)
+    .slice(1)
+    .map((chunk) =>
+      Buffer.from(chunk.replace(/--[^\r\n]*/g, "").replace(/\s+/g, ""), "base64").toString(
+        "utf-8"
+      )
+    );
+}

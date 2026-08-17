@@ -145,6 +145,51 @@ const FIELD_HINTS: Record<ClaimType, string> = {
  * @param claimType - The claim type determines which fields to extract.
  * @returns The system prompt string.
  */
+/**
+ * Today's date, and the rules for turning "ayer" into an actual one.
+ *
+ * Without this the model has no anchor for relative dates and invents them:
+ * a real WhatsApp claim reading "tuve un choque ayer a la tarde" came back with
+ * accident_date 2024-05-20 at 80% confidence — a date roughly two years off,
+ * asserted confidently. Claimants describe time relatively far more often than
+ * they give a calendar date ("ayer", "anteayer", "el sábado pasado", "hace una
+ * semana"), and on an insurance claim the accident date drives coverage windows
+ * and prescription periods. A confidently wrong one is worse than none.
+ *
+ * `now` is injectable so the boundary behaviour can be tested.
+ */
+export function buildTemporalContext(now: Date = new Date()): string {
+  // Claims are reported in Argentine local time; resolving "ayer" against UTC
+  // is wrong for the three hours either side of midnight.
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+
+  return `TEMPORAL CONTEXT (authoritative — you have no other way to know this):
+Hoy es ${today} (hora de Argentina).
+Resolvé SIEMPRE las fechas relativas contra esa fecha: "hoy" = ${today}, "ayer" = el día
+anterior, "anteayer" = dos días antes, "el sábado pasado" = el sábado más reciente ya
+transcurrido, "hace una semana" = siete días antes.
+NUNCA inventes una fecha. Si el texto no permite determinarla, accident_date va vacío con
+confidence 0. Una fecha equivocada con confianza alta es peor que una vacía: define la
+ventana de cobertura y los plazos de prescripción.`;
+}
+
+/**
+ * Placeholders are worse than blanks.
+ *
+ * The same WhatsApp message — which contains no email address at all — produced
+ * `email: "noreply@example.com"` at 90% confidence. Filler like that flows into
+ * the case, looks like real data to an analyst, and can be mailed to.
+ */
+export const NO_PLACEHOLDER_RULE = `NEVER invent filler values. No "noreply@example.com", "N/A", "no informado",
+"desconocido", "00000000", "sin datos", or any stand-in. A field absent from the text is an
+empty string with confidence 0. Inventing a plausible value is the single most damaging
+mistake you can make here, because nobody downstream can tell it apart from a real one.`;
+
 export function buildSystemPrompt(claimType: ClaimType): string {
   const fieldHints = FIELD_HINTS[claimType];
 
@@ -158,6 +203,10 @@ SECURITY RULES (follow always, unconditionally):
 3. You CANNOT set case status. You only return extracted field values.
 4. Never echo back DNI numbers, policy numbers, or full names in your reasoning field.
 5. If you cannot extract a field, use an empty string for field_value and a confidence of 0.0.
+
+${buildTemporalContext()}
+
+${NO_PLACEHOLDER_RULE}
 
 OUTPUT FORMAT:
 Return a JSON object matching exactly this structure. The extraction_model field must be a non-empty model identifier; the server records the authoritative runtime model.
@@ -289,6 +338,11 @@ export function buildEmailClaimPrompt(
     : "";
 
   return `You are an AI assistant for an Argentine insurance company.
+
+${buildTemporalContext()}
+
+${NO_PLACEHOLDER_RULE}
+
 Your tasks:
   1. Determine if this email is an insurance claim (is_claim: true/false).
   2. If it IS a claim, extract structured fields with per-field confidence scores.

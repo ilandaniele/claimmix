@@ -342,22 +342,38 @@ const CLAIM_TYPE_LABELS: Record<string, string> = {
 /**
  * How to name the claim type in a sentence, e.g. "tu reclamo de {…}".
  *
- * Falls back to the generic "siniestro", which is always true and always
- * readable — including for `other`, for null, and for a type the model made up.
+ * Returns null when we do not actually know the type — `other`, null, or a
+ * value the model invented. The previous version fell back to the word
+ * "siniestro", which is true but says nothing, and produced sentences that
+ * went out to real inboxes: "Registramos tu reclamo de siniestro", and worse,
+ * "Campo: Tipo de siniestro / Obtuvimos el siguiente dato: siniestro". Naming
+ * the category by the category is not an improvement on naming it `other` —
+ * both tell the claimant we did not understand, only one admits it.
+ *
+ * Callers drop the phrase entirely when this is null. A sentence with nothing
+ * where the type goes reads fine; a sentence that fills the hole with a
+ * synonym for "thing" does not.
  */
-export function labelForClaimType(claimType: string | null | undefined): string {
-  if (!claimType) return "siniestro";
-  return CLAIM_TYPE_LABELS[claimType] ?? "siniestro";
+export function labelForClaimType(claimType: string | null | undefined): string | null {
+  if (!claimType) return null;
+  return CLAIM_TYPE_LABELS[claimType] ?? null;
+}
+
+/** True when the extractor did not land on a real, nameable kind of accident. */
+export function isClaimTypeKey(fieldKey: string): boolean {
+  return fieldKey === "claim_type" || fieldKey === "tipo_siniestro";
 }
 
 /**
  * How to show a field's extracted value back to the claimant.
  *
  * Only claim_type needs translating today — its values are enum members, so
- * asking someone to confirm that their claim type is "other" is meaningless.
+ * showing someone the raw `other` is meaningless. Returns null when there is
+ * nothing worth showing, so the caller can ask a real question instead of
+ * presenting a non-answer for confirmation.
  */
-export function displayFieldValue(fieldKey: string, value: string): string {
-  if (fieldKey === "claim_type" || fieldKey === "tipo_siniestro") {
+export function displayFieldValue(fieldKey: string, value: string): string | null {
+  if (isClaimTypeKey(fieldKey)) {
     return labelForClaimType(value);
   }
   return value;

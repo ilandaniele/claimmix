@@ -25,7 +25,11 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
   text: string;
 } {
   const subject = `Recibimos tu reclamo - Caso #${data.caseId}`;
+  // No type, no phrase. "tu reclamo de siniestro" is a sentence that spends
+  // words to say nothing; "Registramos exitosamente tu reclamo." is complete.
   const claimLabel = labelForClaimType(data.claimType);
+  const claimPhraseHtml = claimLabel ? ` de <strong>${claimLabel}</strong>` : "";
+  const claimPhraseText = claimLabel ? ` de ${claimLabel}` : "";
   // maskPolicyNumber only keeps digits it can safely show, so a number like
   // POL-4471-A collapses to "****". Printing "Póliza asociada: ****" tells the
   // claimant nothing and reads like the field failed to populate — if the mask
@@ -43,7 +47,7 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
 <head><meta charset="UTF-8"><title>${subject}</title></head>
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #1a56db;">Recibimos tu reclamo</h1>
-  <p>Gracias por contactarnos. Registramos exitosamente tu reclamo de <strong>${claimLabel}</strong>.</p>
+  <p>Gracias por contactarnos. Registramos exitosamente tu reclamo${claimPhraseHtml}.</p>
   <p>Tu número de caso es: <strong>#${data.caseId}</strong></p>
   ${policyLine}
   <p>Nuestro equipo analizará tu solicitud y te contactará a la brevedad para darte novedades o solicitarte información adicional si fuera necesaria.</p>
@@ -53,7 +57,7 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
 </body>
 </html>`;
 
-  const text = `Recibimos tu reclamo\n\nGracias por contactarnos. Registramos exitosamente tu reclamo de ${claimLabel}.\n\nTu número de caso es: #${data.caseId}\n${policyLineText}\nNuestro equipo analizará tu solicitud y te contactará a la brevedad para darte novedades o solicitarte información adicional si fuera necesaria.\n\nPodés responder a este correo si tenés alguna consulta o si querés agregar más información sobre el siniestro.\n\n---\nEste mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
+  const text = `Recibimos tu reclamo\n\nGracias por contactarnos. Registramos exitosamente tu reclamo${claimPhraseText}.\n\nTu número de caso es: #${data.caseId}\n${policyLineText}\nNuestro equipo analizará tu solicitud y te contactará a la brevedad para darte novedades o solicitarte información adicional si fuera necesaria.\n\nPodés responder a este correo si tenés alguna consulta o si querés agregar más información sobre el siniestro.\n\n---\nEste mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
 
   return { subject, html, text };
 }

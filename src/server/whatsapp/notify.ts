@@ -89,18 +89,27 @@ function renderMissingDocs(
 
   const bullets = (list: typeof items) => list.map((i) => `• ${i.label}`).join("\n");
 
+  // The opener used to end in a colon and the first block opened with another
+  // one, so a real reply read "…ya quedó registrada. Para poder avanzar:" and
+  // then "Necesitamos que nos cuentes:" — two headings stacked, each promising
+  // the list that only the second one introduces. The opener is now a closed
+  // sentence and the "para empezar" nuance rides on the block heading, where
+  // there is exactly one colon and it belongs to the list underneath it.
+  const lead = remaining > 0 ? "Para empezar, necesitamos" : "Necesitamos";
+
   const blocks: string[] = [];
   if (datos.length > 0) {
-    blocks.push(`Necesitamos que nos cuentes:\n\n${bullets(datos)}`);
+    blocks.push(`${lead} que nos cuentes:\n\n${bullets(datos)}`);
   }
   if (documentos.length > 0) {
-    blocks.push(`Y que nos mandes:\n\n${bullets(documentos)}`);
+    blocks.push(
+      datos.length > 0
+        ? `Y que nos mandes:\n\n${bullets(documentos)}`
+        : `${lead} que nos mandes:\n\n${bullets(documentos)}`
+    );
   }
 
-  const opener =
-    remaining > 0
-      ? "Recibimos tu denuncia y ya quedó registrada. Para empezar:"
-      : "Recibimos tu denuncia y ya quedó registrada. Para poder avanzar:";
+  const opener = "Recibimos tu denuncia y ya quedó registrada.";
 
   // Only mention photos when we actually asked for one.
   const how =

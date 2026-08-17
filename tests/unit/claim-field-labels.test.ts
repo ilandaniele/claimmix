@@ -98,20 +98,27 @@ describe("labelForClaimType", () => {
 
   it("never says 'other' — it is a bucket, not a kind of accident", () => {
     // "Registramos exitosamente tu reclamo de other" was sent to a real inbox.
-    expect(labelForClaimType("other")).toBe("siniestro");
+    // So was the fix for it: "tu reclamo de siniestro". Naming the category by
+    // the category is not an answer either — null means the caller drops the
+    // phrase instead of filling the hole with a synonym for "thing".
+    expect(labelForClaimType("other")).toBeNull();
   });
 
-  it("falls back to 'siniestro' for null and for a type the model made up", () => {
-    expect(labelForClaimType(null)).toBe("siniestro");
-    expect(labelForClaimType(undefined)).toBe("siniestro");
-    expect(labelForClaimType("meteorito")).toBe("siniestro");
+  it("returns null for null and for a type the model made up", () => {
+    expect(labelForClaimType(null)).toBeNull();
+    expect(labelForClaimType(undefined)).toBeNull();
+    expect(labelForClaimType("meteorito")).toBeNull();
   });
 });
 
 describe("displayFieldValue", () => {
   it("translates a claim type before asking someone to confirm it", () => {
-    expect(displayFieldValue("claim_type", "other")).toBe("siniestro");
     expect(displayFieldValue("claim_type", "choque")).toBe("choque de vehículo");
+  });
+
+  it("returns null for a type there is no point showing back", () => {
+    // Nothing a claimant can confirm or correct — the caller must ask instead.
+    expect(displayFieldValue("claim_type", "other")).toBeNull();
   });
 
   it("leaves ordinary values untouched", () => {

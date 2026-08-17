@@ -118,15 +118,27 @@ describe("renderTemplate — confirmation_received", () => {
     expect(result.text.length).toBeGreaterThan(50);
   });
 
-  it("says 'siniestro' rather than the raw enum member 'other'", () => {
-    // "Registramos exitosamente tu reclamo de other" reached a real inbox.
+  it("drops the type phrase entirely when the type is not known", () => {
+    // "Registramos exitosamente tu reclamo de other" reached a real inbox, and
+    // so did its first fix, "tu reclamo de siniestro" — words spent to say
+    // nothing. With no type, the sentence simply ends.
     const result = renderTemplate("confirmation_received", {
       caseId: "x",
       claimType: "other",
     });
     expect(result.html).not.toContain("other");
     expect(result.text).not.toContain("other");
-    expect(result.html).toContain("reclamo de <strong>siniestro</strong>");
+    expect(result.html).toContain("Registramos exitosamente tu reclamo.");
+    expect(result.html).not.toContain("reclamo de");
+    expect(result.text).toContain("Registramos exitosamente tu reclamo.");
+  });
+
+  it("still names the type when there is one", () => {
+    const result = renderTemplate("confirmation_received", {
+      caseId: "x",
+      claimType: "choque",
+    });
+    expect(result.html).toContain("reclamo de <strong>choque de vehículo</strong>");
   });
 
   it("covers the claim types the old label table had missed", () => {
@@ -247,10 +259,10 @@ describe("renderTemplate — data_confirmation_request", () => {
     expect(result.html).toContain("****5678");
   });
 
-  it("asks about a claim type in words, not as an enum member", () => {
-    // A claimant was asked to confirm that their claim type was "other" — a
-    // value they cannot confirm or correct, because it is not a thing that
-    // happened to them.
+  it("asks outright when the extracted value says nothing", () => {
+    // Two versions of this reached a real inbox. First "confirmá que el tipo
+    // es other", then "confirmá que el tipo de siniestro es: siniestro". There
+    // is no value here to confirm, so the agent asks the question instead.
     const result = renderTemplate("data_confirmation_request", {
       caseId: "case-4",
       fieldKey: "claim_type",
@@ -258,7 +270,22 @@ describe("renderTemplate — data_confirmation_request", () => {
     });
     expect(result.html).not.toContain("other");
     expect(result.text).not.toContain("other");
-    expect(result.html).toContain("siniestro");
+    expect(result.subject).toContain("Nos falta un dato");
+    expect(result.html).toContain("Decinos qué tipo de siniestro fue");
+    // Nothing was shown, so there is nothing to say "Confirmo" about.
+    expect(result.html).not.toContain("Obtuvimos el siguiente dato");
+    expect(result.html).not.toContain("Confirmo");
+  });
+
+  it("still asks for confirmation when there IS a value to confirm", () => {
+    const result = renderTemplate("data_confirmation_request", {
+      caseId: "case-4b",
+      fieldKey: "claim_type",
+      proposedValue: "granizo",
+    });
+    expect(result.subject).toContain("Confirmar datos");
+    expect(result.html).toContain("daño por granizo");
+    expect(result.html).toContain("Confirmo");
   });
 
   it("names an invented field key in Spanish", () => {

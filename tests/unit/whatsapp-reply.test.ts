@@ -214,6 +214,36 @@ describe("replyToWhatsAppIntake", () => {
     expect(body).toContain("Después te pedimos el resto");
   });
 
+  it("does not stack two headings before the list", async () => {
+    // A real reply read "…ya quedó registrada. Para poder avanzar:" and then
+    // "Necesitamos que nos cuentes:" — two colons, each announcing the list
+    // that only the second one actually introduces.
+    queueSelects(
+      [{ is_claim: true, claim_type: "choque" }],
+      [{ doc_key: "dni_asegurado" }],
+      []
+    );
+
+    await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    const [, body] = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0];
+    const beforeList = body.slice(0, body.indexOf("•"));
+    expect((beforeList.match(/:/g) ?? []).length).toBe(1);
+    expect(body).toContain("Recibimos tu denuncia y ya quedó registrada.\n\nNecesitamos");
+  });
+
+  it("carries the 'para empezar' nuance on the heading, not a second opener", async () => {
+    const keys = Array.from({ length: 9 }, (_, i) => ({ doc_key: `dato_${i}` }));
+    queueSelects([{ is_claim: true, claim_type: "choque" }], keys, []);
+
+    await replyToWhatsAppIntake({ caseId: CASE, tenantId: TENANT, to: TO });
+
+    const [, body] = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(body).toContain("Para empezar, necesitamos que nos cuentes:");
+    const beforeList = body.slice(0, body.indexOf("•"));
+    expect((beforeList.match(/:/g) ?? []).length).toBe(1);
+  });
+
   it("does not promise a follow-up when everything fits in one message", async () => {
     queueSelects(
       [{ is_claim: true, claim_type: "choque" }],

@@ -66,6 +66,30 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   // post-extraction flow (confirmations, status transitions) still runs; only
   // the outbound send is skipped.
   if (/@example\.(com|org|net)$/i.test(to.trim())) {
+    // Skipping the send is right; skipping the record was not. Returning here
+    // without a trace meant a simulated case showed no sign the agent had
+    // decided to write at all — the outbound ledger stayed empty and the inbox
+    // read "sin responder", which is indistinguishable from the agent doing
+    // nothing. That made the whole post-extraction flow untestable with test
+    // data, which is the only way it can be exercised safely.
+    //
+    // So: render and record what WOULD have gone out, marked
+    // 'skipped_simulated'. It never counts as a reply — replied_at only counts
+    // 'sent' — but an operator can now read exactly what the agent composed.
+    try {
+      const preview = renderTemplate(template, data);
+      await db.insert(outboundMessages).values({
+        case_id: caseId,
+        tenant_id: tenantId,
+        channel: "email",
+        template,
+        rendered_body: preview.html,
+        status: "skipped_simulated",
+      });
+    } catch {
+      // Preview is a convenience; never let it break the simulation flow.
+    }
+
     console.info(
       JSON.stringify({
         level: "info",

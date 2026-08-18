@@ -94,6 +94,10 @@ export function renderTemplate(
         missingFields: Array.isArray(data.missingFields)
           ? (data.missingFields as string[]).map(String)
           : [],
+        knownValues:
+          data.knownValues && typeof data.knownValues === "object"
+            ? (data.knownValues as Record<string, string>)
+            : undefined,
       });
 
     case "data_confirmation_request":

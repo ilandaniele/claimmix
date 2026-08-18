@@ -15,6 +15,14 @@ import { labelForField } from "@/lib/labels/claim-fields";
 export interface MissingInformationRequestData {
   caseId: string;
   missingFields: string[];
+  /**
+   * Values we already hold for some of the listed fields, keyed by field.
+   *
+   * An item we have a value for is not a gap, it is a doubt: asking "decinos
+   * qué día ocurrió" when they wrote "anteayer" reads as though nobody looked.
+   * Those render as what we understood, asking only for a correction.
+   */
+  knownValues?: Record<string, string>;
 }
 
 /**
@@ -37,17 +45,31 @@ export function renderMissingInformationRequest(
 } {
   const subject = `Información adicional requerida - Caso #${data.caseId}`;
 
+  const known = data.knownValues ?? {};
+
+  /** What to say about one item: a gap to fill, or a value to check. */
+  function askFor(fieldKey: string): { label: string; ask: string } {
+    const { label, instruction } = getFieldInstruction(fieldKey);
+    const value = known[fieldKey]?.trim();
+    return {
+      label,
+      ask: value
+        ? `entendimos ${JSON.stringify(value)}. Si no es así, escribinos el dato correcto.`
+        : instruction,
+    };
+  }
+
   const fieldItemsHtml = data.missingFields
     .map((fieldKey) => {
-      const { label, instruction } = getFieldInstruction(fieldKey);
-      return `<li><strong>${label}:</strong> ${instruction}</li>`;
+      const { label, ask } = askFor(fieldKey);
+      return `<li><strong>${label}:</strong> ${ask}</li>`;
     })
     .join("\n");
 
   const fieldItemsText = data.missingFields
     .map((fieldKey) => {
-      const { label, instruction } = getFieldInstruction(fieldKey);
-      return `- ${label}: ${instruction}`;
+      const { label, ask } = askFor(fieldKey);
+      return `- ${label}: ${ask}`;
     })
     .join("\n");
 

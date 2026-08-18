@@ -363,9 +363,9 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
 
     const ask = vi
       .mocked(dispatchOutboundEmail)
-      .mock.calls.find((c) => c[0].template === "data_confirmation_request");
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
     expect(ask).toBeDefined();
-    expect(ask?.[0].data.fieldKey).toBe("claim_type");
+    expect(ask?.[0].data.missingFields).toContain("claim_type");
 
     // And the status it lands in must be one the sent email justifies.
     const pending = updateSpy.mock.calls.find(
@@ -490,8 +490,9 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
 
     const ask = vi
       .mocked(dispatchOutboundEmail)
-      .mock.calls.find((c) => c[0].template === "data_confirmation_request");
-    expect(ask?.[0].data.fieldKey).toBe("claim_type");
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    const asked = ask?.[0].data.missingFields as string[];
+    expect(asked[0]).toBe("claim_type");
   });
 
   it("writes one row when the same field arrives under two spellings", async () => {
@@ -639,7 +640,8 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
     expect(JSON.stringify(confirmationAudit?.[0].payload)).not.toContain("2024-03-15");
   });
 
-  it("dispatches data_confirmation_request email for pending-confirmation fields", async () => {
+  it("asks about an uncertain field in the same email as everything else", async () => {
+    // Gaps and doubts used to go out as separate emails on separate rounds.
     const claim = extractEmailClaimMock({
       fields_pending_confirmation: ["full_name"],
       fields: [
@@ -655,11 +657,18 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
       NO_MATCHES
     );
 
-    const confirmationEmailCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
-      (call) => call[0].template === "data_confirmation_request"
+    const emails = vi.mocked(dispatchOutboundEmail).mock.calls;
+    const ask = emails.find((c) => c[0].template === "missing_information_request");
+    expect(ask).toBeDefined();
+    expect(ask?.[0].to).toBe(SENDER_EMAIL);
+    expect(ask?.[0].data.missingFields).toContain("full_name");
+    // The value we hold goes with it, so we ask them to correct it rather than
+    // to supply something they already sent.
+    expect((ask?.[0].data.knownValues as Record<string, string>).full_name).toBe(
+      "Juan Pérez"
     );
-    expect(confirmationEmailCall).toBeDefined();
-    expect(confirmationEmailCall?.[0].to).toBe(SENDER_EMAIL);
+    // One email, not two.
+    expect(emails).toHaveLength(1);
   });
 });
 

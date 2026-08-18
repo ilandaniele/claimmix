@@ -233,61 +233,21 @@ export async function orchestratePostExtraction(
     }
   }
 
-  // Also dispatch data_confirmation_request for medium-confidence pending
-  // fields — but only when this is the one thing we are asking for.
-  //
-  // Skipped when required fields are missing: branch E is about to send
-  // missing_information_request, and two "necesitamos algo tuyo" emails landing
-  // together is the same pile-up we removed from the escalation path. The rows
-  // above are still written, so the uncertainty is on the record for an analyst
-  // and the next round can ask once the bigger gap is closed.
   const missingInfoEmailComing = gapResult.missingRequiredFields.length > 0;
   let missingInfoEmailDispatched = false;
 
-  if (
-    pendingConfirmationFields.length > 0 &&
-    !confirmationEmailDispatched &&
-    !missingInfoEmailComing
-  ) {
-    const target = pendingConfirmationFields[0];
-
-    await dispatchOutboundEmail({
-      caseId,
-      tenantId,
-      to: senderEmail,
-      template: "data_confirmation_request",
-      data: {
-        caseId,
-        fieldKey: target.fieldKey,
-        proposedValue: target.proposedValue,
-        conflictWithValue: null,
-      },
-      inReplyToMessageId,
-    });
-    confirmationEmailDispatched = true;
-
-    // The case is now genuinely waiting on the claimant, so say so. Without
-    // this the status came from whatever the gap analyzer computed, which
-    // knows nothing about the email we just sent.
-    await setStatus(caseId, tenantId, "confirmacion_pendiente");
-  }
-
   // ── E. Act on the gap analysis — AC10 ────────────────────────────────────
 
-  if (gapResult.missingRequiredFields.length > 0) {
-    // Missing required fields → dispatch missing_information_request.
-    // Include only the actual missing field keys (not email_or_phone alias).
-    const missingFieldsForEmail = gapResult.missingRequiredFields.filter(
-      (f) => f !== "email_or_phone"
-    );
-    // If email_or_phone was the only "missing" contact, add both to the list.
-    if (
-      gapResult.missingRequiredFields.includes("email_or_phone") &&
-      missingFieldsForEmail.length === gapResult.missingRequiredFields.length - 1
-    ) {
-      missingFieldsForEmail.push("email");
-    }
+  // Everything we need from the claimant, in one message.
+  //
+  // Gaps and doubts used to go out as separate emails on separate rounds — the
+  // policy number today, what kind of accident it was tomorrow. Neither
+  // question depends on the other's answer, so the chain was ours to make and
+  // ours to stop making. A person handling the claim writes one message
+  // listing what they need.
+  const askItems = buildAskList(gapResult.missingRequiredFields, pendingConfirmationFields);
 
+  if (askItems.fields.length > 0 && !confirmationEmailDispatched) {
     await dispatchOutboundEmail({
       caseId,
       tenantId,
@@ -295,17 +255,20 @@ export async function orchestratePostExtraction(
       template: "missing_information_request",
       data: {
         caseId,
-        missingFields: missingFieldsForEmail.length > 0
-          ? missingFieldsForEmail
-          : gapResult.missingRequiredFields,
+        missingFields: askItems.fields,
+        knownValues: askItems.knownValues,
       },
       inReplyToMessageId,
     });
 
     missingInfoEmailDispatched = true;
 
-    // Update status to info_faltante.
-    await setStatus(caseId, tenantId, "info_faltante");
+    // A genuine gap outranks a doubt: the case is blocked, not merely unsure.
+    await setStatus(
+      caseId,
+      tenantId,
+      missingInfoEmailComing ? "info_faltante" : "confirmacion_pendiente"
+    );
 
     // Audit: MISSING_INFO_REQUESTED.
     await writeAuditLog({
@@ -401,8 +364,9 @@ async function resolveAnsweredConfirmations(
   // It closes the one field we asked about, not every pending row: we only ever
   // ask about one per email, and the same ranking that picked it picks it now.
   if (isAffirmativeReply(latestMessageText)) {
-    const asked = await topPendingField(caseId, tenantId, fields);
-    if (asked) settled.add(asked);
+    for (const asked of await askedPendingFields(caseId, tenantId, fields)) {
+      settled.add(asked);
+    }
   }
 
   if (settled.size === 0) return;
@@ -424,12 +388,18 @@ async function resolveAnsweredConfirmations(
   }
 }
 
-/** The pending field the last confirmation email would have asked about. */
-async function topPendingField(
+/**
+ * The pending fields the last email actually put in front of them.
+ *
+ * "Confirmo" agrees with what was on the page, so it must not close a doubt
+ * that never made the list — the cap can leave some out. Recomputed rather
+ * than stored: same rows, same ranking, same subset the email showed.
+ */
+async function askedPendingFields(
   caseId: string,
   tenantId: string,
   fields: ExtractedClaim["fields"]
-): Promise<string | null> {
+): Promise<string[]> {
   try {
     const rows = await db
       .select({ field_name: claimFieldConfirmations.field_name })
@@ -446,11 +416,54 @@ async function topPendingField(
       rows.map((r) => r.field_name),
       fields
     );
-    return ranked[0]?.fieldKey ?? null;
+    return buildAskList([], ranked).fields;
   } catch (err) {
     console.error("[orchestrate] Failed to read pending confirmations:", errCode(err));
-    return null;
+    return [];
   }
+}
+
+/**
+ * How many things one email may ask for.
+ *
+ * A real extraction flagged thirteen gaps at once. Sending someone who just
+ * crashed their car thirteen demands gets no reply at all — the WhatsApp side
+ * learned this first and caps at the same number.
+ */
+const MAX_ASK_ITEMS = 5;
+
+/**
+ * The single list of everything we need, gaps and doubts together.
+ *
+ * Order is deliberate: what is missing blocks the claim, what is uncertain only
+ * slows it. `email_or_phone` is an internal alias for "either of these", so it
+ * goes out as the contact field a person recognises.
+ *
+ * Deterministic, because two callers depend on agreeing: the branch that sends
+ * the email and the one that decides what a bare "Confirmo" answered.
+ */
+function buildAskList(
+  missingRequiredFields: string[],
+  pending: ConfirmableField[]
+): { fields: string[]; knownValues: Record<string, string> } {
+  const missing = missingRequiredFields.map((f) =>
+    f === "email_or_phone" ? "email" : f
+  );
+
+  const seen = new Set(missing);
+  const doubts = pending.filter((p) => !seen.has(p.fieldKey));
+
+  const fields = [...missing, ...doubts.map((d) => d.fieldKey)].slice(0, MAX_ASK_ITEMS);
+
+  // Only doubts carry a value: a missing field has nothing to show.
+  const knownValues: Record<string, string> = {};
+  for (const d of doubts) {
+    if (fields.includes(d.fieldKey) && d.proposedValue) {
+      knownValues[d.fieldKey] = d.proposedValue;
+    }
+  }
+
+  return { fields, knownValues };
 }
 
 interface ConfirmableField {

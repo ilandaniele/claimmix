@@ -419,3 +419,31 @@ describe("AC24 — no raw DNI or raw policy_number in any outbound template", ()
     });
   }
 });
+
+describe("renderTemplate — missing_information_request with values we hold", () => {
+  it("asks for a gap and offers a correction for a doubt, in one list", () => {
+    // Gaps and doubts used to be separate emails on separate rounds.
+    const result = renderTemplate("missing_information_request", {
+      caseId: "c-1",
+      missingFields: ["policy_number", "accident_date"],
+      knownValues: { accident_date: "16/08/2026" },
+    });
+
+    expect(result.html).toContain("Número de póliza");
+    expect(result.html).toContain("Decinos el número de póliza");
+
+    expect(result.html).toContain("Fecha del siniestro");
+    expect(result.html).toContain("16/08/2026");
+    // Not re-asked as though they never said it.
+    expect(result.html).not.toContain("Decinos qué día ocurrió");
+  });
+
+  it("behaves as before when we hold nothing", () => {
+    const result = renderTemplate("missing_information_request", {
+      caseId: "c-2",
+      missingFields: ["policy_number"],
+    });
+    expect(result.html).toContain("Decinos el número de póliza");
+    expect(result.text).toContain("Decinos el número de póliza");
+  });
+});

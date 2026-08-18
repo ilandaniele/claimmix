@@ -10,8 +10,8 @@
  *
  * Email-intake transitions (added in W1 — IC6):
  *   recibido             → info_faltante | confirmacion_pendiente | requiere_especialista | listo_para_core | no_relevante
- *   info_faltante        → recibido | confirmacion_pendiente           (new email reply received)
- *   confirmacion_pendiente → recibido | listo_para_core | info_faltante (after analyst confirms fields)
+ *   info_faltante        → recibido | confirmacion_pendiente | requiere_especialista
+ *   confirmacion_pendiente → recibido | listo_para_core | info_faltante | requiere_especialista
  *   requiere_especialista  → listo_para_core | cerrado
  *   listo_para_core      → enviado_a_core | error_core
  *   enviado_a_core       → cerrado
@@ -69,7 +69,11 @@ export const FSM_TRANSITIONS: Readonly<Record<CaseStatus, readonly CaseStatus[]>
    *
    * LLM08: AI worker may set this status after gap analysis.
    */
-  info_faltante: ["recibido", "confirmacion_pendiente"],
+  // requiere_especialista included: a reply can reveal an injury or a fire the
+  // first message never mentioned, and a claim that turns out to be serious
+  // must be able to escalate rather than stay parked because of where it
+  // started.
+  info_faltante: ["recibido", "confirmacion_pendiente", "requiere_especialista"],
 
   /**
    * confirmacion_pendiente: one or more fields need analyst confirmation.
@@ -78,7 +82,12 @@ export const FSM_TRANSITIONS: Readonly<Record<CaseStatus, readonly CaseStatus[]>
    *
    * LLM08: AI worker may set this status after confidence scoring.
    */
-  confirmacion_pendiente: ["recibido", "listo_para_core", "info_faltante"],
+  confirmacion_pendiente: [
+    "recibido",
+    "listo_para_core",
+    "info_faltante",
+    "requiere_especialista",
+  ],
 
   /**
    * requiere_especialista: high severity signals detected; specialist needed.

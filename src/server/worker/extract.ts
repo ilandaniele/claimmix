@@ -401,8 +401,24 @@ export async function runEmailExtractionWorker(
       return;
     }
 
-    // Only process cases in 'recibido' status (or legacy 'procesando' for compat).
-    const allowedStartStatuses = ["recibido", "procesando", "info_faltante"];
+    // Statuses a new inbound message may re-open.
+    //
+    // `confirmacion_pendiente` was missing, and it is exactly the state a case
+    // is in after the agent asks the claimant to confirm something. They
+    // answered, the reply attached to the case — and the worker declined to
+    // look at it, so the case sat waiting for a reply that had already
+    // arrived. `info_faltante` was on the list, which is why the identical
+    // flow worked whenever the question happened to be phrased as a gap.
+    //
+    // `requiere_especialista` stays off: a person owns that case and will read
+    // the thread themselves. Re-extracting could also silently downgrade the
+    // severity that put it there.
+    const allowedStartStatuses = [
+      "recibido",
+      "procesando",
+      "info_faltante",
+      "confirmacion_pendiente",
+    ];
     if (!allowedStartStatuses.includes(caseRow.status)) {
       console.info(
         JSON.stringify({

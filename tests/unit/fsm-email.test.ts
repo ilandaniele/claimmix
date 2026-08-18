@@ -141,7 +141,6 @@ describe("isValidTransition — invalid email-intake transitions", () => {
     ["recibido", "cerrado"],         // must go through specialist/core
     ["info_faltante", "listo_para_core"], // must be confirmed first
     ["info_faltante", "cerrado"],
-    ["confirmacion_pendiente", "requiere_especialista"], // specialist from recibido only
     ["confirmacion_pendiente", "enviado_a_core"],
     ["listo_para_core", "cerrado"],  // must go through enviado_a_core
     ["listo_para_core", "recibido"], // cannot go back past listo
@@ -174,11 +173,21 @@ describe("getAllowedTransitions — email-intake statuses", () => {
     expect(allowed).toContain("no_relevante");
   });
 
-  it("info_faltante allows 2 transitions", () => {
+  it("info_faltante allows 3 transitions", () => {
     const allowed = getAllowedTransitions("info_faltante");
-    expect(allowed).toHaveLength(2);
+    expect(allowed).toHaveLength(3);
     expect(allowed).toContain("recibido");
     expect(allowed).toContain("confirmacion_pendiente");
+    expect(allowed).toContain("requiere_especialista");
+  });
+
+  it("lets a waiting case escalate when a reply reveals something serious", () => {
+    // A first message can be vague and the follow-up mention an injury or a
+    // fire. A claim that turns out to be serious must be able to escalate
+    // rather than stay parked because of the status it happened to be in.
+    for (const from of ["info_faltante", "confirmacion_pendiente"] as const) {
+      expect(isValidTransition(from, "requiere_especialista"), from).toBe(true);
+    }
   });
 
   it("listo_para_core allows enviado_a_core and error_core", () => {

@@ -36,7 +36,7 @@
  */
 
 import "server-only";
-import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import {
@@ -465,37 +465,47 @@ export async function runEmailExtractionWorker(
       senderEmail = rawMsg.from_addr ?? "";
     } else {
       // Fallback: Gmail intake cases store messages in claim_messages.
-      const claimMsg = firstRow(
-        await db
-          .select({
-            id: claimMessages.id,
-            provider_message_id: claimMessages.provider_message_id,
-            body_text: claimMessages.body_text,
-            subject: claimMessages.subject,
-            from_addr: claimMessages.from_addr,
-          })
-          .from(claimMessages)
-          .where(
-            and(
-              eq(claimMessages.case_id, caseId),
-              eq(claimMessages.tenant_id, tenantId),
-              eq(claimMessages.direction, "inbound")
-            )
+      //
+      // Every inbound message, oldest first — not just the newest one. This
+      // used to be a limit(1), so a re-analysis triggered by a reply saw only
+      // the reply. A claimant who wrote "tuve un problema con el auto anteayer"
+      // and then answered "fue un choque" was asked for the date of the
+      // accident, which they had already given in a message the extractor was
+      // no longer reading. Asking twice is worse than not asking: they
+      // answered, and it reads as though nobody looked.
+      const inboundMessages = await db
+        .select({
+          id: claimMessages.id,
+          provider_message_id: claimMessages.provider_message_id,
+          body_text: claimMessages.body_text,
+          subject: claimMessages.subject,
+          from_addr: claimMessages.from_addr,
+          received_at: claimMessages.received_at,
+        })
+        .from(claimMessages)
+        .where(
+          and(
+            eq(claimMessages.case_id, caseId),
+            eq(claimMessages.tenant_id, tenantId),
+            eq(claimMessages.direction, "inbound")
           )
-          .orderBy(desc(claimMessages.received_at))
-          .limit(1)
-      );
+        )
+        .orderBy(asc(claimMessages.received_at));
 
-      if (!claimMsg) {
+      const latest = inboundMessages[inboundMessages.length - 1];
+
+      if (!latest) {
         console.error("[email-worker] Raw message not found:", caseId); // crew-debug-ok
         return;
       }
 
-      emailBody = claimMsg.body_text ?? "";
-      emailSubject = claimMsg.subject ?? "";
-      senderEmail = claimMsg.from_addr ?? "";
-      claimMessageId = claimMsg.id ?? null;
-      providerMessageId = claimMsg.provider_message_id ?? null;
+      emailBody = buildConversationBody(inboundMessages);
+      // Subject and identity come from the newest message: it is the one being
+      // replied to, and its subject is what the claimant last saw.
+      emailSubject = latest.subject ?? "";
+      senderEmail = latest.from_addr ?? "";
+      claimMessageId = latest.id ?? null;
+      providerMessageId = latest.provider_message_id ?? null;
     }
 
     // ── b) Load memory hints from claim_memory ───────────────────────────────
@@ -1222,4 +1232,66 @@ async function escalateCase(
       error_code: errorCode,
     },
   });
+}
+
+// ── Conversation assembly ─────────────────────────────────────────────────────
+
+/** Per-message cap. Long enough for any real claim, short enough to bound cost. */
+const MAX_CHARS_PER_MESSAGE = 4_000;
+/** Whole-conversation cap. */
+const MAX_CONVERSATION_CHARS = 16_000;
+
+/**
+ * Strip the quoted copy of earlier mail a reply carries.
+ *
+ * A claimant's reply usually quotes the message it answers, which for us means
+ * our own template comes back in. That is the same poisoning as ingesting our
+ * sent mail, arriving by a different door: the extractor reads "necesitamos que
+ * nos proporciones la siguiente información" as though the claimant wrote it.
+ * Quoted lines and the attribution line that introduces them go.
+ */
+export function stripQuotedReply(body: string): string {
+  const lines = body.split(/\r?\n/);
+  const kept: string[] = [];
+
+  for (const line of lines) {
+    // "El lun, 18 ago 2026 a las 21:31, X escribió:" / "On Mon, ... wrote:"
+    if (/^\s*(el|on)\b.{0,120}\b(escribi[oó]|wrote):\s*$/i.test(line)) break;
+    if (/^\s*-{2,}\s*(mensaje original|original message)\s*-{2,}/i.test(line)) break;
+    if (/^\s*>/.test(line)) continue;
+    kept.push(line);
+  }
+
+  return kept.join("\n").trim();
+}
+
+/**
+ * Render every inbound message as one document for the extractor.
+ *
+ * Oldest first, so facts stated once at the start survive into every later
+ * analysis. Newest messages are kept whole when the cap bites — a claimant
+ * correcting themselves means the last word wins.
+ */
+function buildConversationBody(
+  messages: Array<{ body_text: string | null; received_at: string | null }>
+): string {
+  const cleaned = messages
+    .map((m) => stripQuotedReply(m.body_text ?? "").slice(0, MAX_CHARS_PER_MESSAGE))
+    .filter((body) => body.length > 0);
+
+  if (cleaned.length === 0) return "";
+  if (cleaned.length === 1) return cleaned[0];
+
+  const blocks = cleaned.map(
+    (body, i) => `[Mensaje ${i + 1} de ${cleaned.length}]\n${body}`
+  );
+
+  // Drop from the middle if it does not fit: the first message states the
+  // claim, the last ones answer our questions, and the middle is the most
+  // likely to be repetition.
+  while (blocks.length > 2 && blocks.join("\n\n").length > MAX_CONVERSATION_CHARS) {
+    blocks.splice(1, 1);
+  }
+
+  return blocks.join("\n\n");
 }

@@ -65,12 +65,15 @@ export function renderDataConfirmationRequest(
 
   const heading = isOpenQuestion ? "Nos falta un dato" : "Confirmación de datos requerida";
 
+  // Opens by acknowledging receipt: this is now the only email the claimant
+  // gets when something is uncertain, so it has to do the job the separate
+  // confirmation_received used to do.
   const introHtml = isOpenQuestion
-    ? `<p>Para el <strong>caso #${data.caseId}</strong>, nos falta un dato para poder avanzar:</p>`
-    : `<p>Para el <strong>caso #${data.caseId}</strong>, necesitamos que confirmes el siguiente dato:</p>`;
+    ? `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${data.caseId}</strong>, y nos falta un dato para poder avanzar:</p>`
+    : `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${data.caseId}</strong>, y necesitamos que confirmes el siguiente dato:</p>`;
   const introText = isOpenQuestion
-    ? `Para el caso #${data.caseId}, nos falta un dato para poder avanzar:`
-    : `Para el caso #${data.caseId}, necesitamos que confirmes el siguiente dato:`;
+    ? `Gracias por tu reclamo. Lo registramos como caso #${data.caseId}, y nos falta un dato para poder avanzar:`
+    : `Gracias por tu reclamo. Lo registramos como caso #${data.caseId}, y necesitamos que confirmes el siguiente dato:`;
 
   let contextHtml = "";
   let contextText = "";

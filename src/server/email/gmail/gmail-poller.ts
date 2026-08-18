@@ -45,7 +45,7 @@ import { db } from "@/lib/db";
 import { cases, claimAttachments, claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { getGmailClient } from "./gmail-client";
-import { listEnabledGmailAccounts, type GmailAccount } from "./accounts";
+import { getGmailAccountByEmail, listEnabledGmailAccounts, type GmailAccount } from "./accounts";
 import {
   getOrCreatePollState,
   advancePollState,
@@ -393,6 +393,22 @@ async function processAttachments(
  * Returns true on success, false if the message was skipped (duplicate) or errored.
  * Throws if a fatal error occurs that should abort processing of this message.
  */
+/** True when this message was sent by one of the tenant's own connected mailboxes. */
+export async function isOwnMailbox(fromHeader: string): Promise<boolean> {
+  const angled = fromHeader.match(/<([^>]+)>/);
+  const address = (angled ? angled[1] : fromHeader).trim().toLowerCase();
+  if (!address) return false;
+
+  try {
+    const account = await getGmailAccountByEmail(address);
+    return Boolean(account);
+  } catch {
+    // A lookup failure must not stop intake — a duplicated message is
+    // recoverable, a dropped claim is not.
+    return false;
+  }
+}
+
 async function processMessage(
   gmail: ReturnType<typeof getGmailClient>,
   gmailMessageId: string,
@@ -423,6 +439,29 @@ async function processMessage(
   const inReplyToRaw = getHeader(allHeaders, "In-Reply-To");
   const referencesRaw = getHeader(allHeaders, "References");
   const inReplyTo = inReplyToRaw ? normalizeMessageId(inReplyToRaw) : null;
+
+  // ── c2) Never ingest our own outgoing mail ─────────────────────────────────
+  //
+  // history.list reports every change in the mailbox, SENT included — only the
+  // fallback list paths filter on labelIds: ["INBOX"]. So three seconds after
+  // answering a claimant, the poller read our own reply back in as an inbound
+  // message. It landed on the case, the extractor re-ran over a thread now
+  // containing two of our templates, and classified the whole claim as
+  // no_relevante. The claimant's real answer was in that same thread.
+  //
+  // Matching on the connected mailboxes rather than the polled address covers
+  // a tenant whose mailboxes write to each other.
+  if (await isOwnMailbox(fromAddr)) {
+    console.info(
+      JSON.stringify({
+        level: "info",
+        service: "claimmix",
+        msg: "gmail_poller.skipped_own_message",
+        message_id: gmailMessageId,
+      })
+    );
+    return { outcome: "skipped" };
+  }
 
   // Decode body parts (text/plain and text/html).
   const bodyText = extractBodyPart(payload ?? undefined, "text/plain");

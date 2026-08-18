@@ -10,14 +10,15 @@
  *   C. fields_pending_confirmation → insert claim_field_confirmations rows + data_confirmation_request
  *   D. Conflict in customer matches → claim_field_confirmations conflict rows + data_confirmation_request
  *   E. Gap analysis → missing_information_request (info_faltante) OR update status
- *   F. confirmation_received for is_claim=true, unless already escalated (AC12)
+ *   F. confirmation_received — only when no other branch already wrote (AC12)
  *
  * AC7:  Medium-confidence field → claim_field_confirmations row + data_confirmation_request
  * AC9:  Conflict with stored customer → claim_field_confirmations conflict row + data_confirmation_request
  * AC10: Missing required fields → missing_information_request + status=info_faltante
  * AC11: High/critical severity → specialist_escalation + status=requiere_especialista
- * AC12: confirmation_received dispatched for is_claim=true, except when the case
- *       was escalated — the escalation email already acknowledges receipt
+ * AC12: confirmation_received dispatched for is_claim=true, except when another
+ *       branch already wrote — every one of them acknowledges receipt and
+ *       carries the case number, so this would be a second, emptier email
  *
  * LLM08: This module cannot set terminal states; only sets AI_ALLOWED_STATUSES.
  * LLM06: PII (email addresses) is never logged — only case_id and field_key.
@@ -220,6 +221,7 @@ export async function orchestratePostExtraction(
   // above are still written, so the uncertainty is on the record for an analyst
   // and the next round can ask once the bigger gap is closed.
   const missingInfoEmailComing = gapResult.missingRequiredFields.length > 0;
+  let missingInfoEmailDispatched = false;
 
   if (
     pendingConfirmationFields.length > 0 &&
@@ -279,6 +281,8 @@ export async function orchestratePostExtraction(
       inReplyToMessageId,
     });
 
+    missingInfoEmailDispatched = true;
+
     // Update status to info_faltante.
     await setStatus(caseId, tenantId, "info_faltante");
 
@@ -304,18 +308,21 @@ export async function orchestratePostExtraction(
     }
   }
 
-  // ── F. Send confirmation_received for valid claims — AC12 ─────────────────
+  // ── F. Acknowledge receipt — but only if nothing else already did ─────────
   //
-  // Not when the case was escalated. Branch B already told the claimant we
-  // received it, gave them the case number and said a specialist will call
-  // within 24h — a generic "recibimos tu denuncia" on top of that is the third
-  // simultaneous email someone gets right after reporting a fire or an injury,
-  // and it says less than the one they already have. The escalation IS the
-  // acknowledgement.
+  // confirmation_received is the fallback, not a fixture: it exists so a
+  // claimant is never left without an answer. Every other branch already
+  // acknowledges receipt and carries the case number, so adding this one on top
+  // means two emails landing in the same second, the second saying less than
+  // the first. A person handling the claim would send one message.
   //
-  // Nothing is lost by skipping it: everything confirmation_received carries
-  // (case id, receipt) is in the escalation email, which also outranks it.
-  if (!isHighSeverity && !(await checkConfirmationAlreadySent(caseId, tenantId))) {
+  // The escalation was the first case of this — someone reporting a fire got
+  // three at once. The rule generalises: if we said anything at all, we said
+  // it, and this adds nothing.
+  const somethingElseWasSaid =
+    isHighSeverity || confirmationEmailDispatched || missingInfoEmailDispatched;
+
+  if (!somethingElseWasSaid && !(await checkConfirmationAlreadySent(caseId, tenantId))) {
     // Extract claim_type and policy_number from fields for the email template.
     const claimTypeField = extractedClaim.fields.find((f) => f.field_key === "claim_type");
     const policyField = extractedClaim.fields.find((f) => f.field_key === "policy_number");

@@ -6,7 +6,8 @@
  *
  * Decision tree:
  *   A. is_claim=false → return early (no email)
- *   B. High/critical severity → specialist_escalation (and no confirmation_received)
+ *   B. High/critical severity → specialist_escalation, and nothing else: no
+ *      gap request, no confirmation, no other status. A person is taking over
  *   C. fields_pending_confirmation → insert claim_field_confirmations rows + data_confirmation_request
  *   D. Conflict in customer matches → claim_field_confirmations conflict rows + data_confirmation_request
  *   E. Gap analysis → missing_information_request (info_faltante) OR update status
@@ -15,7 +16,8 @@
  * AC7:  Medium-confidence field → claim_field_confirmations row + data_confirmation_request
  * AC9:  Conflict with stored customer → claim_field_confirmations conflict row + data_confirmation_request
  * AC10: Missing required fields → missing_information_request + status=info_faltante
- * AC11: High/critical severity → specialist_escalation + status=requiere_especialista
+ * AC11: High/critical severity → specialist_escalation + status=requiere_especialista,
+ *       and no other branch writes: the escalation promised no further action
  * AC12: confirmation_received dispatched for is_claim=true, except when another
  *       branch already wrote — every one of them acknowledges receipt and
  *       carries the case number, so this would be a second, emptier email
@@ -208,6 +210,9 @@ export async function orchestratePostExtraction(
         conflict_with_value: storedValue,
       });
 
+      // An escalated case keeps its own status and its own single message.
+      if (isHighSeverity) continue;
+
       // Set case status to confirmacion_pendiente for conflict.
       await setStatus(caseId, tenantId, "confirmacion_pendiente");
 
@@ -253,7 +258,17 @@ export async function orchestratePostExtraction(
   // listing what they need.
   const askItems = buildAskList(gapResult.missingRequiredFields, pendingConfirmationFields);
 
-  if (askItems.fields.length > 0 && !confirmationEmailDispatched) {
+  // Not when the case escalated. A claimant whose car burned this morning was
+  // told "la derivamos a un especialista, no hace falta que hagas nada" and,
+  // three seconds later, asked for their DNI, the date and the address. On
+  // WhatsApp the two land as adjacent bubbles contradicting each other.
+  //
+  // The gaps are still recorded, so the specialist opens the case and sees
+  // exactly what is missing — and asks for it on the call, which is what the
+  // first message promised. The cost is that an analyst starts with less
+  // loaded; the person gets one coherent message and the case sits in the
+  // queue it belongs to.
+  if (askItems.fields.length > 0 && !confirmationEmailDispatched && !isHighSeverity) {
     await messenger.send({
       caseId,
       tenantId,

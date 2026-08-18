@@ -1222,3 +1222,74 @@ describe("orchestratePostExtraction — nothing left to ask", () => {
     expect(statuses).not.toContain("listo_para_core");
   });
 });
+
+// ── Test suite: an escalated case gets one message ───────────────────────────
+
+describe("orchestratePostExtraction — escalated cases are left alone", () => {
+  it("does not ask a person whose car just burned for their DNI", async () => {
+    // Two WhatsApp bubbles, three seconds apart: "la derivamos a un
+    // especialista, no hace falta que hagas nada" and then "necesitamos tu
+    // DNI, la fecha y el lugar". The specialist asks on the call — that is
+    // what the first message promised.
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["dni"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    const claim = extractEmailClaimMock({ severity: "critical", requires_specialist: true });
+    const { updateSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+    expect(templates).toEqual(["specialist_escalation"]);
+
+    // And it stays in the specialist queue: the missing-info branch used to
+    // overwrite the status, so a critical fire sat in info_faltante.
+    const statuses = updateSpy.mock.calls.map((c) => (c[0] as { status?: string })?.status);
+    expect(statuses).toContain("requiere_especialista");
+    expect(statuses).not.toContain("info_faltante");
+  });
+
+  it("still records the gaps so the specialist can see them", async () => {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        { fieldName: "claim_type", suggestedValue: "other", reason: "medium_confidence" },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+    const claim = extractEmailClaimMock({
+      severity: "high",
+      requires_specialist: true,
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "claim_type"),
+        { field_key: "claim_type", field_value: "other", confidence: 0.7, source: "ai" as const },
+      ],
+    });
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const row = insertSpy.mock.calls
+      .map((c) => (Array.isArray(c[0]) ? c[0][0] : c[0]) as { field_name?: string })
+      .find((r) => r?.field_name === "claim_type");
+    expect(row).toBeDefined();
+
+    // Recorded, not asked.
+    const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+    expect(templates).not.toContain("missing_information_request");
+  });
+});

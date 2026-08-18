@@ -36,6 +36,8 @@ import { analyzeEmailClaimGaps, MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/ga
 import {
   canonicalFieldKey,
   confirmationRank,
+  isAffirmativeReply,
+  isDerivable,
   isWorthConfirming,
 } from "@/lib/labels/claim-fields";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
@@ -47,6 +49,14 @@ export interface ExtractedClaimOutput {
   extractedClaim: ExtractedClaim;
   senderEmail: string;
   inReplyToMessageId?: string;
+  /**
+   * Body of the newest inbound message, on its own.
+   *
+   * Separate from the conversation the extractor reads, because "Confirmo" is
+   * answered by the fact that they said it, not by anything extraction can
+   * find in it.
+   */
+  latestMessageText?: string;
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -68,7 +78,8 @@ export async function orchestratePostExtraction(
   extractedOutput: ExtractedClaimOutput,
   customerMatches: CustomerMatch[]
 ): Promise<void> {
-  const { extractedClaim, senderEmail, inReplyToMessageId } = extractedOutput;
+  const { extractedClaim, senderEmail, inReplyToMessageId, latestMessageText } =
+    extractedOutput;
 
   // ── A. Non-claim email — return early ─────────────────────────────────────
   if (extractedClaim.is_claim === false) {
@@ -119,9 +130,15 @@ export async function orchestratePostExtraction(
   // 0.60, while no email went out because the extractor had left its list
   // empty. The board said "waiting on the claimant" about a question nobody
   // had been asked, and the case would have sat there forever.
+
   // A field the claimant has now answered is no longer pending. Runs BEFORE
-  // the gap analysis, which reads those rows.
-  await resolveAnsweredConfirmations(caseId, tenantId, extractedClaim.fields);
+  // the gap analysis, which reads those rows straight back out.
+  await resolveAnsweredConfirmations(
+    caseId,
+    tenantId,
+    extractedClaim.fields,
+    latestMessageText
+  );
 
   const gapResult = await analyzeEmailClaimGaps(caseId, extractedClaim.fields, tenantId);
 
@@ -366,17 +383,29 @@ export async function orchestratePostExtraction(
 async function resolveAnsweredConfirmations(
   caseId: string,
   tenantId: string,
-  fields: ExtractedClaim["fields"]
+  fields: ExtractedClaim["fields"],
+  latestMessageText?: string
 ): Promise<void> {
-  const settled = [
-    ...new Set(
-      fields
-        .filter((f) => f.confidence >= MEDIUM_CONFIDENCE_HIGH)
-        .map((f) => canonicalFieldKey(f.field_key))
-    ),
-  ];
+  const settled = new Set(
+    fields
+      .filter((f) => f.confidence >= MEDIUM_CONFIDENCE_HIGH)
+      .map((f) => canonicalFieldKey(f.field_key))
+  );
 
-  if (settled.length === 0) return;
+  // "Confirmo" is an answer even though it adds no data. The email asks for
+  // that exact word and nothing read it, so the claimant wrote it, extraction
+  // re-ran, the inferred value came back at the same confidence it always had,
+  // and the identical email went out again. Answering the way we asked left
+  // them where they started.
+  //
+  // It closes the one field we asked about, not every pending row: we only ever
+  // ask about one per email, and the same ranking that picked it picks it now.
+  if (isAffirmativeReply(latestMessageText)) {
+    const asked = await topPendingField(caseId, tenantId, fields);
+    if (asked) settled.add(asked);
+  }
+
+  if (settled.size === 0) return;
 
   try {
     await db
@@ -387,11 +416,40 @@ async function resolveAnsweredConfirmations(
           eq(claimFieldConfirmations.case_id, caseId),
           eq(claimFieldConfirmations.tenant_id, tenantId),
           eq(claimFieldConfirmations.status, "pending"),
-          inArray(claimFieldConfirmations.field_name, settled)
+          inArray(claimFieldConfirmations.field_name, [...settled])
         )
       );
   } catch (err) {
     console.error("[orchestrate] Failed to resolve confirmations:", errCode(err));
+  }
+}
+
+/** The pending field the last confirmation email would have asked about. */
+async function topPendingField(
+  caseId: string,
+  tenantId: string,
+  fields: ExtractedClaim["fields"]
+): Promise<string | null> {
+  try {
+    const rows = await db
+      .select({ field_name: claimFieldConfirmations.field_name })
+      .from(claimFieldConfirmations)
+      .where(
+        and(
+          eq(claimFieldConfirmations.case_id, caseId),
+          eq(claimFieldConfirmations.tenant_id, tenantId),
+          eq(claimFieldConfirmations.status, "pending")
+        )
+      );
+
+    const ranked = collectConfirmableFields(
+      rows.map((r) => r.field_name),
+      fields
+    );
+    return ranked[0]?.fieldKey ?? null;
+  } catch (err) {
+    console.error("[orchestrate] Failed to read pending confirmations:", errCode(err));
+    return null;
   }
 }
 
@@ -422,8 +480,15 @@ function collectConfirmableFields(
 ): ConfirmableField[] {
   const byCanonical = new Map<string, ConfirmableField>();
 
+  const confidenceOf = (key: string) =>
+    extracted.find((f) => canonicalFieldKey(f.field_key) === canonicalFieldKey(key))
+      ?.confidence;
+
   for (const rawKey of uncertainKeys) {
     if (!isWorthConfirming(rawKey)) continue;
+    // Worked out from something we already read well — an analyst can correct
+    // it without costing the claimant an email.
+    if (isDerivable(rawKey, confidenceOf)) continue;
 
     const canonical = canonicalFieldKey(rawKey);
 

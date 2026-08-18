@@ -15,6 +15,8 @@ import {
   canonicalFieldKey,
   isWorthConfirming,
   confirmationRank,
+  isAffirmativeReply,
+  isDerivable,
   labelForField,
 } from "@/lib/labels/claim-fields";
 
@@ -167,5 +169,56 @@ describe("confirmationRank", () => {
 
   it("ranks an alias exactly as its canonical key", () => {
     expect(confirmationRank("telefono_contacto")).toBe(confirmationRank("phone"));
+  });
+});
+
+describe("isAffirmativeReply", () => {
+  it("recognises the word the email asked them to write", () => {
+    // The template says: Escribí "Confirmo" si el dato es correcto. Nothing
+    // read it, so the identical email went out again.
+    expect(isAffirmativeReply("Confirmo")).toBe(true);
+    expect(isAffirmativeReply("confirmo.")).toBe(true);
+    expect(isAffirmativeReply("Sí")).toBe(true);
+    expect(isAffirmativeReply("Es correcto")).toBe(true);
+    expect(isAffirmativeReply("Ok!")).toBe(true);
+  });
+
+  it("looks past the signature a reply drags along", () => {
+    const body = "Confirmo\nIlan Daniele\nBTP SAP Consultant | M +(598) 99 413 456";
+    expect(isAffirmativeReply(body)).toBe(true);
+  });
+
+  it("does not treat a correction as agreement", () => {
+    // Must go through extraction so the correction actually lands.
+    expect(isAffirmativeReply("Confirmo, pero la fecha fue el 15")).toBe(false);
+    expect(isAffirmativeReply("No, fue en Santa Fe")).toBe(false);
+    expect(isAffirmativeReply("Fue un choque en Bahía Blanca")).toBe(false);
+  });
+
+  it("handles nothing at all", () => {
+    expect(isAffirmativeReply("")).toBe(false);
+    expect(isAffirmativeReply(null)).toBe(false);
+    expect(isAffirmativeReply("   \n  ")).toBe(false);
+  });
+});
+
+describe("isDerivable", () => {
+  const good = () => 0.9;
+  const poor = () => 0.5;
+
+  it("does not ask for the province when the place is already clear", () => {
+    // "Bahía Blanca" gives the province. Asking the claimant to confirm it is
+    // asking them to check our geography.
+    expect(isDerivable("provincia_siniestro", good)).toBe(true);
+  });
+
+  it("does ask when the place it derives from is itself doubtful", () => {
+    // Then the place is the question, and the derivation is worthless.
+    expect(isDerivable("provincia_siniestro", poor)).toBe(false);
+  });
+
+  it("leaves fields that derive from nothing alone", () => {
+    expect(isDerivable("policy_number", good)).toBe(false);
+    expect(isDerivable("claim_type", good)).toBe(false);
   });
 });

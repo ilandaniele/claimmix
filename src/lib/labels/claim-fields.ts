@@ -376,6 +376,65 @@ export function isWorthConfirming(fieldKey: string): boolean {
 }
 
 /**
+ * Fields we work out from another field, and the field they come from.
+ *
+ * Asking a claimant to confirm the province after they wrote "Bahía Blanca" is
+ * asking them to check our geography. If we read the place correctly the
+ * province follows; if we did not, the place is what to ask about. Either way
+ * the derived value is not the question.
+ *
+ * An analyst can still correct it — the row is written, it just does not cost
+ * the claimant an email.
+ */
+const DERIVED_FROM: Record<string, string> = {
+  provincia_siniestro: "accident_location",
+  provincia: "accident_location",
+  localidad_siniestro: "accident_location",
+};
+
+/**
+ * Whether this field can be worked out from something we already hold well.
+ *
+ * `sourceConfidence` is the confidence of the field it derives from; below the
+ * threshold we do not trust the source either, so the derivation is worthless
+ * and the source is what needs asking.
+ */
+export function isDerivable(
+  fieldKey: string,
+  confidenceOf: (key: string) => number | undefined,
+  threshold = 0.85
+): boolean {
+  const source = DERIVED_FROM[canonicalFieldKey(fieldKey)];
+  if (!source) return false;
+  return (confidenceOf(source) ?? 0) >= threshold;
+}
+
+/**
+ * A reply that says "yes, that is right" and nothing else.
+ *
+ * The confirmation email asks the claimant to write "Confirmo", and nothing
+ * read it. They wrote it, the extractor re-ran, the province was still an
+ * inference at 0.70, the row stayed pending — and the identical email went out
+ * again. Answering the question the way we asked them to left them exactly
+ * where they started.
+ *
+ * Only the first line counts, and only when it is nothing but the affirmation:
+ * a reply carrying a correction ("Confirmo, pero fue el 15") must go through
+ * extraction so the correction lands, not be waved through as agreement.
+ */
+const AFFIRMATIONS =
+  /^(confirmo|confirmado|confirmamos|s[ií]|s[ií] confirmo|correcto|es correcto|todo correcto|as[ií] es|exacto|ok|okay|dale|perfecto)[\s.!]*$/i;
+
+export function isAffirmativeReply(body: string | null | undefined): boolean {
+  if (!body) return false;
+  const firstLine = body
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  return firstLine ? AFFIRMATIONS.test(firstLine) : false;
+}
+
+/**
  * Which field to ask about first when several are uncertain.
  *
  * Ordering by confidence alone does not work: this model hands back whole

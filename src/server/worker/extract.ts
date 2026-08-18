@@ -371,6 +371,7 @@ export async function runEmailExtractionWorker(
   // Declared before try so the catch block can log them if Gemini fails mid-extraction.
   let emailBody = "";
   let emailSubject = "";
+  let latestInboundText = "";
   let senderEmail = "";
   let claimMessageId: string | null = null;
   let providerMessageId: string | null = null;
@@ -479,6 +480,7 @@ export async function runEmailExtractionWorker(
       emailBody = rawMsg.body ?? "";
       emailSubject = rawMsg.subject ?? "";
       senderEmail = rawMsg.from_addr ?? "";
+      latestInboundText = emailBody;
     } else {
       // Fallback: Gmail intake cases store messages in claim_messages.
       //
@@ -516,6 +518,7 @@ export async function runEmailExtractionWorker(
       }
 
       emailBody = buildConversationBody(inboundMessages);
+      latestInboundText = stripQuotedReply(latest.body_text ?? "");
       // Subject and identity come from the newest message: it is the one being
       // replied to, and its subject is what the claimant last saw.
       emailSubject = latest.subject ?? "";
@@ -961,6 +964,7 @@ export async function runEmailExtractionWorker(
           // the same thing while dispatch did no such lookup, so no reply ever
           // carried In-Reply-To.
           inReplyToMessageId: undefined,
+          latestMessageText: latestInboundText,
         },
         customerMatches
       );

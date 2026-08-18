@@ -693,3 +693,62 @@ describe("dispatchOutboundEmail — answering the message we were sent", () => {
     expect(sent.headers.find((h) => h.Name === "In-Reply-To")?.Value).toBe("<explicit@caller>");
   });
 });
+
+describe("dispatchOutboundEmail — one subject per conversation", () => {
+  const INBOX = "siniestros@company.com";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-s" });
+    gmailMocks.getGmailAccountForTenant.mockResolvedValue({
+      id: "d", tenantId: TENANT_ID, email: INBOX, refreshToken: "rt", enabled: true,
+    });
+    gmailMocks.getGmailAccountByEmail.mockResolvedValue({
+      id: "i", tenantId: TENANT_ID, email: INBOX, refreshToken: "rt", enabled: true,
+    });
+  });
+
+  afterEach(() => vi.resetModules());
+
+  async function sendWith(inbound: Record<string, unknown> | null) {
+    vi.doMock("@/lib/db", () => ({ db: buildDbMock(inbound) }));
+    const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
+    await dispatchOutboundEmail({
+      caseId: CASE_ID,
+      tenantId: TENANT_ID,
+      to: TO_ADDR,
+      template: "confirmation_received",
+      data: { caseId: CASE_ID },
+    });
+    return gmailMocks.send.mock.calls[0][0] as { subject: string };
+  }
+
+  it("answers under the subject the claimant wrote", async () => {
+    // Gmail groups on References AND subject, so correct headers alone left
+    // one claim showing as three unrelated conversations.
+    const sent = await sendWith({
+      to_addr: INBOX, thread_id: null, headers: [], subject: "Consulta",
+    });
+    expect(sent.subject).toBe("Re: Consulta");
+  });
+
+  it("does not stack Re: on a subject that already has one", async () => {
+    const sent = await sendWith({
+      to_addr: INBOX, thread_id: null, headers: [], subject: "RE: Consulta",
+    });
+    expect(sent.subject).toBe("Re: Consulta");
+  });
+
+  it("keeps the template subject when there is nothing to reply to", async () => {
+    // Simulation-created cases have no inbound message.
+    const sent = await sendWith(null);
+    expect(sent.subject).toContain("Recibimos tu reclamo");
+  });
+
+  it("keeps the template subject when the claimant sent no subject at all", async () => {
+    const sent = await sendWith({
+      to_addr: INBOX, thread_id: null, headers: [], subject: "   ",
+    });
+    expect(sent.subject).toContain("Recibimos tu reclamo");
+  });
+});

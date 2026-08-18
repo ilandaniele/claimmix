@@ -25,14 +25,14 @@
  */
 
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, claimFieldConfirmations, outboundMessages } from "@/lib/db/schema";
 import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
-import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
+import { analyzeEmailClaimGaps, MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/gap-analyzer";
 import {
   canonicalFieldKey,
   confirmationRank,
@@ -119,6 +119,10 @@ export async function orchestratePostExtraction(
   // 0.60, while no email went out because the extractor had left its list
   // empty. The board said "waiting on the claimant" about a question nobody
   // had been asked, and the case would have sat there forever.
+  // A field the claimant has now answered is no longer pending. Runs BEFORE
+  // the gap analysis, which reads those rows.
+  await resolveAnsweredConfirmations(caseId, tenantId, extractedClaim.fields);
+
   const gapResult = await analyzeEmailClaimGaps(caseId, extractedClaim.fields, tenantId);
 
   // ── C. Medium-confidence fields → confirmation rows — AC7 ─────────────────
@@ -344,6 +348,52 @@ export async function orchestratePostExtraction(
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Close the confirmations the claimant just answered.
+ *
+ * Without this the case loops. A pending row is written when a field is
+ * uncertain; the gap analyzer reads pending rows straight back out as "needs
+ * confirmation"; the orchestrator then re-asks and rewrites the row as pending.
+ * So a claimant who replied "fue un choque" — lifting claim_type from 0.70 to
+ * 0.90 — was asked to confirm "choque de vehículo", the thing they had just
+ * said in their own words, and would have been asked again after answering
+ * that, forever.
+ *
+ * `confirmed` rather than `corrected`: the value we hold now came from the
+ * claimant, whether they restated it or we simply read the message better.
+ */
+async function resolveAnsweredConfirmations(
+  caseId: string,
+  tenantId: string,
+  fields: ExtractedClaim["fields"]
+): Promise<void> {
+  const settled = [
+    ...new Set(
+      fields
+        .filter((f) => f.confidence >= MEDIUM_CONFIDENCE_HIGH)
+        .map((f) => canonicalFieldKey(f.field_key))
+    ),
+  ];
+
+  if (settled.length === 0) return;
+
+  try {
+    await db
+      .update(claimFieldConfirmations)
+      .set({ status: "confirmed" })
+      .where(
+        and(
+          eq(claimFieldConfirmations.case_id, caseId),
+          eq(claimFieldConfirmations.tenant_id, tenantId),
+          eq(claimFieldConfirmations.status, "pending"),
+          inArray(claimFieldConfirmations.field_name, settled)
+        )
+      );
+  } catch (err) {
+    console.error("[orchestrate] Failed to resolve confirmations:", errCode(err));
+  }
+}
 
 interface ConfirmableField {
   fieldKey: string;

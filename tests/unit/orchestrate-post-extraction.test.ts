@@ -54,6 +54,9 @@ vi.mock("@/lib/audit/log", () => ({
 
 // Mock gap analyzer.
 vi.mock("@/server/cases/gap-analyzer", () => ({
+  // Real value: the orchestrator resolves pending confirmations against the
+  // same threshold the analyzer uses to create them.
+  MEDIUM_CONFIDENCE_HIGH: 0.85,
   analyzeEmailClaimGaps: vi.fn().mockResolvedValue({
     missingRequiredFields: [],
     fieldsNeedingConfirmation: [],
@@ -369,6 +372,56 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
       (c) => (c[0] as { status?: string })?.status === "confirmacion_pendiente"
     );
     expect(pending).toBeDefined();
+  });
+
+  it("closes a pending confirmation once the claimant has answered it", async () => {
+    // The loop this breaks: a pending row is written when a field is
+    // uncertain, the gap analyzer reads pending rows back out as "needs
+    // confirmation", and the orchestrator re-asks and rewrites the row as
+    // pending. A claimant who replied "fue un choque" — lifting claim_type
+    // from 0.70 to 0.90 — was asked to confirm "choque de vehículo", the thing
+    // they had just said, and would have been asked again after answering.
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: [],
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "claim_type"),
+        { field_key: "claim_type", field_value: "choque", confidence: 0.9, source: "ai" as const },
+      ],
+    });
+    const { updateSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const resolved = updateSpy.mock.calls.find(
+      (c) => (c[0] as { status?: string })?.status === "confirmed"
+    );
+    expect(resolved).toBeDefined();
+  });
+
+  it("leaves a field still in the uncertain band pending", async () => {
+    // Nothing in this extraction clears the bar, so nothing gets closed.
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: [],
+      fields: extractEmailClaimMock().fields.map((f) => ({ ...f, confidence: 0.7 })),
+    });
+    const { updateSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const resolved = updateSpy.mock.calls.find(
+      (c) => (c[0] as { status?: string })?.status === "confirmed"
+    );
+    expect(resolved).toBeUndefined();
   });
 
   it("never asks someone to confirm the sentence they wrote", async () => {

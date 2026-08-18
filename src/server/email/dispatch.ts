@@ -81,9 +81,11 @@ async function resolveReplyContext(
   account: Awaited<ReturnType<typeof getGmailAccountForTenant>>;
   inReplyTo?: string;
   threadId?: string;
+  originalSubject?: string;
 }> {
   let inReplyTo: string | undefined;
   let threadId: string | undefined;
+  let originalSubject: string | undefined;
 
   try {
     const inbound = firstRow(
@@ -92,6 +94,7 @@ async function resolveReplyContext(
           to_addr: claimMessages.to_addr,
           thread_id: claimMessages.thread_id,
           headers: claimMessages.headers,
+          subject: claimMessages.subject,
         })
         .from(claimMessages)
         .where(
@@ -108,10 +111,11 @@ async function resolveReplyContext(
     if (inbound) {
       inReplyTo = messageIdFromHeaders(inbound.headers);
       threadId = inbound.thread_id ?? undefined;
+      originalSubject = inbound.subject?.trim() || undefined;
 
       if (inbound.to_addr) {
         const account = await getGmailAccountByEmail(bareAddress(inbound.to_addr));
-        if (account?.enabled) return { account, inReplyTo, threadId };
+        if (account?.enabled) return { account, inReplyTo, threadId, originalSubject };
       }
     }
   } catch (err) {
@@ -119,7 +123,33 @@ async function resolveReplyContext(
     console.error("[dispatch] Could not resolve inbound message:", code); // crew-debug-ok
   }
 
-  return { account: await getGmailAccountForTenant(tenantId), inReplyTo, threadId };
+  return {
+    account: await getGmailAccountForTenant(tenantId),
+    inReplyTo,
+    threadId,
+    originalSubject,
+  };
+}
+
+/**
+ * The subject to answer under.
+ *
+ * Gmail groups a conversation on References AND subject, so correct threading
+ * headers were not enough on their own: our first reply arrived as "Nos falta
+ * un dato" and the second as "Confirmar datos de reclamo", and Gmail showed
+ * three unrelated conversations about one claim. Replying under the subject
+ * they wrote keeps the whole exchange in the thread they started.
+ *
+ * The cost is that the case number leaves the subject line, so the "Caso #"
+ * fallback in thread-lookup loses its input — the Message-ID path is the
+ * primary one and unaffected, and the case number is still in every body.
+ *
+ * Falls back to the template's own subject when there is nothing to reply to,
+ * which is the case for simulation-created cases.
+ */
+function replySubject(templateSubject: string, originalSubject?: string): string {
+  const base = originalSubject?.replace(/^\s*(re|rv|fwd?)\s*:\s*/i, "").trim();
+  return base ? `Re: ${base}` : templateSubject;
 }
 
 /** Pull the RFC 2822 Message-ID out of the stored header array. */
@@ -219,6 +249,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   const gmailAccount = reply.account;
   const replyToMessageId = inReplyToMessageId ?? reply.inReplyTo;
   const replyThreadId = threadId ?? reply.threadId;
+  const outboundSubject = replySubject(rendered.subject, reply.originalSubject);
   if (!gmailAccount) {
     console.error("[dispatch] No Gmail account configured for tenant", tenantId); // crew-debug-ok
     return { error: "NO_GMAIL_ACCOUNT" };
@@ -243,7 +274,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
           in_reply_to: replyToMessageId ?? null,
           from_addr: fromAddress,
           to_addr: to,
-          subject: rendered.subject,
+          subject: outboundSubject,
           body_text: rendered.text,
           template,
           status: "queued",
@@ -297,7 +328,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   const sendResult = await provider.send({
     to,
     from: fromAddress,
-    subject: rendered.subject,
+    subject: outboundSubject,
     htmlBody: rendered.html,
     textBody: rendered.text,
     headers: threadingHeaders.length > 0 ? threadingHeaders : undefined,

@@ -42,7 +42,14 @@ export const REQUIRED_CONTACT_FIELDS = ["email", "phone"] as const;
 
 /** Confidence threshold for 'medium' confidence (IC9). */
 const MEDIUM_CONFIDENCE_LOW = 0.60;
-const MEDIUM_CONFIDENCE_HIGH = 0.85;
+/**
+ * At or above this, a field is certain enough to act on without asking.
+ *
+ * Exported so the orchestrator resolves pending confirmations against the same
+ * number that created them — two copies of this constant drifting apart would
+ * mean asking about a field we already consider settled.
+ */
+export const MEDIUM_CONFIDENCE_HIGH = 0.85;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

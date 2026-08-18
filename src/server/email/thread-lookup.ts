@@ -45,21 +45,18 @@ export interface ThreadLookupResult {
 export async function threadLookup(
   tenantId: string,
   inReplyTo: string,
-  references: string
+  references: string,
+  subject: string = ""
 ): Promise<ThreadLookupResult> {
   // Collect candidate thread IDs from both headers (angle brackets stripped).
   const candidates = buildCandidates(inReplyTo, references);
-
-  if (candidates.length === 0) {
-    return { existingCaseId: undefined };
-  }
 
   // ── 1. New path: claim_messages WHERE direction='outbound' (AC6 / IC7) ────
   // A claimant reply to one of our outbound emails will have
   // In-Reply-To = <provider_message_id>.  That id is stored in
   // claim_messages.provider_message_id with direction='outbound'.
   try {
-    const claimMsgRow = firstRow(
+    const claimMsgRow = candidates.length === 0 ? null : firstRow(
       await db
         .select({ case_id: claimMessages.case_id })
         .from(claimMessages)
@@ -87,7 +84,7 @@ export async function threadLookup(
   //   - Replies to the original inbound message (cases.email_thread_id = first MessageID)
   //   - Any rows that predate the claim_messages table (migration 0009)
   try {
-    const caseRow = firstRow(
+    const caseRow = candidates.length === 0 ? null : firstRow(
       await db
         .select({ id: cases.id, email_thread_id: cases.email_thread_id })
         .from(cases)
@@ -109,7 +106,39 @@ export async function threadLookup(
     return { existingCaseId: undefined };
   }
 
+  // ── 3. Last resort: the case number we put in our own subject ────────────
+  // Some clients drop References on reply, and a claimant may forward the mail
+  // or start a fresh one quoting it. Every outbound subject already carries
+  // "Caso #<uuid>", so the correlation survives even when the headers do not.
+  // Checked last: a matching header is a fact, a subject is a string someone
+  // may have typed.
+  const subjectCaseId = caseIdFromSubject(subject);
+  if (subjectCaseId) {
+    try {
+      const caseRow = firstRow(
+        await db
+          .select({ id: cases.id })
+          .from(cases)
+          .where(and(eq(cases.tenant_id, tenantId), eq(cases.id, subjectCaseId)))
+          .limit(1)
+      );
+      if (caseRow) return { existingCaseId: caseRow.id };
+    } catch (err) {
+      const code = (err as { code?: string })?.code ?? "DBError";
+      console.error("[thread-lookup] subject case lookup error:", code); // crew-debug-ok
+    }
+  }
+
   return { existingCaseId: undefined };
+}
+
+/** `"Re: Recibimos tu reclamo - Caso #<uuid>"` → the uuid, if there is one. */
+export function caseIdFromSubject(subject: string | null | undefined): string | null {
+  if (!subject) return null;
+  const match = subject.match(
+    /caso\s*#\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+  );
+  return match ? match[1].toLowerCase() : null;
 }
 
 /**

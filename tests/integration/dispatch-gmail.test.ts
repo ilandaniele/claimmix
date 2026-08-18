@@ -633,6 +633,42 @@ describe("dispatchOutboundEmail — answering the message we were sent", () => {
     expect(sent.headers).toBeUndefined();
   });
 
+  it("stores the RFC Message-ID Gmail assigned, not Gmail's internal id", async () => {
+    // thread-lookup compares a reply's In-Reply-To against this column. Storing
+    // `1a01204c9aee8332` there meant the two could never be equal, so every
+    // reply to us opened a second case.
+    gmailMocks.send.mockResolvedValue({
+      providerMessageId: "1a01204c9aee8332",
+      rfcMessageId: "<CAF9y=out@mail.gmail.com>",
+    });
+
+    const { dbMock } = await dispatchWithInbound({
+      to_addr: INBOX,
+      thread_id: null,
+      headers: [],
+    });
+
+    const patch = (dbMock._updates.claim_messages[0] as { patch: Record<string, unknown> })
+      .patch;
+    // Angle brackets stripped: thread-lookup normalises the header the same way
+    // before comparing, so the stored shape has to match.
+    expect(patch.provider_message_id).toBe("CAF9y=out@mail.gmail.com");
+  });
+
+  it("falls back to the provider id when the RFC one cannot be read back", async () => {
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "1a01204c9aee8332" });
+
+    const { dbMock } = await dispatchWithInbound({
+      to_addr: INBOX,
+      thread_id: null,
+      headers: [],
+    });
+
+    const patch = (dbMock._updates.claim_messages[0] as { patch: Record<string, unknown> })
+      .patch;
+    expect(patch.provider_message_id).toBe("1a01204c9aee8332");
+  });
+
   it("lets an explicit inReplyToMessageId win over the lookup", async () => {
     const dbMock = buildDbMock({
       to_addr: INBOX,

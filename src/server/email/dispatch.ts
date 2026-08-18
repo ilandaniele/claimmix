@@ -311,7 +311,18 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
 
   // ── 5. Update claim_messages + outbound_messages + write audit log ─────────
   if (isSendSuccess(sendResult)) {
-    const { providerMessageId } = sendResult;
+    const { providerMessageId, rfcMessageId } = sendResult;
+
+    // Store the RFC Message-ID when the provider could report it. A claimant's
+    // reply quotes that value in In-Reply-To, and thread-lookup matches this
+    // column against it — storing Gmail's internal id here meant the two could
+    // never be equal, so replying to us opened a second case every time.
+    // Stored without angle brackets: thread-lookup strips them off the
+    // In-Reply-To header before comparing, so the column has to match that
+    // shape or the equality silently never holds.
+    const storedMessageId = rfcMessageId
+      ? rfcMessageId.replace(/^<+/, "").replace(/>+$/, "").trim()
+      : providerMessageId;
 
     // Update claim_messages — set provider_message_id + status='sent' + sent_at
     if (claimMessageId) {
@@ -319,7 +330,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
         await db
           .update(claimMessages)
           .set({
-            provider_message_id: providerMessageId,
+            provider_message_id: storedMessageId,
             status: "sent",
             sent_at: new Date().toISOString(),
           })

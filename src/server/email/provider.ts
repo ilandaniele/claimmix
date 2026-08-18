@@ -30,7 +30,18 @@ export interface SendEmailOptions {
 }
 
 export type SendResult =
-  | { providerMessageId: string }
+  | {
+      providerMessageId: string;
+      /**
+       * RFC 2822 Message-ID of the sent message, when the provider can report it.
+       *
+       * Distinct from providerMessageId, which is the provider's own handle
+       * (Gmail hands back `1a01204c9aee8332`). Only this one appears in the
+       * In-Reply-To header of a reply, so it is the only one thread matching
+       * can use.
+       */
+      rfcMessageId?: string;
+    }
   | { errorCode: string };
 
 export interface EmailProvider {

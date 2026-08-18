@@ -125,6 +125,43 @@ function buildRawEmail(opts: SendEmailOptions): string {
 
 // ── GmailSender ──────────────────────────────────────────────────────────────
 
+/**
+ * Read back the RFC Message-ID Gmail assigned to a message we just sent.
+ *
+ * The send call returns only Gmail's internal id. A claimant's reply carries
+ * `In-Reply-To: <...@mail.gmail.com>` — the RFC id — so storing the internal
+ * one meant thread matching compared two identifiers that can never be equal,
+ * and every reply to a case opened a brand new case.
+ *
+ * Setting our own Message-ID in the outgoing MIME would avoid this round trip,
+ * but Gmail rewrites that header, so the value would be a fiction. One extra
+ * metadata read is the honest way to learn what actually went out.
+ *
+ * Best-effort: a failure here costs thread matching on this one message, and
+ * must never turn a delivered email into a reported failure.
+ */
+async function fetchRfcMessageId(
+  gmail: ReturnType<typeof getGmailClient>,
+  id: string
+): Promise<string | undefined> {
+  try {
+    const res = await gmail.users.messages.get({
+      userId: "me",
+      id,
+      format: "metadata",
+      metadataHeaders: ["Message-Id"],
+    });
+    const header = res.data.payload?.headers?.find(
+      (h) => h.name?.toLowerCase() === "message-id"
+    );
+    return header?.value?.trim() || undefined;
+  } catch (err) {
+    const code = err instanceof Error ? err.name : "UnknownError";
+    console.error("[GmailSender] could not read back Message-Id:", code); // crew-debug-ok
+    return undefined;
+  }
+}
+
 export class GmailSender implements EmailProvider {
   readonly name = "gmail" as const;
 
@@ -158,7 +195,7 @@ export class GmailSender implements EmailProvider {
         return { errorCode: "GMAIL_SEND_FAILED" };
       }
 
-      return { providerMessageId };
+      return { providerMessageId, rfcMessageId: await fetchRfcMessageId(gmail, providerMessageId) };
     } catch (err) {
       // AC10: log only the error code — never credential values or message bodies.
       const code =

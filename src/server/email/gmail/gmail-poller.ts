@@ -435,7 +435,8 @@ async function processMessage(
   const { existingCaseId: threadCaseId } = await threadLookup(
     tenantId,
     inReplyToRaw,
-    referencesRaw
+    referencesRaw,
+    subject
   );
 
   // ── e) Resolve case (existing thread or new case) ──────────────────────────

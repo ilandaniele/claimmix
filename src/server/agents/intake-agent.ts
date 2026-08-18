@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
@@ -203,6 +203,20 @@ function chooseAction(channel: IntakeChannel): IntakeAgentResult["action"] {
   return "skip_unsupported_channel";
 }
 
+/**
+ * How long a WhatsApp conversation stays open to new messages.
+ *
+ * A phone number is forever, and it is the only thing tying a WhatsApp message
+ * to a case — email has the Message-ID and the thread, this has a number. With
+ * no bound, a message sent months later joined whatever claim was still open:
+ * a fresh crash arrived as a follow-up, and the agent asked only for the one
+ * document missing from the previous one.
+ *
+ * A week is the judgement call. A reply the next day is almost certainly the
+ * same conversation; a message in March is a new accident.
+ */
+const WHATSAPP_THREAD_WINDOW_DAYS = 7;
+
 async function findExistingWhatsAppCase(
   tenantId: string,
   threadId: string,
@@ -219,6 +233,7 @@ async function findExistingWhatsAppCase(
             eq(c.tenant_id, tenantId),
             eq(c.channel, channel),
             eq(c.email_thread_id, threadId),
+            sql`coalesce(${c.updated_at}, ${c.created_at}) > now() - interval '${sql.raw(String(WHATSAPP_THREAD_WINDOW_DAYS))} days'`,
             inArray(c.status, [
               "recibido",
               "info_faltante",

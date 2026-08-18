@@ -330,3 +330,55 @@ describe("createWhatsAppIntakeAndRunAgent", () => {
     expect(mockDbInsert).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("createWhatsAppIntake — simulated numbers never reach WhatsApp", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRunEmailExtractionWorker.mockResolvedValue(undefined);
+    mockWriteAuditLog.mockResolvedValue(undefined);
+  });
+
+  /** The row handed to the first cases insert. */
+  function insertedCase(): Record<string, unknown> | undefined {
+    const chain = mockDbInsert.mock.results[0]?.value as
+      | { values: ReturnType<typeof vi.fn> }
+      | undefined;
+    return chain?.values.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+  }
+
+  it("marks a simulated intake as whatsapp_sim", async () => {
+    // The simulation and BSP paths invent their phone numbers. They used to be
+    // safe only because the route never asked for a reply; the orchestrator
+    // answers every case now, so the case itself has to carry the warning.
+    setupSelectResults([
+      [],
+      [{ id: "case-sim-1", tenant_id: "tenant-001", channel: "whatsapp_sim", status: "recibido" }],
+    ]);
+    setupInsertResults([{ rows: [{ id: "case-sim-1" }] }, { rows: [] }, { rows: [] }]);
+
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "5491100000000",
+      body: "Choque simulado",
+      simulated: true,
+    });
+
+    expect(insertedCase()?.channel).toBe("whatsapp_sim");
+  });
+
+  it("leaves a real intake on the whatsapp channel", async () => {
+    setupSelectResults([
+      [],
+      [{ id: "case-real-1", tenant_id: "tenant-001", channel: "whatsapp", status: "recibido" }],
+    ]);
+    setupInsertResults([{ rows: [{ id: "case-real-1" }] }, { rows: [] }, { rows: [] }]);
+
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "59899413456",
+      body: "Choqué en Bahía Blanca",
+    });
+
+    expect(insertedCase()?.channel).toBe("whatsapp");
+  });
+});

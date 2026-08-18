@@ -310,6 +310,11 @@ export async function orchestratePostExtraction(
     isHighSeverity || confirmationEmailDispatched || missingInfoEmailDispatched;
 
   if (!somethingElseWasSaid && !(await checkConfirmationAlreadySent(caseId, tenantId))) {
+    // Have we written to this claimant before? If so this is a closing, not an
+    // acknowledgement, and it should not open by thanking them for getting in
+    // touch two rounds after they did.
+    const isFollowUp = await hasPriorOutbound(caseId, tenantId);
+
     // Extract claim_type and policy_number from fields for the email template.
     const claimTypeField = extractedClaim.fields.find((f) => f.field_key === "claim_type");
     const policyField = extractedClaim.fields.find((f) => f.field_key === "policy_number");
@@ -324,6 +329,7 @@ export async function orchestratePostExtraction(
         claimType: claimTypeField?.field_value ?? null,
         // policyNumber passed through; template masks it (AC24).
         policyNumber: policyField?.field_value ?? null,
+        isFollowUp,
       },
       inReplyToMessageId,
     });
@@ -617,6 +623,28 @@ async function upsertFieldConfirmation(
     }
   } catch (err) {
     console.error("[orchestrate] Failed to upsert claim_field_confirmations:", errCode(err));
+  }
+}
+
+/** Whether anything has already gone out to the claimant on this case. */
+async function hasPriorOutbound(caseId: string, tenantId: string): Promise<boolean> {
+  try {
+    const rows = await db
+      .select({ id: outboundMessages.id })
+      .from(outboundMessages)
+      .where(
+        and(
+          eq(outboundMessages.case_id, caseId),
+          eq(outboundMessages.tenant_id, tenantId)
+        )
+      )
+      .limit(1);
+    return rows.length > 0;
+  } catch (err) {
+    // Fall back to the first-contact wording: greeting someone twice is a
+    // smaller error than closing a conversation that never happened.
+    console.error("[orchestrate] Failed to check prior outbound:", errCode(err));
+    return false;
   }
 }
 

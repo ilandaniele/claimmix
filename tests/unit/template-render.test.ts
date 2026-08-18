@@ -472,3 +472,37 @@ describe("renderTemplate — a value we hold but cannot say", () => {
     expect(result.html).toContain("daño por granizo");
   });
 });
+
+describe("renderTemplate — acknowledgement vs closing", () => {
+  it("greets on first contact", () => {
+    const r = renderTemplate("confirmation_received", { caseId: "x", claimType: "choque" });
+    expect(r.subject).toContain("Recibimos tu reclamo");
+    expect(r.html).toContain("Gracias por contactarnos");
+  });
+
+  it("closes instead of greeting when the exchange already happened", () => {
+    // "Gracias por contactarnos" arriving third, after two rounds the claimant
+    // answered, reads as though the conversation never took place.
+    const r = renderTemplate("confirmation_received", {
+      caseId: "x",
+      claimType: "choque",
+      isFollowUp: true,
+    });
+    expect(r.subject).toContain("Tu reclamo quedó completo");
+    expect(r.html).toContain("ya tenemos todo lo que necesitábamos");
+    expect(r.html).toContain("quedó completo y pasa a análisis");
+    expect(r.html).not.toContain("Gracias por contactarnos");
+    expect(r.text).toContain("ya tenemos todo lo que necesitábamos");
+    expect(r.text).not.toContain("Gracias por contactarnos");
+  });
+
+  it("still names the claim type and case in the closing", () => {
+    const r = renderTemplate("confirmation_received", {
+      caseId: "case-77",
+      claimType: "granizo",
+      isFollowUp: true,
+    });
+    expect(r.html).toContain("daño por granizo");
+    expect(r.html).toContain("case-77");
+  });
+});

@@ -86,6 +86,7 @@ export function renderTemplate(
         caseId: String(data.caseId ?? ""),
         claimType: data.claimType != null ? String(data.claimType) : null,
         policyNumber: data.policyNumber != null ? String(data.policyNumber) : null,
+              isFollowUp: data.isFollowUp === true,
       });
 
     case "missing_information_request":

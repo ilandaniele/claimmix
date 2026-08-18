@@ -279,17 +279,20 @@ export async function orchestratePostExtraction(
       target_id: caseId,
       payload: { missing_fields: gapResult.missingRequiredFields },
     });
-  } else if (gapResult.status === "confirmacion_pendiente") {
-    // Pending confirmations, no missing required fields.
-    await setStatus(caseId, tenantId, "confirmacion_pendiente");
-  } else if (gapResult.status === "listo_para_core") {
-    // All required fields present + no pending confirmations.
-    // Not when escalated, and not when we just asked the claimant to confirm
-    // something — the gap analysis ran before that email existed, so on its own
-    // it would call the case ready while an unanswered question is in flight.
-    if (!isHighSeverity && !confirmationEmailDispatched) {
-      await setStatus(caseId, tenantId, "listo_para_core");
-    }
+  } else if (!isHighSeverity && !confirmationEmailDispatched) {
+    // Nothing was asked, so nothing is being waited on.
+    //
+    // The analyzer can return confirmacion_pendiente over doubts we decided are
+    // not worth an email — a derived province, a field ranked below the cap.
+    // Taking that status at face value parked a complete claim as "waiting on
+    // the claimant" in the same run that sent them a message saying we had
+    // everything. A doubt nobody was asked about is a note for the analyst, not
+    // a block on the case.
+    //
+    // The branches that do send a question set their own status above, so
+    // reaching here means the conversation is finished as far as we are
+    // concerned.
+    await setStatus(caseId, tenantId, "listo_para_core");
   }
 
   // ── F. Acknowledge receipt — but only if nothing else already did ─────────

@@ -1143,3 +1143,82 @@ describe("orchestratePostExtraction — getStoredFieldValue non-full_name field"
     expect(row?.conflict_with_value ?? "").toBe("");
   });
 });
+
+// ── Test suite: a finished claim is not "waiting on the claimant" ────────────
+
+describe("orchestratePostExtraction — nothing left to ask", () => {
+  it("marks the case ready when it asked nothing", async () => {
+    // A complete claim was parked as confirmacion_pendiente in the same run
+    // that emailed the claimant saying we had everything. The analyzer can
+    // return that status over doubts we decided are not worth an email — a
+    // derived province, a field below the cap. A doubt nobody was asked about
+    // is a note for the analyst, not a block on the case.
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        {
+          fieldName: "provincia_siniestro",
+          suggestedValue: "Buenos Aires",
+          reason: "medium_confidence",
+        },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+    const claim = extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields,
+        {
+          field_key: "accident_location",
+          field_value: "Bahía Blanca",
+          confidence: 0.9,
+          source: "ai" as const,
+        },
+      ],
+    });
+    const { updateSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+    expect(templates).not.toContain("missing_information_request");
+
+    const statuses = updateSpy.mock.calls.map((c) => (c[0] as { status?: string })?.status);
+    expect(statuses).toContain("listo_para_core");
+    expect(statuses).not.toContain("confirmacion_pendiente");
+  });
+
+  it("still waits when it actually asked something", async () => {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        { fieldName: "claim_type", suggestedValue: "other", reason: "medium_confidence" },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+    const claim = extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "claim_type"),
+        { field_key: "claim_type", field_value: "other", confidence: 0.7, source: "ai" as const },
+      ],
+    });
+    const { updateSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const statuses = updateSpy.mock.calls.map((c) => (c[0] as { status?: string })?.status);
+    expect(statuses).toContain("confirmacion_pendiente");
+    expect(statuses).not.toContain("listo_para_core");
+  });
+});

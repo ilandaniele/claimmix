@@ -28,6 +28,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const gmailMocks = vi.hoisted(() => ({
   send: vi.fn(),
   getGmailAccountForTenant: vi.fn(),
+  getGmailAccountByEmail: vi.fn(),
 }));
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ vi.mock("@/lib/audit/log", () => ({
 
 vi.mock("@/server/email/gmail/accounts", () => ({
   getGmailAccountForTenant: gmailMocks.getGmailAccountForTenant,
+  getGmailAccountByEmail: gmailMocks.getGmailAccountByEmail,
 }));
 
 vi.mock("@/server/email/gmail/gmail-sender", () => ({
@@ -74,7 +76,7 @@ const OUTBOUND_MSG_ID = "outbound-msg-uuid-001";
  *   db.insert(table).values(row).returning({ id: table.id })  → [{ id }]
  *   db.update(table).set(patch).where(eq(...))                → void
  */
-function buildDbMock() {
+function buildDbMock(inboundRow: Record<string, unknown> | null = null) {
   const inserts: Record<string, unknown[]> = {
     claim_messages: [],
     outbound_messages: [],
@@ -112,6 +114,18 @@ function buildDbMock() {
   const dbMock = {
     _inserts: inserts,
     _updates: updates,
+
+    // resolveReplyContext reads the inbound claim_messages row to decide which
+    // mailbox answers and which Message-ID to quote.
+    select: vi.fn().mockImplementation(() => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: () => Promise.resolve(inboundRow ? [inboundRow] : []),
+          }),
+        }),
+      }),
+    })),
 
     insert: vi.fn().mockImplementation((tableObj: object) => {
       const { name, id } = resolveTable(tableObj);
@@ -515,5 +529,131 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
     const update = omUpdates[0] as { patch: Record<string, unknown>; where: Record<string, unknown> };
     expect(update.patch.status).toBe("failed");
     expect(update.where.id).toBe(OUTBOUND_MSG_ID);
+  });
+});
+
+// ── Threading + sender identity ───────────────────────────────────────────────
+
+describe("dispatchOutboundEmail — answering the message we were sent", () => {
+  const INBOX = "siniestros@company.com";
+  const MESSAGE_ID = "<CAJdbW9E1zHTuWtt@mail.gmail.com>";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    gmailMocks.send.mockResolvedValue({ providerMessageId: "out-9" });
+    gmailMocks.getGmailAccountForTenant.mockResolvedValue({
+      id: "default-account",
+      tenantId: TENANT_ID,
+      email: "otra-casilla@company.com",
+      refreshToken: "rt-default",
+      enabled: true,
+    });
+    gmailMocks.getGmailAccountByEmail.mockResolvedValue({
+      id: "inbox-account",
+      tenantId: TENANT_ID,
+      email: INBOX,
+      refreshToken: "rt-inbox",
+      enabled: true,
+    });
+  });
+
+  afterEach(() => vi.resetModules());
+
+  async function dispatchWithInbound(inbound: Record<string, unknown> | null) {
+    const dbMock = buildDbMock(inbound);
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
+    const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
+    await dispatchOutboundEmail({
+      caseId: CASE_ID,
+      tenantId: TENANT_ID,
+      to: TO_ADDR,
+      template: "confirmation_received",
+      data: { caseId: CASE_ID },
+    });
+    return { dbMock, sent: gmailMocks.send.mock.calls[0][0] as Record<string, unknown> };
+  }
+
+  it("replies from the mailbox the claimant wrote to, not the tenant default", async () => {
+    // A claimant mailed ilan.daniele@ and was answered by gonzajas1710@: the
+    // tenant has three mailboxes and the default was whichever row Postgres
+    // handed back first.
+    const { sent } = await dispatchWithInbound({
+      to_addr: `Siniestros <${INBOX}>`,
+      thread_id: "1a012048",
+      headers: [{ name: "Message-ID", value: MESSAGE_ID }],
+    });
+
+    expect(gmailMocks.getGmailAccountByEmail).toHaveBeenCalledWith(INBOX);
+    expect(sent.from).toBe(INBOX);
+  });
+
+  it("quotes the RFC Message-ID so the reply lands in their existing thread", async () => {
+    const { sent } = await dispatchWithInbound({
+      to_addr: INBOX,
+      thread_id: "1a012048",
+      headers: [
+        { name: "Delivered-To", value: INBOX },
+        { name: "Message-ID", value: MESSAGE_ID },
+      ],
+    });
+
+    const headers = sent.headers as Array<{ Name: string; Value: string }>;
+    expect(headers.find((h) => h.Name === "In-Reply-To")?.Value).toBe(MESSAGE_ID);
+    expect(headers.find((h) => h.Name === "References")?.Value).toBe(MESSAGE_ID);
+  });
+
+  it("never sends Gmail's internal id as a Message-ID", async () => {
+    // provider_message_id holds `1a01204891285db2`, which is meaningless to any
+    // other mail server. Only the header value will do.
+    const { sent } = await dispatchWithInbound({
+      to_addr: INBOX,
+      thread_id: "1a01204891285db2",
+      headers: [{ name: "Message-ID", value: MESSAGE_ID }],
+    });
+
+    const headers = sent.headers as Array<{ Name: string; Value: string }>;
+    expect(headers.every((h) => !h.Value.includes("1a01204891285db2"))).toBe(true);
+  });
+
+  it("sends no threading header when the inbound message carries no Message-ID", async () => {
+    const { sent } = await dispatchWithInbound({
+      to_addr: INBOX,
+      thread_id: null,
+      headers: [{ name: "Delivered-To", value: INBOX }],
+    });
+
+    expect(sent.headers).toBeUndefined();
+  });
+
+  it("falls back to the tenant default when there is no inbound message", async () => {
+    // Simulation-created cases have nothing to learn from.
+    const { sent } = await dispatchWithInbound(null);
+
+    expect(sent.from).toBe("otra-casilla@company.com");
+    expect(sent.headers).toBeUndefined();
+  });
+
+  it("lets an explicit inReplyToMessageId win over the lookup", async () => {
+    const dbMock = buildDbMock({
+      to_addr: INBOX,
+      thread_id: null,
+      headers: [{ name: "Message-ID", value: MESSAGE_ID }],
+    });
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
+    const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
+
+    await dispatchOutboundEmail({
+      caseId: CASE_ID,
+      tenantId: TENANT_ID,
+      to: TO_ADDR,
+      template: "confirmation_received",
+      data: { caseId: CASE_ID },
+      inReplyToMessageId: "<explicit@caller>",
+    });
+
+    const sent = gmailMocks.send.mock.calls[0][0] as {
+      headers: Array<{ Name: string; Value: string }>;
+    };
+    expect(sent.headers.find((h) => h.Name === "In-Reply-To")?.Value).toBe("<explicit@caller>");
   });
 });

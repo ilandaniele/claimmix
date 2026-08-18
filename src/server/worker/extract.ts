@@ -930,9 +930,10 @@ export async function runEmailExtractionWorker(
         {
           extractedClaim,
           senderEmail,
-          // inReplyToMessageId: not available here; looked up by dispatch from
-          // the raw_messages row if needed. Passed as undefined — dispatch
-          // degrades gracefully (no In-Reply-To header on first send).
+          // Left undefined on purpose: dispatch reads the RFC Message-ID off
+          // the inbound claim_messages row itself. This comment used to say
+          // the same thing while dispatch did no such lookup, so no reply ever
+          // carried In-Reply-To.
           inReplyToMessageId: undefined,
         },
         customerMatches

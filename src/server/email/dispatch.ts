@@ -56,22 +56,43 @@ function bareAddress(value: string): string {
 }
 
 /**
- * Which of the tenant's mailboxes should send this reply.
+ * Everything the inbound message tells us about how to answer it.
  *
- * The one the claimant wrote to. A tenant can have several connected, and
- * answering from whichever the database happened to return first means someone
- * who mailed siniestros@ gets an answer from an unrelated address — it breaks
- * threading in their client and reads like a mistake, or a scam.
+ * Two things come from the same row, so they are read together.
  *
- * Falls back to the tenant default when there is no inbound message to learn
- * from (a case created by simulation, say) or when that mailbox is no longer
- * connected.
+ * The mailbox: reply from the address the claimant wrote to. A tenant can have
+ * several connected, and answering from whichever the database happened to
+ * return first means someone who mailed siniestros@ gets an answer from an
+ * unrelated address — it breaks threading in their client and reads like a
+ * mistake, or a scam.
+ *
+ * The Message-ID: the RFC one out of the stored headers, not
+ * provider_message_id — that column holds Gmail's internal id (`1a012048...`),
+ * which means nothing to any other mail server. Without In-Reply-To every
+ * reply lands in the claimant's inbox as an unrelated message, which is what
+ * happened: three separate conversations about one claim. The extraction
+ * worker passes inReplyToMessageId as undefined with a comment saying dispatch
+ * would look it up — it never did, so the header was never sent.
  */
-async function resolveSendingAccount(caseId: string, tenantId: string) {
+async function resolveReplyContext(
+  caseId: string,
+  tenantId: string
+): Promise<{
+  account: Awaited<ReturnType<typeof getGmailAccountForTenant>>;
+  inReplyTo?: string;
+  threadId?: string;
+}> {
+  let inReplyTo: string | undefined;
+  let threadId: string | undefined;
+
   try {
     const inbound = firstRow(
       await db
-        .select({ to_addr: claimMessages.to_addr })
+        .select({
+          to_addr: claimMessages.to_addr,
+          thread_id: claimMessages.thread_id,
+          headers: claimMessages.headers,
+        })
         .from(claimMessages)
         .where(
           and(
@@ -84,16 +105,31 @@ async function resolveSendingAccount(caseId: string, tenantId: string) {
         .limit(1)
     );
 
-    if (inbound?.to_addr) {
-      const account = await getGmailAccountByEmail(bareAddress(inbound.to_addr));
-      if (account?.enabled) return account;
+    if (inbound) {
+      inReplyTo = messageIdFromHeaders(inbound.headers);
+      threadId = inbound.thread_id ?? undefined;
+
+      if (inbound.to_addr) {
+        const account = await getGmailAccountByEmail(bareAddress(inbound.to_addr));
+        if (account?.enabled) return { account, inReplyTo, threadId };
+      }
     }
   } catch (err) {
     const code = (err as { code?: string })?.code ?? "DBError";
-    console.error("[dispatch] Could not resolve inbound mailbox:", code); // crew-debug-ok
+    console.error("[dispatch] Could not resolve inbound message:", code); // crew-debug-ok
   }
 
-  return getGmailAccountForTenant(tenantId);
+  return { account: await getGmailAccountForTenant(tenantId), inReplyTo, threadId };
+}
+
+/** Pull the RFC 2822 Message-ID out of the stored header array. */
+function messageIdFromHeaders(headers: unknown): string | undefined {
+  if (!Array.isArray(headers)) return undefined;
+  const row = (headers as Array<{ name?: string; value?: string }>).find(
+    (h) => h?.name?.toLowerCase() === "message-id"
+  );
+  const value = row?.value?.trim();
+  return value ? value : undefined;
 }
 
 /**
@@ -176,9 +212,13 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     return { error: "RENDER_FAILED" };
   }
 
-  // Reply from the mailbox the claimant actually wrote to — see
-  // resolveSendingAccount. Falls back to the tenant default.
-  const gmailAccount = await resolveSendingAccount(caseId, tenantId);
+  // Reply from the mailbox the claimant wrote to, quoting the Message-ID they
+  // wrote from — see resolveReplyContext. Explicit options win: a caller that
+  // already knows the message it is answering knows better than a lookup.
+  const reply = await resolveReplyContext(caseId, tenantId);
+  const gmailAccount = reply.account;
+  const replyToMessageId = inReplyToMessageId ?? reply.inReplyTo;
+  const replyThreadId = threadId ?? reply.threadId;
   if (!gmailAccount) {
     console.error("[dispatch] No Gmail account configured for tenant", tenantId); // crew-debug-ok
     return { error: "NO_GMAIL_ACCOUNT" };
@@ -199,8 +239,8 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
           direction: "outbound",
           provider: provider.name,
           provider_message_id: null, // set after send
-          thread_id: threadId ?? null,
-          in_reply_to: inReplyToMessageId ?? null,
+          thread_id: replyThreadId ?? null,
+          in_reply_to: replyToMessageId ?? null,
           from_addr: fromAddress,
           to_addr: to,
           subject: rendered.subject,
@@ -249,9 +289,9 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   // ── 4. Send via EmailProvider ─────────────────────────────────────────────
   // AC16: Build In-Reply-To / References headers when threading.
   const threadingHeaders: Array<{ Name: string; Value: string }> = [];
-  if (inReplyToMessageId) {
-    threadingHeaders.push({ Name: "In-Reply-To", Value: inReplyToMessageId });
-    threadingHeaders.push({ Name: "References", Value: inReplyToMessageId });
+  if (replyToMessageId) {
+    threadingHeaders.push({ Name: "In-Reply-To", Value: replyToMessageId });
+    threadingHeaders.push({ Name: "References", Value: replyToMessageId });
   }
 
   const sendResult = await provider.send({
@@ -261,6 +301,11 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     htmlBody: rendered.html,
     textBody: rendered.text,
     headers: threadingHeaders.length > 0 ? threadingHeaders : undefined,
+    // Deliberately NOT replyThreadId: Gmail only accepts threadId when the
+    // Subject matches the thread's, and ours never does — it carries the case
+    // number. Passing it risks the send itself. The thread id is still stored
+    // on our row so the case view can group the conversation; the claimant's
+    // client threads on In-Reply-To/References above.
     threadId: threadId ?? undefined,
   });
 

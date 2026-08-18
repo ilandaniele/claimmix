@@ -120,6 +120,16 @@ export const cases = pgTable("cases", {
     .notNull(),
   updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }),
   closed_at: timestamp("closed_at", { withTimezone: true, mode: "string" }),
+  /**
+   * Held while an extraction run owns this case. A lease, not a lock: it
+   * expires, so a crashed run cannot wedge the case forever.
+   */
+  extraction_lease_at: timestamp("extraction_lease_at", {
+    withTimezone: true,
+    mode: "string",
+  }),
+  /** A message arrived while a run was in flight; the holder must run again. */
+  extraction_pending: boolean("extraction_pending").default(false).notNull(),
   email_message_id: text("email_message_id"),
   email_thread_id: text("email_thread_id"),
   is_claim: boolean("is_claim"),

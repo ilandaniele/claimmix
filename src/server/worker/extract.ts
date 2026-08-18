@@ -58,6 +58,7 @@ import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-class
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/server/cases/fsm";
+import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { loadAgentTraining } from "@/server/agents/training";
 import { loadActivePromptRules, formatPromptRules } from "@/server/training/prompt-rules";
@@ -363,6 +364,121 @@ export async function runExtractionWorker(
  * AC15: Severity classification matrix enforced by classifySeverity()
  * AC25: XML sentinel delimiters in buildEmailClaimPrompt defuse injection
  */
+
+// ── Serialising extraction per case ───────────────────────────────────────────
+
+/**
+ * How long a run may hold a case before another may take it.
+ *
+ * Longer than any real extraction (they run 10-20s) and short enough that a
+ * function evicted mid-run does not strand the case. A lease, not a lock: a
+ * crash must not wedge a claim forever.
+ */
+const EXTRACTION_LEASE_MS = 3 * 60 * 1000;
+
+/**
+ * Take the case, or record that it needs running again.
+ *
+ * Two replies a second apart produced two concurrent runs on the same case.
+ * Both read the conversation before either had written, so both emailed the
+ * claimant asking for the policy number and DNI they had just sent — 528 ms
+ * apart — and their overlapping upserts collided, leaving neither value
+ * stored. The claimant answered correctly and the data disappeared.
+ *
+ * The UPDATE is the lock: Postgres serialises writes to the row, so exactly
+ * one caller matches the free-lease predicate and gets a row back.
+ */
+async function acquireExtractionLease(
+  caseId: string,
+  tenantId: string
+): Promise<boolean> {
+  try {
+    const taken = await db
+      .update(cases)
+      .set({ extraction_lease_at: new Date().toISOString() })
+      .where(
+        and(
+          eq(cases.id, caseId),
+          eq(cases.tenant_id, tenantId),
+          or(
+            isNull(cases.extraction_lease_at),
+            sql`${cases.extraction_lease_at} < now() - interval '${sql.raw(String(EXTRACTION_LEASE_MS))} milliseconds'`
+          )
+        )
+      )
+      .returning({ id: cases.id });
+
+    if (taken.length > 0) return true;
+
+    // Someone else holds it. Their run started before this message was stored,
+    // so it cannot see it — flag the case so the holder runs again rather than
+    // letting the message go unread.
+    await db
+      .update(cases)
+      .set({ extraction_pending: true })
+      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+
+    console.info(
+      JSON.stringify({
+        level: "info",
+        service: "claimmix",
+        msg: "email_worker.deferred_busy",
+        case_id: caseId,
+      })
+    );
+    return false;
+  } catch (err) {
+    // Never block intake on the lease itself. Running twice is the bug we are
+    // fixing; not running at all is worse.
+    console.error("[email-worker] lease acquire error:", dbErrCode(err));
+    return true;
+  }
+}
+
+/**
+ * Release the case, and say whether something arrived while we held it.
+ *
+ * The flag is cleared here rather than by the next run, so a message that
+ * arrives after this point sets it again and is not swallowed by the re-run we
+ * are about to trigger.
+ */
+async function releaseExtractionLease(
+  caseId: string,
+  tenantId: string
+): Promise<boolean> {
+  try {
+    const rows = await db
+      .select({ pending: cases.extraction_pending })
+      .from(cases)
+      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
+      .limit(1);
+
+    await db
+      .update(cases)
+      .set({ extraction_lease_at: null, extraction_pending: false })
+      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+
+    return rows[0]?.pending === true;
+  } catch (err) {
+    console.error("[email-worker] lease release error:", dbErrCode(err));
+    return false;
+  }
+}
+
+/** Re-run the worker over HTTP for a message that landed mid-run. */
+async function redispatchExtraction(caseId: string, tenantId: string): Promise<void> {
+  try {
+    await fetch(`${getWorkerBaseUrl()}/api/worker/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Internal-Worker": "true" },
+      body: JSON.stringify({ caseId, tenantId }),
+    });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "UnknownError";
+    console.error("[email-worker] redispatch error:", name, "case:", caseId);
+  }
+}
+
 export async function runEmailExtractionWorker(
   caseId: string,
   tenantId: string,
@@ -375,6 +491,7 @@ export async function runEmailExtractionWorker(
   let senderEmail = "";
   let claimMessageId: string | null = null;
   let providerMessageId: string | null = null;
+  let leaseHeld = false;
 
   try {
     // ── a) Fetch case + raw_messages ──────────────────────────────────────────
@@ -432,6 +549,11 @@ export async function runEmailExtractionWorker(
       );
       return;
     }
+
+    // One run per case at a time. Everything below reads the conversation and
+    // writes back to it, so two runs overlapping corrupt each other.
+    if (!(await acquireExtractionLease(caseId, tenantId))) return;
+    leaseHeld = true;
 
     // ── Throttle real email extractions ──────────────────────────────────────
     // Prevents burst of 30+ simultaneous Gemini calls when many emails arrive
@@ -1067,6 +1189,23 @@ export async function runEmailExtractionWorker(
       })
     );
     // Do not rethrow — fire-and-forget callers must not crash.
+  } finally {
+    if (leaseHeld) {
+      // A message that landed while we were running was never read: the run
+      // that would have read it deferred to us. Run again for it.
+      const arrivedWhileBusy = await releaseExtractionLease(caseId, tenantId);
+      if (arrivedWhileBusy) {
+        console.info(
+          JSON.stringify({
+            level: "info",
+            service: "claimmix",
+            msg: "email_worker.rerun_for_deferred_message",
+            case_id: caseId,
+          })
+        );
+        await redispatchExtraction(caseId, tenantId);
+      }
+    }
   }
 }
 

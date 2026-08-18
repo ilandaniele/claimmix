@@ -189,7 +189,19 @@ function buildDbMock(bodyText = "Test body") {
   const mockUpdate = vi.fn().mockImplementation(() => ({
     set: vi.fn().mockImplementation((data: Record<string, unknown>) => {
       capturedCaseUpdates.push(data);
-      return { where: vi.fn().mockResolvedValue({ rowCount: 1 }) };
+      // `where()` is both awaitable and chainable: the extraction lease reads
+      // `.returning()` off it to learn whether it won the row. A mock that only
+      // resolved made every run look like it had lost the race and return
+      // early — the worker did nothing and the failure looked like extraction.
+      return {
+        where: vi.fn().mockImplementation(() => {
+          const result: Promise<unknown> & {
+            returning?: () => Promise<unknown[]>;
+          } = Promise.resolve({ rowCount: 1 });
+          result.returning = () => Promise.resolve([{ id: "case-1" }]);
+          return result;
+        }),
+      };
     }),
   }));
 
@@ -291,8 +303,10 @@ describe("SEC-1: AC10 — prompt injection containment", () => {
 
     await runEmailExtractionWorker("case-sec-001", "tenant-001", "user-001");
 
-    // The final case update should have is_claim=true, not false
-    const caseUpdate = capturedCaseUpdates[0];
+    // The case update should carry is_claim=true, not false. Found by content
+    // rather than position: the extraction lease writes to `cases` too, so
+    // which update lands first is not the assertion.
+    const caseUpdate = capturedCaseUpdates.find((u) => "is_claim" in u);
     expect(caseUpdate).toBeDefined();
     expect(caseUpdate?.is_claim).toBe(true);
   });

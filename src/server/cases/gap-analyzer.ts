@@ -21,7 +21,11 @@
 import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { claimFieldConfirmations, missingDocs } from "@/lib/db/schema";
+import {
+  claimFieldConfirmations,
+  extractedFields as extractedFieldsTable,
+  missingDocs,
+} from "@/lib/db/schema";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 
@@ -107,6 +111,19 @@ export async function analyzeEmailClaimGaps(
   // ── 1. Fetch unresolved missing_docs rows ──────────────────────────────────
   const missingDocKeys = await fetchMissingDocKeys(caseId, tenantId);
 
+  // Everything the case already holds, not just what this run returned.
+  //
+  // A re-extraction reports what it found in the message it was given. The
+  // third message of a conversation was "fue un choque", and the extractor
+  // returned the claim type and little else — correctly, that is what the
+  // message said. Judging completeness from that one array declared the name,
+  // the date, the description, the policy number and the DNI all missing, and
+  // emailed the claimant asking for five things they had already sent, four of
+  // which were sitting in extracted_fields at 0.95.
+  //
+  // Completeness is a property of the case, not of the last thing said.
+  const storedFields = await fetchStoredFields(caseId, tenantId);
+
   // ── 2. Build a map of extracted field values and confidences ──────────────
   //
   // Keyed by canonical name, best copy wins. The extractor emits `numero_poliza`
@@ -114,10 +131,12 @@ export async function analyzeEmailClaimGaps(
   // raw-key map would report it missing while holding it under the other
   // spelling — and email the claimant asking for something they already sent.
   const fieldMap = new Map<string, ExtractedField>();
-  for (const f of extractedFields) {
+  // Stored first, this run second: a fresh reading of the same field wins ties,
+  // so a correction in the latest message is not outranked by the old value.
+  for (const f of [...storedFields, ...extractedFields]) {
     const key = canonicalFieldKey(f.field_key);
     const existing = fieldMap.get(key);
-    if (!existing || f.confidence > existing.confidence) {
+    if (!existing || f.confidence >= existing.confidence) {
       fieldMap.set(key, f);
     }
   }
@@ -207,6 +226,47 @@ export async function analyzeEmailClaimGaps(
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Fields already persisted for this case by earlier extractions.
+ *
+ * Read-only: the orchestrator owns every write. Failure degrades to "we know
+ * only what this run found", which is the behaviour that caused the bug — so
+ * it is logged rather than passed over in silence.
+ */
+async function fetchStoredFields(
+  caseId: string,
+  tenantId: string
+): Promise<ExtractedField[]> {
+  try {
+    const rows = await db
+      .select({
+        field_key: extractedFieldsTable.field_key,
+        field_value: extractedFieldsTable.field_value,
+        confidence: extractedFieldsTable.confidence,
+      })
+      .from(extractedFieldsTable)
+      .where(
+        and(
+          eq(extractedFieldsTable.case_id, caseId),
+          eq(extractedFieldsTable.tenant_id, tenantId)
+        )
+      );
+
+    return rows.map((r) => ({
+      field_key: r.field_key,
+      field_value: r.field_value ?? "",
+      confidence: Number(r.confidence),
+      source: "ai" as const,
+    }));
+  } catch (err) {
+    const code =
+      (err as { code?: string })?.code ??
+      (err instanceof Error ? err.name : "UnknownError");
+    console.error("[gap-analyzer] extracted_fields fetch error:", code);
+    return [];
+  }
+}
 
 /** Fetch unresolved (satisfied_at IS NULL) doc keys for this case. */
 async function fetchMissingDocKeys(

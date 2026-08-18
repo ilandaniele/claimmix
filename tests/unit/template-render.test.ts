@@ -447,3 +447,28 @@ describe("renderTemplate — missing_information_request with values we hold", (
     expect(result.text).toContain("Decinos el número de póliza");
   });
 });
+
+describe("renderTemplate — a value we hold but cannot say", () => {
+  it("asks outright instead of quoting the enum member back", () => {
+    // `entendimos "other"` reached a real inbox through this list, after the
+    // same enum had already been chased out of two other templates.
+    const result = renderTemplate("missing_information_request", {
+      caseId: "c-3",
+      missingFields: ["claim_type"],
+      knownValues: { claim_type: "other" },
+    });
+
+    expect(result.html).not.toContain("other");
+    expect(result.text).not.toContain("other");
+    expect(result.html).toContain("Decinos qué tipo de siniestro fue");
+  });
+
+  it("shows a claim type it can name", () => {
+    const result = renderTemplate("missing_information_request", {
+      caseId: "c-4",
+      missingFields: ["claim_type"],
+      knownValues: { claim_type: "granizo" },
+    });
+    expect(result.html).toContain("daño por granizo");
+  });
+});

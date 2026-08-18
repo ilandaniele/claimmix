@@ -53,23 +53,24 @@ function setupDbMocks(
     proposed_value: string | null;
     conflict_with_value: string | null;
     confidence: number;
-  }>
+  }>,
+  /** Rows already in extracted_fields from earlier runs on this case. */
+  storedFieldRows: Array<{
+    field_key: string;
+    field_value: string;
+    confidence: number;
+  }> = []
 ) {
+  // Order matters: the analyzer reads missing_docs, then extracted_fields,
+  // then claim_field_confirmations.
+  const byCall = [missingDocRows, storedFieldRows, confirmationRows];
   let callCount = 0;
   vi.mocked(db.select).mockImplementation(() => {
+    const rows = byCall[callCount] ?? confirmationRows;
     callCount++;
-    if (callCount === 1) {
-      // missing_docs query: db.select({doc_key:...}).from(...).where(and(...))
-      return {
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue(missingDocRows),
-        }),
-      } as any;
-    }
-    // claim_field_confirmations query: db.select({...}).from(...).where(and(...))
     return {
       from: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue(confirmationRows),
+        where: vi.fn().mockResolvedValue(rows),
       }),
     } as any;
   });
@@ -391,5 +392,65 @@ describe("analyzeEmailClaimGaps — identifying the policy", () => {
 
     expect(result.missingRequiredFields).toContain("policy_number");
     expect(result.missingRequiredFields).toContain("dni");
+  });
+});
+
+// ── Test suite: completeness is a property of the case ───────────────────────
+
+describe("analyzeEmailClaimGaps — what the case already holds", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const STORED = [
+    { field_key: "full_name",            field_value: "Ilan Daniele", confidence: 0.95 },
+    { field_key: "accident_date",        field_value: "2026-08-16",   confidence: 0.9 },
+    { field_key: "accident_description", field_value: "Choque",       confidence: 0.8 },
+    { field_key: "numero_poliza",        field_value: "POL-4471-A",   confidence: 0.95 },
+    { field_key: "dni_asegurado",        field_value: "30145882",     confidence: 0.95 },
+    { field_key: "telefono_contacto",    field_value: "2914567788",   confidence: 0.85 },
+  ];
+
+  it("does not re-ask for data an earlier message already supplied", async () => {
+    // The third message of a real conversation was "fue un choque", so the
+    // extractor returned the claim type and little else — correctly. Judging
+    // completeness from that one array declared five fields missing and
+    // emailed the claimant asking for things sitting in the database at 0.95.
+    const thisRunOnly: ExtractedField[] = [
+      { field_key: "claim_type", field_value: "choque", confidence: 0.86, source: "ai" },
+    ];
+    setupDbMocks([], [], STORED);
+
+    const result = await analyzeEmailClaimGaps(CASE_ID, thisRunOnly, TENANT_ID);
+
+    expect(result.missingRequiredFields).toEqual([]);
+    expect(result.status).toBe("listo_para_core");
+  });
+
+  it("still reports a field neither the case nor the run has", async () => {
+    setupDbMocks([], [], STORED.filter((f) => f.field_key !== "dni_asegurado"));
+
+    const result = await analyzeEmailClaimGaps(
+      CASE_ID,
+      [{ field_key: "claim_type", field_value: "choque", confidence: 0.86, source: "ai" }],
+      TENANT_ID
+    );
+
+    expect(result.missingRequiredFields).toContain("dni");
+  });
+
+  it("lets a fresh reading override a stored value of equal confidence", async () => {
+    // A correction in the latest message must not lose to the old value.
+    setupDbMocks(
+      [],
+      [],
+      [...STORED, { field_key: "claim_type", field_value: "other", confidence: 0.86 }]
+    );
+
+    const result = await analyzeEmailClaimGaps(
+      CASE_ID,
+      [{ field_key: "claim_type", field_value: "granizo", confidence: 0.86, source: "ai" }],
+      TENANT_ID
+    );
+
+    expect(result.missingRequiredFields).toEqual([]);
   });
 });

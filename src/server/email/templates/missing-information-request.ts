@@ -10,7 +10,7 @@
  * Subject: "Información adicional requerida - Caso #{caseId}"
  */
 
-import { labelForField } from "@/lib/labels/claim-fields";
+import { displayFieldValue, labelForField } from "@/lib/labels/claim-fields";
 
 export interface MissingInformationRequestData {
   caseId: string;
@@ -50,7 +50,13 @@ export function renderMissingInformationRequest(
   /** What to say about one item: a gap to fill, or a value to check. */
   function askFor(fieldKey: string): { label: string; ask: string } {
     const { label, instruction } = getFieldInstruction(fieldKey);
-    const value = known[fieldKey]?.trim();
+    // Through the same translator the other templates use. Passing the raw
+    // value straight through put `entendimos "other"` in a claimant's inbox —
+    // the enum member we had already chased out of two other emails, walking
+    // back in through the door this list opened. A value with no readable form
+    // is not shown at all; the field is simply asked for.
+    const raw = known[fieldKey]?.trim();
+    const value = raw ? displayFieldValue(fieldKey, raw)?.trim() : undefined;
     return {
       label,
       ask: value

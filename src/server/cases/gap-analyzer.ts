@@ -23,6 +23,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { claimFieldConfirmations, missingDocs } from "@/lib/db/schema";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
+import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,12 @@ export const REQUIRED_CLAIM_FIELDS = [
   "accident_date",
   "accident_description",
   "claim_type",
+  // A claim an insurer cannot attach to a policy is not a claim it can act on.
+  // These were absent from the list, so nothing ever asked for them and a case
+  // could reach listo_para_core with no way to identify the policyholder,
+  // while the agent spent its one question confirming an inferred province.
+  "policy_number",
+  "dni",
 ] as const;
 
 /** At least one of these contact fields must be present. */
@@ -101,9 +108,18 @@ export async function analyzeEmailClaimGaps(
   const missingDocKeys = await fetchMissingDocKeys(caseId, tenantId);
 
   // ── 2. Build a map of extracted field values and confidences ──────────────
+  //
+  // Keyed by canonical name, best copy wins. The extractor emits `numero_poliza`
+  // as readily as `policy_number`, and with the policy number now required, a
+  // raw-key map would report it missing while holding it under the other
+  // spelling — and email the claimant asking for something they already sent.
   const fieldMap = new Map<string, ExtractedField>();
   for (const f of extractedFields) {
-    fieldMap.set(f.field_key, f);
+    const key = canonicalFieldKey(f.field_key);
+    const existing = fieldMap.get(key);
+    if (!existing || f.confidence > existing.confidence) {
+      fieldMap.set(key, f);
+    }
   }
 
   // ── 3. Determine missing required fields ──────────────────────────────────
@@ -209,7 +225,9 @@ async function fetchMissingDocKeys(
         )
       );
 
-    return data.map((row) => row.doc_key);
+    // Canonical, so a `numero_poliza` gap and a `policy_number` gap are the
+    // same gap rather than two.
+    return data.map((row) => canonicalFieldKey(row.doc_key));
   } catch (err) {
     const code =
       (err as { code?: string })?.code ??

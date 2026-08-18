@@ -37,6 +37,8 @@ const FULL_HIGH_CONFIDENCE_FIELDS: ExtractedField[] = [
   { field_key: "accident_date",        field_value: "2024-03-15",       confidence: 0.90, source: "ai" },
   { field_key: "accident_description", field_value: "Choque en Av. Corrientes", confidence: 0.88, source: "ai" },
   { field_key: "claim_type",           field_value: "choque",           confidence: 0.90, source: "ai" },
+  { field_key: "policy_number",        field_value: "POL-4471-A",       confidence: 0.90, source: "ai" },
+  { field_key: "dni",                  field_value: "30145882",         confidence: 0.90, source: "ai" },
 ];
 
 /**
@@ -91,12 +93,17 @@ describe("analyzeEmailClaimGaps — complete claim", () => {
   });
 
   it("phone is accepted as contact alternative when email is absent", async () => {
+    // Also covers the Spanish aliases: numero_poliza and dni_asegurado satisfy
+    // the required policy_number and dni, rather than being reported missing
+    // while we hold them under the other spelling.
     const fieldsWithPhone: ExtractedField[] = [
       { field_key: "full_name",            field_value: "Ana García",  confidence: 0.91, source: "ai" },
       { field_key: "phone",                field_value: "+54 11 9999", confidence: 0.88, source: "ai" },
       { field_key: "accident_date",        field_value: "2024-04-01",  confidence: 0.90, source: "ai" },
       { field_key: "accident_description", field_value: "Robo del vehículo", confidence: 0.87, source: "ai" },
       { field_key: "claim_type",           field_value: "robo",        confidence: 0.89, source: "ai" },
+      { field_key: "numero_poliza",        field_value: "POL-8890-C",  confidence: 0.90, source: "ai" },
+      { field_key: "dni_asegurado",        field_value: "28777111",    confidence: 0.90, source: "ai" },
     ];
     setupDbMocks([], []);
     const result = await analyzeEmailClaimGaps(CASE_ID, fieldsWithPhone, TENANT_ID);
@@ -212,6 +219,8 @@ describe("analyzeEmailClaimGaps — pending confirmation", () => {
       { field_key: "accident_date",        field_value: "2024-03-15",       confidence: 0.90, source: "ai" },
       { field_key: "accident_description", field_value: "Choque en calle",  confidence: 0.88, source: "ai" },
       { field_key: "claim_type",           field_value: "choque",           confidence: 0.90, source: "ai" },
+      { field_key: "policy_number",        field_value: "POL-4471-A",       confidence: 0.90, source: "ai" },
+      { field_key: "dni",                  field_value: "30145882",         confidence: 0.90, source: "ai" },
     ];
     setupDbMocks([], []);
     const result = await analyzeEmailClaimGaps(CASE_ID, fieldsWithMediumConfidence, TENANT_ID);
@@ -326,5 +335,61 @@ describe("analyzeEmailClaimGaps — error handling", () => {
     // All required fields missing → info_faltante
     expect(result.status).toBe("info_faltante");
     expect(result.isComplete).toBe(false);
+  });
+});
+
+// ── Test suite: policy number and DNI are required ───────────────────────────
+
+describe("analyzeEmailClaimGaps — identifying the policy", () => {
+  const WITHOUT_IDS: ExtractedField[] = [
+    { field_key: "full_name",            field_value: "Juan Pérez",       confidence: 0.92, source: "ai" },
+    { field_key: "email",                field_value: "juan@example.com", confidence: 0.95, source: "ai" },
+    { field_key: "accident_date",        field_value: "2024-03-15",       confidence: 0.90, source: "ai" },
+    { field_key: "accident_description", field_value: "Choque en Av. Corrientes", confidence: 0.88, source: "ai" },
+    { field_key: "claim_type",           field_value: "choque",           confidence: 0.90, source: "ai" },
+  ];
+
+  it("does not call a claim ready when there is no way to find the policy", async () => {
+    // A case reached listo_para_core with no policy number and no DNI, while
+    // the agent spent its one question confirming a province it had inferred.
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, WITHOUT_IDS, TENANT_ID);
+
+    expect(result.status).toBe("info_faltante");
+    expect(result.missingRequiredFields).toContain("policy_number");
+    expect(result.missingRequiredFields).toContain("dni");
+    expect(result.isComplete).toBe(false);
+  });
+
+  it("accepts them under the Spanish keys the extractor also emits", async () => {
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(
+      CASE_ID,
+      [
+        ...WITHOUT_IDS,
+        { field_key: "numero_poliza", field_value: "POL-4471-A", confidence: 0.9, source: "ai" },
+        { field_key: "dni_asegurado", field_value: "30145882",   confidence: 0.9, source: "ai" },
+      ],
+      TENANT_ID
+    );
+
+    expect(result.missingRequiredFields).not.toContain("policy_number");
+    expect(result.missingRequiredFields).not.toContain("dni");
+  });
+
+  it("still reports them missing when read too poorly to use", async () => {
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(
+      CASE_ID,
+      [
+        ...WITHOUT_IDS,
+        { field_key: "policy_number", field_value: "POL?", confidence: 0.3, source: "ai" },
+        { field_key: "dni",           field_value: "301",  confidence: 0.2, source: "ai" },
+      ],
+      TENANT_ID
+    );
+
+    expect(result.missingRequiredFields).toContain("policy_number");
+    expect(result.missingRequiredFields).toContain("dni");
   });
 });

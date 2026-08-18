@@ -60,6 +60,7 @@ import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/server/cases/fsm";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
+import { messengerFor } from "@/server/confirmations/messenger";
 import { loadAgentTraining } from "@/server/agents/training";
 import { loadActivePromptRules, formatPromptRules } from "@/server/training/prompt-rules";
 import { loadApprovedExamples, formatApprovedExamples } from "@/server/training/examples";
@@ -1074,7 +1075,16 @@ export async function runEmailExtractionWorker(
     // Decides what confirmation/missing-info/specialist emails to send and
     // what final status to apply, based on the extraction result.
     // AC7, AC9, AC10, AC11, AC12.
-    if (caseRow.channel === "email" || caseRow.channel === "email_sim") {
+    // Every channel, one decision tree. WhatsApp used to be excluded here and
+    // ran its own logic in server/whatsapp/notify.ts, which is how the two
+    // drifted: a reported fire got a routine receipt, and a follow-up message
+    // got no answer at all. The messenger differs, the reasoning does not.
+    if (
+      caseRow.channel === "email" ||
+      caseRow.channel === "email_sim" ||
+      caseRow.channel === "whatsapp" ||
+      caseRow.channel === "whatsapp_sim"
+    ) {
       await orchestratePostExtraction(
         caseId,
         tenantId,
@@ -1088,7 +1098,8 @@ export async function runEmailExtractionWorker(
           inReplyToMessageId: undefined,
           latestMessageText: latestInboundText,
         },
-        customerMatches
+        customerMatches,
+        messengerFor(caseRow.channel)
       );
     }
 

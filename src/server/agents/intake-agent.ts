@@ -34,6 +34,17 @@ export interface WhatsAppIntakeInput {
   providerMessageId?: string | null;
   threadId?: string | null;
   userId?: string | null;
+  /**
+   * True for the simulation and BSP-adapter path, whose phone numbers are
+   * invented.
+   *
+   * It lands on the case as channel `whatsapp_sim`, and the messenger for that
+   * channel records what it would have said without sending. Answering is now
+   * the orchestrator's job rather than the route's, so "this route does not
+   * pass a reply address" is no longer a guarantee — the case has to carry it.
+   * Messaging a made-up number is how a WhatsApp Business account gets flagged.
+   */
+  simulated?: boolean;
 }
 
 export interface WhatsAppIntakeResult {
@@ -152,8 +163,10 @@ export async function createWhatsAppIntake(
   const threadId = input.threadId?.trim() || input.from.trim();
   const providerMessageId = input.providerMessageId?.trim() || null;
 
-  const existingCaseId = await findExistingWhatsAppCase(input.tenantId, threadId);
-  const caseId = existingCaseId ?? await createWhatsAppCase(input.tenantId, threadId);
+  const channel = input.simulated ? "whatsapp_sim" : "whatsapp";
+  const existingCaseId = await findExistingWhatsAppCase(input.tenantId, threadId, channel);
+  const caseId =
+    existingCaseId ?? (await createWhatsAppCase(input.tenantId, threadId, channel));
 
   await insertWhatsAppMessage({
     caseId,
@@ -192,7 +205,8 @@ function chooseAction(channel: IntakeChannel): IntakeAgentResult["action"] {
 
 async function findExistingWhatsAppCase(
   tenantId: string,
-  threadId: string
+  threadId: string,
+  channel: "whatsapp" | "whatsapp_sim" = "whatsapp"
 ): Promise<string | null> {
   try {
     const c = tables.cases;
@@ -203,7 +217,7 @@ async function findExistingWhatsAppCase(
         .where(
           and(
             eq(c.tenant_id, tenantId),
-            eq(c.channel, "whatsapp"),
+            eq(c.channel, channel),
             eq(c.email_thread_id, threadId),
             inArray(c.status, [
               "recibido",
@@ -228,7 +242,8 @@ async function findExistingWhatsAppCase(
 
 async function createWhatsAppCase(
   tenantId: string,
-  threadId: string
+  threadId: string,
+  channel: "whatsapp" | "whatsapp_sim" = "whatsapp"
 ): Promise<string> {
   let data: { id: string } | null;
   try {
@@ -237,7 +252,7 @@ async function createWhatsAppCase(
         .insert(tables.cases)
         .values({
           tenant_id: tenantId,
-          channel: "whatsapp",
+          channel,
           status: "recibido",
           email_thread_id: threadId,
           // Unknown until the extractor decides — see the same fix in gmail-poller.

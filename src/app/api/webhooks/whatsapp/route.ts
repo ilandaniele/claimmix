@@ -27,7 +27,6 @@ import { after, type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 import { createWhatsAppIntake, runIntakeAgent } from "@/server/agents/intake-agent";
-import { replyToWhatsAppIntake } from "@/server/whatsapp/notify";
 import {
   parseCloudApiMessages,
   resolveWebhookChallenge,
@@ -63,14 +62,12 @@ function resolveTenantId(bodyTenantId?: string): string | null {
  * is a claim at all and which documents are missing, which is the difference
  * between a useful message and a generic "recibimos tu mensaje".
  *
- * `replyTo` is passed only for newly created cases. Someone who sends three
- * messages in a row about the same crash must not get three acknowledgements.
+ * Answering is the orchestrator's job, not this route's. Three messages in a
+ * row about the same crash still produce one reply: the extraction lease
+ * serialises the runs, and the run that loses re-runs afterwards over the
+ * whole conversation rather than answering its own fragment.
  */
-function scheduleAgent(
-  caseId: string,
-  tenantId: string,
-  replyTo?: string | null
-): void {
+function scheduleAgent(caseId: string, tenantId: string): void {
   after(async () => {
     try {
       await runIntakeAgent({ caseId, tenantId, source: "whatsapp" });
@@ -80,10 +77,10 @@ function scheduleAgent(
       return; // no extraction result — nothing worth saying to the claimant yet
     }
 
-    if (replyTo) {
-      // Already swallows its own errors; intake must survive a messaging failure.
-      await replyToWhatsAppIntake({ caseId, tenantId, to: replyTo });
-    }
+    // Nothing to send from here. The extraction worker runs the same
+    // post-extraction orchestrator email uses, and that decides what to say
+    // and says it — including on follow-up messages, which this path only ever
+    // answered when they happened to create a new case.
   });
 }
 
@@ -144,7 +141,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       try {
         const stored = await ingest(tenantId, msg);
         caseIds.push(stored.caseId);
-        scheduleAgent(stored.caseId, tenantId, stored.created ? msg.from : null);
+        scheduleAgent(stored.caseId, tenantId);
       } catch (err) {
         const name = err instanceof Error ? err.name : "UnknownError";
         console.error("[webhooks/whatsapp] Intake error:", name, "from:", msg.from); // crew-debug-ok
@@ -203,10 +200,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       body: parsed.data.body,
       providerMessageId: parsed.data.provider_message_id,
       threadId: parsed.data.thread_id,
+      // Simulation and BSP adapters invent their phone numbers. The case is
+      // marked so the messenger records what it would have said instead of
+      // sending it — messaging a made-up number is how a WhatsApp Business
+      // account gets flagged.
+      simulated: true,
     });
-    // No `replyTo` here, deliberately: this path serves simulation and BSP
-    // adapters, and a batch of simulated claims must never send real WhatsApp
-    // messages to the numbers it makes up. Only the signed Meta path answers.
     scheduleAgent(stored.caseId, tenantId);
 
     return NextResponse.json(

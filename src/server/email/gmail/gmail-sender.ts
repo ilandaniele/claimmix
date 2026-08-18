@@ -46,7 +46,6 @@ function makeBoundary(): string {
  * an accent in it.
  */
 function encodeHeaderValue(value: string): string {
-  // eslint-disable-next-line no-control-regex
   if (!/[^\x00-\x7F]/.test(value)) return value;
   return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
 }

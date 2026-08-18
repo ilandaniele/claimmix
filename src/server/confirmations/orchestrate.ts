@@ -40,7 +40,7 @@ import {
   isDerivable,
   isWorthConfirming,
 } from "@/lib/labels/claim-fields";
-import { dispatchOutboundEmail } from "@/server/email/dispatch";
+import { emailMessenger, type AgentMessenger } from "@/server/confirmations/messenger";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -76,7 +76,13 @@ export async function orchestratePostExtraction(
   caseId: string,
   tenantId: string,
   extractedOutput: ExtractedClaimOutput,
-  customerMatches: CustomerMatch[]
+  customerMatches: CustomerMatch[],
+  /**
+   * How to deliver what this decides. Defaults to email, which is where the
+   * decision tree grew up; WhatsApp passes its own so the two channels share
+   * the reasoning instead of each keeping a copy that drifts.
+   */
+  messenger: AgentMessenger = emailMessenger
 ): Promise<void> {
   const { extractedClaim, senderEmail, inReplyToMessageId, latestMessageText } =
     extractedOutput;
@@ -99,7 +105,7 @@ export async function orchestratePostExtraction(
     await setStatus(caseId, tenantId, "requiere_especialista");
 
     // Dispatch specialist escalation email to claimant.
-    await dispatchOutboundEmail({
+    await messenger.send({
       caseId,
       tenantId,
       to: senderEmail,
@@ -206,7 +212,7 @@ export async function orchestratePostExtraction(
       await setStatus(caseId, tenantId, "confirmacion_pendiente");
 
       // Dispatch data_confirmation_request email.
-      await dispatchOutboundEmail({
+      await messenger.send({
         caseId,
         tenantId,
         to: senderEmail,
@@ -248,7 +254,7 @@ export async function orchestratePostExtraction(
   const askItems = buildAskList(gapResult.missingRequiredFields, pendingConfirmationFields);
 
   if (askItems.fields.length > 0 && !confirmationEmailDispatched) {
-    await dispatchOutboundEmail({
+    await messenger.send({
       caseId,
       tenantId,
       to: senderEmail,
@@ -319,7 +325,7 @@ export async function orchestratePostExtraction(
     const claimTypeField = extractedClaim.fields.find((f) => f.field_key === "claim_type");
     const policyField = extractedClaim.fields.find((f) => f.field_key === "policy_number");
 
-    await dispatchOutboundEmail({
+    await messenger.send({
       caseId,
       tenantId,
       to: senderEmail,

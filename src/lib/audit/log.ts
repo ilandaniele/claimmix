@@ -175,6 +175,16 @@ export const AuditEvent = {
   CASE_CLOSED_ABANDONED: "claim.closed_abandoned",
 
   /**
+   * DOCUMENTS_RECEIVED: a file the claimant sent was recognised as one of the
+   * documents we had asked for, and the request was closed.
+   * Payload: { case_id, doc_keys }.
+   *
+   * Worth its own event because the decision was the model's: if a document is
+   * ever closed wrongly, this is the line that says when and which.
+   */
+  DOCUMENTS_RECEIVED: "claim.documents_received",
+
+  /**
    * FIELD_CONFIRMED: analyst confirmed or corrected an extracted field.
    * Payload: { case_id, field_key, action, old_value_redacted, new_value_redacted }.
    * AC21.

@@ -222,11 +222,19 @@ async function getVertexToken(): Promise<string> {
  * disabled. That last one is not a preference — a thinking-enabled default
  * once burned $0.78 a call and drained a $10 prepay in sixteen of them.
  */
+export interface InlineMedia {
+  mimeType: string;
+  /** Base64 bytes, no data: prefix. */
+  data: string;
+}
+
 export async function callGemini(
   systemPrompt: string,
   userMessage: string,
   apiKey?: string | null,
-  modelOverride?: string
+  modelOverride?: string,
+  /** Images or documents to look at alongside the text. */
+  media?: InlineMedia[]
 ): Promise<{ text: string | null; usage: GeminiUsage }> {
   const vertex = isVertexTransport();
   // Vertex has its own model catalog (no *-latest aliases) — never forward the
@@ -266,7 +274,17 @@ export async function callGemini(
   const isThinkingModel = !model.startsWith("gemini-2.0");
   const body: Record<string, unknown> = {
     systemInstruction: { parts: [{ text: systemPrompt }] },
-    contents: [{ role: "user", parts: [{ text: userMessage }] }],
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: userMessage },
+          ...(media ?? []).map((m) => ({
+            inlineData: { mimeType: m.mimeType, data: m.data },
+          })),
+        ],
+      },
+    ],
     generationConfig: {
       temperature: 0,
       maxOutputTokens: 8192,

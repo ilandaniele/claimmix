@@ -14,7 +14,7 @@
  */
 
 import "server-only";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { createHash } from "crypto";
 import { sanitizeFilename } from "@/server/email/attachment-validator";
 
@@ -122,4 +122,27 @@ export async function uploadAttachment(
  */
 export function computeContentHash(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
+}
+
+/**
+ * Read an attachment back out of the bucket.
+ *
+ * Used to show a photo to the model when deciding which requested document it
+ * is. Returns null rather than throwing: not being able to look at the file
+ * means the document stays on the outstanding list, which is the safe
+ * direction — marking one received in error hides it from the analyst.
+ */
+export async function readAttachment(storagePath: string): Promise<Buffer | null> {
+  try {
+    const s3 = createStorageClient();
+    const res = await s3.send(
+      new GetObjectCommand({ Bucket: bucketName(), Key: storagePath })
+    );
+    const bytes = await res.Body?.transformToByteArray();
+    return bytes ? Buffer.from(bytes) : null;
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "UnknownError";
+    console.error("[attachments] read failed:", name); // crew-debug-ok
+    return null;
+  }
 }

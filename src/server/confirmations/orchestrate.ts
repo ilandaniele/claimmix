@@ -37,6 +37,11 @@ import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import { analyzeEmailClaimGaps, MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/gap-analyzer";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
 import {
+  pendingDocKeys,
+  reconcileAttachments,
+  seedRequiredDocs,
+} from "@/server/cases/documents";
+import {
   canonicalFieldKey,
   confirmationRank,
   isAffirmativeReply,
@@ -165,6 +170,20 @@ export async function orchestratePostExtraction(
     latestMessageText
   );
 
+  // Documents, before the gap analysis reads what is outstanding.
+  //
+  // Register what this kind of claim needs — required_docs_config was seeded
+  // at the start of the project and read by nothing, so nobody was ever asked
+  // for the photos of the damage or the fire brigade report. Then close the
+  // ones whose file has arrived, or the next round asks for a photo already
+  // sitting in the bucket.
+  const claimTypeValue =
+    extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === "claim_type")
+      ?.field_value ?? null;
+
+  await seedRequiredDocs(caseId, tenantId, claimTypeValue);
+  await reconcileAttachments(caseId, tenantId, labelForClaimType(claimTypeValue));
+
   const gapResult = await analyzeEmailClaimGaps(caseId, extractedClaim.fields, tenantId);
 
   // ── C. Medium-confidence fields → confirmation rows — AC7 ─────────────────
@@ -274,7 +293,11 @@ export async function orchestratePostExtraction(
   // question depends on the other's answer, so the chain was ours to make and
   // ours to stop making. A person handling the claim writes one message
   // listing what they need.
-  const askItems = buildAskList(gapResult.missingRequiredFields, pendingConfirmationFields);
+  const askItems = buildAskList(
+    gapResult.missingRequiredFields,
+    pendingConfirmationFields,
+    await pendingDocKeys(caseId, tenantId)
+  );
 
   // Not when the case escalated. A claimant whose car burned this morning was
   // told "la derivamos a un especialista, no hace falta que hagas nada" and,
@@ -494,7 +517,8 @@ const MAX_ASK_ITEMS = 5;
  */
 function buildAskList(
   missingRequiredFields: string[],
-  pending: ConfirmableField[]
+  pending: ConfirmableField[],
+  outstandingDocs: string[] = []
 ): { fields: string[]; knownValues: Record<string, string> } {
   const missing = missingRequiredFields.map((f) =>
     f === "email_or_phone" ? "email" : f
@@ -502,8 +526,16 @@ function buildAskList(
 
   const seen = new Set(missing);
   const doubts = pending.filter((p) => !seen.has(p.fieldKey));
+  const doubtKeys = new Set(doubts.map((d) => d.fieldKey));
+  // Documents last. A missing field blocks the claim, a doubt slows it, and a
+  // document is something the person has to go and photograph — the slowest
+  // thing to ask for and the least urgent to have.
+  const docs = outstandingDocs.filter((k) => !seen.has(k) && !doubtKeys.has(k));
 
-  const fields = [...missing, ...doubts.map((d) => d.fieldKey)].slice(0, MAX_ASK_ITEMS);
+  const fields = [...missing, ...doubts.map((d) => d.fieldKey), ...docs].slice(
+    0,
+    MAX_ASK_ITEMS
+  );
 
   // Only doubts carry a value: a missing field has nothing to show.
   const knownValues: Record<string, string> = {};

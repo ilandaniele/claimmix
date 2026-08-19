@@ -4,6 +4,8 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { downloadWhatsAppMedia, type WhatsAppMediaRef } from "@/server/whatsapp/cloud-api";
+import { rehostAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 
 type IntakeChannel = "email" | "email_sim" | "whatsapp" | "whatsapp_sim";
@@ -34,6 +36,8 @@ export interface WhatsAppIntakeInput {
   providerMessageId?: string | null;
   threadId?: string | null;
   userId?: string | null;
+  /** Photos, documents or audio the message carried, not yet downloaded. */
+  media?: WhatsAppMediaRef[];
   /**
    * True for the simulation and BSP-adapter path, whose phone numbers are
    * invented.
@@ -168,7 +172,7 @@ export async function createWhatsAppIntake(
   const caseId =
     existingCaseId ?? (await createWhatsAppCase(input.tenantId, threadId, channel));
 
-  await insertWhatsAppMessage({
+  const claimMessageId = await insertWhatsAppMessage({
     caseId,
     tenantId: input.tenantId,
     from: input.from,
@@ -176,6 +180,10 @@ export async function createWhatsAppIntake(
     providerMessageId,
     threadId,
   });
+
+  if (claimMessageId && input.media?.length) {
+    await storeWhatsAppMedia(input.tenantId, caseId, claimMessageId, input.media);
+  }
 
   await writeAuditLog({
     tenant_id: input.tenantId,
@@ -195,6 +203,75 @@ export async function createWhatsAppIntake(
     tenantId: input.tenantId,
     created: !existingCaseId,
   };
+}
+
+/**
+ * Download the message's media and put it where the email attachments live.
+ *
+ * The agent's own reply tells people to send photos through the chat, and for
+ * months the file was thrown away: the payload names the media, the bytes are
+ * behind a second Graph call nobody made, so a photo of a crumpled bumper was
+ * stored as the text "[Imagen adjunta sin texto]".
+ *
+ * Reuses the email rehost pipeline — same bucket, same validation, same
+ * content-hash dedup, same claim_attachments rows — so an analyst sees one
+ * kind of attachment regardless of how it arrived.
+ *
+ * Best-effort throughout. A photo that fails to download is a gap in the
+ * claim; losing the message that carried it would be worse.
+ */
+async function storeWhatsAppMedia(
+  tenantId: string,
+  caseId: string,
+  claimMessageId: string,
+  media: WhatsAppMediaRef[]
+): Promise<void> {
+  try {
+    const downloaded: EmailAttachment[] = [];
+
+    for (const ref of media) {
+      const file = await downloadWhatsAppMedia(ref.id);
+      if (!file) continue;
+      downloaded.push({
+        Name: ref.filename,
+        Content: file.data.toString("base64"),
+        ContentType: file.mimeType || ref.mimeType,
+        ContentLength: file.data.length,
+      });
+    }
+
+    if (downloaded.length === 0) return;
+
+    const results = await rehostAttachments({
+      attachments: downloaded,
+      tenantId,
+      caseId,
+      messageId: claimMessageId,
+      budgetMs: 10_000,
+    });
+
+    console.info(
+      JSON.stringify({
+        level: "info",
+        service: "claimmix",
+        msg: "whatsapp.media_stored",
+        case_id: caseId,
+        attempted: media.length,
+        downloaded: downloaded.length,
+        stored: results.filter((r) => r.stored).length,
+      })
+    );
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "whatsapp.media_failed",
+        case_id: caseId,
+        error: err instanceof Error ? err.name : "UnknownError",
+      })
+    );
+  }
 }
 
 function chooseAction(channel: IntakeChannel): IntakeAgentResult["action"] {
@@ -297,11 +374,13 @@ async function insertWhatsAppMessage(
     providerMessageId: string | null;
     threadId: string;
   }
-): Promise<void> {
+): Promise<string | null> {
   const now = new Date().toISOString();
+  let claimMessageId: string | null = null;
 
   try {
-    await db.insert(tables.claimMessages).values({
+    const inserted = firstRow(
+      await db.insert(tables.claimMessages).values({
       case_id: input.caseId,
       tenant_id: input.tenantId,
       direction: "inbound",
@@ -316,10 +395,15 @@ async function insertWhatsAppMessage(
       raw_payload: {},
       status: "received",
       received_at: now,
-    });
+    }).returning({ id: tables.claimMessages.id })
+    );
+    claimMessageId = inserted?.id ?? null;
   } catch (e) {
     const code = (e as { code?: string })?.code;
-    if (code === "23505") return;
+    // 23505: this exact provider message was already stored. Attachments were
+    // handled on the first pass; returning null keeps the second from
+    // re-uploading them.
+    if (code === "23505") return null;
     throw new Error(`whatsapp_claim_message_insert_failed:${code}`);
   }
 
@@ -336,4 +420,6 @@ async function insertWhatsAppMessage(
   } catch {
     // The Neon call ignored insert errors here — preserve that behaviour.
   }
+
+  return claimMessageId;
 }

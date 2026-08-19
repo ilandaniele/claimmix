@@ -230,5 +230,6 @@ function ingest(tenantId: string, msg: NormalizedWhatsAppMessage) {
     body: msg.body,
     providerMessageId: msg.providerMessageId,
     threadId: msg.from, // thread per sender phone number
+    media: msg.media,
   });
 }

@@ -94,6 +94,23 @@ export interface NormalizedWhatsAppMessage {
   providerMessageId: string;
   /** Sender display name from the contacts block, if present. */
   name?: string;
+  /**
+   * Media the message carried, if any.
+   *
+   * The payload only names the file; the bytes live behind a second Graph call.
+   * Until this existed a photo of a crumpled bumper arrived as the string
+   * "[Imagen adjunta sin texto]" and the file was gone — while the agent's own
+   * reply was telling people to send exactly that.
+   */
+  media?: WhatsAppMediaRef[];
+}
+
+export interface WhatsAppMediaRef {
+  /** Graph media id — resolves to a short-lived download URL. */
+  id: string;
+  mimeType: string;
+  /** Best available name; media other than documents does not carry one. */
+  filename: string;
 }
 
 interface CloudApiTextMessage {
@@ -101,10 +118,10 @@ interface CloudApiTextMessage {
   id: string;
   type: string;
   text?: { body?: string };
-  image?: { caption?: string };
-  video?: { caption?: string };
-  document?: { caption?: string; filename?: string };
-  audio?: unknown;
+  image?: { caption?: string; id?: string; mime_type?: string };
+  video?: { caption?: string; id?: string; mime_type?: string };
+  document?: { caption?: string; filename?: string; id?: string; mime_type?: string };
+  audio?: { id?: string; mime_type?: string };
   button?: { text?: string };
   interactive?: {
     button_reply?: { title?: string };
@@ -138,6 +155,100 @@ function messageBody(msg: CloudApiTextMessage): string {
       );
     default:
       return "";
+  }
+}
+
+/** The media a message carries, named but not yet downloaded. */
+function messageMedia(msg: CloudApiTextMessage): WhatsAppMediaRef[] {
+  const part =
+    msg.type === "image"
+      ? msg.image
+      : msg.type === "video"
+        ? msg.video
+        : msg.type === "document"
+          ? msg.document
+          : msg.type === "audio"
+            ? msg.audio
+            : undefined;
+
+  if (!part?.id) return [];
+
+  const mimeType = part.mime_type || "application/octet-stream";
+  const named = msg.type === "document" ? msg.document?.filename?.trim() : undefined;
+
+  return [
+    {
+      id: part.id,
+      mimeType,
+      // Meta names only documents. Everything else gets the media id plus an
+      // extension guessed from the type, so two photos in one claim do not
+      // collide in storage and an analyst sees something openable.
+      filename: named || `${msg.type}-${part.id}${extensionFor(mimeType)}`,
+    },
+  ];
+}
+
+function extensionFor(mimeType: string): string {
+  const known: Record<string, string> = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "audio/ogg": ".ogg",
+    "audio/mpeg": ".mp3",
+    "application/pdf": ".pdf",
+  };
+  return known[mimeType.split(";")[0].trim()] ?? "";
+}
+
+/**
+ * Download one media file from the Graph API.
+ *
+ * Two calls: the id resolves to a short-lived URL on a Meta CDN, and that URL
+ * needs the same bearer token — fetching it unauthenticated returns HTML, not
+ * the file.
+ *
+ * Returns null rather than throwing. A photo that fails to download is a gap
+ * in the claim, not a reason to lose the message that carried it.
+ */
+export async function downloadWhatsAppMedia(
+  mediaId: string,
+  opts?: { accessToken?: string }
+): Promise<{ data: Buffer; mimeType: string } | null> {
+  const accessToken = opts?.accessToken ?? process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!accessToken) {
+    console.error("[whatsapp] media download skipped: no access token"); // crew-debug-ok
+    return null;
+  }
+
+  try {
+    const metaRes = await fetch(`${GRAPH_API_BASE}/${apiVersion()}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!metaRes.ok) {
+      console.error("[whatsapp] media metadata failed:", metaRes.status); // crew-debug-ok
+      return null;
+    }
+
+    const meta = (await metaRes.json()) as { url?: string; mime_type?: string };
+    if (!meta.url) return null;
+
+    const fileRes = await fetch(meta.url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!fileRes.ok) {
+      console.error("[whatsapp] media fetch failed:", fileRes.status); // crew-debug-ok
+      return null;
+    }
+
+    return {
+      data: Buffer.from(await fileRes.arrayBuffer()),
+      mimeType: meta.mime_type || "application/octet-stream",
+    };
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "UnknownError";
+    console.error("[whatsapp] media download error:", name); // crew-debug-ok
+    return null;
   }
 }
 
@@ -179,12 +290,16 @@ export function parseCloudApiMessages(payload: unknown): NormalizedWhatsAppMessa
       for (const msg of messages) {
         if (!msg?.from || !msg?.id) continue;
         const body = messageBody(msg);
-        if (!body) continue; // unsupported/empty — nothing to extract
+        const media = messageMedia(msg);
+        // A photo with no caption still carries the claim's most important
+        // evidence, so a message is only worthless when it has neither.
+        if (!body && media.length === 0) continue;
         out.push({
           from: msg.from,
           body,
           providerMessageId: msg.id,
           name: nameByWaId.get(msg.from),
+          ...(media.length > 0 ? { media } : {}),
         });
       }
     }

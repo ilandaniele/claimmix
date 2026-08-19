@@ -59,3 +59,66 @@ describe("stripQuotedReply", () => {
     expect(stripQuotedReply("> sólo texto citado")).toBe("");
   });
 });
+
+// ── The conversation loader ──────────────────────────────────────────────────
+
+vi.mock("@/lib/db", () => ({
+  db: { select: vi.fn() },
+}));
+
+import { vi, beforeEach } from "vitest";
+import { loadInboundConversation } from "@/server/worker/extract";
+import { db } from "@/lib/db";
+
+function inboundRows(rows: unknown) {
+  (db.select as ReturnType<typeof vi.fn>).mockReturnValue({
+    from: () => ({ where: () => ({ orderBy: () => Promise.resolve(rows) }) }),
+  });
+}
+
+describe("loadInboundConversation", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("reads every inbound message, not only the newest", async () => {
+    // WhatsApp writes to raw_messages as well as claim_messages, so it silently
+    // took the raw path — one message, no context. A photo arrived on a nearly
+    // complete crash report, the extractor read "[Imagen adjunta sin texto]"
+    // alone, decided it was not a claim, and killed the case.
+    inboundRows([
+      {
+        id: "m1",
+        provider_message_id: "wamid.1",
+        body_text: "Choqué en Bahía Blanca, soy Martín Sosa",
+        subject: "WhatsApp",
+        from_addr: "59899413456",
+        received_at: "2026-08-19T23:09:44Z",
+      },
+      {
+        id: "m2",
+        provider_message_id: "wamid.2",
+        body_text: "[Imagen adjunta sin texto]",
+        subject: "WhatsApp",
+        from_addr: "59899413456",
+        received_at: "2026-08-19T23:17:19Z",
+      },
+    ]);
+
+    const out = await loadInboundConversation("case-1", "tenant-1");
+
+    expect(out?.body).toContain("Choqué en Bahía Blanca");
+    expect(out?.body).toContain("[Imagen adjunta sin texto]");
+    // Identity comes from the newest message: it is the one being answered.
+    expect(out?.claimMessageId).toBe("m2");
+    expect(out?.latestText).toBe("[Imagen adjunta sin texto]");
+  });
+
+  it("returns null when the case has no inbound messages", async () => {
+    inboundRows([]);
+    expect(await loadInboundConversation("case-1", "tenant-1")).toBeNull();
+  });
+
+  it("returns null rather than guessing when the read gives back nonsense", async () => {
+    inboundRows({ notAnArray: true });
+    expect(await loadInboundConversation("case-1", "tenant-1")).toBeNull();
+  });
+});

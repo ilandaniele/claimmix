@@ -506,6 +506,7 @@ export async function runEmailExtractionWorker(
           tenant_id: cases.tenant_id,
           channel: cases.channel,
           email_thread_id: cases.email_thread_id,
+          is_claim: cases.is_claim,
           policyholder_name: cases.policyholder_name,
           policy_number: cases.policy_number,
           created_at: cases.created_at,
@@ -581,9 +582,17 @@ export async function runEmailExtractionWorker(
       }
     }
 
-    // Fetch message body — try raw_messages (simulate flow) first, then
-    // claim_messages (Gmail intake flow). Gmail cases write to claim_messages only.
-
+    // Fetch the message body.
+    //
+    // claim_messages first, because that is where the CONVERSATION lives.
+    // raw_messages holds one row per message and the lookup below takes only
+    // the newest, which was fine when it served the simulate flow alone —
+    // but WhatsApp writes to both tables, so it silently took that path and
+    // every re-extraction saw a single message in isolation. A claimant sent a
+    // photo, the extractor read "[Imagen adjunta sin texto]" with no context,
+    // decided it was not a claim, and killed a case that was three lines from
+    // complete. The conversation fix built for email never reached WhatsApp
+    // because of which table each channel happens to write.
     const rawMsg = firstRow(
       await db
         .select({
@@ -599,55 +608,24 @@ export async function runEmailExtractionWorker(
         .limit(1)
     );
 
-    if (rawMsg) {
+    const conversation = await loadInboundConversation(caseId, tenantId);
+
+    if (conversation) {
+      emailBody = conversation.body;
+      emailSubject = conversation.subject;
+      senderEmail = conversation.senderEmail;
+      latestInboundText = conversation.latestText;
+      claimMessageId = conversation.claimMessageId;
+      providerMessageId = conversation.providerMessageId;
+    } else if (rawMsg) {
       emailBody = rawMsg.body ?? "";
       emailSubject = rawMsg.subject ?? "";
       senderEmail = rawMsg.from_addr ?? "";
       latestInboundText = emailBody;
     } else {
-      // Fallback: Gmail intake cases store messages in claim_messages.
-      //
-      // Every inbound message, oldest first — not just the newest one. This
-      // used to be a limit(1), so a re-analysis triggered by a reply saw only
-      // the reply. A claimant who wrote "tuve un problema con el auto anteayer"
-      // and then answered "fue un choque" was asked for the date of the
-      // accident, which they had already given in a message the extractor was
-      // no longer reading. Asking twice is worse than not asking: they
-      // answered, and it reads as though nobody looked.
-      const inboundMessages = await db
-        .select({
-          id: claimMessages.id,
-          provider_message_id: claimMessages.provider_message_id,
-          body_text: claimMessages.body_text,
-          subject: claimMessages.subject,
-          from_addr: claimMessages.from_addr,
-          received_at: claimMessages.received_at,
-        })
-        .from(claimMessages)
-        .where(
-          and(
-            eq(claimMessages.case_id, caseId),
-            eq(claimMessages.tenant_id, tenantId),
-            eq(claimMessages.direction, "inbound")
-          )
-        )
-        .orderBy(asc(claimMessages.received_at));
-
-      const latest = inboundMessages[inboundMessages.length - 1];
-
-      if (!latest) {
-        console.error("[email-worker] Raw message not found:", caseId); // crew-debug-ok
-        return;
-      }
-
-      emailBody = buildConversationBody(inboundMessages);
-      latestInboundText = stripQuotedReply(latest.body_text ?? "");
-      // Subject and identity come from the newest message: it is the one being
-      // replied to, and its subject is what the claimant last saw.
-      emailSubject = latest.subject ?? "";
-      senderEmail = latest.from_addr ?? "";
-      claimMessageId = latest.id ?? null;
-      providerMessageId = latest.provider_message_id ?? null;
+      // Neither table has anything: the case exists but no message does.
+      console.error("[email-worker] No message found for case:", caseId); // crew-debug-ok
+      return;
     }
 
     // ── b) Load memory hints from claim_memory ───────────────────────────────
@@ -807,7 +785,25 @@ export async function runEmailExtractionWorker(
     }
 
     // ── h) Handle is_claim=false — AC5 ───────────────────────────────────────
-    if (extractedClaim.is_claim === false) {
+    //
+    // Except on a case already established as a claim. A photo arrived on a
+    // finished-looking crash report, the extractor read that one message and
+    // said "not a claim", and the case went to no_relevante — the orchestrator
+    // returns early on that, so the person also got silence. Someone sending
+    // more evidence must never be able to delete their own claim.
+    //
+    // The first classification still stands: a case that was never a claim
+    // stays not one, and a human can always mark it either way.
+    if (extractedClaim.is_claim === false && caseRow.is_claim === true) {
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          service: "claimmix",
+          msg: "email_worker.ignored_unclaim",
+          case_id: caseId,
+        })
+      );
+    } else if (extractedClaim.is_claim === false) {
       const reason =
         extractedClaim.not_relevant_reason ||
         "El clasificador de IA determinó que este email no es un reclamo de seguro.";
@@ -1405,6 +1401,63 @@ async function escalateCase(
 }
 
 // ── Conversation assembly ─────────────────────────────────────────────────────
+
+interface LoadedConversation {
+  body: string;
+  subject: string;
+  senderEmail: string;
+  latestText: string;
+  claimMessageId: string | null;
+  providerMessageId: string | null;
+}
+
+/**
+ * Every inbound message on the case, oldest first, as one document.
+ *
+ * Returns null when the case has no claim_messages at all — the simulate flow
+ * writes only raw_messages, and that path still works the way it did.
+ */
+export async function loadInboundConversation(
+  caseId: string,
+  tenantId: string
+): Promise<LoadedConversation | null> {
+  const inbound = await db
+    .select({
+      id: claimMessages.id,
+      provider_message_id: claimMessages.provider_message_id,
+      body_text: claimMessages.body_text,
+      subject: claimMessages.subject,
+      from_addr: claimMessages.from_addr,
+      received_at: claimMessages.received_at,
+    })
+    .from(claimMessages)
+    .where(
+      and(
+        eq(claimMessages.case_id, caseId),
+        eq(claimMessages.tenant_id, tenantId),
+        eq(claimMessages.direction, "inbound")
+      )
+    )
+    .orderBy(asc(claimMessages.received_at));
+
+  // Defensive: anything other than a row list means we cannot read the
+  // conversation, and the raw-message path is the honest fallback.
+  if (!Array.isArray(inbound)) return null;
+
+  const latest = inbound[inbound.length - 1];
+  if (!latest) return null;
+
+  return {
+    body: buildConversationBody(inbound),
+    // Subject and identity come from the newest message: it is the one being
+    // replied to, and its subject is what the claimant last saw.
+    subject: latest.subject ?? "",
+    senderEmail: latest.from_addr ?? "",
+    latestText: stripQuotedReply(latest.body_text ?? ""),
+    claimMessageId: latest.id ?? null,
+    providerMessageId: latest.provider_message_id ?? null,
+  };
+}
 
 /** Per-message cap. Long enough for any real claim, short enough to bound cost. */
 const MAX_CHARS_PER_MESSAGE = 4_000;

@@ -111,6 +111,7 @@ export async function orchestratePostExtraction(
       caseId,
       tenantId,
       to: senderEmail,
+      lastMessage: latestMessageText,
       template: "specialist_escalation",
       data: { caseId, severity },
       inReplyToMessageId,
@@ -221,6 +222,7 @@ export async function orchestratePostExtraction(
         caseId,
         tenantId,
         to: senderEmail,
+        lastMessage: latestMessageText,
         template: "data_confirmation_request",
         data: {
           caseId,
@@ -273,6 +275,7 @@ export async function orchestratePostExtraction(
       caseId,
       tenantId,
       to: senderEmail,
+      lastMessage: latestMessageText,
       template: "missing_information_request",
       data: {
         caseId,
@@ -344,6 +347,7 @@ export async function orchestratePostExtraction(
       caseId,
       tenantId,
       to: senderEmail,
+      lastMessage: latestMessageText,
       template: "confirmation_received",
       data: {
         caseId,

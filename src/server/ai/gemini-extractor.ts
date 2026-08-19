@@ -216,8 +216,13 @@ async function getVertexToken(): Promise<string> {
 /**
  * Single generateContent call. Returns the raw text + token usage.
  * Throws on HTTP/network errors (caller handles retry).
+ *
+ * Exported so other callers reuse the transport rules rather than rebuilding
+ * them: Vertex vs AI Studio endpoints, the two auth shapes, and thinking
+ * disabled. That last one is not a preference — a thinking-enabled default
+ * once burned $0.78 a call and drained a $10 prepay in sixteen of them.
  */
-async function callGemini(
+export async function callGemini(
   systemPrompt: string,
   userMessage: string,
   apiKey?: string | null,

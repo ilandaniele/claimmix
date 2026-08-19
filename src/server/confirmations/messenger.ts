@@ -25,10 +25,13 @@ import { labelForField, labelForClaimType, displayFieldValue } from "@/lib/label
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import type { EmailTemplate } from "@/server/email/render";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
+import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
 
 export interface AgentMessage {
   caseId: string;
   tenantId: string;
+  /** The claimant's most recent message — used only to pitch the tone. */
+  lastMessage?: string;
   /** Email address, or a wa_id — digits only, no '+'. */
   to: string;
   template: EmailTemplate;
@@ -159,6 +162,20 @@ function renderClosing(data: Record<string, unknown>): string {
         `Un analista la va a revisar y te contactamos si hace falta algo más.`;
 }
 
+/** Which kind of message this is, for the composer's brief. */
+function intentFor(template: EmailTemplate): ReplyIntent {
+  switch (template) {
+    case "specialist_escalation":
+      return "escalation";
+    case "missing_information_request":
+      return "ask";
+    case "data_confirmation_request":
+      return "conflict";
+    default:
+      return "closing";
+  }
+}
+
 function renderForWhatsApp(message: AgentMessage): string | null {
   switch (message.template) {
     case "specialist_escalation":
@@ -199,8 +216,27 @@ export const whatsappMessenger: AgentMessenger = {
         return;
       }
 
-      const res = await sendWhatsAppText(message.to, body);
-      await recordOutbound(message, body, res.ok ? "sent" : "failed");
+      // The template is the floor. composeReply is asked to say the same thing
+      // better, and anything that fails its guardrails comes back as this.
+      const finalBody = await composeReply({
+        intent: intentFor(message.template),
+        channel: "whatsapp",
+        fields: Array.isArray(message.data.missingFields)
+          ? (message.data.missingFields as string[]).map(String)
+          : undefined,
+        knownValues: (message.data.knownValues ?? undefined) as
+          | Record<string, string>
+          | undefined,
+        claimTypeLabel: labelForClaimType(
+          typeof message.data.claimType === "string" ? message.data.claimType : null
+        ),
+        isFollowUp: message.data.isFollowUp === true,
+        lastMessage: message.lastMessage,
+        fallback: body,
+      });
+
+      const res = await sendWhatsAppText(message.to, finalBody);
+      await recordOutbound(message, finalBody, res.ok ? "sent" : "failed");
 
       console.log(
         JSON.stringify({

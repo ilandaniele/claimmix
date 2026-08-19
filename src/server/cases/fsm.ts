@@ -73,7 +73,10 @@ export const FSM_TRANSITIONS: Readonly<Record<CaseStatus, readonly CaseStatus[]>
   // first message never mentioned, and a claim that turns out to be serious
   // must be able to escalate rather than stay parked because of where it
   // started.
-  info_faltante: ["recibido", "confirmacion_pendiente", "requiere_especialista"],
+  // `cerrado` is the abandonment exit: we asked, nobody answered, and the
+  // nightly sweep gives up. Without it a conversation nobody is having stays
+  // on the board forever.
+  info_faltante: ["recibido", "confirmacion_pendiente", "requiere_especialista", "cerrado"],
 
   /**
    * confirmacion_pendiente: one or more fields need analyst confirmation.
@@ -87,6 +90,7 @@ export const FSM_TRANSITIONS: Readonly<Record<CaseStatus, readonly CaseStatus[]>
     "listo_para_core",
     "info_faltante",
     "requiere_especialista",
+    "cerrado",
   ],
 
   /**

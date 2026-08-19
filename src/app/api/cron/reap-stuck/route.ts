@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
+import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 
 export const dynamic = "force-dynamic";
 
@@ -53,5 +54,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const result = await reapStuckProcessingCases();
-  return NextResponse.json({ ok: true, ...result });
+
+  // Same nightly pass, second sweep: conversations the claimant abandoned.
+  // Piggybacking rather than adding a cron because the Hobby plan allows one
+  // run a day and both jobs want exactly that cadence.
+  const abandoned = await closeAbandonedConversations();
+
+  return NextResponse.json({ ok: true, ...result, abandoned_closed: abandoned.closed });
 }

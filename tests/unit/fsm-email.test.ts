@@ -140,7 +140,6 @@ describe("isValidTransition — invalid email-intake transitions", () => {
     ["recibido", "error_core"],      // must go through listo_para_core
     ["recibido", "cerrado"],         // must go through specialist/core
     ["info_faltante", "listo_para_core"], // must be confirmed first
-    ["info_faltante", "cerrado"],
     ["confirmacion_pendiente", "enviado_a_core"],
     ["listo_para_core", "cerrado"],  // must go through enviado_a_core
     ["listo_para_core", "recibido"], // cannot go back past listo
@@ -173,12 +172,22 @@ describe("getAllowedTransitions — email-intake statuses", () => {
     expect(allowed).toContain("no_relevante");
   });
 
-  it("info_faltante allows 3 transitions", () => {
+  it("info_faltante allows 4 transitions", () => {
     const allowed = getAllowedTransitions("info_faltante");
-    expect(allowed).toHaveLength(3);
+    expect(allowed).toHaveLength(4);
     expect(allowed).toContain("recibido");
     expect(allowed).toContain("confirmacion_pendiente");
     expect(allowed).toContain("requiere_especialista");
+    expect(allowed).toContain("cerrado");
+  });
+
+  it("lets a waiting conversation be given up on", () => {
+    // The abandonment exit. Without it a case where we asked and nobody ever
+    // answered stays on the board forever — nineteen piled up in one day of
+    // testing and had to be closed by hand.
+    for (const from of ["info_faltante", "confirmacion_pendiente"] as const) {
+      expect(isValidTransition(from, "cerrado"), from).toBe(true);
+    }
   });
 
   it("lets a waiting case escalate when a reply reveals something serious", () => {

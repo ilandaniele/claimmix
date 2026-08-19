@@ -155,6 +155,26 @@ export const AuditEvent = {
   SPECIALIST_REQUIRED: "claim.specialist_required",
 
   /**
+   * SPECIALIST_ALERTED: a human was actually told the case is waiting.
+   * Payload: { case_id, recipients, delivered }.
+   *
+   * Distinct from SPECIALIST_REQUIRED, which only records that the case
+   * changed status. The claimant is promised someone will call; this is the
+   * line that proves anyone was asked to.
+   */
+  SPECIALIST_ALERTED: "claim.specialist_alerted",
+
+  /**
+   * CASE_CLOSED_ABANDONED: the claimant never answered and the conversation
+   * was closed by the nightly sweep.
+   * Payload: { case_id, after_days, reason }.
+   *
+   * Distinct from a human closing a case: this one says nobody decided
+   * anything, time simply ran out.
+   */
+  CASE_CLOSED_ABANDONED: "claim.closed_abandoned",
+
+  /**
    * FIELD_CONFIRMED: analyst confirmed or corrected an extracted field.
    * Payload: { case_id, field_key, action, old_value_redacted, new_value_redacted }.
    * AC21.

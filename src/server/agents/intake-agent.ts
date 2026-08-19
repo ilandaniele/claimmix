@@ -311,14 +311,17 @@ async function findExistingWhatsAppCase(
             eq(c.channel, channel),
             eq(c.email_thread_id, threadId),
             sql`coalesce(${c.updated_at}, ${c.created_at}) > now() - interval '${sql.raw(String(WHATSAPP_THREAD_WINDOW_DAYS))} days'`,
-            inArray(c.status, [
-              "recibido",
-              "info_faltante",
-              "confirmacion_pendiente",
-              "requiere_especialista",
-              "listo",
-              "listo_para_core",
-            ])
+            // Only statuses where the conversation is genuinely still open.
+            //
+            // `listo_para_core` and `listo` used to be here, and they are the
+            // reason a finished claim swallowed the next message from that
+            // number: the case is complete and waiting on the insurer, not on
+            // the person. Their next message is new information at best and a
+            // new accident at worst — either way it deserves its own case.
+            //
+            // `requiere_especialista` stays out for the same reason: a human
+            // owns it, and the agent has already said it will not write again.
+            inArray(c.status, ["recibido", "info_faltante", "confirmacion_pendiente"])
           )
         )
         .orderBy(desc(c.created_at))

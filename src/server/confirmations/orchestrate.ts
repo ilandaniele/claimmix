@@ -35,12 +35,14 @@ import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import { analyzeEmailClaimGaps, MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/gap-analyzer";
+import { alertSpecialists } from "@/server/notify/specialist-alert";
 import {
   canonicalFieldKey,
   confirmationRank,
   isAffirmativeReply,
   isDerivable,
   isWorthConfirming,
+  labelForClaimType,
 } from "@/lib/labels/claim-fields";
 import { emailMessenger, type AgentMessenger } from "@/server/confirmations/messenger";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
@@ -125,6 +127,20 @@ export async function orchestratePostExtraction(
       target_type: "case",
       target_id: caseId,
       payload: { severity },
+    });
+
+    // And tell an actual person. The message above promises the claimant that
+    // a specialist will be in touch; until this existed, nothing made that
+    // true — the case changed status and waited for someone to notice it.
+    await alertSpecialists({
+      caseId,
+      tenantId,
+      severity,
+      claimTypeLabel: labelForClaimType(
+        extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === "claim_type")
+          ?.field_value ?? null
+      ),
+      summary: extractedClaim.summary ?? null,
     });
   }
 

@@ -22,6 +22,15 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 - **AI:** Gemini `gemini-2.5-flash` **via Vertex AI** (`GEMINI_TRANSPORT=vertex`),
   OpenAI optional fallback (currently an invalid key), `MOCK_AI=true` for local.
 
+## Cómo probar que todo anda
+
+`pnpm check` corre todo: tipos, lint, ~1950 tests, once conversaciones enteras
+por WhatsApp y por mail sobre los canales simulados, y un chequeo contra el
+deploy que está corriendo. **No le manda un mensaje a nadie.**
+
+Corrélo después de cada deploy. Detalle completo en
+[docs/TESTING.md](TESTING.md).
+
 ## Key paths
 
 | Area | Path |

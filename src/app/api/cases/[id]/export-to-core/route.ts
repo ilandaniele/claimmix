@@ -61,7 +61,15 @@ export async function POST(
 
   // ── Missing docs ─────────────────────────────────────────────────────────────
   const docs = await db
-    .select({ doc_key: missingDocs.doc_key, requested_at: missingDocs.requested_at, satisfied_at: missingDocs.satisfied_at })
+    .select({
+      doc_key: missingDocs.doc_key,
+      requested_at: missingDocs.requested_at,
+      satisfied_at: missingDocs.satisfied_at,
+      // Carried through separately: the core system must not read "the
+      // claimant says no such report exists" as "we have the report".
+      declined_at: missingDocs.declined_at,
+      declined_note: missingDocs.declined_note,
+    })
     .from(missingDocs)
     .where(eq(missingDocs.case_id, caseId));
 

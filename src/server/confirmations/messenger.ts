@@ -278,6 +278,9 @@ async function recordOutbound(
       template: WHATSAPP_TEMPLATE_NAMES[message.template] ?? message.template,
       rendered_body: body,
       status,
+      asked_keys: Array.isArray(message.data.missingFields)
+        ? (message.data.missingFields as unknown[]).map(String)
+        : null,
     });
   } catch (err) {
     const code =

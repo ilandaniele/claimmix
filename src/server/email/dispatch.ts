@@ -198,6 +198,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
         template,
         rendered_body: preview.html,
         status: "skipped_simulated",
+        asked_keys: askedKeys(data),
       });
     } catch (err) {
       // Must not break the simulation flow — but must not vanish either. The
@@ -305,6 +306,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
           template,
           rendered_body: rendered.html,
           status: "queued",
+          asked_keys: askedKeys(data),
         })
         .returning({ id: outboundMessages.id })
     );
@@ -440,4 +442,18 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
 
     return { error: errorCode };
   }
+}
+
+/**
+ * The keys a message asks for, pulled out of the template data.
+ *
+ * Recorded alongside the rendered body so a later round can tell it has
+ * already asked exactly this. The prose cannot be compared — the composer
+ * rewrites it every time — and three messages in ninety seconds all asking for
+ * the accident report looked, to the code, like three different messages.
+ */
+function askedKeys(data: Record<string, unknown>): string[] | null {
+  const fields = data.missingFields;
+  if (!Array.isArray(fields) || fields.length === 0) return null;
+  return fields.map(String);
 }

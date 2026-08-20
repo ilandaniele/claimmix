@@ -106,6 +106,11 @@ function getTableName(table: unknown): string {
  */
 function setupDbMocks({
   outboundMessagesRows = [] as Array<{ id: string }>,
+  /**
+   * What the last *sent* ask on this case asked for, as alreadyAskedFor reads
+   * it. Empty means we have never asked for anything, so every ask is new.
+   */
+  lastAskRows = [] as Array<{ asked_keys: string[] | null }>,
 } = {}) {
   const mockDbTyped = db as MockDb;
 
@@ -121,7 +126,11 @@ function setupDbMocks({
       if (tableName === "outbound_messages") {
         return {
           where: () => ({
+            // hasPriorOutbound / checkConfirmationAlreadySent: "has anything
+            // gone out at all?"
             limit: () => Promise.resolve(outboundMessagesRows),
+            // alreadyAskedFor: "what did the last sent ask ask for?"
+            orderBy: () => ({ limit: () => Promise.resolve(lastAskRows) }),
           }),
         };
       }
@@ -1291,5 +1300,145 @@ describe("orchestratePostExtraction — escalated cases are left alone", () => {
     // Recorded, not asked.
     const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
     expect(templates).not.toContain("missing_information_request");
+  });
+});
+
+// ── Asking once ───────────────────────────────────────────────────────────────
+
+/**
+ * Every inbound message starts a fresh round, and a round that finds the same
+ * gap sends the same request again. A claimant answered the question about
+ * injuries and then forwarded a contact card, and got three messages inside
+ * ninety seconds all asking for the friendly accident report. Each round was
+ * individually correct — the document was outstanding, so it asked.
+ *
+ * What was missing was memory of having spoken. The prose could not be
+ * compared: the composer rewrites it every time, so the three messages looked
+ * like three different messages to everything downstream.
+ */
+describe("orchestratePostExtraction — not asking the same thing twice", () => {
+  const GAPS = ["accident_date", "policy_number"];
+
+  function gapsAre(fields: string[]) {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: fields,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  }
+
+  function asks() {
+    return vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.filter((c) => c[0].template === "missing_information_request");
+  }
+
+  it("stays quiet when the last sent message asked for exactly this", async () => {
+    setupDbMocks({ lastAskRows: [{ asked_keys: GAPS }] });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(asks()).toHaveLength(0);
+  });
+
+  it("does not fall through to 'ya tenemos todo' when it stays quiet", async () => {
+    // The dangerous failure. Choosing not to repeat a question must not be
+    // read as having nothing left to ask — that sends a message saying the
+    // claim is complete while a document nobody sent is still outstanding.
+    setupDbMocks({ lastAskRows: [{ asked_keys: GAPS }] });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+    expect(templates).not.toContain("confirmation_received");
+  });
+
+  it("keeps the case waiting on the claimant rather than marking it ready", async () => {
+    const { updateSpy } = setupDbMocks({ lastAskRows: [{ asked_keys: GAPS }] });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const statuses = updateSpy.mock.calls
+      .map((c) => (c[0] as { status?: string }).status)
+      .filter(Boolean);
+    expect(statuses).toContain("info_faltante");
+    expect(statuses).not.toContain("listo_para_core");
+  });
+
+  it("speaks again as soon as one item is resolved", async () => {
+    // The list changed, so this is news: they sent the policy number and we
+    // still need the date.
+    setupDbMocks({ lastAskRows: [{ asked_keys: GAPS }] });
+    gapsAre(["accident_date"]);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(asks()).toHaveLength(1);
+  });
+
+  it("speaks again when something new joins the list", async () => {
+    setupDbMocks({ lastAskRows: [{ asked_keys: ["accident_date"] }] });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(asks()).toHaveLength(1);
+  });
+
+  it("does not care what order the items came out in", async () => {
+    setupDbMocks({ lastAskRows: [{ asked_keys: ["policy_number", "accident_date"] }] });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(asks()).toHaveLength(0);
+  });
+
+  it("asks when nothing has ever been sent", async () => {
+    setupDbMocks({ lastAskRows: [] });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(asks()).toHaveLength(1);
   });
 });

@@ -197,6 +197,7 @@ export const enUS: Record<TranslationKey, string> = {
   "doc.status.pending": "Pending",
   "doc.status.received": "Received",
   "doc.status.excused": "Excused",
+  "doc.status.declined": "They don't have it",
 
   // ── Close dialog ───────────────────────────────────────────────────────────
   "close.title": "Close claim",

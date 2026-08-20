@@ -268,7 +268,13 @@ async function fetchStoredFields(
   }
 }
 
-/** Fetch unresolved (satisfied_at IS NULL) doc keys for this case. */
+/**
+ * Doc keys still outstanding: neither received nor declined.
+ *
+ * A document the claimant told us does not exist is resolved. It is not
+ * satisfied — nothing arrived, and the analyst's view keeps the distinction —
+ * but it is no longer a gap the agent should be chasing.
+ */
 async function fetchMissingDocKeys(
   caseId: string,
   tenantId: string
@@ -281,7 +287,8 @@ async function fetchMissingDocKeys(
         and(
           eq(missingDocs.case_id, caseId),
           eq(missingDocs.tenant_id, tenantId),
-          isNull(missingDocs.satisfied_at)
+          isNull(missingDocs.satisfied_at),
+          isNull(missingDocs.declined_at)
         )
       );
 

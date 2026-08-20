@@ -27,7 +27,7 @@
  */
 
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, claimFieldConfirmations, outboundMessages } from "@/lib/db/schema";
@@ -39,6 +39,7 @@ import { alertSpecialists } from "@/server/notify/specialist-alert";
 import {
   pendingDocKeys,
   reconcileAttachments,
+  resolveDeclinedDocs,
   seedRequiredDocs,
 } from "@/server/cases/documents";
 import {
@@ -193,6 +194,13 @@ export async function orchestratePostExtraction(
   await seedRequiredDocs(caseId, tenantId, claimTypeValue);
   await reconcileAttachments(caseId, tenantId, labelForClaimType(claimTypeValue));
 
+  // And close the ones they have just told us do not exist. Most crashes have
+  // no friendly accident report — our own message says "si lo completaron" —
+  // and until now "no completamos ninguno" was heard as silence: the request
+  // stayed open, every round asked again, and the case died of abandonment two
+  // weeks later.
+  await resolveDeclinedDocs(caseId, tenantId, latestMessageText);
+
   const gapResult = await analyzeEmailClaimGaps(caseId, extractedClaim.fields, tenantId);
 
   // ── C. Medium-confidence fields → confirmation rows — AC7 ─────────────────
@@ -318,7 +326,15 @@ export async function orchestratePostExtraction(
   // first message promised. The cost is that an analyst starts with less
   // loaded; the person gets one coherent message and the case sits in the
   // queue it belongs to.
-  if (askItems.fields.length > 0 && !confirmationEmailDispatched && !isHighSeverity) {
+  // Silence when the answer would be word for word the request we already
+  // made. See alreadyAskedFor: this is the difference between following up and
+  // nagging, and the claimant experiences it as whether anyone is reading.
+  const askAlreadyMade =
+    askItems.fields.length > 0 &&
+    (await alreadyAskedFor(caseId, tenantId, askItems.fields));
+  const askIsNew = askItems.fields.length > 0 && !askAlreadyMade;
+
+  if (askIsNew && !confirmationEmailDispatched && !isHighSeverity) {
     await messenger.send({
       caseId,
       tenantId,
@@ -356,6 +372,16 @@ export async function orchestratePostExtraction(
       target_id: caseId,
       payload: { missing_fields: gapResult.missingRequiredFields },
     });
+  } else if (askAlreadyMade && !isHighSeverity && !confirmationEmailDispatched) {
+    // We asked for exactly this and they have not answered it yet. Nothing to
+    // say, but the case is still blocked on it — leaving the status alone here
+    // would let the branch below mark a claim ready while a document nobody
+    // has sent is still outstanding.
+    await setStatus(
+      caseId,
+      tenantId,
+      missingInfoEmailComing ? "info_faltante" : "confirmacion_pendiente"
+    );
   } else if (!isHighSeverity && !confirmationEmailDispatched) {
     // Nothing was asked, so nothing is being waited on.
     //
@@ -383,8 +409,16 @@ export async function orchestratePostExtraction(
   // The escalation was the first case of this — someone reporting a fire got
   // three at once. The rule generalises: if we said anything at all, we said
   // it, and this adds nothing.
+  //
+  // askAlreadyMade belongs in this list for a subtler reason: the claim is not
+  // complete, we simply have nothing new to say about it. Without it, choosing
+  // not to repeat a question would fall through to "ya tenemos todo lo
+  // necesario" — which is worse than asking twice, because it is false.
   const somethingElseWasSaid =
-    isHighSeverity || confirmationEmailDispatched || missingInfoEmailDispatched;
+    isHighSeverity ||
+    confirmationEmailDispatched ||
+    missingInfoEmailDispatched ||
+    askAlreadyMade;
 
   if (!somethingElseWasSaid && !(await checkConfirmationAlreadySent(caseId, tenantId))) {
     // Have we written to this claimant before? If so this is a closing, not an
@@ -711,6 +745,65 @@ async function upsertFieldConfirmation(
     }
   } catch (err) {
     console.error("[orchestrate] Failed to upsert claim_field_confirmations:", errCode(err));
+  }
+}
+
+/**
+ * Have we already asked for exactly this, and heard nothing back about it?
+ *
+ * Every inbound message starts a fresh round, and a round that finds the same
+ * gap sends the same request again. A claimant answered the question about
+ * injuries and then forwarded a contact card, and got three messages inside
+ * ninety seconds all asking for the friendly accident report. Each round was
+ * individually correct: the document was outstanding, so it asked.
+ *
+ * What was missing is memory of having spoken. The prose cannot be compared —
+ * the composer rewrites it every time — so this compares the keys.
+ *
+ * Only a sent message counts. A request that failed to go out was never made,
+ * and staying quiet about it would leave the claim waiting on an answer to a
+ * question nobody heard.
+ *
+ * Note that this deliberately never expires. Nudging someone who has gone
+ * quiet is a good idea and a different one: it belongs to a job that decides
+ * when a silence has gone on too long, not to whatever unrelated message
+ * happened to arrive next.
+ */
+async function alreadyAskedFor(
+  caseId: string,
+  tenantId: string,
+  keys: string[]
+): Promise<boolean> {
+  if (keys.length === 0) return false;
+
+  try {
+    const last = firstRow(
+      await db
+        .select({ asked_keys: outboundMessages.asked_keys })
+        .from(outboundMessages)
+        .where(
+          and(
+            eq(outboundMessages.case_id, caseId),
+            eq(outboundMessages.tenant_id, tenantId),
+            eq(outboundMessages.status, "sent"),
+            isNotNull(outboundMessages.asked_keys)
+          )
+        )
+        .orderBy(desc(outboundMessages.created_at))
+        .limit(1)
+    );
+
+    const previous = last?.asked_keys;
+    if (!previous || previous.length !== keys.length) return false;
+
+    const before = new Set(previous);
+    return keys.every((k) => before.has(k));
+  } catch (err) {
+    // Speak rather than stay silent. A repeated question is a nuisance; a
+    // claim that waits forever because we wrongly believed we had asked is a
+    // claim nobody is working on.
+    console.error("[orchestrate] Failed to check the last ask:", errCode(err));
+    return false;
   }
 }
 

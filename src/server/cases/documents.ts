@@ -87,7 +87,12 @@ export async function pendingDocKeys(
         and(
           eq(missingDocs.case_id, caseId),
           eq(missingDocs.tenant_id, tenantId),
-          isNull(missingDocs.satisfied_at)
+          isNull(missingDocs.satisfied_at),
+          // A document the claimant told us does not exist is not
+          // outstanding. Asking again for the accident report they already
+          // said nobody filled in is the same failure as asking for the photo
+          // we already have, arriving by a different door.
+          isNull(missingDocs.declined_at)
         )
       );
 
@@ -293,4 +298,142 @@ function errCode(err: unknown): string {
     (err as { code?: string })?.code ??
     (err instanceof Error ? err.name : "UnknownError")
   );
+}
+
+// ── When there is nothing to send ────────────────────────────────────────────
+
+/**
+ * Phrases that might be someone telling us a document does not exist.
+ *
+ * A gate, not a decision. Every inbound message would otherwise cost a model
+ * call to answer "no" — most replies are people sending things, not declining
+ * them. What passes this filter goes to the model; what the model says is
+ * still checked against the list we actually asked for.
+ *
+ * Deliberately loose. A false positive costs one call; a false negative means
+ * the person said "no tenemos parte" and we ask for it again next round.
+ */
+const MIGHT_BE_DECLINING =
+  /\b(no|nunca|ning[uú]n|ninguna|tampoco)\b[^.!?]{0,60}\b(tengo|tenemos|ten[ií]a|hay|hubo|hice|hicimos|complet|llen|firm|labr|existe|corresponde|aplica|puedo|pude|dispon|cuento|qued[oó]|sac|pidi|dieron|entreg)/i;
+
+/**
+ * Close the requests the claimant has just told us cannot be satisfied.
+ *
+ * Most crashes have no friendly accident report — our own message says "si lo
+ * completaron" — and until now a person answering "no completamos ninguno" had
+ * no way to be heard. The request stayed open, the next round asked again, and
+ * the case sat in `confirmacion_pendiente` until the abandonment sweep closed
+ * it two weeks later as though they had never replied.
+ *
+ * Recorded as declined, never as received: nothing arrived. An analyst reading
+ * "received" would go looking for a file. This has to read as "they told us
+ * there isn't one", which is a different fact and sometimes one worth pushing
+ * back on — so the note keeps what they said.
+ *
+ * The direction of caution flips here, and on purpose. Everywhere else we
+ * refuse to close a request we are unsure about. Here the risk of closing
+ * wrongly is that an analyst asks for the document on the phone; the risk of
+ * not closing is that we badger someone for a piece of paper that does not
+ * exist until the case dies of it. Still conservative — a bare "no" closes
+ * nothing — but it does not demand certainty.
+ */
+export async function resolveDeclinedDocs(
+  caseId: string,
+  tenantId: string,
+  latestMessageText: string | null | undefined
+): Promise<void> {
+  const said = (latestMessageText ?? "").trim();
+  if (said.length === 0) return;
+
+  try {
+    const pending = await pendingDocKeys(caseId, tenantId);
+    if (pending.length === 0) return;
+    if (!MIGHT_BE_DECLINING.test(said)) return;
+
+    const declined = await identifyDeclined(said, pending);
+    if (declined.length === 0) return;
+
+    await db
+      .update(missingDocs)
+      .set({ declined_at: new Date().toISOString(), declined_note: said.slice(0, 500) })
+      .where(
+        and(
+          eq(missingDocs.case_id, caseId),
+          eq(missingDocs.tenant_id, tenantId),
+          isNull(missingDocs.satisfied_at),
+          isNull(missingDocs.declined_at),
+          inArray(missingDocs.doc_key, declined)
+        )
+      );
+
+    await writeAuditLog({
+      tenant_id: tenantId,
+      actor_id: null,
+      event_type: AuditEvent.DOCUMENTS_DECLINED,
+      target_type: "case",
+      target_id: caseId,
+      payload: { doc_keys: declined, note: said.slice(0, 500) },
+    });
+
+    console.info(
+      JSON.stringify({
+        level: "info",
+        service: "claimmix",
+        msg: "documents.declined",
+        case_id: caseId,
+        declined,
+      })
+    );
+  } catch (err) {
+    console.error("[documents] decline check failed:", errCode(err), "case:", caseId);
+  }
+}
+
+/**
+ * Ask which of the outstanding documents the person is saying they do not have.
+ *
+ * Closed question, known answer set — the kind a model is reliable at. Anything
+ * it returns that we were not waiting for is dropped.
+ */
+async function identifyDeclined(said: string, pending: string[]): Promise<string[]> {
+  const options = pending
+    .map((key) => `- ${key}: ${labelForField(key).label}`)
+    .join("\n");
+
+  const prompt = `Un asegurado está respondiendo a un pedido de documentación para su denuncia.
+
+Le pedimos estos documentos:
+
+${options}
+
+Esto fue lo que contestó:
+"""${said.slice(0, 1500)}"""
+
+¿De cuáles de esos documentos está diciendo que NO existe, que no lo tiene, que
+no lo completaron o que no se lo dieron? Devolvé sólo las claves de esa lista.
+
+No incluyas un documento porque no lo haya mencionado: el silencio no es una
+negativa, es alguien que todavía lo va a mandar. Tampoco incluyas uno que dice
+que va a conseguir o mandar más tarde — ese sigue pendiente.
+
+Devolvé JSON: {"declined": ["<clave>", ...]}  (lista vacía si no niega ninguno)`;
+
+  try {
+    const { text } = await callGemini(
+      prompt,
+      "Respondé sólo con las claves de los documentos que la persona dice no tener."
+    );
+    if (!text) return [];
+
+    const parsed = JSON.parse(text) as { declined?: unknown };
+    if (!Array.isArray(parsed.declined)) return [];
+
+    return parsed.declined
+      .filter((k): k is string => typeof k === "string")
+      .map((k) => k.trim())
+      .filter((k) => pending.includes(k));
+  } catch (err) {
+    console.error("[documents] decline identify failed:", errCode(err));
+    return [];
+  }
 }

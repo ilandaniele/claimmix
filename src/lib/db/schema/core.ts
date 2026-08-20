@@ -198,6 +198,17 @@ export const missingDocs = pgTable("missing_docs", {
   doc_key: text("doc_key").notNull(),
   requested_at: timestamp("requested_at", { withTimezone: true, mode: "string" }),
   satisfied_at: timestamp("satisfied_at", { withTimezone: true, mode: "string" }),
+  /**
+   * When the claimant said this document does not exist.
+   *
+   * Deliberately not `satisfied_at`: nothing arrived. A document marked
+   * received vanishes from the analyst's list and reads as "we have it"; this
+   * has to read as "they told us there isn't one", which is sometimes worth
+   * pushing back on.
+   */
+  declined_at: timestamp("declined_at", { withTimezone: true, mode: "string" }),
+  /** What they said, so an analyst can judge whether to insist. */
+  declined_note: text("declined_note"),
 });
 
 export const outboundMessages = pgTable("outbound_messages", {
@@ -212,6 +223,14 @@ export const outboundMessages = pgTable("outbound_messages", {
   template: text("template").notNull(),
   rendered_body: text("rendered_body").notNull(),
   status: text("status").notNull().default("queued"),
+  /**
+   * The field and document keys this message asked for.
+   *
+   * The composer rewrites the prose every time, so two messages asking for the
+   * same thing look nothing alike. These keys are what lets the next round see
+   * it has already asked exactly this and stay quiet.
+   */
+  asked_keys: text("asked_keys").array(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),

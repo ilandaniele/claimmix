@@ -23,7 +23,10 @@ vi.mock("@/server/ai/gemini-extractor", () => ({
 
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: vi.fn().mockResolvedValue(undefined),
-  AuditEvent: { DOCUMENTS_RECEIVED: "claim.documents_received" },
+  AuditEvent: {
+    DOCUMENTS_RECEIVED: "claim.documents_received",
+    DOCUMENTS_DECLINED: "claim.documents_declined",
+  },
 }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -31,6 +34,7 @@ import {
   seedRequiredDocs,
   pendingDocKeys,
   reconcileAttachments,
+  resolveDeclinedDocs,
 } from "@/server/cases/documents";
 import { db } from "@/lib/db";
 import { callGemini } from "@/server/ai/gemini-extractor";
@@ -206,5 +210,106 @@ describe("reconcileAttachments", () => {
     });
 
     await expect(reconcileAttachments(CASE, TENANT, null)).resolves.toBeUndefined();
+  });
+});
+
+describe("resolveDeclinedDocs", () => {
+  /**
+   * Most crashes have no friendly accident report — our own message says "si
+   * lo completaron" — and "no completamos ninguno" was heard as silence. The
+   * request stayed open, every round asked for it again, and the case sat in
+   * confirmacion_pendiente until the abandonment sweep closed it two weeks
+   * later as though the claimant had never replied.
+   */
+  function declares(keys: string[] | null) {
+    (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({ declined: keys }),
+      usage: {},
+    });
+  }
+
+  it("closes the request the claimant says cannot be satisfied", async () => {
+    queueSelects([{ doc_key: "parte_amistoso" }, { doc_key: "denuncia_policial" }]);
+    declares(["parte_amistoso"]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "No completamos ningún parte amistoso");
+
+    expect(updatedTo?.declined_at).toBeTruthy();
+    expect(updatedTo?.satisfied_at).toBeUndefined();
+    expect(updatedTo?.declined_note).toBe("No completamos ningún parte amistoso");
+  });
+
+  it("never records it as received — nothing arrived", async () => {
+    // An analyst who reads "recibido" goes looking for a file that does not
+    // exist. The two states have to stay apart.
+    queueSelects([{ doc_key: "parte_amistoso" }]);
+    declares(["parte_amistoso"]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "no tenemos parte");
+
+    expect(Object.keys(updatedTo ?? {})).not.toContain("satisfied_at");
+  });
+
+  it("keeps what they said, so an analyst can judge whether to insist", async () => {
+    queueSelects([{ doc_key: "denuncia_policial" }]);
+    declares(["denuncia_policial"]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "No hicimos denuncia, la policía no vino");
+
+    expect(updatedTo?.declined_note).toContain("la policía no vino");
+    expect(vi.mocked(writeAuditLog).mock.calls[0][0]).toMatchObject({
+      event_type: "claim.documents_declined",
+      payload: { doc_keys: ["denuncia_policial"] },
+    });
+  });
+
+  it("does not spend a model call on a message that denies nothing", async () => {
+    // Every inbound message would otherwise cost one, and most people are
+    // sending things rather than refusing them.
+    queueSelects([{ doc_key: "parte_amistoso" }]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "Ahí va la foto del auto");
+
+    expect(callGemini).not.toHaveBeenCalled();
+    expect(updatedTo).toBeNull();
+  });
+
+  it("refuses a key it was never waiting for", async () => {
+    queueSelects([{ doc_key: "parte_amistoso" }]);
+    declares(["informe_bomberos"]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "no tengo el informe de bomberos");
+
+    expect(updatedTo).toBeNull();
+  });
+
+  it("closes nothing when the model declines nothing", async () => {
+    queueSelects([{ doc_key: "parte_amistoso" }]);
+    declares([]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "no sé si tengo el parte, fijate vos");
+
+    expect(updatedTo).toBeNull();
+  });
+
+  it("ignores an empty message", async () => {
+    await resolveDeclinedDocs(CASE, TENANT, "   ");
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when no document is outstanding", async () => {
+    queueSelects([]);
+    await resolveDeclinedDocs(CASE, TENANT, "no tengo nada de eso");
+    expect(callGemini).not.toHaveBeenCalled();
+  });
+
+  it("never throws — the claim is already stored", async () => {
+    (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("database on fire");
+    });
+
+    await expect(
+      resolveDeclinedDocs(CASE, TENANT, "no tenemos parte")
+    ).resolves.toBeUndefined();
   });
 });

@@ -200,6 +200,7 @@ export const esAR = {
   "doc.status.pending": "Pendiente",
   "doc.status.received": "Recibido",
   "doc.status.excused": "Excusado",
+  "doc.status.declined": "No lo tienen",
 
   // ── Close dialog ───────────────────────────────────────────────────────────
   "close.title": "Cerrar siniestro",

@@ -185,6 +185,17 @@ export const AuditEvent = {
   DOCUMENTS_RECEIVED: "claim.documents_received",
 
   /**
+   * DOCUMENTS_DECLINED: the claimant said one of the documents we asked for
+   * does not exist. Payload: { case_id, doc_keys, note }.
+   *
+   * Never merged into DOCUMENTS_RECEIVED. Nothing arrived, and an analyst who
+   * sees "received" will assume there is a file to open. Also the model's
+   * decision, so the same reasoning applies: if a request is ever waived
+   * wrongly, this is the line that says when and on the strength of what.
+   */
+  DOCUMENTS_DECLINED: "claim.documents_declined",
+
+  /**
    * FIELD_CONFIRMED: analyst confirmed or corrected an extracted field.
    * Payload: { case_id, field_key, action, old_value_redacted, new_value_redacted }.
    * AC21.

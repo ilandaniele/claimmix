@@ -330,6 +330,10 @@ export async function orchestratePostExtraction(
         missingFields: askItems.fields,
         knownValues: askItems.knownValues,
         claimantName,
+        // Fourth message in, the reply still opened with "gracias por
+        // contactarnos". Thanking someone for getting in touch three rounds
+        // after they did is the tell that nobody is really reading.
+        isFollowUp: await hasPriorOutbound(caseId, tenantId),
       },
       inReplyToMessageId,
     });

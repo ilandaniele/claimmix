@@ -122,3 +122,61 @@ describe("loadInboundConversation", () => {
     expect(await loadInboundConversation("case-1", "tenant-1")).toBeNull();
   });
 });
+
+// ── Dates in the rendered conversation ───────────────────────────────────────
+
+import { buildConversationBody } from "@/server/worker/extract";
+
+describe("buildConversationBody — when each message was sent", () => {
+  // "Choqué ayer" was read as the 18th on the day it arrived and, two days
+  // later, as the 19th. Nothing new had been said about the date; the whole
+  // conversation is simply re-read on every reply, and with no dates in it the
+  // model anchored "ayer" on whatever day the re-run happened. The accident
+  // moved without anyone touching it.
+  const msg = (body: string, at: string | null) => ({ body_text: body, received_at: at });
+
+  it("stamps every message with the day it arrived", () => {
+    const out = buildConversationBody([
+      msg("Choqué ayer en Bahía Blanca.", "2026-08-19T00:22:43Z"),
+      msg("[Imagen adjunta sin texto]", "2026-08-20T19:17:00Z"),
+    ]);
+
+    expect(out).toContain("recibido el 2026-08-19");
+    expect(out).toContain("recibido el 2026-08-20");
+    expect(out).toContain("Choqué ayer en Bahía Blanca.");
+  });
+
+  it("stamps a lone message too — it is the one most likely to say 'ayer'", () => {
+    const out = buildConversationBody([msg("Choqué ayer.", "2026-08-19T00:22:43Z")]);
+
+    expect(out).toBe("[Mensaje — recibido el 2026-08-19]\nChoqué ayer.");
+  });
+
+  it("keeps the numbering that tells the model what came first", () => {
+    const out = buildConversationBody([
+      msg("Primero", "2026-08-19T00:00:00Z"),
+      msg("Después", "2026-08-20T00:00:00Z"),
+    ]);
+
+    expect(out.indexOf("Mensaje 1 de 2")).toBeLessThan(out.indexOf("Mensaje 2 de 2"));
+  });
+
+  it("says nothing rather than guessing when the timestamp is missing", () => {
+    // An invented date is worse than none: the model would anchor on it.
+    expect(buildConversationBody([msg("Choqué ayer.", null)])).toBe("Choqué ayer.");
+    expect(buildConversationBody([msg("Choqué ayer.", "not a date")])).toBe("Choqué ayer.");
+  });
+
+  it("still drops quoted replies before stamping", () => {
+    const out = buildConversationBody([
+      msg("Fue un choque.\n> texto citado", "2026-08-19T00:00:00Z"),
+    ]);
+
+    expect(out).not.toContain("texto citado");
+    expect(out).toContain("Fue un choque.");
+  });
+
+  it("returns empty when nothing survives the cleaning", () => {
+    expect(buildConversationBody([msg("> sólo cita", "2026-08-19T00:00:00Z")])).toBe("");
+  });
+});

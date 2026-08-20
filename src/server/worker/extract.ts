@@ -1314,7 +1314,23 @@ async function upsertExtractedFields(
       target: [extractedFields.case_id, extractedFields.field_key],
       set: {
         field_value: sql`excluded.field_value`,
-        confidence: sql`excluded.confidence`,
+        // Never become less sure about an answer that has not changed.
+        //
+        // The whole conversation is re-extracted on every reply, so a field is
+        // re-scored on rounds that told us nothing new about it. "¿Hubo
+        // heridos?" was read at 0.95 from the first message and re-read at
+        // 0.80 two replies later — under the confirmation threshold — so the
+        // agent asked the claimant to confirm something it had already
+        // understood and never doubted. Rereading the same sentence is not
+        // evidence against it.
+        //
+        // A value that DID change keeps the new confidence: that is real news,
+        // and the conflict branch has the stored value to show alongside.
+        confidence: sql`case
+          when ${extractedFields.field_value} is not distinct from excluded.field_value
+            then greatest(${extractedFields.confidence}, excluded.confidence)
+          else excluded.confidence
+        end`,
       },
     });
 }
@@ -1459,6 +1475,29 @@ export async function loadInboundConversation(
   };
 }
 
+/**
+ * When each message arrived, so relative dates resolve against the right day.
+ *
+ * "Choqué ayer" was extracted as the day before the message on the first run
+ * and, two days later, as the day before *that* run: the whole conversation is
+ * re-read on every reply, and with no dates in it the model anchored on today.
+ * The accident silently moved. Stamping each message pins the anchor to the
+ * moment it was actually sent.
+ */
+function dateSuffix(receivedAt: string | null): string {
+  if (!receivedAt) return "";
+  const at = new Date(receivedAt);
+  if (Number.isNaN(at.getTime())) return "";
+  return ` — recibido el ${at.toISOString().slice(0, 10)}`;
+}
+
+/** The same stamp for a lone message, which carries no block header. */
+function stampDate(body: string, receivedAt: string | null): string {
+  const suffix = dateSuffix(receivedAt);
+  return suffix ? `[Mensaje${suffix}]\n${body}` : body;
+}
+
+
 /** Per-message cap. Long enough for any real claim, short enough to bound cost. */
 const MAX_CHARS_PER_MESSAGE = 4_000;
 /** Whole-conversation cap. */
@@ -1495,18 +1534,22 @@ export function stripQuotedReply(body: string): string {
  * analysis. Newest messages are kept whole when the cap bites — a claimant
  * correcting themselves means the last word wins.
  */
-function buildConversationBody(
+export function buildConversationBody(
   messages: Array<{ body_text: string | null; received_at: string | null }>
 ): string {
   const cleaned = messages
-    .map((m) => stripQuotedReply(m.body_text ?? "").slice(0, MAX_CHARS_PER_MESSAGE))
-    .filter((body) => body.length > 0);
+    .map((m) => ({
+      body: stripQuotedReply(m.body_text ?? "").slice(0, MAX_CHARS_PER_MESSAGE),
+      receivedAt: m.received_at,
+    }))
+    .filter((m) => m.body.length > 0);
 
   if (cleaned.length === 0) return "";
-  if (cleaned.length === 1) return cleaned[0];
+  if (cleaned.length === 1) return stampDate(cleaned[0].body, cleaned[0].receivedAt);
 
   const blocks = cleaned.map(
-    (body, i) => `[Mensaje ${i + 1} de ${cleaned.length}]\n${body}`
+    (m, i) =>
+      `[Mensaje ${i + 1} de ${cleaned.length}${dateSuffix(m.receivedAt)}]\n${m.body}`
   );
 
   // Drop from the middle if it does not fit: the first message states the

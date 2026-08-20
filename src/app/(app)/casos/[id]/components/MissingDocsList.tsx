@@ -2,6 +2,7 @@
 
 import { useT } from "@/lib/i18n/LocaleContext";
 import { esAR, type TranslationKey } from "@/lib/i18n";
+import { labelForField } from "@/lib/labels/claim-fields";
 import type { MissingDocRow } from "@/lib/db/types";
 
 type MissingDoc = MissingDocRow;
@@ -23,15 +24,17 @@ function getDocStatus(doc: MissingDoc): DocStatus {
   return "excused";
 }
 
-function docLabel(
-  key: string,
-  t: (key: TranslationKey) => string
-): string {
+/**
+ * The name a person reads.
+ *
+ * The tenant-facing document keys have their own translations; everything else
+ * falls back to the shared field labels, which is also where the raw key would
+ * otherwise leak into the page.
+ */
+function docLabel(key: string, t: (key: TranslationKey) => string): string {
   const i18nKey = `docs.${key}` as TranslationKey;
-  if (i18nKey in esAR) {
-    return t(i18nKey);
-  }
-  return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  if (i18nKey in esAR) return t(i18nKey);
+  return labelForField(key).label;
 }
 
 const STATUS_BADGE_CLASSES: Record<DocStatus, string> = {
@@ -59,22 +62,62 @@ export function MissingDocsList({ docs }: MissingDocsListProps) {
     );
   }
 
+  // Two different things share this table: files we asked the claimant to send,
+  // and fields the extractor was unsure about. The agent has always told them
+  // apart — it never asked for the time of the accident as an attachment — but
+  // the page did not, so a case with everything settled showed four "pending
+  // documents" that were facts, not paper.
+  const files = docs.filter((d) => labelForField(d.doc_key).kind === "documento");
+  const facts = docs.filter((d) => labelForField(d.doc_key).kind !== "documento");
+
+  // One heading over one list is noise. Group only when both kinds are here.
+  if (files.length === 0 || facts.length === 0) {
+    return <DocGroup docs={docs} statusLabels={STATUS_LABELS} t={t} />;
+  }
+
   return (
-    <ul
-      className="space-y-2"
-      aria-label="Lista de documentación requerida"
-      role="list"
-    >
+    <div className="space-y-5">
+      <section aria-labelledby="docs-group-files">
+        <h3
+          id="docs-group-files"
+          className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500"
+        >
+          {t("case.detail.docsGroup")}
+        </h3>
+        <DocGroup docs={files} statusLabels={STATUS_LABELS} t={t} />
+      </section>
+
+      <section aria-labelledby="docs-group-facts">
+        <h3
+          id="docs-group-facts"
+          className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500"
+        >
+          {t("case.detail.fieldsGroup")}
+        </h3>
+        <DocGroup docs={facts} statusLabels={STATUS_LABELS} t={t} />
+      </section>
+    </div>
+  );
+}
+
+function DocGroup({
+  docs,
+  statusLabels,
+  t,
+}: {
+  docs: MissingDoc[];
+  statusLabels: Record<DocStatus, string>;
+  t: (key: TranslationKey) => string;
+}) {
+  return (
+    <ul className="space-y-2" aria-label="Lista de documentación requerida" role="list">
       {docs.map((doc) => {
         const status = getDocStatus(doc);
-        const label = STATUS_LABELS[status];
+        const label = statusLabels[status];
         const classes = STATUS_BADGE_CLASSES[status];
 
         return (
-          <li
-            key={doc.id}
-            className="flex items-start justify-between gap-3"
-          >
+          <li key={doc.id} className="flex items-start justify-between gap-3">
             <span className="text-sm text-slate-700">
               {docLabel(doc.doc_key, t)}
               {status === "declined" && doc.declined_note ? (

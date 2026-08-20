@@ -240,17 +240,25 @@ describe("validate — filling a field in from a lookup", () => {
     ).toBe("resolved_without_looking_anything_up");
   });
 
-  it("refuses to fill in a field nobody said was missing", () => {
+  it("accepts a confirmed value for a field that was not missing", () => {
+    // This looked like it should be refused, and refusing it threw away a
+    // correct decision: shown an expired policy the agent escalated and
+    // recorded the policy number and DNI it had just verified — neither of
+    // which was missing, because the claimant supplied both. The whole plan
+    // died and the fallback asked the man for photographs of a car whose cover
+    // lapsed in 2020. A value confirmed against our own records beats one
+    // typed from memory, missing or not.
     expect(
       validate(
         plan({
-          askFor: ["policy_number"],
-          resolved: [{ field: "cbu", value: "0000003100010000000001" }],
+          intent: "escalate",
+          askFor: [],
+          resolved: [{ field: "policy_number", value: "POL-5500-V" }],
           toolCalls: LOOKED_UP,
         }),
-        situation()
+        situation({ outstanding: ["fotos_danos"] })
       )
-    ).toBe("resolved_something_not_missing:cbu");
+    ).toBeNull();
   });
 
   it("refuses to fill a field in and ask for it in the same breath", () => {

@@ -443,12 +443,19 @@ export function validate(plan: AgentPlan, input: DeliberationInput): string | nu
     return "resolved_without_looking_anything_up";
   }
 
-  const madeUp = plan.resolved.filter((r) => !outstanding.has(r.field));
-  if (madeUp.length > 0) {
-    return `resolved_something_not_missing:${madeUp.map((r) => r.field).join(",")}`;
-  }
+  // Deliberately NOT "the field must be one we said was missing". That rule
+  // looked right and threw away a correct decision: shown an expired policy,
+  // the agent chose to escalate and recorded the policy number and DNI it had
+  // just verified — neither of which was missing, because the claimant had
+  // supplied both. The whole plan was rejected and the fallback tree asked the
+  // man for photographs of a car whose cover lapsed in 2020.
+  //
+  // Recording a value we confirmed against our own records is an improvement
+  // on one a person typed from memory, whether or not we were missing it. The
+  // risk this section exists for — values conjured out of nothing — is already
+  // covered above.
 
-  // And it cannot both fill a field in and ask for it.
+  // It cannot both fill a field in and ask for it.
   const both = plan.askFor.filter((k) => plan.resolved.some((r) => r.field === k));
   if (both.length > 0) return `asked_and_resolved:${both.join(",")}`;
 

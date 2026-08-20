@@ -27,13 +27,15 @@
  */
 
 import "server-only";
-import { and, desc, eq, gt, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import {
   cases,
   claimAttachments,
   claimFieldConfirmations,
+  extractedFields,
+  missingDocs,
   outboundMessages,
 } from "@/lib/db/schema";
 import type { CaseRow } from "@/lib/db/types";
@@ -118,42 +120,19 @@ export async function orchestratePostExtraction(
   const isHighSeverity = severity === "high" || severity === "critical";
 
   if (isHighSeverity) {
-    // Ensure status is requiere_especialista (may already be set by worker).
-    await setStatus(caseId, tenantId, "requiere_especialista");
-
-    // Dispatch specialist escalation email to claimant.
-    await messenger.send({
+    await escalate({
       caseId,
       tenantId,
-      to: senderEmail,
-      lastMessage: latestMessageText,
-      template: "specialist_escalation",
-      data: { caseId, severity },
+      senderEmail,
+      latestMessageText,
       inReplyToMessageId,
-    });
-
-    // Log SPECIALIST_REQUIRED audit event.
-    await writeAuditLog({
-      tenant_id: tenantId,
-      actor_id: null,
-      event_type: AuditEvent.SPECIALIST_REQUIRED,
-      target_type: "case",
-      target_id: caseId,
-      payload: { severity },
-    });
-
-    // And tell an actual person. The message above promises the claimant that
-    // a specialist will be in touch; until this existed, nothing made that
-    // true — the case changed status and waited for someone to notice it.
-    await alertSpecialists({
-      caseId,
-      tenantId,
+      messenger,
       severity,
-      claimTypeLabel: labelForClaimType(
-        extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === "claim_type")
-          ?.field_value ?? null
-      ),
+      claimTypeValue: extractedClaim.fields.find(
+        (f) => canonicalFieldKey(f.field_key) === "claim_type"
+      )?.field_value ?? null,
       summary: extractedClaim.summary ?? null,
+      reason: `severidad ${severity}`,
     });
   }
 
@@ -342,6 +321,8 @@ export async function orchestratePostExtraction(
   const lastAsked = await lastAskedKeys(caseId, tenantId);
 
   const plan = await deliberate({
+    caseId,
+    tenantId,
     outstanding: everythingOutstanding.fields,
     knownValues: everythingOutstanding.knownValues,
     lastAsked,
@@ -362,19 +343,75 @@ export async function orchestratePostExtraction(
         intent: plan.intent,
         ask_for: plan.askFor,
         question: plan.question,
+        // What it went and looked up before deciding.
+        tools: plan.toolCalls,
         // The one thing nobody could answer before: why did it say that.
         reasoning: plan.reasoning,
       },
     });
+
+    // What a lookup turned up goes onto the claim instead of into a question.
+    // Searching by DNI, finding the policy number in our own database, and
+    // then asking the claimant for it is exactly what a form does.
+    const resolved = plan.resolved ?? [];
+    if (resolved.length > 0) {
+      await recordLookedUpFields(caseId, tenantId, resolved);
+    }
+
+    // Something a person handling the file would write down and no column was
+    // ever going to hold: the other driver left the scene, they mentioned a
+    // lawyer, they say they already claimed for this in March.
+    if (plan.noteForAnalyst) {
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.AGENT_NOTE,
+        target_type: "case",
+        target_id: caseId,
+        payload: { note: plan.noteForAnalyst },
+      });
+    }
   }
 
+  // The agent can also decide this is beyond a form.
+  //
+  // Severity classification catches the physical emergencies — fire, injuries
+  // — and misses everything else that needs a person: an expired policy, a DNI
+  // that is not the holder's, someone mentioning a lawyer, someone too
+  // distressed to answer questions. Those are judgement, which is exactly what
+  // was missing, and escalating is the conservative direction: the cost of a
+  // wrong escalation is a person reading a case they did not need to.
+  //
+  // Routed through the same code as a severity escalation so there is one
+  // place where escalation happens, one audit event, and one guarantee that a
+  // specialist is actually told.
+  if (plan?.intent === "escalate" && !isHighSeverity) {
+    await escalate({
+      caseId,
+      tenantId,
+      senderEmail,
+      latestMessageText,
+      inReplyToMessageId,
+      messenger,
+      severity: extractedClaim.severity,
+      claimTypeValue,
+      reason: plan.reasoning,
+    });
+    return;
+  }
+
+  // Anything a lookup just filled in is no longer outstanding, and must not be
+  // carried back onto the list by the keep-asking rule below.
+  const justResolved = new Set(
+    (plan?.resolved ?? []).flatMap((r) => [r.field, canonicalFieldKey(r.field)])
+  );
+  const stillOutstanding = everythingOutstanding.fields.filter(
+    (k) => !justResolved.has(k)
+  );
+
   const chosen = plan
-    ? keepAskingForWhatIsStillNeeded(
-        plan.askFor,
-        lastAsked,
-        everythingOutstanding.fields
-      )
-    : everythingOutstanding.fields.slice(0, MAX_ASK_ITEMS);
+    ? keepAskingForWhatIsStillNeeded(plan.askFor, lastAsked, stillOutstanding)
+    : stillOutstanding.slice(0, MAX_ASK_ITEMS);
 
   const askItems = {
     fields: chosen,
@@ -705,6 +742,132 @@ function buildAskList(
   }
 
   return { fields, knownValues };
+}
+
+/**
+ * Write down what the agent found by looking, not by asking.
+ *
+ * Stored at high confidence and marked as coming from a lookup, because that
+ * is what it is: our own record of a policy is better evidence than a person
+ * typing the number from memory on a phone, and it should not sit in the
+ * medium-confidence band waiting for them to confirm what we already know.
+ *
+ * `validate` has already refused anything not backed by a tool call, so
+ * nothing reaching here was invented.
+ */
+async function recordLookedUpFields(
+  caseId: string,
+  tenantId: string,
+  resolved: Array<{ field: string; value: string }>
+): Promise<void> {
+  try {
+    await db
+      .insert(extractedFields)
+      .values(
+        resolved.map((r) => ({
+          case_id: caseId,
+          tenant_id: tenantId,
+          field_key: canonicalFieldKey(r.field),
+          field_value: r.value,
+          confidence: "0.95",
+        }))
+      )
+      .onConflictDoUpdate({
+        target: [extractedFields.case_id, extractedFields.field_key],
+        set: {
+          field_value: sql`excluded.field_value`,
+          confidence: sql`excluded.confidence`,
+        },
+      });
+
+    // Closes the request too, so the next round does not ask for the document
+    // or field we just filled in ourselves.
+    await db
+      .update(missingDocs)
+      .set({ satisfied_at: new Date().toISOString() })
+      .where(
+        and(
+          eq(missingDocs.case_id, caseId),
+          eq(missingDocs.tenant_id, tenantId),
+          isNull(missingDocs.satisfied_at),
+          inArray(
+            missingDocs.doc_key,
+            resolved.flatMap((r) => [r.field, canonicalFieldKey(r.field)])
+          )
+        )
+      );
+
+    console.info(
+      JSON.stringify({
+        level: "info",
+        service: "claimmix",
+        msg: "agent.resolved_by_lookup",
+        case_id: caseId,
+        fields: resolved.map((r) => r.field),
+      })
+    );
+  } catch (err) {
+    // The claim survives: the field simply stays missing and gets asked for.
+    console.error("[orchestrate] Failed to store looked-up fields:", errCode(err));
+  }
+}
+
+/**
+ * Hand the case to a person, and make sure a person is actually told.
+ *
+ * One function because there are now two ways in and they must not diverge.
+ * Severity classification catches the physical emergencies — fire, injuries —
+ * and the agent catches the rest: an expired policy, a DNI that is not the
+ * holder's, someone mentioning a lawyer, someone too distressed to answer
+ * questions. Both owe the claimant the same message and the specialist the
+ * same alert.
+ *
+ * The alert is not optional. The message above promises that a specialist will
+ * be in touch; until `alertSpecialists` existed, nothing made that true — the
+ * case changed status and waited for somebody to notice it.
+ */
+async function escalate(opts: {
+  caseId: string;
+  tenantId: string;
+  senderEmail: string;
+  latestMessageText?: string;
+  inReplyToMessageId?: string;
+  messenger: AgentMessenger;
+  severity: string | null | undefined;
+  claimTypeValue: string | null;
+  summary?: string | null;
+  reason: string;
+}): Promise<void> {
+  const { caseId, tenantId, severity } = opts;
+
+  await setStatus(caseId, tenantId, "requiere_especialista");
+
+  await opts.messenger.send({
+    caseId,
+    tenantId,
+    to: opts.senderEmail,
+    lastMessage: opts.latestMessageText,
+    template: "specialist_escalation",
+    data: { caseId, severity },
+    inReplyToMessageId: opts.inReplyToMessageId,
+  });
+
+  await writeAuditLog({
+    tenant_id: tenantId,
+    actor_id: null,
+    event_type: AuditEvent.SPECIALIST_REQUIRED,
+    target_type: "case",
+    target_id: caseId,
+    payload: { severity, reason: opts.reason },
+  });
+
+  await alertSpecialists({
+    caseId,
+    tenantId,
+    severity: severity ?? "high",
+    claimTypeLabel: labelForClaimType(opts.claimTypeValue),
+    summary: opts.summary ?? opts.reason,
+  });
 }
 
 /**

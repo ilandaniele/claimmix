@@ -18,6 +18,8 @@ import { validate, type AgentPlan, type DeliberationInput } from "@/server/ai/de
 
 function situation(overrides: Partial<DeliberationInput> = {}): DeliberationInput {
   return {
+    caseId: "11111111-1111-1111-1111-111111111111",
+    tenantId: "10000000-0000-0000-0000-000000000001",
     outstanding: ["policy_number", "fotos_danos"],
     knownValues: {},
     lastAsked: [],
@@ -35,6 +37,9 @@ function plan(overrides: Partial<AgentPlan> = {}): AgentPlan {
     askFor: ["policy_number"],
     question: null,
     reasoning: "falta la póliza",
+    noteForAnalyst: null,
+    resolved: [],
+    toolCalls: [],
     ...overrides,
   };
 }
@@ -143,5 +148,122 @@ describe("validate — what the agent may not decide", () => {
         situation({ outstanding: [], isComplete: true })
       )
     ).toBeNull();
+  });
+});
+
+describe("validate — escalating", () => {
+  /**
+   * Severity classification catches the physical emergencies: fire, injuries.
+   * It misses everything else that needs a person — a policy that lapsed last
+   * year, a DNI that is not the holder's, someone mentioning a lawyer, someone
+   * too distressed to answer questions. Those are judgement, which is the
+   * thing that was missing.
+   *
+   * Nothing here makes escalating harder than carrying on, and that is
+   * deliberate. The cost of a wrong escalation is a person reading a case they
+   * did not need to; the cost of not escalating is a chatbot asking for
+   * photographs of a car whose cover expired in 2020.
+   */
+  it("lets the agent hand a case to a person", () => {
+    expect(
+      validate(
+        plan({ intent: "escalate", askFor: [], reasoning: "la póliza venció en 2020" }),
+        situation()
+      )
+    ).toBeNull();
+  });
+
+  it("allows it even with gaps wide open", () => {
+    // The gaps are exactly why it is escalating.
+    expect(
+      validate(
+        plan({ intent: "escalate", askFor: [] }),
+        situation({ outstanding: ["policy_number", "dni", "fotos_danos"] })
+      )
+    ).toBeNull();
+  });
+
+  it("allows it before anything has been asked", () => {
+    expect(
+      validate(plan({ intent: "escalate", askFor: [] }), situation({ lastAsked: [] }))
+    ).toBeNull();
+  });
+
+  it("refuses to ask for documents in the same breath", () => {
+    // Someone told "la derivamos a un especialista, no hace falta que hagas
+    // nada" and then asked for their DNI got two contradictory bubbles.
+    expect(
+      validate(plan({ intent: "escalate", askFor: ["policy_number"] }), situation())
+    ).toBe("escalation_asks_for_data");
+  });
+});
+
+describe("validate — filling a field in from a lookup", () => {
+  /**
+   * The tools were half a feature without this. The agent would search by DNI,
+   * find the policy number sitting in our own database, and then ask the
+   * claimant for it anyway — asking was the only way it had to move a field
+   * from missing to known.
+   *
+   * The danger is the same mechanism used from memory. A value written here
+   * lands on the claim at high confidence, so a model that can fill fields in
+   * unprompted is a model that can invent a policy number and have it believed.
+   */
+  const LOOKED_UP = [{ tool: "polizas_por_dni", args: { dni: "27654321" } }];
+
+  it("accepts a value that a lookup produced", () => {
+    expect(
+      validate(
+        plan({
+          intent: "ask",
+          askFor: ["fotos_danos"],
+          resolved: [{ field: "policy_number", value: "POL-8812-R" }],
+          toolCalls: LOOKED_UP,
+        }),
+        situation()
+      )
+    ).toBeNull();
+  });
+
+  it("refuses a value with no lookup behind it", () => {
+    // Otherwise the model is writing a policy number from imagination, at 0.95
+    // confidence, which is the worst possible way to be wrong.
+    expect(
+      validate(
+        plan({
+          askFor: ["fotos_danos"],
+          resolved: [{ field: "policy_number", value: "POL-INVENTADA" }],
+          toolCalls: [],
+        }),
+        situation()
+      )
+    ).toBe("resolved_without_looking_anything_up");
+  });
+
+  it("refuses to fill in a field nobody said was missing", () => {
+    expect(
+      validate(
+        plan({
+          askFor: ["policy_number"],
+          resolved: [{ field: "cbu", value: "0000003100010000000001" }],
+          toolCalls: LOOKED_UP,
+        }),
+        situation()
+      )
+    ).toBe("resolved_something_not_missing:cbu");
+  });
+
+  it("refuses to fill a field in and ask for it in the same breath", () => {
+    // The claimant would be asked to supply what the message already contains.
+    expect(
+      validate(
+        plan({
+          askFor: ["policy_number"],
+          resolved: [{ field: "policy_number", value: "POL-8812-R" }],
+          toolCalls: LOOKED_UP,
+        }),
+        situation()
+      )
+    ).toBe("asked_and_resolved:policy_number");
   });
 });

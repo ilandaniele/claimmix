@@ -48,6 +48,7 @@ vi.mock("@/lib/audit/log", () => ({
     CONFIRMATION_REQUESTED: "claim.confirmation_requested",
     MISSING_INFO_REQUESTED: "claim.missing_info_requested",
     AGENT_DELIBERATED: "agent.deliberated",
+    AGENT_NOTE: "agent.note",
     OUTBOUND_EMAIL_SENT: "email.outbound_sent",
     OUTBOUND_EMAIL_FAILED: "email.outbound_failed",
   },
@@ -1491,6 +1492,9 @@ describe("orchestratePostExtraction — acting on the agent's plan", () => {
       askFor: [],
       question: null,
       reasoning: "",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
       ...over,
     } as never);
   }
@@ -1614,6 +1618,9 @@ describe("orchestratePostExtraction — a question beats the no-repeat guard", (
       askFor: ["policy_number"],
       question: "¿cuánto tarda esto?",
       reasoning: "preguntó por los tiempos",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
     } as never);
 
     await orchestratePostExtraction(
@@ -1654,6 +1661,9 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
       askFor: [],
       question: null,
       reasoning: "el pedido no cambió",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
     } as never);
 
     await orchestratePostExtraction(
@@ -1687,6 +1697,9 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
       askFor: [],
       question: null,
       reasoning: "el pedido no cambió",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
     } as never);
 
     await orchestratePostExtraction(
@@ -1697,5 +1710,205 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
     );
 
     expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("orchestratePostExtraction — the agent hands a case to a person", () => {
+  /**
+   * Severity classification catches fire and injuries. The agent catches the
+   * rest: a policy that lapsed last year, a DNI that is not the holder's, a
+   * mention of a lawyer. Both routes run the same code, so the claimant gets
+   * one coherent message and a specialist is genuinely told — the escalation
+   * message promises someone will call, and for a while nothing made that true.
+   */
+  function escalatingPlan() {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "escalate",
+      askFor: [],
+      question: null,
+      reasoning: "la póliza venció en 2020",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [{ tool: "verificar_poliza", args: { numero_poliza: "POL-1" } }],
+    } as never);
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["dni", "fotos_danos"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  }
+
+  async function run() {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+  }
+
+  it("sends the escalation message", async () => {
+    escalatingPlan();
+    await run();
+
+    const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+    expect(templates).toContain("specialist_escalation");
+  });
+
+  it("asks for nothing once it has escalated", async () => {
+    // Two gaps are open and it does not matter. "No hace falta que hagas nada"
+    // followed by a demand for the DNI is the contradiction this prevents.
+    escalatingPlan();
+    await run();
+
+    const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+    expect(templates).not.toContain("missing_information_request");
+    expect(templates).not.toContain("confirmation_received");
+  });
+
+  it("puts the case in the queue a person watches", async () => {
+    const { updateSpy } = setupDbMocks();
+    escalatingPlan();
+    await run();
+
+    const statuses = updateSpy.mock.calls
+      .map((c) => (c[0] as { status?: string }).status)
+      .filter(Boolean);
+    expect(statuses).toContain("requiere_especialista");
+  });
+
+  it("records the reason, not just that it happened", async () => {
+    escalatingPlan();
+    await run();
+
+    const entry = vi
+      .mocked(writeAuditLog)
+      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
+    expect(entry?.[0].payload).toMatchObject({ reason: "la póliza venció en 2020" });
+  });
+
+  it("records what it looked up before deciding", async () => {
+    escalatingPlan();
+    await run();
+
+    const entry = vi
+      .mocked(writeAuditLog)
+      .mock.calls.find((c) => c[0].event_type === "agent.deliberated");
+    expect(entry?.[0].payload?.tools).toEqual([
+      { tool: "verificar_poliza", args: { numero_poliza: "POL-1" } },
+    ]);
+  });
+});
+
+describe("orchestratePostExtraction — notes for whoever picks up the file", () => {
+  it("writes down what the agent noticed and no column holds", async () => {
+    // "El otro conductor se dio a la fuga." A person handling the claim writes
+    // that on the folder; a schema was never going to have a field for it.
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["dni"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "ask",
+      askFor: ["dni"],
+      question: null,
+      reasoning: "falta el DNI",
+      noteForAnalyst: "Dice que el otro conductor se dio a la fuga.",
+      resolved: [],
+      toolCalls: [],
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const note = vi
+      .mocked(writeAuditLog)
+      .mock.calls.find((c) => c[0].event_type === "agent.note");
+    expect(note?.[0].payload).toMatchObject({
+      note: "Dice que el otro conductor se dio a la fuga.",
+    });
+  });
+});
+
+describe("orchestratePostExtraction — what the lookup found", () => {
+  it("records it instead of asking for it", async () => {
+    // The whole reason the tools exist. Searching by DNI, finding the policy
+    // number in our own database, and then asking the claimant for it is what
+    // a form does.
+    const { insertSpy } = setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["policy_number", "hora_siniestro"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "ask",
+      askFor: ["hora_siniestro"],
+      question: null,
+      reasoning: "la póliza la encontré por DNI",
+      noteForAnalyst: null,
+      resolved: [{ field: "policy_number", value: "POL-8812-R" }],
+      toolCalls: [{ tool: "polizas_por_dni", args: { dni: "27654321" } }],
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    // Written onto the claim…
+    const written = insertSpy.mock.calls
+      .flatMap((c) => (Array.isArray(c[0]) ? c[0] : [c[0]]))
+      .find((v) => (v as { field_key?: string })?.field_key === "policy_number");
+    expect(written).toMatchObject({ field_value: "POL-8812-R" });
+
+    // …and gone from what the claimant is asked for.
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect(ask?.[0].data?.missingFields).toEqual(["hora_siniestro"]);
+  });
+
+  it("does not let the keep-asking rule drag it back onto the list", async () => {
+    // We asked for the policy number last round; this round we found it. The
+    // rule that keeps outstanding items on the list must not resurrect it.
+    setupDbMocks({ lastAskRows: [{ asked_keys: ["policy_number"] }] });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["policy_number", "hora_siniestro"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "ask",
+      askFor: ["hora_siniestro"],
+      question: null,
+      reasoning: "",
+      noteForAnalyst: null,
+      resolved: [{ field: "policy_number", value: "POL-8812-R" }],
+      toolCalls: [{ tool: "polizas_por_dni", args: { dni: "27654321" } }],
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect(ask?.[0].data?.missingFields).not.toContain("policy_number");
   });
 });

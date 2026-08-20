@@ -42,8 +42,16 @@ if (!process.env.DATABASE_URL || !TENANT_ID) {
 // Imported after dotenv: the db module reads DATABASE_URL at import time.
 const { createWhatsAppIntakeAndRunAgent } = await import("@/server/agents/intake-agent");
 const { db } = await import("@/lib/db");
-const { cases, claimAttachments, missingDocs, outboundMessages, extractedFields } =
-  await import("@/lib/db/schema");
+const {
+  cases,
+  claimAttachments,
+  customers,
+  insuredAssets,
+  missingDocs,
+  outboundMessages,
+  extractedFields,
+  policies,
+} = await import("@/lib/db/schema");
 const { and, eq, asc } = await import("drizzle-orm");
 
 // ── What a rehearsal looks like ──────────────────────────────────────────────
@@ -90,6 +98,15 @@ interface Turn {
 interface Scenario {
   id: string;
   what: string;
+  /**
+   * A policy to put on file before the conversation starts, and take off
+   * afterwards.
+   *
+   * The tools are only interesting against a book of business, and this tenant
+   * has none loaded yet. Seeded and deleted per scenario so a rehearsal never
+   * leaves an invented customer sitting in the real Clientes screen.
+   */
+  policy?: { numero: string; dni: string; nombre: string; vencida?: boolean };
   turns: Turn[];
   /** Checked once, after the last turn. */
   finally?: {
@@ -184,6 +201,46 @@ const SCENARIOS: Scenario[] = [
   },
 
   {
+    id: "busca-la-poliza",
+    what: "Da el DNI y no el número de póliza: el agente lo busca en vez de pedirlo",
+    policy: { numero: "POL-8812-R", dni: "27.654.321", nombre: "Cecilia Ferrari" },
+    turns: [
+      {
+        // The whole point of giving it lookups. Asking for a policy number
+        // that is sitting in our own database under the DNI they just gave is
+        // what a form does.
+        say: "Hola, choqué esta mañana en Rivadavia y Chiclana. Soy Cecilia Ferrari, DNI 27.654.321. No hubo heridos.",
+        expect: { avoids: ["número de póliza", "numero de poliza"] },
+      },
+    ],
+    finally: { knows: ["full_name"] },
+  },
+
+  {
+    id: "poliza-vencida",
+    what: "Una póliza vencida es para una persona, no para seguir pidiendo papeles",
+    policy: {
+      numero: "POL-5500-V",
+      dni: "24.111.222",
+      nombre: "Jorge Peralta",
+      vencida: true,
+    },
+    turns: [
+      {
+        say: "Buenas, tuve un choque ayer en Villa Mitre. Soy Jorge Peralta, DNI 24.111.222, póliza POL-5500-V.",
+        expect: {
+          replies: 1,
+          // Pedirle fotos de los daños a alguien cuya cobertura venció en 2020
+          // le hace perder la tarde a él y a nosotros.
+          avoids: ["fotos de los daños", "licencia"],
+          status: "requiere_especialista",
+        },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
+  {
     id: "pregunta",
     what: "Una persona que pregunta algo tiene que recibir una respuesta",
     turns: [
@@ -233,6 +290,67 @@ function note(scenario: string, turn: number, why: string) {
   console.log(`      ✗ ${why}`);
 }
 
+/**
+ * Put one policy on file for the length of a rehearsal.
+ *
+ * Returns what to delete afterwards. The lookups are only worth exercising
+ * against a real row — this tenant's book is empty — and an invented customer
+ * left behind would show up in the Clientes screen as a person who does not
+ * exist.
+ */
+async function seedPolicy(
+  policy: NonNullable<Scenario["policy"]>
+): Promise<{ customerId: string }> {
+  const [customer] = await db
+    .insert(customers)
+    .values({
+      tenant_id: TENANT_ID!,
+      full_name: policy.nombre,
+      dni: policy.dni.replace(/\D/g, ""),
+    })
+    .returning({ id: customers.id });
+
+  // From here on, anything that throws has to take the customer with it. The
+  // first version of this did not, a CHECK constraint rejected the vehicle,
+  // and two people who do not exist were left sitting in the Clientes screen.
+  try {
+    await seedPolicyFor(customer.id, policy);
+  } catch (err) {
+    await db.delete(customers).where(eq(customers.id, customer.id));
+    throw err;
+  }
+
+  return { customerId: customer.id };
+}
+
+async function seedPolicyFor(
+  customerId: string,
+  policy: NonNullable<Scenario["policy"]>
+): Promise<void> {
+  const [row] = await db
+    .insert(policies)
+    .values({
+      tenant_id: TENANT_ID!,
+      customer_id: customerId,
+      policy_number: policy.numero,
+      policy_type: "auto",
+      status: "active",
+      end_date: policy.vencida ? "2020-03-01" : "2099-01-01",
+    })
+    .returning({ id: policies.id });
+
+  await db.insert(insuredAssets).values({
+    tenant_id: TENANT_ID!,
+    policy_id: row.id,
+    // The CHECK constraint spells these in English.
+    asset_type: "vehicle",
+    make: "Fiat",
+    model: "Uno",
+    year: 2015,
+    plate: "AB123CD",
+  });
+}
+
 async function repliesSince(caseId: string, seen: number): Promise<string[]> {
   const rows = await db
     .select({ body: outboundMessages.rendered_body })
@@ -250,120 +368,127 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
   let caseId: string | null = null;
   let seen = 0;
 
-  for (const [i, turn] of scenario.turns.entries()) {
-    console.log(`\n   [${i + 1}] 👤 ${turn.say}${turn.photo ? "  📎" : ""}`);
+  const seeded = scenario.policy ? await seedPolicy(scenario.policy) : null;
+  try {
 
-    const result = await createWhatsAppIntakeAndRunAgent({
-      tenantId: TENANT_ID!,
-      from: phone,
-      body: turn.say,
-      providerMessageId: `rehearsal.${RUN}.${scenario.id}.${i}`,
-      simulated: true,
-      media: turn.photo
-        ? [
-            {
-              id: `rehearsal-${RUN}-${i}`,
-              mimeType: "image/jpeg",
-              filename: `${typeof turn.photo === "string" ? turn.photo : "foto"}-${i}.jpg`,
-              data: imageFor(turn.photo),
-            },
-          ]
-        : undefined,
-    });
-    caseId = result.caseId;
+    for (const [i, turn] of scenario.turns.entries()) {
+      console.log(`\n   [${i + 1}] 👤 ${turn.say}${turn.photo ? "  📎" : ""}`);
 
-    const said = await repliesSince(caseId, seen);
-    seen += said.length;
+      const result = await createWhatsAppIntakeAndRunAgent({
+        tenantId: TENANT_ID!,
+        from: phone,
+        body: turn.say,
+        providerMessageId: `rehearsal.${RUN}.${scenario.id}.${i}`,
+        simulated: true,
+        media: turn.photo
+          ? [
+              {
+                id: `rehearsal-${RUN}-${i}`,
+                mimeType: "image/jpeg",
+                filename: `${typeof turn.photo === "string" ? turn.photo : "foto"}-${i}.jpg`,
+                data: imageFor(turn.photo),
+              },
+            ]
+          : undefined,
+      });
+      caseId = result.caseId;
 
-    if (said.length === 0) console.log("       🤖 (silencio)");
-    for (const s of said) console.log(`       🤖 ${s.replace(/\n/g, "\n          ")}`);
+      const said = await repliesSince(caseId, seen);
+      seen += said.length;
 
-    const want = turn.expect;
-    if (!want) continue;
+      if (said.length === 0) console.log("       🤖 (silencio)");
+      for (const s of said) console.log(`       🤖 ${s.replace(/\n/g, "\n          ")}`);
 
-    if (want.replies !== undefined && said.length !== want.replies) {
-      note(scenario.id, i + 1, `esperaba ${want.replies} respuesta(s), hubo ${said.length}`);
-    }
+      const want = turn.expect;
+      if (!want) continue;
 
-    const all = said.join("\n").toLowerCase();
-    for (const phrase of want.mentions ?? []) {
-      if (!all.includes(phrase.toLowerCase())) {
-        note(scenario.id, i + 1, `no menciona "${phrase}"`);
+      if (want.replies !== undefined && said.length !== want.replies) {
+        note(scenario.id, i + 1, `esperaba ${want.replies} respuesta(s), hubo ${said.length}`);
+      }
+
+      const all = said.join("\n").toLowerCase();
+      for (const phrase of want.mentions ?? []) {
+        if (!all.includes(phrase.toLowerCase())) {
+          note(scenario.id, i + 1, `no menciona "${phrase}"`);
+        }
+      }
+      for (const phrase of want.avoids ?? []) {
+        if (all.includes(phrase.toLowerCase())) {
+          note(scenario.id, i + 1, `no debería decir "${phrase}"`);
+        }
+      }
+      if (want.attachments !== undefined) {
+        const rows = await db
+          .select({ id: claimAttachments.id })
+          .from(claimAttachments)
+          .where(eq(claimAttachments.case_id, caseId));
+        if (rows.length !== want.attachments) {
+          note(scenario.id, i + 1, `${rows.length} adjunto(s) guardado(s), esperaba ${want.attachments}`);
+        }
+      }
+      if (want.status) {
+        const row = await db
+          .select({ status: cases.status })
+          .from(cases)
+          .where(eq(cases.id, caseId));
+        if (row[0]?.status !== want.status) {
+          note(scenario.id, i + 1, `estado ${row[0]?.status}, esperaba ${want.status}`);
+        }
       }
     }
-    for (const phrase of want.avoids ?? []) {
-      if (all.includes(phrase.toLowerCase())) {
-        note(scenario.id, i + 1, `no debería decir "${phrase}"`);
+
+    if (caseId && scenario.finally) {
+      const want = scenario.finally;
+      const [row] = await db.select({ status: cases.status }).from(cases).where(eq(cases.id, caseId));
+      if (want.status && row?.status !== want.status) {
+        note(scenario.id, 0, `estado final ${row?.status}, esperaba ${want.status}`);
       }
-    }
-    if (want.attachments !== undefined) {
-      const rows = await db
-        .select({ id: claimAttachments.id })
-        .from(claimAttachments)
-        .where(eq(claimAttachments.case_id, caseId));
-      if (rows.length !== want.attachments) {
-        note(scenario.id, i + 1, `${rows.length} adjunto(s) guardado(s), esperaba ${want.attachments}`);
+
+      const docs = await db
+        .select({
+          key: missingDocs.doc_key,
+          satisfied: missingDocs.satisfied_at,
+          declined: missingDocs.declined_at,
+        })
+        .from(missingDocs)
+        .where(eq(missingDocs.case_id, caseId));
+
+      for (const key of want.docsReceived ?? []) {
+        if (!docs.find((d) => d.key === key && d.satisfied)) {
+          note(scenario.id, 0, `${key} debería figurar como recibido`);
+        }
       }
-    }
-    if (want.status) {
-      const row = await db
-        .select({ status: cases.status })
-        .from(cases)
-        .where(eq(cases.id, caseId));
-      if (row[0]?.status !== want.status) {
-        note(scenario.id, i + 1, `estado ${row[0]?.status}, esperaba ${want.status}`);
+      for (const key of want.docsDeclined ?? []) {
+        if (!docs.find((d) => d.key === key && d.declined)) {
+          note(scenario.id, 0, `${key} debería figurar como rechazado`);
+        }
       }
+
+      if (want.knows?.length) {
+        const known = await db
+          .select({ key: extractedFields.field_key })
+          .from(extractedFields)
+          .where(eq(extractedFields.case_id, caseId));
+        const keys = new Set(known.map((k) => k.key));
+        for (const key of want.knows) {
+          if (!keys.has(key)) note(scenario.id, 0, `perdió el dato ${key}`);
+        }
+      }
+
+      console.log(
+        `\n   estado final: ${row?.status} · docs: ${
+          docs
+            .map((d) => `${d.key}${d.satisfied ? "✓" : d.declined ? "✗" : "·"}`)
+            .join(" ") || "ninguno"
+        }`
+      );
     }
+
+    return caseId;
+  } finally {
+    // Cascades to the policy and the insured vehicle.
+    if (seeded) await db.delete(customers).where(eq(customers.id, seeded.customerId));
   }
-
-  if (caseId && scenario.finally) {
-    const want = scenario.finally;
-    const [row] = await db.select({ status: cases.status }).from(cases).where(eq(cases.id, caseId));
-    if (want.status && row?.status !== want.status) {
-      note(scenario.id, 0, `estado final ${row?.status}, esperaba ${want.status}`);
-    }
-
-    const docs = await db
-      .select({
-        key: missingDocs.doc_key,
-        satisfied: missingDocs.satisfied_at,
-        declined: missingDocs.declined_at,
-      })
-      .from(missingDocs)
-      .where(eq(missingDocs.case_id, caseId));
-
-    for (const key of want.docsReceived ?? []) {
-      if (!docs.find((d) => d.key === key && d.satisfied)) {
-        note(scenario.id, 0, `${key} debería figurar como recibido`);
-      }
-    }
-    for (const key of want.docsDeclined ?? []) {
-      if (!docs.find((d) => d.key === key && d.declined)) {
-        note(scenario.id, 0, `${key} debería figurar como rechazado`);
-      }
-    }
-
-    if (want.knows?.length) {
-      const known = await db
-        .select({ key: extractedFields.field_key })
-        .from(extractedFields)
-        .where(eq(extractedFields.case_id, caseId));
-      const keys = new Set(known.map((k) => k.key));
-      for (const key of want.knows) {
-        if (!keys.has(key)) note(scenario.id, 0, `perdió el dato ${key}`);
-      }
-    }
-
-    console.log(
-      `\n   estado final: ${row?.status} · docs: ${
-        docs
-          .map((d) => `${d.key}${d.satisfied ? "✓" : d.declined ? "✗" : "·"}`)
-          .join(" ") || "ninguno"
-      }`
-    );
-  }
-
-  return caseId;
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

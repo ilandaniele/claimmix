@@ -30,8 +30,15 @@ import "server-only";
 
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
+import { describeTools, runTool, type ToolContext } from "@/server/ai/agent-tools";
 
-export type AgentIntent = "ask" | "answer_and_ask" | "answer" | "acknowledge" | "wait";
+export type AgentIntent =
+  | "ask"
+  | "answer_and_ask"
+  | "answer"
+  | "acknowledge"
+  | "escalate"
+  | "wait";
 
 export interface AgentPlan {
   intent: AgentIntent;
@@ -46,9 +53,35 @@ export interface AgentPlan {
   question: string | null;
   /** Why, in one or two sentences. Written to the audit log. */
   reasoning: string;
+  /**
+   * Something an analyst should know that no field captures.
+   *
+   * "El otro conductor se dio a la fuga", "dice que ya reclamó por esto en
+   * marzo", "menciona un abogado". Facts a person handling the file would
+   * write down and a schema was never going to have a column for.
+   */
+  noteForAnalyst: string | null;
+  /**
+   * Values a lookup turned up, to be recorded instead of asked for.
+   *
+   * Without this the tools were half a feature. The agent would search by DNI,
+   * find the policy number sitting in our own database, and then ask the
+   * claimant for it anyway — because asking was the only way it had to move a
+   * field from missing to known.
+   *
+   * Only ever from a lookup. `validate` refuses these outright when no tool
+   * was called, because a model that can write values into a claim from
+   * memory is a model that can invent a policy number.
+   */
+  resolved: Array<{ field: string; value: string }>;
+  /** The lookups it made, in order, for the audit trail. */
+  toolCalls: Array<{ tool: string; args: Record<string, unknown> }>;
 }
 
 export interface DeliberationInput {
+  /** Which case and tenant the lookups run against. */
+  caseId: string;
+  tenantId: string;
   /** Everything still outstanding, as canonical keys. The only askable set. */
   outstanding: string[];
   /** Values we already hold for some of those, to be confirmed rather than asked. */
@@ -87,15 +120,9 @@ export async function deliberate(
   if (input.isHighSeverity) return null;
 
   try {
-    const { text } = await callGemini(
-      buildPrompt(input),
-      "Decidí qué corresponde hacer con este mensaje y devolvé el JSON pedido."
-    );
-    if (!text) return null;
-
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    const plan = coerce(parsed);
+    const { plan, toolCalls } = await think(input);
     if (!plan) return null;
+    plan.toolCalls = toolCalls;
 
     const problem = validate(plan, input);
     if (problem) {
@@ -121,9 +148,99 @@ export async function deliberate(
   }
 }
 
+/**
+ * How many lookups one decision may make.
+ *
+ * Each is a database query and a round trip to the model, so the ceiling is
+ * about cost and latency rather than safety — the tools are read-only, and a
+ * loop that ran forever would only be expensive. Three is enough for the real
+ * chains: check the DNI, find their policies, confirm one is in force.
+ */
+const MAX_TOOL_CALLS = 3;
+
+/**
+ * Let the agent look things up until it knows enough to decide.
+ *
+ * The model answers with either a tool call or a plan. A tool call is run, its
+ * result appended to the conversation, and the model asked again. This is a
+ * JSON protocol rather than Gemini's native function calling because the
+ * shared `callGemini` pins responseMimeType to JSON for every caller in the
+ * codebase, and the two cannot both be on. What makes it an agent is that the
+ * model chooses the actions and sees their results, not which wire format
+ * carries them.
+ */
+async function think(
+  input: DeliberationInput
+): Promise<{ plan: AgentPlan | null; toolCalls: AgentPlan["toolCalls"] }> {
+  const ctx: ToolContext = { caseId: input.caseId, tenantId: input.tenantId };
+  const toolCalls: AgentPlan["toolCalls"] = [];
+  const transcript: string[] = [];
+
+  for (let step = 0; step <= MAX_TOOL_CALLS; step++) {
+    // On the last pass the tool menu is withdrawn, so the model has to decide
+    // with what it has rather than asking for one more lookup forever.
+    const lastChance = step === MAX_TOOL_CALLS;
+    const prompt =
+      buildPrompt(input, lastChance) +
+      (transcript.length > 0
+        ? `\n\nLO QUE AVERIGUASTE:\n${transcript.join("\n")}`
+        : "");
+
+    const { text } = await callGemini(
+      prompt,
+      "Decidí qué corresponde hacer con este mensaje y devolvé el JSON pedido."
+    );
+    if (!text) return { plan: null, toolCalls };
+
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+
+    const call = toolCallIn(parsed);
+    if (call && !lastChance) {
+      toolCalls.push(call);
+      const result = await runTool(call.tool, call.args, ctx);
+
+      // Logged because a lookup that quietly returns nothing looks exactly
+      // like a lookup nobody made, and the two need different fixes.
+      console.info(
+        JSON.stringify({
+          level: "info",
+          service: "claimmix",
+          msg: "agent.tool_call",
+          case_id: input.caseId,
+          tool: call.tool,
+          args: call.args,
+          result: JSON.stringify(result).slice(0, 300),
+        })
+      );
+
+      transcript.push(
+        `${call.tool}(${JSON.stringify(call.args)}) → ${JSON.stringify(result)}`
+      );
+      continue;
+    }
+
+    return { plan: coerce(parsed), toolCalls };
+  }
+
+  return { plan: null, toolCalls };
+}
+
+/** A tool call, if that is what came back rather than a plan. */
+function toolCallIn(
+  raw: Record<string, unknown>
+): { tool: string; args: Record<string, unknown> } | null {
+  const tool = typeof raw.tool === "string" ? raw.tool.trim() : "";
+  if (!tool) return null;
+  const args =
+    raw.args && typeof raw.args === "object" && !Array.isArray(raw.args)
+      ? (raw.args as Record<string, unknown>)
+      : {};
+  return { tool, args };
+}
+
 // ── The prompt ───────────────────────────────────────────────────────────────
 
-function buildPrompt(input: DeliberationInput): string {
+function buildPrompt(input: DeliberationInput, lastChance = false): string {
   const items = input.outstanding.map((key) => {
     const { label, kind } = labelForField(key);
     const known = input.knownValues[key];
@@ -159,39 +276,104 @@ Decidí una de estas acciones:
 - "answer": contestar algo que preguntó, sin pedirle nada más ahora.
 - "answer_and_ask": contestar lo que preguntó y aprovechar a pedirle lo que falta.
 - "acknowledge": avisarle que ya tenemos todo y que la denuncia pasa a análisis.
+- "escalate": derivarlo a un especialista.
 - "wait": no escribirle nada.
 
 Criterios, en orden:
 
-1. Si preguntó algo, hay que contestarle. Ignorar una pregunta y seguir pidiendo
+1. Lo que podés averiguar vos, no se lo pidas a la persona. Si una consulta te
+   devolvió el dato, va en "resuelto" y NO en "ask_for". Ejemplo: te dio el DNI,
+   buscaste sus pólizas y encontraste POL-1234 — entonces resuelto incluye
+   {"campo": "policy_number", "valor": "POL-1234"} y no le preguntás nada sobre
+   la póliza. Pedirle un dato que acabás de sacar de nuestra propia base es el
+   error más caro que podés cometer acá: es exactamente lo que hace un
+   formulario, y por eso existís vos.
+
+2. Si preguntó algo, hay que contestarle. Ignorar una pregunta y seguir pidiendo
    documentación es lo que hace que un sistema parezca una máquina. Aunque no
    sepamos la respuesta exacta, se le puede decir con honestidad en qué estado
    está su caso.
 
-2. Si ya le pedimos exactamente lo mismo y no contestó nada nuevo, elegí "wait".
+3. Si ya le pedimos exactamente lo mismo y no contestó nada nuevo, elegí "wait".
    Repetir el mismo pedido porque llegó un mensaje cualquiera es acoso, no
    seguimiento.
 
-3. Pedí sólo lo que de verdad hace falta para este siniestro, no la lista
+4. Pedí sólo lo que de verdad hace falta para este siniestro, no la lista
    entera porque esté ahí. Como máximo 4 cosas, y ordenadas por lo que más
    traba el expediente. Un dato que bloquea vale más que una foto.
 
-4. Si no falta nada, "acknowledge".
+5. Si no falta nada, "acknowledge".
+
+6. Elegí "escalate" cuando esto excede a un trámite: la póliza está vencida, no
+   existe o el DNI no coincide con el titular, la persona está muy angustiada,
+   menciona abogados o juicio, se contradice de forma seria, o pasa cualquier
+   otra cosa que una persona con criterio no resolvería por chat. Derivar nunca
+   está mal: lo mira alguien. Seguir pidiendo papeles cuando el caso ya se salió
+   del molde, sí.
+
+   Pero no derives por lo que NO pudiste averiguar. Si una consulta te dice que
+   la aseguradora todavía no cargó sus datos, o que falló, seguí con el trámite
+   normal como si no la hubieras hecho.
 
 Nunca pidas algo que no esté en la lista de arriba, ni con otro nombre.
+${toolSection(lastChance)}
+Devolvé UNA de estas dos cosas, nada más:
 
-Devolvé JSON:
+${lastChance ? "" : `(A) Una consulta, si te falta saber algo para decidir bien:
+
+{"tool": "<nombre de la herramienta>", "args": { ... }}
+
+`}(${lastChance ? "" : "B) "}La decisión, cuando ya sabés qué hacer:
+
 {
-  "intent": "ask" | "answer" | "answer_and_ask" | "acknowledge" | "wait",
+  "intent": "ask" | "answer" | "answer_and_ask" | "acknowledge" | "escalate" | "wait",
   "ask_for": ["<clave exacta de la lista>", ...],
   "question": "<lo que preguntó, en sus palabras>" | null,
+  "nota_para_el_analista": "<algo que conviene que sepa quien tome el caso>" | null,
+  "resuelto": [{"campo": "<clave de la lista>", "valor": "<lo que averiguaste>"}],
   "reasoning": "<por qué, en una o dos oraciones>"
-}`;
+}
+
+En "resuelto" va lo que averiguaste con una consulta y por lo tanto YA NO hace
+falta pedirle a la persona. Si buscaste su póliza por DNI y la encontraste, el
+número va acá y NO en "ask_for": pedirle un dato que acabás de sacar de nuestra
+propia base es exactamente lo que hace un formulario. Nunca pongas en "resuelto"
+algo que no te haya devuelto una consulta.`;
+}
+
+/**
+ * The tool menu, and how to call one.
+ *
+ * Withdrawn on the last pass. Left available, a model that keeps asking for
+ * one more lookup never gets round to deciding — and the person is waiting for
+ * a reply, not for thoroughness.
+ */
+function toolSection(lastChance: boolean): string {
+  if (lastChance) {
+    return "\nYa no podés consultar nada más. Decidí con lo que tenés.\n";
+  }
+
+  return `
+ANTES DE DECIDIR PODÉS AVERIGUAR ESTO:
+
+${describeTools()}
+
+Consultá cuando la respuesta cambie lo que vas a hacer. Sobre todo: nunca le
+pidas a la persona un dato que podés buscar vos, y nunca sigas un trámite sobre
+una póliza sin haber mirado si existe y está vigente.
+`;
 }
 
 // ── Reading the answer ───────────────────────────────────────────────────────
 
-const INTENTS: AgentIntent[] = ["ask", "answer_and_ask", "answer", "acknowledge", "wait"];
+const INTENTS: AgentIntent[] = [
+  "ask",
+  "answer_and_ask",
+  "answer",
+  "acknowledge",
+  "escalate",
+  "wait",
+];
 
 function coerce(raw: Record<string, unknown>): AgentPlan | null {
   const intent = typeof raw.intent === "string" ? raw.intent.trim() : "";
@@ -209,7 +391,34 @@ function coerce(raw: Record<string, unknown>): AgentPlan | null {
   const reasoning =
     typeof raw.reasoning === "string" ? raw.reasoning.trim().slice(0, 500) : "";
 
-  return { intent: intent as AgentIntent, askFor, question, reasoning };
+  const note =
+    typeof raw.nota_para_el_analista === "string" &&
+    raw.nota_para_el_analista.trim().length > 0
+      ? raw.nota_para_el_analista.trim().slice(0, 500)
+      : null;
+
+  const resolved = Array.isArray(raw.resuelto)
+    ? raw.resuelto
+        .filter(
+          (r): r is { campo: string; valor: string } =>
+            typeof r === "object" &&
+            r !== null &&
+            typeof (r as { campo?: unknown }).campo === "string" &&
+            typeof (r as { valor?: unknown }).valor === "string"
+        )
+        .map((r) => ({ field: r.campo.trim(), value: r.valor.trim().slice(0, 200) }))
+        .filter((r) => r.field.length > 0 && r.value.length > 0)
+    : [];
+
+  return {
+    intent: intent as AgentIntent,
+    askFor,
+    question,
+    reasoning,
+    noteForAnalyst: note,
+    resolved,
+    toolCalls: [],
+  };
 }
 
 /**
@@ -225,6 +434,30 @@ export function validate(plan: AgentPlan, input: DeliberationInput): string | nu
 
   const invented = plan.askFor.filter((k) => !outstanding.has(k));
   if (invented.length > 0) return `invented:${invented.join(",")}`;
+
+  // A value written into the claim has to have come from somewhere. Without a
+  // lookup behind it, "resolved" is the model filling in a policy number from
+  // imagination — and it would be stored at full confidence, which is the
+  // worst possible way to be wrong.
+  if (plan.resolved.length > 0 && plan.toolCalls.length === 0) {
+    return "resolved_without_looking_anything_up";
+  }
+
+  const madeUp = plan.resolved.filter((r) => !outstanding.has(r.field));
+  if (madeUp.length > 0) {
+    return `resolved_something_not_missing:${madeUp.map((r) => r.field).join(",")}`;
+  }
+
+  // And it cannot both fill a field in and ask for it.
+  const both = plan.askFor.filter((k) => plan.resolved.some((r) => r.field === k));
+  if (both.length > 0) return `asked_and_resolved:${both.join(",")}`;
+
+  // Escalating is the one intent with no other requirements. It is the
+  // conservative move — a person looks at the case — so nothing here should
+  // make it harder to choose than carrying on.
+  if (plan.intent === "escalate") {
+    return plan.askFor.length > 0 ? "escalation_asks_for_data" : null;
+  }
 
   const wantsToAsk = plan.intent === "ask" || plan.intent === "answer_and_ask";
 

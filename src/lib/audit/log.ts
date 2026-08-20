@@ -206,6 +206,16 @@ export const AuditEvent = {
   AGENT_DELIBERATED: "agent.deliberated",
 
   /**
+   * AGENT_NOTE: something the agent thought an analyst should know and no
+   * field captures. Payload: { note }.
+   *
+   * "El otro conductor se dio a la fuga", "menciona un abogado", "dice que ya
+   * reclamó por esto en marzo". A person handling the file writes these down;
+   * a schema was never going to have a column for them.
+   */
+  AGENT_NOTE: "agent.note",
+
+  /**
    * FIELD_CONFIRMED: analyst confirmed or corrected an extracted field.
    * Payload: { case_id, field_key, action, old_value_redacted, new_value_redacted }.
    * AC21.

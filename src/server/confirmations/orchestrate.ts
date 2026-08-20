@@ -27,15 +27,21 @@
  */
 
 import "server-only";
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
-import { cases, claimFieldConfirmations, outboundMessages } from "@/lib/db/schema";
+import {
+  cases,
+  claimAttachments,
+  claimFieldConfirmations,
+  outboundMessages,
+} from "@/lib/db/schema";
 import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import { analyzeEmailClaimGaps, MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/gap-analyzer";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
+import { deliberate } from "@/server/ai/deliberate";
 import {
   pendingDocKeys,
   reconcileAttachments,
@@ -47,6 +53,7 @@ import {
   confirmationRank,
   isAffirmativeReply,
   isDerivable,
+  isNameable,
   isWorthConfirming,
   labelForClaimType,
 } from "@/lib/labels/claim-fields";
@@ -310,11 +317,73 @@ export async function orchestratePostExtraction(
   // question depends on the other's answer, so the chain was ours to make and
   // ours to stop making. A person handling the claim writes one message
   // listing what they need.
-  const askItems = buildAskList(
+  // Everything outstanding, uncapped and in the deterministic order. This is
+  // both the fallback plan and — more importantly — the only set anything is
+  // allowed to ask for.
+  const everythingOutstanding = buildAskList(
     gapResult.missingRequiredFields,
     pendingConfirmationFields,
-    await pendingDocKeys(caseId, tenantId)
+    await pendingDocKeys(caseId, tenantId),
+    { cap: false }
   );
+
+  // Ask the agent what to do about this message.
+  //
+  // Until now the answer came from a table: rank the gaps, take the first
+  // five, send. That is predictable and it only ever does what someone thought
+  // of in advance — a person who asks "¿cuánto tarda?" gets no answer, because
+  // no branch was written for a question.
+  //
+  // The plan is checked before it is used (see validate): it cannot invent
+  // something to ask for, cannot declare the claim finished while something is
+  // outstanding, and is never consulted at all on an escalation. A plan that
+  // fails is discarded whole and this falls back to the table below, so the
+  // worst case is the behaviour we already had.
+  const lastAsked = await lastAskedKeys(caseId, tenantId);
+
+  const plan = await deliberate({
+    outstanding: everythingOutstanding.fields,
+    knownValues: everythingOutstanding.knownValues,
+    lastAsked,
+    latestMessage: latestMessageText ?? "",
+    claimTypeLabel: labelForClaimType(claimTypeValue),
+    isHighSeverity,
+    isComplete: everythingOutstanding.fields.length === 0,
+  });
+
+  if (plan) {
+    await writeAuditLog({
+      tenant_id: tenantId,
+      actor_id: null,
+      event_type: AuditEvent.AGENT_DELIBERATED,
+      target_type: "case",
+      target_id: caseId,
+      payload: {
+        intent: plan.intent,
+        ask_for: plan.askFor,
+        question: plan.question,
+        // The one thing nobody could answer before: why did it say that.
+        reasoning: plan.reasoning,
+      },
+    });
+  }
+
+  const chosen = plan
+    ? keepAskingForWhatIsStillNeeded(
+        plan.askFor,
+        lastAsked,
+        everythingOutstanding.fields
+      )
+    : everythingOutstanding.fields.slice(0, MAX_ASK_ITEMS);
+
+  const askItems = {
+    fields: chosen,
+    knownValues: Object.fromEntries(
+      chosen
+        .filter((k) => k in everythingOutstanding.knownValues)
+        .map((k) => [k, everythingOutstanding.knownValues[k]])
+    ),
+  };
 
   // Not when the case escalated. A claimant whose car burned this morning was
   // told "la derivamos a un especialista, no hace falta que hagas nada" and,
@@ -332,7 +401,28 @@ export async function orchestratePostExtraction(
   const askAlreadyMade =
     askItems.fields.length > 0 &&
     (await alreadyAskedFor(caseId, tenantId, askItems.fields));
-  const askIsNew = askItems.fields.length > 0 && !askAlreadyMade;
+  // The agent can also decide there is nothing worth saying — someone who
+  // wrote "ok" after being asked for a document has not moved the claim, and
+  // repeating the request at them is the difference between following up and
+  // nagging. Treated exactly like an ask we have already made: quiet, but
+  // still waiting on them.
+  const agentIsWaiting = plan?.intent === "wait";
+
+  // Except when they asked us something. The no-repeat guard exists so an
+  // unchanged request is not sent twice; a person who wrote "¿cuánto tarda?"
+  // while the same two documents are still missing has changed nothing about
+  // the request and everything about whether we owe them a message. Silence
+  // there is the exact robot behaviour this was all meant to fix.
+  const owesAnAnswer = Boolean(plan?.question);
+
+  // Same for a file that just arrived. They went and photographed something;
+  // getting nothing back reads as nobody looking, whether or not we managed to
+  // recognise what it was.
+  const somethingArrived = await filesArrivedSinceWeLastSpoke(caseId, tenantId);
+
+  const askOnHold =
+    (askAlreadyMade || agentIsWaiting) && !owesAnAnswer && !somethingArrived;
+  const askIsNew = askItems.fields.length > 0 && !askOnHold;
 
   if (askIsNew && !confirmationEmailDispatched && !isHighSeverity) {
     await messenger.send({
@@ -346,6 +436,8 @@ export async function orchestratePostExtraction(
         missingFields: askItems.fields,
         knownValues: askItems.knownValues,
         claimantName,
+        // What they asked, so the reply answers it instead of talking past it.
+        question: plan?.question ?? null,
         // Fourth message in, the reply still opened with "gracias por
         // contactarnos". Thanking someone for getting in touch three rounds
         // after they did is the tell that nobody is really reading.
@@ -372,7 +464,7 @@ export async function orchestratePostExtraction(
       target_id: caseId,
       payload: { missing_fields: gapResult.missingRequiredFields },
     });
-  } else if (askAlreadyMade && !isHighSeverity && !confirmationEmailDispatched) {
+  } else if (askOnHold && !isHighSeverity && !confirmationEmailDispatched) {
     // We asked for exactly this and they have not answered it yet. Nothing to
     // say, but the case is still blocked on it — leaving the status alone here
     // would let the branch below mark a claim ready while a document nobody
@@ -418,7 +510,7 @@ export async function orchestratePostExtraction(
     isHighSeverity ||
     confirmationEmailDispatched ||
     missingInfoEmailDispatched ||
-    askAlreadyMade;
+    askOnHold;
 
   if (!somethingElseWasSaid && !(await checkConfirmationAlreadySent(caseId, tenantId))) {
     // Have we written to this claimant before? If so this is a closing, not an
@@ -443,6 +535,7 @@ export async function orchestratePostExtraction(
         policyNumber: policyField?.field_value ?? null,
         isFollowUp,
         claimantName,
+        question: plan?.question ?? null,
       },
       inReplyToMessageId,
     });
@@ -511,17 +604,25 @@ async function resolveAnsweredConfirmations(
 }
 
 /**
- * The pending fields the last email actually put in front of them.
+ * The pending fields the last message actually put in front of them.
  *
  * "Confirmo" agrees with what was on the page, so it must not close a doubt
- * that never made the list — the cap can leave some out. Recomputed rather
- * than stored: same rows, same ranking, same subset the email showed.
+ * that never made the list. This used to re-derive the subset by running the
+ * same ranking again — which only held while the ranking was the only thing
+ * choosing. Now that the agent picks what is worth asking, the list it chose
+ * is recorded, and reading it back is both simpler and actually true.
+ *
+ * The re-derivation stays as the fallback, for messages sent before the keys
+ * were being written down.
  */
 async function askedPendingFields(
   caseId: string,
   tenantId: string,
   fields: ExtractedClaim["fields"]
 ): Promise<string[]> {
+  const recorded = await lastAskedKeys(caseId, tenantId);
+  if (recorded.length > 0) return recorded;
+
   try {
     const rows = await db
       .select({ field_name: claimFieldConfirmations.field_name })
@@ -567,24 +668,33 @@ const MAX_ASK_ITEMS = 5;
 function buildAskList(
   missingRequiredFields: string[],
   pending: ConfirmableField[],
-  outstandingDocs: string[] = []
+  outstandingDocs: string[] = [],
+  opts: { cap?: boolean } = {}
 ): { fields: string[]; knownValues: Record<string, string> } {
-  const missing = missingRequiredFields.map((f) =>
-    f === "email_or_phone" ? "email" : f
-  );
+  const missing = missingRequiredFields
+    .map((f) => (f === "email_or_phone" ? "email" : f))
+    .filter((f) => isNameable(f));
 
-  const seen = new Set(missing);
-  const doubts = pending.filter((p) => !seen.has(p.fieldKey));
+  // A key we cannot name in Spanish never becomes a question. labelForField
+  // always returns something — it title-cases the raw key — which is right for
+  // an internal screen and wrong for a message: a rehearsal caught
+  // `Injury severity: entendimos "none"` going out to someone who had just
+  // crashed their car. The field stays on the case for the analyst.
+  const nameable = (k: string) => isNameable(k);
+  const seen = new Set(missing.filter(nameable));
+  const doubts = pending.filter((p) => !seen.has(p.fieldKey) && nameable(p.fieldKey));
   const doubtKeys = new Set(doubts.map((d) => d.fieldKey));
   // Documents last. A missing field blocks the claim, a doubt slows it, and a
   // document is something the person has to go and photograph — the slowest
   // thing to ask for and the least urgent to have.
-  const docs = outstandingDocs.filter((k) => !seen.has(k) && !doubtKeys.has(k));
-
-  const fields = [...missing, ...doubts.map((d) => d.fieldKey), ...docs].slice(
-    0,
-    MAX_ASK_ITEMS
+  const docs = outstandingDocs.filter(
+    (k) => !seen.has(k) && !doubtKeys.has(k) && nameable(k)
   );
+
+  const ordered = [...missing, ...doubts.map((d) => d.fieldKey), ...docs];
+  // Uncapped when the caller wants the whole picture: the agent choosing what
+  // is worth asking has to see everything before it decides what to leave out.
+  const fields = opts.cap === false ? ordered : ordered.slice(0, MAX_ASK_ITEMS);
 
   // Only doubts carry a value: a missing field has nothing to show.
   const knownValues: Record<string, string> = {};
@@ -595,6 +705,39 @@ function buildAskList(
   }
 
   return { fields, knownValues };
+}
+
+/**
+ * Never drop something we asked for that is still missing.
+ *
+ * Letting the agent choose what is worth asking made the messages shorter and
+ * better judged, and introduced a failure the fixed list could not have: the
+ * choice varied between rounds. A rehearsal produced "necesitamos el parte y
+ * la licencia", then "el parte y las fotos", then "las fotos y la licencia" —
+ * each individually reasonable, and together the unmistakable impression that
+ * nobody was keeping track.
+ *
+ * So the agent decides what to ADD, and the code decides what to KEEP. An item
+ * we have already asked for stays on the list until it arrives or the claimant
+ * says it does not exist; anything the agent newly judged worth asking is
+ * appended after it. Order is stable too, which matters more than it sounds:
+ * a person re-reading a list expects to find the same things in the same
+ * places.
+ */
+function keepAskingForWhatIsStillNeeded(
+  chosen: string[],
+  previouslyAsked: string[],
+  stillOutstanding: string[]
+): string[] {
+  const outstanding = new Set(stillOutstanding);
+
+  // What we asked for last time and is still missing, in the order it was in.
+  const carried = previouslyAsked.filter((k) => outstanding.has(k));
+  const seen = new Set(carried);
+
+  const added = chosen.filter((k) => outstanding.has(k) && !seen.has(k));
+
+  return [...carried, ...added].slice(0, MAX_ASK_ITEMS);
 }
 
 interface ConfirmableField {
@@ -776,6 +919,22 @@ async function alreadyAskedFor(
 ): Promise<boolean> {
   if (keys.length === 0) return false;
 
+  const previous = await lastAskedKeys(caseId, tenantId);
+  if (previous.length !== keys.length) return false;
+
+  const before = new Set(previous);
+  return keys.every((k) => before.has(k));
+}
+
+/**
+ * What the last message we actually sent asked for.
+ *
+ * Empty when nothing has gone out, or on any failure: the safe direction is to
+ * believe we have never asked. A repeated question is a nuisance; a claim that
+ * waits forever because we wrongly believed we had asked is a claim nobody is
+ * working on.
+ */
+async function lastAskedKeys(caseId: string, tenantId: string): Promise<string[]> {
   try {
     const last = firstRow(
       await db
@@ -785,24 +944,75 @@ async function alreadyAskedFor(
           and(
             eq(outboundMessages.case_id, caseId),
             eq(outboundMessages.tenant_id, tenantId),
-            eq(outboundMessages.status, "sent"),
+            // A simulated message counts. It is the message that would have
+            // gone out, composed by the same writer, and a rehearsal in which
+            // the agent never remembers having spoken is rehearsing something
+            // other than production.
+            inArray(outboundMessages.status, ["sent", "skipped_simulated"]),
             isNotNull(outboundMessages.asked_keys)
           )
         )
         .orderBy(desc(outboundMessages.created_at))
         .limit(1)
     );
-
-    const previous = last?.asked_keys;
-    if (!previous || previous.length !== keys.length) return false;
-
-    const before = new Set(previous);
-    return keys.every((k) => before.has(k));
+    return last?.asked_keys ?? [];
   } catch (err) {
-    // Speak rather than stay silent. A repeated question is a nuisance; a
-    // claim that waits forever because we wrongly believed we had asked is a
-    // claim nobody is working on.
-    console.error("[orchestrate] Failed to check the last ask:", errCode(err));
+    console.error("[orchestrate] Failed to read the last ask:", errCode(err));
+    return [];
+  }
+}
+
+/**
+ * Has a file arrived since the last thing we said?
+ *
+ * Sending a document and getting nothing back is its own kind of ignored. The
+ * no-repeat guard is right that an unchanged request should not go out twice,
+ * and wrong to conclude that nothing happened: the claimant went and
+ * photographed something. Even when we cannot tell what the file is — a blurry
+ * page, a screenshot — "recibimos tu archivo" is true and silence is not.
+ *
+ * Compared against the last outbound rather than tracked separately: the
+ * question is only ever "since we last spoke", and both timestamps already
+ * exist.
+ */
+async function filesArrivedSinceWeLastSpoke(
+  caseId: string,
+  tenantId: string
+): Promise<boolean> {
+  try {
+    const spoke = firstRow(
+      await db
+        .select({ created_at: outboundMessages.created_at })
+        .from(outboundMessages)
+        .where(
+          and(
+            eq(outboundMessages.case_id, caseId),
+            eq(outboundMessages.tenant_id, tenantId),
+            inArray(outboundMessages.status, ["sent", "skipped_simulated"])
+          )
+        )
+        .orderBy(desc(outboundMessages.created_at))
+        .limit(1)
+    );
+    if (!spoke?.created_at) return false;
+
+    const since = firstRow(
+      await db
+        .select({ id: claimAttachments.id })
+        .from(claimAttachments)
+        .where(
+          and(
+            eq(claimAttachments.case_id, caseId),
+            eq(claimAttachments.tenant_id, tenantId),
+            gt(claimAttachments.created_at, spoke.created_at)
+          )
+        )
+        .limit(1)
+    );
+    return Boolean(since);
+  } catch (err) {
+    // Speaking is the safe direction here too.
+    console.error("[orchestrate] Failed to check for new files:", errCode(err));
     return false;
   }
 }

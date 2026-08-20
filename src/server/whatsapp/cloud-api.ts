@@ -111,6 +111,15 @@ export interface WhatsAppMediaRef {
   mimeType: string;
   /** Best available name; media other than documents does not carry one. */
   filename: string;
+  /**
+   * The bytes, when the caller already has them.
+   *
+   * The Cloud API never fills this — a real message names the media and the
+   * file lives behind a second Graph call. The rehearsal and the BSP adapter
+   * do: they have a file and no Graph id to fetch it by, and inventing one
+   * only earns a 400. When it is set, the download is skipped.
+   */
+  data?: Buffer;
 }
 
 interface CloudApiTextMessage {

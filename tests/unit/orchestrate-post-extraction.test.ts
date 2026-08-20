@@ -47,9 +47,19 @@ vi.mock("@/lib/audit/log", () => ({
     SPECIALIST_REQUIRED: "claim.specialist_required",
     CONFIRMATION_REQUESTED: "claim.confirmation_requested",
     MISSING_INFO_REQUESTED: "claim.missing_info_requested",
+    AGENT_DELIBERATED: "agent.deliberated",
     OUTBOUND_EMAIL_SENT: "email.outbound_sent",
     OUTBOUND_EMAIL_FAILED: "email.outbound_failed",
   },
+}));
+
+// Mock the deliberation step.
+//
+// Null is "the agent had no usable plan", which is exactly the fallback every
+// test below was written against: the deterministic tree. The tests that
+// exercise a real plan set one explicitly.
+vi.mock("@/server/ai/deliberate", () => ({
+  deliberate: vi.fn().mockResolvedValue(null),
 }));
 
 // Mock gap analyzer.
@@ -71,6 +81,7 @@ import { db } from "@/lib/db";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import { writeAuditLog } from "@/lib/audit/log";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
+import { deliberate } from "@/server/ai/deliberate";
 
 // ── DB mock builder ───────────────────────────────────────────────────────────
 
@@ -110,7 +121,9 @@ function setupDbMocks({
    * What the last *sent* ask on this case asked for, as alreadyAskedFor reads
    * it. Empty means we have never asked for anything, so every ask is new.
    */
-  lastAskRows = [] as Array<{ asked_keys: string[] | null }>,
+  lastAskRows = [] as Array<{ asked_keys?: string[] | null; created_at?: string }>,
+  /** Rows for filesArrivedSinceWeLastSpoke: non-empty means a file arrived. */
+  newAttachmentRows = [] as Array<{ id: string }>,
 } = {}) {
   const mockDbTyped = db as MockDb;
 
@@ -133,6 +146,10 @@ function setupDbMocks({
             orderBy: () => ({ limit: () => Promise.resolve(lastAskRows) }),
           }),
         };
+      }
+
+      if (tableName === "claim_attachments") {
+        return { where: () => ({ limit: () => Promise.resolve(newAttachmentRows) }) };
       }
 
       // claim_field_confirmations (or any other table) — return empty so upsert inserts.
@@ -173,6 +190,8 @@ beforeEach(() => {
 
   // Set up default DB mock chains for every test.
   setupDbMocks();
+
+  vi.mocked(deliberate).mockResolvedValue(null);
 
   // Reset gap analyzer to default (complete claim) for each test.
   vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
@@ -1440,5 +1459,243 @@ describe("orchestratePostExtraction — not asking the same thing twice", () => 
     );
 
     expect(asks()).toHaveLength(1);
+  });
+});
+
+// ── When the agent decides, and when it does not get to ───────────────────────
+
+/**
+ * The plan replaces a table, not the guardrails.
+ *
+ * Which items to ask for, whether a question needs answering, and whether
+ * there is anything worth saying at all are now the agent's calls. What it
+ * cannot do — escalate or not, invent an item, mark a claim finished — is
+ * enforced in deliberate.validate and asserted there. Here the question is
+ * only whether the orchestrator does what a valid plan says.
+ */
+describe("orchestratePostExtraction — acting on the agent's plan", () => {
+  const GAPS = ["accident_date", "policy_number", "dni"];
+
+  function gapsAre(fields: string[]) {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: fields,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  }
+
+  function planIs(over: Record<string, unknown>) {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "ask",
+      askFor: [],
+      question: null,
+      reasoning: "",
+      ...over,
+    } as never);
+  }
+
+  function askCall() {
+    return vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+  }
+
+  async function run() {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+  }
+
+  it("asks for what the plan chose, not for everything outstanding", async () => {
+    // The old behaviour was "rank them and take the first five". Three gaps,
+    // and the agent judged one of them worth a message.
+    gapsAre(GAPS);
+    planIs({ intent: "ask", askFor: ["policy_number"], reasoning: "es lo que traba" });
+
+    await run();
+
+    expect(askCall()?.[0].data?.missingFields).toEqual(["policy_number"]);
+  });
+
+  it("carries the question through so the reply answers it", async () => {
+    gapsAre(GAPS);
+    planIs({
+      intent: "answer_and_ask",
+      askFor: ["policy_number"],
+      question: "¿cuánto tarda esto?",
+    });
+
+    await run();
+
+    expect(askCall()?.[0].data?.question).toBe("¿cuánto tarda esto?");
+  });
+
+  it("says nothing when the plan says to wait", async () => {
+    // Someone answered "ok" after being asked for a document. Nothing moved,
+    // so nothing needs saying.
+    gapsAre(GAPS);
+    planIs({ intent: "wait", askFor: [], reasoning: "no aportó nada nuevo" });
+
+    await run();
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it("keeps the case waiting rather than marking it ready when it stays quiet", async () => {
+    // Silence must never be read as completeness — that would send "ya
+    // tenemos todo" over a claim with three gaps open.
+    const { updateSpy } = setupDbMocks();
+    gapsAre(GAPS);
+    planIs({ intent: "wait", askFor: [] });
+
+    await run();
+
+    const statuses = updateSpy.mock.calls
+      .map((c) => (c[0] as { status?: string }).status)
+      .filter(Boolean);
+    expect(statuses).toContain("info_faltante");
+    expect(statuses).not.toContain("listo_para_core");
+  });
+
+  it("records why it did what it did", async () => {
+    // An operation that cannot answer "why did it say that" cannot be sold to
+    // an insurer, and until now the only answer was "read orchestrate.ts".
+    gapsAre(GAPS);
+    planIs({
+      intent: "ask",
+      askFor: ["policy_number"],
+      reasoning: "sin la póliza no se puede abrir el expediente",
+    });
+
+    await run();
+
+    const entry = vi
+      .mocked(writeAuditLog)
+      .mock.calls.find((c) => c[0].event_type === "agent.deliberated");
+    expect(entry?.[0].payload).toMatchObject({
+      intent: "ask",
+      ask_for: ["policy_number"],
+      reasoning: "sin la póliza no se puede abrir el expediente",
+    });
+  });
+
+  it("falls back to the ranked list when there is no usable plan", async () => {
+    // deliberate returns null on anything it cannot vouch for. The claim must
+    // still move.
+    gapsAre(GAPS);
+    vi.mocked(deliberate).mockResolvedValue(null);
+
+    await run();
+
+    expect(askCall()?.[0].data?.missingFields).toEqual(GAPS);
+  });
+});
+
+describe("orchestratePostExtraction — a question beats the no-repeat guard", () => {
+  it("answers even when the request has not changed since last time", async () => {
+    // The two guards nearly cancelled each other out. The no-repeat guard
+    // exists so an unchanged request is not sent twice; someone who writes
+    // "¿cuánto tarda?" while the same documents are still missing has changed
+    // nothing about the request and everything about whether we owe them a
+    // reply. Staying quiet there is the robot behaviour all of this was for.
+    setupDbMocks({ lastAskRows: [{ asked_keys: ["policy_number"] }] });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["policy_number"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "answer_and_ask",
+      askFor: ["policy_number"],
+      question: "¿cuánto tarda esto?",
+      reasoning: "preguntó por los tiempos",
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const call = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect(call?.[0].data?.question).toBe("¿cuánto tarda esto?");
+  });
+});
+
+describe("orchestratePostExtraction — a file arriving beats the silence guard", () => {
+  it("does not leave someone who just sent a document with no reply", async () => {
+    // They went and photographed something. Getting nothing back reads as
+    // nobody looking — and it happens exactly when we could not recognise the
+    // file, which is when the person most needs to hear that it arrived.
+    setupDbMocks({
+      // One query serves two reads: what we last asked, and when we last spoke.
+      lastAskRows: [
+        { asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" },
+      ],
+      newAttachmentRows: [{ id: "att-1" }],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    // The agent, seeing an unchanged request, would otherwise stay quiet.
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "wait",
+      askFor: [],
+      question: null,
+      reasoning: "el pedido no cambió",
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect(ask).toBeDefined();
+  });
+
+  it("still stays quiet when nothing arrived and nothing changed", async () => {
+    setupDbMocks({
+      lastAskRows: [
+        { asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" },
+      ],
+      newAttachmentRows: [],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "wait",
+      askFor: [],
+      question: null,
+      reasoning: "el pedido no cambió",
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
   });
 });

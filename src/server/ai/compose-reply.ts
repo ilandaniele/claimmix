@@ -47,6 +47,17 @@ export interface ComposeReplyInput {
    * saw was "[Imagen adjunta sin texto]".
    */
   claimantName?: string | null;
+  /**
+   * A question the claimant asked that this message has to answer.
+   *
+   * The agent could only ever collect. Someone who wrote "¿cuánto tarda? lo
+   * necesito para trabajar" got the next document request and nothing else,
+   * which is the single most robotic thing it did. What can honestly be said
+   * is bounded by the same guardrails as everything else — no timelines, no
+   * coverage, nothing invented — but saying nothing was never the honest
+   * option, only the easy one.
+   */
+  question?: string | null;
   /** The claimant's most recent message, for tone only. */
   lastMessage?: string;
   /** The deterministic text. The model is asked to do better, not different. */
@@ -81,6 +92,12 @@ const MAX_CHARS: Record<ComposeReplyInput["channel"], number> = {
   whatsapp: 700,
   email: 1400,
 };
+
+/** Answering a question and asking for things needs more room than either alone. */
+function maxChars(input: ComposeReplyInput): number {
+  const base = MAX_CHARS[input.channel];
+  return input.question ? Math.round(base * 1.4) : base;
+}
 
 function buildPrompt(input: ComposeReplyInput): string {
   const items = (input.fields ?? []).map((key) => {
@@ -118,6 +135,7 @@ ${intentBrief[input.intent]}
 ${items.length > 0 ? `DATOS A PEDIR:\n${items.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${input.claimantName}. Podés llamarla por su nombre de pila.` : ""}
+${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${input.question}"\nContestá con lo que sabemos de verdad: en qué estado está su denuncia y qué falta para avanzar. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder.` : ""}
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}
 ${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto):\n"""${input.lastMessage.slice(0, 600)}"""` : ""}
 
@@ -141,7 +159,7 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   const trimmed = text.trim();
 
   if (trimmed.length < 20) return "too_short";
-  if (trimmed.length > MAX_CHARS[input.channel]) return "too_long";
+  if (trimmed.length > maxChars(input)) return "too_long";
 
   for (const pattern of FORBIDDEN) {
     if (pattern.test(trimmed)) return `forbidden:${pattern.source.slice(0, 24)}`;
@@ -167,6 +185,58 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   return null;
 }
 
+/** Either a message that passed every guardrail, or why it did not. */
+type Attempt = { ok: true; message: string } | { ok: false; problem: string };
+
+/**
+ * One pass at the message.
+ *
+ * The two outcomes are both strings and must not be confused: returning the
+ * rejection reason as the message would send the claimant the word
+ * "dropped_field:policy_number".
+ */
+async function attempt(
+  input: ComposeReplyInput,
+  previousProblem?: string
+): Promise<Attempt> {
+  const correction = previousProblem
+    ? `
+
+Tu intento anterior fue rechazado por: ${explain(previousProblem)}
+Corregilo y devolvé el mensaje entero de nuevo.`
+    : "";
+
+  const { text } = await callGemini(
+    buildPrompt(input) + correction,
+    "Escribí el mensaje y devolvelo como JSON."
+  );
+  if (!text) return { ok: false, problem: "no_output" };
+
+  const parsed = JSON.parse(text) as { message?: unknown };
+  const message = typeof parsed.message === "string" ? parsed.message.trim() : "";
+  if (!message) return { ok: false, problem: "empty_message" };
+
+  const problem = violation(message, input);
+  return problem ? { ok: false, problem } : { ok: true, message };
+}
+
+/** The rejection, in words the model can act on. */
+function explain(problem: string): string {
+  if (problem.startsWith("dropped_field:")) {
+    const key = problem.slice("dropped_field:".length);
+    return `te olvidaste de pedir "${labelForField(key).label}". Tienen que estar TODOS los ítems de la lista.`;
+  }
+  if (problem.startsWith("forbidden:")) {
+    return "prometiste algo sobre cobertura, pagos o plazos. Nadie evaluó el siniestro todavía.";
+  }
+  if (problem === "too_long") return "es demasiado largo. Cortálo.";
+  if (problem === "too_short") return "es demasiado corto.";
+  if (problem === "escalation_asks_for_data") {
+    return "pediste datos en un mensaje de derivación. No hay que pedir nada: se encarga un especialista.";
+  }
+  return problem;
+}
+
 /**
  * Write the message. Returns the fallback whenever anything is off.
  *
@@ -177,32 +247,31 @@ export async function composeReply(input: ComposeReplyInput): Promise<string> {
   if (process.env.AGENT_COMPOSE_REPLIES === "off") return input.fallback;
 
   try {
-    const { text } = await callGemini(
-      buildPrompt(input),
-      "Escribí el mensaje y devolvelo como JSON."
+    const first = await attempt(input);
+    if (first.ok) return first.message;
+
+    // One more go, told exactly what was wrong.
+    //
+    // Rehearsals showed the common rejection is `dropped_field`: asked for
+    // five things, the model listed four. That is a slip worth correcting, not
+    // a reason to fall back to the template — which is how a claim ended up
+    // reading like a form letter when the writer was one bullet away from a
+    // good message. Anything still wrong on the second pass gets the template.
+    const second = await attempt(input, first.problem);
+    if (second.ok) return second.message;
+
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        service: "claimmix",
+        msg: "compose.rejected",
+        intent: input.intent,
+        channel: input.channel,
+        reason: second.problem,
+        first_reason: first.problem,
+      })
     );
-    if (!text) return input.fallback;
-
-    const parsed = JSON.parse(text) as { message?: unknown };
-    const message = typeof parsed.message === "string" ? parsed.message.trim() : "";
-    if (!message) return input.fallback;
-
-    const problem = violation(message, input);
-    if (problem) {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "compose.rejected",
-          intent: input.intent,
-          channel: input.channel,
-          reason: problem,
-        })
-      );
-      return input.fallback;
-    }
-
-    return message;
+    return withUnansweredQuestion(input);
   } catch (err) {
     console.error(
       JSON.stringify({
@@ -213,6 +282,28 @@ export async function composeReply(input: ComposeReplyInput): Promise<string> {
         error: err instanceof Error ? err.name : "UnknownError",
       })
     );
-    return input.fallback;
+    return withUnansweredQuestion(input);
   }
+}
+
+/**
+ * The template, plus a plain answer when a question would otherwise hang.
+ *
+ * Falling back to the template is fine for tone and fatal for a question: the
+ * claimant asked "¿cuánto tarda? lo necesito para trabajar" and received a
+ * paragraph about their claim passing to analysis, which reads as being
+ * ignored. And composition fails most often precisely here — answering a
+ * question is where the model reaches for coverage and timing, which is
+ * exactly what the guardrails refuse.
+ *
+ * So the honest sentence is written by hand. It promises nothing, because
+ * there is nothing anyone can promise before a person has looked at the claim,
+ * but it does not pretend the question was not asked.
+ */
+function withUnansweredQuestion(input: ComposeReplyInput): string {
+  if (!input.question) return input.fallback;
+  const honest =
+    "Sobre lo que preguntás: todavía no podemos darte una respuesta, porque " +
+    "nadie revisó tu caso aún. En cuanto un analista lo mire te avisamos por acá.";
+  return `${input.fallback}\n\n${honest}`;
 }

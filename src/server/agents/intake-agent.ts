@@ -230,7 +230,11 @@ async function storeWhatsAppMedia(
     const downloaded: EmailAttachment[] = [];
 
     for (const ref of media) {
-      const file = await downloadWhatsAppMedia(ref.id);
+      // Bytes in hand skip the round trip. Only the rehearsal and the BSP
+      // adapter arrive that way; a real Cloud API message never does.
+      const file = ref.data
+        ? { data: ref.data, mimeType: ref.mimeType }
+        : await downloadWhatsAppMedia(ref.id);
       if (!file) continue;
       downloaded.push({
         Name: ref.filename,

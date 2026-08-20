@@ -20,7 +20,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:integration": "vitest run --reporter=verbose tests/integration",
-    "cleanup:cases": "tsx scripts/cleanup-cases.ts"
+    "cleanup:cases": "tsx scripts/cleanup-cases.ts",
+    "rehearse": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-conversations.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

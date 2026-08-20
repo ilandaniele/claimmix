@@ -199,6 +199,36 @@ const WHATSAPP_TEMPLATE_NAMES: Record<string, string> = {
   confirmation_received: "wa_confirmation_received",
 };
 
+/**
+ * Turn the deterministic template into the message a person reads.
+ *
+ * The template is the floor: composeReply is asked to say the same thing
+ * better, and anything failing its guardrails comes back as the template
+ * unchanged. Shared by the real messenger and the simulated one so a rehearsal
+ * exercises the same writer as production.
+ */
+async function writeWhatsAppReply(message: AgentMessage, fallback: string): Promise<string> {
+  return composeReply({
+    intent: intentFor(message.template),
+    channel: "whatsapp",
+    fields: Array.isArray(message.data.missingFields)
+      ? (message.data.missingFields as string[]).map(String)
+      : undefined,
+    knownValues: (message.data.knownValues ?? undefined) as
+      | Record<string, string>
+      | undefined,
+    claimTypeLabel: labelForClaimType(
+      typeof message.data.claimType === "string" ? message.data.claimType : null
+    ),
+    isFollowUp: message.data.isFollowUp === true,
+    claimantName:
+      typeof message.data.claimantName === "string" ? message.data.claimantName : null,
+    question: typeof message.data.question === "string" ? message.data.question : null,
+    lastMessage: message.lastMessage,
+    fallback,
+  });
+}
+
 export const whatsappMessenger: AgentMessenger = {
   async send(message) {
     try {
@@ -216,26 +246,7 @@ export const whatsappMessenger: AgentMessenger = {
         return;
       }
 
-      // The template is the floor. composeReply is asked to say the same thing
-      // better, and anything that fails its guardrails comes back as this.
-      const finalBody = await composeReply({
-        intent: intentFor(message.template),
-        channel: "whatsapp",
-        fields: Array.isArray(message.data.missingFields)
-          ? (message.data.missingFields as string[]).map(String)
-          : undefined,
-        knownValues: (message.data.knownValues ?? undefined) as
-          | Record<string, string>
-          | undefined,
-        claimTypeLabel: labelForClaimType(
-          typeof message.data.claimType === "string" ? message.data.claimType : null
-        ),
-        isFollowUp: message.data.isFollowUp === true,
-        claimantName:
-          typeof message.data.claimantName === "string" ? message.data.claimantName : null,
-        lastMessage: message.lastMessage,
-        fallback: body,
-      });
+      const finalBody = await writeWhatsAppReply(message, body);
 
       const res = await sendWhatsAppText(message.to, finalBody);
       await recordOutbound(message, finalBody, res.ok ? "sent" : "failed");
@@ -310,7 +321,11 @@ export const simulatedWhatsappMessenger: AgentMessenger = {
   async send(message) {
     const body = renderForWhatsApp(message);
     if (!body) return;
-    await recordOutbound(message, body, "skipped_simulated");
+    // Compose, then do not send. A rehearsal that skipped the writer would be
+    // rehearsing a different script: the template is the floor, and what a
+    // claimant actually reads is whatever the model made of it.
+    const finalBody = await writeWhatsAppReply(message, body);
+    await recordOutbound(message, finalBody, "skipped_simulated");
     console.info(
       JSON.stringify({
         level: "info",

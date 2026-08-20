@@ -135,6 +135,11 @@ const FIELD_LABELS: Record<string, FieldLabel> = {
     instruction: "Decinos en qué provincia ocurrió.",
     kind: "dato",
   },
+  patente_vehiculo: {
+    label: "Patente del vehículo",
+    instruction: "Decinos la patente del vehículo.",
+    kind: "dato",
+  },
   tipo_vehiculo: {
     label: "Vehículo involucrado",
     instruction: "Decinos marca, modelo y patente del vehículo.",
@@ -340,6 +345,11 @@ const FIELD_ALIASES: Record<string, string> = {
   lugar_siniestro: "accident_location",
   descripcion_hecho: "accident_description",
   tipo_siniestro: "claim_type",
+  // The extractor emits this one in English, and a rehearsal caught it reaching
+  // a claimant as `Injury severity: entendimos "none"`. It is the same fact as
+  // hay_heridos, asked in another language.
+  injury_severity: "hay_heridos",
+  heridos: "hay_heridos",
 };
 
 /** The one key that stands for this field, whichever alias arrived. */
@@ -370,6 +380,28 @@ const NARRATIVE_HINTS = [
  * them. What is worth confirming is something we *derived*: a classification we
  * inferred, or a structured value we may have misread.
  */
+/**
+ * Can we name this field in a sentence a claimant would read?
+ *
+ * `labelForField` always returns something — it title-cases the raw key rather
+ * than showing snake_case — which is fine for an internal screen and wrong for
+ * a message. A rehearsal caught `Injury severity: entendimos "none"` going out
+ * in an otherwise Spanish message: an English key and a value that means
+ * nothing to anyone, asked of someone who had just crashed their car.
+ *
+ * If the field is not in the table and its own name is not Spanish, we do not
+ * understand it well enough to ask about it. It stays on the case for the
+ * analyst; it does not become a question.
+ */
+export function isNameable(fieldKey: string): boolean {
+  const key = canonicalFieldKey(fieldKey);
+  if (FIELD_LABELS[key]) return true;
+
+  // The raw key too: the table holds both canonical names and the Spanish
+  // aliases the extractor emits, and either is a name we chose on purpose.
+  return Boolean(FIELD_LABELS[fieldKey]);
+}
+
 export function isWorthConfirming(fieldKey: string): boolean {
   const key = canonicalFieldKey(fieldKey).toLowerCase();
   return !NARRATIVE_HINTS.some((h) => key.includes(h));

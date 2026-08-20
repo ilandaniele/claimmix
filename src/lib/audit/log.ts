@@ -196,6 +196,16 @@ export const AuditEvent = {
   DOCUMENTS_DECLINED: "claim.documents_declined",
 
   /**
+   * AGENT_DELIBERATED: the agent decided what to do about an inbound message.
+   * Payload: { intent, ask_for, question, reasoning }.
+   *
+   * The only place the "why" is written down. Everything the agent says is now
+   * a decision it made rather than a branch someone wrote, and an operation
+   * that cannot answer "why did it say that" cannot be sold to an insurer.
+   */
+  AGENT_DELIBERATED: "agent.deliberated",
+
+  /**
    * FIELD_CONFIRMED: analyst confirmed or corrected an extracted field.
    * Payload: { case_id, field_key, action, old_value_redacted, new_value_redacted }.
    * AC21.

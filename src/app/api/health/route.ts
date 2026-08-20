@@ -24,9 +24,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
-import { sql } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { gmailAccounts } from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -107,6 +108,20 @@ function why(err: unknown): string {
   );
 }
 
+/**
+ * The rows from a raw query.
+ *
+ * `db.execute` hands back the driver's result object, not an array — and code
+ * that assumed an array got an empty list, which here meant reporting every
+ * migration as missing on a database where all of them were applied.
+ */
+async function rowsOf<T>(query: SQL): Promise<T[]> {
+  const result = (await db.execute(query)) as unknown;
+  if (Array.isArray(result)) return result as T[];
+  const rows = (result as { rows?: unknown })?.rows;
+  return Array.isArray(rows) ? (rows as T[]) : [];
+}
+
 // ── The checks ───────────────────────────────────────────────────────────────
 
 async function checkDatabase(): Promise<Check> {
@@ -134,15 +149,13 @@ async function checkSchema(): Promise<Check> {
   ];
 
   try {
-    const rows = (await db.execute(sql`
+    const rows = await rowsOf<{ table_name: string; column_name: string }>(sql`
       select table_name, column_name
         from information_schema.columns
        where table_schema = 'public'
-    `)) as unknown as Array<{ table_name: string; column_name: string }>;
+    `);
 
-    const present = new Set(
-      (Array.isArray(rows) ? rows : []).map((r) => `${r.table_name}.${r.column_name}`)
-    );
+    const present = new Set(rows.map((r) => `${r.table_name}.${r.column_name}`));
     const missing = required
       .map(([t, c]) => `${t}.${c}`)
       .filter((key) => !present.has(key));
@@ -259,19 +272,28 @@ async function checkGmail(): Promise<Check> {
   if (!tenantId) return degraded("gmail", "GMAIL_TENANT_ID sin configurar");
 
   try {
-    const rows = (await db.execute(sql`
-      select email_address, refresh_token is not null as has_token
-        from gmail_accounts
-       where tenant_id = ${tenantId}::uuid
-       limit 1
-    `)) as unknown as Array<{ email_address: string; has_token: boolean }>;
+    // Through the schema rather than raw SQL: the first version of this asked
+    // for `email_address` and `refresh_token`, neither of which is what the
+    // columns are called, and reported "gmail no se pudo verificar" on a
+    // perfectly healthy mailbox. A health check that cries wolf gets ignored,
+    // which is worse than not having one.
+    const rows = await db
+      .select({
+        email: gmailAccounts.email,
+        enabled: gmailAccounts.enabled,
+        lastError: gmailAccounts.last_error,
+      })
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.tenant_id, tenantId))
+      .limit(1);
 
-    const account = Array.isArray(rows) ? rows[0] : undefined;
+    const account = rows[0];
     if (!account) return degraded("gmail", "ninguna casilla conectada");
-    if (!account.has_token) {
-      return down("gmail", `${account.email_address} perdió el refresh token`);
+    if (!account.enabled) return degraded("gmail", `${account.email} está desactivada`);
+    if (account.lastError) {
+      return down("gmail", `${account.email}: ${String(account.lastError).slice(0, 80)}`);
     }
-    return ok("gmail", `${account.email_address} conectada`);
+    return ok("gmail", `${account.email} conectada`);
   } catch (err) {
     return degraded("gmail", `no se pudo verificar: ${why(err)}`);
   }

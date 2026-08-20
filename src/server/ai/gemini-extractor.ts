@@ -104,6 +104,16 @@ function isRetryableGeminiStatus(status: number): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
+/** Exponential backoff, shared by the HTTP and the network-error paths. */
+function backoffMs(attempt: number): number {
+  const baseMs = getNumberEnv(
+    "GEMINI_RETRY_BASE_MS",
+    DEFAULT_GEMINI_RETRY_BASE_MS,
+    30_000
+  );
+  return Math.min(baseMs * 2 ** attempt, 30_000);
+}
+
 function retryAfterMs(headers: Headers, attempt: number, status: number): number {
   // Cap 429 retries at 10s so the Vercel after() worker (maxDuration=180s) has
   // time to run the GeminiExtractionError catch + escalate the case.
@@ -118,12 +128,7 @@ function retryAfterMs(headers: Headers, attempt: number, status: number): number
     if (Number.isFinite(dateMs)) return Math.min(Math.max(dateMs - Date.now(), 0), capMs);
   }
 
-  const baseMs = getNumberEnv(
-    "GEMINI_RETRY_BASE_MS",
-    DEFAULT_GEMINI_RETRY_BASE_MS,
-    30_000
-  );
-  return Math.min(baseMs * 2 ** attempt, capMs);
+  return Math.min(backoffMs(attempt), capMs);
 }
 
 async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
@@ -133,15 +138,46 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
     5
   );
 
+  let lastNetworkError: unknown;
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     await waitForGeminiSlot();
-    const res = await fetch(url, init);
+
+    // A connection that drops is as retryable as a 503, and until now it was
+    // not retried at all: fetch throwing went straight up, the extraction
+    // failed, and a claimant's message went unanswered because a socket
+    // hiccuped. ECONNRESET and UND_ERR_CONNECT_TIMEOUT both showed up
+    // repeatedly in a single afternoon of rehearsals.
+    let res: Response;
+    try {
+      res = await fetch(url, init);
+    } catch (err) {
+      lastNetworkError = err;
+      if (attempt >= maxRetries) break;
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          service: "claimmix",
+          msg: "ai.transport_retry",
+          attempt: attempt + 1,
+          code: (err as { cause?: { code?: string } })?.cause?.code ?? "network",
+        })
+      );
+      await sleep(backoffMs(attempt));
+      continue;
+    }
+
     if (res.ok) return res;
     if (!isRetryableGeminiStatus(res.status) || attempt >= maxRetries) return res;
     await sleep(retryAfterMs(res.headers, attempt, res.status));
   }
 
-  return fetch(url, init);
+  // Out of attempts on a connection that never opened. Thrown rather than
+  // returned so the caller's own error handling sees it as the failure it is.
+  throw new GeminiExtractionError(
+    `No se pudo conectar con el modelo tras ${maxRetries + 1} intentos`,
+    { code: (lastNetworkError as { cause?: { code?: string } })?.cause?.code }
+  );
 }
 
 interface GeminiUsage {

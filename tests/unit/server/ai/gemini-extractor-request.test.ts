@@ -167,3 +167,94 @@ describe("Gemini extractor request", () => {
     expect(requestBody.generationConfig).not.toHaveProperty("responseSchema");
   });
 });
+
+describe("Gemini extractor transport — a connection that drops", () => {
+  /**
+   * The retry loop only ever looked at HTTP statuses. A socket that reset threw
+   * straight out of fetch, past every retry, and the extraction failed — which
+   * means a claimant's message went unanswered because of a network hiccup.
+   * ECONNRESET and UND_ERR_CONNECT_TIMEOUT both appeared repeatedly in a single
+   * afternoon of rehearsals against the real API.
+   */
+  function networkError(code: string): Error {
+    const err = new TypeError("fetch failed");
+    (err as unknown as { cause: { code: string } }).cause = { code };
+    return err;
+  }
+
+  beforeEach(() => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    process.env.GEMINI_MIN_REQUEST_INTERVAL_MS = "0";
+    process.env.GEMINI_MAX_RETRIES = "2";
+    process.env.GEMINI_RETRY_BASE_MS = "1";
+  });
+
+  afterEach(() => {
+    delete process.env.GEMINI_RETRY_BASE_MS;
+    vi.unstubAllGlobals();
+  });
+
+  it("tries again after a reset connection", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(networkError("ECONNRESET"))
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => geminiJsonResponse(),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await extractEmailClaimGemini({
+      subject: "Choque",
+      body: "Choqué ayer en Bahía Blanca.",
+      memoryHints: [],
+      knownPatterns: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.is_claim).toBe(true);
+  });
+
+  it("tries again after a connect timeout", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(networkError("UND_ERR_CONNECT_TIMEOUT"))
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => geminiJsonResponse(),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await extractEmailClaimGemini({
+      subject: "Choque",
+      body: "Choqué ayer.",
+      memoryHints: [],
+      knownPatterns: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up loudly rather than silently, once the attempts run out", async () => {
+    // Silence here would be the worst outcome: the case sits in `procesando`
+    // and nobody knows the model was never reached.
+    const fetchMock = vi.fn().mockRejectedValue(networkError("ECONNRESET"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      extractEmailClaimGemini({
+        subject: "Choque",
+        body: "Choqué ayer.",
+        memoryHints: [],
+        knownPatterns: [],
+      })
+    ).rejects.toThrow();
+
+    // Six: three transport attempts (maxRetries=2), inside the extractor's own
+    // two-attempt loop. Worth knowing the two are multiplied rather than
+    // shared — a generous GEMINI_MAX_RETRIES costs twice what it looks like.
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+});

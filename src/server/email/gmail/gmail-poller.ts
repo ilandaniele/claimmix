@@ -53,10 +53,9 @@ import {
 } from "./poll-state";
 import { adaptGmailAttachments } from "./gmail-attachment-adapter";
 import { checkDuplicate } from "@/server/email/dedupe";
-import { threadLookup } from "@/server/email/thread-lookup";
+import { ingestInboundEmail } from "@/server/email/inbound-email";
 import { rehostAndRecordAttachments } from "@/server/email/rehost-attachments";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
-import { classifyInboundEmailForIntake } from "@/server/email/relevance-prefilter";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import type { gmail_v1 } from "googleapis";
 
@@ -225,81 +224,6 @@ async function markMessageRead(
 
 
 /**
- * Insert a claim_messages row for a newly received inbound Gmail message.
- * Returns the inserted row's UUID, or null on failure.
- */
-async function insertClaimMessage(
-  opts: {
-    caseId: string;
-    tenantId: string;
-    providerMessageId: string;
-    threadId: string | null;
-    inReplyTo: string | null;
-    fromAddr: string;
-    toAddr: string;
-    subject: string;
-    bodyText: string;
-    bodyHtml: string;
-    headers: Array<{ name?: string | null; value?: string | null }>;
-    rawPayload: unknown;
-  }
-): Promise<string | null> {
-  const {
-    caseId,
-    tenantId,
-    providerMessageId,
-    threadId,
-    inReplyTo,
-    fromAddr,
-    toAddr,
-    subject,
-    bodyText,
-    bodyHtml,
-    headers,
-    rawPayload,
-  } = opts;
-
-  // Normalise headers to { name, value } pairs (filter out null names).
-  const normalisedHeaders = headers.map((h) => ({
-    name: h.name ?? "",
-    value: h.value ?? "",
-  }));
-
-  try {
-    const inserted = firstRow(
-      await db
-        .insert(claimMessages)
-        .values({
-          case_id: caseId,
-          tenant_id: tenantId,
-          direction: "inbound",
-          provider: "gmail",
-          provider_message_id: providerMessageId,
-          thread_id: threadId,
-          in_reply_to: inReplyTo,
-          from_addr: fromAddr,
-          to_addr: toAddr,
-          subject,
-          body_text: bodyText,
-          body_html: bodyHtml,
-          headers: normalisedHeaders,  // jsonb — full Gmail headers array
-          raw_payload: rawPayload,     // jsonb — verbatim Gmail Message JSON
-          status: "received",
-          received_at: new Date().toISOString(),
-        })
-        .returning({ id: claimMessages.id })
-    );
-
-    return inserted?.id ?? null;
-  } catch (err) {
-    // AC10: log error code only — body/headers may contain PII.
-    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
-    console.error("[gmail-poller] claim_messages insert error:", code); // crew-debug-ok
-    return null;
-  }
-}
-
-/**
  * Process claim_attachments: adapt Gmail parts, rehost to storage, insert rows.
  * Non-fatal — errors are logged, not thrown.
  */
@@ -423,112 +347,36 @@ async function processMessage(
   // raw_payload: verbatim Gmail Message JSON (AC4).
   const rawPayload = msg;
 
-  // ── d) Thread lookup ───────────────────────────────────────────────────────
-  const { existingCaseId: threadCaseId } = await threadLookup(
+  // ── d–f) Find or open the case, and record the message ─────────────────────
+  //
+  // Shared with every other way an email can reach us, and with the rehearsal
+  // that runs before each deploy. What is left in this file is the part that
+  // genuinely needs Gmail.
+  const ingested = await ingestInboundEmail({
     tenantId,
-    inReplyToRaw,
-    referencesRaw,
-    subject
-  );
-
-  // ── e) Resolve case (existing thread or new case) ──────────────────────────
-  if (!threadCaseId) {
-    const prefilter = classifyInboundEmailForIntake({
-      fromAddr,
-      subject,
-      bodyText,
-      bodyHtml,
-      headers: allHeaders,
-    });
-
-    if (prefilter.action === "skip") {
-      await markMessageRead(gmail, gmailMessageId);
-      await writeAuditLog({
-        tenant_id: tenantId,
-        actor_id: null,
-        event_type: AuditEvent.EMAIL_FILTERED,
-        target_type: "gmail_message",
-        target_id: null,
-        payload: {
-          action: "prefilter_skip",
-          message_id: gmailMessageId,
-          reason: prefilter.reason,
-          category: prefilter.category,
-        },
-      });
-      return { outcome: "skipped" };
-    }
-  }
-
-  let caseId: string;
-
-  if (threadCaseId) {
-    caseId = threadCaseId;
-  } else {
-    // Create a new case for this email.
-    let newCase: { id: string } | null;
-    try {
-      newCase = firstRow(
-        await db
-          .insert(cases)
-          .values({
-            tenant_id: tenantId,
-            channel: "email",
-            status: "recibido",
-            email_message_id: gmailMessageId,
-            email_thread_id: threadId,
-            // Unknown until the extractor decides. Seeding `true` here made every
-            // un-analysed inbox message (newsletters, promos) read as "¿Es reclamo?
-            // Sí" in the UI, and the value stuck forever when extraction failed.
-            is_claim: null,
-            claim_type: null,
-          })
-          .returning({ id: cases.id })
-      );
-    } catch (caseErr) {
-      const code = (caseErr as { code?: string })?.code;
-      // 23505 = unique_violation: case already exists for this email_message_id.
-      // Treat as already-processed (a previous partial run created the case
-      // but not the claim_message). Return "skipped" so the watermark advances.
-      if (code === "23505") {
-        return { outcome: "skipped" };
-      }
-      // AC10: log code only.
-      console.error( // crew-debug-ok
-        "[gmail-poller] Failed to create case:", code
-      );
-      throw new Error(`case_insert_failed: ${code ?? "unknown"}`);
-    }
-
-    if (!newCase) {
-      console.error( // crew-debug-ok
-        "[gmail-poller] Failed to create case:", "no_data"
-      );
-      throw new Error(`case_insert_failed: no_data`);
-    }
-
-    caseId = newCase.id;
-  }
-
-  // ── f) Insert claim_messages ───────────────────────────────────────────────
-  const claimMessageId = await insertClaimMessage({
-    caseId,
-    tenantId,
-    providerMessageId: gmailMessageId,
-    threadId,
-    inReplyTo,
+    channel: "email",
     fromAddr,
     toAddr,
     subject,
     bodyText,
     bodyHtml,
-    headers: allHeaders,
+    messageId: gmailMessageId,
+    threadId,
+    inReplyTo,
+    references: referencesRaw,
+    headers: allHeaders.map((h) => ({ name: h.name ?? "", value: h.value ?? "" })),
     rawPayload,
   });
 
-  if (!claimMessageId) {
-    throw new Error("claim_message_insert_failed");
+  if (ingested.outcome === "skipped") {
+    // The prefilter turned it away, or we had already taken it. Either way the
+    // watermark should advance, and a filtered message gets marked read so it
+    // does not come back every poll.
+    if (ingested.reason !== "duplicate") await markMessageRead(gmail, gmailMessageId);
+    return { outcome: "skipped" };
   }
+
+  const { caseId, claimMessageId, isNewCase } = ingested;
 
   // ── g) Rehost attachments ──────────────────────────────────────────────────
   if (payload?.parts && payload.parts.length > 0) {
@@ -554,18 +402,9 @@ async function processMessage(
     console.error("[gmail-poller] mark-as-read error:", code, "msgId:", gmailMessageId); // crew-debug-ok
   }
 
-  // ── i) Audit log ───────────────────────────────────────────────────────────
-  await writeAuditLog({
-    tenant_id: tenantId,
-    actor_id: null,
-    event_type: AuditEvent.EMAIL_RECEIVED,
-    target_type: "case",
-    target_id: caseId,
-    payload: {
-      action: threadCaseId ? "thread_update" : "new_case",
-      message_id: gmailMessageId,
-    },
-  });
+  // The EMAIL_RECEIVED audit entry is written by ingestInboundEmail, which is
+  // the only place that knows whether this opened a case or joined one.
+  void isNewCase;
 
   await dispatchExtractionWorker(caseId, tenantId);
 

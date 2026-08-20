@@ -21,7 +21,10 @@
     "test:e2e:ui": "playwright test --ui",
     "test:integration": "vitest run --reporter=verbose tests/integration",
     "cleanup:cases": "tsx scripts/cleanup-cases.ts",
-    "rehearse": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-conversations.mts"
+    "rehearse": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-conversations.mts",
+    "smoke": "tsx --tsconfig tsconfig.rehearsal.json scripts/smoke-production.mts",
+    "verify": "tsc --noEmit && eslint src --max-warnings=0 && vitest run",
+    "check": "tsx --tsconfig tsconfig.rehearsal.json scripts/check-everything.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

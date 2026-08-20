@@ -12,8 +12,14 @@
  * numbers.
  *
  * This runs the same code on the same database with the same model, on the
- * `whatsapp_sim` channel: the messenger composes the reply exactly as it would
- * and then records it instead of sending it. Nothing reaches a phone.
+ * simulated channels. On WhatsApp the messenger composes the reply exactly as
+ * it would and records it instead of sending it; on email the dispatcher does
+ * the same for any `@example.com` address. Nothing reaches a phone or an inbox.
+ *
+ * Both channels matter and they are genuinely different code: email threads by
+ * subject and header, runs a prefilter that decides a message is a newsletter,
+ * strips the quoted copy of our own mail out of a reply, and renders HTML
+ * templates. None of that exists on WhatsApp, and all of it has broken.
  *
  * It is a rehearsal, not a unit test. It spends real tokens and writes real
  * rows, and it is the only thing here that can catch a regression in the
@@ -41,6 +47,8 @@ if (!process.env.DATABASE_URL || !TENANT_ID) {
 
 // Imported after dotenv: the db module reads DATABASE_URL at import time.
 const { createWhatsAppIntakeAndRunAgent } = await import("@/server/agents/intake-agent");
+const { ingestInboundEmail } = await import("@/server/email/inbound-email");
+const { runIntakeAgent } = await import("@/server/agents/intake-agent");
 const { db } = await import("@/lib/db");
 const {
   cases,
@@ -98,6 +106,8 @@ interface Turn {
 interface Scenario {
   id: string;
   what: string;
+  /** Which door the claim comes in through. Defaults to WhatsApp. */
+  channel?: "whatsapp" | "email";
   /**
    * A policy to put on file before the conversation starts, and take off
    * afterwards.
@@ -240,6 +250,85 @@ const SCENARIOS: Scenario[] = [
     finally: { status: "requiere_especialista" },
   },
 
+  // ── Email ─────────────────────────────────────────────────────────────────
+  //
+  // Genuinely different code from here down: threading by subject, a prefilter
+  // that decides a message is a newsletter before anyone reads it, stripping
+  // the quoted copy of our own mail out of a reply, and HTML templates instead
+  // of the composer. All of it has broken at least once.
+
+  {
+    id: "mail-completo",
+    channel: "email",
+    what: "Una denuncia por mail, en varias respuestas, hasta quedar lista",
+    turns: [
+      {
+        say: [
+          "Buenas tardes,",
+          "",
+          "Les escribo porque ayer choqué en Bahía Blanca, en Av. Alem al 2300.",
+          "Soy Martín Sosa, DNI 30.145.882, póliza POL-4471-A. No hubo heridos.",
+          "",
+          "Saludos,",
+          "Martín",
+        ].join("\n"),
+        expect: { replies: 1 },
+      },
+      {
+        // The reply quotes our own message back, which is how a mail client
+        // works and how the extractor once ended up reading our template as
+        // though the claimant had written it.
+        say: [
+          "No completamos ningún parte amistoso, el otro conductor no quiso.",
+          "",
+          "El mié, 20 ago 2026 a las 21:30, ClaimMix <siniestros@example.com> escribió:",
+          "> Necesitamos que nos envíes:",
+          "> - Parte amistoso de accidente",
+          "> - Fotos de los daños",
+        ].join("\n"),
+        expect: { replies: 1 },
+      },
+    ],
+    finally: {
+      docsDeclined: ["parte_amistoso"],
+      knows: ["policy_number", "full_name"],
+    },
+  },
+
+  {
+    id: "mail-no-es-reclamo",
+    channel: "email",
+    what: "Un newsletter no abre una denuncia ni recibe respuesta",
+    turns: [
+      {
+        // The prefilter should turn this away before a single token is spent
+        // on it. Nineteen of these piled up in one day of real inbox testing.
+        say: [
+          "NEWSLETTER SEPTIEMBRE — Novedades del sector asegurador",
+          "",
+          "Si no querés recibir más estos correos, hacé clic acá para desuscribirte.",
+        ].join("\n"),
+        expect: { replies: 0 },
+      },
+    ],
+  },
+
+  {
+    id: "mail-grave",
+    channel: "email",
+    what: "Por mail, un incendio con heridos también se deriva y no pide nada",
+    turns: [
+      {
+        say: [
+          "Se incendió el auto en la ruta 3 y mi señora está internada con quemaduras.",
+          "Soy Laura Giménez, póliza POL-9982-C.",
+        ].join("\n"),
+        expect: { replies: 1, status: "requiere_especialista" },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
   {
     id: "pregunta",
     what: "Una persona que pregunta algo tiene que recibir una respuesta",
@@ -351,6 +440,107 @@ async function seedPolicyFor(
   });
 }
 
+/**
+ * Hand one message to the WhatsApp intake, exactly as the webhook does.
+ */
+async function deliverWhatsApp(
+  scenario: Scenario,
+  turn: Turn,
+  i: number,
+  phone: string
+): Promise<string> {
+  const result = await createWhatsAppIntakeAndRunAgent({
+    tenantId: TENANT_ID!,
+    from: phone,
+    body: turn.say,
+    providerMessageId: `rehearsal.${RUN}.${scenario.id}.${i}`,
+    simulated: true,
+    media: turn.photo
+      ? [
+          {
+            id: `rehearsal-${RUN}-${i}`,
+            mimeType: "image/jpeg",
+            filename: `${typeof turn.photo === "string" ? turn.photo : "foto"}-${i}.jpg`,
+            data: imageFor(turn.photo),
+          },
+        ]
+      : undefined,
+  });
+  return result.caseId;
+}
+
+/**
+ * Hand one message to the email intake, exactly as the Gmail poller does.
+ *
+ * Returns the case, or null when the prefilter turned the message away.
+ *
+ * Replies carry the case number in the subject, which is how a real reply
+ * threads: our outbound subject puts it there and the claimant's mail client
+ * quotes it back. Header threading is the other route and cannot be rehearsed
+ * — a simulated send has no Message-ID, because no message was sent.
+ */
+async function deliverEmail(
+  scenario: Scenario,
+  turn: Turn,
+  i: number,
+  address: string,
+  caseId: string | null
+): Promise<string | null> {
+  const subject = caseId
+    ? `Re: Denuncia de siniestro — caso #${caseId}`
+    : "Denuncia de siniestro";
+
+  const result = await ingestInboundEmail({
+    tenantId: TENANT_ID!,
+    channel: "email_sim",
+    fromAddr: address,
+    toAddr: "siniestros@example.com",
+    subject,
+    bodyText: turn.say,
+    messageId: `rehearsal.${RUN}.${scenario.id}.${i}@example.com`,
+    threadId: `thread.${RUN}.${scenario.id}`,
+  });
+
+  if (result.outcome === "skipped") return null;
+
+  await runIntakeAgent({
+    caseId: result.caseId,
+    tenantId: TENANT_ID!,
+    userId: null,
+    source: "worker",
+  });
+
+  return result.caseId;
+}
+
+/**
+ * The message as a person would read it.
+ *
+ * Email goes out as HTML, and a rehearsal transcript full of inline styles is
+ * a transcript nobody reads — which defeats half the point, since a person
+ * skimming the output is how you notice a reply that passes every assertion
+ * and still sounds wrong.
+ */
+function readable(body: string): string {
+  if (!/<[a-z!]/i.test(body)) return body;
+  return body
+    .replace(/<head[\s\S]*?<\/head>/gi, "")
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
+    .replace(/<\/(p|div|h1|h2|h3|li|tr)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line, i, all) => line.length > 0 || (i > 0 && all[i - 1].length > 0))
+    .join("\n")
+    .trim();
+}
+
 async function repliesSince(caseId: string, seen: number): Promise<string[]> {
   const rows = await db
     .select({ body: outboundMessages.rendered_body })
@@ -363,8 +553,13 @@ async function repliesSince(caseId: string, seen: number): Promise<string[]> {
 async function runScenario(scenario: Scenario): Promise<string | null> {
   console.log(`\n▸ ${scenario.id} — ${scenario.what}`);
 
-  // A fresh number per run, so nothing joins a conversation from an earlier one.
-  const phone = `5490000${RUN}${SCENARIOS.indexOf(scenario)}`;
+  // A fresh identity per run, so nothing joins a conversation from an earlier
+  // one. The address is @example.com on purpose: that is exactly what the
+  // dispatcher checks before deciding never to actually send.
+  const index = SCENARIOS.indexOf(scenario);
+  const phone = `5490000${RUN}${index}`;
+  const address = `ensayo.${RUN}.${index}@example.com`;
+  const byEmail = scenario.channel === "email";
   let caseId: string | null = null;
   let seen = 0;
 
@@ -374,30 +569,29 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
     for (const [i, turn] of scenario.turns.entries()) {
       console.log(`\n   [${i + 1}] 👤 ${turn.say}${turn.photo ? "  📎" : ""}`);
 
-      const result = await createWhatsAppIntakeAndRunAgent({
-        tenantId: TENANT_ID!,
-        from: phone,
-        body: turn.say,
-        providerMessageId: `rehearsal.${RUN}.${scenario.id}.${i}`,
-        simulated: true,
-        media: turn.photo
-          ? [
-              {
-                id: `rehearsal-${RUN}-${i}`,
-                mimeType: "image/jpeg",
-                filename: `${typeof turn.photo === "string" ? turn.photo : "foto"}-${i}.jpg`,
-                data: imageFor(turn.photo),
-              },
-            ]
-          : undefined,
-      });
-      caseId = result.caseId;
+      const delivered = byEmail
+        ? await deliverEmail(scenario, turn, i, address, caseId)
+        : await deliverWhatsApp(scenario, turn, i, phone);
 
-      const said = await repliesSince(caseId, seen);
+      if (delivered === null) {
+        // The prefilter turned it away. That is an outcome, not a failure —
+        // one scenario exists precisely to check that it does.
+        console.log("       ⊘ (el filtro de entrada lo descartó)");
+        if (turn.expect?.replies !== undefined && turn.expect.replies !== 0) {
+          note(scenario.id, i + 1, "el filtro de entrada lo descartó y no debía");
+        }
+        continue;
+      }
+      const active: string = delivered;
+      caseId = active;
+
+      const said = await repliesSince(active, seen);
       seen += said.length;
 
       if (said.length === 0) console.log("       🤖 (silencio)");
-      for (const s of said) console.log(`       🤖 ${s.replace(/\n/g, "\n          ")}`);
+      for (const reply of said) {
+        console.log(`       🤖 ${readable(reply).replace(/\n/g, "\n          ")}`);
+      }
 
       const want = turn.expect;
       if (!want) continue;
@@ -421,7 +615,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         const rows = await db
           .select({ id: claimAttachments.id })
           .from(claimAttachments)
-          .where(eq(claimAttachments.case_id, caseId));
+          .where(eq(claimAttachments.case_id, active));
         if (rows.length !== want.attachments) {
           note(scenario.id, i + 1, `${rows.length} adjunto(s) guardado(s), esperaba ${want.attachments}`);
         }
@@ -430,7 +624,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         const row = await db
           .select({ status: cases.status })
           .from(cases)
-          .where(eq(cases.id, caseId));
+          .where(eq(cases.id, active));
         if (row[0]?.status !== want.status) {
           note(scenario.id, i + 1, `estado ${row[0]?.status}, esperaba ${want.status}`);
         }

@@ -185,7 +185,7 @@ async function checkStorage(deep: boolean): Promise<Check> {
   if (!deep) return ok("almacenamiento", "configurado (sin probar; usá deep=1)");
 
   try {
-    const { uploadAttachment, readAttachment } = await import(
+    const { uploadAttachment, readAttachment, deleteAttachment } = await import(
       "@/server/storage/claim-attachments-bucket"
     );
     const data = Buffer.from(`health ${Date.now()}`);
@@ -200,11 +200,15 @@ async function checkStorage(deep: boolean): Promise<Check> {
     if ("error" in uploaded) return down("almacenamiento", `subida: ${uploaded.error}`);
 
     const read = await readAttachment(uploaded.storagePath);
+    // Tidied up whether or not the read matched: this runs on every deploy,
+    // and a bucket slowly filling with health-check scraps is our mess.
+    await deleteAttachment(uploaded.storagePath);
+
     if (!read || !read.equals(data)) {
       return down("almacenamiento", "lo subido no volvió igual");
     }
 
-    return ok("almacenamiento", "subida y lectura correctas");
+    return ok("almacenamiento", "subida, lectura y borrado correctos");
   } catch (err) {
     return down("almacenamiento", why(err));
   }

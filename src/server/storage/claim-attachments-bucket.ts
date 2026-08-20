@@ -14,7 +14,12 @@
  */
 
 import "server-only";
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { createHash } from "crypto";
 import { sanitizeFilename } from "@/server/email/attachment-validator";
 
@@ -144,5 +149,28 @@ export async function readAttachment(storagePath: string): Promise<Buffer | null
     const name = err instanceof Error ? err.name : "UnknownError";
     console.error("[attachments] read failed:", name); // crew-debug-ok
     return null;
+  }
+}
+
+/**
+ * Remove an object from the bucket.
+ *
+ * Deliberately not reachable from anything that handles a claim: an attachment
+ * belongs to a claim file and deleting one is a decision for a person with a
+ * retention policy, not for code reacting to a message.
+ *
+ * It exists for the health check, which proves the bucket really works by
+ * writing to it — and would otherwise leave a scrap of test data behind on
+ * every run, forever.
+ */
+export async function deleteAttachment(storagePath: string): Promise<boolean> {
+  try {
+    const s3 = createStorageClient();
+    await s3.send(new DeleteObjectCommand({ Bucket: bucketName(), Key: storagePath }));
+    return true;
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "UnknownError";
+    console.error("[attachments] delete failed:", name); // crew-debug-ok
+    return false;
   }
 }

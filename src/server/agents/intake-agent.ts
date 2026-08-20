@@ -5,7 +5,7 @@ import { db, tables } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { downloadWhatsAppMedia, type WhatsAppMediaRef } from "@/server/whatsapp/cloud-api";
-import { rehostAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
+import { rehostAndRecordAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 
 type IntakeChannel = "email" | "email_sim" | "whatsapp" | "whatsapp_sim";
@@ -242,7 +242,7 @@ async function storeWhatsAppMedia(
 
     if (downloaded.length === 0) return;
 
-    const results = await rehostAttachments({
+    const results = await rehostAndRecordAttachments({
       attachments: downloaded,
       tenantId,
       caseId,

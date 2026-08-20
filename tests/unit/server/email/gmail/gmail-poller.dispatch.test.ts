@@ -103,6 +103,7 @@ vi.mock("@/server/email/thread-lookup", () => ({
 
 vi.mock("@/server/email/rehost-attachments", () => ({
   rehostAttachments: mockRehostAttachments,
+  rehostAndRecordAttachments: mockRehostAttachments,
 }));
 
 vi.mock("@/lib/audit/log", () => ({

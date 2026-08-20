@@ -181,6 +181,15 @@ export async function orchestratePostExtraction(
     extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === "claim_type")
       ?.field_value ?? null;
 
+  // Who we are writing to. The claimant said their name in the first message
+  // and the model greeted them by it; the second round arrived as a photo with
+  // no caption, so the only text we handed the composer was "[Imagen adjunta
+  // sin texto]" and the reply opened with a bare "¡Hola!". A name we already
+  // hold should not be forgotten because the last thing said was a picture.
+  const claimantName =
+    extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === "full_name")
+      ?.field_value?.trim() || null;
+
   await seedRequiredDocs(caseId, tenantId, claimTypeValue);
   await reconcileAttachments(caseId, tenantId, labelForClaimType(claimTypeValue));
 
@@ -320,6 +329,7 @@ export async function orchestratePostExtraction(
         caseId,
         missingFields: askItems.fields,
         knownValues: askItems.knownValues,
+        claimantName,
       },
       inReplyToMessageId,
     });
@@ -394,6 +404,7 @@ export async function orchestratePostExtraction(
         // policyNumber passed through; template masks it (AC24).
         policyNumber: policyField?.field_value ?? null,
         isFollowUp,
+        claimantName,
       },
       inReplyToMessageId,
     });

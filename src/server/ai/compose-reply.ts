@@ -38,6 +38,15 @@ export interface ComposeReplyInput {
   claimTypeLabel?: string | null;
   /** True when we have already written to this claimant about this case. */
   isFollowUp?: boolean;
+  /**
+   * The claimant's name, when the claim already holds one.
+   *
+   * Not derived from `lastMessage`: a person who introduces themselves in the
+   * first message and then sends a photo with no caption was greeted with a
+   * bare "¡Hola!" on the second round, because the only text the composer
+   * saw was "[Imagen adjunta sin texto]".
+   */
+  claimantName?: string | null;
   /** The claimant's most recent message, for tone only. */
   lastMessage?: string;
   /** The deterministic text. The model is asked to do better, not different. */
@@ -108,6 +117,7 @@ ${intentBrief[input.intent]}
 
 ${items.length > 0 ? `DATOS A PEDIR:\n${items.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
+${input.claimantName ? `\nLa persona se llama ${input.claimantName}. Podés llamarla por su nombre de pila.` : ""}
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}
 ${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto):\n"""${input.lastMessage.slice(0, 600)}"""` : ""}
 

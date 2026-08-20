@@ -22,6 +22,7 @@ import { claimAttachments } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { computeContentHash, uploadAttachment } from "@/server/storage/claim-attachments-bucket";
 import { validateAttachment, MAX_AGGREGATE_SIZE_BYTES } from "@/server/email/attachment-validator";
+import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -206,6 +207,81 @@ export async function rehostAttachments(
       storagePath: uploadResult.storagePath,
       contentHash,
     });
+  }
+
+  return results;
+}
+
+// ── Rehost and record, in one step ───────────────────────────────────────────
+
+/**
+ * Rehost each attachment and write the row that points at it.
+ *
+ * `rehostAttachments` above only moves bytes; the row in `claim_attachments`
+ * was written by the Gmail poller afterwards, in a loop it owned. When
+ * WhatsApp media arrived it called the rehost half and stopped — so a photo of
+ * a crumpled bumper went into the bucket with nothing in the database pointing
+ * at it. The upload logged success, the analyst saw no attachment, and the
+ * agent asked for the photo it already had.
+ *
+ * Both channels call this now. The row is written whether or not the upload
+ * worked: a rejected file with a reason is a fact worth keeping, and it is
+ * what tells us the difference between "nobody sent it" and "it did not fit".
+ */
+export async function rehostAndRecordAttachments(
+  opts: RehostAttachmentsOpts
+): Promise<RehostResult[]> {
+  const { attachments, tenantId, caseId, messageId } = opts;
+  const results = await rehostAttachments(opts);
+
+  for (let i = 0; i < attachments.length; i++) {
+    const attachment = attachments[i];
+    const result = results[i];
+    if (!result) continue;
+
+    try {
+      await db.insert(claimAttachments).values({
+        case_id: caseId,
+        tenant_id: tenantId,
+        claim_message_id: messageId,
+        file_name: attachment.Name,
+        content_type: attachment.ContentType,
+        size_bytes: attachment.ContentLength,
+        storage_path: result.stored ? result.storagePath : null,
+        content_hash: result.stored ? result.contentHash : null,
+        rejected_reason: result.stored ? null : result.reason,
+      });
+    } catch (err) {
+      const code =
+        (err as { code?: string })?.code ??
+        (err instanceof Error ? err.name : "UnknownError");
+      console.error("[attachments] row insert failed:", code); // crew-debug-ok
+      continue;
+    }
+
+    if (result.stored) {
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.ATTACHMENT_REHOSTED,
+        target_type: "case",
+        target_id: caseId,
+        payload: {
+          storage_path: result.storagePath,
+          size_bytes: attachment.ContentLength,
+          content_hash_prefix: result.contentHash.slice(0, 12),
+        },
+      });
+    } else if (result.reason !== "rehost_timeout") {
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.ATTACHMENT_REJECTED,
+        target_type: "case",
+        target_id: caseId,
+        payload: { reason: result.reason, size_bytes: attachment.ContentLength },
+      });
+    }
   }
 
   return results;

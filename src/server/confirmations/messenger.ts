@@ -231,6 +231,8 @@ export const whatsappMessenger: AgentMessenger = {
           typeof message.data.claimType === "string" ? message.data.claimType : null
         ),
         isFollowUp: message.data.isFollowUp === true,
+        claimantName:
+          typeof message.data.claimantName === "string" ? message.data.claimantName : null,
         lastMessage: message.lastMessage,
         fallback: body,
       });

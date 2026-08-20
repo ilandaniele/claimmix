@@ -54,7 +54,7 @@ import {
 import { adaptGmailAttachments } from "./gmail-attachment-adapter";
 import { checkDuplicate } from "@/server/email/dedupe";
 import { threadLookup } from "@/server/email/thread-lookup";
-import { rehostAttachments } from "@/server/email/rehost-attachments";
+import { rehostAndRecordAttachments } from "@/server/email/rehost-attachments";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { classifyInboundEmailForIntake } from "@/server/email/relevance-prefilter";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
@@ -326,62 +326,15 @@ async function processAttachments(
 
   if (adapted.length === 0) return;
 
-  const results = await rehostAttachments({
+  // Rehost and record together — the row that points at the uploaded file is
+  // written by the same call, so no channel can upload bytes and forget the row.
+  await rehostAndRecordAttachments({
     attachments: adapted,
     tenantId,
     caseId,
     messageId: claimMessageId,
     budgetMs: 5_000,
   });
-
-  for (let i = 0; i < adapted.length; i++) {
-    const attachment = adapted[i];
-    const result = results[i];
-    if (!result) continue;
-
-    try {
-      await db.insert(claimAttachments).values({
-        case_id: caseId,
-        tenant_id: tenantId,
-        claim_message_id: claimMessageId,
-        file_name: attachment.Name,
-        content_type: attachment.ContentType,
-        size_bytes: attachment.ContentLength,
-        storage_path: result.stored ? result.storagePath : null,
-        content_hash: result.stored ? result.contentHash : null,
-        rejected_reason: result.stored ? null : result.reason,
-      });
-    } catch (attachErr) {
-      const code = (attachErr as { code?: string })?.code ??
-        (attachErr instanceof Error ? attachErr.name : "UnknownError");
-      console.error("[gmail-poller] claim_attachments insert:", code); // crew-debug-ok
-    }
-
-    // Emit audit events (non-fatal).
-    if (result.stored) {
-      await writeAuditLog({
-        tenant_id: tenantId,
-        actor_id: null,
-        event_type: AuditEvent.ATTACHMENT_REHOSTED,
-        target_type: "case",
-        target_id: caseId,
-        payload: {
-          storage_path: result.storagePath,
-          size_bytes: attachment.ContentLength,
-          content_hash_prefix: result.contentHash.slice(0, 12),
-        },
-      });
-    } else if (result.reason !== "rehost_timeout") {
-      await writeAuditLog({
-        tenant_id: tenantId,
-        actor_id: null,
-        event_type: AuditEvent.ATTACHMENT_REJECTED,
-        target_type: "case",
-        target_id: caseId,
-        payload: { reason: result.reason, size_bytes: attachment.ContentLength },
-      });
-    }
-  }
 }
 
 // ── Process a single Gmail message ────────────────────────────────────────────

@@ -281,6 +281,7 @@ vi.mock("@/server/email/thread-lookup", () => ({
 
 vi.mock("@/server/email/rehost-attachments", () => ({
   rehostAttachments: vi.fn().mockResolvedValue([]),
+  rehostAndRecordAttachments: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/server/email/gmail/gmail-attachment-adapter", () => ({

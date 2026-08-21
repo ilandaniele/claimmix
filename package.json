@@ -24,6 +24,7 @@
     "rehearse": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-conversations.mts",
     "smoke": "tsx --tsconfig tsconfig.rehearsal.json scripts/smoke-production.mts",
     "prove": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-delivery.mts",
+    "switch-gcp": "tsx --tsconfig tsconfig.rehearsal.json scripts/switch-gcp-project.mts",
     "verify": "tsc --noEmit && eslint src --max-warnings=0 && vitest run && bash scripts/check-personal-data.sh",
     "check": "tsx --tsconfig tsconfig.rehearsal.json scripts/check-everything.mts"
   },

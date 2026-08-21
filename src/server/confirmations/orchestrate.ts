@@ -177,6 +177,10 @@ export async function orchestratePostExtraction(
     extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === "full_name")
       ?.field_value?.trim() || null;
 
+  // What we have actually put in front of this person. Read before the
+  // documents block, which needs it to know what could possibly be refused.
+  const lastAsked = await lastAskedKeys(caseId, tenantId);
+
   await seedRequiredDocs(caseId, tenantId, claimTypeValue);
   await reconcileAttachments(caseId, tenantId, labelForClaimType(claimTypeValue));
 
@@ -185,7 +189,7 @@ export async function orchestratePostExtraction(
   // and until now "no completamos ninguno" was heard as silence: the request
   // stayed open, every round asked again, and the case died of abandonment two
   // weeks later.
-  await resolveDeclinedDocs(caseId, tenantId, latestMessageText);
+  await resolveDeclinedDocs(caseId, tenantId, latestMessageText, lastAsked);
 
   const gapResult = await analyzeEmailClaimGaps(caseId, extractedClaim.fields, tenantId);
 
@@ -318,8 +322,6 @@ export async function orchestratePostExtraction(
   // outstanding, and is never consulted at all on an escalation. A plan that
   // fails is discarded whole and this falls back to the table below, so the
   // worst case is the behaviour we already had.
-  const lastAsked = await lastAskedKeys(caseId, tenantId);
-
   const plan = await deliberate({
     caseId,
     tenantId,

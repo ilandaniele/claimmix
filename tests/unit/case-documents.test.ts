@@ -221,18 +221,33 @@ describe("resolveDeclinedDocs", () => {
    * confirmacion_pendiente until the abandonment sweep closed it two weeks
    * later as though the claimant had never replied.
    */
-  function declares(keys: string[] | null) {
+  /**
+   * The model naming documents and quoting the words that refuse each one.
+   *
+   * The quote is not decoration: it is checked against the message, because a
+   * model that cannot point at the words was inferring, and inference here
+   * removes a request nobody will make again.
+   */
+  function declares(entries: Array<{ clave: string; cita: string }> | null) {
     (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
-      text: JSON.stringify({ declined: keys }),
+      text: JSON.stringify({ declined: entries }),
       usage: {},
     });
   }
 
+  /** Documents we have actually asked this person for. */
+  const ASKED = ["parte_amistoso", "denuncia_policial", "fotos_danos", "licencia_conducir"];
+
   it("closes the request the claimant says cannot be satisfied", async () => {
     queueSelects([{ doc_key: "parte_amistoso" }, { doc_key: "denuncia_policial" }]);
-    declares(["parte_amistoso"]);
+    declares([{ clave: "parte_amistoso", cita: "No completamos ningún parte amistoso" }]);
 
-    await resolveDeclinedDocs(CASE, TENANT, "No completamos ningún parte amistoso");
+    await resolveDeclinedDocs(
+      CASE,
+      TENANT,
+      "No completamos ningún parte amistoso",
+      ASKED
+    );
 
     expect(updatedTo?.declined_at).toBeTruthy();
     expect(updatedTo?.satisfied_at).toBeUndefined();
@@ -243,18 +258,23 @@ describe("resolveDeclinedDocs", () => {
     // An analyst who reads "recibido" goes looking for a file that does not
     // exist. The two states have to stay apart.
     queueSelects([{ doc_key: "parte_amistoso" }]);
-    declares(["parte_amistoso"]);
+    declares([{ clave: "parte_amistoso", cita: "no tenemos parte" }]);
 
-    await resolveDeclinedDocs(CASE, TENANT, "no tenemos parte");
+    await resolveDeclinedDocs(CASE, TENANT, "no tenemos parte", ASKED);
 
     expect(Object.keys(updatedTo ?? {})).not.toContain("satisfied_at");
   });
 
   it("keeps what they said, so an analyst can judge whether to insist", async () => {
     queueSelects([{ doc_key: "denuncia_policial" }]);
-    declares(["denuncia_policial"]);
+    declares([{ clave: "denuncia_policial", cita: "No hicimos denuncia" }]);
 
-    await resolveDeclinedDocs(CASE, TENANT, "No hicimos denuncia, la policía no vino");
+    await resolveDeclinedDocs(
+      CASE,
+      TENANT,
+      "No hicimos denuncia, la policía no vino",
+      ASKED
+    );
 
     expect(updatedTo?.declined_note).toContain("la policía no vino");
     expect(vi.mocked(writeAuditLog).mock.calls[0][0]).toMatchObject({
@@ -268,7 +288,7 @@ describe("resolveDeclinedDocs", () => {
     // sending things rather than refusing them.
     queueSelects([{ doc_key: "parte_amistoso" }]);
 
-    await resolveDeclinedDocs(CASE, TENANT, "Ahí va la foto del auto");
+    await resolveDeclinedDocs(CASE, TENANT, "Ahí va la foto del auto", ASKED);
 
     expect(callGemini).not.toHaveBeenCalled();
     expect(updatedTo).toBeNull();
@@ -276,9 +296,9 @@ describe("resolveDeclinedDocs", () => {
 
   it("refuses a key it was never waiting for", async () => {
     queueSelects([{ doc_key: "parte_amistoso" }]);
-    declares(["informe_bomberos"]);
+    declares([{ clave: "informe_bomberos", cita: "no tengo el informe de bomberos" }]);
 
-    await resolveDeclinedDocs(CASE, TENANT, "no tengo el informe de bomberos");
+    await resolveDeclinedDocs(CASE, TENANT, "no tengo el informe de bomberos", ASKED);
 
     expect(updatedTo).toBeNull();
   });
@@ -287,19 +307,19 @@ describe("resolveDeclinedDocs", () => {
     queueSelects([{ doc_key: "parte_amistoso" }]);
     declares([]);
 
-    await resolveDeclinedDocs(CASE, TENANT, "no sé si tengo el parte, fijate vos");
+    await resolveDeclinedDocs(CASE, TENANT, "no sé si tengo el parte, fijate vos", ASKED);
 
     expect(updatedTo).toBeNull();
   });
 
   it("ignores an empty message", async () => {
-    await resolveDeclinedDocs(CASE, TENANT, "   ");
+    await resolveDeclinedDocs(CASE, TENANT, "   ", ASKED);
     expect(db.select).not.toHaveBeenCalled();
   });
 
   it("does nothing when no document is outstanding", async () => {
     queueSelects([]);
-    await resolveDeclinedDocs(CASE, TENANT, "no tengo nada de eso");
+    await resolveDeclinedDocs(CASE, TENANT, "no tengo nada de eso", ASKED);
     expect(callGemini).not.toHaveBeenCalled();
   });
 
@@ -309,7 +329,112 @@ describe("resolveDeclinedDocs", () => {
     });
 
     await expect(
-      resolveDeclinedDocs(CASE, TENANT, "no tenemos parte")
+      resolveDeclinedDocs(CASE, TENANT, "no tenemos parte", ASKED)
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("resolveDeclinedDocs — what stops a claim being waived by accident", () => {
+  function declares(entries: Array<{ clave: string; cita: string }>) {
+    (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({ declined: entries }),
+      usage: {},
+    });
+  }
+
+  it("cannot refuse a document nobody has asked for yet", async () => {
+    /**
+     * The failure this guard exists for, caught by a rehearsal.
+     *
+     * The opening message of a claim — "choqué ayer en Bahía Blanca... No hubo
+     * heridos" — waived all three documents at once. "No hubo heridos" tripped
+     * the phrase gate, the model was asked which documents the person was
+     * refusing, and it answered with the whole list. Nothing had been asked
+     * for. The claim went straight to "ya tenemos todo lo necesario".
+     *
+     * A request that was never made cannot be refused, and that is now a fact
+     * about the code rather than a hope about the model's judgement.
+     */
+    await resolveDeclinedDocs(
+      CASE,
+      TENANT,
+      "Choqué ayer en Bahía Blanca. Soy Martín Sosa. No hubo heridos.",
+      [] // nothing asked for yet
+    );
+
+    expect(db.select).not.toHaveBeenCalled();
+    expect(callGemini).not.toHaveBeenCalled();
+    expect(updatedTo).toBeNull();
+  });
+
+  it("only considers documents that were actually asked for", async () => {
+    // Three outstanding, one of them ever mentioned to the claimant. A refusal
+    // can only touch the one they were shown.
+    queueSelects([
+      { doc_key: "parte_amistoso" },
+      { doc_key: "fotos_danos" },
+      { doc_key: "licencia_conducir" },
+    ]);
+    declares([
+      { clave: "parte_amistoso", cita: "no completamos el parte" },
+      { clave: "fotos_danos", cita: "no completamos el parte" },
+    ]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "no completamos el parte", [
+      "parte_amistoso",
+    ]);
+
+    const audit = vi.mocked(writeAuditLog).mock.calls[0]?.[0];
+    expect(audit?.payload).toMatchObject({ doc_keys: ["parte_amistoso"] });
+  });
+
+  it("ignores a refusal it cannot quote", async () => {
+    // The model naming a document without pointing at the words was inferring,
+    // and inference here removes a request nobody will make again.
+    queueSelects([{ doc_key: "parte_amistoso" }]);
+    declares([{ clave: "parte_amistoso", cita: "no tengo el parte amistoso" }]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "no hubo heridos, gracias", [
+      "parte_amistoso",
+    ]);
+
+    expect(updatedTo).toBeNull();
+  });
+
+  it("accepts a quote whose accents differ from the message", async () => {
+    // People type "policia" and the model writes "policía". The words are the
+    // same words.
+    queueSelects([{ doc_key: "denuncia_policial" }]);
+    declares([{ clave: "denuncia_policial", cita: "no hicimos denuncia policía" }]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "No hicimos denuncia policia", [
+      "denuncia_policial",
+    ]);
+
+    expect(updatedTo?.declined_at).toBeTruthy();
+  });
+
+  it("ignores a quote too short to mean anything", async () => {
+    // "no" appears in almost every message.
+    queueSelects([{ doc_key: "parte_amistoso" }]);
+    declares([{ clave: "parte_amistoso", cita: "no" }]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "no sé, fijate vos", ["parte_amistoso"]);
+
+    expect(updatedTo).toBeNull();
+  });
+
+  it("ignores an answer in the old shape, with no quote at all", async () => {
+    (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({ declined: ["parte_amistoso"] }),
+      usage: {},
+    });
+    queueSelects([{ doc_key: "parte_amistoso" }]);
+
+    await resolveDeclinedDocs(CASE, TENANT, "no tenemos parte amistoso", [
+      "parte_amistoso",
+    ]);
+
+    expect(updatedTo).toBeNull();
   });
 });

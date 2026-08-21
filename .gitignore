@@ -77,3 +77,19 @@ prompt.txt
 
 # training exports (large data dumps, regenerate with scripts/export-training.mjs)
 training-export/
+
+# Fotos reales para el ensayo de reconocimiento de documentos.
+#
+# El reconocimiento sólo se puede probar con documentos de verdad, y un
+# documento de verdad es el documento de alguien: la licencia que usamos tiene
+# nombre, domicilio, fecha de nacimiento y firma del titular. Eso no entra a un
+# repositorio, ni siquiera a uno privado — una vez adentro queda en el historial
+# para siempre y viaja con cada clon.
+#
+# Viven en la máquina de quien corre el ensayo. Sin ellas la suite corre igual y
+# avisa que esa parte no se ejercitó.
+tests/fixtures/*.jpg
+tests/fixtures/*.jpeg
+tests/fixtures/*.png
+tests/fixtures/*.pdf
+!tests/fixtures/placeholder.jpg

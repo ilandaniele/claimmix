@@ -340,13 +340,28 @@ const MIGHT_BE_DECLINING =
 export async function resolveDeclinedDocs(
   caseId: string,
   tenantId: string,
-  latestMessageText: string | null | undefined
+  latestMessageText: string | null | undefined,
+  /**
+   * The document keys we have actually put in front of this person.
+   *
+   * The guard that matters. A rehearsal caught the opening message of a claim
+   * — "choqué ayer... No hubo heridos" — waiving all three documents at once:
+   * the phrase tripped the gate, the model was asked which documents the
+   * person was refusing, and it answered with the whole list. Nobody had asked
+   * for anything yet. The claim went straight to "ya tenemos todo".
+   *
+   * A request that was never made cannot be refused. Passing what we asked for
+   * makes that a fact rather than a hope about the model's judgement.
+   */
+  alreadyAsked: string[]
 ): Promise<void> {
   const said = (latestMessageText ?? "").trim();
   if (said.length === 0) return;
+  if (alreadyAsked.length === 0) return;
 
   try {
-    const pending = await pendingDocKeys(caseId, tenantId);
+    const asked = new Set(alreadyAsked);
+    const pending = (await pendingDocKeys(caseId, tenantId)).filter((k) => asked.has(k));
     if (pending.length === 0) return;
     if (!MIGHT_BE_DECLINING.test(said)) return;
 
@@ -389,6 +404,16 @@ export async function resolveDeclinedDocs(
   }
 }
 
+/** For comparing a quote with the message: accents and spacing vary, the words do not. */
+function normalize(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
  * Ask which of the outstanding documents the person is saying they do not have.
  *
@@ -410,13 +435,23 @@ Esto fue lo que contestó:
 """${said.slice(0, 1500)}"""
 
 ¿De cuáles de esos documentos está diciendo que NO existe, que no lo tiene, que
-no lo completaron o que no se lo dieron? Devolvé sólo las claves de esa lista.
+no lo completaron o que no se lo dieron?
 
-No incluyas un documento porque no lo haya mencionado: el silencio no es una
-negativa, es alguien que todavía lo va a mandar. Tampoco incluyas uno que dice
-que va a conseguir o mandar más tarde — ese sigue pendiente.
+Por cada uno que incluyas, copiá TEXTUALMENTE el fragmento de su mensaje donde
+lo niega. Si no podés señalar las palabras exactas, no lo incluyas: significa
+que lo estás deduciendo, y deducir acá le saca a la persona un pedido que nadie
+va a volver a hacerle.
 
-Devolvé JSON: {"declined": ["<clave>", ...]}  (lista vacía si no niega ninguno)`;
+Cuidado con las negaciones que no son sobre documentos. "No hubo heridos" es
+una respuesta sobre el siniestro, no una negativa a mandar nada. Lo mismo "no
+fue mi culpa", "no me acuerdo la hora", "no está el otro auto".
+
+El silencio tampoco es una negativa: si no lo mencionó, sigue pendiente. Y si
+dice que lo va a conseguir o mandar después, también sigue pendiente.
+
+Devolvé JSON:
+{"declined": [{"clave": "<clave exacta>", "cita": "<sus palabras textuales>"}]}
+Lista vacía si no niega ninguno.`;
 
   try {
     const { text } = await callGemini(
@@ -428,9 +463,24 @@ Devolvé JSON: {"declined": ["<clave>", ...]}  (lista vacía si no niega ninguno
     const parsed = JSON.parse(text) as { declined?: unknown };
     if (!Array.isArray(parsed.declined)) return [];
 
+    const normalized = normalize(said);
+
     return parsed.declined
-      .filter((k): k is string => typeof k === "string")
-      .map((k) => k.trim())
+      .filter(
+        (d): d is { clave: string; cita: string } =>
+          typeof d === "object" &&
+          d !== null &&
+          typeof (d as { clave?: unknown }).clave === "string" &&
+          typeof (d as { cita?: unknown }).cita === "string"
+      )
+      // The quote has to actually be in the message. A model that cannot point
+      // at the words was inferring, and inference here removes a request
+      // nobody will make again.
+      .filter((d) => {
+        const quote = normalize(d.cita);
+        return quote.length >= 4 && normalized.includes(quote);
+      })
+      .map((d) => d.clave.trim())
       .filter((k) => pending.includes(k));
   } catch (err) {
     console.error("[documents] decline identify failed:", errCode(err));

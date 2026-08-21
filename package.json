@@ -23,6 +23,7 @@
     "cleanup:cases": "tsx scripts/cleanup-cases.ts",
     "rehearse": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-conversations.mts",
     "smoke": "tsx --tsconfig tsconfig.rehearsal.json scripts/smoke-production.mts",
+    "prove": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-delivery.mts",
     "verify": "tsc --noEmit && eslint src --max-warnings=0 && vitest run",
     "check": "tsx --tsconfig tsconfig.rehearsal.json scripts/check-everything.mts"
   },

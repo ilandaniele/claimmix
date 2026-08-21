@@ -97,6 +97,23 @@ interface Turn {
     avoids?: string[];
     /** How many attachment rows the case should hold by now. */
     attachments?: number;
+    /**
+     * Document keys the arriving file should have closed.
+     *
+     * Only checked when a real photograph is on disk. With the placeholder the
+     * recogniser correctly identifies nothing, so asserting a match would be
+     * asserting a bug.
+     */
+    recognises?: string[];
+    /**
+     * Document keys that must NOT have been closed.
+     *
+     * The direction of caution that matters: a file wrongly marked as received
+     * vanishes from the analyst's list and nobody finds out until the claim
+     * stalls. Checked whatever fixture is present — an unrecognisable image
+     * must close nothing either.
+     */
+    recognisesNothing?: boolean;
     /** Exactly how many messages this turn should produce. 0 means silence. */
     replies?: number;
     status?: string;
@@ -137,17 +154,24 @@ const SCENARIOS: Scenario[] = [
         say: "Hola, choqué ayer en Bahía Blanca, Av. Alem al 2300. Soy Martín Sosa, póliza POL-4471-A, DNI 30.145.882. No hubo heridos.",
         expect: { replies: 1, mentions: ["parte", "licencia"], avoids: ["cubierto", "aprobado"] },
       },
-      { say: "Ahí van las fotos", photo: "danos", expect: { attachments: 1 } },
-      { say: "Y esta es la licencia", photo: "licencia", expect: { attachments: 2 } },
+      {
+        say: "Ahí van las fotos",
+        photo: "danos",
+        expect: { attachments: 1, recognises: ["fotos_danos"] },
+      },
+      {
+        // The discriminating case: two paper documents outstanding, and it has
+        // to pick the right one rather than the only remaining one.
+        say: "Y esta es la licencia",
+        photo: "licencia",
+        expect: { attachments: 2, recognises: ["licencia_conducir"] },
+      },
       {
         say: "No completamos ningún parte amistoso, el otro conductor no quiso",
         expect: { replies: 1 },
       },
     ],
     finally: {
-      // Not listo_para_core: the placeholder images are unrecognisable, so
-      // those two document requests correctly stay open. With real photos in
-      // tests/fixtures the claim closes.
       docsDeclined: ["parte_amistoso"],
       knows: ["policy_number", "full_name"],
     },
@@ -248,6 +272,26 @@ const SCENARIOS: Scenario[] = [
       },
     ],
     finally: { status: "requiere_especialista" },
+  },
+
+  {
+    id: "foto-que-no-es-nada",
+    what: "Una imagen que no es ningún documento pedido no cierra ningún pedido",
+    turns: [
+      {
+        say: "Choqué en Alem y Sarmiento. Soy Nadia Ferro, DNI 31.909.100, póliza POL-2201-K.",
+        expect: { replies: 1 },
+      },
+      {
+        // Someone forwards a screenshot by accident. The direction of caution
+        // that matters most: a request marked satisfied by the wrong file
+        // disappears from the analyst's list and nobody finds out until the
+        // claim stalls. Asking twice is a nuisance; this is a hole.
+        say: "Perdón, mandé cualquier cosa",
+        photo: "irrelevante",
+        expect: { attachments: 1, recognisesNothing: true },
+      },
+    ],
   },
 
   // ── Email ─────────────────────────────────────────────────────────────────
@@ -357,6 +401,8 @@ interface Failure {
 }
 
 const failures: Failure[] = [];
+/** Fixture names a scenario asked for and did not find, reported at the end. */
+const unrehearsed = new Set<string>();
 const RUN = Date.now().toString().slice(-8);
 
 /**
@@ -367,10 +413,32 @@ const RUN = Date.now().toString().slice(-8);
  * actually recognise. Otherwise a 1×1 placeholder, which exercises storage and
  * is correctly identified as nothing.
  */
+/** Is there a real photograph for this fixture name? */
+function haveRealPhoto(photo: string | boolean): boolean {
+  return typeof photo === "string" && fs.existsSync(fixturePath(photo));
+}
+
+function fixturePath(name: string): string {
+  return path.resolve("tests/fixtures", `${name}.jpg`);
+}
+
+/**
+ * The bytes to attach.
+ *
+ * A real photograph when one is on disk, otherwise a 1×1 placeholder. The
+ * placeholder still exercises everything up to recognition — download,
+ * validation, upload, the row in claim_attachments — and is correctly
+ * identified as nothing, because it is nothing.
+ *
+ * Real photographs are not in the repository and never will be. Deciding that
+ * an image shows a crumpled bumper needs an image of a crumpled bumper, and
+ * the licence that makes the discrimination test meaningful is somebody's
+ * actual licence: name, address, date of birth, signature. That does not go
+ * into a git history, where it would live forever and travel with every clone.
+ * See docs/TESTING.md for which files to drop in.
+ */
 function imageFor(photo: string | boolean): Buffer {
-  const named =
-    typeof photo === "string" ? path.resolve("tests/fixtures", `${photo}.jpg`) : null;
-  if (named && fs.existsSync(named)) return fs.readFileSync(named);
+  if (haveRealPhoto(photo)) return fs.readFileSync(fixturePath(photo as string));
   return fs.readFileSync(path.resolve("tests/fixtures/placeholder.jpg"));
 }
 
@@ -722,12 +790,36 @@ if (failures.length === 0) {
   }
 }
 
+if (unrehearsed.size > 0) {
+  // Said out loud rather than left implicit. A suite that reports "todo verde"
+  // while quietly skipping a whole capability is worse than one that fails.
+  console.log(
+    "\n⋯ Reconocimiento de documentos NO ensayado: faltan " +
+      [...unrehearsed].map((n) => `tests/fixtures/${n}.jpg`).join(", ")
+  );
+}
+
 if (keep) {
   console.log(`\nCasos dejados en la base:\n${created.map((c) => "  " + c).join("\n")}`);
 } else if (created.length > 0) {
   // Rehearsal cases would otherwise sit in the analyst's board looking like
   // real claims from people who do not exist.
+  //
+  // The files go too. Deleting the case cascades through the database and
+  // stops at the bucket, so a fortnight of rehearsals had quietly left a pile
+  // of orphaned placeholder images in R2 with nothing pointing at them.
+  const { deleteAttachment } = await import("@/server/storage/claim-attachments-bucket");
+
   for (const id of created) {
+    const files = await db
+      .select({ path: claimAttachments.storage_path })
+      .from(claimAttachments)
+      .where(eq(claimAttachments.case_id, id));
+
+    for (const file of files) {
+      if (file.path) await deleteAttachment(file.path);
+    }
+
     await db.delete(cases).where(eq(cases.id, id));
   }
   console.log(`\n${created.length} caso(s) de ensayo borrados. Usá --keep para conservarlos.`);

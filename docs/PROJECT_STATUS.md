@@ -24,9 +24,12 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 
 ## Cómo probar que todo anda
 
-`pnpm check` corre todo: tipos, lint, ~1950 tests, once conversaciones enteras
+`pnpm check` corre todo: tipos, lint, ~1960 tests, doce conversaciones enteras
 por WhatsApp y por mail sobre los canales simulados, y un chequeo contra el
 deploy que está corriendo. **No le manda un mensaje a nadie.**
+
+`pnpm prove --whatsapp <número>` / `--email <dirección>` es el único que manda
+algo de verdad, para comprobar que la salida funciona.
 
 Corrélo después de cada deploy. Detalle completo en
 [docs/TESTING.md](TESTING.md).

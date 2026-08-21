@@ -17,7 +17,7 @@ pnpm check
 
 ---
 
-## Las tres capas
+## Las capas
 
 Corren en ese orden — de la más barata a la más cara — y se detiene en la
 primera que falla, porque las siguientes cuestan plata y con un test unitario
@@ -35,7 +35,7 @@ de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
 
 ### 2. `pnpm rehearse` — minutos, gasta tokens
 
-Once denuncias enteras, de punta a punta, contra el mismo código, la misma base
+Doce denuncias enteras, de punta a punta, contra el mismo código, la misma base
 y el mismo modelo que producción. Por los canales simulados: en WhatsApp el
 mensajero redacta la respuesta exactamente como lo haría y la guarda en vez de
 enviarla; en mail el despachador hace lo mismo con cualquier dirección
@@ -50,8 +50,8 @@ eso se rompió alguna vez.
 Escenarios: la denuncia completa hasta quedar lista, el incendio con heridos que
 se deriva, la cotización que no es un reclamo, los datos que llegan de a uno, el
 mensaje que no aporta nada y no merece respuesta, la pregunta que hay que
-contestar, la póliza que hay que buscar por DNI, la póliza vencida, y los tres
-equivalentes por mail.
+contestar, la póliza que hay que buscar por DNI, la póliza vencida, la foto que
+no es ningún documento, y los tres equivalentes por mail.
 
 Imprime la conversación completa. **Leela.** La mitad del valor está en que una
 persona note una respuesta que pasa todas las verificaciones y suena mal.
@@ -65,13 +65,48 @@ pnpm rehearse --keep           # deja los casos en la base para inspeccionarlos
 Los casos de ensayo se borran al terminar. Si sembró una póliza de prueba,
 también se borra.
 
-**Lo que no puede ensayar:** el reconocimiento de documentos. Decidir que una
-foto muestra un baúl destrozado requiere una foto de un baúl destrozado, y el
-archivo de prueba es un píxel gris. Poné imágenes reales en
-`tests/fixtures/danos.jpg` y `tests/fixtures/licencia.jpg` y esa parte también
-corre.
+### Las fotos
 
-### 3. `pnpm smoke` — segundos, gratis
+El reconocimiento de documentos sólo se puede ensayar con documentos de verdad.
+Las fotos **no están en el repositorio y no van a estar**: la licencia que
+usamos tiene nombre, domicilio, fecha de nacimiento y firma del titular, y eso
+no entra a un historial de git, donde queda para siempre y viaja con cada clon.
+
+Viven en la máquina de quien corre el ensayo, en `tests/fixtures/`:
+
+| Archivo | Qué es | Para qué |
+|---|---|---|
+| `danos.jpg` | Un auto chocado | Que lo reconozca como las fotos de los daños |
+| `licencia.jpg` | Una licencia de conducir | El caso difícil: dos documentos de papel pendientes, tiene que elegir el correcto |
+| `irrelevante.jpg` | Cualquier foto que no sea un documento | El caso negativo: no tiene que cerrar ningún pedido |
+
+Sin ellas la suite corre igual, avisa cuáles faltan, y no da por probado lo que
+no probó. El caso negativo sí se verifica siempre: una imagen que no
+reconocemos no puede cerrar nada, y esa es la dirección de la cautela que
+importa — un documento marcado como recibido por error desaparece de la lista
+del analista y nadie se entera hasta que el reclamo se traba.
+
+### 3. `pnpm prove` — segundos, **manda mensajes de verdad**
+
+Lo único que las otras capas no pueden probar: que un mensaje salga del
+edificio. Un token de WhatsApp que caducó, una cuenta que Meta restringió, un
+refresh token de Gmail revocado al cambiar la contraseña — todas fallan en
+silencio desde nuestro lado. El webhook sigue aceptando mensajes, el agente
+sigue decidiendo qué decir, y no llega nada.
+
+```bash
+pnpm prove --whatsapp +5492916426930
+pnpm prove --email vos@gmail.com
+```
+
+Sin destino no hace nada. Es el único comando de la suite que manda algo, así
+que no corre por accidente y no entra en `pnpm check`.
+
+WhatsApp sólo acepta texto libre hacia un número que le escribió al negocio en
+las últimas 24 horas; fuera de esa ventana Meta lo rechaza, y el script
+distingue "ventana cerrada" de "token roto", porque piden respuestas opuestas.
+
+### 4. `pnpm smoke` — segundos, gratis
 
 Le pregunta **al deploy que está corriendo** qué alcanza a ver, por red, igual
 que el webhook de un asegurado.
@@ -104,6 +139,7 @@ pnpm smoke --url https://…      # un preview en vez de producción
 | **Después de cada deploy** | `pnpm check` |
 | Antes de mostrárselo a un cliente | `pnpm check --deep` |
 | "Algo raro está pasando en producción" | `pnpm smoke --deep` |
+| Dudás de si el bot puede mandar mensajes | `pnpm prove --whatsapp <número>` |
 
 `--fast` saltea el ensayo (gratis, sin tokens). `--local` saltea el chequeo de
 producción.
@@ -132,11 +168,9 @@ archivo de verdad y llama al modelo de verdad.
 
 Dicho de frente, para que nadie lea "todo verde" como "todo probado":
 
-- **El reconocimiento de documentos**, por lo de arriba.
-- **El envío real.** El ensayo prueba que el agente decide bien y redacta bien;
-  que Meta entregue el mensaje y que Gmail lo mande son las dos cosas que
-  siguen necesitando una prueba manual, y `pnpm smoke` sólo verifica que las
-  credenciales sirvan.
 - **La interfaz.** No hay tests de navegador. Las pantallas se prueban mirándolas.
 - **La sincronización con el core del asegurador**, que nunca se ejercitó contra
   un sistema real.
+- **La entrega en sí.** `pnpm prove` confirma que el proveedor aceptó el
+  mensaje. Que haya llegado al teléfono o a la bandeja lo mira una persona —
+  aunque un rechazo del proveedor es el 95% de las formas de fallar.

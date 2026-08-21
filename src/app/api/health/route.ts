@@ -258,13 +258,33 @@ async function checkWhatsApp(): Promise<Check> {
   try {
     const version = process.env.WHATSAPP_API_VERSION?.trim() || "v21.0";
     const res = await fetch(
-      `https://graph.facebook.com/${version}/${phoneId}?fields=display_phone_number`,
+      `https://graph.facebook.com/${version}/${phoneId}` +
+        `?fields=display_phone_number,quality_rating,messaging_limit_tier`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (!res.ok) return down("whatsapp", `graph respondió ${res.status}`);
 
-    const body = (await res.json()) as { display_phone_number?: string };
-    return ok("whatsapp", `token válido para ${body.display_phone_number ?? phoneId}`);
+    const body = (await res.json()) as {
+      display_phone_number?: string;
+      quality_rating?: string;
+      messaging_limit_tier?: string;
+    };
+
+    const number = body.display_phone_number ?? phoneId;
+    const quality = body.quality_rating?.toUpperCase();
+
+    // Meta downgrades a number quietly, by quality rating, before it ever
+    // blocks it. RED means the account is one bad week from being unable to
+    // reach anyone, and nothing else in the product would tell us.
+    if (quality === "RED") {
+      return down("whatsapp", `${number}: calidad EN ROJO, la cuenta está en riesgo`);
+    }
+    if (quality === "YELLOW") {
+      return degraded("whatsapp", `${number}: calidad amarilla, vigilalo`);
+    }
+
+    const tier = body.messaging_limit_tier ? `, ${body.messaging_limit_tier}` : "";
+    return ok("whatsapp", `${number} operativo${tier}`);
   } catch (err) {
     return down("whatsapp", why(err));
   }

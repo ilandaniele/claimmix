@@ -248,7 +248,30 @@ export async function setTenantModelDefaults(
 /** True when the provider has a usable API key (user → tenant → env). */
 export async function hasProviderKeyForTenant(tenantId: string, provider: AiProvider, userId?: string): Promise<boolean> {
   if (provider === "openai") return hasProviderKey("openai");
+
+  // Vertex authenticates with a service account, not an API key, so asking for
+  // an API key answers the wrong question.
+  //
+  // This failed silently and completely. A rehearsal ran with the Vertex
+  // credentials and no GEMINI_API_KEY: the resolver decided Gemini was
+  // unavailable, then that OpenAI was unavailable, and fell all the way
+  // through to the mock extractor. Twelve conversations were rehearsed against
+  // canned data and reported as the agent's behaviour.
+  //
+  // Production happens to carry a leftover GEMINI_API_KEY, which is the only
+  // reason it was not doing the same thing — an insurer's deployment quietly
+  // answering claimants with mock output is about the worst outcome this
+  // codebase has available, and one unused environment variable was standing
+  // between us and it.
+  if (isVertexConfigured()) return true;
+
   return Boolean(await getTenantGeminiKey(tenantId, userId));
+}
+
+/** Vertex is usable when the transport is on and the project is named. */
+export function isVertexConfigured(): boolean {
+  if (process.env.GEMINI_TRANSPORT?.trim().toLowerCase() !== "vertex") return false;
+  return Boolean(process.env.GOOGLE_CLOUD_PROJECT?.trim());
 }
 
 /** Env-level default provider (AI_PROVIDER, default "gemini"). */

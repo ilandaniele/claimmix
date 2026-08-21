@@ -818,6 +818,50 @@ async function sweepOldRehearsalCases(): Promise<void> {
   }
 }
 
+/**
+ * Refuse to rehearse against the mock extractor.
+ *
+ * The whole point is to exercise the real agent — the real model, the real
+ * decisions. Run against the mock it still prints twelve tidy conversations
+ * and a green tick, and every one of them is canned. That is worse than not
+ * running: a suite that reports success without testing anything is how a
+ * regression ships with a passing build behind it.
+ *
+ * It happened. A CI run had the Vertex credentials and no GEMINI_API_KEY, the
+ * provider resolver decided no model was available and fell through to mock,
+ * and the failures it reported were the mock's behaviour rather than the
+ * agent's. Two hours went into a bug that did not exist.
+ */
+async function refuseIfMocked(): Promise<void> {
+  if (process.env.MOCK_AI === "true" || process.env.AI_MOCK === "true") {
+    console.error(
+      "MOCK_AI está prendido. El ensayo existe para probar el agente de verdad;\n" +
+        "contra el mock daría todo verde sin haber probado nada. Apagalo."
+    );
+    process.exit(1);
+  }
+
+  const { resolveExtractionEngine } = await import("@/server/ai/provider");
+  const engine = await resolveExtractionEngine(TENANT_ID!);
+
+  if (engine === "mock") {
+    console.error(
+      [
+        "El sistema resolvió el motor de extracción como 'mock', así que no hay",
+        "nada que ensayar: las respuestas serían inventadas y todo daría verde.",
+        "",
+        "Suele ser que faltan credenciales del modelo. Con Vertex hacen falta",
+        "GEMINI_TRANSPORT=vertex, GOOGLE_CLOUD_PROJECT y las credenciales de la",
+        "service account; con AI Studio, GEMINI_API_KEY.",
+      ].join("\n")
+    );
+    process.exit(1);
+  }
+
+  console.log(`Motor de extracción: ${engine}.\n`);
+}
+
+await refuseIfMocked();
 await sweepOldRehearsalCases();
 
 const created: string[] = [];

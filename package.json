@@ -24,7 +24,7 @@
     "rehearse": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-conversations.mts",
     "smoke": "tsx --tsconfig tsconfig.rehearsal.json scripts/smoke-production.mts",
     "prove": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-delivery.mts",
-    "verify": "tsc --noEmit && eslint src --max-warnings=0 && vitest run",
+    "verify": "tsc --noEmit && eslint src --max-warnings=0 && vitest run && bash scripts/check-personal-data.sh",
     "check": "tsx --tsconfig tsconfig.rehearsal.json scripts/check-everything.mts"
   },
   "dependencies": {

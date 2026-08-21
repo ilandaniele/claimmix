@@ -90,7 +90,7 @@ describe("loadInboundConversation", () => {
         provider_message_id: "wamid.1",
         body_text: "Choqué en Bahía Blanca, soy Martín Sosa",
         subject: "WhatsApp",
-        from_addr: "59899413456",
+        from_addr: "5491100000000",
         received_at: "2026-08-19T23:09:44Z",
       },
       {
@@ -98,7 +98,7 @@ describe("loadInboundConversation", () => {
         provider_message_id: "wamid.2",
         body_text: "[Imagen adjunta sin texto]",
         subject: "WhatsApp",
-        from_addr: "59899413456",
+        from_addr: "5491100000000",
         received_at: "2026-08-19T23:17:19Z",
       },
     ]);

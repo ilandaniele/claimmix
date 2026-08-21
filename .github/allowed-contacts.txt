@@ -1,0 +1,46 @@
+# Teléfonos y direcciones que SÍ pueden estar en el código.
+#
+# Todo lo demás que parezca un contacto real hace fallar el workflow "Secretos".
+# El repositorio es público: el teléfono de una persona no se puede desandar una
+# vez que entró al historial.
+#
+# Una línea por patrón, con el motivo. Sin motivo no se agrega.
+
+# Bloque de ejemplo. No es de nadie.
+5491100000000
+549110000000
+
+# Números de prueba obviamente sintéticos, ya usados en tests.
+541112345678
+59899123456
+5491112345678
+541123456789
+
+# Casilla de contacto de la política de privacidad. Es pública a propósito:
+# es la dirección a la que un titular de datos escribe para ejercer sus derechos.
+ilan.daniele@gmail.com
+
+# El número del negocio en WhatsApp. Es el número al que le escriben los
+# asegurados — público por definición.
+5492916426930
+
+# Cuentas de infraestructura nombradas en PROJECT_STATUS. No son de clientes.
+veltra.info1@gmail.com
+veltra.soporte@gmail.com
+n10jasper@gmail.com
+
+# ── Direcciones sintéticas de los tests ──────────────────────────────────────
+#
+# Personas inventadas en fixtures y casos de prueba. Se asientan acá una vez
+# para que la lista quede en cero, y a partir de ahora cualquier dirección
+# nueva hace fallar el chequeo y alguien la mira.
+#
+# Para datos nuevos usá @example.com, que está reservado justamente para esto
+# y no requiere permiso de nadie.
+carlos.mendoza.test@gmail.com
+maria.gonzalez@gmail.com
+claims@gmail.com
+test@gmail.com
+someone@gmail.com
+original-msg@gmail.com
+s@gmail.com

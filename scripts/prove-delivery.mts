@@ -20,8 +20,8 @@
  * This is the only script here that sends anything real, so it never runs by
  * accident: it does nothing at all unless you name a destination.
  *
- *   pnpm prove --whatsapp 59899413456
- *   pnpm prove --email vos@gmail.com
+ *   pnpm prove --whatsapp 5491100000000
+ *   pnpm prove --email vos@tudominio.com
  *   pnpm prove --whatsapp 598… --email vos@…
  *
  * WhatsApp only accepts free-form text to a number that wrote to the business
@@ -55,8 +55,8 @@ if (!toWhatsApp && !toEmail) {
     [
       "Este comando manda mensajes DE VERDAD, así que no hace nada por las dudas.",
       "",
-      "  pnpm prove --whatsapp 59899413456",
-      "  pnpm prove --email vos@gmail.com",
+      "  pnpm prove --whatsapp 5491100000000",
+      "  pnpm prove --email vos@tudominio.com",
       "",
       "El envío lo hace el deploy, no tu máquina: ahí están las credenciales.",
       "WhatsApp sólo acepta texto libre hacia un número que le escribió al negocio",
@@ -128,7 +128,7 @@ async function send(channel: "whatsapp" | "email", to: string): Promise<void> {
     console.log("    · ¿es el número DE LA PERSONA, no el del bot?");
     console.log("    · ¿te escribió en las últimas 24 h? Fuera de esa ventana");
     console.log("      sólo se puede mandar una plantilla aprobada.");
-    console.log("    · ¿está completo, con código de país? (por ejemplo 59899413456)");
+    console.log("    · ¿está completo, con código de país? (por ejemplo 5491100000000)");
     console.log("    El '+' adelante no molesta: Meta lo acepta igual.");
   }
 

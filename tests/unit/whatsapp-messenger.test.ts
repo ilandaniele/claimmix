@@ -37,7 +37,7 @@ import type { EmailTemplate } from "@/server/email/render";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
-const TO = "59899413456";
+const TO = "5491100000000";
 
 let inserted: Record<string, unknown>[];
 

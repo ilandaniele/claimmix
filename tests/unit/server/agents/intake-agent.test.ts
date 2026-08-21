@@ -375,7 +375,7 @@ describe("createWhatsAppIntake — simulated numbers never reach WhatsApp", () =
 
     await createWhatsAppIntakeAndRunAgent({
       tenantId: "tenant-001",
-      from: "59899413456",
+      from: "5491100000000",
       body: "Choqué en Bahía Blanca",
     });
 

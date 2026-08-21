@@ -95,8 +95,8 @@ silencio desde nuestro lado. El webhook sigue aceptando mensajes, el agente
 sigue decidiendo qué decir, y no llega nada.
 
 ```bash
-pnpm prove --whatsapp +5492916426930
-pnpm prove --email vos@gmail.com
+pnpm prove --whatsapp +5491100000000
+pnpm prove --email vos@tudominio.com
 ```
 
 Sin destino no hace nada. Es el único comando de la suite que manda algo, así

@@ -60,7 +60,7 @@ const {
   extractedFields,
   policies,
 } = await import("@/lib/db/schema");
-const { and, eq, asc } = await import("drizzle-orm");
+const { and, eq, asc, inArray, isNotNull, like, or } = await import("drizzle-orm");
 
 // ── What a rehearsal looks like ──────────────────────────────────────────────
 
@@ -769,6 +769,56 @@ console.log(
   `Ensayando ${chosen.length} conversación(es) sobre el canal simulado.\n` +
     `Nada sale a un teléfono. Se gastan tokens de verdad.\n`
 );
+
+/**
+ * Clear out rehearsal cases left behind by a run that died.
+ *
+ * Every run tidies up after itself, and a run that crashes cannot. One did
+ * today — Node aborted on the way out — and left cases sitting in the board
+ * looking like real claims from people who do not exist. Once this runs after
+ * every deploy rather than when someone remembers, orphans stop being an
+ * annoyance and become a slow leak into the analyst's queue.
+ *
+ * Identified by the invented identities the rehearsal uses: phone numbers in
+ * the 5490000-prefixed block and `ensayo.*@example.com` addresses. Nothing a
+ * real claimant can have, so this cannot reach a real case.
+ */
+async function sweepOldRehearsalCases(): Promise<void> {
+  try {
+    const stale = await db
+      .select({ id: cases.id })
+      .from(cases)
+      .where(
+        and(
+          eq(cases.tenant_id, TENANT_ID!),
+          inArray(cases.channel, ["whatsapp_sim", "email_sim"]),
+          or(
+            like(cases.email_thread_id, "5490000%"),
+            like(cases.email_thread_id, "thread.%")
+          )
+        )
+      );
+
+    if (stale.length === 0) return;
+
+    const { deleteAttachment } = await import("@/server/storage/claim-attachments-bucket");
+    for (const row of stale) {
+      const files = await db
+        .select({ path: claimAttachments.storage_path })
+        .from(claimAttachments)
+        .where(eq(claimAttachments.case_id, row.id));
+      for (const file of files) if (file.path) await deleteAttachment(file.path);
+      await db.delete(cases).where(eq(cases.id, row.id));
+    }
+
+    console.log(`Limpiados ${stale.length} caso(s) de ensayos anteriores que quedaron colgados.\n`);
+  } catch (err) {
+    // Not worth failing the run over: the rehearsal itself still cleans up.
+    console.error("No se pudo limpiar ensayos viejos:", err instanceof Error ? err.name : "error");
+  }
+}
+
+await sweepOldRehearsalCases();
 
 const created: string[] = [];
 for (const scenario of chosen) {

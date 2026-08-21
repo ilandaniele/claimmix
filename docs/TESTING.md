@@ -165,9 +165,14 @@ producción.
 lint, tests, build, auditoría de dependencias.
 
 **Después de cada deploy de producción** — `.github/workflows/post-deploy.yml`.
-GitHub recibe de Vercel el aviso de que el deploy terminó bien y dispara
-`pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
-real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
+GitHub recibe de Vercel el aviso de que el deploy terminó bien y dispara dos
+trabajos, en orden:
+
+1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
+   real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
+2. `pnpm rehearse`: las doce conversaciones enteras contra el agente real.
+   Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
+   el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
 
 Antes de mirar nada, espera a que el alias sirva **el commit de ese deploy**.
 Sin eso el chequeo puede interrogar al build anterior y darlo por bueno — la
@@ -180,11 +185,21 @@ deploy, que es exactamente el punto.
 También se puede disparar a mano desde la pestaña *Actions* → *Post-deploy* →
 *Run workflow*, con una URL distinta si querés apuntar a un preview.
 
-**Lo que NO corre solo es el ensayo de conversaciones.** Necesita el juego
-completo de credenciales de producción —base, Vertex, R2— y la clave que
-descifra la casilla está marcada *Sensitive* en Vercel, o sea que no se puede
-copiar a ningún lado. Corrélo vos con `pnpm check` cuando toques el
-comportamiento del agente.
+El ensayo **escribe en la base de producción**: crea doce casos y los borra al
+terminar. Al empezar barre los que hayan quedado de una corrida que se murió a
+mitad de camino — se los reconoce por identidades inventadas (números
+`5490000…`, direcciones `ensayo.*@example.com`) que ningún asegurado real puede
+tener. Si estás mostrando el tablero justo en ese momento, los vas a ver
+aparecer y desaparecer.
+
+**Dos cosas siguen sin correr solas**, y por el mismo motivo: no se puede
+copiar lo que hace falta.
+
+- **El reconocimiento de documentos.** Necesita fotos reales, y una licencia de
+  verdad no entra ni al repositorio ni a los secretos de GitHub. El ensayo
+  avisa que esa parte no la probó.
+- **La prueba de entrega** (`pnpm prove`). Manda mensajes de verdad a personas
+  de verdad; eso se dispara a mano.
 
 ---
 

@@ -16,11 +16,17 @@ import { NextResponse } from "next/server";
 import { db, tables } from "@/lib/db";
 // package.json is a static asset — importing version avoids a runtime read.
 import packageJson from "../../../../../package.json";
+import { isVertexConfigured } from "@/server/ai/provider";
 
 export async function GET() {
   // ── AI mode ──────────────────────────────────────────────────────────────────
   const preferredProvider = process.env.AI_PROVIDER?.trim().toLowerCase();
-  const geminiConfigured = Boolean(process.env.GEMINI_API_KEY?.trim());
+  // Vertex authenticates with a service account, so "is Gemini configured?"
+  // cannot be "is there an API key?" — that reading is what silently sent the
+  // extractor to the mock, and here it would have this page report "mock" over
+  // a perfectly working deployment.
+  const geminiConfigured =
+    isVertexConfigured() || Boolean(process.env.GEMINI_API_KEY?.trim());
   const openaiConfigured = Boolean(process.env.OPENAI_API_KEY?.trim());
   let aiMode: "mock" | "gemini" | "openai" = "mock";
   if (process.env.MOCK_AI !== "true" && process.env.AI_MOCK !== "true") {
@@ -52,7 +58,10 @@ export async function GET() {
   // env: boolean presence checks — NEVER expose actual key values (AC16)
   const env = {
     database_url: !!process.env.DATABASE_URL,
-    gemini_api_key: !!process.env.GEMINI_API_KEY,
+    // Reported as "can we reach Gemini", not "is there a key": under Vertex
+    // there is no key and the answer is still yes.
+    gemini: geminiConfigured,
+    gemini_transport: isVertexConfigured() ? "vertex" : "ai-studio",
     openai_api_key: !!process.env.OPENAI_API_KEY,
     sentry_dsn: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
   };

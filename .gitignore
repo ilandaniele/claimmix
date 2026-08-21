@@ -93,3 +93,4 @@ tests/fixtures/*.jpeg
 tests/fixtures/*.png
 tests/fixtures/*.pdf
 !tests/fixtures/placeholder.jpg
+check.log

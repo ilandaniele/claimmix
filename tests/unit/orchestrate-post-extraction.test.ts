@@ -1912,3 +1912,71 @@ describe("orchestratePostExtraction — what the lookup found", () => {
     expect(ask?.[0].data?.missingFields).not.toContain("policy_number");
   });
 });
+
+describe("orchestratePostExtraction — never ask for what we can quote back", () => {
+  it("offers a value to confirm instead of asking for it again", async () => {
+    /**
+     * The message this prevents, caught by a rehearsal: the claimant wrote
+     * "Soy Roberto Paz, DNI 25.888.101" and the reply opened "¡Gracias,
+     * Roberto!" and then asked for his name and surname.
+     *
+     * Both halves came from the same run. The greeting used the extracted
+     * value; the list used the gap analyser; the two disagreed about whether
+     * we knew who he was. A field we can quote is never missing — it may be
+     * uncertain, and the honest question is "¿confirmás que sos Roberto Paz?".
+     */
+    setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["full_name", "policy_number"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue(null);
+
+    const claim = extractEmailClaimMock();
+    claim.fields = [
+      { field_key: "full_name", field_value: "Roberto Paz", confidence: 0.7, source: "ai" },
+    ] as never;
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+
+    expect(ask?.[0].data?.knownValues).toMatchObject({ full_name: "Roberto Paz" });
+  });
+
+  it("still asks plainly for a field we hold nothing for", async () => {
+    setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["policy_number"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue(null);
+
+    const claim = extractEmailClaimMock();
+    claim.fields = [] as never;
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+
+    expect(ask?.[0].data?.knownValues).not.toHaveProperty("policy_number");
+  });
+});

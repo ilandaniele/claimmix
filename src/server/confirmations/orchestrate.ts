@@ -307,7 +307,7 @@ export async function orchestratePostExtraction(
     gapResult.missingRequiredFields,
     pendingConfirmationFields,
     await pendingDocKeys(caseId, tenantId),
-    { cap: false }
+    { cap: false, held: valuesWeHold(extractedClaim.fields) }
   );
 
   // Ask the agent what to do about this message.
@@ -708,7 +708,23 @@ function buildAskList(
   missingRequiredFields: string[],
   pending: ConfirmableField[],
   outstandingDocs: string[] = [],
-  opts: { cap?: boolean } = {}
+  opts: {
+    cap?: boolean;
+    /**
+     * Values we hold, whatever the gap analyser thinks.
+     *
+     * A rehearsal caught the message this fixes: the claimant wrote "Soy
+     * Roberto Paz, DNI 25.888.101" and the reply opened "¡Gracias, Roberto!"
+     * and then asked for his name and surname. Both halves came from the same
+     * run — the greeting used the extracted value, the list used the gap
+     * analyser, and the two disagreed about whether we knew who he was.
+     *
+     * A field we can quote back is never missing. It might be uncertain, and
+     * the honest question is "¿confirmás que sos Roberto Paz?" — never "decinos
+     * tu nombre" to someone who just said it.
+     */
+    held?: Record<string, string>;
+  } = {}
 ): { fields: string[]; knownValues: Record<string, string> } {
   const missing = missingRequiredFields
     .map((f) => (f === "email_or_phone" ? "email" : f))
@@ -735,12 +751,18 @@ function buildAskList(
   // is worth asking has to see everything before it decides what to leave out.
   const fields = opts.cap === false ? ordered : ordered.slice(0, MAX_ASK_ITEMS);
 
-  // Only doubts carry a value: a missing field has nothing to show.
   const knownValues: Record<string, string> = {};
   for (const d of doubts) {
     if (fields.includes(d.fieldKey) && d.proposedValue) {
       knownValues[d.fieldKey] = d.proposedValue;
     }
+  }
+
+  // And anything we hold a value for, however it got onto the list.
+  for (const key of fields) {
+    if (knownValues[key]) continue;
+    const value = opts.held?.[key] ?? opts.held?.[canonicalFieldKey(key)];
+    if (value) knownValues[key] = value;
   }
 
   return { fields, knownValues };
@@ -903,6 +925,32 @@ function keepAskingForWhatIsStillNeeded(
   const added = chosen.filter((k) => outstanding.has(k) && !seen.has(k));
 
   return [...carried, ...added].slice(0, MAX_ASK_ITEMS);
+}
+
+/**
+ * Every field value this extraction produced, by canonical key.
+ *
+ * Highest confidence wins when the extractor emits a field twice under
+ * different names, which it routinely does.
+ */
+function valuesWeHold(fields: ExtractedClaim["fields"]): Record<string, string> {
+  const held: Record<string, string> = {};
+  const seen: Record<string, number> = {};
+
+  for (const field of fields) {
+    const value = field.field_value?.trim();
+    if (!value) continue;
+
+    const key = canonicalFieldKey(field.field_key);
+    const confidence = Number(field.confidence) || 0;
+    if (held[key] !== undefined && seen[key] >= confidence) continue;
+
+    held[key] = value;
+    held[field.field_key] = value;
+    seen[key] = confidence;
+  }
+
+  return held;
 }
 
 interface ConfirmableField {

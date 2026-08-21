@@ -19,7 +19,7 @@ import "server-only";
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { authUsers, users } from "@/lib/db/schema";
+import { authUsers, cases, users } from "@/lib/db/schema";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
 import { isSendSuccess } from "@/server/email/provider";
@@ -44,6 +44,39 @@ export interface SpecialistAlertInput {
   claimTypeLabel?: string | null;
   /** One line of what happened, already scrubbed of PII by extraction. */
   summary?: string | null;
+}
+
+/**
+ * Is this case a simulation?
+ *
+ * Read here rather than passed in, deliberately. A batch simulation escalated
+ * thirty-five invented claims in four minutes and seventeen real emails
+ * reached a real inbox — "[Urgente] Siniestro de incendio derivado a
+ * especialista", seventeen times, about fires that never happened.
+ *
+ * The rest of the product already knows not to do this: the messenger refuses
+ * to WhatsApp an invented number, the dispatcher refuses to email an
+ * @example.com address. This was the one path that had never been told, and it
+ * is the one that reaches a person directly. Asking the database means no
+ * caller can forget to mention it, which is precisely how it went wrong.
+ *
+ * On failure: treated as simulated. A missed alert on a real claim shows up as
+ * a case sitting in `requiere_especialista` that someone will find; a flood of
+ * urgent emails about fires that did not happen is how an insurer stops
+ * trusting the product.
+ */
+async function isSimulatedCase(caseId: string): Promise<boolean> {
+  try {
+    const rows = await db
+      .select({ channel: cases.channel })
+      .from(cases)
+      .where(eq(cases.id, caseId))
+      .limit(1);
+    const channel = rows[0]?.channel;
+    return channel === "email_sim" || channel === "whatsapp_sim";
+  } catch {
+    return true;
+  }
 }
 
 async function recipientsFor(tenantId: string): Promise<string[]> {
@@ -88,6 +121,21 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
   const { caseId, tenantId } = input;
 
   try {
+    if (await isSimulatedCase(caseId)) {
+      // Logged rather than passed over: an operator watching a rehearsal
+      // should be able to see the alert was deliberately withheld, not
+      // wonder whether it silently failed.
+      console.info(
+        JSON.stringify({
+          level: "info",
+          service: "claimmix",
+          msg: "specialist_alert.skipped_simulated",
+          case_id: caseId,
+        })
+      );
+      return;
+    }
+
     if (await alreadyAlerted(caseId, tenantId)) return;
 
     const recipients = await recipientsFor(tenantId);

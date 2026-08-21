@@ -57,8 +57,30 @@ function isAllowlistedAdmin(email: string | null | undefined, emailVerified: boo
  * To add someone, list them here or have an admin create the user from
  * /admin/users (which provisions into the admin's own tenant).
  */
-function isSignupAllowed(email: string | null | undefined): boolean {
+function isSignupAllowed(
+  email: string | null | undefined,
+  emailVerified: boolean | undefined
+): boolean {
   if (!email) return false;
+
+  // The address has to be proven, not merely typed.
+  //
+  // requireEmailVerification is false on the password path, so `user.email` is
+  // whatever the person entered. Without this check, anyone who guessed an
+  // address on the allowlist that had not registered yet could sign up as it
+  // and be provisioned into the production tenant as an analyst — which the
+  // note above spells out means reading every claim in it: names, DNI, policy
+  // numbers, addresses.
+  //
+  // Not hypothetical. Adding veltra.claimmix@gmail.com to ADMIN_EMAILS this
+  // afternoon created exactly that window, for an address anyone could guess
+  // from the company name.
+  //
+  // Google sign-in sets emailVerified, so the intended path is untouched. A
+  // password signup now lands without a profile row, which is the same
+  // fail-safe the function already used for a stranger: the account exists,
+  // it reaches nothing, and an admin attaches it from /admin/users.
+  if (!emailVerified) return false;
   const entries = [process.env.SIGNUP_ALLOWED_EMAILS, process.env.ADMIN_EMAILS]
     .filter(Boolean)
     .join(",")
@@ -101,7 +123,7 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
     .limit(1);
   if (existing.length > 0) return;
 
-  if (!isSignupAllowed(user.email)) {
+  if (!isSignupAllowed(user.email, user.emailVerified)) {
     // No profile row → no tenant → no access to any claim. The Better Auth
     // account survives so an admin can approve the person from /admin/users.
     console.warn(

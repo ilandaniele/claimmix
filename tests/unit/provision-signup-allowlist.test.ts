@@ -76,7 +76,7 @@ describe("provisionUserProfile — signup allowlist", () => {
     process.env.SIGNUP_ALLOWED_EMAILS = "analista@aseguradora.com";
     const values = mockInsert();
 
-    await provisionUserProfile({ id: "u3", name: "Ana", email: "Analista@Aseguradora.com" });
+    await provisionUserProfile({ id: "u3", name: "Ana", email: "Analista@Aseguradora.com", emailVerified: true });
 
     expect(values).toHaveBeenCalledWith(
       expect.objectContaining({ id: "u3", tenant_id: TENANT, role: "analyst" })
@@ -87,7 +87,7 @@ describe("provisionUserProfile — signup allowlist", () => {
     process.env.SIGNUP_ALLOWED_EMAILS = "@aseguradora.com";
     const values = mockInsert();
 
-    await provisionUserProfile({ id: "u4", name: "Bruno", email: "bruno@aseguradora.com" });
+    await provisionUserProfile({ id: "u4", name: "Bruno", email: "bruno@aseguradora.com", emailVerified: true });
 
     expect(values).toHaveBeenCalledWith(expect.objectContaining({ id: "u4" }));
   });
@@ -101,15 +101,51 @@ describe("provisionUserProfile — signup allowlist", () => {
     expect(values).not.toHaveBeenCalled();
   });
 
-  it("treats ADMIN_EMAILS as allowed, so configured admins keep signing in", async () => {
+  it("treats ADMIN_EMAILS as allowed, and makes them admin once verified", async () => {
     process.env.ADMIN_EMAILS = "jefe@veltra.com";
     const values = mockInsert();
 
-    // emailVerified stays false here (password signup), so the admin role is
-    // NOT granted — but the account is still admitted to the tenant.
-    await provisionUserProfile({ id: "u6", name: "Jefe", email: "jefe@veltra.com" });
+    await provisionUserProfile({
+      id: "u6",
+      name: "Jefe",
+      email: "jefe@veltra.com",
+      emailVerified: true,
+    });
 
-    expect(values).toHaveBeenCalledWith(expect.objectContaining({ id: "u6", role: "analyst" }));
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({ id: "u6", role: "admin" }));
+  });
+
+  it("refuses an allowlisted address that has not been proven", async () => {
+    /**
+     * This test used to assert the opposite, and describe it as intended: an
+     * unverified password signup on the allowlist was admitted as an analyst.
+     *
+     * requireEmailVerification is false on that path, so the address is simply
+     * what the person typed. Anyone who guessed an allowlisted address that had
+     * not registered yet could take it and read every claim in the tenant —
+     * names, DNI, policy numbers, addresses. Adding veltra.claimmix@gmail.com
+     * to ADMIN_EMAILS opened exactly that window on an address anyone could
+     * guess from the company name.
+     *
+     * Google sign-in proves the address, so the intended path is unaffected.
+     * A password signup now lands with no profile row: the account exists, it
+     * reaches nothing, and an admin attaches it from /admin/users.
+     */
+    process.env.ADMIN_EMAILS = "jefe@veltra.com";
+    const values = mockInsert();
+
+    await provisionUserProfile({ id: "u7", name: "Mallory", email: "jefe@veltra.com" });
+
+    expect(values).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unverified address on the signup allowlist too", async () => {
+    process.env.SIGNUP_ALLOWED_EMAILS = "@aseguradora.com";
+    const values = mockInsert();
+
+    await provisionUserProfile({ id: "u8", name: "Mallory", email: "ana@aseguradora.com" });
+
+    expect(values).not.toHaveBeenCalled();
   });
 
   it("still skips work when the profile already exists (idempotent hook)", async () => {

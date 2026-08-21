@@ -132,8 +132,9 @@ Mail → ${to}`);
   if (!process.env.GMAIL_TOKEN_ENCRYPTION_KEY?.trim()) {
     console.log("  ✗ falta GMAIL_TOKEN_ENCRYPTION_KEY en .env.local");
     console.log("    Sin ella no se puede descifrar el token de la casilla.");
-    console.log("    Está en Vercel marcada como Sensitive, así que");
-    console.log("    `vercel env pull` la trae vacía: copiala del panel a mano.");
+    console.log("    `vercel env pull` no sirve: en este proyecto devuelve casi");
+    console.log("    todos los valores vacíos. Copiala del panel de Vercel:");
+    console.log("    Settings → Environment Variables → el ojo para revelarla.");
     failures++;
     return;
   }

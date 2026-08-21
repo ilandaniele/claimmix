@@ -41,6 +41,7 @@ const CONFIGURED: Record<string, string> = {
   R2_BUCKET: "bucket",
   GEMINI_API_KEY: "gemini",
   GMAIL_TENANT_ID: "10000000-0000-0000-0000-000000000001",
+  GMAIL_TOKEN_ENCRYPTION_KEY: "una-clave-de-prueba",
 };
 
 beforeEach(() => {
@@ -171,5 +172,67 @@ describe("GET /api/health — what it reports", () => {
     expect(body.deep).toBe(false);
     const storage = body.checks.find((c: { name: string }) => c.name === "almacenamiento");
     expect(storage.detail).toContain("sin probar");
+  });
+});
+
+describe("GET /api/health — a connected mailbox that cannot be read", () => {
+  /**
+   * The row's existence is not the thing that matters. The refresh token is
+   * stored encrypted, and if the key is missing or has been rotated, the row
+   * still looks perfect while nothing can send or poll a single message.
+   *
+   * The first version of this check reported "conectada" on exactly that, and
+   * the local script hit the real failure minutes later.
+   */
+  function mailboxOnFile(tokenEncrypted = "iv.tag.ciphertext") {
+    mockSelect.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: () =>
+            Promise.resolve([
+              {
+                email: "siniestros@aseguradora.com",
+                enabled: true,
+                lastError: null,
+                tokenEncrypted,
+              },
+            ]),
+        }),
+      }),
+    });
+  }
+
+  async function gmailCheck() {
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const body = await res.json();
+    return body.checks.find((c: { name: string }) => c.name === "gmail");
+  }
+
+  it("calls it down when the encryption key is missing", async () => {
+    mailboxOnFile();
+    delete process.env.GMAIL_TOKEN_ENCRYPTION_KEY;
+
+    const gmail = await gmailCheck();
+    expect(gmail.status).toBe("down");
+    expect(gmail.detail).toContain("GMAIL_TOKEN_ENCRYPTION_KEY");
+  });
+
+  it("calls it down when the stored token will not decrypt", async () => {
+    // What a rotated key looks like: the row is fine, the bytes are not.
+    mailboxOnFile("esto-no-es-un-payload-valido");
+
+    const gmail = await gmailCheck();
+    expect(gmail.status).toBe("down");
+    expect(gmail.detail).toContain("no descifra");
+  });
+
+  it("still reports a mailbox nobody has connected as merely degraded", async () => {
+    // Nothing is broken — the product simply has not been set up yet.
+    mockSelect.mockReturnValue({
+      from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }),
+    });
+
+    const gmail = await gmailCheck();
+    expect(gmail.status).toBe("degraded");
   });
 });

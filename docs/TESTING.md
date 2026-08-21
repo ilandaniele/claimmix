@@ -102,6 +102,12 @@ pnpm prove --email vos@gmail.com
 Sin destino no hace nada. Es el único comando de la suite que manda algo, así
 que no corre por accidente y no entra en `pnpm check`.
 
+Para el mail hace falta **`GMAIL_TOKEN_ENCRYPTION_KEY` en `.env.local`**: el
+refresh token de la casilla está guardado cifrado y sin esa clave no se puede
+leer. `vercel env pull` no sirve — en este proyecto devuelve vacíos casi todos
+los valores. Se copia del panel: *Settings → Environment Variables →* el ícono
+del ojo para revelarla.
+
 WhatsApp sólo acepta texto libre hacia un número que le escribió al negocio en
 las últimas 24 horas; fuera de esa ventana Meta lo rechaza, y el script
 distingue "ventana cerrada" de "token roto", porque piden respuestas opuestas.

@@ -306,6 +306,7 @@ async function checkGmail(): Promise<Check> {
         email: gmailAccounts.email,
         enabled: gmailAccounts.enabled,
         lastError: gmailAccounts.last_error,
+        tokenEncrypted: gmailAccounts.refresh_token_encrypted,
       })
       .from(gmailAccounts)
       .where(eq(gmailAccounts.tenant_id, tenantId))
@@ -317,7 +318,28 @@ async function checkGmail(): Promise<Check> {
     if (account.lastError) {
       return down("gmail", `${account.email}: ${String(account.lastError).slice(0, 80)}`);
     }
-    return ok("gmail", `${account.email} conectada`);
+
+    // A row is not a working mailbox.
+    //
+    // This used to report "conectada" from the row's existence alone, which is
+    // false comfort: the refresh token is stored encrypted, and if
+    // GMAIL_TOKEN_ENCRYPTION_KEY is missing or has been rotated, the row still
+    // looks perfect while nothing can read or send a single message. Trying
+    // the decryption costs no network and turns a guess into a fact.
+    if (!process.env.GMAIL_TOKEN_ENCRYPTION_KEY?.trim()) {
+      return down("gmail", "falta GMAIL_TOKEN_ENCRYPTION_KEY: el token no se puede descifrar");
+    }
+
+    try {
+      const { decryptRefreshToken } = await import("@/server/email/gmail/accounts");
+      const token = decryptRefreshToken(account.tokenEncrypted);
+      if (!token) return down("gmail", `${account.email}: el token descifra vacío`);
+    } catch {
+      // Almost always the key changed and the stored token predates it.
+      return down("gmail", `${account.email}: el token guardado no descifra con esta clave`);
+    }
+
+    return ok("gmail", `${account.email} conectada, token legible`);
   } catch (err) {
     return degraded("gmail", `no se pudo verificar: ${why(err)}`);
   }

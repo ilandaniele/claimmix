@@ -73,6 +73,8 @@ if (!SECRET) {
 }
 
 let failures = 0;
+/** Channels the rate limit refused: neither a pass nor a failure. */
+let throttled = 0;
 
 async function send(channel: "whatsapp" | "email", to: string): Promise<void> {
   const label = channel === "whatsapp" ? "WhatsApp" : "Mail";
@@ -107,6 +109,7 @@ async function send(channel: "whatsapp" | "email", to: string): Promise<void> {
 
   if (res.status === 429) {
     console.log(`  ! ${body.detail ?? "demasiado seguido"}`);
+    throttled++;
     return;
   }
 
@@ -141,10 +144,14 @@ if (toWhatsApp) await send("whatsapp", toWhatsApp);
 if (toEmail) await send("email", toEmail);
 
 console.log(`\n${"─".repeat(60)}`);
-if (failures === 0) {
-  console.log("✓ La salida funciona. Fijate que hayan llegado de verdad.");
-} else {
+if (failures > 0) {
   console.log(`✗ ${failures} camino(s) de salida rotos.`);
+} else if (throttled > 0) {
+  // Not a pass. Nothing was sent, so nothing was proved — saying "la salida
+  // funciona" here would be the check lying about its own coverage.
+  console.log("· No se probó nada: el límite de frecuencia frenó el envío.");
+} else {
+  console.log("✓ La salida funciona. Fijate que hayan llegado de verdad.");
 }
 
 // exitCode rather than exit(): calling process.exit() while sockets are still

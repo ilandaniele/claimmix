@@ -1,0 +1,83 @@
+# Comprobar el deploy que acaba de salir.
+#
+# CI ya corre en cada push: tipos, lint, tests, build. Todo eso pasa en un
+# runner limpio y no dice nada sobre el entorno de producción — que es donde
+# fallan las cosas que más caro salen. R2 funcionó en cada corrida local
+# durante horas mientras producción descartaba todos los adjuntos, porque las
+# credenciales nunca se habían cargado en Vercel. Nada falló en voz alta.
+#
+# Esto le pregunta al deploy recién promovido qué alcanza a ver: base de datos,
+# migraciones aplicadas, almacenamiento (con una subida real), el modelo (con
+# una llamada real), el token de WhatsApp y la casilla conectada.
+#
+# Primero espera a que el alias sirva el commit de este deploy. Sin eso el
+# chequeo puede interrogar al build anterior y darlo por bueno, que es la
+# respuesta más peligrosa posible: la que tapa justo el deploy que se está
+# preguntando.
+#
+# Sólo necesita un secreto, CRON_SECRET. Todo lo demás ya vive en el deploy.
+
+name: Post-deploy
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL a chequear"
+        default: "https://claimmix.vercel.app"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke de producción
+    runs-on: ubuntu-latest
+    # Sólo cuando un deploy de producción terminó bien. El evento también llega
+    # para previews y para estados intermedios.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.environment == 'Production')
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Chequear el deploy
+        # --deep sube un archivo a R2 y llama al modelo de verdad. Cuesta
+        # centavos y es la diferencia entre "las variables están" y "funciona".
+        #
+        # Contra el alias, no contra la URL del deploy: el alias es lo que usan
+        # los asegurados, y --expect-commit se encarga de que sea este build y
+        # no el anterior.
+        run: |
+          pnpm smoke -- --deep \
+            --url "${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}" \
+            ${{ github.event_name == 'deployment_status' && format('--expect-commit {0}', github.event.deployment.sha) || '' }}
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
+      - name: Qué hacer si esto falló
+        if: failure()
+        run: |
+          echo "::error::El deploy salió pero producción no está sana."
+          echo ""
+          echo "Mirá el detalle arriba. Los tres casos habituales:"
+          echo ""
+          echo "  · 'faltan columnas'   → hay una migración sin aplicar en Neon."
+          echo "                          Los deploys no las corren solas."
+          echo "  · 'sin configurar'    → falta una variable en Vercel."
+          echo "  · 'sigue sirviendo X' → el alias no se movió al build nuevo."
+          echo ""
+          echo "Reproducilo con: pnpm smoke --deep"

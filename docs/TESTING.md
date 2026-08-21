@@ -147,6 +147,7 @@ pnpm smoke --url https://…      # un preview en vez de producción
 | Situación | Comando |
 |---|---|
 | Mientras programás | `pnpm verify` |
+| Después de un deploy | *nada — corre solo, ver abajo* |
 | Antes de commitear algo que toca el agente | `pnpm check --local` |
 | **Después de cada deploy** | `pnpm check` |
 | Antes de mostrárselo a un cliente | `pnpm check --deep` |
@@ -155,6 +156,35 @@ pnpm smoke --url https://…      # un preview en vez de producción
 
 `--fast` saltea el ensayo (gratis, sin tokens). `--local` saltea el chequeo de
 producción.
+
+---
+
+## Lo que corre solo
+
+**En cada push a `main`** — `.github/workflows/ci.yml`, que ya existía: tipos,
+lint, tests, build, auditoría de dependencias.
+
+**Después de cada deploy de producción** — `.github/workflows/post-deploy.yml`.
+GitHub recibe de Vercel el aviso de que el deploy terminó bien y dispara
+`pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
+real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
+
+Antes de mirar nada, espera a que el alias sirva **el commit de ese deploy**.
+Sin eso el chequeo puede interrogar al build anterior y darlo por bueno — la
+respuesta más peligrosa posible, porque tapa justo el deploy que se está
+preguntando.
+
+Necesita un solo secreto en GitHub, `CRON_SECRET`. Todo lo demás ya vive en el
+deploy, que es exactamente el punto.
+
+También se puede disparar a mano desde la pestaña *Actions* → *Post-deploy* →
+*Run workflow*, con una URL distinta si querés apuntar a un preview.
+
+**Lo que NO corre solo es el ensayo de conversaciones.** Necesita el juego
+completo de credenciales de producción —base, Vertex, R2— y la clave que
+descifra la casilla está marcada *Sensitive* en Vercel, o sea que no se puede
+copiar a ningún lado. Corrélo vos con `pnpm check` cuando toques el
+comportamiento del agente.
 
 ---
 

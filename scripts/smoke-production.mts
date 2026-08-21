@@ -28,10 +28,29 @@ dotenv.config({ path: fs.existsSync(envPath) ? envPath : undefined });
 
 const args = process.argv.slice(2);
 const deep = args.includes("--deep");
-const urlFlag = args.indexOf("--url");
+
+function flag(name: string): string | null {
+  const i = args.indexOf(`--${name}`);
+  if (i < 0) return null;
+  const value = args[i + 1];
+  return value && !value.startsWith("--") ? value : null;
+}
+
 const BASE = (
-  urlFlag >= 0 ? args[urlFlag + 1] : process.env.SMOKE_URL || "https://claimmix.vercel.app"
+  flag("url") || process.env.SMOKE_URL || "https://claimmix.vercel.app"
 ).replace(/\/+$/, "");
+
+/**
+ * The commit this run is checking, when it knows.
+ *
+ * Vercel promotes the alias a moment after the deployment reports success, so
+ * a check that fires immediately can interrogate the *previous* build and
+ * report it green — the most dangerous possible answer, because the broken
+ * deploy is the one being asked about. Given a SHA, this waits until the
+ * running deployment says it is that one.
+ */
+const EXPECT_COMMIT = flag("expect-commit")?.slice(0, 7) ?? null;
+const WAIT_FOR_ALIAS_MS = 3 * 60 * 1000;
 
 const SECRET = process.env.CRON_SECRET;
 if (!SECRET) {
@@ -92,12 +111,47 @@ async function checkHealthIsProtected(): Promise<boolean> {
   }
 }
 
+/**
+ * Wait until the alias is serving the deployment we were asked about.
+ *
+ * Returns false if it never arrives, which is itself a failure worth
+ * reporting: the deploy said success and the traffic is still going somewhere
+ * else.
+ */
+async function waitForCommit(expected: string): Promise<boolean> {
+  const deadline = Date.now() + WAIT_FOR_ALIAS_MS;
+  let last: string | null = null;
+
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${BASE}/api/health`, {
+        headers: { Authorization: `Bearer ${SECRET}` },
+      });
+      const body = (await res.json()) as { commit?: string | null };
+      last = body.commit ?? null;
+      if (last === expected) {
+        console.log(`  ✓ sirviendo el commit ${expected}`);
+        return true;
+      }
+    } catch {
+      // Still coming up. Keep waiting.
+    }
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+
+  console.log(
+    `  ✗ tras 3 minutos sigue sirviendo ${last ?? "algo desconocido"}, esperaba ${expected}`
+  );
+  return false;
+}
+
 async function main() {
   let failures = 0;
 
   console.log("Alcance:");
   if (!(await checkReachable())) failures++;
   if (!(await checkHealthIsProtected())) failures++;
+  if (EXPECT_COMMIT && !(await waitForCommit(EXPECT_COMMIT))) failures++;
 
   console.log("\nDependencias:");
   let body: {

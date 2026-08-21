@@ -216,6 +216,16 @@ export const AuditEvent = {
   AGENT_NOTE: "agent.note",
 
   /**
+   * DELIVERY_TEST: someone asked the deployment to send a real test message.
+   * Payload: { channel, ok, detail }.
+   *
+   * A real message went to a real person, so it belongs in the record like
+   * anything else we send — and it is what the rate limit reads to know a test
+   * already went out this minute.
+   */
+  DELIVERY_TEST: "health.delivery_test",
+
+  /**
    * FIELD_CONFIRMED: analyst confirmed or corrected an extracted field.
    * Payload: { case_id, field_key, action, old_value_redacted, new_value_redacted }.
    * AC21.

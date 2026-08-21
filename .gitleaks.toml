@@ -33,4 +33,13 @@ regexes = [
 paths = [
   # El lockfile son hashes de integridad, no credenciales.
   '''pnpm-lock\.yaml''',
+
+  # .env.example existe para tener marcadores, y la regla de entropía marca
+  # <r2-secret-access-key> igual que marcaría la clave de verdad.
+  #
+  # Es el archivo donde más fácil se cuela un valor real — alguien copia su
+  # .env.local para documentar y se olvida de vaciarlo — así que no queda sin
+  # vigilancia: scripts/check-personal-data.sh verifica que cada valor tenga
+  # forma de marcador, y ese chequeo corre acá y en `pnpm verify`.
+  '''\.env\.example''',
 ]

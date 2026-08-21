@@ -55,6 +55,65 @@ scan "Teléfonos que no están en la lista permitida:" \
 scan "Direcciones de correo reales:" \
   '[a-z0-9._%+-]+@(gmail|hotmail|outlook|yahoo|live)\.[a-z]{2,}'
 
+# ── .env.example ─────────────────────────────────────────────────────────────
+#
+# El archivo donde más fácil se cuela una credencial real: alguien copia su
+# .env.local para documentar las variables y se olvida de vaciar los valores.
+# gitleaks no lo mira — sus marcadores disparan la regla de entropía y hubo que
+# excluirlo — así que lo mira esto.
+#
+# Busca FORMA DE CREDENCIAL, no "valor largo". La primera versión marcaba
+# R2_BUCKET=claim-attachments y GOOGLE_CLOUD_LOCATION=us-central1, que son
+# configuración y no secretos; un chequeo así se apaga a la semana.
+#
+# Lo que sí es sospechoso: una cadena de aspecto aleatorio, una cadena con
+# prefijo conocido de proveedor, o una URL con usuario y contraseña adentro.
+check_env_example() {
+  local file=".env.example" bad="" name value
+  [ -f "$file" ] || return 0
+
+  while IFS= read -r line; do
+    case "$line" in ''|\#*) continue ;; esac
+    name="${line%%=*}"
+    value="${line#*=}"
+    value="${value%%#*}"
+    value="$(printf '%s' "$value" | sed 's/[[:space:]]*$//; s/^["'"'"']//; s/["'"'"']$//')"
+
+    # Un marcador se declara como tal.
+    printf '%s' "$value" | grep -qiE '<|placeholder|example|your|tu-|xxx|change[-_]?me|\.\.\.' && continue
+
+    # Prefijos de proveedor: son credenciales por definición.
+    if printf '%s' "$value" | grep -qE '^(sk-|AIza|ghp_|gho_|xox[baprs]-|EAA[A-Za-z0-9]|AKIA)'; then
+      bad="${bad}  ${name} (prefijo de credencial)"$'\n'
+      continue
+    fi
+
+    # Una URL con contraseña adentro.
+    if printf '%s' "$value" | grep -qE '://[^/[:space:]]+:[^@/[:space:]]+@'; then
+      bad="${bad}  ${name} (URL con contraseña)"$'\n'
+      continue
+    fi
+
+    # Aspecto aleatorio: 24+ caracteres sin separadores de palabra y con
+    # mezcla de letras y dígitos. La configuración legible casi nunca es así
+    # (claim-attachments, us-central1, gemini-2.0-flash).
+    if printf '%s' "$value" | grep -qE '^[A-Za-z0-9+/=_]{24,}$' \
+      && printf '%s' "$value" | grep -qE '[0-9]' \
+      && printf '%s' "$value" | grep -qE '[A-Za-z]'; then
+      bad="${bad}  ${name} (parece una clave)"$'\n'
+    fi
+  done < "$file"
+
+  if [ -n "$bad" ]; then
+    echo "::error::Valores en .env.example que parecen credenciales reales:"
+    printf '%s' "$bad"
+    echo "Este archivo se lee en un repo público. Poné <tu-clave>."
+    found=1
+  fi
+}
+
+check_env_example
+
 if [ "$found" = "1" ]; then
   echo ""
   echo "Usá 5491100000000 y algo@example.com — no son de nadie."

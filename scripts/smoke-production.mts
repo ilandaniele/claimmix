@@ -144,7 +144,10 @@ async function main() {
     console.log(`✗ ${failures} problema(s). No lo dejes así.`);
   }
 
-  process.exit(failures === 0 ? 0 : 1);
+  // exitCode rather than exit(): calling process.exit() while sockets are
+  // still closing crashes Node on Windows with a libuv assertion, which looks
+  // exactly like the run failing and is only the process leaving.
+  process.exitCode = failures === 0 ? 0 : 1;
 }
 
 await main();

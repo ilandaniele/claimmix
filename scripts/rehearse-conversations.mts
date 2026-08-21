@@ -825,4 +825,7 @@ if (keep) {
   console.log(`\n${created.length} caso(s) de ensayo borrados. Usá --keep para conservarlos.`);
 }
 
-process.exit(failures.length === 0 ? 0 : 1);
+// exitCode rather than exit(): calling process.exit() while sockets are
+// still closing crashes Node on Windows with a libuv assertion, which looks
+// exactly like the run failing and is only the process leaving.
+process.exitCode = failures.length === 0 ? 0 : 1;

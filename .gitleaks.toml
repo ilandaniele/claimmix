@@ -1,0 +1,36 @@
+# Qué NO es un secreto, aunque lo parezca.
+#
+# gitleaks trae una regla de entropía, `generic-api-key`, que marca cualquier
+# cadena larga y aleatoria. Es la que encuentra las credenciales que ninguna
+# regla específica conoce, y también la que marca un valor de prueba que
+# simplemente se ve como una clave.
+#
+# Las excepciones son por lo que la cadena DICE, no por dónde está. Permitir
+# "todo lo que viva en tests/" sería exactamente el agujero por el que entra un
+# secreto de verdad: alguien pega una clave real en un fixture para reproducir
+# un bug y nadie se entera. Estas excepciones sólo alcanzan a cadenas que se
+# anuncian como falsas.
+
+title = "ClaimMix"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Marcadores que se declaran a sí mismos como no reales"
+
+regexes = [
+  # Marcadores de .env.example: <cloudflare-account-id>, <r2-secret-access-key>.
+  '''<[a-z0-9][a-z0-9-]{4,}>''',
+
+  # Valores de test que llevan "test" o "placeholder" en el nombre.
+  # Una clave real no se llama test-cron-secret-abc123.
+  '''(?i)\btest[-_][a-z0-9-]*(secret|key|token)[a-z0-9-]*''',
+  '''(?i)placeholder''',
+  '''(?i)\b(fake|dummy|example|sample)[-_][a-z0-9-]+''',
+]
+
+paths = [
+  # El lockfile son hashes de integridad, no credenciales.
+  '''pnpm-lock\.yaml''',
+]

@@ -358,20 +358,29 @@ function auditAdminGuards(): void {
       const key = `${rel}:${verb}`;
       const body = block.split("\nexport ")[0]!;
       const gate = /requireRole\(\s*\.\.\.\s*(\w+)/.exec(body)?.[1] ?? null;
-      // isInternalRequest cuenta como candado fuerte: es el secreto en tiempo
-      // constante. requireAdmin también. getSessionContext sólo pide sesión.
+
+      // Qué cuenta como candado de admin, en orden de fuerza:
+      //   · requireAdmin()               — el guarda dedicado (owner/admin, 403)
+      //   · requireRole(...ADMIN_ROLES)  — lo mismo, deletreado
+      //   · isInternalRequest / CRON_SECRET — ruta interna, secreto compartido
+      // getSessionContext sólo prueba que HAY sesión, no de qué rol: no alcanza
+      // para algo que modifica.
       const internal = /isInternalRequest/.test(body);
+      if (internal) continue; // la cubre la sonda del header, más abajo
+
+      const adminGated = /requireAdmin\b/.test(body) || gate === "ADMIN_ROLES";
       const hasSomeGate =
-        gate !== null || internal || /requireAdmin|getSessionContext|CRON_SECRET/.test(body);
-      if (internal) continue; // ruta interna: la cubre la sonda del header más abajo
+        gate !== null || adminGated || /getSessionContext|CRON_SECRET/.test(body);
 
       if (ADMIN_READ_ALLOWED.has(key)) continue;
 
       if (!hasSomeGate) {
         ungated.push(key);
-      } else if (MUTATING.includes(verb) && gate !== "ADMIN_ROLES") {
-        weak.push(`${key} usa ${gate ?? "un chequeo suelto"}`);
-      } else if (verb === "GET" && gate !== null && gate !== "ADMIN_ROLES") {
+      } else if (MUTATING.includes(verb) && !adminGated) {
+        // Algo que modifica bajo /api/admin tiene que exigir admin, no una
+        // sesión cualquiera.
+        weak.push(`${key} usa ${gate ?? "sólo sesión"}`);
+      } else if (verb === "GET" && !adminGated && gate !== null) {
         // Un GET de admin que lee cualquier rol puede ser correcto, pero tiene
         // que ser una decisión escrita, no un descuido.
         weak.push(`${key} usa ${gate} y no está declarado`);

@@ -1,16 +1,24 @@
 /**
- * RLS isolation tests for email-intake endpoints.
+ * Qué hace una ruta cuando la consulta no devuelve nada.
  *
- * AC19: Cross-tenant case access returns 404 (IDOR defense).
- * Tenant A cannot access Tenant B cases via:
- *   - GET /api/cases/:id
- *   - PATCH /api/cases/:id/confirm-field
- *   - GET /api/customers (returns empty, not error — RLS-filtered)
+ * OJO CON EL NOMBRE DEL ARCHIVO: esto NO prueba el aislamiento entre tenants.
+ * Mockea `@/lib/db` para que devuelva cero filas y después verifica que la ruta
+ * conteste 404 y no 403 ni 500 — que es una pregunta legítima (un 403 le
+ * confirmaría al atacante que el caso existe) pero es otra pregunta.
  *
- * These tests mock @/lib/db (Drizzle) and @/lib/auth/session to simulate
- * the behavior where cross-tenant queries return no rows.
+ * Quien devuelve cero filas acá es el mock. Si mañana alguien escribe una
+ * consulta sin `where tenant_id`, estos cuatro tests siguen en verde, porque
+ * nunca tocan una base.
  *
- * True DB RLS tests require RLS_INTEGRATION_ENABLED=true + live Neon.
+ * El aislamiento de verdad lo prueba `pnpm pentest`, con la base real y dos
+ * tenants reales: crea un caso en uno, lo busca desde el otro por id, por
+ * listado, por búsqueda, por el CSV y por las tres herramientas del agente, y
+ * comprueba primero que el dueño SÍ lo vea — sin eso, no encontrar un caso que
+ * no existe sería un verde gratis.
+ *
+ * El comentario anterior decía "true DB RLS tests require RLS_INTEGRATION_ENABLED
+ * + live Neon". Esa variable no existía en ningún lado y nadie montó nunca esos
+ * tests, así que la falla más cara del producto estuvo cubierta por un mock.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

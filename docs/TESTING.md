@@ -241,6 +241,25 @@ se equivoca: es si alguien puede *pedirle* que se equivoque.
 Siembra una póliza señuelo con una patente que no existe en ningún otro lado —
 sin eso, no revelar datos no es mérito— y la borra al terminar.
 
+**La pared entre tenants** es la tercera fase, y es gratis: no llama al modelo.
+Crea un caso en un segundo tenant y lo busca desde el primero por id, por
+listado, por búsqueda, por el CSV de exportación y por las tres herramientas
+del agente.
+
+Es la falla catastrófica de este producto. No molesta: termina el negocio,
+porque lo que se filtra son nombres, DNI, domicilios y siniestros de gente que
+no eligió estar en ninguna de las dos carteras.
+
+Había tests que decían cubrirlo y no lo cubrían: mockeaban la base para que
+devolviera cero filas y después verificaban que la ruta contestara 404. O sea,
+verificaban el mock — el archivo mismo lo admitía y remitía a unos tests con
+base viva que nadie montó nunca. Si alguien escribe una consulta sin
+`where tenant_id`, aquellos tests siguen verdes.
+
+Cada dirección se prueba dos veces: que el dueño **sí** ve lo suyo, y recién
+después que el otro no. Sin la primera, la segunda no prueba nada — no
+encontrar un caso que no existe es gratis.
+
 **Se planta si el modelo no está disponible.** En la primera corrida el cupo
 diario del tenant estaba agotado, el agente no contestó nada, y los cuatro
 ataques dieron verde: una respuesta vacía no filtra la patente ni el prompt, así
@@ -339,7 +358,15 @@ archivo de verdad y llama al modelo de verdad.
 
 Dicho de frente, para que nadie lea "todo verde" como "todo probado":
 
-- **La interfaz.** No hay tests de navegador. Las pantallas se prueban mirándolas.
+- **La interfaz, casi entera.** Hay siete archivos de Playwright y corren en
+  cada push, pero cubren poco: que el health conteste, que el login no cicle,
+  que las pantallas no exploten. El grueso de las pantallas se sigue probando
+  mirándolas.
+
+  Hasta el 22 de agosto de 2026 esos tests **estaban en rojo y no se notaba**:
+  el trabajo tenía `continue-on-error: true`, así que CI decía "success" en cada
+  push mientras un test fallaba desde hacía días. Ya no lo tiene. Una suite que
+  no puede hacer fallar el build es un adorno.
 - **La sincronización con el core del asegurador**, que nunca se ejercitó contra
   un sistema real.
 - **La entrega en sí.** `pnpm prove` confirma que el proveedor aceptó el

@@ -17,16 +17,31 @@ test.describe("Health endpoint", () => {
     expect(body).toHaveProperty("timestamp");
   });
 
-  test("response includes env checks (boolean values only, no secrets)", async ({
-    request,
-  }) => {
+  /**
+   * Este endpoint es público —lo pinga un monitor de uptime cada 5 minutos— y
+   * por eso lo único que puede decir es si está vivo.
+   *
+   * Antes devolvía además el transporte del modelo, si había clave de OpenAI,
+   * la región y si Sentry estaba prendido. Ninguno es un secreto por separado;
+   * juntos son reconocimiento gratis para cualquiera. El más útil para quien
+   * mira desde afuera es el de Sentry: "false" dice que nadie se entera de los
+   * errores, o sea que se puede probar tranquilo.
+   *
+   * Este test antes exigía ese bloque. Ahora exige lo contrario.
+   */
+  test("no enumera la configuración a un anónimo", async ({ request }) => {
     const response = await request.get("/api/admin/health");
-    const body = await response.json();
-    expect(body).toHaveProperty("env");
-    // All env check values must be booleans — never expose actual key values.
-    const envValues = Object.values(body.env as Record<string, unknown>);
-    for (const val of envValues) {
-      expect(typeof val).toMatch(/^(boolean)$/);
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(body).not.toHaveProperty("env");
+    expect(body).not.toHaveProperty("ai");
+    expect(body).not.toHaveProperty("region");
+
+    // Y que no se cuele por otro nombre: nada que suene a credencial o a
+    // proveedor tiene por qué estar en una respuesta que lee cualquiera.
+    const serialized = JSON.stringify(body).toLowerCase();
+    for (const word of ["api_key", "sentry", "vertex", "openai", "gemini", "transport"]) {
+      expect(serialized).not.toContain(word);
     }
   });
 

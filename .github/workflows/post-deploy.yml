@@ -222,8 +222,15 @@ jobs:
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
 
-      - name: Atacar la superficie
+      - name: Atacar la superficie y la pared entre tenants
         run: pnpm pentest
+        env:
+          # La fase de la pared necesita la base y DOS tenants. Sin el segundo
+          # se saltea y lo dice — que es distinto de darla por probada.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
+          DEMO_TENANT_ID: ${{ secrets.DEMO_TENANT_ID }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
 
       - name: Qué significa que esto falle
         if: failure()
@@ -235,5 +242,7 @@ jobs:
           echo "                          INTENTIONALLY_PUBLIC en scripts/pen-test.mts"
           echo "                          CON EL MOTIVO, y controlá qué contesta."
           echo "  · una cabecera        → mirá next.config.ts y src/proxy.ts."
+          echo "  · 'cruza la pared'    → UNA CONSULTA SIN where tenant_id."
+          echo "                          Es la falla que termina el negocio. Parate acá."
           echo ""
           echo "Reproducilo con: pnpm pentest"

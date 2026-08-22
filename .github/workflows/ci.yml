@@ -204,14 +204,22 @@ jobs:
           INTEGRATION_ENABLED: ${{ secrets.INTEGRATION_ENABLED || 'false' }}
 
   # ── 6. E2E tests ─────────────────────────────────────────────────────────────
-  # Requires a live Neon DB (secrets). Skipped when not configured.
-  # continue-on-error: true — E2E is informational in PRs without live Neon secrets.
+  #
+  # Requiere una base viva. Sin el secreto se saltea, y saltearse es distinto de
+  # fallar: el paso lo dice en voz alta y no inventa un verde.
+  #
+  # Tenía `continue-on-error: true`, o sea que un rojo acá no rompía nada. Y
+  # estuvo en rojo, sin que nadie lo viera, durante días: un test exigía que
+  # /api/admin/health devolviera un bloque de configuración que había dejado de
+  # ser booleano. CI decía "success" en cada push.
+  #
+  # Una suite que no puede hacer fallar el build no es una suite, es un adorno.
+  # Si esto se pone inestable, lo que hay que arreglar es la inestabilidad.
   e2e-tests:
     name: E2E tests (Playwright)
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    continue-on-error: true
     needs: [build]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

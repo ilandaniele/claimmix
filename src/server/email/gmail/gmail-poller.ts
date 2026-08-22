@@ -56,6 +56,7 @@ import { checkDuplicate } from "@/server/email/dedupe";
 import { ingestInboundEmail } from "@/server/email/inbound-email";
 import { rehostAndRecordAttachments } from "@/server/email/rehost-attachments";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
+import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import type { gmail_v1 } from "googleapis";
 
@@ -182,7 +183,7 @@ async function dispatchExtractionWorker(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Internal-Worker": "true",
+        ...internalAuthHeaders(),
       },
       body: JSON.stringify({ caseId, tenantId }),
     });

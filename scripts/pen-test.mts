@@ -207,6 +207,39 @@ async function attackSurface(): Promise<void> {
     `(${handshake.status})`
   );
 
+  // ── El header interno, que era un secreto que no era secreto ────────────────
+  console.log("\nRutas internas (worker, reproceso, watch):\n");
+
+  /*
+   * Estas tres confiaban en `X-Internal-Worker: true` para saber que la llamada
+   * venía de adentro. Un header no es un secreto: lo manda cualquiera, y nada
+   * en el borde lo saca — proxy.ts ni corre sobre /api. La de reproceso, encima,
+   * recorre todos los tenants y dispara hasta 50 extracciones reales por
+   * llamada: la puerta abierta era también una palanca de gasto.
+   *
+   * Con el header falso tienen que contestar 401 igual que sin nada.
+   */
+  const internalRoutes = [
+    { path: "/api/worker/extract", body: { caseId: "x", tenantId: "x" } },
+    { path: "/api/admin/reprocess-unclassified", body: {} },
+    { path: "/api/admin/setup-gmail-watch", body: {} },
+  ];
+  for (const route of internalRoutes) {
+    const res = await head(`${BASE}${route.path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Internal-Worker": "true" },
+      body: JSON.stringify(route.body),
+    });
+    probe(
+      `${route.path} no entra con X-Internal-Worker`,
+      res.status === 401,
+      route.path.includes("reprocess")
+        ? "disparar 50 extracciones reales por llamada contra la tarjeta, sin credencial"
+        : "correr trabajo interno del sistema sin credencial",
+      `(${res.status})`
+    );
+  }
+
   // ── Cabeceras y aislamiento del navegador ──────────────────────────────────
   console.log("\nEl navegador:\n");
 
@@ -270,6 +303,94 @@ async function attackSurface(): Promise<void> {
     !enumerates,
     "saber el stack y —lo peor— que nadie está mirando los errores, antes de empezar a probar",
     enumerates ? `\n      dice: ${publicHealth.body.slice(0, 200)}` : ""
+  );
+}
+
+// ── Parte 1b: los candados, leídos del código ────────────────────────────────
+
+/**
+ * Que ninguna ruta de administración quede sin candado, ni con el equivocado.
+ *
+ * El barrido por red de arriba prueba que una ruta pida *algo*. No puede
+ * distinguir "pide admin" de "pide cualquier sesión", porque desde afuera las
+ * dos contestan 401 igual. Y ahí estaba el agujero: cuatro rutas bajo
+ * /api/admin aceptaban cualquier rol, así que un `viewer` —el rol de sólo
+ * lectura— podía conectar, apagar y borrar las casillas de entrada del
+ * asegurador, o sea dejarlo sin intake.
+ *
+ * Lo encontré de casualidad, mirando otra cosa. Esto lo vuelve sistemático:
+ * cada handler que modifica algo bajo /api/admin tiene que pedir ADMIN_ROLES, y
+ * el que no, tiene que estar declarado abajo con su motivo.
+ */
+const ADMIN_READ_ALLOWED = new Map<string, string>([
+  [
+    "src/app/api/admin/gmail-accounts/route.ts:GET",
+    "listar las casillas conectadas: el analista necesita ver si el intake anda",
+  ],
+  [
+    "src/app/api/admin/gmail-status/route.ts:GET",
+    "estado del polling, mismo motivo",
+  ],
+  [
+    "src/app/api/admin/health/route.ts:GET",
+    "público a propósito, lo pinga el monitor; lo que dice se controla aparte",
+  ],
+]);
+
+const MUTATING = ["POST", "PATCH", "PUT", "DELETE"];
+
+function auditAdminGuards(): void {
+  console.log("\nLos candados de /api/admin, leídos del código:\n");
+
+  const weak: string[] = [];
+  const ungated: string[] = [];
+
+  for (const file of findRoutes("src/app/api/admin")) {
+    const rel = file.replace(/\\/g, "/");
+    const source = fs.readFileSync(file, "utf8");
+
+    // Un handler por bloque. No es un parser de TypeScript y no hace falta:
+    // alcanza con ver qué guarda invoca cada exportación.
+    for (const block of source.split("export async function ").slice(1)) {
+      const verb = block.slice(0, block.indexOf("(")).trim().toUpperCase();
+      if (!["GET", ...MUTATING].includes(verb)) continue;
+
+      const key = `${rel}:${verb}`;
+      const body = block.split("\nexport ")[0]!;
+      const gate = /requireRole\(\s*\.\.\.\s*(\w+)/.exec(body)?.[1] ?? null;
+      // isInternalRequest cuenta como candado fuerte: es el secreto en tiempo
+      // constante. requireAdmin también. getSessionContext sólo pide sesión.
+      const internal = /isInternalRequest/.test(body);
+      const hasSomeGate =
+        gate !== null || internal || /requireAdmin|getSessionContext|CRON_SECRET/.test(body);
+      if (internal) continue; // ruta interna: la cubre la sonda del header más abajo
+
+      if (ADMIN_READ_ALLOWED.has(key)) continue;
+
+      if (!hasSomeGate) {
+        ungated.push(key);
+      } else if (MUTATING.includes(verb) && gate !== "ADMIN_ROLES") {
+        weak.push(`${key} usa ${gate ?? "un chequeo suelto"}`);
+      } else if (verb === "GET" && gate !== null && gate !== "ADMIN_ROLES") {
+        // Un GET de admin que lee cualquier rol puede ser correcto, pero tiene
+        // que ser una decisión escrita, no un descuido.
+        weak.push(`${key} usa ${gate} y no está declarado`);
+      }
+    }
+  }
+
+  probe(
+    "ninguna ruta de admin sin control de acceso",
+    ungated.length === 0,
+    "cualquier usuario con sesión administrando el sistema",
+    ungated.length ? `\n      sin candado: ${ungated.join(", ")}` : ""
+  );
+
+  probe(
+    "lo que modifica bajo /api/admin pide admin",
+    weak.length === 0,
+    "un viewer —sólo lectura— apagando la casilla de entrada, o sea dejando al asegurador sin intake",
+    weak.length ? `\n      ${weak.join("\n      ")}` : ""
   );
 }
 
@@ -640,6 +761,7 @@ async function attackAgent(): Promise<void> {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 await attackSurface();
+auditAdminGuards();
 await attackTenantWall();
 if (doAgent) {
   await attackAgent();

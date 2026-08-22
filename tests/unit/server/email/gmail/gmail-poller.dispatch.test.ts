@@ -2,7 +2,7 @@
  * Unit tests for dispatchExtractionWorker() behaviour in gmail-poller.ts.
  *
  * AC5: Gmail poller dispatches via fetch POST to /api/worker/extract with
- *      X-Internal-Worker: true header and JSON body { caseId, tenantId }.
+ *      the internal Bearer credential and JSON body { caseId, tenantId }.
  * AC6: Dispatch error is logged (name + caseId, no PII) and does NOT crash the
  *      poll loop; subsequent messages are still processed.
  * NB3: New case insert uses claim_type: null (not a hard-coded string) so that
@@ -237,6 +237,9 @@ beforeEach(() => {
 
   // Env vars
   process.env.GMAIL_USER_EMAIL = "claims@claimmix.com";
+  // El worker interno se autentica con CRON_SECRET; sin él, internalAuthHeaders
+  // (correctamente) tira, así que el poller no puede despachar.
+  process.env.CRON_SECRET = "test-cron-secret";
   delete process.env.GMAIL_TENANT_ID; // use sentinel
 
   // Default mock returns
@@ -253,12 +256,13 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   delete process.env.GMAIL_USER_EMAIL;
   delete process.env.GMAIL_TENANT_ID;
+  delete process.env.CRON_SECRET;
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("dispatchExtractionWorker — AC5: fetch POST with correct shape", () => {
-  it("calls fetch with POST method and X-Internal-Worker: true header", async () => {
+  it("calls fetch with POST and the internal Bearer credential", async () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: true });
     globalThis.fetch = mockFetch;
 
@@ -273,7 +277,9 @@ describe("dispatchExtractionWorker — AC5: fetch POST with correct shape", () =
 
     expect(url).toBe("http://localhost:3000/api/worker/extract");
     expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>)["X-Internal-Worker"]).toBe("true");
+    // El secreto en el Authorization, no el header adivinable.
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer test-cron-secret");
+    expect((init.headers as Record<string, string>)["X-Internal-Worker"]).toBeUndefined();
     expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
   });
 

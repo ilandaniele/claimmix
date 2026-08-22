@@ -4,9 +4,11 @@
  * Selects up to 50 email cases where severity OR claim_type is NULL and the case
  * is in an open status, then dispatches /api/worker/extract for each one.
  *
- * Auth: Internal-only. Same pattern as /api/worker/extract.
- *   a) X-Internal-Worker: true header (same-origin worker call)
- *   b) Authorization: Bearer <CRON_SECRET> header (Vercel cron / scheduled triggers)
+ * Auth: interna, con CRON_SECRET (Bearer). Antes también entraba con un header
+ * `X-Internal-Worker: true`, que cualquiera puede mandar — ver internal-auth.ts.
+ * Importa acá más que en otras: esta ruta recorre TODOS los tenants y dispara
+ * hasta 50 extracciones reales por llamada, así que la puerta abierta era
+ * además una palanca de gasto contra la tarjeta.
  *
  * Tenant scoping: this is a SYSTEM path that intentionally scans cases across
  * ALL tenants (like the Gmail poller); each selected row carries its own
@@ -24,8 +26,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { and, asc, inArray, isNull, or } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
-import { timingSafeStringEqual } from "@/lib/security/compare";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
+import { internalAuthHeaders, isInternalRequest } from "@/lib/security/internal-auth";
 
 /**
  * Statuses considered "open" for reprocessing. Includes "escalado" so cases
@@ -40,25 +42,6 @@ const CHANNELS = ["email", "email_sim"] as const;
 /** Max cases dispatched per call. */
 const BATCH_LIMIT = 50;
 
-/**
- * Verify the caller is an internal worker or Vercel cron.
- * Returns true if the request is authorized.
- */
-function isAuthorized(request: NextRequest): boolean {
-  // Option A: same-origin internal worker header.
-  const internalHeader = request.headers.get("x-internal-worker");
-  if (internalHeader === "true") return true;
-
-  // Option B: Vercel cron secret (constant-time compare).
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = request.headers.get("authorization");
-    if (timingSafeStringEqual(authHeader, `Bearer ${cronSecret}`)) return true;
-  }
-
-  return false;
-}
-
 interface UnclassifiedCase {
   id: string;
   tenant_id: string;
@@ -66,7 +49,7 @@ interface UnclassifiedCase {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // ── Auth check ────────────────────────────────────────────────────────────────
-  if (!isAuthorized(request)) {
+  if (!isInternalRequest(request)) {
     return NextResponse.json(
       { error: { code: "UNAUTHORIZED", message: "Acceso no autorizado." } },
       { status: 401 }
@@ -146,7 +129,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Internal-Worker": "true",
+            ...internalAuthHeaders(),
           },
           body: JSON.stringify({
             caseId: caseRow.id,

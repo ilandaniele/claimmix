@@ -1,8 +1,10 @@
 /**
  * Integration tests for POST /api/admin/reprocess-unclassified.
  *
- * AC12: 401 UNAUTHORIZED without internal-auth header (or wrong creds).
- * AC13: with X-Internal-Worker: true → returns { triggered: N, case_ids: [...] }.
+ * AC12: 401 sin credencial interna (o con la equivocada), incluido el header
+ *        `X-Internal-Worker: true` que ANTES alcanzaba y ya no — ver
+ *        internal-auth.ts. La autorización es CRON_SECRET por Bearer.
+ * AC13: con el Bearer correcto → { triggered: N, case_ids: [...] }.
  * AC14: no unclassified cases → 200 { triggered: 0, case_ids: [], failed: [] }.
  * AC15: one fetch fails → that case in failed[], others still triggered.
  *
@@ -88,6 +90,8 @@ function buildRequest(
     "Content-Type": "application/json",
   };
   if (opts.internalWorker) {
+    // El header viejo. Se sigue pudiendo mandar; lo que cambió es que ya no
+    // autoriza. Los tests de abajo dependen de eso.
     headers["x-internal-worker"] = "true";
   }
   if (opts.bearerToken) {
@@ -155,6 +159,15 @@ describe("POST /api/admin/reprocess-unclassified", () => {
     expect(body.error.code).toBe("UNAUTHORIZED");
   });
 
+  it("AC12: el header X-Internal-Worker: true YA NO alcanza", async () => {
+    // Era el bypass: un header que manda cualquiera pasaba por credencial. Este
+    // test existe para que no vuelva. Esta ruta dispara 50 extracciones reales
+    // por llamada, así que el header abierto era también gasto contra la tarjeta.
+    const response = await POST(buildRequest({ internalWorker: true }));
+
+    expect(response.status).toBe(401);
+  });
+
   it("AC12: returns 401 when Bearer token is wrong", async () => {
     const req = new NextRequest("http://localhost:3000/api/admin/reprocess-unclassified", {
       method: "POST",
@@ -195,7 +208,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
       new Response(JSON.stringify({ ok: true }), { status: 200 })
     );
 
-    const request = buildRequest({ internalWorker: true });
+    const request = buildRequest({ bearerToken: "super-secret-cron" });
     const response = await POST(request);
     const body = await response.json();
 
@@ -210,7 +223,9 @@ describe("POST /api/admin/reprocess-unclassified", () => {
     const [callUrl, callInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(callUrl).toBe("http://localhost:3000/api/worker/extract");
     expect(callInit.method).toBe("POST");
-    expect(callInit.headers["X-Internal-Worker"]).toBe("true");
+    // Hacia el worker viaja el secreto, no el header adivinable.
+    expect(callInit.headers["Authorization"]).toBe("Bearer super-secret-cron");
+    expect(callInit.headers["X-Internal-Worker"]).toBeUndefined();
   });
 
   it("AC13: forwards caseId and tenantId in the dispatch body", async () => {
@@ -222,7 +237,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
       new Response(JSON.stringify({ ok: true }), { status: 200 })
     );
 
-    const request = buildRequest({ internalWorker: true });
+    const request = buildRequest({ bearerToken: "super-secret-cron" });
     await POST(request);
 
     const [, callInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -238,7 +253,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
 
     global.fetch = vi.fn(); // should not be called
 
-    const request = buildRequest({ internalWorker: true });
+    const request = buildRequest({ bearerToken: "super-secret-cron" });
     const response = await POST(request);
     const body = await response.json();
 
@@ -252,7 +267,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
 
     global.fetch = vi.fn();
 
-    const request = buildRequest({ internalWorker: true });
+    const request = buildRequest({ bearerToken: "super-secret-cron" });
     const response = await POST(request);
     const body = await response.json();
 
@@ -281,7 +296,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
       return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     });
 
-    const request = buildRequest({ internalWorker: true });
+    const request = buildRequest({ bearerToken: "super-secret-cron" });
     const response = await POST(request);
     const body = await response.json();
 
@@ -309,7 +324,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
       return mockFetchOk();
     });
 
-    const request = buildRequest({ internalWorker: true });
+    const request = buildRequest({ bearerToken: "super-secret-cron" });
     const response = await POST(request);
     const body = await response.json();
 
@@ -326,7 +341,7 @@ describe("POST /api/admin/reprocess-unclassified", () => {
     (dbError as Error & { code?: string }).code = "PGRST116";
     mockDbInstance = buildMockDb(null, dbError);
 
-    const request = buildRequest({ internalWorker: true });
+    const request = buildRequest({ bearerToken: "super-secret-cron" });
     const response = await POST(request);
     const body = await response.json();
 

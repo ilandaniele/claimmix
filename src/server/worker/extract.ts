@@ -59,6 +59,7 @@ import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/server/cases/fsm";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
+import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { messengerFor } from "@/server/confirmations/messenger";
 import { loadAgentTraining } from "@/server/agents/training";
@@ -471,7 +472,7 @@ async function redispatchExtraction(caseId: string, tenantId: string): Promise<v
   try {
     await fetch(`${getWorkerBaseUrl()}/api/worker/extract`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Internal-Worker": "true" },
+      headers: { "Content-Type": "application/json", ...internalAuthHeaders() },
       body: JSON.stringify({ caseId, tenantId }),
     });
   } catch (err) {

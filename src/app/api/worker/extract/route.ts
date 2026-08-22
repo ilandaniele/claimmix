@@ -5,13 +5,10 @@
  * agent for the specified case. Used as a fire-and-forget endpoint from webhook
  * handlers (or Vercel cron) to decouple extraction from webhook response latency.
  *
- * Auth: Internal-only. Accepts either:
- *   a) X-Internal-Worker: true header (same-origin worker call)
- *   b) Authorization: Bearer <CRON_SECRET> header (Vercel cron / scheduled triggers)
- *
- * This endpoint is NOT user-facing — it should not be exposed publicly.
- * The proxy.ts (middleware) will block unauthenticated requests to /api/worker/*
- * so this header check is defense-in-depth.
+ * Auth: interna, con CRON_SECRET (Bearer). NO es una ruta de cara al usuario.
+ * El header `X-Internal-Worker: true` que aceptaba antes lo puede mandar
+ * cualquiera; proxy.ts no corre sobre /api, así que no había segunda capa que
+ * lo tapara. Ver internal-auth.ts.
  *
  * Returns 200 on success, 500 on error (for fire-and-forget callers).
  *
@@ -21,34 +18,19 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
+import { isInternalRequest } from "@/lib/security/internal-auth";
 
 const WorkerBodySchema = z.object({
   caseId: z.string().uuid("caseId must be a valid UUID."),
   tenantId: z.string().uuid("tenantId must be a valid UUID."),
 });
 
-/**
- * Verify the caller is an internal worker or Vercel cron.
- * Returns true if the request is authorized.
- */
-function isAuthorized(request: NextRequest): boolean {
-  // Option A: same-origin internal worker header.
-  const internalHeader = request.headers.get("x-internal-worker");
-  if (internalHeader === "true") return true;
-
-  // Option B: Vercel cron secret.
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader === `Bearer ${cronSecret}`) return true;
-  }
-
-  return false;
-}
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // ── Auth check ────────────────────────────────────────────────────────────────
-  if (!isAuthorized(request)) {
+  // Antes bastaba `X-Internal-Worker: true`, un header que manda cualquiera, y
+  // encima el CRON_SECRET se comparaba con === (oráculo de timing). Ahora los
+  // dos caminos son uno: el secreto, en tiempo constante. Ver internal-auth.ts.
+  if (!isInternalRequest(request)) {
     return NextResponse.json(
       { error: { code: "UNAUTHORIZED", message: "Acceso no autorizado al worker." } },
       { status: 401 }

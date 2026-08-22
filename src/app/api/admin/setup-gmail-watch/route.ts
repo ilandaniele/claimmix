@@ -4,53 +4,23 @@
  * Registers a Gmail push subscription for the configured account by calling
  * setupGmailWatch() with the PUBSUB_TOPIC environment variable.
  *
- * Auth: Internal-only. Accepts either:
- *   a) X-Internal-Worker: true header (same-origin worker call)
- *   b) Authorization: Bearer <CRON_SECRET> header (Vercel cron / scheduled triggers)
+ * Auth: interna, con CRON_SECRET (Bearer). NO es una ruta de cara al usuario.
  *
- * This endpoint is NOT user-facing — it should not be exposed publicly.
- * The proxy.ts (middleware) blocks unauthenticated requests to /api/admin/*
- * so this header check is defense-in-depth.
+ * Antes también aceptaba un header `X-Internal-Worker: true`, que no es un
+ * secreto: lo manda cualquiera. El comentario decía que proxy.ts tapaba el
+ * hueco como segunda capa, pero el matcher de proxy.ts excluye /api y nunca
+ * corrió acá. El header era la única puerta y estaba abierta.
  *
  * W4: AC12, AC13, AC14, AC15.
  */
 
-import { timingSafeEqual } from "crypto";
 import { type NextRequest, NextResponse } from "next/server";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
-
-/**
- * Verify the caller is an internal worker or Vercel cron.
- * Returns true if the request is authorized.
- */
-function isAuthorized(request: NextRequest): boolean {
-  // Option A: same-origin internal worker header.
-  const internalHeader = request.headers.get("x-internal-worker");
-  if (internalHeader === "true") return true;
-
-  // Option B: Vercel cron secret — constant-time comparison to prevent timing oracle.
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = request.headers.get("authorization") ?? "";
-    const expected = `Bearer ${cronSecret}`;
-    try {
-      // timingSafeEqual requires same-length buffers — encode both as UTF-8.
-      const expectedBuf = Buffer.from(expected, "utf-8");
-      const actualBuf = Buffer.from(authHeader, "utf-8");
-      if (expectedBuf.length === actualBuf.length && timingSafeEqual(expectedBuf, actualBuf)) {
-        return true;
-      }
-    } catch {
-      // length mismatch or encoding error — fall through to reject
-    }
-  }
-
-  return false;
-}
+import { isInternalRequest } from "@/lib/security/internal-auth";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // ── Auth check ────────────────────────────────────────────────────────────────
-  if (!isAuthorized(request)) {
+  if (!isInternalRequest(request)) {
     return NextResponse.json(
       { error: { code: "UNAUTHORIZED", message: "Acceso no autorizado." } },
       { status: 401 }

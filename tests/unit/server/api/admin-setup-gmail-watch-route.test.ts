@@ -2,7 +2,7 @@
  * Unit tests for POST /api/admin/setup-gmail-watch route handler.
  *
  * AC12: No auth header (or wrong credentials) → 401, setupGmailWatch NOT called.
- * AC13: X-Internal-Worker: true → setupGmailWatch called, 200 with {historyId, expiration, message}.
+ * AC13: credencial interna (Bearer CRON_SECRET) → setupGmailWatch, 200 con {historyId, expiration, message}.
  * AC14: Authorization: Bearer <CRON_SECRET> → setupGmailWatch called, 200.
  * AC15: PUBSUB_TOPIC not set → 500 with code PUBSUB_NOT_CONFIGURED, setupGmailWatch NOT called.
  *
@@ -106,6 +106,14 @@ describe("POST /api/admin/setup-gmail-watch", () => {
       expect(mockSetupGmailWatch).not.toHaveBeenCalled();
     });
 
+    it("el header X-Internal-Worker: true YA NO autoriza (era el bypass)", async () => {
+      // Un header lo manda cualquiera; no es una credencial. Este test existe
+      // para que el bypass no vuelva. Ver internal-auth.ts.
+      const req = makeRequest({ internalWorker: true });
+      const res = await POST(req);
+      expect(res.status).toBe(401);
+    });
+
     it("returns 401 when x-internal-worker header is 'false'", async () => {
       const headers: Record<string, string> = { "x-internal-worker": "false" };
       const req = new NextRequest("http://localhost/api/admin/setup-gmail-watch", {
@@ -121,11 +129,11 @@ describe("POST /api/admin/setup-gmail-watch", () => {
     });
   });
 
-  // ── AC13: X-Internal-Worker: true ─────────────────────────────────────────
+  // ── AC13: la credencial interna (CRON_SECRET) → 200 ──────────────────────
 
-  describe("AC13 — X-Internal-Worker: true → 200 with watch data", () => {
+  describe("AC13 — credencial interna (Bearer CRON_SECRET) → 200 with watch data", () => {
     it("calls setupGmailWatch and returns historyId, expiration, message", async () => {
-      const req = makeRequest({ internalWorker: true });
+      const req = makeRequest({ authHeader: `Bearer ${CRON_SECRET}` });
       const res = await POST(req);
 
       expect(res.status).toBe(200);
@@ -141,7 +149,7 @@ describe("POST /api/admin/setup-gmail-watch", () => {
       const customTopic = "projects/other/topics/custom-topic";
       process.env.PUBSUB_TOPIC = customTopic;
 
-      const req = makeRequest({ internalWorker: true });
+      const req = makeRequest({ authHeader: `Bearer ${CRON_SECRET}` });
       await POST(req);
 
       expect(mockSetupGmailWatch).toHaveBeenCalledWith(customTopic);
@@ -179,7 +187,7 @@ describe("POST /api/admin/setup-gmail-watch", () => {
   describe("AC15 — PUBSUB_TOPIC missing → 500 PUBSUB_NOT_CONFIGURED", () => {
     it("returns 500 with PUBSUB_NOT_CONFIGURED when env var is not set", async () => {
       delete process.env.PUBSUB_TOPIC;
-      const req = makeRequest({ internalWorker: true });
+      const req = makeRequest({ authHeader: `Bearer ${CRON_SECRET}` });
       const res = await POST(req);
 
       expect(res.status).toBe(500);
@@ -197,9 +205,9 @@ describe("POST /api/admin/setup-gmail-watch", () => {
       expect(mockSetupGmailWatch).not.toHaveBeenCalled();
     });
 
-    it("returns 500 PUBSUB_NOT_CONFIGURED even with valid X-Internal-Worker header", async () => {
+    it("returns 500 PUBSUB_NOT_CONFIGURED even with a valid internal credential", async () => {
       delete process.env.PUBSUB_TOPIC;
-      const req = makeRequest({ internalWorker: true });
+      const req = makeRequest({ authHeader: `Bearer ${CRON_SECRET}` });
       const res = await POST(req);
 
       expect(res.status).toBe(500);
@@ -215,7 +223,7 @@ describe("POST /api/admin/setup-gmail-watch", () => {
       const err = new Error("Gmail API quota exceeded");
       mockSetupGmailWatch.mockRejectedValue(err);
 
-      const req = makeRequest({ internalWorker: true });
+      const req = makeRequest({ authHeader: `Bearer ${CRON_SECRET}` });
       const res = await POST(req);
 
       expect(res.status).toBe(500);
@@ -234,7 +242,7 @@ describe("POST /api/admin/setup-gmail-watch", () => {
 
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-      const req = makeRequest({ internalWorker: true });
+      const req = makeRequest({ authHeader: `Bearer ${CRON_SECRET}` });
       await POST(req);
 
       const loggedOutput = consoleSpy.mock.calls.flat().join(" ");

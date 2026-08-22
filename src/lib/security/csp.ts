@@ -31,12 +31,34 @@ export function generateNonce(): string {
  *   'self' 'unsafe-inline' – Tailwind v4 generates inline styles at runtime;
  *   style nonces are not supported by Tailwind v4's PostCSS model.
  */
+/**
+ * Where the browser may send error reports.
+ *
+ * Derived from the configured DSN rather than hardcoded. The literal
+ * `https://o0.ingest.sentry.io` that used to be here is Sentry's placeholder
+ * host from their docs, not an ingest endpoint anyone owns — so the day
+ * somebody set a real DSN, the CSP would have blocked every report and the
+ * only symptom would be errors quietly not arriving.
+ *
+ * Returns nothing when Sentry is off, which it is today: an allowance for a
+ * host we never contact is an allowance an attacker can use.
+ */
+function sentryOrigin(): string {
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN?.trim();
+  if (!dsn) return "";
+  try {
+    return ` ${new URL(dsn).origin}`;
+  } catch {
+    return "";
+  }
+}
+
 export function buildCsp(nonce: string): string {
   const directives: string[] = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     "style-src 'self' 'unsafe-inline'",
-    `connect-src 'self' https://o0.ingest.sentry.io`,
+    `connect-src 'self'${sentryOrigin()}`,
     "img-src 'self' data: https:",
     "font-src 'self' data:",
     "frame-ancestors 'none'",

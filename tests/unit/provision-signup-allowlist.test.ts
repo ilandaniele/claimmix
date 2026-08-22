@@ -123,8 +123,8 @@ describe("provisionUserProfile — signup allowlist", () => {
      * requireEmailVerification is false on that path, so the address is simply
      * what the person typed. Anyone who guessed an allowlisted address that had
      * not registered yet could take it and read every claim in the tenant —
-     * names, DNI, policy numbers, addresses. Adding veltra.claimmix@gmail.com
-     * to ADMIN_EMAILS opened exactly that window on an address anyone could
+     * names, DNI, policy numbers, addresses. Adding a new company mailbox to
+     * ADMIN_EMAILS opened exactly that window, on an address anyone could
      * guess from the company name.
      *
      * Google sign-in proves the address, so the intended path is unaffected.

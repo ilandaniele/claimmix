@@ -5,7 +5,7 @@
  * Here we test the environment checks and CSP utilities used by it.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 // Mock server-only so imports that use it compile in the test environment.
 vi.mock("server-only", () => ({}));
@@ -83,5 +83,47 @@ describe("buildCsp", () => {
   it("includes form-action 'self'", () => {
     const csp = buildCsp("testnonce123==");
     expect(csp).toContain("form-action 'self'");
+  });
+});
+
+describe("buildCsp — where reports may go", () => {
+  /**
+   * The directive used to name `https://o0.ingest.sentry.io`, which is the
+   * placeholder host out of Sentry's documentation and belongs to nobody. The
+   * day someone set a real DSN, every report would have been blocked and the
+   * only symptom would be errors quietly failing to arrive.
+   */
+  const SAVED = process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+  afterEach(() => {
+    if (SAVED === undefined) delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    else process.env.NEXT_PUBLIC_SENTRY_DSN = SAVED;
+  });
+
+  it("allows only ourselves when Sentry is off", () => {
+    delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    expect(buildCsp("n")).toContain("connect-src 'self';");
+  });
+
+  it("allows the real ingest host when a DSN is configured", () => {
+    process.env.NEXT_PUBLIC_SENTRY_DSN = "https://abc123@o4507.ingest.us.sentry.io/12345";
+    expect(buildCsp("n")).toContain("connect-src 'self' https://o4507.ingest.us.sentry.io");
+  });
+
+  it("does not widen the policy on a malformed DSN", () => {
+    // A typo in an env var must not turn into a permissive directive.
+    process.env.NEXT_PUBLIC_SENTRY_DSN = "no-es-una-url";
+    expect(buildCsp("n")).toContain("connect-src 'self';");
+  });
+
+  it("never allows inline scripts, whatever else changes", () => {
+    // The one directive the whole file exists for.
+    expect(buildCsp("n")).not.toContain("unsafe-inline'; script");
+    const scriptSrc = buildCsp("n")
+      .split("; ")
+      .find((d) => d.startsWith("script-src"));
+    expect(scriptSrc).not.toContain("unsafe-inline");
+    expect(scriptSrc).not.toContain("unsafe-eval");
+    expect(scriptSrc).toContain("'nonce-n'");
   });
 });

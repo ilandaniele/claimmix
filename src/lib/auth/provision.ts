@@ -72,9 +72,9 @@ function isSignupAllowed(
   // note above spells out means reading every claim in it: names, DNI, policy
   // numbers, addresses.
   //
-  // Not hypothetical. Adding veltra.claimmix@gmail.com to ADMIN_EMAILS this
-  // afternoon created exactly that window, for an address anyone could guess
-  // from the company name.
+  // Not hypothetical: adding a new company mailbox to ADMIN_EMAILS opened
+  // exactly that window on an address anyone could guess from the company
+  // name, and it stayed open until someone thought to check.
   //
   // Google sign-in sets emailVerified, so the intended path is untouched. A
   // password signup now lands without a profile row, which is the same

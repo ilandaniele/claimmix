@@ -140,6 +140,72 @@ pnpm smoke --deep               # además sube un archivo real y llama al modelo
 pnpm smoke --url https://…      # un preview en vez de producción
 ```
 
+### 5. `pnpm load` — cuánto aguanta
+
+Todo lo anterior pregunta si el sistema hace lo correcto. Esto pregunta si lo
+sigue haciendo cuando llegan cien denuncias en dos minutos, que es un escenario
+previsible —un granizo sobre una ciudad mediana genera exactamente eso— y el
+único modo de falla que no aparece nunca mientras se programa, porque ahí
+siempre hay un solo usuario.
+
+Son dos mitades con costos muy distintos.
+
+```bash
+pnpm load                          # sólo lectura: gratis, no escribe nada
+pnpm load --write                  # + 10 asegurados simultáneos (gasta tokens)
+pnpm load --write --claimants 100  # la tormenta
+```
+
+**La mitad de lectura** mide las consultas del tablero contra la base de
+producción con 1, 5 y 20 analistas a la vez, y muestra el plan que Postgres
+elige para cada una. Corre sola después de cada deploy. Lo que busca no es una
+latencia bonita: es la regresión silenciosa. Un filtro nuevo o un orden distinto
+pueden dejar el índice afuera y convertir el listado en un recorrido de la tabla
+entera — con cuatrocientos casos no se nota, con cuatrocientos mil es la
+pantalla que no abre, y para entonces nadie se acuerda del commit que lo causó.
+Por eso falla si el listado deja de usar su índice.
+
+**La mitad de escritura** manda N asegurados inventados al webhook del deploy de
+verdad, todos al mismo tiempo, sin escalonar —escalonar es lo que convierte una
+prueba de carga en una que siempre pasa— y mide tres cosas que no son la misma:
+
+| | Por qué importa |
+|---|---|
+| Acuse del webhook | Si tarda demasiado, Meta reintenta y el asegurado recibe todo dos veces |
+| Hasta la respuesta | Lo único que el asegurado percibe |
+| El tablero, mientras tanto | El analista no trabaja en un sistema en reposo |
+
+Nada le llega a una persona: el camino Bearer del webhook marca el caso como
+simulado, igual que el ensayo. Los casos se borran al terminar, también con
+Ctrl-C, y usan el mismo bloque de números inventados que el ensayo barre.
+
+No corre en cada deploy: cuesta plata y el número no cambia solo. Se corre a
+mano antes de un piloto, o después de tocar algo del camino de entrada.
+
+#### Lo que midió, el 21 de agosto de 2026
+
+Contra producción (Vercel Hobby + Neon + Vertex), con 378 casos en la base:
+
+| Asegurados a la vez | Acuse p95 | Respuesta p50 | Respuesta p95 | Perdidos |
+|---|---|---|---|---|
+| 10 | 2.9s | 18.3s | 21.4s | 0 |
+| 30 | 2.8s | 18.2s | 36.6s | 0 |
+| 60 | 1.6s | 38.8s | 54.1s | 0 |
+| 100 | 1.7s | 30.5s | 58.1s | 0 |
+
+Cien denuncias simultáneas, ninguna perdida, la última contestada al minuto.
+El tablero del analista durante la tormenta: 162ms de mediana, 391ms de p95 —
+no se entera.
+
+Fijate que la mediana casi no se mueve y la cola se duplica. Eso es una fila
+formándose: al asegurado promedio no le pasa nada y el último espera detrás de
+todos. Es el comportamiento correcto para esto; sería inaceptable en algo
+interactivo.
+
+**El límite no es el código.** No apareció en ninguna de las cuatro corridas.
+Los que sí van a aparecer son de plan y de cuota, y son escalones, no curvas:
+el mes que Vercel o Neon lleguen a su tope no se pone lento, se corta.
+
 ---
 
 ## Cuándo correr qué
@@ -153,6 +219,7 @@ pnpm smoke --url https://…      # un preview en vez de producción
 | Antes de mostrárselo a un cliente | `pnpm check --deep` |
 | "Algo raro está pasando en producción" | `pnpm smoke --deep` |
 | Dudás de si el bot puede mandar mensajes | `pnpm prove --whatsapp <número>` |
+| Antes de un piloto con volumen real | `pnpm load --write --claimants 100` |
 
 `--fast` saltea el ensayo (gratis, sin tokens). `--local` saltea el chequeo de
 producción.
@@ -165,14 +232,17 @@ producción.
 lint, tests, build, auditoría de dependencias.
 
 **Después de cada deploy de producción** — `.github/workflows/post-deploy.yml`.
-GitHub recibe de Vercel el aviso de que el deploy terminó bien y dispara dos
-trabajos, en orden:
+GitHub recibe de Vercel el aviso de que el deploy terminó bien y dispara tres
+trabajos: el smoke primero, y si pasó, el ensayo y la mitad gratis de la prueba
+de carga.
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
 2. `pnpm rehearse`: las doce conversaciones enteras contra el agente real.
    Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
+3. `pnpm load`: las consultas del tablero, y el plan que Postgres elige para
+   cada una. Gratis, no escribe nada. Falla si el listado perdió su índice.
 
 Antes de mirar nada, espera a que el alias sirva **el commit de ese deploy**.
 Sin eso el chequeo puede interrogar al build anterior y darlo por bueno — la
@@ -231,3 +301,12 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
 - **La entrega en sí.** `pnpm prove` confirma que el proveedor aceptó el
   mensaje. Que haya llegado al teléfono o a la bandeja lo mira una persona —
   aunque un rechazo del proveedor es el 95% de las formas de fallar.
+- **La carga sostenida.** `pnpm load --write` mide una ráfaga de un minuto, que
+  es la forma en que llegan las denuncias. Ocho horas seguidas al tope es otra
+  pregunta, y la que se contesta mirando la factura, no un script.
+- **La búsqueda por texto del tablero**, que recorre la tabla entera: `ilike
+  '%texto%'` no puede usar un índice común. Con los casos de hoy tarda 100ms y
+  no vale la pena arreglarlo — un índice trigram cuesta escritura en cada
+  denuncia que entra, que es el camino caliente. Cuando el listado empiece a
+  contarse en cientos de miles: `CREATE EXTENSION pg_trgm` y un índice GIN
+  `gin_trgm_ops` sobre `policyholder_name` y `policy_number`.

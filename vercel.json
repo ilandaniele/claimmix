@@ -11,6 +11,7 @@
     }
   ],
   "functions": {
+    "src/app/api/webhooks/whatsapp/route.ts": { "maxDuration": 60 },
     "src/app/api/webhooks/gmail/route.ts": { "maxDuration": 60 },
     "src/app/api/cron/gmail-poll/route.ts": { "maxDuration": 60 },
     "src/app/api/cron/reap-stuck/route.ts": { "maxDuration": 60 },

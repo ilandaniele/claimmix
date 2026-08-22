@@ -498,6 +498,23 @@ async function refuseIfMocked(): Promise<void> {
     );
     process.exit(1);
   }
+
+  /*
+   * Y tampoco medir un sistema sin presupuesto.
+   *
+   * Cien denuncias contra un cupo agotado se contestan todas en cero segundos,
+   * porque el worker ni llama al modelo. El número sale precioso y es mentira.
+   *
+   * Vale saber además que esta prueba GASTA de ese cupo: cien denuncias son
+   * más o menos un millón y medio de tokens del mismo tenant que atiende a los
+   * asegurados de verdad.
+   */
+  const { checkBudget } = await import("@/server/ai/budget");
+  const budget = await checkBudget(TENANT_ID!);
+  if (budget.exceeded) {
+    console.error(`No hay presupuesto para medir nada: ${budget.reason}`);
+    process.exit(1);
+  }
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { google } from "googleapis";
-import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
+import { requireRole, ADMIN_ROLES } from "@/lib/auth/require-role";
 
 const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
@@ -16,7 +16,7 @@ export async function GET() {
     `${headerStore.get("x-forwarded-proto") ?? "https"}://${headerStore.get("host")}`;
 
   try {
-    const { userRow, user } = await requireRole(...ALL_ROLES);
+    const { userRow, user } = await requireRole(...ADMIN_ROLES);
 
     const clientId = process.env.GMAIL_CLIENT_ID;
     const clientSecret = process.env.GMAIL_CLIENT_SECRET;

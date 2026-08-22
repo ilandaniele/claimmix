@@ -55,26 +55,28 @@ export async function GET() {
   // ── Response ──────────────────────────────────────────────────────────────────
   const status = dbStatus === "connected" ? "ok" : "degraded";
 
-  // env: boolean presence checks — NEVER expose actual key values (AC16)
-  const env = {
-    database_url: !!process.env.DATABASE_URL,
-    // Reported as "can we reach Gemini", not "is there a key": under Vertex
-    // there is no key and the answer is still yes.
-    gemini: geminiConfigured,
-    gemini_transport: isVertexConfigured() ? "vertex" : "ai-studio",
-    openai_api_key: !!process.env.OPENAI_API_KEY,
-    sentry_dsn: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
-  };
-
+  /*
+   * Arriba o abajo, y nada más.
+   *
+   * Esto devolvía además el transporte del modelo, si había clave de OpenAI, la
+   * región y si Sentry estaba prendido. Ninguno de esos datos es un secreto por
+   * separado; juntos son reconocimiento gratis para cualquiera. El más útil
+   * para quien mira desde afuera es el de Sentry: "sentry_dsn: false" dice que
+   * nadie se entera de los errores, o sea que se puede probar tranquilo.
+   *
+   * El monitor de uptime necesita saber si contestamos y si la base está — no
+   * cómo está cableado el sistema. Eso vive en /api/health, que pide llave y
+   * está protegido justamente por este motivo.
+   *
+   * `aiMode` se sigue calculando porque decide si el estado es sano, pero no
+   * sale en la respuesta.
+   */
   return NextResponse.json(
     {
       status,
       db: dbStatus,
-      ai: aiMode,
       version: packageJson.version,
-      region: process.env.VERCEL_REGION ?? "local",
       timestamp: new Date().toISOString(),
-      env,
       ...(dbError ? { db_error: dbError } : {}),
     },
     { status: 200 }

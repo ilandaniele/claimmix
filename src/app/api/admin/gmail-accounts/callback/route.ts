@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
-import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
+import { requireRole, ADMIN_ROLES } from "@/lib/auth/require-role";
 import { tables } from "@/lib/db";
 import { encryptRefreshToken } from "@/server/email/gmail/accounts";
 
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { db, user, userRow } = await requireRole(...ALL_ROLES);
+    const { db, user, userRow } = await requireRole(...ADMIN_ROLES);
     if (state.tenantId !== userRow.tenant_id || state.userId !== user.id) {
       return NextResponse.redirect(new URL("/configuracion?gmail=invalid_state", origin));
     }

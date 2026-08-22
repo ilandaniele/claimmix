@@ -4,8 +4,10 @@
  * Uses the Generative Language REST API directly (no SDK dependency):
  *   POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
  *
- * Free tier friendly: defaults to gemini-2.5-flash (GEMINI_MODEL to override)
- * and records cost_usd = 0 (the free tier is not billed).
+ * Defaults to gemini-2.5-flash (GEMINI_MODEL to override). El costo se estima
+ * con el precio de lista: registrarlo en 0 fue correcto mientras corría por el
+ * tier gratis de AI Studio, y dejó de serlo al pasar a Vertex postpago. Un tope
+ * mensual en dólares contra una suma que siempre da cero no salta nunca.
  *
  * Same security posture as the OpenAI extractor:
  * LLM01: prompts built by buildEmailClaimPrompt / buildSystemPrompt (XML sentinels).
@@ -26,7 +28,7 @@ import { OPENAI_JSON_SCHEMA } from "@/lib/schemas/extracted-claim";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { ClaimType } from "@/lib/schemas/cases";
 import { buildSystemPrompt, buildUserMessage, buildEmailClaimPrompt } from "./prompt";
-import { recordUsage } from "./budget";
+import { computeCostUsd, recordUsage } from "./budget";
 import { logProviderUsage } from "./provider-usage";
 import {
   parseResponse,
@@ -550,10 +552,15 @@ export async function extractEmailClaimGemini(
   }
 
   if (result) {
-    // LLM10: track usage (cost 0 — free tier) so token caps still apply.
+    // LLM10: track usage so the token caps and the monthly USD cap both apply.
+    //
+    // Registraba 0 con el comentario "free tier", cierto mientras corría por
+    // AI Studio. Con Vertex postpago dejó de serlo y nadie lo notó: un tope en
+    // dólares contra una suma que siempre da cero no salta nunca.
+    const costUsd = computeCostUsd(totalPromptTokens, totalCompletionTokens, model);
     if (tenantId) {
       try {
-        await recordUsage(tenantId, null, model, totalPromptTokens, totalCompletionTokens, 0);
+        await recordUsage(tenantId, null, model, totalPromptTokens, totalCompletionTokens, costUsd);
       } catch {
         // recordUsage never throws, but defensive catch.
       }
@@ -564,7 +571,7 @@ export async function extractEmailClaimGemini(
       extraction_model: model,
       prompt_tokens: totalPromptTokens,
       completion_tokens: totalCompletionTokens,
-      cost_usd: 0,
+      cost_usd: costUsd,
     };
   }
 
@@ -673,7 +680,7 @@ export async function runGeminiExtractor(
       extraction_model: model,
       prompt_tokens: totalPromptTokens,
       completion_tokens: totalCompletionTokens,
-      cost_usd: 0,
+      cost_usd: computeCostUsd(totalPromptTokens, totalCompletionTokens, model),
     };
   }
 

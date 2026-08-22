@@ -28,7 +28,8 @@
     "mailbox": "tsx --tsconfig tsconfig.rehearsal.json scripts/switch-mailbox.mts",
     "verify": "tsc --noEmit && eslint src --max-warnings=0 && vitest run && bash scripts/check-personal-data.sh",
     "check": "tsx --tsconfig tsconfig.rehearsal.json scripts/check-everything.mts",
-    "load": "tsx --tsconfig tsconfig.rehearsal.json scripts/load-test.mts"
+    "load": "tsx --tsconfig tsconfig.rehearsal.json scripts/load-test.mts",
+    "pentest": "tsx --tsconfig tsconfig.rehearsal.json scripts/pen-test.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

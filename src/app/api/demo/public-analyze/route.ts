@@ -9,14 +9,13 @@ import "server-only";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 import { extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
-import { checkBudget } from "@/server/ai/budget";
+import { checkDemoBudget, getDemoTenantId } from "@/server/ai/budget";
 import { rateLimit, getClientIp } from "@/lib/rate-limit/index";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 
 export const maxDuration = 60;
 
-const DEMO_TENANT_ID = "10000000-0000-0000-0000-000000000001";
 const DEMO_USER_ID = "demo-public";
 
 const AnalyzeSchema = z.object({
@@ -54,10 +53,26 @@ export async function POST(request: NextRequest): Promise<Response> {
     return err(new AppError("VALIDATION_FAILED", parsed.error.issues[0]?.message ?? "Datos inválidos."));
   }
 
-  // Hard cost ceiling for the anonymous endpoint: the in-memory IP limiter is
-  // per-instance on serverless, so the tenant daily-token / monthly-cost budget
-  // is the backstop that actually bounds abuse spend.
-  const budget = await checkBudget(DEMO_TENANT_ID, null);
+  /*
+   * El techo duro del endpoint anónimo.
+   *
+   * El límite por IP se puede esquivar rotando IPs, que cuesta centavos, así
+   * que el presupuesto es lo que de verdad acota el abuso. Lo que importa es
+   * de quién es ese presupuesto: hasta ahora era el del tenant de producción,
+   * y el tope mensual ni siquiera filtraba por tenant. Un anónimo agotaba
+   * cualquiera de los dos y a partir de ahí ninguna denuncia real se extraía,
+   * sin que fallara nada en voz alta.
+   *
+   * Ahora la demo tiene tenant propio y tope propio. Sin DEMO_TENANT_ID no
+   * atiende: pedir prestado el presupuesto de producción es justamente lo que
+   * se está arreglando.
+   */
+  const demoTenantId = getDemoTenantId();
+  if (!demoTenantId) {
+    return err(new AppError("RATE_LIMITED", "La demo no está disponible en este momento."));
+  }
+
+  const budget = await checkDemoBudget();
   if (budget.exceeded) {
     return err(new AppError("RATE_LIMITED", "La demo alcanzó su cupo diario. Volvé mañana."));
   }
@@ -66,7 +81,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   try {
     result = await extractEmailClaimGemini(
       { subject: parsed.data.subject, body: parsed.data.body, memoryHints: [], knownPatterns: [] },
-      DEMO_TENANT_ID,
+      demoTenantId,
       "demo",
       DEMO_USER_ID
     );

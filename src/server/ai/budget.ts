@@ -18,7 +18,7 @@
  */
 
 import "server-only";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, ne, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 
 /** @deprecated Legacy constants for gpt-4o-mini. Use computeCostUsd(tokens, tokens, model). */
@@ -28,14 +28,45 @@ export const COST_PER_COMPLETION_TOKEN = 0.00000060;
 const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   "gpt-4o-mini": { input: 0.00000015, output: 0.00000060 },
   "gpt-4o":      { input: 0.0000025,  output: 0.00001 },
+  // Gemini por Vertex, precio de lista por token. El tope mensual existía y no
+  // servía para nada: la extracción registraba cost_usd = 0 con el comentario
+  // "free tier", que fue cierto mientras corría por AI Studio. Al pasar a
+  // Vertex postpago dejó de serlo, y nada avisó — un tope de USD contra una
+  // suma que siempre da cero no salta nunca.
+  //
+  // Es una estimación, no la factura. Su trabajo es que el tope deje de ser
+  // decorativo; para conciliar plata está la consola de Google.
+  "gemini-2.5-flash":      { input: 0.0000003,  output: 0.0000025 },
+  "gemini-2.5-flash-lite": { input: 0.0000001,  output: 0.0000004 },
+  "gemini-2.5-pro":        { input: 0.00000125, output: 0.00001 },
 };
 
 /**
+ * Precio por token del modelo, tolerando los nombres que devuelve Vertex.
+ *
+ * Un modelo afinado llega como `projects/…/locations/…/models/1234567890` y no
+ * va a coincidir con ninguna clave. Cobra como su modelo base, que es lo que
+ * hace Google, así que la aproximación correcta es "flash" y no "gratis".
+ */
+function ratesFor(model?: string): { input: number; output: number } {
+  const name = (model ?? "").toLowerCase();
+  if (MODEL_COSTS[name]) return MODEL_COSTS[name]!;
+  for (const [key, rates] of Object.entries(MODEL_COSTS)) {
+    if (key.startsWith("gemini") && name.includes(key)) return rates;
+  }
+  if (name.includes("gemini") || name.startsWith("projects/")) {
+    return MODEL_COSTS["gemini-2.5-flash"]!;
+  }
+  return MODEL_COSTS["gpt-4o-mini"]!;
+}
+
+/**
  * Compute estimated cost for a given token usage.
- * Pass model to get accurate per-model pricing; defaults to gpt-4o-mini rates.
+ * Pass model to get per-model pricing; unknown names fall back to a base rate
+ * rather than to zero — see ratesFor.
  */
 export function computeCostUsd(promptTokens: number, completionTokens: number, model?: string): number {
-  const rates = MODEL_COSTS[model ?? "gpt-4o-mini"] ?? MODEL_COSTS["gpt-4o-mini"]!;
+  const rates = ratesFor(model);
   return promptTokens * rates.input + completionTokens * rates.output;
 }
 
@@ -59,10 +90,90 @@ export interface BudgetCheckResult {
 }
 
 /**
+ * El tenant de la demo pública, si está configurado.
+ *
+ * Deliberadamente sin fallback al tenant de producción. Que la demo se caiga
+ * porque falta una variable es un problema de la demo; que la demo comparta
+ * presupuesto con las denuncias reales es un problema del asegurado.
+ */
+export function getDemoTenantId(): string | null {
+  return process.env.DEMO_TENANT_ID?.trim() || null;
+}
+
+/**
+ * El techo de la demo pública, que es plata que se puede perder.
+ *
+ * Separado de checkBudget a propósito: acá el peor caso es que la demo deje de
+ * andar hasta mañana, y eso es aceptable. Allá el peor caso es que un
+ * asegurador se quede sin intake, y no lo es. Nadie autenticado pasa por acá.
+ */
+export async function checkDemoBudget(): Promise<BudgetCheckResult> {
+  const demoTenantId = getDemoTenantId();
+  if (!demoTenantId) {
+    return { exceeded: true, reason: "La demo no tiene tenant propio configurado." };
+  }
+
+  const dailyTokenCap = parseInt(process.env.AI_DEMO_DAILY_TOKEN_CAP ?? "300000", 10);
+  const monthlyCapUsd = parseFloat(process.env.DEMO_MONTHLY_BUDGET_USD ?? "10");
+
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  try {
+    const [day] = await db
+      .select({
+        tokens: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
+      })
+      .from(tables.aiUsage)
+      .where(
+        and(
+          eq(tables.aiUsage.tenant_id, demoTenantId),
+          gte(tables.aiUsage.created_at, dayStart.toISOString())
+        )
+      );
+
+    if ((day?.tokens ?? 0) >= dailyTokenCap) {
+      return { exceeded: true, reason: "La demo alcanzó su cupo diario." };
+    }
+
+    const [month] = await db
+      .select({ usd: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8` })
+      .from(tables.aiUsage)
+      .where(
+        and(
+          eq(tables.aiUsage.tenant_id, demoTenantId),
+          gte(tables.aiUsage.created_at, monthStart.toISOString())
+        )
+      );
+
+    if ((month?.usd ?? 0) >= monthlyCapUsd) {
+      return { exceeded: true, reason: "La demo alcanzó su cupo mensual." };
+    }
+
+    return { exceeded: false };
+  } catch (e) {
+    /*
+     * Acá sí, cerrado.
+     *
+     * Es la única diferencia de criterio con checkBudget, y es a propósito: si
+     * no se puede saber cuánto lleva gastado un endpoint anónimo, seguir
+     * gastando es la decisión cara. La demo se apaga un rato; nadie que esté
+     * denunciando un siniestro se entera.
+     */
+    console.error("[budget] demo check error:", (e as { code?: string })?.code); // crew-debug-ok
+    return { exceeded: true, reason: "No se pudo verificar el cupo de la demo." };
+  }
+}
+
+/**
  * Check if AI budget is available for the current tenant.
  *
  * Checks:
- *   1. Monthly project-level cost cap ($200 by default)
+ *   1. Monthly project-level cost cap ($200 by default), excluding the public
+ *      demo — see the comment inside.
  *   2. Per-tenant daily token cap
  *   3. Per-user daily token cap (if userId provided)
  *
@@ -88,6 +199,18 @@ export async function checkBudget(
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
+  /*
+   * El tope mensual es del proyecto entero, y eso es lo que se quiere: protege
+   * la tarjeta. Lo que no puede hacer es contar lo que gasta la demo pública.
+   *
+   * Ese endpoint corre sin autenticación, y hasta ahora su gasto sumaba acá.
+   * Un anónimo con IPs rotativas llegaba al tope y a partir de ahí ninguna
+   * denuncia real se extraía — sin que fallara nada en voz alta: el worker
+   * anota un warn y el caso se queda esperando. La demo tiene su propio tope,
+   * en checkDemoBudget.
+   */
+  const demoTenantId = getDemoTenantId();
+
   let monthlyCostUsd = 0;
   try {
     const [monthly] = await db
@@ -95,7 +218,14 @@ export async function checkBudget(
         total: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8`,
       })
       .from(tables.aiUsage)
-      .where(gte(tables.aiUsage.created_at, monthStart.toISOString()));
+      .where(
+        demoTenantId
+          ? and(
+              gte(tables.aiUsage.created_at, monthStart.toISOString()),
+              ne(tables.aiUsage.tenant_id, demoTenantId)
+            )
+          : gte(tables.aiUsage.created_at, monthStart.toISOString())
+      );
     monthlyCostUsd = monthly?.total ?? 0;
   } catch (e) {
     // Fail open on DB error (don't block users due to budget check failure).

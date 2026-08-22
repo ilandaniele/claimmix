@@ -221,10 +221,17 @@ pnpm pentest --agent     # + los ataques al agente (gasta tokens)
 **La superficie** prueba cada ruta de la API sin credenciales. La lista **no
 está escrita a mano**: sale de recorrer `src/app/api`, así que una ruta nueva
 que nadie protegió falla el día que se sube, y no el día que alguien la
-encuentra. Las tres que son públicas a propósito están declaradas en el script
-con su motivo, y esa lista tiene que seguir siendo corta. Además: firmas de
-webhook falsificadas, las seis cabeceras de seguridad, CORS, y que un error no
-devuelva el stack.
+encuentra. Las que son públicas a propósito están declaradas en el script con
+su motivo, y esa lista tiene que seguir siendo corta. Además:
+
+- **Los candados por rol, leídos del código.** El barrido por red no distingue
+  "pide admin" de "pide cualquier sesión" —las dos dan 401— así que esto lee
+  cada handler bajo `/api/admin` y falla si algo que modifica no exige admin.
+  Así se encontró que un `viewer` podía apagar la casilla de entrada.
+- **El header interno.** Tres rutas confiaban en un `X-Internal-Worker: true`
+  que manda cualquiera. La sonda comprueba que ya no alcanza.
+- Firmas de webhook falsificadas, las seis cabeceras, CORS, y que un error no
+  devuelva el stack.
 
 **El agente** es la mitad propia de este producto. Lee texto escrito por
 desconocidos y decide cosas con consecuencias — dar por recibido un documento,

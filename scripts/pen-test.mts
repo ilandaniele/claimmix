@@ -93,6 +93,7 @@ const INTENTIONALLY_PUBLIC = new Map<string, string>([
   ["/api/auth/[...all]", "el propio login: no puede pedir sesión para dar una"],
   ["/api/demo/public-analyze", "la demo del prospecto; acotada por IP y por presupuesto propio"],
   ["/api/intake/email", "410 Gone, un stub del webhook viejo de Postmark"],
+  ["/api/admin/health", "el monitor de uptime la pinga cada 5 minutos; abajo se controla qué dice"],
 ]);
 
 /** Convierte src/app/api/x/[id]/route.ts en /api/x/<uuid>. */
@@ -250,6 +251,25 @@ async function attackSurface(): Promise<void> {
     "/api/health no enumera dependencias a cualquiera",
     health.status === 401,
     "el mapa de todo lo que el sistema toca y cómo está cableado"
+  );
+
+  /*
+   * El health público es público a propósito — lo pinga un monitor. Lo que se
+   * controla es qué cuenta.
+   *
+   * Contestaba con el transporte del modelo, si había clave de OpenAI, la
+   * región y si Sentry estaba prendido. Ninguno de esos datos es un secreto por
+   * separado; juntos son reconocimiento gratis. El más útil para quien mira
+   * desde afuera es el de Sentry: "false" dice que nadie se entera de los
+   * errores, o sea que se puede probar tranquilo.
+   */
+  const publicHealth = await head(`${BASE}/api/admin/health`);
+  const enumerates = /"env"|api_key|sentry|transport|region|"ai"\s*:/i.test(publicHealth.body);
+  probe(
+    "/api/admin/health dice si está viva y nada más",
+    !enumerates,
+    "saber el stack y —lo peor— que nadie está mirando los errores, antes de empezar a probar",
+    enumerates ? `\n      dice: ${publicHealth.body.slice(0, 200)}` : ""
   );
 }
 

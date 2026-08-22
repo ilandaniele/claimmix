@@ -60,5 +60,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // run a day and both jobs want exactly that cadence.
   const abandoned = await closeAbandonedConversations();
 
-  return NextResponse.json({ ok: true, ...result, abandoned_closed: abandoned.closed });
+  // Third sweep, same reason: the rate limiter writes a row per key per window
+  // and none of them mean anything once the window has passed.
+  const { purgeExpiredRateLimits } = await import("@/lib/rate-limit/postgres");
+  const purged = await purgeExpiredRateLimits();
+
+  return NextResponse.json({
+    ok: true,
+    ...result,
+    abandoned_closed: abandoned.closed,
+    rate_limit_rows_purged: purged,
+  });
 }

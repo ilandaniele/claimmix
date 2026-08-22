@@ -1,8 +1,16 @@
 /**
- * Rate-limit facade — selects between in-memory and Upstash implementations.
+ * Rate-limit facade — Postgres by default, memory in tests, Upstash if asked.
  *
- * Default: in-memory (single-instance, no external deps).
- * Upgrade: set RATE_LIMIT_PROVIDER=upstash + Upstash env vars.
+ * It used to default to memory, and on serverless that means counting per
+ * instance. Vercel answers parallel requests by starting more instances, each
+ * one beginning its count at zero — so the person who makes the limit weakest
+ * is the one sending the most requests at once, which is exactly who it exists
+ * to stop. The load test made it concrete: a hundred simultaneous requests
+ * served without any single instance seeing more than a handful.
+ *
+ * Postgres is the only thing every instance shares, and it is already there.
+ * No extra vendor, no extra credential to rotate, nothing new to expire
+ * unnoticed. RATE_LIMIT_PROVIDER can still force `upstash` or `memory`.
  *
  * Auth endpoint limits (per spec):
  *   /api/auth/sign-in: 5 attempts / 10s per IP+email tuple
@@ -21,9 +29,13 @@ import {
 export { resetRateLimit, clearAllRateLimits };
 
 /**
- * Simple in-memory rate limiter — thin wrapper around the memory implementation.
- * Exported for direct use by /api/intake/email without needing the full rateLimit()
- * async wrapper (which handles Upstash fallback).
+ * Synchronous, memory-only limiter.
+ *
+ * Written for /api/intake/email, which is now a 410 stub — nothing in the
+ * application calls this any more, only its tests. Left in place because a
+ * synchronous limiter is occasionally the only option (no await available),
+ * but do not reach for it: being memory-only it counts per instance, which on
+ * serverless means counting per attacker. Use `rateLimit()`.
  *
  * @param identifier - Unique key (e.g. IP address for webhook endpoint)
  * @param maxRequests - Maximum requests allowed within the window
@@ -76,6 +88,20 @@ export const RATE_LIMIT_CONFIGS = {
   SYNC_TO_CORE: { limit: 5, windowMs: 60_000 },
 } as const;
 
+/**
+ * Which implementation counts.
+ *
+ * The tests run against memory on purpose: they are about the limiting logic,
+ * they run thousands of times, and none of them should need a database to say
+ * whether a sixth attempt in ten seconds is refused.
+ */
+export function resolveProvider(): "postgres" | "memory" | "upstash" {
+  const forced = process.env.RATE_LIMIT_PROVIDER?.trim().toLowerCase();
+  if (forced === "upstash" || forced === "memory" || forced === "postgres") return forced;
+  if (process.env.NODE_ENV === "test") return "memory";
+  return process.env.DATABASE_URL ? "postgres" : "memory";
+}
+
 export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
@@ -95,13 +121,16 @@ export async function rateLimit(
   key: string,
   config: { limit: number; windowMs: number }
 ): Promise<RateLimitResult> {
-  const provider = process.env.RATE_LIMIT_PROVIDER ?? "memory";
+  const provider = resolveProvider();
 
   let result: { allowed: boolean; remaining: number; resetAt: number };
 
   if (provider === "upstash") {
     const { checkRateLimitUpstash } = await import("./upstash");
     result = await checkRateLimitUpstash(key, config.limit, config.windowMs);
+  } else if (provider === "postgres") {
+    const { checkRateLimitPostgres } = await import("./postgres");
+    result = await checkRateLimitPostgres(key, config.limit, config.windowMs);
   } else {
     result = checkMemory(key, config.limit, config.windowMs);
   }

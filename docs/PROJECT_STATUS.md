@@ -66,9 +66,17 @@ Corrélo después de cada deploy. Detalle completo en
 - **DB migrations still do NOT run on deploy** — they never have. But they are
   tracked now: `scripts/migrate.mjs` keeps a `schema_migrations` ledger, checksums
   every applied file to catch one edited after it ran, and applies each in its own
-  transaction. The baseline was adopted against prod on **2026-08-21** — fourteen
-  migrations had been applied by hand with no record of it — and **0001–0016 are
-  applied**, ledger and live schema agreeing.
+  transaction. **0001–0017 are applied** (verified against the live schema, not the
+  ledger, on 2026-08-23).
+  ⚠️ **A baselined row is a claim, not a fact.** The 2026-08-21 baseline adopted
+  fourteen migrations as applied *without executing them*, on the assumption they
+  had been run by hand. **0010 had not been.** For two days the ledger showed it
+  green while `tenants` still had three columns: every tenant creation failed and
+  `/api/admin/billing` answered 500. Found on 2026-08-23 by the first run of
+  `pnpm onboard`, and applied for real. Use `migrate.mjs --forget <version>` to
+  drop a row that lies, then `--apply`.
+  The runner also falls back to Neon's SQL-over-HTTPS when port 5432 is blocked
+  (it is, from at least one of the networks this gets worked on).
   ```
   node scripts/migrate.mjs            # estado
   node scripts/migrate.mjs --apply    # aplica lo que falte
@@ -216,19 +224,35 @@ Closed on three sides:
    `maxDuration`, or process per-case via the worker route.
 2. ~~**Migration runner + `schema_migrations` tracking**~~ ✅ **DONE** — runner
    2026-08-13, baseline adopted against prod 2026-08-21 (see Infra facts).
-3. **No admin UI for tenants or billing.** Both are API/script only. Fine for the
-   first few clients, not for ten.
-4. **Billing has no invoice history.** `/api/admin/billing` recomputes from
-   `cases` on every call, so a past month's invoice changes if old cases are
-   edited or deleted. Snapshot each period once it closes before issuing real
-   invoices.
+3. ~~**No admin UI for tenants or billing**~~ ✅ **DONE 2026-08-23.**
+   `/admin/facturacion` shows the tenant's month — fee, included, overage, total,
+   AI cost, margin, the four volume buckets, and whether the period is closed.
+   `/admin/cartera` shows every client with plan, status, claims and margin;
+   it crosses tenants, so it sits behind `requireOperator` (admin session **and**
+   an address in `ADMIN_EMAILS`, fail-closed). Creating a client stays in
+   `create-tenant.mjs` on purpose — one form duplicating the commercial rules for
+   an operation that happens once per client is not worth it.
+4. ~~**Billing has no invoice history**~~ ✅ **DONE 2026-08-23** (migration 0017).
+   A month that has ENDED is frozen the first time anyone asks for it, and served
+   from that copy afterwards; the current month is still a live count. The stored
+   row keeps the terms that were used, not just the total, so an invoice survives
+   the client changing plan. Frozen on read rather than by cron because Hobby
+   allows two crons a day and both are taken.
 
 ### 🙋 Waiting on you (not code)
 
 - **Vercel and Neon are still on the free plans.** The load test says the ceiling
   is the plan, not the code — that becomes a step-shaped outage the month it hits.
 - **New GCP project `claimmix-veltra`** + `pnpm switch-gcp` to move extraction to it.
-- **Connect the veltra mailbox** (`pnpm mailbox`).
+- ~~**Connect the veltra mailbox**~~ ✅ **DONE 2026-08-23.** Intake now reads from
+  `veltra.claimmix@gmail.com` and nothing else. The two personal mailboxes it replaced
+  are **disabled, not deleted** — reversible from Configuración; run
+  `pnpm mailbox --keep veltra.claimmix@gmail.com --delete` to remove them for good.
+  Production proved the new mailbox can send before the old ones were switched off, and
+  the Gmail watch was registered on the spot, so inbound is push and not once-a-day.
+  `GMAIL_USER_EMAIL` / `GMAIL_FROM_ADDRESS` still name the old address and that is
+  harmless: the From comes from the connected account (`dispatch.ts`), and the env var
+  is only a fallback for when no mailbox is connected at all.
 - **Demote the two extra admins** in the database if the `[Urgente]` alerts should
   reach veltra only.
 - **Rotate the `veltra.soporte@gmail.com` app password** — see Security hygiene below.
@@ -302,9 +326,15 @@ regenerated. Latest dump: `training-examples-2026-08-07.json` (206 + 20 rules).
   over SMS in Argentina.
 - **Multi-tenant onboarding (the business model):** key resolution is user → tenant →
   env, so each insurer pastes **their own** Gemini key in Configuración and pays their
-  own consumption — our cost per client is $0. Creating the tenant is now scripted
-  (`create-tenant.mjs`), but the flow has **never been rehearsed end-to-end with a
-  second tenant** — do that on a throwaway tenant before a real client, not during one.
+  own consumption — our cost per client is $0. ✅ **Rehearsed end-to-end since
+  2026-08-23**: `pnpm onboard` creates a throwaway tenant with the real script,
+  checks the plan's terms landed, that its claims are invisible from the other tenant
+  through all five read paths, that billing counts and prices only its own, that a
+  closed month's invoice survives its cases being deleted, that its AI budget and key
+  resolution are its own, and then deletes it and verifies nothing is left. Free — it
+  never calls the model — so run it before each real client. It says out loud what it
+  could not test: the client's own key needs `GMAIL_TOKEN_ENCRYPTION_KEY`, which is
+  write-only in Vercel.
 - ~~**Re-trigger fine-tuning**~~ ✅ **DONE 2026-06-30 — first successful tuned model.**
   Job `2eb72bbc-…` (Vertex `tuningJobs/2998492462349025280`) → `JOB_STATE_SUCCEEDED`,
   model `…/models/562968095363170304@1`, base gemini-2.5-flash, 116 examples. DB row is
@@ -372,7 +402,8 @@ ships, so a second non-blocking step keeps dev advisories visible.
 | `cleanup-junk-cases.mjs` | Deletes only dead-end cases (`no_relevante` / unrecovered `escalado`) that back no approved example. Dry-run by default. |
 | `activate-gemini.mjs` | Legacy: verifies the AI Studio key and re-drives the escalado backlog. Superseded by the Vertex transport; kept for the prepay path. |
 | `create-tenant.mjs` | Onboards a client: creates the tenant with its plan's commercial terms. Dry-run by default; `--apply` to execute. Prints the remaining manual steps (SIGNUP_ALLOWED_EMAILS, the client's own Gemini key). |
-| `migrate.mjs` | Applies pending SQL migrations and records them in `schema_migrations`. Status by default; `--apply` to run; `--baseline NNNN` to adopt already-hand-applied ones without executing. Detects a migration edited after it ran. |
+| `migrate.mjs` | Applies pending SQL migrations and records them in `schema_migrations`. Status by default; `--apply` to run; `--baseline NNNN` to adopt already-hand-applied ones without executing; `--forget NNNN` to drop a ledger row that turned out to be a lie (the schema is not touched). Detects a migration edited after it ran. Falls back to Neon over HTTPS when port 5432 is blocked. |
+| `rehearse-onboarding.mts` | `pnpm onboard` — gives a throwaway client the full onboarding, checks isolation, billing, the invoice freeze and the AI budget, then deletes it. Free. Run it before each real client. |
 | `switch-gcp-project.mts` | `pnpm switch-gcp` — moves extraction to another GCP project in one command (service account, APIs, Vercel vars). |
 | `switch-mailbox.mts` | `pnpm mailbox` — swaps the intake mailbox without a moment of silence. |
 

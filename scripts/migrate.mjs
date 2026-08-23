@@ -29,6 +29,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import pg from "pg";
+import { neon } from "@neondatabase/serverless";
 
 const MIGRATIONS_DIR = "./neon/migrations";
 
@@ -77,6 +78,105 @@ function readMigrations() {
   });
 }
 
+/**
+ * Cómo hablarle a la base, por el camino que esté abierto.
+ *
+ * `pg` va por TCP al 5432, que es el camino bueno: transacciones interactivas
+ * de verdad, un begin/commit alrededor del archivo entero. Pero hay redes
+ * donde ese puerto no sale —operadores que lo bloquean, oficinas con egress
+ * filtrado— y desde ahí este script no servía para nada mientras la
+ * aplicación andaba perfecto: Neon también atiende SQL sobre HTTPS, y es por
+ * ahí que se conecta la app.
+ *
+ * Si el 5432 no responde, entonces, cae al camino HTTPS en vez de rendirse.
+ * Lo que se pierde es la transacción interactiva: sobre HTTP las sentencias
+ * van juntas en una lista, y armar esa lista obliga a partir el archivo, que
+ * es un problema mal definido en el caso general. Cuando el archivo tiene algo
+ * que el partidor no puede garantizar, se planta y lo dice: media migración
+ * aplicada es peor que ninguna.
+ */
+async function connect(connectionString) {
+  const client = new pg.Client({ connectionString, ssl: { rejectUnauthorized: false } });
+  try {
+    await client.connect();
+    return tcpDriver(client);
+  } catch (e) {
+    const blocked = ["ETIMEDOUT", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH"];
+    const codes = [e?.code, ...(e?.errors ?? []).map((x) => x?.code)];
+    if (!codes.some((code) => blocked.includes(code))) throw e;
+    console.log("· El puerto 5432 no responde; voy por el SQL sobre HTTPS de Neon.");
+    return httpDriver(connectionString);
+  }
+}
+
+function tcpDriver(client) {
+  return {
+    query: (text, params) => client.query(text, params),
+    async applyMigration(m, appliedBy) {
+      try {
+        await client.query("begin");
+        await client.query(m.sql);
+        await client.query(LEDGER_INSERT, [m.version, m.filename, m.checksum, appliedBy]);
+        await client.query("commit");
+      } catch (e) {
+        await client.query("rollback");
+        throw e;
+      }
+    },
+    end: () => client.end(),
+  };
+}
+
+function httpDriver(connectionString) {
+  const sql = neon(connectionString);
+  return {
+    query: async (text, params) => ({ rows: await sql.query(text, params ?? []) }),
+    async applyMigration(m, appliedBy) {
+      const statements = splitStatements(m.sql, m.filename);
+      await sql.transaction([
+        ...statements.map((statement) => sql.query(statement)),
+        sql.query(LEDGER_INSERT, [m.version, m.filename, m.checksum, appliedBy]),
+      ]);
+    },
+    end: async () => {},
+  };
+}
+
+/**
+ * Parte un archivo en sentencias, o se planta.
+ *
+ * El endpoint HTTP acepta una sentencia por pedido, así que no hay opción. Un
+ * partidor por `;` es correcto para DDL simple y deja de serlo en cuanto
+ * aparece un bloque con comillas de dólar —una función, un DO, un trigger—
+ * porque ahí el `;` vive adentro del cuerpo. En vez de adivinar, se niega: esa
+ * migración se aplica desde una red con el 5432 abierto.
+ */
+function splitStatements(text, filename) {
+  const withoutComments = text.replace(/^[ \t]*--.*$/gm, "");
+
+  if (/\$\$|\$[a-zA-Z_]+\$/.test(withoutComments)) {
+    console.error(`\n✖ ${filename} tiene un bloque con comillas de dólar.`);
+    console.error("  Sobre HTTPS habría que partirlo en sentencias, y eso no se");
+    console.error("  puede hacer con seguridad. Aplicá ésta desde una red con el");
+    console.error("  puerto 5432 abierto.");
+    process.exit(1);
+  }
+
+  const statements = withoutComments
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+
+  if (statements.length === 0) {
+    console.error(`\n✖ ${filename} no tiene ninguna sentencia.`);
+    process.exit(1);
+  }
+  return statements;
+}
+
+const LEDGER_INSERT =
+  "insert into schema_migrations (version, filename, checksum, applied_by) values ($1,$2,$3,$4)";
+
 const env = readFileSync("./.env.local", "utf8");
 const connMatch = env.match(/^DATABASE_URL\s*=\s*"?([^"\n]+)"?/m);
 if (!connMatch) {
@@ -84,8 +184,7 @@ if (!connMatch) {
   process.exit(1);
 }
 
-const c = new pg.Client({ connectionString: connMatch[1], ssl: { rejectUnauthorized: false } });
-await c.connect();
+const c = await connect(connMatch[1]);
 
 try {
   // The ledger bootstraps itself rather than living in a migration file —
@@ -141,11 +240,7 @@ try {
     }
 
     for (const m of toAdopt) {
-      await c.query(
-        `insert into schema_migrations (version, filename, checksum, applied_by)
-         values ($1,$2,$3,$4)`,
-        [m.version, m.filename, m.checksum, "baseline"]
-      );
+      await c.query(LEDGER_INSERT, [m.version, m.filename, m.checksum, "baseline"]);
     }
     console.log(`\n✔ ${toAdopt.length} migraciones adoptadas. Corré --apply para las pendientes.`);
     process.exit(0);
@@ -154,7 +249,8 @@ try {
   // ── Status ──────────────────────────────────────────────────────────────
   console.log(`APLICADAS (${applied.size}):`);
   for (const m of migrations.filter((x) => applied.has(x.version))) {
-    const when = applied.get(m.version).applied_at.toISOString().slice(0, 10);
+    // Por TCP llega Date y por HTTP string: normalizar acá y no en dos lados.
+    const when = new Date(applied.get(m.version).applied_at).toISOString().slice(0, 10);
     console.log(`  ✔ ${m.filename}   ${when}`);
   }
   if (applied.size === 0) console.log("  (ninguna)");
@@ -190,17 +286,9 @@ try {
   for (const m of pending) {
     process.stdout.write(`\n→ ${m.filename} ... `);
     try {
-      await c.query("begin");
-      await c.query(m.sql);
-      await c.query(
-        `insert into schema_migrations (version, filename, checksum, applied_by)
-         values ($1,$2,$3,$4)`,
-        [m.version, m.filename, m.checksum, "migrate.mjs"]
-      );
-      await c.query("commit");
+      await c.applyMigration(m, "migrate.mjs");
       console.log("ok");
     } catch (e) {
-      await c.query("rollback");
       console.log("FALLÓ");
       console.error(`\n✖ ${m.filename} falló y se revirtió por completo:`);
       console.error(`  ${e.message}`);

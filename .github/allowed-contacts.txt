@@ -26,6 +26,7 @@ ilan.daniele@gmail.com
 
 # Cuentas de infraestructura nombradas en PROJECT_STATUS. No son de clientes.
 veltra.info1@gmail.com
+veltra.claimmix@gmail.com
 veltra.soporte@gmail.com
 n10jasper@gmail.com
 

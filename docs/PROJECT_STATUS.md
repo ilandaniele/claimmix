@@ -8,8 +8,10 @@ Update it at the end of a work session so the next one can recover quickly._
 > approved examples** without needing fine-tuning. 21–23 August went into hardening: the
 > app was attacked on purpose, load-tested at a hundred simultaneous claimants, and what
 > that turned up was fixed. Migrations are tracked now — **0001–0016 applied**, ledger
-> and database agreeing. Nothing is broken. What's left is commercial, not technical: a
-> real WhatsApp number and Meta business verification.
+> and database agreeing. Nothing is broken. **WhatsApp now runs on the real Argentine
+> number**, verified, with the WABA approved — the last technical blocker to a pilot is
+> gone. What is left is commercial and operational: paid plans, the veltra mailbox, and
+> a first client.
 
 ## What ClaimMix is
 
@@ -90,8 +92,15 @@ Corrélo después de cada deploy. Detalle completo en
   `messages` subscription were registered through the **Graph API**, not the dashboard:
   that is the ban-safe route — automating the Facebook UI is what risks the account.
   All 7 `WHATSAPP_*` vars are in Vercel, including a **permanent** system-user token
-  (`expires_at: 0`) so it no longer dies every 24 h. Still on Meta's **test number**
-  (+1 555-174-3395), which only accepts allow-listed senders.
+  (`expires_at: 0`) so it no longer dies every 24 h.
+- **The real number is live** (since ~2026-08-16, verified again 2026-08-23 against the
+  Graph API): `+54 9 291 642-6930`, display name «ClaimMix», `code_verification_status:
+  VERIFIED`, quality **GREEN**, on WABA «Veltra» with `account_review_status: APPROVED`.
+  Meta's **test number is gone** and with it the allow-list — anyone can write in now.
+  Messaging tier is **TIER_250** (250 business-initiated conversations a day; people
+  writing to us first are not capped). The number is the business's and is public by
+  design — it is in `.github/allowed-contacts.txt` with its reason, which is what stops
+  the personal-data check from failing on it.
 - Stuck-`procesando` reaper (`reap-stuck.ts`) + daily cron + opportunistic call in simulate/batch-simulate.
 - Public demo at `/demo`.
 - Admin account for the paid Gemini key: **`veltra.info1@gmail.com`** (via "Continuar con Google").
@@ -223,7 +232,9 @@ Closed on three sides:
 - **Demote the two extra admins** in the database if the `[Urgente]` alerts should
   reach veltra only.
 - **Rotate the `veltra.soporte@gmail.com` app password** — see Security hygiene below.
-- **WhatsApp: the real number** and Meta business verification (see below).
+- **Meta business verification** (Business Manager → CUIT/AFIP docs) if the 250/day
+  tier starts to bind. The number and the WABA are already approved; this only raises
+  the ceiling on business-initiated conversations. Not urgent before a pilot.
 
 ### 🤖 The AI path — RESOLVED, running unattended (verified 2026-08-07)
 Extraction runs on **Vertex AI**, not the AI Studio key. That switch is what ended
@@ -283,14 +294,12 @@ regenerated. Latest dump: `training-examples-2026-08-07.json` (206 + 20 rules).
   to `.gitignore`. BUT the `veltra.soporte@gmail.com` app password was pasted into a
   chat session (lives in transcripts) → **rotate that password**. The dead `AQ.` key was
   also pasted around; it's dead, so no action needed once replaced.
-- **WhatsApp — real number.** Everything else is done (see above); only the production
-  number is left. Registering `+54 9 11 2318-4512` failed because it still had a
-  WhatsApp account attached, and a fresh chip never received the SMS code. Next
-  attempt: use **voice-call verification** instead of SMS (more reliable in AR), on a
-  chip confirmed to receive normal calls/SMS first. Then **business verification**
-  (Meta → Security Center → CUIT/AFIP docs, takes days) so any customer can write in,
-  not just allow-listed test senders. Hand the new **Phone Number ID** over and the
-  Vercel swap is a one-liner. Full guide: `docs/whatsapp-setup.md`.
+- ~~**WhatsApp — real number**~~ ✅ **DONE.** It took two attempts: `+54 9 11 2318-4512`
+  failed because it still had a WhatsApp account attached and a fresh chip never got the
+  SMS code. The number that worked is the one in production now. If it ever has to be
+  swapped again, the Vercel change is a one-liner once you have the new **Phone Number
+  ID** — full guide in `docs/whatsapp-setup.md`, and prefer **voice-call verification**
+  over SMS in Argentina.
 - **Multi-tenant onboarding (the business model):** key resolution is user → tenant →
   env, so each insurer pastes **their own** Gemini key in Configuración and pays their
   own consumption — our cost per client is $0. Creating the tenant is now scripted

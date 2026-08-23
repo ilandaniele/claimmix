@@ -898,8 +898,7 @@ async function refuseIfBudgetSpent(): Promise<void> {
       "el runner y en Vercel. Si la suite entera no entra en un día, subí",
       "AI_TENANT_DAILY_TOKEN_CAP en los dos lados: la variable del repo en",
       "GitHub (la usa el ensayo) y la de Vercel (la usa producción).",
-    ].join("
-")
+    ].join("\n")
   );
   process.exit(1);
 }

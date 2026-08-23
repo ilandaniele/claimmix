@@ -55,6 +55,10 @@ beforeEach(() => {
       { table_name: "missing_docs", column_name: "declined_at" },
       { table_name: "outbound_messages", column_name: "asked_keys" },
       { table_name: "cases", column_name: "extraction_lease_at" },
+      { table_name: "tenants", column_name: "plan" },
+      { table_name: "tenants", column_name: "monthly_fee_usd" },
+      { table_name: "billing_invoices", column_name: "id" },
+      { table_name: "rate_limit_counters", column_name: "key" },
     ],
   });
   mockSelect.mockReturnValue({
@@ -125,6 +129,28 @@ describe("GET /api/health — what it reports", () => {
     const schema = body.checks.find((c: { name: string }) => c.name === "migraciones");
     expect(schema.status).toBe("down");
     expect(schema.detail).toContain("missing_docs.declined_at");
+  });
+
+  it("nota que falta lo comercial, no sólo lo del camino caliente", async () => {
+    // Es la falla que pasó: la 0010 figuraba aplicada en el registro y no lo
+    // estaba. Nadie lo vio durante dos días porque la facturación no es lo que
+    // toca una denuncia al entrar, y el chequeo sólo miraba ese camino.
+    mockExecute.mockResolvedValue({
+      rows: [
+        { table_name: "missing_docs", column_name: "declined_at" },
+        { table_name: "outbound_messages", column_name: "asked_keys" },
+        { table_name: "cases", column_name: "extraction_lease_at" },
+        { table_name: "billing_invoices", column_name: "id" },
+        { table_name: "rate_limit_counters", column_name: "key" },
+      ],
+    });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const body = await res.json();
+
+    const schema = body.checks.find((c: { name: string }) => c.name === "migraciones");
+    expect(schema.status).toBe("down");
+    expect(schema.detail).toContain("tenants.plan");
   });
 
   it("answers 503 when anything is down, so a watcher notices", async () => {

@@ -136,16 +136,29 @@ async function checkDatabase(): Promise<Check> {
 /**
  * Are the migrations actually applied to the database this deployment talks to?
  *
- * Migrations here are applied by hand and nothing tracks them, so code that
- * expects a column can ship days before the column exists. The failure is
- * quiet and specific: one feature stops working while everything else looks
- * fine. Checking the newest columns catches the whole class.
+ * Deploys do not run migrations, so code that expects a column can ship days
+ * before the column exists. The failure is quiet and specific: one feature
+ * stops working while everything else looks fine.
+ *
+ * There IS a ledger now (schema_migrations), and this deliberately does not
+ * read it. A ledger row says a migration was recorded, not that it ran:
+ * `--baseline` writes rows without executing anything. That is not a theory —
+ * 0010 sat in the ledger green for two days while `tenants` still had three
+ * columns, tenant creation failed and /api/admin/billing answered 500. Asking
+ * the schema is the only question whose answer cannot be a claim.
+ *
+ * The list is not every column: it is one from each migration whose absence
+ * breaks something, INCLUDING the ones off the hot path. 0010 went unnoticed
+ * precisely because billing is not what a claim arriving touches.
  */
 async function checkSchema(): Promise<Check> {
   const required: Array<[string, string]> = [
     ["missing_docs", "declined_at"],
     ["outbound_messages", "asked_keys"],
     ["cases", "extraction_lease_at"],
+    // 0010: sin esto no se puede dar de alta un cliente ni emitir una factura.
+    ["tenants", "plan"],
+    ["tenants", "monthly_fee_usd"],
   ];
 
   try {
@@ -156,13 +169,21 @@ async function checkSchema(): Promise<Check> {
     `);
 
     const present = new Set(rows.map((r) => `${r.table_name}.${r.column_name}`));
+
+    // 0017 crea una tabla entera; sin ella una factura cerrada se recalcula en
+    // cada consulta, que es justo lo que la 0017 existe para impedir.
+    const requiredTables = ["billing_invoices", "rate_limit_counters"];
+    const tablesPresent = new Set(rows.map((r) => r.table_name));
+    const missingTables = requiredTables.filter((t) => !tablesPresent.has(t));
     const missing = required
       .map(([t, c]) => `${t}.${c}`)
       .filter((key) => !present.has(key));
 
-    return missing.length === 0
-      ? ok("migraciones", "las columnas que el código espera existen")
-      : down("migraciones", `faltan: ${missing.join(", ")}`);
+    const gaps = [...missing, ...missingTables];
+
+    return gaps.length === 0
+      ? ok("migraciones", "el esquema tiene lo que el código espera")
+      : down("migraciones", `faltan: ${gaps.join(", ")}`);
   } catch (err) {
     return degraded("migraciones", `no se pudo verificar: ${why(err)}`);
   }

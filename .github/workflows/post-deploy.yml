@@ -15,7 +15,12 @@
 # respuesta más peligrosa posible: la que tapa justo el deploy que se está
 # preguntando.
 #
-# Sólo necesita un secreto, CRON_SECRET. Todo lo demás ya vive en el deploy.
+# El smoke sólo necesita un secreto, CRON_SECRET: interroga al deploy, y todo
+# lo demás ya vive adentro. Los otros tres trabajos no — el ensayo, la carga y
+# la pared entre tenants corren el código acá, en el runner, contra la base de
+# producción, así que necesitan sus credenciales y su configuración. Lo que
+# olvidan es lo segundo: una variable que falta acá no rompe nada en voz alta,
+# toma otro default que producción y prueba algo que no es producción.
 
 name: Post-deploy
 
@@ -126,6 +131,19 @@ jobs:
           GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           VERTEX_EXTRACTION_MODEL: ${{ secrets.VERTEX_EXTRACTION_MODEL }}
+          # El cupo diario de tokens del tenant.
+          #
+          # El ensayo corre acá, en el runner, no adentro del deploy — así que
+          # lee el tope de ESTE entorno. Sin esta línea tomaba el default de 5M
+          # mientras producción tiene 20M, y una tarde de pruebas (la carga, el
+          # pen test del agente, los ensayos mismos) lo agotaba. Entonces el
+          # worker no llama al modelo, el agente se queda mudo, y las doce
+          # conversaciones fallan juntas como si se hubiera roto algo.
+          #
+          # Variable del repo y no secreto: no lo es, y GitHub tacha el valor de
+          # un secreto en el log — dejaría «5.088.283 / ***» justo en la línea
+          # que explica la falla. Mantenerla igual a la de Vercel.
+          AI_TENANT_DAILY_TOKEN_CAP: ${{ vars.AI_TENANT_DAILY_TOKEN_CAP || '20000000' }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

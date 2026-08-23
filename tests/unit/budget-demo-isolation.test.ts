@@ -126,3 +126,32 @@ describe("checkDemoBudget", () => {
     expect((await checkDemoBudget()).exceeded).toBe(true);
   });
 });
+
+/**
+ * Un tope que no se puede alcanzar no avisa de que no está.
+ *
+ * El ensayo de post-deploy corre en un runner de GitHub, no adentro del
+ * deploy, así que lee el tope de SU entorno. Cablearlo desde una variable del
+ * repo que nadie creó deja `AI_TENANT_DAILY_TOKEN_CAP=""`, y `parseInt("")`
+ * es NaN: cualquier comparación contra NaN da false, o sea que la variable
+ * vacía no aflojaba el tope, lo apagaba entero y sin decir nada.
+ */
+describe("checkBudget — el tope leído del entorno", () => {
+  it("cae al default cuando la variable está vacía, en vez de apagarse", async () => {
+    process.env.AI_TENANT_DAILY_TOKEN_CAP = "";
+    rows.push({ total: 0 }, { total: 6_000_000 }); // mensual, diario del tenant
+    expect((await checkBudget(REAL)).exceeded).toBe(true);
+  });
+
+  it("cae al default cuando la variable no es un número", async () => {
+    process.env.AI_TENANT_DAILY_TOKEN_CAP = "20M";
+    rows.push({ total: 0 }, { total: 6_000_000 });
+    expect((await checkBudget(REAL)).exceeded).toBe(true);
+  });
+
+  it("respeta el tope que sí está bien puesto", async () => {
+    process.env.AI_TENANT_DAILY_TOKEN_CAP = "20000000";
+    rows.push({ total: 0 }, { total: 6_000_000 });
+    expect((await checkBudget(REAL)).exceeded).toBe(false);
+  });
+});

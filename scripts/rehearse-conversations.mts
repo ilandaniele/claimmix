@@ -861,7 +861,51 @@ async function refuseIfMocked(): Promise<void> {
   console.log(`Motor de extracción: ${engine}.\n`);
 }
 
+/**
+ * Refuse to rehearse with the tenant's daily token budget already spent.
+ *
+ * Same reasoning as refuseIfMocked, one step further along: there the agent
+ * answers with something canned, here it does not answer at all. The worker
+ * checks the budget before it calls the model, logs a warn, and leaves the
+ * case where it was. Every scenario then fails at once — no reply, wrong
+ * state, fields never extracted — and the report reads like the agent broke.
+ *
+ * It happened on 22 August 2026: four post-deploy runs in a row went red with
+ * 33 behavioural differences, and not one of them was real. The day's own
+ * testing — the load run, the agent pen test, the rehearsals themselves — had
+ * spent the tenant's cap, so the model was never called. Whoever reads that
+ * report goes hunting a regression that does not exist.
+ *
+ * The budget is shared with production on purpose: the rehearsal runs as the
+ * real tenant, against the real configuration. So it can genuinely run out,
+ * and when it does the honest answer is "no lo probé", not a list of failures.
+ */
+async function refuseIfBudgetSpent(): Promise<void> {
+  const { checkBudget } = await import("@/server/ai/budget");
+  const budget = await checkBudget(TENANT_ID!);
+
+  if (!budget.exceeded) return;
+
+  console.error(
+    [
+      `No hay presupuesto: ${budget.reason}`,
+      "",
+      "Sin modelo el agente no contesta, y una conversación en silencio falla",
+      "todas las verificaciones a la vez: parece que el agente se rompió, y lo",
+      "único que pasó es que se acabó el cupo. Prefiero fallar acá y decirlo.",
+      "",
+      "El cupo diario se repone a la medianoche del huso donde corre — UTC en",
+      "el runner y en Vercel. Si la suite entera no entra en un día, subí",
+      "AI_TENANT_DAILY_TOKEN_CAP en los dos lados: la variable del repo en",
+      "GitHub (la usa el ensayo) y la de Vercel (la usa producción).",
+    ].join("
+")
+  );
+  process.exit(1);
+}
+
 await refuseIfMocked();
+await refuseIfBudgetSpent();
 await sweepOldRehearsalCases();
 
 const created: string[] = [];

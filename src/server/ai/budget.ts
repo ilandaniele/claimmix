@@ -90,6 +90,24 @@ export interface BudgetCheckResult {
 }
 
 /**
+ * Un tope leído del entorno, que cae al default si el valor no es un número.
+ *
+ * `parseInt("")` da NaN, y `total >= NaN` es false para cualquier total: una
+ * variable vacía o mal escrita no relaja el tope, lo apaga entero y en
+ * silencio. Es la misma forma que tenía el `cost_usd = 0` — un techo que no se
+ * puede alcanzar nunca avisa de que no está.
+ *
+ * Un cero se respeta: apagar el gasto a propósito es una decisión válida. Lo
+ * que no se acepta es basura, un negativo, o la variable vacía que deja un
+ * workflow cuando el secreto que la llena no existe.
+ */
+function readCap(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  if (!raw?.trim() || !Number.isFinite(value) || value < 0) return fallback;
+  return value;
+}
+
+/**
  * El tenant de la demo pública, si está configurado.
  *
  * Deliberadamente sin fallback al tenant de producción. Que la demo se caiga
@@ -113,8 +131,8 @@ export async function checkDemoBudget(): Promise<BudgetCheckResult> {
     return { exceeded: true, reason: "La demo no tiene tenant propio configurado." };
   }
 
-  const dailyTokenCap = parseInt(process.env.AI_DEMO_DAILY_TOKEN_CAP ?? "300000", 10);
-  const monthlyCapUsd = parseFloat(process.env.DEMO_MONTHLY_BUDGET_USD ?? "10");
+  const dailyTokenCap = readCap(process.env.AI_DEMO_DAILY_TOKEN_CAP, 300_000);
+  const monthlyCapUsd = readCap(process.env.DEMO_MONTHLY_BUDGET_USD, 10);
 
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
@@ -184,15 +202,9 @@ export async function checkBudget(
   tenantId: string,
   userId?: string | null
 ): Promise<BudgetCheckResult> {
-  const monthlyCapUsd = parseFloat(process.env.MONTHLY_BUDGET_USD ?? "200");
-  const tenantDailyTokenCap = parseInt(
-    process.env.AI_TENANT_DAILY_TOKEN_CAP ?? "5000000",
-    10
-  );
-  const userDailyTokenCap = parseInt(
-    process.env.AI_USER_DAILY_TOKEN_CAP ?? "100000",
-    10
-  );
+  const monthlyCapUsd = readCap(process.env.MONTHLY_BUDGET_USD, 200);
+  const tenantDailyTokenCap = readCap(process.env.AI_TENANT_DAILY_TOKEN_CAP, 5_000_000);
+  const userDailyTokenCap = readCap(process.env.AI_USER_DAILY_TOKEN_CAP, 100_000);
 
   // ── 1. Monthly cost check (project-wide) ─────────────────────────────────────
   const monthStart = new Date();

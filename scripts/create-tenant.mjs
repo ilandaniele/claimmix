@@ -30,7 +30,7 @@
  * exact line to add.
  */
 import { readFileSync } from "node:fs";
-import pg from "pg";
+import { connect } from "./lib/db-driver.mjs";
 
 // Mirrors src/lib/billing/plans.ts. Duplicated deliberately: this script is
 // plain .mjs run outside the Next build and cannot import the TS module.
@@ -98,8 +98,7 @@ console.log();
 
 const env = readFileSync("./.env.local", "utf8");
 const conn = env.match(/^DATABASE_URL\s*=\s*"?([^"\n]+)"?/m)[1];
-const c = new pg.Client({ connectionString: conn, ssl: { rejectUnauthorized: false } });
-await c.connect();
+const c = await connect(conn);
 
 try {
   // Migration 0010 must be applied first — these columns are hand-applied in

@@ -1,14 +1,15 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-08-13. This file is the single source of truth for "where things stand."
+_Last updated: 2026-08-23. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
-> through **Vertex AI** (postpay, no prepay wall), 83 extractions in the last 3 days with
-> **zero errors**, and the agent is trained on **206 approved examples** without needing
-> fine-tuning. Nothing is broken. What's left is commercial, not technical: a real
-> WhatsApp number and Meta business verification. Tenant onboarding + per-claim
-> billing now exist in code (2026-08-13) but **migration 0010 is still unapplied**.
+> through **Vertex AI** (postpay, no prepay wall), and the agent is trained on **206
+> approved examples** without needing fine-tuning. 21–23 August went into hardening: the
+> app was attacked on purpose, load-tested at a hundred simultaneous claimants, and what
+> that turned up was fixed. Migrations are tracked now — **0001–0016 applied**, ledger
+> and database agreeing. Nothing is broken. What's left is commercial, not technical: a
+> real WhatsApp number and Meta business verification.
 
 ## What ClaimMix is
 
@@ -30,6 +31,9 @@ deploy que está corriendo. **No le manda un mensaje a nadie.**
 
 `pnpm prove --whatsapp <número>` / `--email <dirección>` es el único que manda
 algo de verdad, para comprobar que la salida funciona.
+
+`pnpm load` mide cuánto aguanta y `pnpm pentest` pregunta qué se consigue sin
+credenciales. Las mitades gratis de las dos corren solas después de cada deploy.
 
 Corrélo después de cada deploy. Detalle completo en
 [docs/TESTING.md](TESTING.md).
@@ -57,25 +61,20 @@ Corrélo después de cada deploy. Detalle completo en
   This silently broke when a `*/15` cron was added; keep all crons daily.
   **Always verify a deploy is live** (curl a new route / `npx vercel ls`) — do not
   assume "push + green CI = deployed". Manual deploy: `npx vercel --prod --yes`.
-- **DB migrations are applied BY HAND** (psql / one-off scripts). No tracking
-  table, no runner; deploys do NOT apply them. When something DB-shaped breaks
-  after a deploy, query the LIVE Neon schema and diff vs `src/lib/db/schema/*` —
-  do not trust the migration files. Migrations 0001–0009 are all applied (verified 2026-06-28).
-  ✅ **There is a runner now: `scripts/migrate.mjs`** (2026-08-13). It keeps a
-  `schema_migrations` ledger, checksums every applied file to catch a migration
-  edited after the fact, and runs each one in its own transaction.
-  **First run on this database must be the baseline**, because 0001–0009 are
-  already applied by hand and must not re-execute:
+- **DB migrations still do NOT run on deploy** — they never have. But they are
+  tracked now: `scripts/migrate.mjs` keeps a `schema_migrations` ledger, checksums
+  every applied file to catch one edited after it ran, and applies each in its own
+  transaction. The baseline was adopted against prod on **2026-08-21** — fourteen
+  migrations had been applied by hand with no record of it — and **0001–0016 are
+  applied**, ledger and live schema agreeing.
   ```
-  node scripts/migrate.mjs --baseline 0009 --apply   # adopt, do not run
-  node scripts/migrate.mjs                            # status
-  node scripts/migrate.mjs --apply                    # runs 0010
+  node scripts/migrate.mjs            # estado
+  node scripts/migrate.mjs --apply    # aplica lo que falte
   ```
-  It refuses to run when the ledger is empty but `cases` already exists, so the
-  baseline cannot be skipped by accident.
-  ⚠️ **`0010_tenant_commercial_terms.sql` is NOT applied yet** (written 2026-08-13).
-  Until it runs, `/api/admin/billing` and `scripts/create-tenant.mjs` both fail —
-  the script checks for `tenants.plan` up front and tells you so.
+  It refuses to run when the ledger is empty but `cases` already exists, so history
+  cannot be re-executed by accident. `pnpm smoke` also asks the deploy which
+  migrations it can see, on every deploy: a forgotten one now fails out loud
+  instead of at the first request that needs the column.
 - **Neon DATABASE_URL** is in `.env.local` (prod). `vercel env pull` returns blank
   values for secrets — use `vercel env ls` to check presence.
 
@@ -99,7 +98,7 @@ Corrélo después de cada deploy. Detalle completo en
   `veltra.soporte@gmail.com` was blocked by Google (2026-07) and decommissioned — neutralized in
   the DB (cases reassigned, session/account cleared, demoted; profile kept as tombstone for FK/audit).
 
-### 💰 Commercial plumbing (added 2026-08-13, needs migration 0010)
+### 💰 Commercial plumbing (added 2026-08-13, migration 0010 applied 2026-08-21)
 The technical product was sellable; the *database* was not. `tenants` held only
 (id, name, created_at), there was **no code anywhere that creates a tenant**, and
 while cost per tenant was measured (`ai_usage.cost_usd`) nothing recorded what a
@@ -108,7 +107,7 @@ client had agreed to pay. Closed that:
 - `neon/migrations/0010_tenant_commercial_terms.sql` — plan, billing_status,
   monthly_fee_usd, included_claims, overage_price_usd, contact_email,
   trial_ends_at, activated_at, with CHECK constraints and an index on
-  `cases (tenant_id, created_at)` for the billing query. **Apply by hand.**
+  `cases (tenant_id, created_at)` for the billing query. **Applied 2026-08-21.**
 - `src/lib/billing/plans.ts` — the price ladder plus `computeInvoice` /
   `computeMargin` as pure functions (17 unit tests; money rounds to cents once,
   garbage input clamps to 0 rather than emitting a credit).
@@ -125,20 +124,106 @@ endpoint returns all four buckets so an invoice can be defended line by line.
 A tenant's own stored terms are authoritative, not the catalog: a signed contract
 must not change retroactively because someone edited the price list.
 
+### 🔐 Hardening pass (2026-08-21 → 23)
+
+Everything else here asks whether the system does what it promises. This asked the
+opposite question — what do you get without asking anyone — and it found things.
+
+Two suites, both wired into post-deploy where they are free:
+
+- **`pnpm load`** — the read half measures the analyst's dashboard against the
+  production database with 1, 5 and 20 concurrent analysts and shows the plan
+  Postgres picks; it fails if the case list stops using its index. The write half
+  (`--write --claimants N`, spends tokens, by hand) throws N claimants at the real
+  webhook at once. **100 simultaneous, none lost**, the last answered inside a
+  minute; the dashboard during the storm: 162 ms median. The ceiling is not the
+  code — it is the Vercel/Neon plan, and that is a step, not a curve.
+- **`pnpm pentest`** — every API route with no credentials, the route list walked
+  from `src/app/api` rather than hand-written, so a new unprotected route fails the
+  day it ships. Plus role locks read out of the handlers, forged webhook signatures,
+  the six headers, CORS, and the tenant wall against a **real database with two
+  tenants**. `--agent` (prompt injection) is by hand: it spends the same quota that
+  serves claimants.
+
+What it found, all fixed and deployed:
+
+| Hole | What it was worth |
+|---|---|
+| `X-Internal-Worker: true` | A header is not a secret — anyone could run the extraction worker, the reprocess sweep (**all** tenants, up to 50 real extractions per call, i.e. a lever against the credit card) and the Gmail watch setup. Now `CRON_SECRET` compared in constant time, via `src/lib/security/internal-auth.ts` |
+| `/api/admin/health` | Told anyone the transport, whether an OpenAI key existed, the region and whether Sentry was on. Not secrets one by one; together, free reconnaissance. Now status + db, and a probe keeps it that way |
+| `viewer` role | The read-only role could connect, disable and delete the insurer's inbox — four `/api/admin` routes accepted any role |
+| Monthly USD cap | Never fired: extraction recorded `cost_usd = 0` ("free tier" — true on AI Studio, false since Vertex). A cap in dollars against a sum that is always zero. Now estimated with list prices |
+| Public demo | Spent the production tenant's budget, so an anonymous visitor could stop real intake. Now its own tenant (`DEMO_TENANT_ID`, migration 0016) and `checkDemoBudget`, fail-closed |
+
+The **rate limiter** was in-memory, which in serverless means per instance — one
+counter per attacker. It runs on Postgres now (`rate_limit_counters`, migration
+0015, fail-open); `RATE_LIMIT_PROVIDER` forces upstash/memory.
+
+The **tenant wall** had tests that did not cover it: they mocked `@/lib/db` to
+return zero rows and then asserted a 404 — verifying the mock. A query written
+without `where tenant_id` left them green. It is now exercised for real, in both
+directions (owner sees it first, then the other must not), across id, list,
+search, CSV export and the agent's three tools.
+
+The **browser tests** had been red for days without anyone noticing: the job
+carried `continue-on-error: true`, so CI reported success on every push. Removed —
+a suite that cannot fail the build is decoration.
+
+Prod config changed with it: `ADMIN_EMAILS` is only `veltra.claimmix@gmail.com`,
+and `AI_TENANT_DAILY_TOKEN_CAP` went to 20M (a full suite run costs ~1.5M).
+
+### 🚦 Post-deploy, and the trap it fell into (2026-08-23)
+
+`.github/workflows/post-deploy.yml` fires when Vercel reports a successful
+production deploy: smoke first, and only if it passed, the rehearsal + the free
+halves of load and pentest.
+
+**Only the smoke runs inside the deploy.** The other three run the code *in the
+GitHub runner* against the production database, so they read their configuration
+from the runner's environment — and what is missing there is not loud. Four
+post-deploy runs went red on 2026-08-22 with 33 behavioural differences from the
+rehearsal, and not one of them was real: `AI_TENANT_DAILY_TOKEN_CAP` was never
+wired into CI, so the runner used the 5M default while production had 20M. That
+day's own testing had spent it, the worker never called the model, and twelve
+silent conversations failed every assertion at once — a report that reads exactly
+like the agent broke.
+
+Closed on three sides:
+
+- The cap is a **repo variable** now (`vars.AI_TENANT_DAILY_TOKEN_CAP`), passed to
+  the rehearsal job. A variable and not a secret on purpose: GitHub masks a
+  secret's value in the log, which would print `5.088.283 / ***` in the very line
+  that explains the failure. **Keep it equal to Vercel's.**
+- The rehearsal **refuses to start** with the budget spent, the same way it already
+  refused to run against the mock. Silence is not a behavioural finding.
+- `readCap` in `budget.ts` stops an empty or malformed value from disabling a cap
+  in silence — `parseInt("")` is NaN, and every comparison against NaN is false, so
+  the empty variable did not relax the cap, it switched it off.
+
 ### 🔧 Optional improvements (not broken, worth doing)
 1. **Big batches still lose cases.** The reaper makes stuck cases *recoverable*
    (`escalado`) but does not *process* them, so a large `batch-simulate` still
    drops part of the distribution. Real fix: chunk/cap batches to fit
    `maxDuration`, or process per-case via the worker route.
-2. ~~**Migration runner + `schema_migrations` tracking**~~ ✅ **DONE 2026-08-13**
-   (`scripts/migrate.mjs`, see Infra facts). Still needs its first baseline run
-   against prod.
+2. ~~**Migration runner + `schema_migrations` tracking**~~ ✅ **DONE** — runner
+   2026-08-13, baseline adopted against prod 2026-08-21 (see Infra facts).
 3. **No admin UI for tenants or billing.** Both are API/script only. Fine for the
    first few clients, not for ten.
 4. **Billing has no invoice history.** `/api/admin/billing` recomputes from
    `cases` on every call, so a past month's invoice changes if old cases are
    edited or deleted. Snapshot each period once it closes before issuing real
    invoices.
+
+### 🙋 Waiting on you (not code)
+
+- **Vercel and Neon are still on the free plans.** The load test says the ceiling
+  is the plan, not the code — that becomes a step-shaped outage the month it hits.
+- **New GCP project `claimmix-veltra`** + `pnpm switch-gcp` to move extraction to it.
+- **Connect the veltra mailbox** (`pnpm mailbox`).
+- **Demote the two extra admins** in the database if the `[Urgente]` alerts should
+  reach veltra only.
+- **Rotate the `veltra.soporte@gmail.com` app password** — see Security hygiene below.
+- **WhatsApp: the real number** and Meta business verification (see below).
 
 ### 🤖 The AI path — RESOLVED, running unattended (verified 2026-08-07)
 Extraction runs on **Vertex AI**, not the AI Studio key. That switch is what ended
@@ -247,9 +332,23 @@ regenerated. Latest dump: `training-examples-2026-08-07.json` (206 + 20 rules).
 (`WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_ACCESS_TOKEN`,
 `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TENANT_ID`). See `.env.example`.
 
+Added by the hardening pass: `ADMIN_EMAILS` (who is admin), `DEMO_TENANT_ID` (the
+public demo's own tenant — no fallback to production on purpose),
+`AI_TENANT_DAILY_TOKEN_CAP` / `AI_USER_DAILY_TOKEN_CAP` / `AI_DEMO_DAILY_TOKEN_CAP`
+/ `MONTHLY_BUDGET_USD` (the caps that now actually fire), `RATE_LIMIT_PROVIDER`
+(postgres by default) and the `R2_*` set for attachments.
+
+⚠️ `AI_TENANT_DAILY_TOKEN_CAP` lives in **two** places and they must agree: Vercel
+(production) and the GitHub **repo variable** (the post-deploy rehearsal, which runs
+in the runner). See the post-deploy section above for what happens when they don't.
+
 ## Verify / build commands
 `pnpm type-check` · `pnpm lint` (max 5 warnings) · `pnpm test:unit` · `pnpm build`.
 CI (GitHub Actions) runs all of these + CodeQL on every push to `main`.
+
+After every **production** deploy, `post-deploy.yml` runs `pnpm smoke --deep` and, if
+it passed, the rehearsal + the free halves of load and pentest. `pnpm check` is the
+same thing from your machine. Everything about the suites: [docs/TESTING.md](TESTING.md).
 
 **CI audit note:** the blocking dependency gate runs `pnpm audit --prod`. One dev-only
 advisory is unfixable — eslint → minimatch@3 → brace-expansion@1, patched only in
@@ -263,8 +362,14 @@ ships, so a second non-blocking step keeps dev advisories visible.
 | `reset-cases-keep-training.mjs` | Wipes every case but keeps the trained agent. Dry-run by default; `--apply` to execute. |
 | `cleanup-junk-cases.mjs` | Deletes only dead-end cases (`no_relevante` / unrecovered `escalado`) that back no approved example. Dry-run by default. |
 | `activate-gemini.mjs` | Legacy: verifies the AI Studio key and re-drives the escalado backlog. Superseded by the Vertex transport; kept for the prepay path. |
-| `create-tenant.mjs` | Onboards a client: creates the tenant with its plan's commercial terms. Dry-run by default; `--apply` to execute. Needs migration 0010. Prints the remaining manual steps (SIGNUP_ALLOWED_EMAILS, the client's own Gemini key). |
+| `create-tenant.mjs` | Onboards a client: creates the tenant with its plan's commercial terms. Dry-run by default; `--apply` to execute. Prints the remaining manual steps (SIGNUP_ALLOWED_EMAILS, the client's own Gemini key). |
 | `migrate.mjs` | Applies pending SQL migrations and records them in `schema_migrations`. Status by default; `--apply` to run; `--baseline NNNN` to adopt already-hand-applied ones without executing. Detects a migration edited after it ran. |
+| `switch-gcp-project.mts` | `pnpm switch-gcp` — moves extraction to another GCP project in one command (service account, APIs, Vercel vars). |
+| `switch-mailbox.mts` | `pnpm mailbox` — swaps the intake mailbox without a moment of silence. |
+
+The testing scripts — `check-everything`, `rehearse-conversations`, `smoke-production`,
+`prove-delivery`, `load-test`, `pen-test` — are run through their `pnpm` aliases and
+documented in [docs/TESTING.md](TESTING.md), not here.
 
 ⚠️ **Never `DELETE FROM cases` directly.** `training_examples` hangs off cases by *two*
 cascading paths — `case_id`, and `agent_run_id` → `agent_runs.case_id` — so a plain

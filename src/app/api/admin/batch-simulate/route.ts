@@ -29,6 +29,9 @@ import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { rateLimit, getClientIp } from "@/lib/rate-limit/index";
 import type { ClaimType } from "@/lib/schemas/cases";
+import { internalAuthHeaders, isInternalRequest } from "@/lib/security/internal-auth";
+import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
+import { BATCH_BUDGET_MS, MAX_CHAIN, fitsAnotherCase } from "@/server/intake/batch-budget";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -40,13 +43,148 @@ const BatchSimulateSchema = z.object({
   scenario_id: z.string().max(80).optional(),
 });
 
+/**
+ * La continuación: los casos que la invocación anterior no llegó a procesar.
+ *
+ * Entra por la misma ruta y no por una nueva porque es el mismo trabajo, sólo
+ * que ya con los casos creados. Se autentica con CRON_SECRET —la manda el
+ * deploy a sí mismo— y por eso no pasa por requireAdmin ni por el limitador:
+ * la persona ya fue autorizada cuando pidió el lote.
+ */
+const ContinuationSchema = z.object({
+  continue_case_ids: z.array(z.string().uuid()).min(1).max(50),
+  tenant_id: z.string().uuid(),
+  user_id: z.string().uuid().nullable().optional(),
+  delay_ms: z.number().int().min(0).max(5_000).default(1_500),
+  chain: z.number().int().min(1).max(MAX_CHAIN),
+});
+
 function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Procesa lo que entre en esta invocación y le pasa el resto a la siguiente.
+ *
+ * El lote se procesa en serie porque las extracciones simuladas se turnan; lo
+ * que no se puede es que todas tengan que entrar en la misma invocación. Antes
+ * de cada caso se pregunta si alcanza el tiempo para uno más, midiendo lo que
+ * costaron los anteriores. Cuando no alcanza, lo que queda viaja a otra
+ * invocación por HTTP, con el secreto interno.
+ *
+ * Sin esto la invocación se cortaba a mitad de camino y los casos que faltaban
+ * quedaban en `procesando` hasta que el reaper los escalaba al día siguiente.
+ */
+async function processBatch(input: {
+  caseIds: string[];
+  tenantId: string;
+  userId: string | null;
+  delayMs: number;
+  chain: number;
+}): Promise<void> {
+  const startedAt = Date.now();
+  const pending = [...input.caseIds];
+  let processed = 0;
+
+  while (pending.length > 0) {
+    if (!fitsAnotherCase(Date.now() - startedAt, processed, BATCH_BUDGET_MS)) break;
+
+    const caseId = pending.shift()!;
+    try {
+      await runIntakeAgent({
+        caseId,
+        tenantId: input.tenantId,
+        userId: input.userId,
+        source: "simulate",
+      });
+    } catch (e) {
+      const name = e instanceof Error ? e.name : "UnknownError";
+      console.error("[batch-simulate] worker error:", name, "case:", caseId);
+    }
+    processed++;
+    if (input.delayMs > 0 && pending.length > 0) await sleep(input.delayMs);
+  }
+
+  console.info(
+    JSON.stringify({
+      level: "info",
+      service: "claimmix",
+      msg: "batch_simulate.slice_complete",
+      tenant_id: input.tenantId,
+      chain: input.chain,
+      processed,
+      pending: pending.length,
+      elapsed_ms: Date.now() - startedAt,
+    })
+  );
+
+  if (pending.length === 0) return;
+
+  // Un tope de eslabones, no porque se espere llegar —seis por lo que entra en
+  // cada uno cubre de sobra el máximo de 50— sino porque una cadena sin tope es
+  // una función que se llama a sí misma contra la tarjeta de alguien.
+  if (input.chain >= MAX_CHAIN) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "batch_simulate.chain_exhausted",
+        tenant_id: input.tenantId,
+        abandoned: pending.length,
+      })
+    );
+    return;
+  }
+
+  try {
+    await fetch(`${getWorkerBaseUrl()}/api/admin/batch-simulate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...internalAuthHeaders() },
+      body: JSON.stringify({
+        continue_case_ids: pending,
+        tenant_id: input.tenantId,
+        user_id: input.userId,
+        delay_ms: input.delayMs,
+        chain: input.chain + 1,
+      }),
+    });
+  } catch (e) {
+    const name = e instanceof Error ? e.name : "UnknownError";
+    console.error("[batch-simulate] no pude pasar el resto:", name, "quedan:", pending.length);
+  }
+}
+
 export async function POST(request: NextRequest): Promise<Response> {
   try {
+    // Un stream se lee una sola vez, así que el cuerpo se parsea acá y se usa
+    // en las dos ramas. Leerlo de nuevo más abajo tira 'body already read', y
+    // sólo pasaría con secreto interno Y sesión a la vez: donde peor se
+    // encuentra un error.
+    const body = await request.json().catch(() => null);
+
+    // ── ¿Es la continuación de un lote que ya empezó? ─────────────────────
+    //
+    // Se mira antes que la sesión: la manda el propio deploy con el secreto
+    // interno, no una persona, y los casos ya están creados. Se contesta rápido
+    // y el trabajo sigue en after(), igual que el pedido original.
+    if (isInternalRequest(request)) {
+      const cont = ContinuationSchema.safeParse(body);
+      if (cont.success) {
+        const { continue_case_ids, tenant_id, user_id, delay_ms, chain } = cont.data;
+        after(async () => {
+          await processBatch({
+            caseIds: continue_case_ids,
+            tenantId: tenant_id,
+            userId: user_id ?? null,
+            delayMs: delay_ms,
+            chain,
+          });
+        });
+        return accepted({ accepted: continue_case_ids.length, case_ids: continue_case_ids, chain });
+      }
+    }
+
     const { db: adminDb, user, userRow } = await requireAdmin();
 
     const ip = getClientIp(request);
@@ -56,7 +194,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       return err(new AppError("RATE_LIMITED", "Máximo 2 lotes cada 10 minutos."));
     }
 
-    const parsed = BatchSimulateSchema.safeParse(await request.json().catch(() => null));
+    const parsed = BatchSimulateSchema.safeParse(body);
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
     }
@@ -189,24 +327,13 @@ export async function POST(request: NextRequest): Promise<Response> {
     const capturedDelay = delay_ms;
 
     after(async () => {
-      for (const caseId of capturedIds) {
-        try {
-          await runIntakeAgent({ caseId, tenantId, userId, source: "simulate" });
-        } catch (e) {
-          const name = e instanceof Error ? e.name : "UnknownError";
-          console.error("[batch-simulate] worker error:", name, "case:", caseId);
-        }
-        if (capturedDelay > 0) await sleep(capturedDelay);
-      }
-      console.info(
-        JSON.stringify({
-          level: "info",
-          service: "claimmix",
-          msg: "batch_simulate.complete",
-          tenant_id: tenantId,
-          processed: capturedIds.length,
-        })
-      );
+      await processBatch({
+        caseIds: capturedIds,
+        tenantId,
+        userId,
+        delayMs: capturedDelay,
+        chain: 1,
+      });
     });
 
     return accepted({

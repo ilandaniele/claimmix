@@ -13,6 +13,7 @@
 import { eq } from "drizzle-orm";
 
 import { getSessionContext } from "@/lib/auth/session";
+import { isOperatorEmail } from "@/lib/auth/require-operator";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { users } from "@/lib/db/schema";
@@ -54,6 +55,9 @@ export default async function AppLayout({
 
   const fullName: string = userRow?.full_name ?? user?.email ?? "Analista";
   const role: string = userRow?.role ?? "analyst";
+  // Sólo para decidir si el enlace a la cartera aparece. La pantalla se
+  // defiende sola con requireOperator: esconder un enlace no es una guarda.
+  const isOperator = isOperatorEmail(user?.email);
   // Account preference wins over the device cookie (so the saved language
   // follows the user to any device); cookie/default covers the rest.
   const cookieLocale = await getServerLocale();
@@ -68,7 +72,7 @@ export default async function AppLayout({
       <ThemeProvider>
         <div className="flex h-screen overflow-hidden bg-[#F8FAFC] dark:bg-[#0B1120]">
           {/* Left sidebar */}
-          <Sidebar role={role} />
+          <Sidebar role={role} isOperator={isOperator} />
 
           {/* Main content area */}
           <div className="flex flex-1 flex-col overflow-hidden">

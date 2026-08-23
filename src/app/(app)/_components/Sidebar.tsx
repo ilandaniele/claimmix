@@ -13,6 +13,8 @@ import {
   Brain,
   Lock,
   Play,
+  Receipt,
+  Briefcase,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -65,7 +67,14 @@ function NavLink({ href, label, icon: Icon, disabled, disabledReason }: NavItemD
   );
 }
 
-export function Sidebar({ role }: { role: string }) {
+export function Sidebar({
+  role,
+  isOperator = false,
+}: {
+  role: string;
+  /** Quien opera ClaimMix, no el asegurador. Ve la cartera de clientes. */
+  isOperator?: boolean;
+}) {
   const t = useT();
   const canUseAgent = role === "owner" || role === "admin";
 
@@ -86,6 +95,13 @@ export function Sidebar({ role }: { role: string }) {
       disabledReason: "Solo administradores pueden abrir la consola del agente.",
     },
     { label: t("nav.admin") || "Usuarios", href: "/admin/users", icon: Shield },
+    { label: "Facturación", href: "/admin/facturacion", icon: Receipt },
+    // La cartera cruza tenants: la ve el operador, no el asegurador. Se
+    // oculta en vez de deshabilitarse — que la pantalla exista tampoco es
+    // algo que le tenga que constar a un cliente.
+    ...(isOperator
+      ? [{ label: "Cartera", href: "/admin/cartera", icon: Briefcase }]
+      : []),
   ];
 
   return (

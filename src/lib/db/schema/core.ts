@@ -83,6 +83,38 @@ export const users = pgTable("users", {
     .notNull(),
 });
 
+/**
+ * La liquidación de un mes que ya cerró, tal como se emitió.
+ *
+ * /api/admin/billing recalcula desde `cases`, y para el mes en curso eso es
+ * lo correcto. Para un mes terminado no: borrar casos viejos, corregir un
+ * `is_claim` o cambiar de plan mueven una cifra que un cliente ya pagó. Acá
+ * queda la copia, con los términos que se usaron y la respuesta entera del día
+ * del cierre — sin eso la factura no se puede defender línea por línea.
+ *
+ * Ver neon/migrations/0017_billing_invoice_snapshots.sql.
+ */
+export const billingInvoices = pgTable("billing_invoices", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenant_id: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  month: text("month").notNull(),
+  period_start: timestamp("period_start", { withTimezone: true, mode: "string" }).notNull(),
+  period_end: timestamp("period_end", { withTimezone: true, mode: "string" }).notNull(),
+  billable_claims: integer("billable_claims").notNull(),
+  total_usd: numeric("total_usd", { precision: 12, scale: 2 }).notNull(),
+  ai_cost_usd: numeric("ai_cost_usd", { precision: 12, scale: 4 }).notNull(),
+  plan: text("plan").notNull(),
+  monthly_fee_usd: numeric("monthly_fee_usd", { precision: 10, scale: 2 }).notNull(),
+  included_claims: integer("included_claims").notNull(),
+  overage_price_usd: numeric("overage_price_usd", { precision: 10, scale: 4 }).notNull(),
+  payload: jsonb("payload").notNull(),
+  frozen_at: timestamp("frozen_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+});
+
 export const cases = pgTable("cases", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   tenant_id: uuid("tenant_id")

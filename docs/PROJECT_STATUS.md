@@ -1,18 +1,19 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-08-23. This file is the single source of truth for "where things stand."
+_Last updated: 2026-08-24. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
 > through **Vertex AI** (postpay, no prepay wall), and the agent is trained on **206
 > approved examples** without needing fine-tuning. **WhatsApp runs on the real Argentine
 > number**, verified, WABA approved. Intake mail arrives at **veltra.claimmix@gmail.com**
-> and nothing else. 21–23 August went into hardening and then into the commercial layer:
-> the app was attacked on purpose, load-tested at a hundred simultaneous claimants,
-> onboarding a second client was rehearsed end to end, a closed month's invoice is frozen,
-> and billing + portfolio have screens. **Every check is green** (CI, CodeQL, secret scan,
-> and the four post-deploy jobs) for the first time since the suite was built.
-> What is left is commercial and operational: paid plans, and a first client.
+> and nothing else. 21–24 August went into hardening, then the commercial layer, then
+> the last metre of the wire: the app was attacked on purpose, load-tested at a hundred
+> simultaneous claimants, onboarding a second client was rehearsed end to end, a closed
+> month's invoice is frozen, billing + portfolio have screens, and **both channels were
+> driven end to end with real messages from a real person** — a mail, two WhatsApps and a
+> photograph, all answered. **Every check is green** (CI, CodeQL, secret scan, and the
+> five post-deploy jobs). What is left is commercial: paid plans, and a first client.
 
 ## What ClaimMix is
 
@@ -277,16 +278,64 @@ in [docs/TESTING.md](TESTING.md) among what is *not* covered.
    the client changing plan. Frozen on read rather than by cron because Hobby
    allows two crons a day and both are taken.
 
+### 📨 The last metre of the wire (2026-08-24)
+
+Every layer above the transport had a test; the transport itself was covered by "a
+person sends a message and looks". That is now two things instead of one.
+
+**`pnpm knock`, on every deploy.** The deploy *deposits* a claim-shaped mail into the
+real mailbox with `users.messages.insert` — not sent, no SMTP, no recipient — and a
+Meta-signed payload is posted to the real webhook. Both become cases, the agent's reply
+is composed and recorded, and nothing leaves the building: the mail sender is
+`@example.com` and the number is from the reserved block. It also checks that a forged
+signature is rejected, which is the half of a signature that matters. What it does not
+prove is Google and Meta *delivering* to us — there the message is already in the box
+and we call our own webhook.
+
+Its first run found a real bug: **the reply to the test mail was actually sent.** The
+guard compared the raw `to` header against `@example.com`, and a real mail carries
+`Nombre <dirección>` — the string ends in `>`, so it never matched. It only ever worked
+for bare addresses, which is how the rehearsal sends them and not how any mail client
+does. Building the WhatsApp half surfaced a second one: the "never message an invented
+number" rule lived only in the *simulated* messenger, so anything arriving through the
+signed webhook would have tried Meta — which is exactly what gets a WhatsApp Business
+account restricted. Both guards now live on the recipient, where they hold for every
+path (`lib/email/reserved.ts`, `lib/phone/reserved.ts`).
+
+**And the real messages, sent by hand.** A mail (`choque`, answered in 18 seconds), two
+WhatsApps (`granizo`, policy extracted, both replies delivered) and a **photograph** —
+which travelled Meta → R2 → recognition → closed the `fotos_danos` request → reply, four
+steps nothing had ever exercised.
+
+Those messages found the rest of a day's worth of small lies in the data:
+
+- **`email` held whatever the channel called the sender**: the whole header on mail,
+  the phone number on WhatsApp. Neither broke a reply — sending uses the connected
+  mailbox, not this field — and both poison the thing that is actually compared:
+  matching a customer by mail against `Nombre <dir>` finds nobody, and against a phone
+  number finds anything. A value that looks present and is wrong is worse than an empty
+  one: an empty one gets asked for.
+- **The phone was asked for on WhatsApp**, where the sender *is* the contact number and
+  we know it better than if they typed it. It went unnoticed because the number sat in
+  the `email` field and satisfied the contact pair with a falsehood; removing it made
+  the question appear. Now `phone` is filled from the sender and the pending contact
+  request is closed — only the contact pair, because the sender is the identity of the
+  transport (a fact), while the time of the accident is a reading of the text (an
+  interpretation), and closing a request on an interpretation marks as received
+  something nobody confirmed.
+- **The rehearsal was walking a path production never walks.** It invented 17-digit
+  phone numbers; E.164 stops at 15, so the new guard rejected them, the case ended with
+  no contact at all, and the agent asked for *"dejanos un correo donde podamos
+  escribirte"* — something a real claimant is never asked, because a real number goes
+  through. Green for the wrong reason is worse than red. Invented claimants are now
+  invented in who they are, not in what shape they have.
+
 ### 🙋 Waiting on you (not code)
 
-- **Write to it once, from a real phone and a real mailbox.** Everything on our
-  side of the wire now has a test: `pnpm knock` drops a claim-shaped mail into the
-  real mailbox (deposited, not sent) and posts a Meta-signed payload to the real
-  webhook, and both become cases with the agent's reply recorded and nothing leaving
-  the building. It runs on every deploy. What no automated test can cover is Google
-  and Meta *delivering* to us — for that, one real message each, once per
-  configuration change. It has not been done since the mailbox and the number
-  changed.
+- ~~**Write to it once, from a real phone and a real mailbox**~~ ✅ **DONE 2026-08-24.**
+  See "The last metre" below: a real mail, two real WhatsApps and a real photograph,
+  all answered. Do it again after the next change to the mailbox, the number or their
+  credentials — that is the only part no test can cover.
 - **Rotate the WhatsApp system-user token.** Meta echoed it inside an error response
   on 2026-08-23 and it is now in a chat transcript. Same standing as the
   `veltra.soporte` password below: it is not known to be leaked, and it is no longer
@@ -463,6 +512,7 @@ ships, so a second non-blocking step keeps dev advisories visible.
 | `activate-gemini.mjs` | Legacy: verifies the AI Studio key and re-drives the escalado backlog. Superseded by the Vertex transport; kept for the prepay path. |
 | `create-tenant.mjs` | Onboards a client: creates the tenant with its plan's commercial terms. Dry-run by default; `--apply` to execute. Prints the remaining manual steps (SIGNUP_ALLOWED_EMAILS, the client's own Gemini key). |
 | `migrate.mjs` | Applies pending SQL migrations and records them in `schema_migrations`. Status by default; `--apply` to run; `--baseline NNNN` to adopt already-hand-applied ones without executing; `--forget NNNN` to drop a ledger row that turned out to be a lie (the schema is not touched). Detects a migration edited after it ran. Falls back to Neon over HTTPS when port 5432 is blocked. |
+| `knock-on-the-door.mts` | `pnpm knock` — deposita un mail con forma de denuncia en la casilla de verdad y le manda al webhook un payload firmado como lo firma Meta. Prueba el primer metro de la cadena sin que salga nada del edificio. Corre en cada deploy. |
 | `rehearse-onboarding.mts` | `pnpm onboard` — gives a throwaway client the full onboarding, checks isolation, billing, the invoice freeze and the AI budget, then deletes it. Free. Run it before each real client. |
 | `switch-gcp-project.mts` | `pnpm switch-gcp` — moves extraction to another GCP project in one command (service account, APIs, Vercel vars). |
 | `switch-mailbox.mts` | `pnpm mailbox` — swaps the intake mailbox without a moment of silence. |

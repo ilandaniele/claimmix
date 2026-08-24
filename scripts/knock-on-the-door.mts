@@ -1,0 +1,310 @@
+/**
+ * scripts/knock-on-the-door.mts
+ *
+ * Tocar el timbre de verdad, por los dos transportes, sin escribirle a nadie.
+ *
+ * El ensayo de conversaciones entra por los canales simulados y eso es
+ * deliberado: así nunca le manda un mensaje a una persona, y así la cuenta de
+ * WhatsApp Business no se arriesga por escribirle a números inventados. Lo que
+ * queda afuera de esa decisión es el primer metro de la cadena — lo que pasa
+ * entre "el mensaje aparece en la casilla / llega al webhook" y "el worker lo
+ * levanta". Ese tramo se probaba de una sola manera: alguien mandando un mail y
+ * un WhatsApp a mano.
+ *
+ * Esto lo cubre sin sacar nada del edificio:
+ *
+ *   · **Mail.** El deploy DEPOSITA un mensaje en la casilla con
+ *     `users.messages.insert` — no lo manda, no hay SMTP, no hay destinatario —
+ *     y a partir de ahí el poller, el watch, el parseo del MIME y el prefiltro
+ *     corren igual que con un mail real. El remitente es `@example.com`, así que
+ *     la respuesta del agente se compone, se guarda y no sale.
+ *
+ *   · **WhatsApp.** Se arma el payload que manda Meta, se firma con el
+ *     `WHATSAPP_APP_SECRET` de verdad y se lo manda al webhook del deploy. Entra
+ *     por el camino firmado —el real, no el simulado— y ejercita la validación
+ *     de firma, el parseo, la resolución de tenant y el worker. El número es del
+ *     bloque reservado, y el mensajero se niega a mandarle nada a ese bloque
+ *     venga por donde venga.
+ *
+ * Lo que NO prueba, dicho de frente: que Google y Meta nos entreguen. Acá el
+ * mensaje ya está en el buzón y el webhook lo llamamos nosotros. Todo lo que
+ * está de ahí para adentro es nuestro código, y es lo que esto ejercita; el
+ * tramo de afuera lo prueba una persona mandando un mensaje, una vez por cada
+ * vez que cambia la configuración.
+ *
+ * Uso:
+ *   pnpm knock                 # los dos transportes
+ *   pnpm knock --mail          # sólo el mail
+ *   pnpm knock --whatsapp      # sólo WhatsApp
+ *   pnpm knock --keep          # deja los casos para mirarlos
+ */
+
+import * as path from "node:path";
+import * as fs from "node:fs";
+import { createHmac } from "node:crypto";
+import * as dotenv from "dotenv";
+
+const envPath = path.resolve(process.cwd(), ".env.local");
+dotenv.config({ path: fs.existsSync(envPath) ? envPath : undefined });
+
+const args = process.argv.slice(2);
+const KEEP = args.includes("--keep");
+const ONLY_MAIL = args.includes("--mail");
+const ONLY_WA = args.includes("--whatsapp");
+const RUN = String(Date.now()).slice(-6);
+
+function flag(name: string): string | null {
+  const i = args.indexOf(`--${name}`);
+  const value = args[i + 1];
+  return i !== -1 && value && !value.startsWith("--") ? value : null;
+}
+
+const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix.vercel.app").replace(/\/+$/, "");
+const SECRET = process.env.CRON_SECRET;
+const APP_SECRET = process.env.WHATSAPP_APP_SECRET;
+const TENANT = process.env.GMAIL_TENANT_ID;
+
+if (!process.env.DATABASE_URL || !TENANT) {
+  console.error("Faltan DATABASE_URL o GMAIL_TENANT_ID en .env.local");
+  process.exit(1);
+}
+if (!SECRET) {
+  console.error("Falta CRON_SECRET: no puedo pedirle nada al deploy.");
+  process.exit(1);
+}
+
+const failures: string[] = [];
+
+function check(label: string, ok: boolean, detail?: string): void {
+  console.log(`   ${ok ? "✓" : "✗"} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!ok) failures.push(label);
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const { db } = await import("@/lib/db");
+const { cases, outboundMessages, extractedFields } = await import("@/lib/db/schema");
+const { and, desc, eq, like, sql } = await import("drizzle-orm");
+
+/**
+ * Espera a que el caso aparezca y termine de procesarse.
+ *
+ * La extracción tarda segundos y corre en otra invocación, así que preguntar una
+ * vez y dar por ausente lo que todavía no llegó sería inventar una falla.
+ */
+async function waitForCase(
+  find: () => Promise<{ id: string; status: string } | null>,
+  seconds = 90
+): Promise<{ id: string; status: string } | null> {
+  for (let i = 0; i < seconds; i++) {
+    const row = await find();
+    if (row && row.status !== "procesando" && row.status !== "recibido") return row;
+    if (row && i > seconds - 3) return row;
+    await sleep(1000);
+  }
+  return find();
+}
+
+/** Lo que el agente compuso para ese caso, haya salido o no. */
+async function replyFor(caseId: string) {
+  return db
+    .select({ status: outboundMessages.status, template: outboundMessages.template })
+    .from(outboundMessages)
+    .where(eq(outboundMessages.case_id, caseId))
+    .orderBy(desc(outboundMessages.created_at))
+    .limit(1);
+}
+
+async function fieldsFor(caseId: string) {
+  return db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(extractedFields)
+    .where(eq(extractedFields.case_id, caseId));
+}
+
+const created: string[] = [];
+
+// ── El timbre por mail ───────────────────────────────────────────────────────
+async function knockByMail(): Promise<void> {
+  console.log("\n▸ MAIL — un mensaje aparece en la casilla de verdad\n");
+
+  const res = await fetch(`${BASE}/api/health/knock`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${SECRET}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "insert", run: RUN }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    message_id?: string;
+    mailbox?: string;
+    error?: { message?: string };
+  };
+
+  if (!res.ok || !body.ok) {
+    check("el deploy pudo dejar el mensaje en la casilla", false, body.error?.message ?? `HTTP ${res.status}`);
+    return;
+  }
+  check("el mensaje quedó en la casilla", true, body.mailbox);
+
+  // El watch avisa a Google, no a nosotros: se dispara el poller igual que a las
+  // tres de la mañana, que es el mismo camino que recorre un mail real.
+  const poll = await fetch(`${BASE}/api/cron/gmail-poll`, {
+    headers: { Authorization: `Bearer ${SECRET}` },
+  });
+  check("el poller lo levantó", poll.ok, `HTTP ${poll.status}`);
+
+  const found = await waitForCase(async () => {
+    const [row] = await db
+      .select({ id: cases.id, status: cases.status })
+      .from(cases)
+      .where(and(eq(cases.tenant_id, TENANT!), like(cases.policy_number, "POL-8812-C")))
+      .orderBy(desc(cases.created_at))
+      .limit(1);
+    return row ?? null;
+  });
+
+  check("se creó el caso", Boolean(found), found?.id);
+  if (!found) return;
+  created.push(found.id);
+
+  const [fields] = await fieldsFor(found.id);
+  check("extrajo los datos", (fields?.n ?? 0) > 0, `${fields?.n} campo(s)`);
+  check("no lo tomó por spam", found.status !== "no_relevante", found.status);
+
+  const [reply] = await replyFor(found.id);
+  check("el agente contestó", Boolean(reply), reply?.template);
+  check(
+    "y la respuesta NO salió del edificio",
+    reply?.status === "skipped_simulated",
+    reply?.status ?? "sin registro"
+  );
+
+  if (!KEEP && body.message_id) {
+    await fetch(`${BASE}/api/health/knock`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SECRET}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "trash", message_id: body.message_id }),
+    });
+  }
+}
+
+// ── El timbre por WhatsApp ───────────────────────────────────────────────────
+async function knockByWhatsApp(): Promise<void> {
+  console.log("\n▸ WHATSAPP — el payload de Meta, firmado como lo firma Meta\n");
+
+  if (!APP_SECRET) {
+    console.log("   (sin WHATSAPP_APP_SECRET: no puedo firmar como Meta, se saltea)");
+    return;
+  }
+
+  // Del bloque reservado. El mensajero se niega a escribirle a este bloque
+  // venga por donde venga, así que nadie recibe nada.
+  const from = `5490000${RUN}`;
+
+  const payload = {
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        id: "timbre",
+        changes: [
+          {
+            field: "messages",
+            value: {
+              messaging_product: "whatsapp",
+              contacts: [{ profile: { name: "Asegurado de prueba" }, wa_id: from }],
+              messages: [
+                {
+                  from,
+                  id: `wamid.timbre.${RUN}`,
+                  timestamp: "0",
+                  type: "text",
+                  text: {
+                    body:
+                      "Hola, choqué ayer a la tarde en Alem al 2300, Bahía Blanca. " +
+                      "Soy Carla Ferreyra, DNI 31.444.777, póliza POL-8812-C. No hubo heridos.",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  const raw = JSON.stringify(payload);
+  const signature = `sha256=${createHmac("sha256", APP_SECRET).update(raw).digest("hex")}`;
+
+  const res = await fetch(`${BASE}/api/webhooks/whatsapp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-hub-signature-256": signature },
+    body: raw,
+  });
+  check("el webhook aceptó la firma", res.ok, `HTTP ${res.status}`);
+
+  // Y que rechace una falsa, que es la mitad que importa de una firma.
+  const forged = await fetch(`${BASE}/api/webhooks/whatsapp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-hub-signature-256": "sha256=00" },
+    body: raw,
+  });
+  check("y rechaza una firma falsa", forged.status === 401, `HTTP ${forged.status}`);
+
+  if (!res.ok) return;
+
+  const found = await waitForCase(async () => {
+    const [row] = await db
+      .select({ id: cases.id, status: cases.status })
+      .from(cases)
+      .where(and(eq(cases.tenant_id, TENANT!), like(cases.email_thread_id, `%${from}%`)))
+      .orderBy(desc(cases.created_at))
+      .limit(1);
+    return row ?? null;
+  });
+
+  check("se creó el caso", Boolean(found), found?.id);
+  if (!found) return;
+  created.push(found.id);
+
+  const [fields] = await fieldsFor(found.id);
+  check("extrajo los datos", (fields?.n ?? 0) > 0, `${fields?.n} campo(s)`);
+
+  const [reply] = await replyFor(found.id);
+  check("el agente contestó", Boolean(reply), reply?.template);
+  check(
+    "y no le escribió a un número inventado",
+    reply?.status === "skipped_simulated",
+    reply?.status ?? "sin registro"
+  );
+}
+
+// ── Correr ───────────────────────────────────────────────────────────────────
+console.log("═".repeat(70));
+console.log(`TOCAR EL TIMBRE — por los transportes de verdad, contra ${BASE}`);
+console.log("═".repeat(70));
+
+try {
+  if (!ONLY_WA) await knockByMail();
+  if (!ONLY_MAIL) await knockByWhatsApp();
+} catch (e) {
+  const detail = e instanceof Error ? e.message : String(e);
+  console.log(`   ✗ se cortó: ${detail}`);
+  failures.push(`se cortó: ${detail}`);
+} finally {
+  if (KEEP) {
+    console.log(`\n(--keep) quedan ${created.length} caso(s) en la base.`);
+  } else if (created.length > 0) {
+    for (const id of created) await db.delete(cases).where(eq(cases.id, id));
+    console.log(`\n${created.length} caso(s) de prueba borrados.`);
+  }
+
+  console.log("\n" + "─".repeat(70));
+  if (failures.length === 0) {
+    console.log("✓ Entra por los dos transportes, y no sale nada hacia afuera.");
+  } else {
+    console.log(`✗ ${failures.length} problema(s):\n`);
+    for (const f of failures) console.log(`  · ${f}`);
+  }
+
+  process.exitCode = failures.length === 0 ? 0 : 1;
+}

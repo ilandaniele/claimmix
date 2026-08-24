@@ -30,7 +30,8 @@
     "check": "tsx --tsconfig tsconfig.rehearsal.json scripts/check-everything.mts",
     "load": "tsx --tsconfig tsconfig.rehearsal.json scripts/load-test.mts",
     "pentest": "tsx --tsconfig tsconfig.rehearsal.json scripts/pen-test.mts",
-    "onboard": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-onboarding.mts"
+    "onboard": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-onboarding.mts",
+    "knock": "tsx --tsconfig tsconfig.rehearsal.json scripts/knock-on-the-door.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

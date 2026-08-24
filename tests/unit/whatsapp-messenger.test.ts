@@ -212,6 +212,51 @@ describe("whatsappMessenger — what it says", () => {
  * en un prompt es una lista de cosas para pedir, diga lo que diga la
  * instrucción de al lado.
  */
+describe("whatsappMessenger — a un número inventado no le escribe nadie", () => {
+  it("no llama a Meta cuando el destino es del bloque reservado", async () => {
+    // La restricción vivía sólo en el mensajero simulado, y eso alcanzaba
+    // mientras inventar un asegurado fuera cosa del camino simulado. Una
+    // prueba que entra por el webhook firmado usa el mensajero real, y ahí el
+    // intento de envío sale hacia Meta — que es por lo que restringen una
+    // cuenta de WhatsApp Business.
+    await whatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: "5490000123456",
+      template: "missing_information_request",
+      data: { caseId: CASE, missingFields: ["policy_number"] },
+    });
+
+    expect(sendWhatsAppText).not.toHaveBeenCalled();
+  });
+
+  it("igual deja anotado lo que habría dicho", async () => {
+    await whatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: "+54 9 0000 12 3456",
+      template: "missing_information_request",
+      data: { caseId: CASE, missingFields: ["policy_number"] },
+    });
+
+    // Con espacios y con el +: es el mismo destinatario escrito distinto.
+    expect(sendWhatsAppText).not.toHaveBeenCalled();
+    expect(inserted[0]?.status).toBe("skipped_simulated");
+  });
+
+  it("a un número de verdad sí le manda", async () => {
+    await whatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO,
+      template: "missing_information_request",
+      data: { caseId: CASE, missingFields: ["policy_number"] },
+    });
+
+    expect(sendWhatsAppText).toHaveBeenCalled();
+  });
+});
+
 describe("whatsappMessenger — tomar nota sin repetir el pedido", () => {
   it("dice que tomó nota", async () => {
     await send("information_received", { caseId: CASE });

@@ -26,6 +26,7 @@ import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import type { EmailTemplate } from "@/server/email/render";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
+import { isReservedTestNumber } from "@/lib/phone/reserved";
 
 export interface AgentMessage {
   caseId: string;
@@ -253,6 +254,19 @@ async function writeWhatsAppReply(message: AgentMessage, fallback: string): Prom
 export const whatsappMessenger: AgentMessenger = {
   async send(message) {
     try {
+      // Un asegurado inventado no recibe nada, entre por donde entre.
+      //
+      // La restricción estaba en el mensajero simulado, que alcanza mientras
+      // inventar un asegurado sea cosa del camino simulado. Una prueba que
+      // entra por el webhook firmado usa ESTE mensajero, y el intento de envío
+      // saldría hacia Meta — que es de las cosas por las que restringen una
+      // cuenta de WhatsApp Business. La prueba que sirve para no romper
+      // producción no puede ser la que nos bloquee el canal.
+      if (isReservedTestNumber(message.to)) {
+        await simulatedWhatsappMessenger.send(message);
+        return;
+      }
+
       const body = renderForWhatsApp(message);
       if (!body) {
         console.error(

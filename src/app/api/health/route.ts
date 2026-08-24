@@ -24,7 +24,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
-import { eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { gmailAccounts } from "@/lib/db/schema";
@@ -330,12 +330,22 @@ async function checkGmail(): Promise<Check> {
         tokenEncrypted: gmailAccounts.refresh_token_encrypted,
       })
       .from(gmailAccounts)
-      .where(eq(gmailAccounts.tenant_id, tenantId))
+      // La que trabaja, no una cualquiera.
+      //
+      // Esto pedía una fila del tenant sin filtrar y sin ordenar. Mientras
+      // hubo una sola casilla dio igual; el día que se cambió la casilla de
+      // entrada quedaron tres —dos apagadas y la que atiende— y Postgres
+      // devolvió una apagada. Producción sana, salud en amarillo, y el aviso
+      // apuntando a una casilla que se apagó a propósito.
+      //
+      // Es la falla contra la que advierte el comentario de acá arriba, dos
+      // versiones después: un chequeo que grita sin motivo se deja de mirar.
+      .where(and(eq(gmailAccounts.tenant_id, tenantId), eq(gmailAccounts.enabled, true)))
+      .orderBy(asc(gmailAccounts.created_at))
       .limit(1);
 
     const account = rows[0];
-    if (!account) return degraded("gmail", "ninguna casilla conectada");
-    if (!account.enabled) return degraded("gmail", `${account.email} está desactivada`);
+    if (!account) return degraded("gmail", "ninguna casilla activa");
     if (account.lastError) {
       return down("gmail", `${account.email}: ${String(account.lastError).slice(0, 80)}`);
     }

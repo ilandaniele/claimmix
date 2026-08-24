@@ -118,6 +118,39 @@ describe("GET /api/health — who gets to see it", () => {
 });
 
 describe("GET /api/health — what it reports", () => {
+  it("mira la casilla que atiende, no una apagada al lado", async () => {
+    // Pasó el 24 de agosto: al cambiar la casilla de entrada quedaron tres
+    // filas —dos apagadas a propósito y la que trabaja— y el chequeo levantaba
+    // una cualquiera. Producción sana, salud en amarillo, y el aviso apuntando
+    // a una casilla que apagamos nosotros. Un chequeo que grita sin motivo se
+    // deja de mirar, que es peor que no tenerlo.
+    const active = Promise.resolve([
+      {
+        email: "siniestros@aseguradora.com",
+        enabled: true,
+        lastError: null,
+        tokenEncrypted: "iv.tag.ciphertext",
+      },
+    ]);
+    mockSelect.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: () => active,
+          orderBy: () => ({ limit: () => active }),
+        }),
+      }),
+    });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const body = await res.json();
+    const gmail = body.checks.find((c: { name: string }) => c.name === "gmail");
+
+    // Lo que se afirma es de QUÉ casilla habla, no si el token de la fixtura
+    // descifra: eso lo cubren los tests de al lado.
+    expect(gmail.detail).not.toContain("desactivada");
+    expect(gmail.detail).toContain("siniestros@aseguradora.com");
+  });
+
   it("calls a missing migration down, not merely a warning", async () => {
     // The column is absent, which means a feature is quietly broken in
     // production. That is not something to mention in passing.
@@ -211,22 +244,28 @@ describe("GET /api/health — a connected mailbox that cannot be read", () => {
    * the local script hit the real failure minutes later.
    */
   function mailboxOnFile(tokenEncrypted = "iv.tag.ciphertext") {
+    const rows = Promise.resolve([
+      {
+        email: "siniestros@aseguradora.com",
+        enabled: true,
+        lastError: null,
+        tokenEncrypted,
+      },
+    ]);
+
+    // La consulta pide la casilla ACTIVA y ordenada: where().orderBy().limit().
+    // El mock acepta las dos formas para no atarse a la escritura exacta de la
+    // cadena, que es un detalle del constructor y no del comportamiento.
     mockSelect.mockReturnValue({
       from: () => ({
         where: () => ({
-          limit: () =>
-            Promise.resolve([
-              {
-                email: "siniestros@aseguradora.com",
-                enabled: true,
-                lastError: null,
-                tokenEncrypted,
-              },
-            ]),
+          limit: () => rows,
+          orderBy: () => ({ limit: () => rows }),
         }),
       }),
     });
   }
+
 
   async function gmailCheck() {
     const res = await GET(request(`Bearer ${SECRET}`));

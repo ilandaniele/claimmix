@@ -5,13 +5,14 @@ Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
 > through **Vertex AI** (postpay, no prepay wall), and the agent is trained on **206
-> approved examples** without needing fine-tuning. 21–23 August went into hardening: the
-> app was attacked on purpose, load-tested at a hundred simultaneous claimants, and what
-> that turned up was fixed. Migrations are tracked now — **0001–0016 applied**, ledger
-> and database agreeing. Nothing is broken. **WhatsApp now runs on the real Argentine
-> number**, verified, with the WABA approved — the last technical blocker to a pilot is
-> gone. What is left is commercial and operational: paid plans, the veltra mailbox, and
-> a first client.
+> approved examples** without needing fine-tuning. **WhatsApp runs on the real Argentine
+> number**, verified, WABA approved. Intake mail arrives at **veltra.claimmix@gmail.com**
+> and nothing else. 21–23 August went into hardening and then into the commercial layer:
+> the app was attacked on purpose, load-tested at a hundred simultaneous claimants,
+> onboarding a second client was rehearsed end to end, a closed month's invoice is frozen,
+> and billing + portfolio have screens. **Every check is green** (CI, CodeQL, secret scan,
+> and the four post-deploy jobs) for the first time since the suite was built.
+> What is left is commercial and operational: paid plans, and a first client.
 
 ## What ClaimMix is
 
@@ -217,11 +218,48 @@ Closed on three sides:
   in silence — `parseInt("")` is NaN, and every comparison against NaN is false, so
   the empty variable did not relax the cap, it switched it off.
 
+### 💬 The agent answers when someone writes (2026-08-23)
+
+The no-repeat rule was right that an unchanged request should not go out twice, and
+wrong to conclude there was nothing to say. Someone answering *"fue un choque, ayer
+a la tarde"* while their name, policy and DNI are still missing got **silence** — the
+rehearsal caught it three runs in a row, always the same turn.
+
+Now a short acknowledgement goes out on both channels — *tomamos nota, seguimos
+esperando lo de antes* — **without the list** (repeating it is exactly what the rule
+prevents) and without claiming the claim is complete (it is not, and saying so would
+be worse than asking twice: it would be false).
+
+Two mistakes on the way there, both caught by the rehearsal rather than by a test:
+
+- The first trigger was "new fields appeared in the database". Too loose: extraction
+  re-reads the whole conversation each round, so an "ok" produces rows that were not
+  stored before — from older messages — and earned an acknowledgement. The same
+  nagging with a different template. The agent's own `wait` verdict now overrules it.
+- The field list was passed to the composer *"so it knows what not to ask for"*, and
+  out came *"tomamos nota… Para seguir, necesitamos que nos digas el número de
+  póliza"*. A list of fields in a prompt is a list of things to ask for, whatever the
+  instruction beside it says.
+
+**What the rehearsal cannot promise** is that the acknowledgement path itself runs:
+it needs the pending set to come out identical to the previous message's, and with a
+live model almost any new fact enters the ask as a confirmation, which changes the
+set. A scenario written to force it passed or failed by the day — a rehearsal that
+fails at random stops being read — so it is covered by 15 tests instead, and listed
+in [docs/TESTING.md](TESTING.md) among what is *not* covered.
+
 ### 🔧 Optional improvements (not broken, worth doing)
-1. **Big batches still lose cases.** The reaper makes stuck cases *recoverable*
-   (`escalado`) but does not *process* them, so a large `batch-simulate` still
-   drops part of the distribution. Real fix: chunk/cap batches to fit
-   `maxDuration`, or process per-case via the worker route.
+1. ~~**Big batches lose cases**~~ ✅ **DONE 2026-08-23.** Not for the reason the note
+   gave: simulated extractions are serialised on purpose (they take turns so fifty
+   calls do not hit the model at once), so parallelising was never the fix — and
+   handing each case to the worker route would have been worse, since each would get
+   60s to wait for a turn that can take 170. What had to break was all fifty
+   depending on one invocation. Measured against production first: twenty cases took
+   between 175s and 822s — 8.75 to 41 seconds each — so fifty never fit in the 300s
+   ceiling. Now the run asks whether there is time for one more, **measuring the
+   cases it already did**, and hands the rest to another invocation over HTTP with
+   the internal secret. Six links max: a function that calls itself with no ceiling
+   is spending with no floor.
 2. ~~**Migration runner + `schema_migrations` tracking**~~ ✅ **DONE** — runner
    2026-08-13, baseline adopted against prod 2026-08-21 (see Infra facts).
 3. ~~**No admin UI for tenants or billing**~~ ✅ **DONE 2026-08-23.**
@@ -241,6 +279,20 @@ Closed on three sides:
 
 ### 🙋 Waiting on you (not code)
 
+- **The one test nobody but you can run: write to it.** Everything below the surface
+  is proven — production sent a real mail *from* the veltra mailbox, the Gmail watch
+  is registered and real inbound mail (Google's own notifications) became cases and
+  was correctly filed as `no_relevante`, and twelve whole conversations run against
+  the real agent on both channels every deploy. What has NOT been done since the
+  mailbox changed is the last metre: **a claim-shaped message from a real person to
+  `veltra.claimmix@gmail.com`, and a real WhatsApp to the business number**. The
+  rehearsal cannot do it — it runs on the simulated channels on purpose, so it never
+  messages anyone — and neither can anyone but the owner of a phone and a mailbox.
+  Send both, watch them land in Bandeja, and read what comes back.
+- **Rotate the WhatsApp system-user token.** Meta echoed it inside an error response
+  on 2026-08-23 and it is now in a chat transcript. Same standing as the
+  `veltra.soporte` password below: it is not known to be leaked, and it is no longer
+  only where it should be.
 - **Vercel and Neon are still on the free plans.** The load test says the ceiling
   is the plan, not the code — that becomes a step-shaped outage the month it hits.
 - **New GCP project `claimmix-veltra`** + `pnpm switch-gcp` to move extraction to it.
@@ -388,6 +440,16 @@ CI (GitHub Actions) runs all of these + CodeQL on every push to `main`.
 After every **production** deploy, `post-deploy.yml` runs `pnpm smoke --deep` and, if
 it passed, the rehearsal + the free halves of load and pentest. `pnpm check` is the
 same thing from your machine. Everything about the suites: [docs/TESTING.md](TESTING.md).
+
+**Secret scanning (fixed 2026-08-23):** the *Secretos* workflow had been red on every
+push since it was added on 21 August, and it was not a false positive — it was
+scanning **nothing**. gitleaks builds the push range (`<before>^..<after>`) and hands
+it to git; the checkout used `fetch-depth: 1` to save minutes, so those commits were
+not in the clone, git answered "unknown revision", and the scan ended with «0 commits
+scanned» and exit 1. The worst pair: red, which is noise, and unscanned, which is what
+the red made it look like was happening. Sunday's scheduled run clones in full and
+passed, so from outside it looked intermittent rather than never-worked. Full clone
+now, and the log says how many commits it read.
 
 **CI audit note:** the blocking dependency gate runs `pnpm audit --prod`. One dev-only
 advisory is unfixable — eslint → minimatch@3 → brace-expansion@1, patched only in

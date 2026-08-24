@@ -13,7 +13,8 @@ Update it at the end of a work session so the next one can recover quickly._
 > month's invoice is frozen, billing + portfolio have screens, and **both channels were
 > driven end to end with real messages from a real person** — a mail, two WhatsApps and a
 > photograph, all answered. **Every check is green** (CI, CodeQL, secret scan, and the
-> five post-deploy jobs). What is left is commercial: paid plans, and a first client.
+> five post-deploy jobs), and the extraction now bills to **Veltra's own Google Cloud
+> project**. What is left is commercial: paid plans, and a first client.
 
 ## What ClaimMix is
 
@@ -330,6 +331,37 @@ Those messages found the rest of a day's worth of small lies in the data:
   through. Green for the wrong reason is worse than red. Invented claimants are now
   invented in who they are, not in what shape they have.
 
+### ☁️ Moving the extraction to Veltra's own project (2026-08-24)
+
+The point was not the name: it was that the model's spend should be the business's,
+not a person's. So the project had to be created **signed in as veltra.claimmix**, in
+Veltra's organisation, with its own billing account — nothing I could do from a
+session authenticated as someone else, and the reason the console steps were handed
+over rather than scripted.
+
+`pnpm switch-gcp` verifies before it writes: it makes a real Vertex call with the new
+key and, if the model does not answer, nothing is touched. It answered, and the deep
+smoke confirmed production is extracting on the new project.
+
+Three things worth remembering:
+
+- **The script wrote GitHub and not Vercel, and exited successfully.** On Windows
+  `npx` is a `.cmd` and `execFileSync` cannot run it: ENOENT, caught, printed as
+  "cargalo a mano" on one line, and on it went. That left local and CI pointing at the
+  new project while production stayed on the old one — the worst way to be half-done,
+  because each half looks healthy on its own. (`gh` is an `.exe`, which is why that
+  half worked and made it look like a Vercel problem.) Fixed, and a partial write now
+  exits non-zero.
+- **The key landed inside the repository, which is public.** `.gitignore` covers
+  `*-sa-key.json` and Google names the download `<project>-<hex>.json`, which does not
+  match — one `git add -A` away from a service-account key in a public repo. Keep the
+  local copy named `*-sa-key.json`.
+- **New organisations block service-account keys by default**
+  (`iam.disableServiceAccountKeyCreation`). Overriding it at *project* level is the
+  narrow fix; the wide one is Workload Identity Federation, where Vercel proves who it
+  is with a short-lived OIDC token and there is no JSON to leak at all. That is the
+  real answer to a key living in three places, and it is not written yet.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Write to it once, from a real phone and a real mailbox**~~ ✅ **DONE 2026-08-24.**
@@ -342,7 +374,24 @@ Those messages found the rest of a day's worth of small lies in the data:
   only where it should be.
 - **Vercel and Neon are still on the free plans.** The load test says the ceiling
   is the plan, not the code — that becomes a step-shaped outage the month it hits.
-- **New GCP project `claimmix-veltra`** + `pnpm switch-gcp` to move extraction to it.
+- ~~**New GCP project + `pnpm switch-gcp`**~~ ✅ **DONE 2026-08-24.** Extraction now
+  runs on **`claimmix-506321`**, inside the `veltra-claimmix-org` organisation and on
+  **its own billing account** (`0158E1-5C6451-D20FCE`), so the model's spend stops
+  landing on a personal card. The ID is not `claimmix-veltra`: project IDs are
+  immutable and `claimmix` was already taken by the personal project, so Google
+  appended the number. Two projects are now called "claimmix" — worth renaming the old
+  one's *display* name so nobody confuses them in six months.
+  ⚠️ **Do NOT delete the old `claimmix` project.** The Gmail OAuth client lives there
+  (`GMAIL_CLIENT_ID` starts with its project number) along with the Pub/Sub topic that
+  makes mail arrive in seconds, the tuning bucket and June's tuned model. Deleting it
+  stops mail intake dead: the stored refresh token for the mailbox becomes worthless.
+  Moving those is a separate job and it forces re-consenting the mailbox.
+- **Turn `iam.disableServiceAccountKeyCreation` back on** for `claimmix-506321`. New
+  organisations enforce it by default and it had to be overridden — at project level,
+  not org — to create the one key we needed. The override is still there.
+- **Delete the downloaded key** from `Downloads`. The value lives in Vercel, in GitHub
+  and in the git-ignored copy in the repo; a service-account key in a Downloads folder
+  is the next leak.
 - ~~**Connect the veltra mailbox**~~ ✅ **DONE 2026-08-23.** Intake now reads from
   `veltra.claimmix@gmail.com` and nothing else. The two personal mailboxes it replaced
   are **disabled, not deleted** — reversible from Configuración; run
@@ -368,7 +417,8 @@ account — no prepay wall — and still serves the pinned `gemini-2.5-*` models
 Studio now 404s for newly-created keys.
 
 - **Config** (`GEMINI_TRANSPORT=vertex`, set in Vercel prod + `.env.local`):
-  `GOOGLE_CLOUD_PROJECT=claimmix`, `GOOGLE_CLOUD_LOCATION=us-central1`,
+  `GOOGLE_CLOUD_PROJECT=claimmix-506321` (Veltra's org and billing since 2026-08-24;
+  it was `claimmix` before), `GOOGLE_CLOUD_LOCATION=us-central1`,
   `VERTEX_EXTRACTION_MODEL=gemini-2.5-flash`, and `GOOGLE_SERVICE_ACCOUNT_JSON`
   (the SA JSON **inline** — serverless has no filesystem, so the key-file path in
   `GOOGLE_APPLICATION_CREDENTIALS` cannot work on Vercel).
@@ -514,7 +564,7 @@ ships, so a second non-blocking step keeps dev advisories visible.
 | `migrate.mjs` | Applies pending SQL migrations and records them in `schema_migrations`. Status by default; `--apply` to run; `--baseline NNNN` to adopt already-hand-applied ones without executing; `--forget NNNN` to drop a ledger row that turned out to be a lie (the schema is not touched). Detects a migration edited after it ran. Falls back to Neon over HTTPS when port 5432 is blocked. |
 | `knock-on-the-door.mts` | `pnpm knock` — deposita un mail con forma de denuncia en la casilla de verdad y le manda al webhook un payload firmado como lo firma Meta. Prueba el primer metro de la cadena sin que salga nada del edificio. Corre en cada deploy. |
 | `rehearse-onboarding.mts` | `pnpm onboard` — gives a throwaway client the full onboarding, checks isolation, billing, the invoice freeze and the AI budget, then deletes it. Free. Run it before each real client. |
-| `switch-gcp-project.mts` | `pnpm switch-gcp` — moves extraction to another GCP project in one command (service account, APIs, Vercel vars). |
+| `switch-gcp-project.mts` | `pnpm switch-gcp` — moves extraction to another GCP project in one command. Verifies the new key against Vertex BEFORE writing anything, then updates .env.local, Vercel and GitHub. Exits non-zero if any of the three could not be written: half a migration is worse than none. |
 | `switch-mailbox.mts` | `pnpm mailbox` — swaps the intake mailbox without a moment of silence. |
 
 The testing scripts — `check-everything`, `rehearse-conversations`, `smoke-production`,

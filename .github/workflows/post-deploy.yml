@@ -160,6 +160,58 @@ jobs:
           echo ""
           echo "Reproducilo con: pnpm rehearse <nombre-del-escenario>"
 
+  # ── El timbre ────────────────────────────────────────────────────────────────
+  #
+  # El ensayo entra por los canales simulados, a propósito: así no le escribe a
+  # nadie. Lo que queda afuera de esa decisión es el primer metro — entre que el
+  # mensaje aparece en la casilla o llega al webhook, y que el worker lo levanta.
+  #
+  # Esto lo cubre sin sacar nada del edificio: el deploy DEPOSITA un mail en la
+  # casilla (no lo manda), y se le manda al webhook un payload firmado con el
+  # secreto de Meta desde un número del bloque reservado. Cuesta dos
+  # extracciones y borra los dos casos al terminar.
+  #
+  # La mitad de WhatsApp necesita WHATSAPP_APP_SECRET para firmar como Meta. Si
+  # no está, se saltea y lo dice — que es distinto de darla por probada.
+  timbre:
+    name: Tocar el timbre
+    runs-on: ubuntu-latest
+    needs: [smoke]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Entrar por los transportes de verdad
+        run: pnpm knock
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
+
+      - name: Qué significa que esto falle
+        if: failure()
+        run: |
+          echo "::error::Un mensaje que llega por el transporte real no termina en un caso."
+          echo ""
+          echo "  · 'no pudo dejar el mensaje' → la casilla se desconectó, o el token"
+          echo "                                  de Gmail dejó de servir."
+          echo "  · 'no se creó el caso'       → el poller o el webhook lo levantan y"
+          echo "                                  algo se rompe antes del worker."
+          echo "  · 'la respuesta SALIÓ'       → el freno de destinatarios reservados"
+          echo "                                  no frenó. Eso es un mail a alguien."
+          echo ""
+          echo "Reproducilo con: pnpm knock --keep"
+
   # ── La prueba de carga, sólo la mitad gratis ─────────────────────────────────
   #
   # La fase de lectura: las consultas del tablero contra la base de producción,

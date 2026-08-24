@@ -279,16 +279,14 @@ in [docs/TESTING.md](TESTING.md) among what is *not* covered.
 
 ### 🙋 Waiting on you (not code)
 
-- **The one test nobody but you can run: write to it.** Everything below the surface
-  is proven — production sent a real mail *from* the veltra mailbox, the Gmail watch
-  is registered and real inbound mail (Google's own notifications) became cases and
-  was correctly filed as `no_relevante`, and twelve whole conversations run against
-  the real agent on both channels every deploy. What has NOT been done since the
-  mailbox changed is the last metre: **a claim-shaped message from a real person to
-  `veltra.claimmix@gmail.com`, and a real WhatsApp to the business number**. The
-  rehearsal cannot do it — it runs on the simulated channels on purpose, so it never
-  messages anyone — and neither can anyone but the owner of a phone and a mailbox.
-  Send both, watch them land in Bandeja, and read what comes back.
+- **Write to it once, from a real phone and a real mailbox.** Everything on our
+  side of the wire now has a test: `pnpm knock` drops a claim-shaped mail into the
+  real mailbox (deposited, not sent) and posts a Meta-signed payload to the real
+  webhook, and both become cases with the agent's reply recorded and nothing leaving
+  the building. It runs on every deploy. What no automated test can cover is Google
+  and Meta *delivering* to us — for that, one real message each, once per
+  configuration change. It has not been done since the mailbox and the number
+  changed.
 - **Rotate the WhatsApp system-user token.** Meta echoed it inside an error response
   on 2026-08-23 and it is now in a chat transcript. Same standing as the
   `veltra.soporte` password below: it is not known to be leaked, and it is no longer

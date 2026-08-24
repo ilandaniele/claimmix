@@ -206,7 +206,54 @@ interactivo.
 Los que sí van a aparecer son de plan y de cuota, y son escalones, no curvas:
 el mes que Vercel o Neon lleguen a su tope no se pone lento, se corta.
 
-### 6. `pnpm pentest` — qué se consigue sin permiso
+### 6. `pnpm knock` — que un mensaje de verdad se convierta en un caso
+
+Todo lo anterior entra por los canales simulados, y eso es una decisión, no una
+limitación: así el ensayo no le escribe nunca a una persona, y así la cuenta de
+WhatsApp Business no se arriesga por mandarle mensajes a números inventados.
+
+Lo que queda afuera de esa decisión es el primer metro de la cadena. Entre "el
+mensaje aparece en la casilla" y "el worker lo levanta" hay parseo de MIME,
+hilado por asunto, prefiltro, validación de firma y resolución de tenant — y
+todo eso se probaba de una sola manera: alguien mandando un mail y un WhatsApp a
+mano, cada vez.
+
+```bash
+pnpm knock                 # los dos transportes
+pnpm knock --mail          # sólo el mail
+pnpm knock --whatsapp      # sólo WhatsApp
+pnpm knock --keep          # deja los casos para mirarlos por dentro
+```
+
+**Por mail**, el deploy *deposita* un mensaje en la casilla con
+`users.messages.insert`: no lo manda, no hay SMTP, no hay destinatario. De ahí en
+adelante el poller y el watch corren igual que con un mail de verdad. Vive en un
+endpoint del deploy y no en el script porque la clave que descifra el token de la
+casilla es de sólo escritura en Vercel — la misma razón por la que `pnpm prove`
+manda desde producción. El cuerpo lo fija el servidor: quien llama elige la
+acción, nunca el contenido.
+
+**Por WhatsApp**, se arma el payload que manda Meta, se firma con el
+`WHATSAPP_APP_SECRET` de verdad y se lo manda al webhook del deploy. Entra por el
+camino firmado, no por el simulado, así que ejercita la validación de firma — y
+comprueba también que una firma falsa dé 401, que es la mitad que importa.
+
+Nadie recibe nada: el remitente del mail es `@example.com` y el número es del
+bloque reservado, y el despachador y el mensajero se niegan a entregarles.
+
+**Lo que encontró la primera vez que se corrió**: la respuesta al mail *salía de
+verdad*. El freno comparaba el campo `to` crudo contra `@example.com`, y un mail
+real trae `Nombre <dirección>` — la cadena termina en `>`, no coincidía, y se
+entregaba. Funcionaba sólo con la dirección pelada, que es como la manda el
+ensayo y no como la manda un cliente de correo.
+
+**Lo que NO prueba**, dicho de frente: que Google y Meta nos entreguen. Acá el
+mensaje ya está en el buzón y al webhook lo llamamos nosotros. De ahí para
+adentro es todo código nuestro, y es lo que esto ejercita; el tramo de afuera lo
+prueba una persona mandando un mensaje, una vez por cada vez que cambia la
+configuración.
+
+### 7. `pnpm pentest` — qué se consigue sin permiso
 
 Todo lo anterior corre con credenciales y pregunta si el sistema hace lo que
 promete. Esto corre sin ninguna y pregunta lo contrario. Son dos preguntas
@@ -288,6 +335,7 @@ que aprueba porque el sistema estaba apagado es peor que no correrlo.
 | Dudás de si el bot puede mandar mensajes | `pnpm prove --whatsapp <número>` |
 | Antes de un piloto con volumen real | `pnpm load --write --claimants 100` |
 | Después de tocar el agente o los prompts | `pnpm pentest --agent` |
+| Después de cambiar la casilla, el número o sus credenciales | `pnpm knock` |
 
 `--fast` saltea el ensayo (gratis, sin tokens). `--local` saltea el chequeo de
 producción.
@@ -311,7 +359,10 @@ de carga y la mitad gratis del pen test.
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
 3. `pnpm load`: las consultas del tablero, y el plan que Postgres elige para
    cada una. Gratis, no escribe nada. Falla si el listado perdió su índice.
-4. `pnpm pentest`: cada ruta de la API sin credenciales, las firmas de webhook,
+4. `pnpm knock`: un mail depositado en la casilla de verdad y un payload
+   firmado al webhook, para que el primer metro de la cadena tenga prueba. Dos
+   extracciones, y borra los casos al terminar.
+5. `pnpm pentest`: cada ruta de la API sin credenciales, las firmas de webhook,
    las cabeceras y lo que cuenta un error. Gratis. Falla si algo quedó abierto.
 
 Antes de mirar nada, espera a que el alias sirva **el commit de ese deploy**.

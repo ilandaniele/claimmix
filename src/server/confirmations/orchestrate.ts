@@ -49,6 +49,7 @@ import {
   reconcileAttachments,
   resolveDeclinedDocs,
   seedRequiredDocs,
+  satisfyContactDocsWeAlreadyHave,
 } from "@/server/cases/documents";
 import {
   canonicalFieldKey,
@@ -182,6 +183,11 @@ export async function orchestratePostExtraction(
   const lastAsked = await lastAskedKeys(caseId, tenantId);
 
   await seedRequiredDocs(caseId, tenantId, claimTypeValue);
+
+  // Y cerrar el contacto que ya tenemos por el canal: por WhatsApp el teléfono
+  // es el remitente, y pedirle a alguien el número desde el que está escribiendo
+  // es de las cosas que hacen que deje de contestar.
+  await satisfyContactDocsWeAlreadyHave(caseId, tenantId, extractedClaim.fields);
   await reconcileAttachments(caseId, tenantId, labelForClaimType(claimTypeValue));
 
   // And close the ones they have just told us do not exist. Most crashes have

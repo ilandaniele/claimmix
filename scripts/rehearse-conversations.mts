@@ -625,7 +625,14 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
   // one. The address is @example.com on purpose: that is exactly what the
   // dispatcher checks before deciding never to actually send.
   const index = SCENARIOS.indexOf(scenario);
-  const phone = `5490000${RUN}${index}`;
+
+  // Inventado pero posible: 5490000 + 6 del reloj + el índice son 14 dígitos, y
+  // E.164 termina en 15. Antes eran 17 y eso lo hacía un número que no puede
+  // existir — el intake lo trata como tal y descarta el teléfono, así que el
+  // ensayo recorría un camino que producción no recorre: el agente pedía un
+  // correo que a nadie se le pide. Un asegurado inventado tiene que ser
+  // inventado en quién es, no en qué forma tiene.
+  const phone = `5490000${RUN.slice(-6)}${index}`;
   const address = `ensayo.${RUN}.${index}@example.com`;
   const byEmail = scenario.channel === "email";
   let caseId: string | null = null;

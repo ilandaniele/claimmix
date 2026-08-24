@@ -19,6 +19,7 @@
 
 import { describe, it, expect } from "vitest";
 import { parseEmailClaimFields } from "@/lib/email/claim-parser";
+import { contactDocsToClose } from "@/server/cases/documents";
 
 function emailField(fields: Array<{ field_key: string; field_value: string }>) {
   return fields.find((f) => f.field_key === "email")?.field_value ?? null;
@@ -133,5 +134,45 @@ describe("parseEmailClaimFields — el teléfono del remitente", () => {
     });
 
     expect(phoneField(fields)).toBeNull();
+  });
+});
+
+/**
+ * Un contacto que ya tenemos no se pide.
+ *
+ * `telefono_contacto` se siembra desde la configuración del asegurador. Por
+ * WhatsApp ese teléfono es el remitente — lo sabemos con más certeza que si lo
+ * escribiera — y el pedido quedaba abierto igual. Un pedido abierto se
+ * pregunta tarde o temprano.
+ *
+ * Sólo el par de contacto, y no cualquier dato pendiente: el contacto es la
+ * identidad del transporte, un hecho; la hora del siniestro es una lectura del
+ * texto. Cerrar un pedido por una interpretación es marcar como recibido algo
+ * que nadie confirmó, y eso desaparece de la lista del analista sin que nadie
+ * se entere.
+ */
+describe("contactDocsToClose", () => {
+  it("cierra el teléfono cuando lo tenemos, con su alias", () => {
+    const out = contactDocsToClose([{ field_key: "phone", field_value: "5491100000000" }]);
+    expect(out).toContain("phone");
+    expect(out).toContain("telefono_contacto");
+  });
+
+  it("no cierra un dato que no es contacto", () => {
+    const out = contactDocsToClose([
+      { field_key: "hora_siniestro", field_value: "20:30" },
+      { field_key: "lugar_siniestro", field_value: "Alem al 500" },
+    ]);
+    expect(out).toHaveLength(0);
+  });
+
+  it("un valor vacío no cuenta como tenerlo", () => {
+    expect(contactDocsToClose([{ field_key: "phone", field_value: "   " }])).toHaveLength(0);
+    expect(contactDocsToClose([{ field_key: "phone", field_value: null }])).toHaveLength(0);
+  });
+
+  it("el mail también, que es la otra mitad del par", () => {
+    const out = contactDocsToClose([{ field_key: "email", field_value: "ana@correo.com.ar" }]);
+    expect(out).toContain("email");
   });
 });

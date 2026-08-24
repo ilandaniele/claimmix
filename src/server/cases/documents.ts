@@ -24,7 +24,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { claimAttachments, missingDocs, requiredDocsConfig } from "@/lib/db/schema";
 import { callGemini } from "@/server/ai/gemini-extractor";
-import { labelForField } from "@/lib/labels/claim-fields";
+import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 /**
@@ -485,5 +485,70 @@ Lista vacía si no niega ninguno.`;
   } catch (err) {
     console.error("[documents] decline identify failed:", errCode(err));
     return [];
+  }
+}
+
+/**
+ * Cerrar el pedido de un contacto que ya tenemos por el canal.
+ *
+ * `telefono_contacto` se siembra desde la configuración del asegurador, que
+ * pide un teléfono en la ficha. Por WhatsApp ese teléfono es el remitente: lo
+ * sabemos con más certeza que si la persona lo escribiera, porque es el número
+ * desde el que está hablando. Aun así el pedido quedaba abierto, y un pedido
+ * abierto se pregunta tarde o temprano.
+ *
+ * Sólo el par de contacto —teléfono y mail— y no cualquier dato pendiente. La
+ * diferencia es de dónde viene el valor: el contacto es la identidad del
+ * transporte, un hecho; la hora del siniestro es una lectura del texto, una
+ * interpretación. Cerrar un pedido por una interpretación es marcar como
+ * recibido algo que nadie confirmó, y esa es la dirección de la cautela que
+ * este archivo entero respeta: un documento mal dado por recibido desaparece de
+ * la lista del analista y nadie se entera hasta que el reclamo se traba.
+ */
+/**
+ * Qué pedidos de contacto se pueden cerrar con lo que ya tenemos.
+ *
+ * Pura, y separada de la escritura, porque es acá donde se puede meter la
+ * pata: cerrar de más es marcar como recibido algo que nadie mandó.
+ */
+export function contactDocsToClose(
+  fields: Array<{ field_key: string; field_value?: string | null }>
+): string[] {
+  const held = new Set(
+    fields
+      .filter((f) => (f.field_value ?? "").trim().length > 0)
+      .map((f) => canonicalFieldKey(f.field_key))
+  );
+
+  return ["phone", "telefono_contacto", "email"].filter((key) =>
+    held.has(canonicalFieldKey(key))
+  );
+}
+
+export async function satisfyContactDocsWeAlreadyHave(
+  caseId: string,
+  tenantId: string,
+  fields: Array<{ field_key: string; field_value?: string | null }>
+): Promise<void> {
+  const closable = contactDocsToClose(fields);
+  if (closable.length === 0) return;
+
+  try {
+    await db
+      .update(missingDocs)
+      .set({ satisfied_at: new Date().toISOString() })
+      .where(
+        and(
+          eq(missingDocs.case_id, caseId),
+          eq(missingDocs.tenant_id, tenantId),
+          isNull(missingDocs.satisfied_at),
+          isNull(missingDocs.declined_at),
+          inArray(missingDocs.doc_key, closable)
+        )
+      );
+  } catch (err) {
+    // Que no se cierre no rompe nada: se vuelve a preguntar, que es la falla
+    // barata. Lo caro es lo contrario.
+    console.error("[documents] contact close failed:", errCode(err), "case:", caseId);
   }
 }

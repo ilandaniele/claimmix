@@ -161,6 +161,20 @@ function updateEnvLocal(): void {
   console.log("  ✓ .env.local");
 }
 
+/**
+ * En Windows, `npx` es un .cmd y execFileSync no puede ejecutarlo.
+ *
+ * No falla de forma ruidosa: tira ENOENT, el catch de más abajo lo cuenta como
+ * «cargalo a mano», y el script sigue como si nada. Pasó en la mudanza del 24
+ * de agosto: las cuatro variables de GitHub se escribieron y las cuatro de
+ * Vercel no, así que el entorno local y el de CI apuntaban al proyecto nuevo y
+ * producción seguía en el viejo. Es la peor forma de quedar a mitad de camino,
+ * porque cada mitad por separado se ve sana.
+ *
+ * `gh` es un .exe y anda sin esto, que es por qué la mitad de GitHub sí pasó.
+ */
+const NEEDS_SHELL = process.platform === "win32";
+
 /** Write one secret without it passing through a shell argument. */
 function writeSecret(target: "vercel" | "github", name: string, value: string): void {
   const tmp = path.resolve(`.secret-${name}.tmp`);
@@ -168,10 +182,16 @@ function writeSecret(target: "vercel" | "github", name: string, value: string): 
   try {
     const input = fs.readFileSync(tmp);
     if (target === "vercel") {
+      // El valor va por stdin y nunca por un argumento: un argumento se ve en la
+      // lista de procesos y queda en el historial de la terminal.
       execFileSync("npx", ["vercel", "env", "rm", name, "production", "--yes"], {
         stdio: "ignore",
+        shell: NEEDS_SHELL,
       });
-      execFileSync("npx", ["vercel", "env", "add", name, "production"], { input });
+      execFileSync("npx", ["vercel", "env", "add", name, "production"], {
+        input,
+        shell: NEEDS_SHELL,
+      });
     } else {
       execFileSync("gh", ["secret", "set", name], { input });
     }
@@ -179,6 +199,15 @@ function writeSecret(target: "vercel" | "github", name: string, value: string): 
     fs.rmSync(tmp, { force: true });
   }
 }
+
+/**
+ * Lo que no se pudo escribir.
+ *
+ * Las tres copias tienen que coincidir; media mudanza deja el entorno local
+ * apuntando a un proyecto y producción a otro, y las dos mitades se ven sanas
+ * por separado. Si algo falta, esto termina distinto de cero para que se note.
+ */
+const failed: string[] = [];
 
 console.log("Escribiendo:");
 updateEnvLocal();
@@ -188,6 +217,7 @@ for (const [name, value] of Object.entries(values)) {
     writeSecret("vercel", name, value);
     console.log(`  ✓ Vercel · ${name}`);
   } catch {
+    failed.push(`Vercel · ${name}`);
     console.log(`  ✗ Vercel · ${name} — cargalo a mano`);
   }
 }
@@ -197,6 +227,7 @@ for (const [name, value] of Object.entries(values)) {
     writeSecret("github", name, value);
     console.log(`  ✓ GitHub · ${name}`);
   } catch {
+    failed.push(`GitHub · ${name}`);
     console.log(`  ✗ GitHub · ${name} — cargalo a mano`);
   }
 }
@@ -216,4 +247,14 @@ console.log(
   ].join("\n")
 );
 
+
+  // Media mudanza es peor que ninguna: el entorno local y CI apuntando a un
+  // proyecto y producción a otro, y cada mitad viéndose sana por separado. Por
+  // eso esto termina distinto de cero — si no, el script dice «cargalo a mano»
+  // en una línea y sale con éxito, que es como se pasa por alto.
+  if (failed.length > 0) {
+    console.error(`\n✖ Sin escribir: ${failed.join(", ")}`);
+    console.error("  Las tres copias tienen que coincidir. Cargá las que faltan a mano.");
+    process.exitCode = 1;
+  }
 }

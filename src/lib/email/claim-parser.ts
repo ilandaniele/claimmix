@@ -1,4 +1,5 @@
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
+import { bareAddress } from "@/lib/email/reserved";
 
 type ParseInput = {
   subject?: string | null;
@@ -147,12 +148,32 @@ function extractFullName(text: string): string | null {
   return titleCase(greetingName);
 }
 
+/**
+ * La dirección de la persona, y sólo si es una dirección.
+ *
+ * El último recurso era `senderEmail` tal cual venía, y `senderEmail` es el
+ * identificador del canal, no una dirección. Guardaba dos cosas que no son un
+ * mail:
+ *
+ *   · por mail, el encabezado entero — `Ilan Daniele <ilan@…>` — porque un
+ *     cliente de correo manda el nombre visible pegado a la dirección;
+ *   · por WhatsApp, el número de teléfono, que de mail no tiene nada.
+ *
+ * Ninguna de las dos rompía una respuesta —el envío usa la casilla conectada,
+ * no este campo— y las dos ensucian lo que sí se compara: cruzar un cliente por
+ * su mail contra `Nombre <dir>` no encuentra a nadie, y contra un teléfono
+ * encuentra cualquier cosa. Un dato que parece estar y está mal es peor que
+ * vacío: vacío se pide, y esto no.
+ */
 function extractEmail(text: string, senderEmail?: string | null): string | null {
   const labeled = matchValue(LABELED_EMAIL_RE, text);
   if (labeled) return labeled;
 
   const match = EMAIL_RE.exec(text);
-  return match?.[0] ?? senderEmail?.trim() ?? null;
+  if (match?.[0]) return match[0];
+
+  const bare = bareAddress(senderEmail);
+  return bare && EMAIL_RE.test(bare) ? bare : null;
 }
 
 function inferClaimType(text: string): string | null {

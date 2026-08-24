@@ -125,6 +125,11 @@ function setupDbMocks({
   lastAskRows = [] as Array<{ asked_keys?: string[] | null; created_at?: string }>,
   /** Rows for filesArrivedSinceWeLastSpoke: non-empty means a file arrived. */
   newAttachmentRows = [] as Array<{ id: string }>,
+  /**
+   * Rows for factsLearnedSinceWeLastSpoke: non-empty means the claimant told
+   * us something we did not have when we last wrote to them.
+   */
+  newFactRows = [] as Array<{ id: string }>,
 } = {}) {
   const mockDbTyped = db as MockDb;
 
@@ -151,6 +156,10 @@ function setupDbMocks({
 
       if (tableName === "claim_attachments") {
         return { where: () => ({ limit: () => Promise.resolve(newAttachmentRows) }) };
+      }
+
+      if (tableName === "extracted_fields") {
+        return { where: () => ({ limit: () => Promise.resolve(newFactRows) }) };
       }
 
       // claim_field_confirmations (or any other table) — return empty so upsert inserts.
@@ -1336,6 +1345,158 @@ describe("orchestratePostExtraction — escalated cases are left alone", () => {
  * compared: the composer rewrites it every time, so the three messages looked
  * like three different messages to everything downstream.
  */
+/**
+ * Callarse no es lo mismo que no tener nada que decir.
+ *
+ * La regla de no repetirse acierta en que un pedido sin cambios no sale dos
+ * veces. Lo que no se sigue de ahí es que no haya que contestar: alguien que
+ * escribe "fue un choque, ayer a la tarde" mientras siguen faltando el nombre,
+ * la póliza y el DNI no cambió el pedido y sí cambió si le debemos un mensaje.
+ *
+ * Del lado del asegurado, escribir y no recibir nada se lee como que nadie está
+ * leyendo — que es el problema que este producto existe para arreglar. Pasó en
+ * el ensayo de conversaciones, tres corridas seguidas, en el mismo turno.
+ */
+describe("orchestratePostExtraction — acusar recibo sin repetir el pedido", () => {
+  const GAPS = ["full_name", "policy_number", "dni"];
+
+  function gapsAre(fields: string[]) {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: fields,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  }
+
+  function templates() {
+    return vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+  }
+
+  it("acusa recibo cuando contaron algo nuevo y el pedido no cambió", async () => {
+    setupDbMocks({
+      lastAskRows: [{ asked_keys: GAPS, created_at: "2026-08-23T10:00:00.000Z" }],
+      newFactRows: [{ id: "un dato que antes no teníamos" }],
+    });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(templates()).toContain("information_received");
+  });
+
+  it("y no repite el pedido: el acuse va en lugar de la lista, no además", async () => {
+    setupDbMocks({
+      lastAskRows: [{ asked_keys: GAPS, created_at: "2026-08-23T10:00:00.000Z" }],
+      newFactRows: [{ id: "un dato nuevo" }],
+    });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(templates()).not.toContain("missing_information_request");
+  });
+
+  it("tampoco dice que está todo completo, porque no lo está", async () => {
+    // El acuse cuenta como haber hablado. Sin eso, la rama de cierre le
+    // agregaría encima un "ya tenemos todo lo necesario" que es falso mientras
+    // faltan tres datos.
+    setupDbMocks({
+      lastAskRows: [{ asked_keys: GAPS, created_at: "2026-08-23T10:00:00.000Z" }],
+      newFactRows: [{ id: "un dato nuevo" }],
+    });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(templates()).not.toContain("confirmation_received");
+  });
+
+  it("si no contaron nada nuevo, sigue en silencio", async () => {
+    // Alguien que escribe "ok" no movió el reclamo. Contestarle "tomamos nota"
+    // es ruido, y la regla de no repetirse sigue mandando.
+    setupDbMocks({ lastAskRows: [{ asked_keys: GAPS, created_at: "2026-08-23T10:00:00.000Z" }], newFactRows: [] });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(templates()).toHaveLength(0);
+  });
+
+  it("respeta el juicio del agente: si dijo `wait`, no acusa recibo", async () => {
+    // La regresión que esto fija, encontrada en el ensayo y no en un test: la
+    // extracción relee la conversación entera en cada vuelta, así que un "ok"
+    // produce campos que antes no estaban guardados — de mensajes viejos, no
+    // del último. Con eso solo, un "ok" y un "gracias" recibían un acuse cada
+    // uno: el mismo hostigamiento de antes con otra plantilla.
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "wait",
+      askFor: [],
+      question: null,
+      reasoning: "el mensaje no aporta nada",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
+
+    setupDbMocks({
+      lastAskRows: [{ asked_keys: GAPS, created_at: "2026-08-23T10:00:00.000Z" }],
+      newFactRows: [{ id: "un campo que la relectura acaba de guardar" }],
+    });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(templates()).toHaveLength(0);
+  });
+
+  it("cuando el pedido SÍ cambió, va el pedido y no un acuse", async () => {
+    // El acuse es para cuando no hay nada nuevo que pedir. Si lo hay, lo que
+    // corresponde es pedirlo: un acuse en su lugar dejaría el reclamo esperando
+    // un dato que nunca se pidió.
+    setupDbMocks({
+      lastAskRows: [{ asked_keys: ["accident_date"], created_at: "2026-08-23T10:00:00.000Z" }],
+      newFactRows: [{ id: "un dato nuevo" }],
+    });
+    gapsAre(GAPS);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(templates()).toContain("missing_information_request");
+    expect(templates()).not.toContain("information_received");
+  });
+});
+
 describe("orchestratePostExtraction — not asking the same thing twice", () => {
   const GAPS = ["accident_date", "policy_number"];
 

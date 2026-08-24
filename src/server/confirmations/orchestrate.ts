@@ -290,6 +290,9 @@ export async function orchestratePostExtraction(
 
   const missingInfoEmailComing = gapResult.missingRequiredFields.length > 0;
   let missingInfoEmailDispatched = false;
+  // Un acuse de recibo también es haber hablado: la rama F no puede agregarle
+  // encima un "ya tenemos todo lo necesario" que además sería falso.
+  let acknowledgementDispatched = false;
 
   // ── E. Act on the gap analysis — AC10 ────────────────────────────────────
 
@@ -463,6 +466,34 @@ export async function orchestratePostExtraction(
     (askAlreadyMade || agentIsWaiting) && !owesAnAnswer && !somethingArrived;
   const askIsNew = askItems.fields.length > 0 && !askOnHold;
 
+  // Pero callarse no es lo mismo que no tener nada que decir.
+  //
+  // Alguien que contesta «fue un choque, ayer a la tarde» mientras siguen
+  // faltando el nombre, la póliza y el DNI no cambió el pedido: la regla de no
+  // repetirse lo deja en silencio, y del otro lado eso se lee como que nadie
+  // está leyendo. Que es el problema que este producto existe para arreglar.
+  //
+  // Entonces cuando el pedido queda en espera Y nos enteramos de algo que antes
+  // no sabíamos, sale un acuse corto: tomamos nota, seguimos esperando lo de
+  // antes. Sin la lista — volver a ponerla es exactamente lo que la regla evita.
+  // Dos condiciones, y la primera es el juicio del agente.
+  //
+  // "Nos enteramos de algo nuevo" por sí solo no alcanza: la extracción relee
+  // la conversación entera en cada vuelta, así que un `ok` puede producir
+  // campos que antes no estaban guardados — de mensajes viejos, no del
+  // último. Con esa señal sola, un "ok" y un "gracias" recibían un acuse cada
+  // uno, que es el hostigamiento que la regla de no repetirse evita, sólo que
+  // con otra plantilla.
+  //
+  // Cuando el agente deliberó y dijo `wait`, ya juzgó que el mensaje no
+  // aportó nada. Eso se respeta: el acuse es para quien contó algo y no
+  // recibió respuesta, no para quien dijo `ok`.
+  const acknowledgeOnly =
+    askOnHold &&
+    !agentIsWaiting &&
+    !isHighSeverity &&
+    (await factsLearnedSinceWeLastSpoke(caseId, tenantId));
+
   if (askIsNew && !confirmationEmailDispatched && !isHighSeverity) {
     await messenger.send({
       caseId,
@@ -529,6 +560,31 @@ export async function orchestratePostExtraction(
     await setStatus(caseId, tenantId, "listo_para_core");
   }
 
+  if (acknowledgeOnly && !confirmationEmailDispatched && !missingInfoEmailDispatched) {
+    await messenger.send({
+      caseId,
+      tenantId,
+      to: senderEmail,
+      lastMessage: latestMessageText,
+      template: "information_received",
+      data: {
+        caseId,
+        claimantName,
+        // Sin la lista de lo que falta, deliberadamente.
+        //
+        // La pasé una vez «para que el redactor sepa qué no volver a pedir» y
+        // el resultado fue: «Ana, tomamos nota de lo que nos contaste. Para
+        // seguir, necesitamos que nos digas el número de póliza». O sea, el
+        // pedido otra vez. Una lista de campos en el prompt es una lista de
+        // cosas para pedir, diga lo que diga la instrucción de al lado.
+        isFollowUp: true,
+      },
+      inReplyToMessageId,
+    });
+
+    acknowledgementDispatched = true;
+  }
+
   // ── F. Acknowledge receipt — but only if nothing else already did ─────────
   //
   // confirmation_received is the fallback, not a fixture: it exists so a
@@ -549,6 +605,7 @@ export async function orchestratePostExtraction(
     isHighSeverity ||
     confirmationEmailDispatched ||
     missingInfoEmailDispatched ||
+    acknowledgementDispatched ||
     askOnHold;
 
   if (!somethingElseWasSaid && !(await checkConfirmationAlreadySent(caseId, tenantId))) {
@@ -1226,6 +1283,63 @@ async function filesArrivedSinceWeLastSpoke(
   } catch (err) {
     // Speaking is the safe direction here too.
     console.error("[orchestrate] Failed to check for new files:", errCode(err));
+    return false;
+  }
+}
+
+/**
+ * ¿Nos enteramos de algo nuevo desde la última vez que hablamos?
+ *
+ * Hermana de filesArrivedSinceWeLastSpoke, y por el mismo motivo: la regla de
+ * no repetir el pedido acierta en que una petición sin cambios no se manda dos
+ * veces, y se equivoca al concluir que no pasó nada. Alguien que contesta «fue
+ * un choque, ayer a la tarde» mientras siguen faltando el nombre, la póliza y
+ * el DNI no cambió el pedido y sí cambió si le debemos un mensaje.
+ *
+ * Se apoya en que extracted_fields hace upsert sobre (case_id, field_key) y NO
+ * toca extracted_at al actualizar: una fila con fecha posterior a lo último que
+ * dijimos es un dato que antes no teníamos. Un valor que CAMBIÓ —«no, fue el
+ * martes»— no se detecta por acá; eso es una corrección, va por el camino del
+ * conflicto, y decirlo así es más honesto que fingir que esto lo cubre.
+ */
+async function factsLearnedSinceWeLastSpoke(
+  caseId: string,
+  tenantId: string
+): Promise<boolean> {
+  try {
+    const spoke = firstRow(
+      await db
+        .select({ created_at: outboundMessages.created_at })
+        .from(outboundMessages)
+        .where(
+          and(
+            eq(outboundMessages.case_id, caseId),
+            eq(outboundMessages.tenant_id, tenantId),
+            inArray(outboundMessages.status, ["sent", "skipped_simulated"])
+          )
+        )
+        .orderBy(desc(outboundMessages.created_at))
+        .limit(1)
+    );
+    if (!spoke?.created_at) return false;
+
+    const since = firstRow(
+      await db
+        .select({ id: extractedFields.id })
+        .from(extractedFields)
+        .where(
+          and(
+            eq(extractedFields.case_id, caseId),
+            eq(extractedFields.tenant_id, tenantId),
+            gt(extractedFields.extracted_at, spoke.created_at)
+          )
+        )
+        .limit(1)
+    );
+    return Boolean(since);
+  } catch (err) {
+    // Callarse es la dirección insegura acá: ante la duda, contestar.
+    console.error("[orchestrate] Failed to check for new facts:", errCode(err));
     return false;
   }
 }

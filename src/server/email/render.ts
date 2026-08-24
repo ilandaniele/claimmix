@@ -16,13 +16,17 @@ import { renderConfirmationReceived } from "./templates/confirmation-received";
 import { renderMissingInformationRequest } from "./templates/missing-information-request";
 import { renderDataConfirmationRequest } from "./templates/data-confirmation-request";
 import { renderSpecialistEscalation } from "./templates/specialist-escalation";
+import { renderInformationReceived } from "./templates/information-received";
 
 /** All supported outbound email template keys. */
 export type EmailTemplate =
   | "confirmation_received"
   | "missing_information_request"
   | "data_confirmation_request"
-  | "specialist_escalation";
+  | "specialist_escalation"
+  // Acusar recibo sin repetir el pedido: la persona contó algo nuevo y lo
+  // que falta sigue siendo lo mismo que ya le pedimos.
+  | "information_received";
 
 export interface RenderedEmail {
   subject: string;
@@ -81,6 +85,12 @@ export function renderTemplate(
   data: Record<string, unknown>
 ): RenderedEmail {
   switch (template) {
+    case "information_received":
+      return renderInformationReceived({
+        caseId: String(data.caseId ?? ""),
+        noted: data.noted != null ? String(data.noted) : null,
+      });
+
     case "confirmation_received":
       return renderConfirmationReceived({
         caseId: String(data.caseId ?? ""),

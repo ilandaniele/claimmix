@@ -162,6 +162,22 @@ function renderClosing(data: Record<string, unknown>): string {
         `Un analista la va a revisar y te contactamos si hace falta algo más.`;
 }
 
+/**
+ * El piso del acuse de recibo, sin la lista de lo que falta.
+ *
+ * Dos oraciones: que lo anotamos, y que seguimos esperando lo de antes. Si el
+ * redactor no puede mejorarlo, esto es lo que sale — y dicho así ya es
+ * suficiente. Lo que no puede hacer, ni acá ni en la versión redactada, es
+ * volver a enumerar lo que pedimos hace un minuto.
+ */
+function renderNoted(data: Record<string, unknown>): string {
+  const noted = typeof data.noted === "string" && data.noted ? ` de ${data.noted}` : " de lo que nos contaste";
+  return (
+    `Gracias, tomamos nota${noted}. ` +
+    "Seguimos a la espera de lo que te pedimos antes para poder avanzar."
+  );
+}
+
 /** Which kind of message this is, for the composer's brief. */
 function intentFor(template: EmailTemplate): ReplyIntent {
   switch (template) {
@@ -171,6 +187,8 @@ function intentFor(template: EmailTemplate): ReplyIntent {
       return "ask";
     case "data_confirmation_request":
       return "conflict";
+    case "information_received":
+      return "acknowledgement";
     default:
       return "closing";
   }
@@ -184,6 +202,8 @@ function renderForWhatsApp(message: AgentMessage): string | null {
       return renderAsk(message.data);
     case "data_confirmation_request":
       return renderConflict(message.data);
+    case "information_received":
+      return renderNoted(message.data);
     case "confirmation_received":
       return renderClosing(message.data);
     default:
@@ -194,6 +214,7 @@ function renderForWhatsApp(message: AgentMessage): string | null {
 /** Ledger names, so a WhatsApp row is recognisable next to an email one. */
 const WHATSAPP_TEMPLATE_NAMES: Record<string, string> = {
   specialist_escalation: "wa_specialist_escalation",
+  information_received: "wa_information_received",
   missing_information_request: "wa_missing_information_request",
   data_confirmation_request: "wa_data_confirmation_request",
   confirmation_received: "wa_confirmation_received",

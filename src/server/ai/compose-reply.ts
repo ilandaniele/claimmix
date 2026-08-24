@@ -25,7 +25,8 @@ export type ReplyIntent =
   | "ask" // we need things from them
   | "escalation" // a specialist is taking over
   | "closing" // nothing left to ask
-  | "conflict"; // what they said differs from what we hold
+  | "conflict" // what they said differs from what we hold
+  | "acknowledgement"; // they told us something; what we need has not changed
 
 export interface ComposeReplyInput {
   intent: ReplyIntent;
@@ -117,6 +118,18 @@ function buildPrompt(input: ComposeReplyInput): string {
     closing:
       "Avisar que ya tenemos todo lo necesario y que la denuncia pasa a análisis. NO pidas nada.",
     conflict: "Señalar la diferencia entre los dos valores y preguntar cuál es el correcto.",
+    // Es la única intención donde la lista de campos se pasa para que NO se
+    // use: el redactor la necesita para no volver a pedir eso mismo con
+    // otras palabras, que es como se rompería la regla sin darse cuenta.
+    // La lista de campos NO se le muestra a esta intención, aunque llegue: ver
+    // el bloque DATOS A PEDIR más abajo. Una lista en el prompt se lee como
+    // una lista de cosas para pedir por más que la instrucción diga lo
+    // contrario — pasó, y salió el mismo pedido con otras palabras.
+    acknowledgement:
+      "Decir que tomamos nota de lo que la persona acaba de contar, y que seguimos " +
+      "esperando lo que ya le pedimos. NO repitas la lista de datos: se la pedimos hace " +
+      "un momento y repetirla es hostigar. NO digas que está todo completo, porque no lo " +
+      "está. Dos oraciones como mucho.",
   };
 
   const channelBrief =
@@ -132,7 +145,7 @@ denunciar un siniestro. Escribís en castellano rioplatense, con voseo, claro y 
 LO QUE HAY QUE DECIR (no lo cambies, no agregues ni saques temas):
 ${intentBrief[input.intent]}
 
-${items.length > 0 ? `DATOS A PEDIR:\n${items.join("\n")}` : ""}
+${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${input.claimantName}. Podés llamarla por su nombre de pila.` : ""}
 ${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${input.question}"\nContestá con lo que sabemos de verdad: en qué estado está su denuncia y qué falta para avanzar. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder.` : ""}

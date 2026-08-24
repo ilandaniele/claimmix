@@ -199,6 +199,55 @@ describe("whatsappMessenger — what it says", () => {
   });
 });
 
+/**
+ * El acuse de recibo, que existe para no dejar a nadie hablando solo.
+ *
+ * La regla de no repetir el pedido es correcta y deja un hueco: alguien que
+ * cuenta algo mientras falta lo mismo de antes no recibía nada. El acuse llena
+ * ese hueco, y su única obligación es no convertirse en el pedido otra vez.
+ *
+ * No es hipotético: la primera versión le pasaba la lista al redactor «para que
+ * sepa qué NO pedir» y salió «Ana, tomamos nota de lo que nos contaste. Para
+ * seguir, necesitamos que nos digas el número de póliza». Una lista de campos
+ * en un prompt es una lista de cosas para pedir, diga lo que diga la
+ * instrucción de al lado.
+ */
+describe("whatsappMessenger — tomar nota sin repetir el pedido", () => {
+  it("dice que tomó nota", async () => {
+    await send("information_received", { caseId: CASE });
+    expect(sentBody().toLowerCase()).toContain("nota");
+  });
+
+  it("no enumera nada, ni aunque le manden la lista", async () => {
+    // La defensa es doble a propósito: el orquestador ya no manda los campos,
+    // y si alguien los vuelve a mandar, esto tiene que seguir sin listarlos.
+    await send("information_received", {
+      caseId: CASE,
+      missingFields: ["policy_number", "dni_asegurado", "hora_siniestro"],
+    });
+
+    const body = sentBody();
+    expect(body).not.toContain("•");
+    expect(body).not.toContain("póliza");
+    expect(body).not.toContain("DNI");
+  });
+
+  it("no dice que esté todo listo, porque no lo está", async () => {
+    await send("information_received", { caseId: CASE });
+
+    const body = sentBody().toLowerCase();
+    expect(body).not.toContain("todo lo necesario");
+    expect(body).not.toContain("quedó completo");
+  });
+
+  it("queda en el libro con su propio nombre", async () => {
+    // Un acuse no es un pedido ni un cierre: si se anotara como cualquiera de
+    // los dos, alreadyAskedFor leería mal lo último que dijimos.
+    await send("information_received", { caseId: CASE });
+    expect(inserted[0]?.template).toBe("wa_information_received");
+  });
+});
+
 describe("whatsappMessenger — the record", () => {
   it("writes to the same ledger email writes to", async () => {
     await send("confirmation_received", { caseId: CASE });

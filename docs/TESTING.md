@@ -374,6 +374,17 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
   el trabajo tenía `continue-on-error: true`, así que CI decía "success" en cada
   push mientras un test fallaba desde hacía días. Ya no lo tiene. Una suite que
   no puede hacer fallar el build es un adorno.
+- **El acuse de recibo**, que es lo que sale cuando alguien cuenta algo y lo que
+  falta sigue siendo lo mismo que ya le pedimos. La plantilla, el redactor y los
+  dos canales están cubiertos por tests; lo que el ensayo **no** puede garantizar
+  es la situación que lo dispara. Hace falta que el conjunto de datos pendientes
+  quede idéntico al del mensaje anterior, y con un modelo vivo casi cualquier
+  dato nuevo entra al pedido como confirmación —"el lugar del siniestro,
+  entendimos Alem al 500, ¿es correcto?"— y entonces el pedido cambió. Se
+  intentó un escenario para forzarlo y salía verde o rojo según el día, que es
+  peor que no tenerlo: un ensayo que falla por azar deja de mirarse. Cuando pasa
+  de verdad, `goteo` lo agarra.
+
 - **La sincronización con el core del asegurador**, que nunca se ejercitó contra
   un sistema real.
 - **La entrega en sí.** `pnpm prove` confirma que el proveedor aceptó el

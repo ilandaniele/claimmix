@@ -27,6 +27,7 @@ import { db } from "@/lib/db";
 import { claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { renderTemplate, type EmailTemplate } from "./render";
+import { isReservedTestAddress } from "@/lib/email/reserved";
 import { getGmailAccountByEmail, getGmailAccountForTenant } from "./gmail/accounts";
 import { GmailSender } from "./gmail/gmail-sender";
 import { isSendSuccess } from "./provider";
@@ -174,11 +175,16 @@ function messageIdFromHeaders(headers: unknown): string | undefined {
 export async function dispatchOutboundEmail(options: DispatchOptions): Promise<DispatchResult> {
   const { caseId, tenantId, to, template, data, inReplyToMessageId, threadId } = options;
 
-  // Simulation cases (batch-simulate / simulate) use IANA-reserved example.*
-  // sender addresses. Never attempt real delivery to them — the rest of the
-  // post-extraction flow (confirmations, status transitions) still runs; only
-  // the outbound send is skipped.
-  if (/@example\.(com|org|net)$/i.test(to.trim())) {
+  // Los asegurados inventados usan dominios example.*, reservados por la IANA.
+  // Nunca se les entrega de verdad: el resto del flujo posterior a la
+  // extracción corre igual, y sólo se saltea el envío.
+  //
+  // La comparación va sobre la DIRECCIÓN y no sobre el encabezado crudo. Estaba
+  // escrita contra `to` tal cual, y eso funciona mientras la dirección venga
+  // pelada — como la manda el ensayo, y no como la manda un cliente de correo.
+  // Un From real trae nombre visible, la cadena termina en `>`, la expresión no
+  // coincidía y el mail salía. Ver lib/email/reserved.ts.
+  if (isReservedTestAddress(to)) {
     // Skipping the send is right; skipping the record was not. Returning here
     // without a trace meant a simulated case showed no sign the agent had
     // decided to write at all — the outbound ledger stayed empty and the inbox

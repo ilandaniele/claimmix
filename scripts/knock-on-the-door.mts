@@ -105,14 +105,27 @@ async function waitForCase(
   return find();
 }
 
-/** Lo que el agente compuso para ese caso, haya salido o no. */
-async function replyFor(caseId: string) {
-  return db
-    .select({ status: outboundMessages.status, template: outboundMessages.template })
-    .from(outboundMessages)
-    .where(eq(outboundMessages.case_id, caseId))
-    .orderBy(desc(outboundMessages.created_at))
-    .limit(1);
+/**
+ * Lo que el agente compuso para ese caso, haya salido o no.
+ *
+ * Con espera, porque el estado del caso y la respuesta se escriben por
+ * separado y no siempre en ese orden. La primera versión preguntaba una sola
+ * vez apenas cambiaba el estado y reportaba «sin registro» por medio segundo
+ * de diferencia: una falla inventada por el reloj, que es la peor clase de
+ * rojo — manda a buscar un bug que no existe.
+ */
+async function replyFor(caseId: string, seconds = 20) {
+  for (let i = 0; i < seconds; i++) {
+    const rows = await db
+      .select({ status: outboundMessages.status, template: outboundMessages.template })
+      .from(outboundMessages)
+      .where(eq(outboundMessages.case_id, caseId))
+      .orderBy(desc(outboundMessages.created_at))
+      .limit(1);
+    if (rows.length > 0) return rows;
+    await sleep(1000);
+  }
+  return [];
 }
 
 async function fieldsFor(caseId: string) {

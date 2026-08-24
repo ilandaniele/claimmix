@@ -58,7 +58,7 @@ export function parseEmailClaimFields(input: ParseInput): ExtractedField[] {
 
   addField(fields, "full_name", extractFullName(text));
   addField(fields, "email", extractEmail(text, input.senderEmail));
-  addField(fields, "phone", matchValue(PHONE_RE, text));
+  addField(fields, "phone", matchValue(PHONE_RE, text) ?? phoneFromSender(input.senderEmail));
   addField(fields, "dni", normalizeDni(matchValue(DNI_RE, text) ?? matchValue(LABELED_DNI_RE, text)));
   addField(fields, "cbu", normalizeDigits(matchValue(CBU_RE, text)));
   addField(fields, "policy_number", matchValue(POLICY_NUMBER_RE, text) ?? matchValue(CLAIM_REF_RE, subject) ?? matchValue(CLAIM_REF_RE, text));
@@ -174,6 +174,31 @@ function extractEmail(text: string, senderEmail?: string | null): string | null 
 
   const bare = bareAddress(senderEmail);
   return bare && EMAIL_RE.test(bare) ? bare : null;
+}
+
+/**
+ * El remitente, cuando el canal es un teléfono y no una casilla.
+ *
+ * Por WhatsApp el identificador del remitente ES el teléfono de contacto, y lo
+ * sabemos con más certeza que si lo escribiera: es el número desde el que está
+ * hablando. Igual se pedía, porque el par de contacto —mail o teléfono— sólo
+ * miraba lo que apareciera en el texto.
+ *
+ * Hasta hoy eso no se notaba, y por una razón incómoda: el número entraba en el
+ * campo `email` y el par quedaba satisfecho con un dato falso. Al sacarlo de
+ * ahí, la pregunta habría aparecido. Preguntarle a alguien el teléfono desde el
+ * que está escribiendo es la clase de cosa que hace que un asegurado deje de
+ * contestar.
+ */
+function phoneFromSender(sender?: string | null): string | null {
+  const raw = sender?.trim();
+  if (!raw || raw.includes("@")) return null;
+
+  // E.164 va de 8 a 15 dígitos. Fuera de ese rango no es un teléfono, es otra
+  // cosa: un id interno, un pedazo de encabezado, algo que no hay que guardar
+  // como si fuera el número de una persona.
+  const digits = raw.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 15 ? digits : null;
 }
 
 function inferClaimType(text: string): string | null {

@@ -20,6 +20,55 @@ significar «capas porque sí».
 
 ---
 
+## El esquema
+
+```
+                        EL MUNDO DE AFUERA
+   📧 Gmail · 💬 WhatsApp · 🤖 Vertex            🖥️ el navegador
+                 │                                      │
+                 ▼                                      ▼
+ ┌──────────────────────────────────────────────────────────────────┐
+ │   ┌──────────────────┐                  ┌──────────────────┐     │
+ │   │    adapters/     │                  │    features/     │     │
+ │   │ Puertos y        │                  │ Rebanadas        │     │
+ │   │ Adaptadores      │                  │ Verticales       │     │
+ │   └────────┬─────────┘                  └────────┬─────────┘     │
+ │            └───────────┐        ┌────────────────┘               │
+ │                        ▼        ▼                                │
+ │                 ┌────────────────────────┐                       │
+ │                 │        core/           │                       │
+ │                 │   NÚCLEO FUNCIONAL     │                       │
+ │                 │   puro · sin red       │                       │
+ │                 │   no depende de nadie  │                       │
+ │                 └────────────────────────┘                       │
+ │                        ▲        ▲                                │
+ │            ┌───────────┘        └────────────────┐               │
+ │   ┌────────┴─────────┐                  ┌────────┴─────────┐     │
+ │   │   workflows/     │                  │      data/       │     │
+ │   │ Ejecución        │                  │ Capa de Datos    │     │
+ │   │ Durable          │                  │ + DTOs           │     │
+ │   └──────────────────┘                  └────────┬─────────┘     │
+ │                                                  │               │
+ │  LA CÁSCARA — impura: hace entrada/salida        │               │
+ │  y atrapa errores                                │               │
+ └──────────────────────────────────────────────────┼───────────────┘
+                                                    ▼
+                     ┌──────────────────────────────────────────┐
+                     │  Postgres · FORCE ROW LEVEL SECURITY     │
+                     │  el segundo cierre de la tenencia        │
+                     └──────────────────────────────────────────┘
+```
+
+Las flechas `▼` desde arriba son el recorrido de un mensaje. Las flechas hacia
+el centro son **«depende de»**, y que todas apunten al núcleo es la regla
+entera: `core` no importa a nadie, así que se puede cambiar Gmail, la base o el
+motor de flujos sin tocarlo — y probarlo sin encender nada.
+
+`data/` y Postgres son los **dos cierres de la tenencia**: tienen que fallar los
+dos para que una aseguradora vea lo de otra. Hoy no hay ninguno de los dos.
+
+---
+
 ## El mapa: empleado → patrón
 
 | Empleado | Patrón | De dónde sale | Carpeta |

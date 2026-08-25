@@ -172,9 +172,12 @@ Si el proceso muere, se reanuda en el paso donde iba, no desde el principio.
 Trae reintentos, esperas largas e idempotencia como parte del modelo.
 
 **Por qué acá.** Porque ya existe una versión casera de esto —`MAX_CHAIN`,
-auto-invocación por HTTP, leases a mano, 77 reintentos con criterio propio— que
-existe sólo para esquivar el límite de 60 segundos, y que pierde casos. Hay un
-cron llamado `reap-stuck` cuyo trabajo es juntar lo perdido.
+auto-invocación por HTTP, leases a mano, 77 reintentos con criterio propio— para
+esquivar el límite de tiempo de una función. **Funciona:** verificado contra
+producción, cero casos atascados sobre 464. Lo que cuesta es mantener cuatro
+piezas para que siga funcionando, y lo que con ellas no se puede hacer: esperar
+días por una respuesta, reanudar donde murió, y ver en qué paso quedó cada
+expediente.
 
 **Con qué se lo arruina.** Metiendo lógica de negocio adentro de los pasos. El
 flujo debe leerse como un índice: *extraer, analizar, preguntar, esperar,
@@ -259,3 +262,13 @@ fi
 Va al lado de `check-personal-data.sh`, que ya hace lo mismo con otra invariante
 y por el mismo motivo: **una regla que no se verifica sola no es una regla, es
 una intención.**
+
+
+> **Corrección (2026-08-25).** Este documento afirmaba que la cañería pierde
+> casos y que la existencia del cron `reap-stuck` lo probaba. **Lo verifiqué
+> contra producción y no es cierto hoy:** de 464 casos, cero quedaron atascados
+> en `procesando`. La pérdida silenciosa era el comportamiento *anterior* a
+> `batch-budget.ts`, que la corrigió; el barrendero quedó como red de seguridad
+> y no está atrapando nada. El argumento por la ejecución durable sigue en pie,
+> pero por otros motivos —las cuatro piezas caseras, las esperas largas, la
+> imposibilidad de reanudar y la falta de visibilidad—, no por pérdida de datos.

@@ -89,10 +89,12 @@ Tiene la lista de pasos de cada siniestro y va tachando: traducido ✓, analizad
 ✓, preguntado ✓, esperando respuesta… Si se corta la luz en el paso tres, cuando
 vuelve **retoma en el paso tres**, no desde el principio.
 **Lo importante:** hoy no hay capataz. Cada empleado trabaja mientras le alcanza
-el turno de un minuto, y si no termina se llama a sí mismo por teléfono para
-seguir; después de seis llamadas, se rinde. Hay un empleado nocturno que pasa a
-juntar los expedientes que quedaron tirados — **y su existencia es la prueba de
-que se pierden.**
+el turno, y si no termina se llama a sí mismo por teléfono para seguir; después
+de seis llamadas, se rinde. Hay un empleado nocturno que pasa a juntar
+expedientes tirados — **y hoy no encuentra ninguno**, porque el sistema de
+turnos anda. Lo que cuesta no son expedientes perdidos: es que nadie sabe en
+qué paso va cada uno, no se puede esperar una semana por una respuesta, y si
+algo se corta hay que empezar de nuevo.
 
 ### 🧑‍💼 El mostrador · `features`
 Las pantallas: la bandeja, el caso abierto, las métricas. Donde una persona de
@@ -140,4 +142,14 @@ confiar en que nadie se distraiga y que distraerse no alcance.
 |---|---|---|
 | **El archivo** | Cada empleado entra por su cuenta y se acuerda de mirar de quién es cada carpeta. 198 veces. | Hay un archivero. Nadie más tiene llave, y él mira siempre. |
 | **Las decisiones** | El que decide y el que atiende el teléfono son la misma persona, en un escritorio de 1.424 papeles. Para probar si decide bien hay que montar la oficina entera. | Están separados. Al que decide se lo prueba solo, con una ficha de mentira, en un segundo. |
-| **Los expedientes** | No hay capataz. Se pierden cuando se acaba el turno, y hay un empleado nocturno que pasa a juntarlos. | Hay capataz y lista de pasos. Perder un expediente deja de ser posible. |
+| **Los expedientes** | No hay capataz: hay un sistema de turnos hecho a mano que funciona —hoy no se pierde ninguno— pero que hay que mantener, y con el que nadie sabe en qué paso va cada uno. | Hay capataz y lista de pasos: se ve dónde está cada expediente, se puede esperar una semana por una respuesta, y si algo se corta retoma donde quedó. |
+
+
+> **Corrección (2026-08-25).** Este documento afirmaba que la cañería pierde
+> casos y que la existencia del cron `reap-stuck` lo probaba. **Lo verifiqué
+> contra producción y no es cierto hoy:** de 464 casos, cero quedaron atascados
+> en `procesando`. La pérdida silenciosa era el comportamiento *anterior* a
+> `batch-budget.ts`, que la corrigió; el barrendero quedó como red de seguridad
+> y no está atrapando nada. El argumento por la ejecución durable sigue en pie,
+> pero por otros motivos —las cuatro piezas caseras, las esperas largas, la
+> imposibilidad de reanudar y la falta de visibilidad—, no por pérdida de datos.

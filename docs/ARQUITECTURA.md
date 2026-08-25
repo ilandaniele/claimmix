@@ -123,9 +123,12 @@ un caso tarda         ~15 s
 Son cuatro piezas de un motor de ejecución durable, hechas a mano y sin estar
 unidas, para esquivar el límite de tiempo de una función serverless.
 
-**Y hay un cron cuyo trabajo es juntar los casos que la cañería dejó tirados.**
-Su existencia es la confesión: el sistema sabe que pierde trabajo y programó a
-alguien para ir a buscarlo.
+**Y hay un cron cuyo trabajo es juntar los casos que queden atascados**
+(`reap-stuck`). Nació porque la cañería sí perdía casos: la invocación se
+cortaba a mitad y los que faltaban quedaban en `procesando` para siempre.
+`batch-budget.ts` corrigió eso, y **hoy el barrendero no atrapa nada** — cero
+casos atascados sobre 464. Lo que queda no es pérdida de datos sino cuatro
+piezas caseras que sostienen algo que un motor hace solo.
 
 Y explica un bug real: **«los batches grandes pierden casos»** es exactamente
 cómo falla una cadena casera cuando se le acaba el presupuesto de tiempo. Se
@@ -482,3 +485,13 @@ migraciones dicen qué se pidió, `pg_class.relforcerowsecurity` dice qué pasa.
 - [It's probably time to stop recommending Clean Code — qntm](https://qntm.org/clean)
 - [Clean Code: crítica capítulo por capítulo](https://bugzmanov.github.io/cleancode-critique/)
 - [autocannon vs k6 vs artillery (2026)](https://www.pkgpulse.com/guides/autocannon-vs-k6-vs-artillery-load-testing-api-2026)
+
+
+> **Corrección (2026-08-25).** Este documento afirmaba que la cañería pierde
+> casos y que la existencia del cron `reap-stuck` lo probaba. **Lo verifiqué
+> contra producción y no es cierto hoy:** de 464 casos, cero quedaron atascados
+> en `procesando`. La pérdida silenciosa era el comportamiento *anterior* a
+> `batch-budget.ts`, que la corrigió; el barrendero quedó como red de seguridad
+> y no está atrapando nada. El argumento por la ejecución durable sigue en pie,
+> pero por otros motivos —las cuatro piezas caseras, las esperas largas, la
+> imposibilidad de reanudar y la falta de visibilidad—, no por pérdida de datos.

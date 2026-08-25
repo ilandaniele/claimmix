@@ -152,7 +152,7 @@ real después.
 
 ---
 
-## Ejemplo 3 — La cañería deja de perder casos
+## Ejemplo 3 — La cañería deja de sostenerse con cuatro piezas caseras
 
 ### Antes · `src/app/api/admin/batch-simulate/route.ts`
 
@@ -166,10 +166,14 @@ if (input.chain >= MAX_CHAIN) {
 await fetch(`${getWorkerBaseUrl()}/api/...`, { headers: internalAuthHeaders() });
 ```
 
-Traducido: *«adiviná si entra otro caso antes de que me maten a los 60 segundos;
-si no entra, llamate a vos mismo por HTTP; si ya te llamaste seis veces,
-rendite y anotá `chain_exhausted`»*. Más un cron `reap-stuck` que después pasa a
-juntar lo que quedó tirado.
+Traducido: *«adiviná si entra otro caso antes de que me maten; si no entra,
+llamate a vos mismo por HTTP; si ya te llamaste seis veces, rendite y anotá
+`chain_exhausted`»*. Más un cron `reap-stuck` de red de seguridad.
+
+**La adivinanza funciona.** Verificado contra producción: cero casos atascados
+sobre 464. Lo que cuesta no son los datos —no se pierde ninguno— sino mantener
+cuatro piezas para que eso siga siendo cierto, y todo lo que con ellas no se
+puede hacer.
 
 ### Después · `src/workflows/process-claim.ts`
 
@@ -195,8 +199,11 @@ Se van, todos juntos: `MAX_CHAIN`, `BATCH_BUDGET_MS`, `fitsAnotherCase`, la
 auto-invocación por HTTP, los leases hechos a mano, `chain_exhausted` y el cron
 `reap-stuck`.
 
-**La diferencia que importa:** «los batches grandes pierden casos» deja de ser un
-bug a parchar y pasa a ser un estado imposible.
+**La diferencia que importa:** hoy la cañería no pierde casos porque alguien
+escribió cuatro piezas que lo evitan, y hay que mantenerlas para que siga siendo
+verdad. Después no se pierden porque el modelo no lo permite — y además se puede
+esperar siete días por una respuesta, reanudar donde murió, y ver en qué paso
+quedó cada expediente. Nada de eso se puede hoy.
 
 ---
 
@@ -269,3 +276,13 @@ error, y lo reintentás desde ahí.
 **Cuando entra un cliente nuevo:** hoy confiás en que las 198 consultas están
 bien escritas. Después la base no le da a nadie lo que no es suyo, aunque el
 código se equivoque.
+
+
+> **Corrección (2026-08-25).** Este documento afirmaba que la cañería pierde
+> casos y que la existencia del cron `reap-stuck` lo probaba. **Lo verifiqué
+> contra producción y no es cierto hoy:** de 464 casos, cero quedaron atascados
+> en `procesando`. La pérdida silenciosa era el comportamiento *anterior* a
+> `batch-budget.ts`, que la corrigió; el barrendero quedó como red de seguridad
+> y no está atrapando nada. El argumento por la ejecución durable sigue en pie,
+> pero por otros motivos —las cuatro piezas caseras, las esperas largas, la
+> imposibilidad de reanudar y la falta de visibilidad—, no por pérdida de datos.

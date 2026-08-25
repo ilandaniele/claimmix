@@ -94,3 +94,10 @@ tests/fixtures/*.png
 tests/fixtures/*.pdf
 !tests/fixtures/placeholder.jpg
 check.log
+
+# El documento de arquitectura armado para descargar. Se genera a partir de
+# docs/ARQUITECTURA*.md, así que versionarlo es guardar la misma cosa dos veces
+# —y la copia envejece sin avisar. El archivo se queda en disco; el repo no lo
+# sigue.
+Arquitectura*ClaimMix.html
+Arquitectura*ClaimMix.md

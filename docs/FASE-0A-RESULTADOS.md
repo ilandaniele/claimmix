@@ -249,3 +249,59 @@ Dos defectos más que aparecieron al hacerlo repetible:
   fracaso. Es el mismo defecto de `switch-gcp` — en Windows, todo argumento con
   `&` va comillado. Y el `catch` mudo que lo escondía ahora distingue «falló el
   aislamiento» de «el comando ni arrancó», que son cosas muy distintas.
+
+---
+
+## El rol de producción, creado (2026-08-25)
+
+`pnpm rol-app` creó `claimmix_app` en producción: sin `BYPASSRLS`, sin
+`SUPERUSER`, sin ser dueño de ninguna tabla, con permisos de lectura, escritura,
+secuencias y funciones sobre `public` — más los permisos **por omisión**, para
+que una tabla creada mañana no nazca sin acceso y rompa sin que nadie relacione
+una cosa con la otra.
+
+**Crear el rol no cambió nada**: nadie lo usa. Producción siguió con sus siete
+chequeos en verde durante todo el procedimiento.
+
+Con el rol nuevo, contra producción:
+
+```
+✓ claimmix_app — sin BYPASSRLS, sin SUPERUSER
+✓ 29 tablas con RLS, FORCE y política
+✓ con el contexto de "Seguros del Sur": 458 casos propios
+✓ sin contexto: 0 filas
+⚠ la prueba cruzada no se pudo hacer: falta un segundo inquilino con datos
+```
+
+Ese ⚠ es honesto y no es un defecto de la defensa. En producción hay dos
+inquilinos y sólo uno tiene datos; `audit_log` parecía tener dos, pero el
+segundo es `00000000-0000-0000-0000-000000000000` —tres filas huérfanas que no
+son de nadie—. La demostración cruzada la da el ensayo, donde sí hay dos
+inquilinos con casos y el resultado es concluyente.
+
+Por eso el chequeo ahora distingue **«falló»** de **«no se pudo probar»**, y sale
+con 3 en el segundo caso: un chequeo que no probó lo que dice probar no debería
+pasar por verde, pero tampoco debería anunciar una fuga que no encontró.
+
+### ⛔ Por qué NO se cambia `DATABASE_URL` todavía
+
+Es la medición que faltaba, y es tajante:
+
+```
+como claimmix_app:   0 caso(s)
+como el dueño:     458 caso(s)
+```
+
+**No hay un solo `set_config` en `src/`.** Ninguna consulta de la aplicación pone
+el contexto de inquilino, y la app usa `neon-http`, que ni siquiera soporta
+transacciones. Cambiar `DATABASE_URL` hoy no sería arriesgado: sería una caída
+total garantizada — todas las consultas devolviendo cero filas.
+
+El rol queda creado, con sus permisos, verificado y esperando. Su cadena de
+conexión está en `.env.local` como **`DATABASE_URL_APP`**, deliberadamente
+separada. El cambio ocurre cuando exista la capa de datos que pone el contexto,
+que es la Fase 1 — y entonces es una variable de entorno, reversible en un
+minuto.
+
+**La Fase 0-A queda cerrada.** Todo lo que se podía hacer sin tocar el código de
+la aplicación, está hecho.

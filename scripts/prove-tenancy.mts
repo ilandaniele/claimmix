@@ -50,6 +50,12 @@ const nota = (t: string) => console.log(`     ${t}`);
 
 const pool = new Pool({ connectionString: url });
 const problemas: string[] = [];
+// Separado a propósito de `problemas`: «no se pudo probar» no es lo mismo que
+// «falló». Meterlos en la misma bolsa hace que el chequeo anuncie «la base no
+// separa» cuando en realidad todo lo verificable pasó y lo que faltaron fueron
+// datos con qué cruzar. Esa confusión es la que convierte un chequeo en ruido,
+// y un chequeo que se vuelve ruido se deja de mirar.
+const sinProbar: string[] = [];
 
 try {
   const cx = await pool.connect();
@@ -116,6 +122,18 @@ try {
 
     // ── 3. La prueba de verdad ──────────────────────────────────────────────
     titulo("La prueba cruzada: dos aseguradoras, una consulta");
+
+    // Con qué tabla se cruza.
+    //
+    // `cases` es la que más significa, pero sólo sirve si dos inquilinos tienen
+    // casos. En producción hay uno solo con casos, y entonces "no vi nada
+    // ajeno" no prueba nada. Antes de resignarse a un "no concluyente" —o peor,
+    // de escribir datos falsos en producción para que la prueba pase— se busca
+    // alguna tabla que YA tenga filas de más de un inquilino.
+    //
+    // Esto se hace con el rol que esté probándose. Si ese rol obedece RLS y no
+    // hay contexto puesto, no verá nada y el recuento dará uno: por eso la
+    // búsqueda corre con el contexto de cada inquilino, más abajo.
     const inquilinos = (
       await cx.query(`SELECT id::text AS id, name FROM tenants ORDER BY created_at LIMIT 2`)
     ).rows;
@@ -125,83 +143,105 @@ try {
     } else {
       const [a, b] = inquilinos;
 
-      const verConContexto = async (ctx: string) => {
-        await cx.query("BEGIN");
-        try {
-          await cx.query("SELECT set_config('claimmix.tenant_id', $1, true)", [ctx]);
-          const r = await cx.query(
-            `SELECT tenant_id::text AS t, count(*)::int AS n
-             FROM cases GROUP BY tenant_id`
-          );
-          return r.rows as Array<{ t: string; n: number }>;
-        } finally {
-          await cx.query("ROLLBACK");
-        }
-      };
-
-      // Cuánto hay realmente de cada uno, antes de sacar conclusiones.
-      //
-      // Sin esto la prueba miente: si el segundo inquilino no tiene ni un caso,
-      // "no vi nada ajeno" no significa que la base lo haya impedido, significa
-      // que no había nada que ver. Un verde que no probó nada es exactamente lo
-      // que hay que evitar.
-      //
-      // Y hay que contarlo CON el contexto de cada uno, no de una sola pasada:
-      // cuando el aislamiento funciona, una consulta sin contexto devuelve cero
-      // —que es el objetivo— y entonces el propio recuento diría que no hay
-      // nada de nadie. La primera versión de esto se equivocaba justo ahí, y el
-      // síntoma era que la prueba se volvía "no concluyente" precisamente
-      // cuando empezaba a funcionar.
-      // Se cuenta con el contexto puesto Y filtrando por dueño. El filtro no
-      // sobra: si el rol saltea RLS, la consulta sin filtro devuelve todo y el
-      // recuento diría que existen 462 casos "ajenos" cuando en realidad son
-      // los propios del otro inquilino vistos de más. El resultado sería un
-      // "de 462 que existen" falso justo en el escenario que estamos tratando
-      // de denunciar.
-      const contarDe = async (tenant: string) => {
+      const enContexto = async <T,>(tenant: string, hacer: () => Promise<T>): Promise<T> => {
         await cx.query("BEGIN");
         try {
           await cx.query("SELECT set_config('claimmix.tenant_id', $1, true)", [tenant]);
-          const r = await cx.query(`SELECT count(*)::int AS n FROM cases WHERE tenant_id = $1`, [
-            tenant,
-          ]);
-          return r.rows[0].n as number;
+          return await hacer();
         } finally {
           await cx.query("ROLLBACK");
         }
       };
-      const hayAjenas = await contarDe(b.id);
 
+      const cuantasDe = (tabla: string, tenant: string) =>
+        enContexto(tenant, async () => {
+          const r = await cx.query(
+            `SELECT count(*)::int AS n FROM "${tabla}" WHERE tenant_id = $1`,
+            [tenant]
+          );
+          return r.rows[0].n as number;
+        });
+
+      // Elegir la tabla con la que cruzar.
+      //
+      // `cases` es la que más significa, pero en producción hay un solo
+      // inquilino con casos y entonces "no vi nada ajeno" no prueba nada. Antes
+      // de resignarse a un "no concluyente" —o de escribir datos falsos en
+      // producción para que la prueba pase, que sería mucho peor— se busca una
+      // tabla que YA tenga filas de los dos.
+      let tabla = "cases";
+      let hayAjenas = await cuantasDe(tabla, b.id);
+
+      if (hayAjenas === 0) {
+        const candidatas = (
+          await cx.query(`
+            SELECT c.table_name::text AS t
+            FROM information_schema.columns c
+            JOIN information_schema.tables tb
+              ON tb.table_schema = c.table_schema AND tb.table_name = c.table_name
+            WHERE c.table_schema = 'public' AND c.column_name = 'tenant_id'
+              AND tb.table_type = 'BASE TABLE' AND c.table_name <> 'cases'
+            ORDER BY 1`)
+        ).rows as Array<{ t: string }>;
+
+        for (const { t } of candidatas) {
+          try {
+            const n = await cuantasDe(t, b.id);
+            if (n > 0) {
+              tabla = t;
+              hayAjenas = n;
+              nota(`\`cases\` no alcanza (el otro inquilino no tiene): se cruza con \`${t}\``);
+              break;
+            }
+          } catch {
+            // Una tabla sin permiso o con forma rara no invalida la prueba.
+          }
+        }
+      }
+
+      const verConContexto = (ctx: string) =>
+        enContexto(ctx, async () => {
+          const r = await cx.query(
+            `SELECT tenant_id::text AS t, count(*)::int AS n
+             FROM "${tabla}" GROUP BY tenant_id`
+          );
+          return r.rows as Array<{ t: string; n: number }>;
+        });
+
+      // El recuento de lo ajeno va con el contexto puesto Y filtrando por
+      // dueño. El filtro no sobra: si el rol saltea RLS, la consulta sin filtro
+      // devuelve todo, y el recuento informaría cientos de filas "ajenas" que
+      // en realidad son las propias vistas de más — un dato falso justo en el
+      // escenario que este chequeo existe para denunciar.
       const desdeA = await verConContexto(a.id);
       const ajenas = desdeA.filter((f) => f.t !== a.id);
       const propias = desdeA.find((f) => f.t === a.id)?.n ?? 0;
 
-      console.log(`   con el contexto de "${a.name}":`);
-      nota(`propias: ${propias} caso(s)`);
+      console.log(`   con el contexto de "${a.name}" sobre \`${tabla}\`:`);
+      nota(`propias: ${propias} fila(s)`);
       if (ajenas.length) {
-        mal(`ajenas: ${ajenas.reduce((s, f) => s + f.n, 0)} caso(s) de ${ajenas.length} inquilino(s) más`);
+        mal(`ajenas: ${ajenas.reduce((s, f) => s + f.n, 0)} fila(s) de ${ajenas.length} inquilino(s) más`);
         nota(`"${b.name}" es visible desde "${a.name}". Esto es la fuga.`);
-        problemas.push("una aseguradora puede ver los casos de otra");
+        problemas.push("una aseguradora puede ver los datos de otra");
       } else if (hayAjenas === 0) {
-        mal("no concluyente: no hay casos de ningún otro inquilino");
-        nota(`"${b.name}" no tiene casos, así que no ver nada ajeno no prueba nada.`);
-        nota("Para que esta prueba valga hace falta un caso de otro inquilino.");
-        problemas.push("la prueba cruzada no tiene con qué cruzar");
+        mal("no concluyente: ninguna tabla tiene filas de un segundo inquilino");
+        nota("No ver nada ajeno no prueba aislamiento si no hay nada ajeno que ver.");
+        sinProbar.push("la prueba cruzada: falta un segundo inquilino con datos");
       } else {
         bien(`ajenas: 0 de ${hayAjenas} que existen — la base no las entrega`);
       }
 
       // Sin contexto: no debería verse nada.
       await cx.query("BEGIN");
-      const sinCtx = await cx.query(`SELECT count(*)::int AS n FROM cases`);
+      const sinCtx = await cx.query(`SELECT count(*)::int AS n FROM "${tabla}"`);
       await cx.query("ROLLBACK");
       const n = sinCtx.rows[0].n as number;
       if (n > 0) {
-        mal(`sin contexto se ven ${n} caso(s)`);
+        mal(`sin contexto se ven ${n} fila(s) de \`${tabla}\``);
         nota("Una consulta que olvida poner el contexto devuelve datos de todos.");
         problemas.push("sin contexto se ven casos de todos");
       } else {
-        bien("sin contexto: 0 casos — olvidarse el contexto no filtra nada");
+        bien(`sin contexto: 0 filas — olvidarse el contexto no filtra nada`);
       }
     }
   } finally {
@@ -217,10 +257,23 @@ await pool.end();
 
 // ── Veredicto ───────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(70));
-if (problemas.length === 0) {
+if (problemas.length === 0 && sinProbar.length === 0) {
   console.log("✓ La base separa a las aseguradoras por sí misma.");
   console.log("  Un WHERE olvidado deja de ser una fuga.");
   process.exit(0);
+}
+
+if (problemas.length === 0) {
+  console.log("⚠ Todo lo verificable pasó, pero algo no se pudo probar:");
+  for (const p of sinProbar) console.log(`   · ${p}`);
+  console.log("");
+  console.log("  El rol no saltea RLS, las tablas tienen FORCE y política, y sin");
+  console.log("  contexto no se ve nada. Lo que falta no es una defensa: son datos");
+  console.log("  con qué demostrarla.");
+  console.log("");
+  console.log("  Sale con 3 y no con 0: un chequeo que no probó lo que dice probar");
+  console.log("  no debería pasar por verde.");
+  process.exit(esperadoAbierto ? 0 : 3);
 }
 
 console.log(`✗ La base NO separa. ${problemas.length} motivo(s):`);

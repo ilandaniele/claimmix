@@ -29,6 +29,11 @@ import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { gmailAccounts } from "@/lib/db/schema";
 
+import { getWatchExpiration } from "@/server/email/gmail/poll-state";
+
+const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
+const UNA_HORA_MS = 60 * 60 * 1000;
+
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
@@ -328,6 +333,7 @@ async function checkGmail(): Promise<Check> {
         enabled: gmailAccounts.enabled,
         lastError: gmailAccounts.last_error,
         tokenEncrypted: gmailAccounts.refresh_token_encrypted,
+        lastConnectedAt: gmailAccounts.last_connected_at,
       })
       .from(gmailAccounts)
       // La que trabaja, no una cualquiera.
@@ -370,7 +376,44 @@ async function checkGmail(): Promise<Check> {
       return down("gmail", `${account.email}: el token guardado no descifra con esta clave`);
     }
 
-    return ok("gmail", `${account.email} conectada, token legible`);
+    // Un token legible tampoco es correo entrando rápido.
+    //
+    // El aviso de push (gmail.users.watch) cuelga del permiso de OAuth: al
+    // reconectar la casilla, el permiso viejo se cae y el aviso con él. La fila
+    // de gmail_poll_state, en cambio, se queda con el vencimiento anterior —a
+    // siete días vista— así que el cron, que sólo renueva lo que ve por vencer,
+    // no lo renueva. Todo se ve sano y el correo pasa a entrar por el cron en
+    // vez de en segundos. Es una degradación invisible que dura una semana.
+    //
+    // No hay columna con la fecha de registro, pero se deduce: Gmail da siete
+    // días exactos, así que el aviso se pidió en `watch_expiration - 7d`. Si la
+    // casilla se conectó después de eso, el aviso es de un permiso que ya no
+    // existe. Se compara con un margen de una hora para no gritar por el
+    // segundo que separa la conexión del registro que la sigue.
+    try {
+      const expiration = await getWatchExpiration(account.email);
+      if (!expiration) {
+        return degraded(
+          "gmail",
+          `${account.email} conectada, pero sin aviso de push: el correo entra por el cron`
+        );
+      }
+      const registrado = new Date(expiration).getTime() - SIETE_DIAS_MS;
+      const conectado = account.lastConnectedAt
+        ? new Date(account.lastConnectedAt).getTime()
+        : 0;
+      if (conectado - registrado > UNA_HORA_MS) {
+        return degraded(
+          "gmail",
+          `${account.email} conectada, pero el aviso de push quedó del permiso anterior: ` +
+            "el correo entra por el cron. Reconectá la casilla o pegale a /api/admin/setup-gmail-watch"
+        );
+      }
+    } catch {
+      // Que no se pueda leer el estado del aviso no invalida la casilla.
+    }
+
+    return ok("gmail", `${account.email} conectada, token legible, push al día`);
   } catch (err) {
     return degraded("gmail", `no se pudo verificar: ${why(err)}`);
   }

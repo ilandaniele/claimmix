@@ -35,7 +35,8 @@
     "tenancy": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-tenancy.mts",
     "ensayo-tenencia": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-tenancy.mts",
     "esquemas": "tsx --tsconfig tsconfig.rehearsal.json scripts/compare-schemas.mts",
-    "rol-app": "tsx --tsconfig tsconfig.rehearsal.json scripts/create-app-role.mts"
+    "rol-app": "tsx --tsconfig tsconfig.rehearsal.json scripts/create-app-role.mts",
+    "capa-datos": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-data-layer.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

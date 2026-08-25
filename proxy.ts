@@ -26,6 +26,21 @@ import { auth } from "@/lib/auth";
 const PUBLIC_PREFIXES = [
   "/login",
   "/registro",
+  // Las tres páginas que tienen que poder verse SIN cuenta, y que no podían.
+  //
+  // /demo es la pantalla que ve un prospecto: estaba detrás del login, o sea
+  // que la demo pública no existía para nadie que no fuera ya cliente. El
+  // endpoint que usa (/api/demo/) nunca estuvo bloqueado —el matcher de acá
+  // abajo no distingue, pero las rutas de API se defienden solas— así que la
+  // mitad de atrás funcionaba y la de adelante no se podía abrir.
+  //
+  // /privacy y /terms son requisito de Google para publicar una app que pide
+  // permisos de Gmail, y publicarla es lo que impide que el permiso de la
+  // casilla venza a los siete días. Una política de privacidad que redirige al
+  // login no es una política de privacidad publicada.
+  "/demo",
+  "/privacy",
+  "/terms",
   "/api/auth/sign-in",
   "/api/auth/sign-out",
   "/api/auth/callback",

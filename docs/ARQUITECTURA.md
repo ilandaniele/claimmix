@@ -413,7 +413,8 @@ tenencia se defiende sólo por tipos.**
 
 ### Fase 0-B — La ejecución durable (3-4 días) · *sólo para C-máxima*
 Migrar **un** flujo real punta a punta a pasos durables y medir si sobrevive el
-timeout que hoy pierde casos. No se compromete el resto hasta que este ande.
+corte: se mata la función a mitad y el flujo tiene que retomar donde iba, sin
+repetir el paso ya hecho. No se compromete el resto hasta que este ande.
 → Vale la misma regla que arriba: no se recomienda una pieza central sin
 probarla. Es exactamente el error del proxy borrado, en versión arquitectura.
 

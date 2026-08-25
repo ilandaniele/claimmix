@@ -246,7 +246,7 @@ falsear.
 | | Qué | Cuánto | Termina cuando |
 |---|---|---|---|
 | **0-A** | Probar `FORCE RLS` + rol no-dueño contra una rama de Neon | 2-3 d | una consulta sin contexto devuelve cero filas |
-| **0-B** | Un flujo real migrado a pasos durables | 3-4 d | sobrevive el timeout que hoy pierde casos |
+| **0-B** | Un flujo real migrado a pasos durables | 3-4 d | se mata la función a mitad y el flujo retoma donde iba |
 | **1** | `src/data/` — la puerta única | 1 sem | ninguna ruta ni página tiene SQL |
 | **2** | `src/core/` — sacar las decisiones | 1½ sem | menos de 100 mocks |
 | **3** | `src/features/` — rebanadas | 1 sem | cada funcionalidad en su carpeta |

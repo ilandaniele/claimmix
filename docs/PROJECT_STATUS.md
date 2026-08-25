@@ -113,7 +113,8 @@ Corrélo después de cada deploy. Detalle completo en
   design — it is in `.github/allowed-contacts.txt` with its reason, which is what stops
   the personal-data check from failing on it.
 - Stuck-`procesando` reaper (`reap-stuck.ts`) + daily cron + opportunistic call in simulate/batch-simulate.
-- Public demo at `/demo`.
+- Public demo at `/demo` — genuinely reachable without an account since 2026-08-24;
+  see "Three pages nobody outside could open" below for why it was not before.
 - Admin account for the paid Gemini key: **`veltra.info1@gmail.com`** (via "Continuar con Google").
   `veltra.soporte@gmail.com` was blocked by Google (2026-07) and decommissioned — neutralized in
   the DB (cases reassigned, session/account cleared, demoted; profile kept as tombstone for FK/audit).
@@ -362,12 +363,89 @@ Three things worth remembering:
   is with a short-lived OIDC token and there is no JSON to leak at all. That is the
   real answer to a key living in three places, and it is not written yet.
 
+### 🔕 The week the mailbox would have gone quiet (2026-08-24)
+
+Publishing the OAuth app was the last step of the migration, and the reason is narrow:
+while an app that asks for Gmail scopes sits in **Testing**, Google expires the
+mailbox's permission **every seven days**. The intake would have stopped by itself the
+following Sunday, with nothing in the logs to explain it. It is **In production** now,
+unverified — which is fine up to 100 users and only costs the "Google hasn't verified
+this app" screen when *we* connect *our own* mailbox.
+
+Publishing needs a public Terms URL and a public Privacy URL. That requirement is what
+uncovered the `/demo` problem below.
+
+**The expiry is stamped on the token, not read from the app.** The permission issued an
+hour before publishing still carried its seven-day clock, so the mailbox had to be
+reconnected once more afterwards. Reconnecting is what broke it:
+
+- Google answered the consent with a **500**, after the app had already dropped the
+  existing row. One transient error from Google and there was **no mailbox at all** —
+  `/api/health` went to `degraded`, the poller returned `INTERNAL`. The retry worked.
+- Worse, and quieter: **reconnecting kills the push subscription and nothing notices.**
+  `gmail.users.watch` hangs off the OAuth grant, so revoking the grant drops it on
+  Google's side — but `gmail_poll_state` keeps the old expiry, seven days out. The cron
+  only renews what it sees expiring, so it did not renew. `/api/health` still said
+  "casilla conectada, token legible", because the token *was* readable. Mail still
+  arrived, just via the twice-daily cron instead of in seconds.
+
+  Nothing failed. The system looked healthy and was slow, and would have stayed that
+  way for a week.
+
+Three fixes, in the order that matters:
+
+1. **The callback re-registers the watch**, because that is the only moment we know for
+   certain there is a fresh grant. If it fails the mailbox stays connected — push is
+   latency, not the way in, and the cron keeps working.
+2. **`/api/admin/setup-gmail-watch` reads the mailbox from the database.** It was still
+   looking in `GMAIL_USER_EMAIL`, unset since mailboxes moved to the Configuración
+   screen, so the one manual way to revive push returned a 500.
+3. **Health checks the push, not just the token.** There is no column holding when the
+   watch was registered, but it can be derived: Gmail grants exactly seven days, so
+   registration was `watch_expiration - 7d`. If the mailbox connected *after* that, the
+   watch belongs to a permission that no longer exists → `degraded`, with the command
+   to fix it in the message.
+
+The callback had **no tests at all** — which is how a route that connects mailboxes
+came to silently disable push. It has seven now; two go red if the watch registration
+is removed. Proven in production by depositing a mail and waiting **without calling the
+poller**: the case appeared on its own.
+
+### 🚧 Three pages nobody outside could open (2026-08-24)
+
+`/privacy` and `/terms` exist because Google will not publish an app without them. Both
+were behind the session gate, so Google could not read them — and neither could
+`/demo`, which meant **the public demo had never been public**. This document listed it
+under "done, deployed and verified" for weeks. The back half worked the whole time
+(`/api/demo/public-analyze` was never gated), so nothing looked broken; the front door
+was simply locked.
+
+**And the way it was found is the part worth keeping.** There were two `proxy.ts` files,
+one at the root and one in `src/`. I reasoned about which one Next.js loads, concluded
+it was the root, and deleted the other. Wrong: this project keeps `app/` inside `src/`,
+so the proxy must sit beside it. **Production served `/bandeja`, `/clientes` and
+`/metricas` with no session at all** until it was restored.
+
+The evidence was one command away and free: the build log prints `ƒ Proxy (Middleware)`
+when a proxy ships. It was there in the previous build and gone from mine. **Deducing
+which file runs, when the build will tell you, is not a shortcut.** Restoring it then
+exposed a second fault the same reasoning had hidden — the matcher was gating `/api`,
+so `/api/health` returned 401 before reaching its own Bearer check, which would have
+broken both crons, the smoke test and the doorbell. API routes authenticate themselves
+and the pen test walks every one of them unauthenticated on each deploy.
+
+Every deploy since checks `ƒ Proxy (Middleware)` is in the build output.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Write to it once, from a real phone and a real mailbox**~~ ✅ **DONE 2026-08-24.**
   See "The last metre" below: a real mail, two real WhatsApps and a real photograph,
   all answered. Do it again after the next change to the mailbox, the number or their
   credentials — that is the only part no test can cover.
+- **Rotate the Google OAuth client secret** (`GOCSPX-…`). It was read off a screenshot
+  during the migration, and it now backs four env vars: `GMAIL_CLIENT_ID`/`SECRET` for
+  the mailbox and `GOOGLE_CLIENT_ID`/`SECRET` for logging in. Rotating it forces a
+  reconnect of the mailbox and a re-login, in that order.
 - **Rotate the WhatsApp system-user token.** Meta echoed it inside an error response
   on 2026-08-23 and it is now in a chat transcript. Same standing as the
   `veltra.soporte` password below: it is not known to be leaked, and it is no longer
@@ -381,11 +459,11 @@ Three things worth remembering:
   immutable and `claimmix` was already taken by the personal project, so Google
   appended the number. Two projects are now called "claimmix" — worth renaming the old
   one's *display* name so nobody confuses them in six months.
-  ⚠️ **Do NOT delete the old `claimmix` project.** The Gmail OAuth client lives there
-  (`GMAIL_CLIENT_ID` starts with its project number) along with the Pub/Sub topic that
-  makes mail arrive in seconds, the tuning bucket and June's tuned model. Deleting it
-  stops mail intake dead: the stored refresh token for the mailbox becomes worthless.
-  Moving those is a separate job and it forces re-consenting the mailbox.
+  The old `claimmix` project is **deleted** (`DELETE_REQUESTED` 2026-08-24, restorable
+  for 30 days). Everything that hung off it was moved first — Gmail OAuth client,
+  Pub/Sub topic and push subscription, the login OAuth client, and the tuning bucket —
+  and each move was proved against production before the next one started. The mailbox
+  had to re-consent, which is what set off the incident recorded below.
 - **Turn `iam.disableServiceAccountKeyCreation` back on** for `claimmix-506321`. New
   organisations enforce it by default and it had to be overridden — at project level,
   not org — to create the one key we needed. The override is still there.
@@ -509,7 +587,8 @@ regenerated. Latest dump: `training-examples-2026-08-07.json` (206 + 20 rules).
   guard (`createVertexAiTuningDraft`, statuses draft/queued/running/eval_pending/approved).
   Marked it `failed` → new drafts unblocked.
 - **Fine-tuning can only be triggered where the SA key lives.** `GOOGLE_APPLICATION_CREDENTIALS`
-  (claimmix-vertex-sa-key.json) + `VERTEX_AI_TUNING_ENABLED=true` + project/location/bucket
+  (`claimmix-veltra-sa-key.json`, since 2026-08-24 — the old `claimmix-vertex-sa-key.json`
+  belonged to the deleted project and was removed) + `VERTEX_AI_TUNING_ENABLED=true` + project/location/bucket
   are in `.env.local` (LOCAL), NOT on Vercel — so run the draft→start from local, or add the
   SA creds to Vercel. Trigger path: admin UI / `POST /api/admin/fine-tuning/vertex`
   (`action:"draft"` then `action:"start"`).

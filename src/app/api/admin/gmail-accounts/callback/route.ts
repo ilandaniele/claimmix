@@ -3,6 +3,7 @@ import { google } from "googleapis";
 import { requireRole, ADMIN_ROLES } from "@/lib/auth/require-role";
 import { tables } from "@/lib/db";
 import { encryptRefreshToken } from "@/server/email/gmail/accounts";
+import { setupGmailWatch } from "@/server/email/gmail/watch";
 
 type StatePayload = {
   tenantId?: string;
@@ -92,6 +93,34 @@ export async function GET(request: NextRequest) {
         (e as { code?: string })?.code ?? "unknown"
       );
       return NextResponse.redirect(new URL("/configuracion?gmail=save_failed", origin));
+    }
+
+    // Reconectar la casilla apagaba el push, en silencio y por una semana.
+    //
+    // El aviso de Gmail cuelga del permiso: al revocarlo se cae del lado de
+    // Google, pero la fila de gmail_poll_state sigue diciendo que vence dentro
+    // de siete días. El cron sólo renueva lo que ve por vencer, así que no lo
+    // renovaba; /api/health decía «casilla conectada» porque el token se lee
+    // bien; y el correo entraba igual, pero por el cron y no en segundos.
+    // Nada fallaba a la vista: simplemente todo se volvía más lento.
+    //
+    // Este es el único momento en que sabemos con certeza que hay permiso
+    // nuevo, así que es acá donde se vuelve a pedir el aviso. Si falla no se
+    // toca la conexión —la casilla quedó bien conectada— y el cron sigue
+    // trayendo el correo mientras tanto.
+    const pubsubTopic = process.env.PUBSUB_TOPIC;
+    if (pubsubTopic) {
+      try {
+        await setupGmailWatch(pubsubTopic, {
+          email,
+          refreshToken: tokens.refresh_token,
+        });
+      } catch (e) {
+        console.error(
+          "[gmail-accounts callback] watch:",
+          e instanceof Error ? e.name : "unknown"
+        );
+      }
     }
 
     return NextResponse.redirect(new URL("/configuracion?gmail=connected", origin));

@@ -17,12 +17,19 @@ import { NextRequest } from "next/server";
 
 // ── Mocks (hoisted before any module import) ──────────────────────────────────
 
-const { mockSetupGmailWatch } = vi.hoisted(() => ({
+const { mockSetupGmailWatch, mockListEnabledGmailAccounts } = vi.hoisted(() => ({
   mockSetupGmailWatch: vi.fn(),
+  mockListEnabledGmailAccounts: vi.fn(),
 }));
 
 vi.mock("@/server/email/gmail/watch", () => ({
   setupGmailWatch: mockSetupGmailWatch,
+}));
+
+// La ruta ya no saca la casilla de GMAIL_USER_EMAIL sino de la base, que es
+// donde vive desde que se conectan por pantalla. Ver el caso de abajo.
+vi.mock("@/server/email/gmail/accounts", () => ({
+  listEnabledGmailAccounts: mockListEnabledGmailAccounts,
 }));
 
 // ── Import route AFTER mocks ──────────────────────────────────────────────────
@@ -37,6 +44,14 @@ const PUBSUB_TOPIC = "projects/claimmix/topics/gmail-push";
 const MOCK_WATCH_RESULT = {
   historyId: "123456",
   expiration: new Date(1750000000000).toISOString(),
+};
+
+const MOCK_ACCOUNT = {
+  id: "acc-1",
+  tenant_id: "tenant-1",
+  email: "casilla@example.com",
+  refreshToken: "refresh-token-de-prueba",
+  enabled: true,
 };
 
 function makeRequest(options: {
@@ -63,6 +78,8 @@ describe("POST /api/admin/setup-gmail-watch", () => {
     process.env.CRON_SECRET = CRON_SECRET;
     process.env.PUBSUB_TOPIC = PUBSUB_TOPIC;
     mockSetupGmailWatch.mockResolvedValue(MOCK_WATCH_RESULT);
+    mockListEnabledGmailAccounts.mockResolvedValue([MOCK_ACCOUNT]);
+    delete process.env.GMAIL_USER_EMAIL;
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -138,11 +155,16 @@ describe("POST /api/admin/setup-gmail-watch", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.historyId).toBe(MOCK_WATCH_RESULT.historyId);
-      expect(body.expiration).toBe(MOCK_WATCH_RESULT.expiration);
+      expect(body.registered).toHaveLength(1);
+      expect(body.registered[0].historyId).toBe(MOCK_WATCH_RESULT.historyId);
+      expect(body.registered[0].expiration).toBe(MOCK_WATCH_RESULT.expiration);
+      expect(body.registered[0].email).toBe(MOCK_ACCOUNT.email);
       expect(body.message).toBe("watch setup OK");
       expect(mockSetupGmailWatch).toHaveBeenCalledOnce();
-      expect(mockSetupGmailWatch).toHaveBeenCalledWith(PUBSUB_TOPIC);
+      expect(mockSetupGmailWatch).toHaveBeenCalledWith(PUBSUB_TOPIC, {
+        email: MOCK_ACCOUNT.email,
+        refreshToken: MOCK_ACCOUNT.refreshToken,
+      });
     });
 
     it("passes PUBSUB_TOPIC env var to setupGmailWatch", async () => {
@@ -152,7 +174,39 @@ describe("POST /api/admin/setup-gmail-watch", () => {
       const req = makeRequest({ authHeader: `Bearer ${CRON_SECRET}` });
       await POST(req);
 
-      expect(mockSetupGmailWatch).toHaveBeenCalledWith(customTopic);
+      expect(mockSetupGmailWatch).toHaveBeenCalledWith(
+        customTopic,
+        expect.objectContaining({ email: MOCK_ACCOUNT.email })
+      );
+    });
+
+    // El defecto que trajo esto: reconectar la casilla dejaba el push muerto y
+    // esta ruta —la única forma de revivirlo a mano— devolvía 500, porque
+    // buscaba la casilla en una variable de entorno que ya nadie carga.
+    it("registra el aviso para la casilla de la base, no para GMAIL_USER_EMAIL", async () => {
+      process.env.GMAIL_USER_EMAIL = "vieja-y-muerta@example.com";
+
+      const req = makeRequest({ authHeader: `Bearer ${CRON_SECRET}` });
+      const res = await POST(req);
+
+      expect(res.status).toBe(200);
+      expect(mockSetupGmailWatch).toHaveBeenCalledWith(
+        PUBSUB_TOPIC,
+        expect.objectContaining({ email: MOCK_ACCOUNT.email })
+      );
+    });
+
+    it("sin casillas conectadas devuelve 400 NO_MAILBOX, no 500", async () => {
+      mockListEnabledGmailAccounts.mockResolvedValue([]);
+      delete process.env.GMAIL_USER_EMAIL;
+
+      const req = makeRequest({ authHeader: `Bearer ${CRON_SECRET}` });
+      const res = await POST(req);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("NO_MAILBOX");
+      expect(mockSetupGmailWatch).not.toHaveBeenCalled();
     });
   });
 
@@ -165,8 +219,8 @@ describe("POST /api/admin/setup-gmail-watch", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.historyId).toBe(MOCK_WATCH_RESULT.historyId);
-      expect(body.expiration).toBe(MOCK_WATCH_RESULT.expiration);
+      expect(body.registered[0].historyId).toBe(MOCK_WATCH_RESULT.historyId);
+      expect(body.registered[0].expiration).toBe(MOCK_WATCH_RESULT.expiration);
       expect(body.message).toBe("watch setup OK");
       expect(mockSetupGmailWatch).toHaveBeenCalledOnce();
     });

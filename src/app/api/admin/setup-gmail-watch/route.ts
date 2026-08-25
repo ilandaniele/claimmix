@@ -16,6 +16,7 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
+import { listEnabledGmailAccounts } from "@/server/email/gmail/accounts";
 import { isInternalRequest } from "@/lib/security/internal-auth";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -42,10 +43,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // ── Setup watch ──────────────────────────────────────────────────────────────
+  // Las casillas viven en la base desde que se conectan por pantalla. Esta ruta
+  // seguía buscándolas en GMAIL_USER_EMAIL, que ya no se carga: pedía el aviso
+  // para una casilla inexistente y devolvía 500. Se usa el mismo listado que el
+  // cron, así no hay dos ideas distintas de cuál es la casilla.
   try {
-    const { historyId, expiration } = await setupGmailWatch(topicName);
+    const accounts = await listEnabledGmailAccounts();
+    const targets =
+      accounts.length > 0
+        ? accounts.map((a) => ({ email: a.email, refreshToken: a.refreshToken }))
+        : process.env.GMAIL_USER_EMAIL
+          ? [{ email: process.env.GMAIL_USER_EMAIL, refreshToken: undefined }]
+          : [];
+
+    if (targets.length === 0) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "NO_MAILBOX",
+            message: "No hay ninguna casilla conectada para la que registrar el aviso.",
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    const registered = [];
+    for (const account of targets) {
+      const { historyId, expiration } = await setupGmailWatch(topicName, account);
+      registered.push({ email: account.email, historyId, expiration });
+    }
+
     return NextResponse.json(
-      { historyId, expiration, message: "watch setup OK" },
+      { registered, message: "watch setup OK" },
       { status: 200 }
     );
   } catch (err) {

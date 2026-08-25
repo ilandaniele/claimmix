@@ -37,15 +37,23 @@ import { sql } from "drizzle-orm";
 import * as schema from "@/lib/db/schema";
 
 /**
- * De qué inquilino se trata, y quién pregunta.
+ * De qué inquilino se trata.
  *
- * Se construye a partir de la sesión y nunca de algo que venga en un pedido:
- * un `tenantId` que llega por el cuerpo o por la URL es un pedido de fuga con
- * pasos extra. Es de sólo lectura para que nadie lo reescriba a mitad de camino.
+ * Se construye a partir de la sesión y nunca de algo que venga en un pedido: un
+ * `tenantId` que llega por el cuerpo o por la URL es una fuga con pasos extra.
+ * Es de sólo lectura para que nadie lo reescriba a mitad de camino.
+ *
+ * Sólo lleva el inquilino, y no el usuario. La primera versión llevaba los dos,
+ * hasta que al migrar la primera ruta quedó claro que estaba mezclando dos
+ * trabajos: acotar los datos —que es del inquilino— y decidir si alguien puede
+ * hacer algo —que es de `requireRole`—. Los scripts que prueban el aislamiento
+ * no tienen usuario y no deberían tener que inventar uno para pedir datos.
+ *
+ * Que sea un objeto y no un string suelto también es a propósito: un string se
+ * pasa por accidente desde cualquier lado, incluido el cuerpo de un pedido.
  */
 export type TenantContext = {
   readonly tenantId: string;
-  readonly userId: string;
 };
 
 type ClienteDatos = ReturnType<typeof crearCliente>;
@@ -58,24 +66,29 @@ let cacheCliente: ClienteDatos | null = null;
 let cacheCadena: string | null = null;
 
 /**
- * El cliente con el que habla esta capa.
+ * El cliente con el que habla esta capa. Sólo DATABASE_URL_APP, y sin respaldo.
  *
- * Usa DATABASE_URL_APP —el rol restringido— y cae a DATABASE_URL sólo mientras
- * dure la transición, avisando. Ese aviso importa: con el rol viejo esta capa
- * *funciona igual*, porque las consultas son correctas de todos modos; lo que
- * se pierde es la defensa. Un fallback silencioso convertiría "estamos
- * protegidos" en una creencia en vez de un hecho.
+ * La primera versión caía a DATABASE_URL avisando por consola, con el argumento
+ * de que "la capa funciona igual y lo único que se pierde es la defensa". Eso
+ * era falso, y peligroso:
+ *
+ * Las consultas que pasan por acá **ya no llevan `WHERE tenant_id`** — el filtro
+ * lo pone la base. Con el rol viejo, que tiene BYPASSRLS, las políticas no se
+ * aplican y esa consulta sin filtro devuelve **los datos de todos los
+ * inquilinos**. O sea que el respaldo no degradaba la defensa: fabricaba
+ * exactamente la fuga que esta capa existe para impedir.
+ *
+ * Por eso rompe. Un 500 en una pantalla es un mal rato; una aseguradora viendo
+ * los siniestros de otra es otra clase de problema.
  */
 function cliente(): ClienteDatos {
-  const app = process.env.DATABASE_URL_APP?.trim();
-  const cadena = app || process.env.DATABASE_URL?.trim();
+  const cadena = process.env.DATABASE_URL_APP?.trim();
 
   if (!cadena) {
-    throw new Error("[data] falta DATABASE_URL_APP (o DATABASE_URL) para acceder a los datos");
-  }
-  if (!app) {
-    console.warn(
-      "[data] DATABASE_URL_APP no está: se usa el rol viejo y el aislamiento por base NO está activo"
+    throw new Error(
+      "[data] falta DATABASE_URL_APP. Esta capa NO usa DATABASE_URL: sus consultas " +
+        "no llevan filtro por inquilino y el rol viejo saltea RLS, así que caer a él " +
+        "devolvería los datos de todos los inquilinos."
     );
   }
 

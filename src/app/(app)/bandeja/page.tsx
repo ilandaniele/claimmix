@@ -111,7 +111,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const tenantId = userRow.tenant_id;
 
   // Fetch cases matching the current filter.
-  const initialData = await listCases(tenantId, {
+  const initialData = await listCases({ tenantId }, {
     status,
     type,
     page,

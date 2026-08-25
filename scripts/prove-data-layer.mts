@@ -52,7 +52,7 @@ if (inquilinos.length < 2) {
   process.exit(3);
 }
 
-const ctxDe = (t: { id: string }): TenantContext => ({ tenantId: t.id, userId: "prueba" });
+const ctxDe = (t: { id: string }): TenantContext => ({ tenantId: t.id });
 
 // ── 1. Cada uno ve lo suyo ─────────────────────────────────────────────────
 console.log("\n▸ Cada inquilino, a través de la capa");

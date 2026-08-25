@@ -153,7 +153,7 @@ async function loadRead(): Promise<void> {
   // Neon suspende la compute cuando nadie la usa, y la primera consulta después
   // paga el arranque. Sin este calentamiento el primer número mide eso y no la
   // carga, que es justo lo contrario de lo que se quiere saber.
-  await listCases(TENANT_ID!, { ...QUERY } as never);
+  await listCases({ tenantId: TENANT_ID! }, { ...QUERY } as never);
 
   const sample = await db
     .select({ id: cases.id })
@@ -166,13 +166,13 @@ async function loadRead(): Promise<void> {
     {
       name: "listado (página 1, 25)",
       run: async () => {
-        await listCases(TENANT_ID!, { ...QUERY } as never);
+        await listCases({ tenantId: TENANT_ID! }, { ...QUERY } as never);
       },
     },
     {
       name: "búsqueda por texto",
       run: async () => {
-        await listCases(TENANT_ID!, { ...QUERY, q: "gonzalez" } as never);
+        await listCases({ tenantId: TENANT_ID! }, { ...QUERY, q: "gonzalez" } as never);
       },
     },
   ];
@@ -396,7 +396,7 @@ async function loadWrite(): Promise<boolean> {
 
     const t0 = performance.now();
     try {
-      await listCases(TENANT_ID!, { ...QUERY } as never);
+      await listCases({ tenantId: TENANT_ID! }, { ...QUERY } as never);
       duringStorm.push({ ms: performance.now() - t0, ok: true });
     } catch {
       duringStorm.push({ ms: performance.now() - t0, ok: false });

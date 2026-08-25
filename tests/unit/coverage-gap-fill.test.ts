@@ -12,6 +12,11 @@
  */
 
 // vi.mock() must be at module top level — Vitest hoists these calls.
+vi.mock("@/data/scope", () => ({
+  enTenant: vi.fn().mockResolvedValue([]),
+  enTenantVarias: vi.fn(),
+}));
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: vi.fn(),
@@ -403,6 +408,7 @@ describe("findCustomerMatches — conflict detection branches", () => {
 
 import { listCases, listCasesForExport } from "@/server/cases/list";
 import type { CaseQuery } from "@/lib/schemas/cases";
+import { enTenantVarias } from "@/data/scope";
 
 const BASE_QUERY: CaseQuery = {
   page: 1,
@@ -416,35 +422,28 @@ describe("listCases — filter branches", () => {
     vi.clearAllMocks();
   });
 
+  // Antes esto armaba a mano la cadena de drizzle —from, where, orderBy, limit,
+  // offset— para que la consulta pudiera resolverse. Desde que `listCases` pasa
+  // por la capa de datos alcanza con decir qué devuelve la capa: el conteo y las
+  // filas, que es lo único que el resto de la función mira.
   function setupListMocks(total: number, data: any[]) {
-    // countRows uses db.$count
-    vi.mocked(db.$count).mockResolvedValue(total);
-
-    // hydrateCaseListIdentity only runs when rows are missing policyholder_name/policy_number.
-    // We ensure every row has those fields set so hydration short-circuits after the first select.
+    // La hidratación sólo corre si a alguna fila le falta el nombre o la póliza;
+    // se las ponemos para que no corra y el test hable de una sola cosa.
     const dataWithIdentity = data.map((row: any) => ({
       policyholder_name: "Test Name",
       policy_number: "POL-0000",
       ...row,
     }));
 
-    // data query: db.select().from().where().orderBy().limit().offset()
-    vi.mocked(db.select).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          orderBy: vi.fn().mockReturnValue({
-            limit: vi.fn().mockReturnValue({
-              offset: vi.fn().mockResolvedValue(dataWithIdentity),
-            }),
-          }),
-        }),
-      }),
-    } as any);
+    vi.mocked(enTenantVarias).mockResolvedValue([
+      [{ n: total }],
+      dataWithIdentity,
+    ] as never);
   }
 
   it("returns empty list with no filters", async () => {
     setupListMocks(0, []);
-    const result = await listCases(TENANT_ID, BASE_QUERY);
+    const result = await listCases({ tenantId: TENANT_ID }, BASE_QUERY);
     expect(result.data).toEqual([]);
     expect(result.meta.total).toBe(0);
     expect(result.meta.pages).toBe(0);
@@ -452,55 +451,55 @@ describe("listCases — filter branches", () => {
 
   it("applies status filter (branch: if status)", async () => {
     setupListMocks(2, [{ id: "abc" }]);
-    const result = await listCases(TENANT_ID, { ...BASE_QUERY, status: "recibido" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, status: "recibido" });
     expect(result.meta.total).toBe(2);
   });
 
   it("applies type filter (branch: if type)", async () => {
     setupListMocks(1, [{ id: "xyz" }]);
-    const result = await listCases(TENANT_ID, { ...BASE_QUERY, type: "choque" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, type: "choque" });
     expect(result.data.length).toBe(1);
   });
 
   it("applies q filter (branch: if q)", async () => {
     setupListMocks(3, [{}, {}, {}]);
-    const result = await listCases(TENANT_ID, { ...BASE_QUERY, q: "Martín" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, q: "Martín" });
     expect(result.meta.total).toBe(3);
   });
 
   it("applies severity filter", async () => {
     setupListMocks(1, [{ id: "s1" }]);
-    const result = await listCases(TENANT_ID, { ...BASE_QUERY, severity: "high" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, severity: "high" });
     expect(result.data.length).toBe(1);
   });
 
   it("applies customer_id filter", async () => {
     setupListMocks(1, [{ id: "c1" }]);
-    const result = await listCases(TENANT_ID, { ...BASE_QUERY, customer_id: "cust-uuid" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, customer_id: "cust-uuid" });
     expect(result.data.length).toBe(1);
   });
 
   it("applies policy_id filter", async () => {
     setupListMocks(1, [{ id: "p1" }]);
-    const result = await listCases(TENANT_ID, { ...BASE_QUERY, policy_id: "pol-uuid" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, policy_id: "pol-uuid" });
     expect(result.data.length).toBe(1);
   });
 
   it("applies channel filter", async () => {
     setupListMocks(5, new Array(5).fill({ id: "e" }));
-    const result = await listCases(TENANT_ID, { ...BASE_QUERY, channel: "email" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, channel: "email" });
     expect(result.meta.total).toBe(5);
   });
 
   it("applies is_claim=false filter", async () => {
     setupListMocks(2, [{}, {}]);
-    const result = await listCases(TENANT_ID, { ...BASE_QUERY, is_claim: false });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, is_claim: false });
     expect(result.meta.total).toBe(2);
   });
 
   it("computes pagination meta correctly", async () => {
     setupListMocks(25, new Array(10).fill({}));
-    const result = await listCases(TENANT_ID, { ...BASE_QUERY, per_page: 10 });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, per_page: 10 });
     expect(result.meta.pages).toBe(3); // ceil(25/10)=3
     expect(result.meta.page).toBe(1);
     expect(result.meta.per_page).toBe(10);
@@ -508,7 +507,7 @@ describe("listCases — filter branches", () => {
 
   it("count 0 defaults to 0 pages", async () => {
     setupListMocks(0, []);
-    const result = await listCases(TENANT_ID, BASE_QUERY);
+    const result = await listCases({ tenantId: TENANT_ID }, BASE_QUERY);
     expect(result.meta.total).toBe(0);
   });
 });

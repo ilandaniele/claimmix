@@ -17,6 +17,14 @@ vi.mock("@/lib/db", () => ({
   tables: {},
 }));
 
+// La capa de datos: un solo mock reemplaza toda la imitación de la cadena de
+// drizzle para `listCases`. La hidratación (`enTenant`) devuelve vacío por
+// omisión, que es el caso normal —sólo se usa cuando falta el nombre o la póliza.
+vi.mock("@/data/scope", () => ({
+  enTenant: vi.fn().mockResolvedValue([]),
+  enTenantVarias: vi.fn(),
+}));
+
 // countRows calls db.$count — mock the helper module so it delegates to our mocked db.$count
 vi.mock("@/lib/db/helpers", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/db/helpers")>();
@@ -31,6 +39,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { listCases, listCasesForExport } from "@/server/cases/list";
 import { db } from "@/lib/db";
 import { countRows } from "@/lib/db/helpers";
+import { enTenant, enTenantVarias } from "@/data/scope";
 
 // ── Base query fixture ────────────────────────────────────────────────────────
 
@@ -83,6 +92,16 @@ function makeSelectChain(rows: unknown[]): any {
 
 // ── listCases ─────────────────────────────────────────────────────────────────
 
+/**
+ * Desde que `listCases` pasa por la capa de datos, estos tests no necesitan
+ * imitar la cadena de drizzle: alcanza con decir qué devuelve la capa.
+ *
+ * Es la diferencia entre probar el comportamiento y probar la forma en que se
+ * arma una consulta. `makeSelectChain` sigue existiendo más abajo sólo porque
+ * `listCasesForExport` todavía no se migró.
+ */
+const CTX = { tenantId: TENANT_ID };
+
 describe("listCases", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -93,11 +112,9 @@ describe("listCases", () => {
       { id: "case-1", status: "listo", claim_type: "choque", policyholder_name: "Juan", policy_number: "POL-1" },
       { id: "case-2", status: "listo", claim_type: "robo", policyholder_name: "Ana", policy_number: "POL-2" },
     ];
+    vi.mocked(enTenantVarias).mockResolvedValue([[{ n: 2 }], mockRows] as never);
 
-    vi.mocked(countRows).mockResolvedValue(2);
-    vi.mocked(db.select).mockReturnValue(makeSelectChain(mockRows) as any);
-
-    const result = await listCases(TENANT_ID, baseQuery);
+    const result = await listCases(CTX, baseQuery);
 
     expect(result.data).toEqual(mockRows);
     expect(result.meta.total).toBe(2);
@@ -106,47 +123,41 @@ describe("listCases", () => {
     expect(result.meta.pages).toBe(1);
   });
 
-  it("calculates pages correctly", async () => {
-    vi.mocked(countRows).mockResolvedValue(55);
-    vi.mocked(db.select).mockReturnValue(makeSelectChain([]) as any);
+  it("le pasa a la capa el inquilino del contexto, y ningún otro", async () => {
+    vi.mocked(enTenantVarias).mockResolvedValue([[{ n: 0 }], []] as never);
 
-    const result = await listCases(TENANT_ID, { ...baseQuery, per_page: 20 });
+    await listCases(CTX, baseQuery);
+
+    // Lo que se verifica no es que la consulta lleve un WHERE —ya no lo lleva—
+    // sino que el contexto con el que se pide sea el de la sesión.
+    expect(enTenantVarias).toHaveBeenCalledWith({ tenantId: TENANT_ID }, expect.any(Function));
+  });
+
+  it("calculates pages correctly", async () => {
+    vi.mocked(enTenantVarias).mockResolvedValue([[{ n: 55 }], []] as never);
+
+    const result = await listCases(CTX, { ...baseQuery, per_page: 20 });
     // 55 / 20 = 2.75 → ceil = 3
     expect(result.meta.pages).toBe(3);
   });
 
   it("returns empty data when count is 0", async () => {
-    vi.mocked(countRows).mockResolvedValue(0);
-    vi.mocked(db.select).mockReturnValue(makeSelectChain([]) as any);
+    vi.mocked(enTenantVarias).mockResolvedValue([[{ n: 0 }], []] as never);
 
-    const result = await listCases(TENANT_ID, baseQuery);
+    const result = await listCases(CTX, baseQuery);
     expect(result.data).toEqual([]);
     expect(result.meta.total).toBe(0);
     expect(result.meta.pages).toBe(0);
   });
 
-  it("throws when count query returns an error", async () => {
+  it("throws when the query fails", async () => {
     const err = new Error("relation does not exist");
     (err as any).code = "42P01";
-    vi.mocked(countRows).mockRejectedValue(err);
+    vi.mocked(enTenantVarias).mockRejectedValue(err);
 
-    await expect(listCases(TENANT_ID, baseQuery)).rejects.toThrow("[listCases] count error");
-  });
-
-  it("throws when data query returns an error", async () => {
-    vi.mocked(countRows).mockResolvedValue(10);
-
-    // Make the chain throw at the terminal step (.offset())
-    const chain: any = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      orderBy: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockReturnThis(),
-      offset: vi.fn().mockRejectedValue(Object.assign(new Error("no rows"), { code: "PGRST116" })),
-    };
-    vi.mocked(db.select).mockReturnValue(chain as any);
-
-    await expect(listCases(TENANT_ID, baseQuery)).rejects.toThrow("[listCases] data error");
+    // El conteo y los datos viajan juntos, así que ya no hay dos errores
+    // distintos que distinguir: hay uno, y lleva el código de Postgres.
+    await expect(listCases(CTX, baseQuery)).rejects.toThrow("[listCases] query error: 42P01");
   });
 });
 

@@ -482,7 +482,7 @@ async function attackTenantWall(): Promise<void> {
      * las cuatro darían verde sin haber mirado nada. Esto se asegura de que,
      * cuando el caso SÍ es tuyo, el marcador se ve.
      */
-    const ownList = await listCases(TENANT_B, { ...query } as never);
+    const ownList = await listCases({ tenantId: TENANT_B }, { ...query } as never);
     probe(
       "y lo ve en su propio listado",
       JSON.stringify(ownList).includes(marker),
@@ -497,14 +497,14 @@ async function attackTenantWall(): Promise<void> {
       "leer cualquier denuncia de otra aseguradora con sólo saber el id"
     );
 
-    const list = await listCases(TENANT_A, { ...query } as never);
+    const list = await listCases({ tenantId: TENANT_A }, { ...query } as never);
     probe(
       "el caso de B no aparece en el listado de A",
       !JSON.stringify(list).includes(marker),
       "la cartera de siniestros del otro asegurador, en la pantalla principal"
     );
 
-    const search = await listCases(TENANT_A, { ...query, q: marker } as never);
+    const search = await listCases({ tenantId: TENANT_A }, { ...query, q: marker } as never);
     probe(
       "buscándolo por nombre tampoco aparece",
       !JSON.stringify(search).includes(marker),

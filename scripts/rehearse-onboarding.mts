@@ -166,7 +166,7 @@ try {
     .returning({ id: cases.id });
 
   check("el dueño ve su caso por id", Boolean(await getCaseDetail(TENANT, mine!.id)));
-  const ownList = await listCases(TENANT, { ...query } as never);
+  const ownList = await listCases({ tenantId: TENANT }, { ...query } as never);
   check("el dueño lo ve en su listado", JSON.stringify(ownList).includes(marker));
 
   check(
@@ -175,11 +175,11 @@ try {
   );
   check(
     "producción NO lo ve en el listado",
-    !JSON.stringify(await listCases(PROD_TENANT, { ...query } as never)).includes(marker)
+    !JSON.stringify(await listCases({ tenantId: PROD_TENANT }, { ...query } as never)).includes(marker)
   );
   check(
     "producción NO lo encuentra buscándolo",
-    !JSON.stringify(await listCases(PROD_TENANT, { ...query, q: marker } as never)).includes(marker)
+    !JSON.stringify(await listCases({ tenantId: PROD_TENANT }, { ...query, q: marker } as never)).includes(marker)
   );
   check(
     "producción NO lo exporta en el CSV",

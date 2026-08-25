@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
 
   // ── 4. Fetch data (explicit tenant_id filter — RLS is gone) ───────────────
   try {
-    const result = await listCases(userRow.tenant_id, parsed.data);
+    const result = await listCases({ tenantId: userRow.tenant_id }, parsed.data);
     // Drizzle numeric columns surface as strings — convert at the boundary so
     // the JSON shape matches the previous PostgREST response (numbers).
     return ok({

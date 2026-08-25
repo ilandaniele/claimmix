@@ -14,6 +14,7 @@
 import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { countRows, ilikeAny } from "@/lib/db/helpers";
+import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { cases, extractedFields } from "@/lib/db/schema";
 import type { CaseRow } from "@/lib/db/types";
 import type { CaseQuery, SortColumn } from "@/lib/schemas/cases";
@@ -48,14 +49,23 @@ const SORT_COLUMNS = {
 /**
  * Query cases with filtering, sorting, and pagination.
  *
- * Every query filters explicitly by the caller's tenant_id. The caller MUST
- * pass the authenticated user's tenant id — never a client-supplied value —
- * to preserve IDOR safety.
+ * **Ninguna consulta de acá filtra por inquilino.** No es un olvido: el filtro
+ * lo pone la base. `enTenantVarias` manda las consultas en un lote junto a
+ * `set_config('claimmix.tenant_id', …)`, y las políticas de RLS hacen el resto.
+ *
+ * Antes esta función recibía un `tenantId` suelto y armaba
+ * `eq(cases.tenant_id, tenantId)` a mano, con un comentario pidiéndole al que
+ * llamara que por favor no pasara un valor del cliente. Ese pedido era la única
+ * defensa, y estaba repetido 198 veces en el repositorio. Ahora recibe un
+ * `TenantContext`, que sólo se construye desde la sesión.
+ *
+ * De paso, el conteo y los datos viajan juntos: eran dos idas a la base y ahora
+ * es una.
  *
  * raw_intake_text is intentionally NOT selected here (large field, not needed for list).
  */
 export async function listCases(
-  tenantId: string,
+  ctx: TenantContext,
   query: CaseQuery
 ): Promise<CaseListResult> {
   const {
@@ -75,7 +85,12 @@ export async function listCases(
   } = query;
 
   // ── Shared filters ─────────────────────────────────────────────────────────
-  const conditions: (SQL | undefined)[] = [eq(cases.tenant_id, tenantId)];
+  //
+  // Acá NO va `eq(cases.tenant_id, …)`. Lo pone la base, a partir del contexto
+  // que viaja con el lote. Si alguna vez volviera a aparecer escrito a mano,
+  // sería redundante y —peor— haría pensar que sin él la consulta filtraría de
+  // menos, cuando lo que pasaría es que no devolvería nada.
+  const conditions: (SQL | undefined)[] = [];
 
   if (status) conditions.push(eq(cases.status, status));
   if (type) conditions.push(eq(cases.claim_type, type));
@@ -91,25 +106,23 @@ export async function listCases(
   if (channel) conditions.push(eq(cases.channel, channel));
   if (is_claim !== undefined) conditions.push(eq(cases.is_claim, is_claim));
 
-  const where = and(...conditions);
+  // `and()` sin condiciones devuelve undefined, que para drizzle es "sin WHERE".
+  // Correcto: la restricción por inquilino ya no vive en el WHERE.
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-  // ── Count query ────────────────────────────────────────────────────────────
-  let total: number;
-  try {
-    total = await countRows(cases, where);
-  } catch (err) {
-    throw new Error(`[listCases] count error: ${errCode(err)}`);
-  }
-
-  // ── Data query ─────────────────────────────────────────────────────────────
-  // Select core case columns + email-intake columns added in 0005/0006.
   const sortColumn = SORT_COLUMNS[sort];
   const from = (page - 1) * per_page;
 
+  // ── Conteo y datos, en un solo viaje ───────────────────────────────────────
+  let total: number;
   let data: Record<string, unknown>[];
   try {
-    data = await db
-      .select({
+    const [conteo, filas] = await enTenantVarias<
+      [Array<{ n: number }>, Record<string, unknown>[]]
+    >(ctx, (db) => [
+      db.select({ n: sql<number>`count(*)::int` }).from(cases).where(where),
+      db
+        .select({
         id: cases.id,
         tenant_id: cases.tenant_id,
         policy_number: cases.policy_number,
@@ -146,21 +159,24 @@ export async function listCases(
              and om.tenant_id = ${cases.tenant_id}
              and om.status = 'sent'
         )`,
-      })
-      .from(cases)
-      .where(where)
-      .orderBy(order === "asc" ? asc(sortColumn) : desc(sortColumn))
-      // Pagination — max 100 per page (enforced in CaseQuerySchema)
-      .limit(per_page)
-      .offset(from);
+        })
+        .from(cases)
+        .where(where)
+        .orderBy(order === "asc" ? asc(sortColumn) : desc(sortColumn))
+        // Pagination — max 100 per page (enforced in CaseQuerySchema)
+        .limit(per_page)
+        .offset(from),
+    ]);
+    total = conteo[0]?.n ?? 0;
+    data = filas;
   } catch (err) {
-    throw new Error(`[listCases] data error: ${errCode(err)}`);
+    // Antes eran dos errores distintos, "count error" y "data error", porque
+    // eran dos viajes. Ahora es uno solo y no hay forma de distinguirlos: decir
+    // cuál de los dos falló sería inventarlo.
+    throw new Error(`[listCases] query error: ${errCode(err)}`);
   }
 
-  const rows = await hydrateCaseListIdentity(
-    tenantId,
-    data as unknown as CaseRow[]
-  );
+  const rows = await hydrateCaseListIdentity(ctx, data as unknown as CaseRow[]);
 
   return {
     data: rows,
@@ -174,7 +190,7 @@ export async function listCases(
 }
 
 async function hydrateCaseListIdentity(
-  tenantId: string,
+  ctx: TenantContext,
   rows: CaseRow[]
 ): Promise<CaseRow[]> {
   const caseIdsNeedingHydration = rows
@@ -185,20 +201,23 @@ async function hydrateCaseListIdentity(
 
   let data: Array<{ case_id: string; field_key: string; field_value: string }>;
   try {
-    data = await db
-      .select({
-        case_id: extractedFields.case_id,
-        field_key: extractedFields.field_key,
-        field_value: extractedFields.field_value,
-      })
-      .from(extractedFields)
-      .where(
-        and(
-          eq(extractedFields.tenant_id, tenantId),
-          inArray(extractedFields.case_id, caseIdsNeedingHydration),
-          inArray(extractedFields.field_key, ["full_name", "policy_number"])
+    data = await enTenant(ctx, (db) =>
+      db
+        .select({
+          case_id: extractedFields.case_id,
+          field_key: extractedFields.field_key,
+          field_value: extractedFields.field_value,
+        })
+        .from(extractedFields)
+        // Sin `eq(extractedFields.tenant_id, …)`: lo pone la base. Los dos
+        // `inArray` que quedan son filtros de negocio, no de seguridad.
+        .where(
+          and(
+            inArray(extractedFields.case_id, caseIdsNeedingHydration),
+            inArray(extractedFields.field_key, ["full_name", "policy_number"])
+          )
         )
-      );
+    );
   } catch (err) {
     console.error("[listCases] extracted_fields hydration error:", errCode(err));
     return rows;

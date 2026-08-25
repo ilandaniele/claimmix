@@ -29,7 +29,7 @@ dotenv.config({ path: ".env.local" });
 
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { splitSqlStatements } from "./lib/split-sql.mjs";
 
@@ -87,38 +87,50 @@ async function neonApi<T>(ruta: string, init?: RequestInit): Promise<T> {
   return (await r.json()) as T;
 }
 
-// ── Qué proyecto es el nuestro ──────────────────────────────────────────────
+// ── Contra qué base se ensaya, y si se puede hacer sobre una rama ───────────
 //
-// La cadena de conexión no lleva el id del proyecto, así que se busca por el
-// host del endpoint. Si hubiera varios proyectos, esto elige el correcto en vez
-// de "el primero", que sería la forma de tocar el proyecto equivocado.
+// La cadena de conexión no lleva el id del proyecto, así que el proyecto se
+// busca por el host del endpoint. Eso elige el correcto en vez de "el primero
+// de la lista", que sería la forma de trabajar sobre el proyecto equivocado.
+//
+// Una clave de Neon alcanza sólo los proyectos de SU cuenta. Si alcanza el
+// proyecto de destino, se ensaya sobre una rama descartable —así ni siquiera la
+// base de ensayo queda sucia—. Si no lo alcanza, se ensaya directamente sobre
+// ella, avisando: es peor, pero es honesto y sigue sin acercarse a producción.
+const urlDestino = modoEnsayo ? urlEnsayo! : urlProd!;
+const hostDestino = new URL(urlDestino.replace(/^postgres(ql)?:\/\//, "https://")).hostname;
+
 let proyecto: { id: string; name: string } | undefined;
 
-if (!modoEnsayo) {
-  paso("Buscando el proyecto en Neon");
-  const hostProd = new URL(urlProd!.replace(/^postgres(ql)?:\/\//, "https://")).hostname;
-  const { projects } = await neonApi<{ projects: Array<{ id: string; name: string }> }>(
-    "/projects"
-  );
+paso(`Base de destino: ${hostDestino.split(".")[0]}${modoEnsayo ? " (ensayo)" : " (PRODUCCIÓN)"}`);
 
-  for (const p of projects) {
-    const { endpoints } = await neonApi<{ endpoints: Array<{ host: string }> }>(
-      `/projects/${p.id}/endpoints`
+if (clave) {
+  const { organizations } = await neonApi<{ organizations: Array<{ id: string; name: string }> }>(
+    "/users/me/organizations"
+  );
+  for (const org of organizations) {
+    const { projects } = await neonApi<{ projects: Array<{ id: string; name: string }> }>(
+      `/projects?org_id=${org.id}&limit=100`
     );
-    if (endpoints.some((e) => e.host === hostProd)) {
-      proyecto = p;
-      break;
+    for (const p of projects) {
+      const { endpoints } = await neonApi<{ endpoints: Array<{ host: string }> }>(
+        `/projects/${p.id}/endpoints`
+      );
+      if (endpoints.some((e) => e.host === hostDestino)) {
+        proyecto = p;
+        break;
+      }
     }
+    if (proyecto) break;
   }
-  if (!proyecto) {
-    console.error(`   ✗ ningún proyecto de esta cuenta tiene el endpoint ${hostProd}`);
-    process.exit(2);
-  }
-  ok(`${proyecto.name} (${proyecto.id})`);
+}
+
+if (proyecto) {
+  ok(`proyecto ${proyecto.name} (${proyecto.id}) — se ensaya sobre una rama descartable`);
+} else if (clave) {
+  info("la clave de Neon no alcanza este proyecto: se ensaya sobre la base misma");
 } else {
-  const host = new URL(urlEnsayo!.replace(/^postgres(ql)?:\/\//, "https://")).hostname;
-  paso(`Ensayando sobre STAGING_DATABASE_URL (${host.split(".")[0]})`);
-  ok("sin rama y sin clave de API — producción no se toca en ningún momento");
+  info("sin clave de Neon: se ensaya sobre la base misma");
 }
 
 // ── La rama ─────────────────────────────────────────────────────────────────
@@ -147,14 +159,14 @@ let salida = 1;
 
 try {
   let urlRama: string;
-  if (modoEnsayo) {
-    urlRama = urlEnsayo!;
+  if (!proyecto) {
+    urlRama = urlDestino;
   } else {
     paso(`Creando la rama ${nombreRama}`);
     const creada = await neonApi<{
       branch: { id: string };
       connection_uris: Array<{ connection_uri: string }>;
-    }>(`/projects/${proyecto!.id}/branches`, {
+    }>(`/projects/${proyecto.id}/branches`, {
       method: "POST",
       body: JSON.stringify({
         branch: { name: nombreRama },
@@ -162,10 +174,21 @@ try {
       }),
     });
     ramaId = creada.branch.id;
-    const uri = creada.connection_uris[0]?.connection_uri;
+
+    // La respuesta de creación trae `connection_uris` sólo a veces, según lo
+    // que se le haya pedido. Pedirla aparte siempre funciona y no depende de
+    // esa sutileza — el nombre de la base y del rol se sacan de la cadena de
+    // destino, para que la rama se abra igual que su origen.
+    const destino = new URL(urlDestino.replace(/^postgres(ql)?:\/\//, "https://"));
+    const baseNombre = destino.pathname.replace(/^\//, "") || "neondb";
+    const rolNombre = destino.username || "neondb_owner";
+    const { uri } = await neonApi<{ uri: string }>(
+      `/projects/${proyecto.id}/connection_uri` +
+        `?branch_id=${ramaId}&database_name=${baseNombre}&role_name=${rolNombre}`
+    );
     if (!uri) throw new Error("Neon no devolvió cadena de conexión para la rama");
     urlRama = uri;
-    ok(`rama viva, con una copia de los datos de producción`);
+    ok(`rama viva, copia de ${baseNombre} en el momento de crearla`);
   }
 
   const poolRama = new Pool({ connectionString: urlRama });
@@ -285,13 +308,28 @@ try {
     paso("Probando la tenencia con el rol nuevo");
     console.log("");
     try {
-      execFileSync(
-        "npx",
-        ["tsx", "--tsconfig", "tsconfig.rehearsal.json", "scripts/prove-tenancy.mts", "--url", urlRolFinal],
-        { stdio: "inherit", shell: process.platform === "win32" }
+      // La URL va entre comillas a propósito.
+      //
+      // En Windows `npx` es un .cmd, así que hace falta shell para invocarlo; y
+      // con shell, cmd parte el argumento en el `&` de "?sslmode=require&..." e
+      // intenta ejecutar "sslmode" como si fuera un comando. El ensayo pasaba y
+      // el envoltorio reportaba fracaso. Es el mismo defecto que ya apareció en
+      // switch-gcp: en Windows, todo argumento con & o espacios va comillado.
+      execSync(
+        `npx tsx --tsconfig tsconfig.rehearsal.json scripts/prove-tenancy.mts --url "${urlRolFinal}"`,
+        { stdio: "inherit" }
       );
       salida = 0;
-    } catch {
+    } catch (e) {
+      // Un catch mudo acá cuesta caro: el ensayo dice "no pasó" y no se sabe si
+      // falló el aislamiento —lo que se quería medir— o si el comando ni
+      // arrancó. Son dos cosas muy distintas y hay que poder distinguirlas.
+      const err = e as { status?: number; message?: string };
+      if (err.status === 1) {
+        info("la prueba de tenencia falló: mirá su salida de arriba");
+      } else {
+        info(`la prueba de tenencia no llegó a correr: ${err.message?.slice(0, 120)}`);
+      }
       salida = 1;
     }
   } finally {

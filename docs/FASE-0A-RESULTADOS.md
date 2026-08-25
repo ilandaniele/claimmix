@@ -226,3 +226,26 @@ escrito por la base.
 Queda **pendiente de aplicar**: el cambio a producción lo bloqueó el clasificador
 de permisos, y es DDL en vivo, así que lo decide una persona. Son tres
 `ALTER COLUMN SET DEFAULT` y un `UPDATE` que ya se midió que afecta 0 filas.
+
+### El ensayo, ahora sobre ramas descartables
+
+Con `NEON_API_KEY` cargada, `pnpm ensayo-tenencia --staging` crea una rama, la
+usa y la borra. Dos corridas seguidas en verde y ninguna rama colgada. Eso lo
+hace apto para CI, que era la diferencia entre una herramienta y una
+demostración de una sola vez.
+
+La clave es de `veltra.claimmix@gmail.com` y alcanza **sólo la organización
+Veltra**: ve el proyecto de ensayo (`odd-fire-27605230`, São Paulo) y **no** el
+de producción, que quedó en la cuenta vieja. Para que el CI ensaye contra una
+copia de los datos reales hace falta una clave de esa otra cuenta, o mudar el
+proyecto — decisión aparte.
+
+Dos defectos más que aparecieron al hacerlo repetible:
+
+- **La respuesta de crear una rama no siempre trae la cadena de conexión.** Se
+  pide aparte con `/connection_uri`, que siempre funciona.
+- **Windows partía la URL en el `&` de `?sslmode=require&…`** y trataba
+  `sslmode` como un comando: el ensayo pasaba y el envoltorio reportaba
+  fracaso. Es el mismo defecto de `switch-gcp` — en Windows, todo argumento con
+  `&` va comillado. Y el `catch` mudo que lo escondía ahora distingue «falló el
+  aislamiento» de «el comando ni arrancó», que son cosas muy distintas.

@@ -31,7 +31,8 @@
     "load": "tsx --tsconfig tsconfig.rehearsal.json scripts/load-test.mts",
     "pentest": "tsx --tsconfig tsconfig.rehearsal.json scripts/pen-test.mts",
     "onboard": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-onboarding.mts",
-    "knock": "tsx --tsconfig tsconfig.rehearsal.json scripts/knock-on-the-door.mts"
+    "knock": "tsx --tsconfig tsconfig.rehearsal.json scripts/knock-on-the-door.mts",
+    "tenancy": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-tenancy.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

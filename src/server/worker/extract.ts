@@ -38,7 +38,7 @@
 import "server-only";
 import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {
   cases,
@@ -106,17 +106,19 @@ export async function runExtractionWorker(
   } | null;
   try {
     caseRow = firstRow(
-      await db
-        .select({
-          id: cases.id,
-          status: cases.status,
-          claim_type: cases.claim_type,
-          tenant_id: cases.tenant_id,
-          channel: cases.channel,
-        })
-        .from(cases)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
-        .limit(1)
+      await enTenant(ctx, (db) =>
+        db
+          .select({
+            id: cases.id,
+            status: cases.status,
+            claim_type: cases.claim_type,
+            tenant_id: cases.tenant_id,
+            channel: cases.channel,
+          })
+          .from(cases)
+          .where(eq(cases.id, caseId))
+          .limit(1)
+      )
     );
   } catch (err) {
     console.error("[worker] Case not found:", caseId, dbErrCode(err));
@@ -159,14 +161,14 @@ export async function runExtractionWorker(
   let rawMsg: { body: string } | null;
   try {
     rawMsg = firstRow(
-      await db
-        .select({ body: rawMessages.body })
-        .from(rawMessages)
-        .where(
-          and(eq(rawMessages.case_id, caseId), eq(rawMessages.tenant_id, tenantId))
-        )
-        .orderBy(desc(rawMessages.received_at))
-        .limit(1)
+      await enTenant(ctx, (db) =>
+        db
+          .select({ body: rawMessages.body })
+          .from(rawMessages)
+          .where(eq(rawMessages.case_id, caseId))
+          .orderBy(desc(rawMessages.received_at))
+          .limit(1)
+      )
     );
   } catch {
     rawMsg = null;
@@ -397,33 +399,36 @@ const EXTRACTION_LEASE_MS = 3 * 60 * 1000;
  */
 async function acquireExtractionLease(
   caseId: string,
-  tenantId: string
+  ctx: TenantContext
 ): Promise<boolean> {
   try {
-    const taken = await db
-      .update(cases)
-      .set({ extraction_lease_at: new Date().toISOString() })
-      .where(
-        and(
-          eq(cases.id, caseId),
-          eq(cases.tenant_id, tenantId),
-          or(
-            isNull(cases.extraction_lease_at),
-            sql`${cases.extraction_lease_at} < now() - interval '${sql.raw(String(EXTRACTION_LEASE_MS))} milliseconds'`
+    const taken = await enTenant(ctx, (db) =>
+      db
+        .update(cases)
+        .set({ extraction_lease_at: new Date().toISOString() })
+        .where(
+          and(
+            eq(cases.id, caseId),
+            or(
+              isNull(cases.extraction_lease_at),
+              sql`${cases.extraction_lease_at} < now() - interval '${sql.raw(String(EXTRACTION_LEASE_MS))} milliseconds'`
+            )
           )
         )
-      )
-      .returning({ id: cases.id });
+        .returning({ id: cases.id })
+    );
 
     if (taken.length > 0) return true;
 
     // Someone else holds it. Their run started before this message was stored,
     // so it cannot see it — flag the case so the holder runs again rather than
     // letting the message go unread.
-    await db
-      .update(cases)
-      .set({ extraction_pending: true })
-      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+    await enTenant(ctx, (db) =>
+      db
+        .update(cases)
+        .set({ extraction_pending: true })
+        .where(eq(cases.id, caseId))
+    );
 
     console.info(
       JSON.stringify({
@@ -451,21 +456,29 @@ async function acquireExtractionLease(
  */
 async function releaseExtractionLease(
   caseId: string,
-  tenantId: string
+  ctx: TenantContext
 ): Promise<boolean> {
   try {
-    const rows = await db
-      .select({ pending: cases.extraction_pending })
-      .from(cases)
-      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
-      .limit(1);
+    // Las dos van juntas en un lote: un solo viaje, y la lectura y la escritura
+    // ocurren dentro de la misma transacción. Antes eran dos idas separadas, con
+    // una ventana en el medio en la que un mensaje que llegara quedaba en tierra
+    // de nadie.
+    const [filas] = await enTenantVarias<[Array<{ pending: boolean | null }>, unknown]>(
+      ctx,
+      (db) => [
+        db
+          .select({ pending: cases.extraction_pending })
+          .from(cases)
+          .where(eq(cases.id, caseId))
+          .limit(1),
+        db
+          .update(cases)
+          .set({ extraction_lease_at: null, extraction_pending: false })
+          .where(eq(cases.id, caseId)),
+      ]
+    );
 
-    await db
-      .update(cases)
-      .set({ extraction_lease_at: null, extraction_pending: false })
-      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
-
-    return rows[0]?.pending === true;
+    return filas[0]?.pending === true;
   } catch (err) {
     console.error("[email-worker] lease release error:", dbErrCode(err));
     return false;
@@ -508,22 +521,27 @@ export async function runEmailExtractionWorker(
     // ── a) Fetch case + raw_messages ──────────────────────────────────────────
 
     const caseRow = firstRow(
-      await db
-        .select({
-          id: cases.id,
-          status: cases.status,
-          claim_type: cases.claim_type,
-          tenant_id: cases.tenant_id,
-          channel: cases.channel,
-          email_thread_id: cases.email_thread_id,
-          is_claim: cases.is_claim,
-          policyholder_name: cases.policyholder_name,
-          policy_number: cases.policy_number,
-          created_at: cases.created_at,
-        })
-        .from(cases)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
-        .limit(1)
+      await enTenant(ctx, (db) =>
+        db
+          .select({
+            id: cases.id,
+            status: cases.status,
+            claim_type: cases.claim_type,
+            tenant_id: cases.tenant_id,
+            channel: cases.channel,
+            email_thread_id: cases.email_thread_id,
+            is_claim: cases.is_claim,
+            policyholder_name: cases.policyholder_name,
+            policy_number: cases.policy_number,
+            created_at: cases.created_at,
+          })
+          .from(cases)
+          // Buscar por id sin contexto sería peor que antes: el id de un
+          // caso ajeno devolvería la fila. Con la capa, la base no la
+          // entrega, y por eso este bloque va envuelto y no sólo sin filtro.
+          .where(eq(cases.id, caseId))
+          .limit(1)
+      )
     );
 
     if (!caseRow) {
@@ -564,7 +582,7 @@ export async function runEmailExtractionWorker(
 
     // One run per case at a time. Everything below reads the conversation and
     // writes back to it, so two runs overlapping corrupt each other.
-    if (!(await acquireExtractionLease(caseId, tenantId))) return;
+    if (!(await acquireExtractionLease(caseId, ctx))) return;
     leaseHeld = true;
 
     // ── Throttle real email extractions ──────────────────────────────────────
@@ -604,18 +622,18 @@ export async function runEmailExtractionWorker(
     // complete. The conversation fix built for email never reached WhatsApp
     // because of which table each channel happens to write.
     const rawMsg = firstRow(
-      await db
-        .select({
-          body: rawMessages.body,
-          subject: rawMessages.subject,
-          from_addr: rawMessages.from_addr,
-        })
-        .from(rawMessages)
-        .where(
-          and(eq(rawMessages.case_id, caseId), eq(rawMessages.tenant_id, tenantId))
-        )
-        .orderBy(desc(rawMessages.received_at))
-        .limit(1)
+      await enTenant(ctx, (db) =>
+        db
+          .select({
+            body: rawMessages.body,
+            subject: rawMessages.subject,
+            from_addr: rawMessages.from_addr,
+          })
+          .from(rawMessages)
+          .where(eq(rawMessages.case_id, caseId))
+          .orderBy(desc(rawMessages.received_at))
+          .limit(1)
+      )
     );
 
     const conversation = await loadInboundConversation(caseId, ctx);
@@ -685,10 +703,12 @@ export async function runEmailExtractionWorker(
         payload: { reason: budgetResult.reason },
       });
       // Escalate so a human can re-trigger once budget resets — never leave the case in procesando.
-      await db
-        .update(cases)
-        .set({ status: "escalado", updated_at: new Date().toISOString() })
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+      await enTenant(ctx, (db) =>
+        db
+          .update(cases)
+          .set({ status: "escalado", updated_at: new Date().toISOString() })
+          .where(eq(cases.id, caseId))
+      );
       return;
     }
 
@@ -778,10 +798,12 @@ export async function runEmailExtractionWorker(
     // a provider/schema error, NOT a genuine is_claim=false classification.
     // Set escalado so a human can re-trigger, never no_relevante.
     if (extractedClaim.parse_failed === true) {
-      await db
-        .update(cases)
-        .set({ status: "escalado", updated_at: new Date().toISOString() })
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+      await enTenant(ctx, (db) =>
+        db
+          .update(cases)
+          .set({ status: "escalado", updated_at: new Date().toISOString() })
+          .where(eq(cases.id, caseId))
+      );
       await writeAuditLog({
         tenant_id: tenantId,
         actor_id: userId,
@@ -818,7 +840,8 @@ export async function runEmailExtractionWorker(
         extractedClaim.not_relevant_reason ||
         "El clasificador de IA determinó que este email no es un reclamo de seguro.";
 
-      await db
+      await enTenant(ctx, (db) =>
+        db
         .update(cases)
         .set({
           status: "no_relevante",
@@ -826,7 +849,8 @@ export async function runEmailExtractionWorker(
           not_relevant_reason: reason.slice(0, 500),
           updated_at: new Date().toISOString(),
         })
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+        .where(eq(cases.id, caseId))
+      );
 
       await writeAuditLog({
         tenant_id: tenantId,
@@ -1042,10 +1066,9 @@ export async function runEmailExtractionWorker(
     }
 
     try {
-      await db
-        .update(cases)
-        .set(caseUpdate)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+      await enTenant(ctx, (db) =>
+        db.update(cases).set(caseUpdate).where(eq(cases.id, caseId))
+      );
     } catch (err) {
       console.error("[email-worker] Case update error:", dbErrCode(err));
     }
@@ -1160,10 +1183,12 @@ export async function runEmailExtractionWorker(
       const errStatus = typeof cause?.status === "number" ? cause.status : null;
       const errCode = typeof cause?.code === "string" ? cause.code : null;
       try {
-        await db
-          .update(cases)
-          .set({ status: "escalado", updated_at: new Date().toISOString() })
-          .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+        await enTenant(ctx, (db) =>
+          db
+            .update(cases)
+            .set({ status: "escalado", updated_at: new Date().toISOString() })
+            .where(eq(cases.id, caseId))
+        );
 
         await writeAuditLog({
           tenant_id: tenantId,
@@ -1210,7 +1235,7 @@ export async function runEmailExtractionWorker(
     if (leaseHeld) {
       // A message that landed while we were running was never read: the run
       // that would have read it deferred to us. Run again for it.
-      const arrivedWhileBusy = await releaseExtractionLease(caseId, tenantId);
+      const arrivedWhileBusy = await releaseExtractionLease(caseId, ctx);
       if (arrivedWhileBusy) {
         console.info(
           JSON.stringify({

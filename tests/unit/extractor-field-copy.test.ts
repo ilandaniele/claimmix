@@ -43,12 +43,18 @@ import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 // tests/unit/data-scope-sin-rol.test.ts y, contra bases de verdad, en
 // `pnpm capa-datos` y `pnpm tenancy`.
 vi.mock("@/data/scope", async () => {
-  const { db } = await import("@/lib/db");
+  const mod = await import("@/lib/db");
+  // Se lee `mod.db` en CADA llamada, sin desestructurar.
+  //
+  // El mock de @/lib/db expone `db` con un getter para que los tests puedan
+  // intercambiar la base simulada entre corridas. Un `const { db } = ...`
+  // llama al getter una sola vez y congela ese valor: al cambiar la base, el
+  // puente seguía entregando la anterior y el caso aparecía como inexistente.
   return {
     enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(db)),
+      Promise.resolve(armar(mod.db)),
     enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(db)),
+      Promise.all(armar(mod.db)),
   };
 });
 

@@ -167,6 +167,12 @@ export const config = {
      * - favicon.ico
      * - Static image/font extensions
      */
-    "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff|woff2)$).*)",
+    // Las rutas de API quedan afuera, y no es un descuido: cada una se
+    // autentica sola —sesión, rol o CRON_SECRET— y el pen test lo comprueba
+    // en cada deploy recorriendo src/app/api sin credenciales. Gatearlas acá
+    // además rompe las que se autentican por token: /api/health con su Bearer
+    // recibía 401 antes de llegar al handler, y con eso se caen el smoke, los
+    // dos crons y el timbre.
+    "/((?!api|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff|woff2)$).*)",
   ],
 };

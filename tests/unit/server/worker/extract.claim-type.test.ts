@@ -130,6 +130,24 @@ function registerCommonMocks(
     },
   }));
 
+  // La capa de datos, corriendo contra el mockDb de arriba.
+  //
+  // Las funciones migradas piden enTenant(ctx, (db) => consulta) en vez de
+  // hablar con db directamente. Lo que este test verifica —qué se escribe en el
+  // caso, qué queda en la auditoría— no cambió, así que alcanza con que la capa
+  // les entregue el mismo db simulado.
+  //
+  // Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
+  // eso no se puede simular sin mentir. Se verifica en
+  // tests/unit/data-scope-sin-rol.test.ts y, contra bases de verdad, en
+  // `pnpm capa-datos` y `pnpm tenancy`.
+  vi.doMock("@/data/scope", () => ({
+    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
+      Promise.resolve(armar(mockDb)),
+    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
+      Promise.all(armar(mockDb)),
+  }));
+
   // Mock memory load so it doesn't make additional db.select calls
   vi.doMock("@/server/memory/load", () => ({
     loadMemoryHints: vi.fn().mockResolvedValue([]),

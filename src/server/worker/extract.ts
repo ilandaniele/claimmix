@@ -38,6 +38,7 @@
 import "server-only";
 import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {
   cases,
@@ -90,6 +91,10 @@ export async function runExtractionWorker(
   tenantId: string,
   userId: string | null
 ): Promise<void> {
+  // El contexto se arma una vez, acá, a partir del inquilino que llega en la
+  // firma. Todo lo que consulte o escriba abajo lo recibe: esa es la única
+  // forma de que la base sepa de quién es lo que se está tocando.
+  const ctx: TenantContext = { tenantId };
   // ──0. Fetch case + raw message ──────────────────────────────────────────────
 
   let caseRow: {
@@ -169,7 +174,7 @@ export async function runExtractionWorker(
 
   if (!rawMsg) {
     console.error("[worker] Raw message not found for case:", caseId);
-    await escalateCase(caseId, tenantId, userId, "raw_message_missing", "raw_message_missing");
+    await escalateCase(caseId, ctx, userId, "raw_message_missing", "raw_message_missing");
     return;
   }
 
@@ -194,7 +199,7 @@ export async function runExtractionWorker(
       payload: { reason: budgetResult.reason },
     });
     // Park case in escalado — human needs to re-trigger.
-    await updateCaseStatus(caseId, tenantId, "escalado", null);
+    await updateCaseStatus(caseId, ctx, "escalado", null);
     return;
   }
 
@@ -220,7 +225,7 @@ export async function runExtractionWorker(
           error_name: e.cause instanceof Error ? e.cause.name : e.name,
         })
       );
-      await escalateCase(caseId, tenantId, userId, "AI_OUTPUT_INVALID", "ai_output_invalid");
+      await escalateCase(caseId, ctx, userId, "AI_OUTPUT_INVALID", "ai_output_invalid");
       return;
     }
     const name = e instanceof Error ? e.name : "UnknownError";
@@ -233,7 +238,7 @@ export async function runExtractionWorker(
         error_name: name,
       })
     );
-    await escalateCase(caseId, tenantId, userId, "extractor_error", "extractor_error");
+    await escalateCase(caseId, ctx, userId, "extractor_error", "extractor_error");
     return;
   }
 
@@ -243,7 +248,7 @@ export async function runExtractionWorker(
   // ── 4. Write extracted_fields ────────────────────────────────────────────────
   if (extractedClaim.fields.length > 0) {
     try {
-      await upsertExtractedFields(caseId, tenantId, extractedClaim.fields);
+      await upsertExtractedFields(caseId, ctx, extractedClaim.fields);
     } catch (err) {
       console.error("[worker] Failed to write extracted_fields:", dbErrCode(err), "case:", caseId);
     }
@@ -252,7 +257,7 @@ export async function runExtractionWorker(
   // ── 5. Write missing_docs ────────────────────────────────────────────────────
   if (gapResult.missing_doc_keys.length > 0) {
     try {
-      await insertMissingDocsIfAbsent(caseId, tenantId, gapResult.missing_doc_keys);
+      await insertMissingDocsIfAbsent(caseId, ctx, gapResult.missing_doc_keys);
     } catch (err) {
       console.error("[worker] Failed to write missing_docs:", dbErrCode(err), "case:", caseId);
     }
@@ -278,12 +283,12 @@ export async function runExtractionWorker(
   // Safety: always validate FSM transition (LLM08 containment).
   if (!isValidTransition("procesando", newStatus)) {
     console.error("[worker] Invalid FSM transition attempt:", "procesando", "→", newStatus);
-    await escalateCase(caseId, tenantId, userId, "fsm_violation", "fsm_violation");
+    await escalateCase(caseId, ctx, userId, "fsm_violation", "fsm_violation");
     return;
   }
 
   // ── 7. Update case status + confidence_min ───────────────────────────────────
-  await updateCaseStatus(caseId, tenantId, newStatus, gapResult.confidence_min);
+  await updateCaseStatus(caseId, ctx, newStatus, gapResult.confidence_min);
 
   // ── 8. Audit log ─────────────────────────────────────────────────────────────
   const auditPayload: Record<string, unknown> = {
@@ -486,6 +491,10 @@ export async function runEmailExtractionWorker(
   tenantId: string,
   userId: string | null
 ): Promise<void> {
+  // El contexto se arma una vez, acá, a partir del inquilino que llega en la
+  // firma. Todo lo que consulte o escriba abajo lo recibe: esa es la única
+  // forma de que la base sepa de quién es lo que se está tocando.
+  const ctx: TenantContext = { tenantId };
   // Declared before try so the catch block can log them if Gemini fails mid-extraction.
   let emailBody = "";
   let emailSubject = "";
@@ -609,7 +618,7 @@ export async function runEmailExtractionWorker(
         .limit(1)
     );
 
-    const conversation = await loadInboundConversation(caseId, tenantId);
+    const conversation = await loadInboundConversation(caseId, ctx);
 
     if (conversation) {
       emailBody = conversation.body;
@@ -640,7 +649,7 @@ export async function runEmailExtractionWorker(
     // human-approved few-shot examples + active versioned tenant prompt.
     const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields] =
       await Promise.all([
-        loadKnownPatterns(tenantId),
+        loadKnownPatterns(ctx),
         loadAgentTraining(tenantId),
         loadActivePromptRules(tenantId),
         loadApprovedExamples(tenantId, caseRow.claim_type),
@@ -856,7 +865,7 @@ export async function runEmailExtractionWorker(
 
     if (fieldsToWrite.length > 0) {
       try {
-        await upsertExtractedFields(caseId, tenantId, fieldsToWrite);
+        await upsertExtractedFields(caseId, ctx, fieldsToWrite);
       } catch (err) {
         console.error("[email-worker] extracted_fields upsert error:", dbErrCode(err));
       }
@@ -873,7 +882,7 @@ export async function runEmailExtractionWorker(
 
     if (missingFieldKeys.length > 0) {
       try {
-        await insertMissingDocsIfAbsent(caseId, tenantId, missingFieldKeys);
+        await insertMissingDocsIfAbsent(caseId, ctx, missingFieldKeys);
       } catch (err) {
         console.error("[email-worker] missing_docs upsert error:", dbErrCode(err));
       }
@@ -1247,9 +1256,10 @@ function toPromptMemoryHints(
 
 // ── Helper: load known_claim_patterns ────────────────────────────────────────
 
-async function loadKnownPatterns(tenantId: string): Promise<KnownPattern[]> {
+async function loadKnownPatterns(ctx: TenantContext): Promise<KnownPattern[]> {
   try {
-    const data = await db
+    const data = await enTenant(ctx, (db) =>
+      db
       .select({
         pattern_text: knownClaimPatterns.pattern_text,
         pattern_type: knownClaimPatterns.pattern_type,
@@ -1257,17 +1267,13 @@ async function loadKnownPatterns(tenantId: string): Promise<KnownPattern[]> {
         language: knownClaimPatterns.language,
       })
       .from(knownClaimPatterns)
-      .where(
-        and(
-          // Global rows have tenant_id = NULL (visible to all tenants).
-          or(
-            isNull(knownClaimPatterns.tenant_id),
-            eq(knownClaimPatterns.tenant_id, tenantId)
-          ),
-          eq(knownClaimPatterns.enabled, true)
-        )
-      )
-      .limit(200);
+      // Sin el `or(isNull(...), eq(...))` que había acá: la política de la
+      // tabla (migración 0019) ya deja ver lo propio Y lo global. Escribirlo
+      // otra vez no agregaría nada y haría pensar que sin eso las reglas
+      // globales se perderían — que es justo lo que 0019 vino a evitar.
+      .where(eq(knownClaimPatterns.enabled, true))
+      .limit(200)
+    );
 
     return data.map((row) => ({
       pattern_text: row.pattern_text ?? "",
@@ -1297,18 +1303,22 @@ function dbErrCode(err: unknown): string {
  */
 async function upsertExtractedFields(
   caseId: string,
-  tenantId: string,
+  ctx: TenantContext,
   fields: Array<{ field_key: string; field_value: string; confidence: number }>
 ): Promise<void> {
+  // El tenant_id sigue yendo en los valores: ahí no es un filtro, es el dueño
+  // de la fila. Y ahora la base comprueba que coincida con el contexto —
+  // escribir en la cuenta de otro pasó de ser posible a ser rechazado.
   const fieldInserts = fields.map((f) => ({
     case_id: caseId,
-    tenant_id: tenantId,
+    tenant_id: ctx.tenantId,
     field_key: f.field_key,
     field_value: f.field_value,
     confidence: f.confidence.toFixed(2),
   }));
 
-  await db
+  await enTenant(ctx, (db) =>
+    db
     .insert(extractedFields)
     .values(fieldInserts)
     .onConflictDoUpdate({
@@ -1333,7 +1343,8 @@ async function upsertExtractedFields(
           else excluded.confidence
         end`,
       },
-    });
+    })
+  );
 }
 
 /**
@@ -1346,34 +1357,36 @@ async function upsertExtractedFields(
  */
 async function insertMissingDocsIfAbsent(
   caseId: string,
-  tenantId: string,
+  ctx: TenantContext,
   docKeys: string[]
 ): Promise<void> {
-  const existing = await db
-    .select({ doc_key: missingDocs.doc_key })
-    .from(missingDocs)
-    .where(
-      and(eq(missingDocs.case_id, caseId), eq(missingDocs.tenant_id, tenantId))
-    );
+  const existing = await enTenant(ctx, (db) =>
+    db
+      .select({ doc_key: missingDocs.doc_key })
+      .from(missingDocs)
+      .where(eq(missingDocs.case_id, caseId))
+  );
 
   const existingKeys = new Set(existing.map((row) => row.doc_key));
   const newKeys = docKeys.filter((docKey) => !existingKeys.has(docKey));
   if (newKeys.length === 0) return;
 
-  await db.insert(missingDocs).values(
-    newKeys.map((docKey) => ({
-      case_id: caseId,
-      tenant_id: tenantId,
-      doc_key: docKey,
-      requested_at: null,
-      satisfied_at: null,
-    }))
+  await enTenant(ctx, (db) =>
+    db.insert(missingDocs).values(
+      newKeys.map((docKey) => ({
+        case_id: caseId,
+        tenant_id: ctx.tenantId,
+        doc_key: docKey,
+        requested_at: null,
+        satisfied_at: null,
+      }))
+    )
   );
 }
 
 async function updateCaseStatus(
   caseId: string,
-  tenantId: string,
+  ctx: TenantContext,
   newStatus: "listo" | "esperando" | "escalado",
   confidenceMin: number | null
 ): Promise<void> {
@@ -1386,10 +1399,9 @@ async function updateCaseStatus(
   }
 
   try {
-    await db
-      .update(cases)
-      .set(updatePayload)
-      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+    await enTenant(ctx, (db) =>
+      db.update(cases).set(updatePayload).where(eq(cases.id, caseId))
+    );
   } catch (err) {
     console.error("[worker] Failed to update case status:", dbErrCode(err), "case:", caseId);
   }
@@ -1397,14 +1409,14 @@ async function updateCaseStatus(
 
 async function escalateCase(
   caseId: string,
-  tenantId: string,
+  ctx: TenantContext,
   userId: string | null,
   auditReason: string,
   errorCode: string
 ): Promise<void> {
-  await updateCaseStatus(caseId, tenantId, "escalado", null);
+  await updateCaseStatus(caseId, ctx, "escalado", null);
   await writeAuditLog({
-    tenant_id: tenantId,
+    tenant_id: ctx.tenantId,
     actor_id: userId,
     event_type: AuditEvent.AI_EXTRACTED,
     target_type: "case",
@@ -1436,9 +1448,10 @@ interface LoadedConversation {
  */
 export async function loadInboundConversation(
   caseId: string,
-  tenantId: string
+  ctx: TenantContext
 ): Promise<LoadedConversation | null> {
-  const inbound = await db
+  const inbound = await enTenant(ctx, (db) =>
+    db
     .select({
       id: claimMessages.id,
       provider_message_id: claimMessages.provider_message_id,
@@ -1451,11 +1464,11 @@ export async function loadInboundConversation(
     .where(
       and(
         eq(claimMessages.case_id, caseId),
-        eq(claimMessages.tenant_id, tenantId),
         eq(claimMessages.direction, "inbound")
       )
     )
-    .orderBy(asc(claimMessages.received_at));
+    .orderBy(asc(claimMessages.received_at))
+  );
 
   // Defensive: anything other than a row list means we cannot read the
   // conversation, and the raw-message path is the honest fallback.

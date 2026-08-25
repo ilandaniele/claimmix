@@ -152,17 +152,25 @@ try {
       // nada de nadie. La primera versión de esto se equivocaba justo ahí, y el
       // síntoma era que la prueba se volvía "no concluyente" precisamente
       // cuando empezaba a funcionar.
-      const contarPara = async (tenant: string) => {
+      // Se cuenta con el contexto puesto Y filtrando por dueño. El filtro no
+      // sobra: si el rol saltea RLS, la consulta sin filtro devuelve todo y el
+      // recuento diría que existen 462 casos "ajenos" cuando en realidad son
+      // los propios del otro inquilino vistos de más. El resultado sería un
+      // "de 462 que existen" falso justo en el escenario que estamos tratando
+      // de denunciar.
+      const contarDe = async (tenant: string) => {
         await cx.query("BEGIN");
         try {
           await cx.query("SELECT set_config('claimmix.tenant_id', $1, true)", [tenant]);
-          const r = await cx.query(`SELECT count(*)::int AS n FROM cases`);
+          const r = await cx.query(`SELECT count(*)::int AS n FROM cases WHERE tenant_id = $1`, [
+            tenant,
+          ]);
           return r.rows[0].n as number;
         } finally {
           await cx.query("ROLLBACK");
         }
       };
-      const hayAjenas = await contarPara(b.id);
+      const hayAjenas = await contarDe(b.id);
 
       const desdeA = await verConContexto(a.id);
       const ajenas = desdeA.filter((f) => f.t !== a.id);

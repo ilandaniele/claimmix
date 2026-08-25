@@ -141,18 +141,28 @@ try {
 
       // Cuánto hay realmente de cada uno, antes de sacar conclusiones.
       //
-      // Sin esto, la prueba miente: si el segundo inquilino no tiene ni un
-      // caso, "no vi nada ajeno" no significa que la base lo haya impedido,
-      // significa que no había nada que ver. Un verde que no probó nada es
-      // exactamente lo que hay que evitar.
-      await cx.query("BEGIN");
-      const reparto = (
-        await cx.query(
-          `SELECT tenant_id::text AS t, count(*)::int AS n FROM cases GROUP BY tenant_id`
-        )
-      ).rows as Array<{ t: string; n: number }>;
-      await cx.query("ROLLBACK");
-      const hayAjenas = reparto.filter((f) => f.t !== a.id).reduce((s, f) => s + f.n, 0);
+      // Sin esto la prueba miente: si el segundo inquilino no tiene ni un caso,
+      // "no vi nada ajeno" no significa que la base lo haya impedido, significa
+      // que no había nada que ver. Un verde que no probó nada es exactamente lo
+      // que hay que evitar.
+      //
+      // Y hay que contarlo CON el contexto de cada uno, no de una sola pasada:
+      // cuando el aislamiento funciona, una consulta sin contexto devuelve cero
+      // —que es el objetivo— y entonces el propio recuento diría que no hay
+      // nada de nadie. La primera versión de esto se equivocaba justo ahí, y el
+      // síntoma era que la prueba se volvía "no concluyente" precisamente
+      // cuando empezaba a funcionar.
+      const contarPara = async (tenant: string) => {
+        await cx.query("BEGIN");
+        try {
+          await cx.query("SELECT set_config('claimmix.tenant_id', $1, true)", [tenant]);
+          const r = await cx.query(`SELECT count(*)::int AS n FROM cases`);
+          return r.rows[0].n as number;
+        } finally {
+          await cx.query("ROLLBACK");
+        }
+      };
+      const hayAjenas = await contarPara(b.id);
 
       const desdeA = await verConContexto(a.id);
       const ajenas = desdeA.filter((f) => f.t !== a.id);

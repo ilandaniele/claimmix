@@ -40,12 +40,29 @@ const clave = process.env.NEON_API_KEY?.trim();
 const urlProd = process.env.DATABASE_URL?.trim();
 const conservar = process.argv.includes("--conservar");
 
-if (!clave) {
-  console.error("Falta NEON_API_KEY.");
-  console.error("  Consola de Neon → Account settings → API keys → Create new API key");
+// Dos formas de conseguir dónde ensayar, y la diferencia importa.
+//
+//   rama    — una copia de producción, con sus datos. Es lo ideal: se ensaya
+//             contra el volumen y las formas reales. Necesita NEON_API_KEY.
+//   ensayo  — una base aparte, construida desde los archivos de migración.
+//             No tiene los datos de producción, así que hay que sembrarlos;
+//             a cambio, no hace falta ninguna clave y no se acerca a producción.
+//
+// El modo se imprime siempre: saber contra qué se ensayó es parte del resultado.
+const modoEnsayo = process.argv.includes("--staging");
+const urlEnsayo = process.env.STAGING_DATABASE_URL?.trim();
+
+if (modoEnsayo && !urlEnsayo) {
+  console.error("Falta STAGING_DATABASE_URL en .env.local.");
   process.exit(2);
 }
-if (!urlProd) {
+if (!modoEnsayo && !clave) {
+  console.error("Falta NEON_API_KEY para crear la rama.");
+  console.error("  Consola de Neon → Account settings → API keys → Create new API key");
+  console.error("  O corré con --staging para ensayar contra STAGING_DATABASE_URL.");
+  process.exit(2);
+}
+if (!modoEnsayo && !urlProd) {
   console.error("Falta DATABASE_URL: hace falta para saber de qué proyecto sacar la rama.");
   process.exit(2);
 }
@@ -75,27 +92,34 @@ async function neonApi<T>(ruta: string, init?: RequestInit): Promise<T> {
 // La cadena de conexión no lleva el id del proyecto, así que se busca por el
 // host del endpoint. Si hubiera varios proyectos, esto elige el correcto en vez
 // de "el primero", que sería la forma de tocar el proyecto equivocado.
-paso("Buscando el proyecto en Neon");
-const hostProd = new URL(urlProd.replace(/^postgres(ql)?:\/\//, "https://")).hostname;
-const { projects } = await neonApi<{ projects: Array<{ id: string; name: string }> }>(
-  "/projects"
-);
-
 let proyecto: { id: string; name: string } | undefined;
-for (const p of projects) {
-  const { endpoints } = await neonApi<{ endpoints: Array<{ host: string }> }>(
-    `/projects/${p.id}/endpoints`
+
+if (!modoEnsayo) {
+  paso("Buscando el proyecto en Neon");
+  const hostProd = new URL(urlProd!.replace(/^postgres(ql)?:\/\//, "https://")).hostname;
+  const { projects } = await neonApi<{ projects: Array<{ id: string; name: string }> }>(
+    "/projects"
   );
-  if (endpoints.some((e) => e.host === hostProd)) {
-    proyecto = p;
-    break;
+
+  for (const p of projects) {
+    const { endpoints } = await neonApi<{ endpoints: Array<{ host: string }> }>(
+      `/projects/${p.id}/endpoints`
+    );
+    if (endpoints.some((e) => e.host === hostProd)) {
+      proyecto = p;
+      break;
+    }
   }
+  if (!proyecto) {
+    console.error(`   ✗ ningún proyecto de esta cuenta tiene el endpoint ${hostProd}`);
+    process.exit(2);
+  }
+  ok(`${proyecto.name} (${proyecto.id})`);
+} else {
+  const host = new URL(urlEnsayo!.replace(/^postgres(ql)?:\/\//, "https://")).hostname;
+  paso(`Ensayando sobre STAGING_DATABASE_URL (${host.split(".")[0]})`);
+  ok("sin rama y sin clave de API — producción no se toca en ningún momento");
 }
-if (!proyecto) {
-  console.error(`   ✗ ningún proyecto de esta cuenta tiene el endpoint ${hostProd}`);
-  process.exit(2);
-}
-ok(`${proyecto.name} (${proyecto.id})`);
 
 // ── La rama ─────────────────────────────────────────────────────────────────
 const sufijo = randomBytes(3).toString("hex");
@@ -122,21 +146,27 @@ process.on("SIGINT", async () => {
 let salida = 1;
 
 try {
-  paso(`Creando la rama ${nombreRama}`);
-  const creada = await neonApi<{
-    branch: { id: string };
-    connection_uris: Array<{ connection_uri: string }>;
-  }>(`/projects/${proyecto.id}/branches`, {
-    method: "POST",
-    body: JSON.stringify({
-      branch: { name: nombreRama },
-      endpoints: [{ type: "read_write" }],
-    }),
-  });
-  ramaId = creada.branch.id;
-  const urlRama = creada.connection_uris[0]?.connection_uri;
-  if (!urlRama) throw new Error("Neon no devolvió cadena de conexión para la rama");
-  ok(`rama viva, con una copia de los datos de producción`);
+  let urlRama: string;
+  if (modoEnsayo) {
+    urlRama = urlEnsayo!;
+  } else {
+    paso(`Creando la rama ${nombreRama}`);
+    const creada = await neonApi<{
+      branch: { id: string };
+      connection_uris: Array<{ connection_uri: string }>;
+    }>(`/projects/${proyecto!.id}/branches`, {
+      method: "POST",
+      body: JSON.stringify({
+        branch: { name: nombreRama },
+        endpoints: [{ type: "read_write" }],
+      }),
+    });
+    ramaId = creada.branch.id;
+    const uri = creada.connection_uris[0]?.connection_uri;
+    if (!uri) throw new Error("Neon no devolvió cadena de conexión para la rama");
+    urlRama = uri;
+    ok(`rama viva, con una copia de los datos de producción`);
+  }
 
   const poolRama = new Pool({ connectionString: urlRama });
   const cx = await poolRama.connect();
@@ -166,10 +196,31 @@ try {
     // al final. Para producción se genera otra, y esa sí va a Vercel.
     paso("Creando el rol de aplicación (sin BYPASSRLS)");
     const passRol = randomBytes(24).toString("base64url");
-    await cx.query(`DROP ROLE IF EXISTS claimmix_app`);
+
+    // El rol se reutiliza en vez de recrearse.
+    //
+    // Borrarlo exige soltar antes todo lo que se le concedió (DROP OWNED BY), y
+    // eso pide privilegios que el dueño de la base no tiene en Neon: "permission
+    // denied to drop objects". Como los GRANT de más abajo son idempotentes,
+    // alcanza con cambiarle la contraseña. Así el ensayo se puede correr las
+    // veces que haga falta, que es la diferencia entre una herramienta y una
+    // demostración de una sola vez.
+    // Ojo con NOSUPERUSER: tocar ese atributo exige ser superusuario, incluso
+    // para ponerlo en "no". Neon no da superusuario a nadie, así que incluirlo
+    // en un ALTER devuelve "permission denied to alter role" — un mensaje que
+    // hace pensar que falta permiso sobre el rol, cuando lo que falta es
+    // permiso sobre UN atributo. Como NOSUPERUSER es el valor por omisión al
+    // crear, alcanza con no nombrarlo.
+    //
+    // NOBYPASSRLS, en cambio, sí se puede y es el que importa: es el atributo
+    // que decide si las políticas se obedecen o se ignoran.
+    const yaExiste =
+      ((await cx.query(`SELECT 1 FROM pg_roles WHERE rolname = 'claimmix_app'`)).rowCount ?? 0) > 0;
     await cx.query(
-      `CREATE ROLE claimmix_app WITH LOGIN PASSWORD '${passRol}'
-         NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`
+      yaExiste
+        ? `ALTER ROLE claimmix_app WITH LOGIN PASSWORD '${passRol}' NOBYPASSRLS`
+        : `CREATE ROLE claimmix_app WITH LOGIN PASSWORD '${passRol}'
+             NOCREATEDB NOCREATEROLE NOBYPASSRLS`
     );
     await cx.query(`GRANT USAGE ON SCHEMA public TO claimmix_app`);
     await cx.query(
@@ -188,27 +239,40 @@ try {
     );
     ok("claimmix_app creado, con permisos sobre el esquema public");
 
-    // ── El segundo inquilino, para que la prueba pruebe algo ────────────────
-    paso("Sembrando un caso de un segundo inquilino");
-    const inquilinos = (
+    // ── Dos inquilinos con casos, o la prueba no prueba nada ────────────────
+    //
+    // El aislamiento sólo se puede demostrar si hay algo ajeno que NO se ve. Con
+    // un solo inquilino, "no vi nada de otro" es cierto y vacío. Así que acá se
+    // garantiza que haya dos, cada uno con al menos un caso, antes de medir.
+    paso("Asegurando dos inquilinos con casos");
+    let inquilinos = (
       await cx.query(`SELECT id::text AS id, name FROM tenants ORDER BY created_at LIMIT 2`)
-    ).rows;
+    ).rows as Array<{ id: string; name: string }>;
+
     if (inquilinos.length < 2) {
-      info("hay un solo inquilino: la prueba cruzada va a quedar no concluyente");
-    } else {
-      const b = inquilinos[1];
-      const yaTiene = (
-        await cx.query(`SELECT count(*)::int AS n FROM cases WHERE tenant_id = $1`, [b.id])
+      const nuevo = (
+        await cx.query(
+          `INSERT INTO tenants (name) VALUES ('Aseguradora de ensayo')
+           RETURNING id::text AS id, name`
+        )
+      ).rows[0];
+      info(`creado un segundo inquilino: "${nuevo.name}"`);
+      inquilinos = [...inquilinos, nuevo];
+    }
+
+    for (const t of inquilinos) {
+      const n = (
+        await cx.query(`SELECT count(*)::int AS n FROM cases WHERE tenant_id = $1`, [t.id])
       ).rows[0].n as number;
-      if (yaTiene > 0) {
-        ok(`"${b.name}" ya tiene ${yaTiene} caso(s)`);
+      if (n > 0) {
+        ok(`"${t.name}" ya tiene ${n} caso(s)`);
       } else {
         await cx.query(
           `INSERT INTO cases (tenant_id, status, channel, policyholder_name)
-           VALUES ($1, 'nuevo', 'email', 'Asegurado del segundo inquilino')`,
-          [b.id]
+           VALUES ($1, 'recibido', 'email', $2)`,
+          [t.id, `Asegurado de ${t.name}`]
         );
-        ok(`caso sembrado para "${b.name}" (sólo en la rama)`);
+        ok(`caso sembrado para "${t.name}"`);
       }
     }
 

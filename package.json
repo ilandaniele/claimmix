@@ -33,7 +33,8 @@
     "onboard": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-onboarding.mts",
     "knock": "tsx --tsconfig tsconfig.rehearsal.json scripts/knock-on-the-door.mts",
     "tenancy": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-tenancy.mts",
-    "ensayo-tenencia": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-tenancy.mts"
+    "ensayo-tenencia": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-tenancy.mts",
+    "esquemas": "tsx --tsconfig tsconfig.rehearsal.json scripts/compare-schemas.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

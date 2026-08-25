@@ -85,14 +85,35 @@ function readMigrations() {
   });
 }
 
-const env = readFileSync("./.env.local", "utf8");
-const connMatch = env.match(/^DATABASE_URL\s*=\s*"?([^"\n]+)"?/m);
-if (!connMatch) {
-  console.error("✖ DATABASE_URL not found in .env.local");
-  process.exit(1);
+// A qué base apunta.
+//
+// Antes era siempre DATABASE_URL, o sea siempre producción. Para ensayar una
+// migración hace falta poder correrla en otro lado primero —una base de ensayo,
+// una rama— y descubrir ahí lo que rompe. Con `--env NOMBRE` se elige otra
+// variable del .env.local; con `--url` se pasa la cadena directamente.
+//
+// El nombre de la variable se imprime siempre: equivocarse de base es la clase
+// de error que sólo se nota cuando ya pasó.
+const urlIdx = process.argv.indexOf("--url");
+const envIdx = process.argv.indexOf("--env");
+const VAR = envIdx !== -1 ? process.argv[envIdx + 1] : "DATABASE_URL";
+
+let conn;
+if (urlIdx !== -1) {
+  conn = process.argv[urlIdx + 1];
+  console.log("▸ base: (pasada por --url)");
+} else {
+  const env = readFileSync("./.env.local", "utf8");
+  const connMatch = env.match(new RegExp("^" + VAR + '\\s*=\\s*"?([^"\\n]+)"?', "m"));
+  if (!connMatch) {
+    console.error(`✖ ${VAR} no está en .env.local`);
+    process.exit(1);
+  }
+  conn = connMatch[1];
+  console.log(`▸ base: ${VAR}`);
 }
 
-const c = await connect(connMatch[1]);
+const c = await connect(conn);
 
 try {
   // The ledger bootstraps itself rather than living in a migration file —

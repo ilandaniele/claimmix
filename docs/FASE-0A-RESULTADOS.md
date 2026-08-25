@@ -145,3 +145,84 @@ Listo para correr en cuanto haya dónde:
 app siga conectándose como `neondb_owner`. La protección empieza el día que
 `DATABASE_URL` apunta al rol nuevo — una variable de entorno, que se revierte en
 un minuto.
+
+---
+
+## Cierre — el ensayo pasó (2026-08-25)
+
+Ensayado en una base aparte (`STAGING_DATABASE_URL`, org Veltra, São Paulo,
+Postgres 18.6 igual que producción), construida desde cero con los 18 archivos
+de migración. Producción no se tocó en ningún momento.
+
+```
+✓ claimmix_app — sin BYPASSRLS, sin SUPERUSER
+✓ 29 tablas con tenant_id: todas con RLS, FORCE y política
+✓ ajenas: 0 de 1 que existen — la base no las entrega
+✓ sin contexto: 0 casos — olvidarse el contexto no filtra nada
+```
+
+El anteúltimo renglón es el que importa: **hay un caso de otra aseguradora, y no
+se ve.** No es que no haya nada; es que la base no lo entrega. Y el último es la
+otra mitad: una consulta que olvida poner el contexto devuelve cero, no todo.
+
+**La hipótesis quedó demostrada. La opción C-máxima se sostiene.**
+
+### Cuatro cosas que sólo se descubren ensayando
+
+1. **`SET LOCAL` no acepta parámetros.** Se usa `set_config(clave, $1, true)`.
+2. **`DROP OWNED BY` pide privilegios que el dueño de la base no tiene** en Neon
+   (`permission denied to drop objects`). El rol se reutiliza, no se recrea.
+3. **Tocar `NOSUPERUSER` exige ser superusuario, incluso para ponerlo en «no».**
+   El mensaje —`permission denied to alter role`— hace pensar que falta permiso
+   sobre el rol, cuando lo que falta es permiso sobre *un atributo*. Como es el
+   valor por omisión al crear, alcanza con no nombrarlo.
+4. **La prueba se volvía «no concluyente» justo cuando empezaba a funcionar.**
+   Contaba cuántos casos ajenos existen con una consulta sin contexto; en cuanto
+   el aislamiento anduvo, esa consulta devolvió cero y el chequeo concluyó que
+   no había nada que cruzar. Ahora cuenta con el contexto de cada inquilino.
+
+Las cuatro son la razón de ser de una Fase 0. Ninguna se ve leyendo
+documentación, y las cuatro habrían aparecido en producción.
+
+---
+
+## Y de paso: drift real en producción
+
+Construir la base de ensayo desde los archivos permitió compararla contra la que
+corre (`pnpm esquemas`). Resultado:
+
+```
+tablas         ✓ iguales (39)
+índices        ✓ iguales (111)
+restricciones  ✓ iguales (407)
+funciones      ✓ iguales (50)
+columnas       ✗ 3 diferencias
+```
+
+Las tres son la misma cosa:
+
+```
+los archivos dicen:   DEFAULT 'gemini'
+producción tiene:     DEFAULT 'openai'
+
+agent_runs.model_provider
+tenant_ai_settings.active_model_provider
+tenant_ai_settings.provider
+```
+
+`0005_gemini_default.sql` figura en el registro con
+`applied_by: "baseline: aplicada a mano antes del ledger"` — **registrada sin
+ejecutarse, exactamente como pasó con la 0010** (que rompió facturación dos días
+sin que nadie supiera por qué).
+
+**Impacto hoy: ninguno.** El único inquilino ya está en `gemini` y las 670
+corridas también. La 0005 corregiría 0 filas.
+
+**Impacto mañana: un inquilino nuevo nace en `openai`,** que no es parte del
+stack desde julio. Y el respaldo del código (`DEFAULT_AI_PROVIDER = "gemini"`)
+no lo tapa: sólo actúa cuando el valor viene nulo, y acá viene con un valor
+escrito por la base.
+
+Queda **pendiente de aplicar**: el cambio a producción lo bloqueó el clasificador
+de permisos, y es DDL en vivo, así que lo decide una persona. Son tres
+`ALTER COLUMN SET DEFAULT` y un `UPDATE` que ya se midió que afecta 0 filas.

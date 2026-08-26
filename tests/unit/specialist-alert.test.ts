@@ -285,7 +285,7 @@ describe("a quién le llega", () => {
   it("sin especialistas, va a UNO solo y no a todos los admins", async () => {
     database({
       especialistas: [],
-      owners: ["dueña@aseguradora.com", "admin2@aseguradora.com", "personal@gmail.com"],
+      owners: ["dueña@aseguradora.com", "admin2@aseguradora.com", "personal@example.com"],
     });
 
     await alert();
@@ -295,7 +295,7 @@ describe("a quién le llega", () => {
     // destinatario, no una lista que crece cada vez que alguien suma un admin.
     expect(para.split(",").length).toBe(1);
     expect(para).toContain("dueña@aseguradora.com");
-    expect(para).not.toContain("personal@gmail.com");
+    expect(para).not.toContain("personal@example.com");
   });
 
   it("avisa en los registros que nadie tiene el rol", async () => {

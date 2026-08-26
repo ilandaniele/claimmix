@@ -184,6 +184,9 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
+    env:
+      # Un secreto no se puede leer desde un `if:`; una variable de entorno sí.
+      HAY_ENSAYO: ${{ secrets.STAGING_DATABASE_URL }}
     permissions:
       contents: read
     continue-on-error: false
@@ -223,15 +226,18 @@ jobs:
       # producción: sembrar un usuario con contraseña conocida en la base donde
       # viven denuncias reales es una puerta abierta con la llave puesta. El
       # script se planta solo si le pasan la cadena de producción.
+      # El `if` mira `env` y no `secrets` porque el contexto `secrets` no está
+      # disponible en una condición: el workflow ni siquiera arranca. Se mapea
+      # una vez al entorno del job y se pregunta por ahí.
       - name: Sembrar la base del ensayo
-        if: ${{ secrets.STAGING_DATABASE_URL != '' }}
+        if: env.HAY_ENSAYO != ''
         run: pnpm sembrar
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
 
       - name: Levantar el servidor
-        if: ${{ secrets.STAGING_DATABASE_URL != '' }}
+        if: env.HAY_ENSAYO != ''
         run: |
           pnpm dev > /tmp/dev.log 2>&1 &
           for i in $(seq 1 60); do

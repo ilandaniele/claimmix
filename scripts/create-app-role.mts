@@ -151,13 +151,52 @@ try {
       await p2.end();
     }
 
+    /*
+     * La contraseña se ESCRIBE en el archivo, no se imprime.
+     *
+     * Imprimirla es exactamente cómo llegó al transcripto de una sesión de
+     * trabajo, y de ahí a tener que rotarla de nuevo. Una credencial que
+     * aparece en una pantalla termina en un registro, en una captura o en el
+     * historial de una terminal, y no hay forma de saber en cuál de los tres.
+     *
+     * Va directo a `.env.local`, bajo el nombre que le corresponde según contra
+     * qué base se corrió. Quien la necesite para otra cosa la lee de ahí; quien
+     * mire esta salida se entera de que se rotó y no de cuál es.
+     */
+    const CLAVE = VAR === "DATABASE_URL" ? "DATABASE_URL_APP" : `${VAR}_APP`;
+    const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
+
+    const archivo = ".env.local";
+    let contenido = existsSync(archivo) ? readFileSync(archivo, "utf8") : "";
+    const salto = contenido.includes("\r\n") ? "\r\n" : "\n";
+    const patron = new RegExp(`^${CLAVE}=.*$`, "m");
+    contenido = patron.test(contenido)
+      ? contenido.replace(patron, `${CLAVE}=${urlFinal}`)
+      : `${contenido.replace(/\s*$/, "")}${salto}${salto}${CLAVE}=${urlFinal}${salto}`;
+    writeFileSync(archivo, contenido, "utf8");
+
     console.log("\n" + "─".repeat(70));
-    console.log("Cadena de conexión del rol nuevo (NO la pongas en DATABASE_URL todavía):");
+    console.log(`✓ ${CLAVE} actualizada en ${archivo}.`);
     console.log("");
-    console.log(`  ${urlFinal}`);
+    console.log("  No se imprime a propósito: una credencial en pantalla termina en un");
+    console.log("  registro, una captura o el historial de la terminal, y no hay forma");
+    console.log("  de saber en cuál de los tres.");
     console.log("");
-    console.log("Guardala como DATABASE_URL_APP. La va a usar la capa de datos");
-    console.log("cuando exista, y recién entonces se cambia DATABASE_URL.");
+    console.log("  ⚠ SI ESTA BASE LA USA UN DEPLOY VIVO, YA ESTÁ CAÍDO.");
+    console.log("");
+    console.log("    La aplicación desplegada tiene la contraseña anterior, y acaba de");
+    console.log("    dejar de servir. No hay forma de evitar esa ventana: Postgres no");
+    console.log("    admite dos contraseñas a la vez para el mismo rol.");
+    console.log("");
+    console.log("    El orden que la hace corta:");
+    console.log("      1. rotar (esto)");
+    console.log("      2. subir la variable a Vercel");
+    console.log("      3. REDESPLEGAR — el deploy que corre no relee las variables");
+    console.log("      4. mirar /api/health");
+    console.log("");
+    console.log("  Para llevarla a Vercel o a GitHub sin que pase por pantalla:");
+    console.log(`    grep -oP '(?<=^${CLAVE}=).*' .env.local | tr -d '\\r\\n' | npx vercel env add ${CLAVE} production`);
+    console.log(`    grep -oP '(?<=^${CLAVE}=).*' .env.local | tr -d '\\r\\n' | gh secret set ${CLAVE}`);
   } else {
     console.log("     (el rol ya existía y no se rotó: no tengo su contraseña para probar)");
     console.log("     Corré con --rotar si necesitás una cadena de conexión nueva.");

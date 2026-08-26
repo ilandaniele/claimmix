@@ -77,8 +77,12 @@ function database(opts: {
   especialistas?: string[];
   /** El respaldo: owners. */
   owners?: string[];
+  /** Con qué dirección o teléfono entró el denunciante. */
+  remitente?: string;
 }) {
   const channel = opts.channel ?? "email";
+  // Una persona de verdad, salvo que el test diga otra cosa.
+  const remitente = opts.remitente ?? "carla.gimenez@gmail.com";
   const staff = opts.staff ?? ["analista@aseguradora.com"];
   let call = 0;
   // El módulo pregunta por roles hasta dos veces: primero `specialist`, y sólo
@@ -105,6 +109,12 @@ function database(opts: {
           if (call === 1) return Promise.resolve([{ channel }]);
           return Promise.resolve(opts.alreadySent ? [{ id: 1 }] : []);
         },
+        // El contacto del denunciante, que es lo único que distingue a un
+        // asegurado inventado cuando el canal es de verdad:
+        //   select().from().where().orderBy().limit()
+        orderBy: () => ({
+          limit: () => Promise.resolve([{ from_addr: remitente }]),
+        }),
       }),
     }),
   }));
@@ -315,5 +325,72 @@ describe("a quién le llega", () => {
     // Cuántos, no quiénes: una dirección es un dato personal y esto es un registro.
     expect(j.destinatarios_de_respaldo).toBe(1);
     expect(JSON.stringify(j)).not.toContain("@");
+  });
+});
+
+/**
+ * El ensayo entra por los canales de verdad, y ahí estaba el agujero.
+ *
+ * `pnpm check` corre conversaciones enteras contra el agente real, y lo hace a
+ * propósito por `email` y `whatsapp` en vez de `email_sim`: su razón de ser es
+ * ejercitar el camino que recorre producción. Uno de sus escenarios es un
+ * incendio con heridos, que se deriva a especialista por diseño.
+ *
+ * O sea que el filtro por canal —lo único que había— no lo tapaba. Cada
+ * verificación mandaba un "[Urgente]" de verdad sobre un siniestro inventado a
+ * la casilla de una persona; y como el ensayo borra sus casos al terminar, el
+ * enlace del mail abría un caso que ya no existía.
+ *
+ * Lo que sí distingue a un asegurado inventado es cómo se lo contacta.
+ */
+describe("alertSpecialists — un ensayo por canal real", () => {
+  it("no avisa por una dirección example.com, aunque el canal sea email", async () => {
+    database({ channel: "email", remitente: "ensayo.k3x9f2.1@example.com" });
+
+    await alert();
+
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("tampoco cuando la dirección viene con nombre visible", async () => {
+    // Como la manda un cliente de correo de verdad, que es la forma que ya se
+    // le escapó una vez a la guarda del despachador.
+    database({
+      channel: "email",
+      remitente: "Asegurado de prueba <ensayo.k3x9f2.2@example.com>",
+    });
+
+    await alert();
+
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("no avisa por el bloque telefónico del ensayo", async () => {
+    database({ channel: "whatsapp", remitente: "5490000123451" });
+
+    await alert();
+
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("pero un asegurado de verdad por el mismo canal sí avisa", async () => {
+    // La otra mitad, y la que importa: esto no puede convertirse en una excusa
+    // para no avisar nunca. Un siniestro real que se derivó y no le llegó a
+    // nadie es peor que el problema que se está arreglando.
+    database({ channel: "whatsapp", remitente: "5491168820011" });
+
+    await alert();
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("un teléfono argentino que sólo empieza parecido sí avisa", async () => {
+    // `5490000` es el bloque reservado; `549000...` con otro dígito no lo es.
+    // Una guarda demasiado ancha silencia siniestros de verdad.
+    database({ channel: "whatsapp", remitente: "5490001234567" });
+
+    await alert();
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
   });
 });

@@ -52,7 +52,18 @@ export async function seedRequiredDocs(
       db
         .select({ doc_key: requiredDocsConfig.doc_key })
         .from(requiredDocsConfig)
-        .where(eq(requiredDocsConfig.claim_type, claimType))
+        .where(
+          and(
+            eq(requiredDocsConfig.claim_type, claimType),
+            // Sólo los obligatorios. Un documento opcional —la denuncia
+            // policial de un cristal roto, que sólo aplica si hubo
+            // vandalismo— no lo pide el agente, porque analyzeGaps filtra por
+            // `required`. Sembrarlo igual dejaba un pendiente que nadie iba a
+            // reclamar nunca y que el analista tenía que descartar a mano en
+            // cada caso.
+            eq(requiredDocsConfig.required, true)
+          )
+        )
     );
 
     if (configured.length === 0) return;

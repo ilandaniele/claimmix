@@ -17,10 +17,12 @@
 
 import "server-only";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { authUsers, cases, users } from "@/lib/db/schema";
+import { authUsers, cases, claimMessages, users } from "@/lib/db/schema";
+import { isReservedTestAddress } from "@/lib/email/reserved";
+import { isReservedTestNumber } from "@/core/phone/reserved";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
 import { isSendSuccess } from "@/server/email/provider";
@@ -98,7 +100,43 @@ async function isSimulatedCase(tenantId: string, caseId: string): Promise<boolea
         .limit(1)
     );
     const channel = rows[0]?.channel;
-    return channel === "email_sim" || channel === "whatsapp_sim";
+    if (channel === "email_sim" || channel === "whatsapp_sim") return true;
+
+    /*
+     * El canal no alcanza, y ésta es la parte que costó una bandeja llena.
+     *
+     * El ensayo de conversaciones entra a propósito por los canales de verdad
+     * —`email` y `whatsapp`, no `_sim`— porque su razón de ser es ejercitar
+     * el camino que recorre producción. Uno de sus escenarios es un incendio
+     * con heridos, que se deriva a especialista por diseño. Así que cada
+     * `pnpm check` mandaba un "[Urgente] Siniestro derivado a especialista" de
+     * verdad, sobre un siniestro inventado, a la casilla de una persona. Y
+     * como el ensayo borra sus casos al terminar, el que abría el enlace del
+     * mail se encontraba con que el caso no existía.
+     *
+     * Lo que sí distingue a un denunciante inventado es cómo se lo contacta:
+     * el ensayo usa direcciones `example.*` —reservadas por la IANA, no le
+     * pertenecen a nadie— y el bloque telefónico `5490000`. El despachador y
+     * el mensajero ya se niegan a escribirles; esta ruta era la única que no
+     * lo preguntaba, y es la única que le escribe a un empleado en vez de al
+     * asegurado.
+     */
+    const contacto = await enTenant({ tenantId }, (db) =>
+      db
+        .select({ from_addr: claimMessages.from_addr })
+        .from(claimMessages)
+        .where(
+          and(
+            eq(claimMessages.case_id, caseId),
+            eq(claimMessages.direction, "inbound")
+          )
+        )
+        .orderBy(asc(claimMessages.received_at))
+        .limit(1)
+    );
+
+    const remitente = contacto[0]?.from_addr;
+    return isReservedTestAddress(remitente) || isReservedTestNumber(remitente);
   } catch {
     return true;
   }

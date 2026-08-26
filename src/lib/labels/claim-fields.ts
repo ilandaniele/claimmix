@@ -207,6 +207,12 @@ const FIELD_LABELS: Record<string, FieldLabel> = {
     instruction: "Mandanos el informe de bomberos.",
     kind: "documento",
   },
+  certificado_medico: {
+    label: "Certificado médico",
+    instruction:
+      "Mandanos el certificado médico o el alta hospitalaria de la atención.",
+    kind: "documento",
+  },
   foto_oblea_vtv: {
     label: "Oblea de la VTV",
     instruction: "Mandanos una foto de la oblea de la VTV.",

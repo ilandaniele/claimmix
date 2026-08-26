@@ -82,7 +82,7 @@ function database(opts: {
 }) {
   const channel = opts.channel ?? "email";
   // Una persona de verdad, salvo que el test diga otra cosa.
-  const remitente = opts.remitente ?? "carla.gimenez@gmail.com";
+  const remitente = opts.remitente ?? "denunciante@correo-de-prueba.test";
   const staff = opts.staff ?? ["analista@aseguradora.com"];
   let call = 0;
   // El módulo pregunta por roles hasta dos veces: primero `specialist`, y sólo
@@ -366,7 +366,7 @@ describe("alertSpecialists — un ensayo por canal real", () => {
   });
 
   it("no avisa por el bloque telefónico del ensayo", async () => {
-    database({ channel: "whatsapp", remitente: "5490000123451" });
+    database({ channel: "whatsapp", remitente: "5490000123456" });
 
     await alert();
 
@@ -377,7 +377,7 @@ describe("alertSpecialists — un ensayo por canal real", () => {
     // La otra mitad, y la que importa: esto no puede convertirse en una excusa
     // para no avisar nunca. Un siniestro real que se derivó y no le llegó a
     // nadie es peor que el problema que se está arreglando.
-    database({ channel: "whatsapp", remitente: "5491168820011" });
+    database({ channel: "whatsapp", remitente: "5491100000000" });
 
     await alert();
 

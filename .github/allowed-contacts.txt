@@ -51,3 +51,9 @@ test@gmail.com
 someone@gmail.com
 original-msg@gmail.com
 s@gmail.com
+
+# El límite del bloque reservado, en tests/unit/specialist-alert.test.ts.
+# Empieza igual que `5490000` pero no lo es, y existe para comprobar que la
+# guarda no sea demasiado ancha: si se comiera este número, silenciaría avisos
+# de siniestros reales. El código de área 000 no existe, así que no es de nadie.
+5490001234567

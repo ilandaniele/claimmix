@@ -117,14 +117,16 @@ describe.skipIf(shouldSkip)("POST /api/auth/sign-in", () => {
   });
 
   it("AC3: returns 429 with Retry-After after 5 failed attempts", async () => {
-    // Send 5 failed attempts to fill the rate limit window.
-    for (let i = 0; i < 5; i++) {
-      await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
+    const intento = () =>
+      fetch(`${BASE_URL}/api/auth/sign-in/email`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          // Un navegador siempre lo manda; sin él Better Auth responde 403 por
+          // origen y nunca se llega a ver el techo.
           Origin: BASE_URL,
-          // Consistent IP via header (in production the edge sets this).
+          // La IP fija hace que los seis intentos compartan cupo. En producción
+          // la pone el borde.
           "X-Forwarded-For": "10.0.0.1",
         },
         body: JSON.stringify({
@@ -132,20 +134,18 @@ describe.skipIf(shouldSkip)("POST /api/auth/sign-in", () => {
           password: "badpassword",
         }),
       });
-    }
 
-    // 6th attempt should be rate-limited.
-    const res = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Forwarded-For": "10.0.0.1",
-      },
-      body: JSON.stringify({
-        email: "ratelimit-test@example.com",
-        password: "badpassword",
-      }),
-    });
+    /*
+     * Los cinco salen JUNTOS, no uno tras otro.
+     *
+     * La ventana es de diez segundos, y en serie cada intento consulta la base:
+     * en una máquina de CI los seis no entran, el sexto cae en una ventana
+     * nueva y pasa. El test medía la velocidad del runner, no el techo.
+     */
+    await Promise.all(Array.from({ length: 5 }, intento));
+
+    // El sexto, dentro de la misma ventana.
+    const res = await intento();
 
     expect(res.status).toBe(429);
     const body = await res.json();

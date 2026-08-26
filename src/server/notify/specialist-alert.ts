@@ -27,16 +27,38 @@ import { isSendSuccess } from "@/server/email/provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 /**
- * Who gets told, in order of preference.
+ * Quién se entera, y en qué orden.
  *
- * Specialists first because the case is addressed to them. Owners and admins
- * are the fallback for a tenant that has not named any — better a wider alert
- * than none, since the alternative is a critical claim nobody sees.
+ *   1. `SPECIALIST_ALERT_EMAILS`, si está. Una lista explícita gana sobre
+ *      cualquier deducción: es la única forma de decir "a estas direcciones y
+ *      a ninguna otra" sin tener que tocarle el rol a nadie.
+ *   2. Los usuarios con rol `specialist`. El caso está dirigido a ellos.
+ *   3. UN owner, y no todos los admins.
+ *
+ * El tercer punto cambió después de que pasara. El respaldo eran `owner` Y
+ * `admin`, con el argumento de que un aviso de más es mejor que un siniestro
+ * que nadie mira. El argumento sigue siendo cierto y la implementación no:
+ * ninguna aseguradora tenía usuarios `specialist`, así que TODAS las alertas
+ * caían al respaldo, y el resumen de cada siniestro —con el enlace al caso, que
+ * abre todo— se repartía a las cuatro direcciones con rol de admin. Entre ellas,
+ * cuentas personales de Gmail que nadie eligió para eso.
+ *
+ * "Mejor de más que ninguno" justifica UN destinatario, no una lista que crece
+ * cada vez que alguien suma un admin. Y avisa en los registros, para que la
+ * ausencia de especialistas se note en vez de convertirse en la normalidad.
  */
 type TenantRole = "owner" | "admin" | "specialist" | "analyst" | "viewer";
 
 const PREFERRED_ROLES: TenantRole[] = ["specialist"];
-const FALLBACK_ROLES: TenantRole[] = ["owner", "admin"];
+const FALLBACK_ROLES: TenantRole[] = ["owner"];
+
+/** La lista explícita, si el despliegue la fijó. */
+function listaExplicita(): string[] {
+  return (process.env.SPECIALIST_ALERT_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim())
+    .filter((e) => e.includes("@"));
+}
 
 export interface SpecialistAlertInput {
   caseId: string;
@@ -96,8 +118,26 @@ async function recipientsFor(tenantId: string): Promise<string[]> {
     return rows.map((r) => r.email).filter(Boolean);
   };
 
+  const explicita = listaExplicita();
+  if (explicita.length > 0) return explicita;
+
   const specialists = await byRoles(PREFERRED_ROLES);
-  return specialists.length > 0 ? specialists : byRoles(FALLBACK_ROLES);
+  if (specialists.length > 0) return specialists;
+
+  // Sin especialistas: UNO solo, y que se sepa.
+  const respaldo = (await byRoles(FALLBACK_ROLES)).slice(0, 1);
+  console.warn(
+    JSON.stringify({
+      level: "warn",
+      service: "claimmix",
+      msg: "specialist_alert.sin_especialistas",
+      tenant_id: tenantId,
+      // Cuántos, no quiénes: es un registro, y una dirección es un dato personal.
+      destinatarios_de_respaldo: respaldo.length,
+      nota: "Nadie tiene rol specialist. El aviso va a un owner. Asigná el rol, o fijá SPECIALIST_ALERT_EMAILS.",
+    })
+  );
+  return respaldo;
 }
 
 function renderAlert(input: SpecialistAlertInput, caseUrl: string) {

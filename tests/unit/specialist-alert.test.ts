@@ -56,7 +56,7 @@ vi.mock("@/lib/audit/log", () => ({
   AuditEvent: { SPECIALIST_ALERTED: "claim.specialist_alerted" },
 }));
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
@@ -69,15 +69,34 @@ const TENANT = "10000000-0000-0000-0000-000000000001";
  *   already  → select().from().where().limit()  (audit_log)
  *   people   → select().from().innerJoin().where()
  */
-function database(opts: { channel?: string; alreadySent?: boolean; staff?: string[] }) {
+function database(opts: {
+  channel?: string;
+  alreadySent?: boolean;
+  staff?: string[];
+  /** Los que tienen rol `specialist`. Vacío = la aseguradora no nombró ninguno. */
+  especialistas?: string[];
+  /** El respaldo: owners. */
+  owners?: string[];
+}) {
   const channel = opts.channel ?? "email";
   const staff = opts.staff ?? ["analista@aseguradora.com"];
   let call = 0;
+  // El módulo pregunta por roles hasta dos veces: primero `specialist`, y sólo
+  // si no hay ninguno, `owner`. Se cuentan las llamadas para poder devolver
+  // listas distintas y probar cuál gana.
+  let porRol = 0;
 
   mockSelect.mockImplementation(() => ({
     from: () => ({
       innerJoin: () => ({
-        where: () => Promise.resolve(staff.map((email) => ({ email }))),
+        where: () => {
+          porRol += 1;
+          if (opts.especialistas !== undefined || opts.owners !== undefined) {
+            const lista = porRol === 1 ? (opts.especialistas ?? []) : (opts.owners ?? []);
+            return Promise.resolve(lista.map((email) => ({ email })));
+          }
+          return Promise.resolve(staff.map((email) => ({ email })));
+        },
       }),
       where: () => ({
         limit: () => {
@@ -214,5 +233,87 @@ describe("alertSpecialists — when it cannot do its job", () => {
     mockSend.mockRejectedValue(new Error("gmail down"));
 
     await expect(alert()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * A quién se le manda, que es lo que se rompió.
+ *
+ * El respaldo eran `owner` Y `admin`. Como ninguna aseguradora tenía usuarios
+ * con rol `specialist`, TODAS las alertas caían ahí: el resumen de cada
+ * siniestro —con el enlace al caso, que abre todo— se repartía a las cuatro
+ * direcciones con rol de admin, entre ellas cuentas personales de Gmail que
+ * nadie eligió para eso. Lo reportó la persona que las estaba recibiendo.
+ *
+ * El archivo tenía diez tests y ninguno miraba la lista de destinatarios.
+ */
+describe("a quién le llega", () => {
+  const guardada = process.env.SPECIALIST_ALERT_EMAILS;
+  afterEach(() => {
+    if (guardada === undefined) delete process.env.SPECIALIST_ALERT_EMAILS;
+    else process.env.SPECIALIST_ALERT_EMAILS = guardada;
+  });
+
+  it("la lista explícita gana sobre cualquier deducción", async () => {
+    process.env.SPECIALIST_ALERT_EMAILS = "guardia@aseguradora.com, siniestros@aseguradora.com";
+    database({ especialistas: ["nadie@no.com"], owners: ["tampoco@no.com"] });
+
+    await alert();
+
+    const para = mockSend.mock.calls[0][0].to as string;
+    expect(para).toContain("guardia@aseguradora.com");
+    expect(para).toContain("siniestros@aseguradora.com");
+    // Es la única forma de decir "a estas y a ninguna otra" sin tocarle el rol
+    // a nadie.
+    expect(para).not.toContain("nadie@no.com");
+    expect(para).not.toContain("tampoco@no.com");
+  });
+
+  it("con especialistas nombrados, van a ellos", async () => {
+    database({
+      especialistas: ["peritaje@aseguradora.com"],
+      owners: ["dueña@aseguradora.com"],
+    });
+
+    await alert();
+
+    const para = mockSend.mock.calls[0][0].to as string;
+    expect(para).toContain("peritaje@aseguradora.com");
+    expect(para).not.toContain("dueña@aseguradora.com");
+  });
+
+  it("sin especialistas, va a UNO solo y no a todos los admins", async () => {
+    database({
+      especialistas: [],
+      owners: ["dueña@aseguradora.com", "admin2@aseguradora.com", "personal@gmail.com"],
+    });
+
+    await alert();
+
+    const para = mockSend.mock.calls[0][0].to as string;
+    // "Mejor un aviso de más que un siniestro que nadie mira" justifica UN
+    // destinatario, no una lista que crece cada vez que alguien suma un admin.
+    expect(para.split(",").length).toBe(1);
+    expect(para).toContain("dueña@aseguradora.com");
+    expect(para).not.toContain("personal@gmail.com");
+  });
+
+  it("avisa en los registros que nadie tiene el rol", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    database({ especialistas: [], owners: ["dueña@aseguradora.com"] });
+
+    await alert();
+
+    // Sin esto, la ausencia de especialistas se vuelve la normalidad y el
+    // respaldo deja de ser un respaldo.
+    const avisos = warn.mock.calls
+      .map((c) => String(c[0]))
+      .filter((t) => t.includes("sin_especialistas"));
+    expect(avisos).toHaveLength(1);
+    const j = JSON.parse(avisos[0]);
+    expect(j.tenant_id).toBe(TENANT);
+    // Cuántos, no quiénes: una dirección es un dato personal y esto es un registro.
+    expect(j.destinatarios_de_respaldo).toBe(1);
+    expect(JSON.stringify(j)).not.toContain("@");
   });
 });

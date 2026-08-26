@@ -28,6 +28,7 @@ import { z } from "zod";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {
   cases,
@@ -57,6 +58,9 @@ export async function GET(
     // ── 1. Auth ──────────────────────────────────────────────────────────────
     const { user, userRow } = await requireRole(...ALL_ROLES);
     const tenantId = userRow.tenant_id;
+      // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+      // Este contexto es lo único que le dice de quién son los datos.
+      const tenantCtx: TenantContext = { tenantId: tenantId };
 
     // ── 2. Rate limit ────────────────────────────────────────────────────────
     const rl = await rateLimit(
@@ -75,11 +79,13 @@ export async function GET(
 
     // ── 4. Case (explicit tenant filter → wrong tenant = no row = 404) ───────
     const caseRow = firstRow(
-      await db
-        .select({ id: cases.id, status: cases.status, is_claim: cases.is_claim })
-        .from(cases)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: cases.id, status: cases.status, is_claim: cases.is_claim })
+          .from(cases)
+          .where(eq(cases.id, caseId))
+          .limit(1)
+      )
     );
     if (!caseRow) {
       return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
@@ -90,71 +96,71 @@ export async function GET(
     // behavior where query errors yielded empty arrays.
     const [run, fieldRows, missingRows, confirmationRows] = await Promise.all([
       getLatestAgentRun(tenantId, caseId),
-      db
-        .select({
-          field_key: extractedFields.field_key,
-          field_value: extractedFields.field_value,
-          confidence: extractedFields.confidence,
-          extracted_at: extractedFields.extracted_at,
-        })
-        .from(extractedFields)
-        .where(
-          and(
-            eq(extractedFields.case_id, caseId),
-            eq(extractedFields.tenant_id, tenantId)
+      enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            field_key: extractedFields.field_key,
+            field_value: extractedFields.field_value,
+            confidence: extractedFields.confidence,
+            extracted_at: extractedFields.extracted_at,
+          })
+          .from(extractedFields)
+          .where(
+            eq(extractedFields.case_id, caseId)
           )
-        )
-        .orderBy(asc(extractedFields.field_key))
-        .catch(() => []),
-      db
-        .select({
-          doc_key: missingDocs.doc_key,
-          satisfied_at: missingDocs.satisfied_at,
-        })
-        .from(missingDocs)
-        .where(
-          and(
-            eq(missingDocs.case_id, caseId),
-            eq(missingDocs.tenant_id, tenantId),
-            isNull(missingDocs.satisfied_at)
+          .orderBy(asc(extractedFields.field_key))
+          .catch(() => [])
+      ),
+      enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            doc_key: missingDocs.doc_key,
+            satisfied_at: missingDocs.satisfied_at,
+          })
+          .from(missingDocs)
+          .where(
+            and(
+              eq(missingDocs.case_id, caseId),
+              isNull(missingDocs.satisfied_at)
+            )
           )
-        )
-        .catch(() => []),
-      db
-        .select({
-          // Neon column names are field_name / suggested_value — aliased to
-          // preserve the previous field_key / proposed_value response shape.
-          field_key: claimFieldConfirmations.field_name,
-          proposed_value: claimFieldConfirmations.suggested_value,
-          confidence: claimFieldConfirmations.confidence,
-          status: claimFieldConfirmations.status,
-        })
-        .from(claimFieldConfirmations)
-        .where(
-          and(
-            eq(claimFieldConfirmations.case_id, caseId),
-            eq(claimFieldConfirmations.tenant_id, tenantId),
-            eq(claimFieldConfirmations.status, "pending")
+          .catch(() => [])
+      ),
+      enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            // Neon column names are field_name / suggested_value — aliased to
+            // preserve the previous field_key / proposed_value response shape.
+            field_key: claimFieldConfirmations.field_name,
+            proposed_value: claimFieldConfirmations.suggested_value,
+            confidence: claimFieldConfirmations.confidence,
+            status: claimFieldConfirmations.status,
+          })
+          .from(claimFieldConfirmations)
+          .where(
+            and(
+              eq(claimFieldConfirmations.case_id, caseId),
+              eq(claimFieldConfirmations.status, "pending")
+            )
           )
-        )
-        .catch(() => []),
+          .catch(() => [])
+      ),
     ]);
 
     // ── 6. Already approved? ─────────────────────────────────────────────────
     let alreadyApproved = false;
     if (run) {
       const existing = firstRow(
-        await db
-          .select({ id: trainingExamples.id })
-          .from(trainingExamples)
-          .where(
-            and(
-              eq(trainingExamples.agent_run_id, run.id),
-              eq(trainingExamples.tenant_id, tenantId)
+        await enTenant(tenantCtx, (db) =>
+          db
+            .select({ id: trainingExamples.id })
+            .from(trainingExamples)
+            .where(
+              eq(trainingExamples.agent_run_id, run.id)
             )
-          )
-          .limit(1)
-          .catch(() => [] as Array<{ id: string }>)
+            .limit(1)
+            .catch(() => [] as Array<{ id: string }>)
+        )
       );
       alreadyApproved = Boolean(existing);
     }

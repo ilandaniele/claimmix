@@ -3,6 +3,7 @@ import { z } from "zod";
 import { and, asc, eq } from "drizzle-orm";
 import { requireRole, ADMIN_ROLES, ALL_ROLES } from "@/lib/auth/require-role";
 import { tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -26,6 +27,8 @@ const ACCOUNT_COLUMNS = {
 export async function GET() {
   try {
     const { db, user, userRow } = await requireRole(...ALL_ROLES);
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
     const isAdmin = userRow.role === "admin" || userRow.role === "owner";
 
     let data;
@@ -55,6 +58,8 @@ export async function GET() {
 export async function PATCH(request: NextRequest) {
   try {
     const { db, user, userRow } = await requireRole(...ADMIN_ROLES);
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
     const isAdmin = userRow.role === "admin" || userRow.role === "owner";
     const parsed = UpdateGmailAccountSchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -64,18 +69,20 @@ export async function PATCH(request: NextRequest) {
     let data;
     try {
       data = firstRow(
-        await db
-          .update(t)
-          .set({
-            enabled: parsed.data.enabled,
-            updated_at: new Date().toISOString(),
-          })
-          .where(
-            isAdmin
-              ? and(eq(t.id, parsed.data.id), eq(t.tenant_id, userRow.tenant_id))
-              : and(eq(t.id, parsed.data.id), eq(t.tenant_id, userRow.tenant_id), eq(t.connected_by, user.id))
-          )
-          .returning(ACCOUNT_COLUMNS)
+        await enTenant(tenantCtx, (db) =>
+          db
+            .update(t)
+            .set({
+              enabled: parsed.data.enabled,
+              updated_at: new Date().toISOString(),
+            })
+            .where(
+              isAdmin
+                ? eq(t.id, parsed.data.id)
+                : and(eq(t.id, parsed.data.id), eq(t.tenant_id, userRow.tenant_id), eq(t.connected_by, user.id))
+            )
+            .returning(ACCOUNT_COLUMNS)
+        )
       );
     } catch (e) {
       console.error(
@@ -99,18 +106,23 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const { db, user, userRow } = await requireRole(...ADMIN_ROLES);
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
     const isAdmin = userRow.role === "admin" || userRow.role === "owner";
     const id = new URL(request.url).searchParams.get("id");
     if (!id) throw new AppError("VALIDATION_FAILED");
 
     try {
-      await db
-        .delete(t)
-        .where(
-          isAdmin
-            ? and(eq(t.id, id), eq(t.tenant_id, userRow.tenant_id))
-            : and(eq(t.id, id), eq(t.tenant_id, userRow.tenant_id), eq(t.connected_by, user.id))
-        );
+      await enTenant(tenantCtx, (db) =>
+        db
+          .delete(t)
+          .where(
+            isAdmin
+              ? eq(t.id, id)
+              : and(eq(t.id, id), eq(t.tenant_id, userRow.tenant_id), eq(t.connected_by, user.id))
+          )
+      );
     } catch (e) {
       console.error(
         "[admin/gmail-accounts DELETE]",

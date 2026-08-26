@@ -19,6 +19,7 @@ import { type NextRequest } from "next/server";
 import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, claimAttachments, claimMessages } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
@@ -64,6 +65,9 @@ export async function GET(
   }
   const { userRow } = ctx;
   const tenantId = userRow.tenant_id;
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: tenantId };
 
   // ── 2. Rate limit ─────────────────────────────────────────────────────────
   const rlKey = buildUserKey(userRow.id, "cases-messages-get");
@@ -87,11 +91,13 @@ export async function GET(
     let caseRow: { id: string } | null;
     try {
       caseRow = firstRow(
-        await db
-          .select({ id: cases.id })
-          .from(cases)
-          .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
-          .limit(1)
+        await enTenant(tenantCtx, (db) =>
+          db
+            .select({ id: cases.id })
+            .from(cases)
+            .where(eq(cases.id, caseId))
+            .limit(1)
+        )
       );
     } catch (e) {
       console.error("[GET /api/cases/:id/messages] case lookup error:", dbErrCode(e)); // crew-debug-ok
@@ -116,26 +122,27 @@ export async function GET(
       received_at: string;
     }>;
     try {
-      messages = await db
-        .select({
-          id: claimMessages.id,
-          direction: claimMessages.direction,
-          provider: claimMessages.provider,
-          subject: claimMessages.subject,
-          from_addr: claimMessages.from_addr,
-          body_text: claimMessages.body_text,
-          received_at: claimMessages.received_at,
-        })
-        .from(claimMessages)
-        .where(
-          and(
-            eq(claimMessages.case_id, caseId),
-            eq(claimMessages.tenant_id, tenantId),
-            eq(claimMessages.direction, "inbound")
+      messages = await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            id: claimMessages.id,
+            direction: claimMessages.direction,
+            provider: claimMessages.provider,
+            subject: claimMessages.subject,
+            from_addr: claimMessages.from_addr,
+            body_text: claimMessages.body_text,
+            received_at: claimMessages.received_at,
+          })
+          .from(claimMessages)
+          .where(
+            and(
+              eq(claimMessages.case_id, caseId),
+              eq(claimMessages.direction, "inbound")
+            )
           )
-        )
-        .orderBy(asc(claimMessages.received_at))
-        .limit(MESSAGES_LIMIT);
+          .orderBy(asc(claimMessages.received_at))
+          .limit(MESSAGES_LIMIT)
+      );
     } catch (e) {
       console.error("[GET /api/cases/:id/messages] messages query error:", dbErrCode(e)); // crew-debug-ok
       return err(new AppError("INTERNAL_ERROR"));
@@ -145,20 +152,21 @@ export async function GET(
     const attachmentCounts = new Map<string, number>();
     if (messages.length > 0) {
       try {
-        const attachmentRows = await db
-          .select({ claim_message_id: claimAttachments.claim_message_id })
-          .from(claimAttachments)
-          .where(
-            and(
-              eq(claimAttachments.case_id, caseId),
-              eq(claimAttachments.tenant_id, tenantId),
-              isNotNull(claimAttachments.claim_message_id),
-              inArray(
-                claimAttachments.claim_message_id,
-                messages.map((m) => m.id)
+        const attachmentRows = await enTenant(tenantCtx, (db) =>
+          db
+            .select({ claim_message_id: claimAttachments.claim_message_id })
+            .from(claimAttachments)
+            .where(
+              and(
+                eq(claimAttachments.case_id, caseId),
+                isNotNull(claimAttachments.claim_message_id),
+                inArray(
+                  claimAttachments.claim_message_id,
+                  messages.map((m) => m.id)
+                )
               )
             )
-          );
+        );
 
         for (const row of attachmentRows) {
           if (!row.claim_message_id) continue;

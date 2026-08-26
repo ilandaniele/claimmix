@@ -11,6 +11,7 @@
 import { notFound } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { eq, and, desc } from "drizzle-orm";
 import { cases, customers, policies, users } from "@/lib/db/schema";
 import { getT } from "@/lib/i18n";
@@ -91,30 +92,39 @@ export default async function CustomerDetailPage({
     .from(users)
     .where(eq(users.id, session.user.id))
     .limit(1);
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
   if (!userRow) notFound();
 
   // Fetch customer (explicit tenant check — wrong tenant → 404)
-  const [customer] = await db
-    .select({ id: customers.id, full_name: customers.full_name, dni: customers.dni, email: customers.email, phone: customers.phone, created_at: customers.created_at })
-    .from(customers)
-    .where(and(eq(customers.id, id), eq(customers.tenant_id, userRow.tenant_id)))
-    .limit(1);
+  const [customer] = await enTenant(tenantCtx, (db) =>
+    db
+      .select({ id: customers.id, full_name: customers.full_name, dni: customers.dni, email: customers.email, phone: customers.phone, created_at: customers.created_at })
+      .from(customers)
+      .where(eq(customers.id, id))
+      .limit(1)
+  );
 
   if (!customer) notFound();
 
   // Fetch policies + cases in parallel
   const [policiesData, casesData] = await Promise.all([
-    db
-      .select({ id: policies.id, policy_number: policies.policy_number, policy_type: policies.policy_type, status: policies.status, start_date: policies.start_date, end_date: policies.end_date })
-      .from(policies)
-      .where(and(eq(policies.customer_id, id), eq(policies.tenant_id, userRow.tenant_id)))
-      .orderBy(desc(policies.created_at)),
-    db
-      .select({ id: cases.id, created_at: cases.created_at, status: cases.status, severity: cases.severity, claim_type: cases.claim_type })
-      .from(cases)
-      .where(and(eq(cases.customer_id, id), eq(cases.tenant_id, userRow.tenant_id)))
-      .orderBy(desc(cases.created_at))
-      .limit(50),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: policies.id, policy_number: policies.policy_number, policy_type: policies.policy_type, status: policies.status, start_date: policies.start_date, end_date: policies.end_date })
+        .from(policies)
+        .where(eq(policies.customer_id, id))
+        .orderBy(desc(policies.created_at))
+    ),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: cases.id, created_at: cases.created_at, status: cases.status, severity: cases.severity, claim_type: cases.claim_type })
+        .from(cases)
+        .where(eq(cases.customer_id, id))
+        .orderBy(desc(cases.created_at))
+        .limit(50)
+    ),
   ]);
 
   const customerPolicies: Policy[] = policiesData;

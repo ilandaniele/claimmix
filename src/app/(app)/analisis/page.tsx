@@ -8,6 +8,7 @@
 
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { eq, and, gte, count } from "drizzle-orm";
 import { cases, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
@@ -53,6 +54,9 @@ async function fetchAnalisis(): Promise<AnalisisData | null> {
       .from(users)
       .where(eq(users.id, session.user.id))
       .limit(1);
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
     if (!userRow) return null;
 
     const now = new Date();
@@ -60,18 +64,24 @@ async function fetchAnalisis(): Promise<AnalisisData | null> {
     const day30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     const [allCasesRows, [recent7Row], [recent30Row]] = await Promise.all([
-      db
-        .select({ status: cases.status, claim_type: cases.claim_type, confidence_min: cases.confidence_min })
-        .from(cases)
-        .where(eq(cases.tenant_id, userRow.tenant_id)),
-      db
-        .select({ n: count() })
-        .from(cases)
-        .where(and(eq(cases.tenant_id, userRow.tenant_id), gte(cases.created_at, day7))),
-      db
-        .select({ n: count() })
-        .from(cases)
-        .where(and(eq(cases.tenant_id, userRow.tenant_id), gte(cases.created_at, day30))),
+      enTenant(tenantCtx, (db) =>
+        db
+          .select({ status: cases.status, claim_type: cases.claim_type, confidence_min: cases.confidence_min })
+          .from(cases)
+          
+      ),
+      enTenant(tenantCtx, (db) =>
+        db
+          .select({ n: count() })
+          .from(cases)
+          .where(and( gte(cases.created_at, day7)))
+      ),
+      enTenant(tenantCtx, (db) =>
+        db
+          .select({ n: count() })
+          .from(cases)
+          .where(and( gte(cases.created_at, day30)))
+      ),
     ]);
 
     const byStatus: Record<string, number> = {};

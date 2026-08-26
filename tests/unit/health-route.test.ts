@@ -33,6 +33,10 @@ vi.mock("@/data/scope", async () => {
 
 vi.mock("@/lib/db", () => ({
   db: { execute: mockExecute, select: mockSelect },
+  // La ruta lee `tables.cases` para el chequeo de la capa de datos. Los
+  // nombres no importan —la cadena está simulada— pero el objeto sí: sin él
+  // se rompe al leer la propiedad, no al consultar.
+  tables: { cases: { id: "id" } },
 }));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -77,7 +81,10 @@ beforeEach(() => {
     ],
   });
   mockSelect.mockReturnValue({
-    from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }),
+    from: () => ({
+      limit: () => Promise.resolve([]),
+      where: () => ({ limit: () => Promise.resolve([]) }),
+    }),
   });
 });
 
@@ -149,6 +156,10 @@ describe("GET /api/health — what it reports", () => {
     ]);
     mockSelect.mockReturnValue({
       from: () => ({
+        // El chequeo de la capa de datos va `from(...).limit(...)` sin where:
+        // el filtro por inquilino lo pone la base. Sin este nivel, la cadena
+        // simulada no resuelve y el chequeo sale down por culpa del mock.
+        limit: () => Promise.resolve([]),
         where: () => ({
           limit: () => active,
           orderBy: () => ({ limit: () => active }),
@@ -273,6 +284,10 @@ describe("GET /api/health — a connected mailbox that cannot be read", () => {
     // cadena, que es un detalle del constructor y no del comportamiento.
     mockSelect.mockReturnValue({
       from: () => ({
+        // El chequeo de la capa de datos va `from(...).limit(...)` sin where:
+        // el filtro por inquilino lo pone la base. Sin este nivel, la cadena
+        // simulada no resuelve y el chequeo sale down por culpa del mock.
+        limit: () => Promise.resolve([]),
         where: () => ({
           limit: () => rows,
           orderBy: () => ({ limit: () => rows }),
@@ -309,7 +324,11 @@ describe("GET /api/health — a connected mailbox that cannot be read", () => {
   it("still reports a mailbox nobody has connected as merely degraded", async () => {
     // Nothing is broken — the product simply has not been set up yet.
     mockSelect.mockReturnValue({
-      from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }),
+      from: () => ({
+        // El chequeo de la capa de datos va `from(...).limit(...)` sin where:
+        // el filtro por inquilino lo pone la base. Sin este nivel, la cadena
+        // simulada no resuelve y el chequeo sale down por culpa del mock.
+        limit: () => Promise.resolve([]), where: () => ({ limit: () => Promise.resolve([]) }) }),
     });
 
     const gmail = await gmailCheck();

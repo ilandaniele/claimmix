@@ -17,8 +17,14 @@
  *
  * Sólo lee. No escribe, no borra, no cambia configuración.
  *
+ * **Contra qué rol.** Por omisión audita `DATABASE_URL_APP`, que es el rol con
+ * el que la aplicación consulta de verdad. Auditar `DATABASE_URL` no sirve:
+ * `neondb_owner` es dueño de las tablas y tiene BYPASSRLS por diseño —corre las
+ * migraciones—, así que este chequeo siempre daría rojo y el rojo no querría
+ * decir nada. La pregunta "¿la base separa?" es sobre el rol restringido.
+ *
  * Uso:
- *   pnpm tenancy                    contra DATABASE_URL
+ *   pnpm tenancy                    contra DATABASE_URL_APP
  *   pnpm tenancy --url "postgres://..."   contra una rama o un rol distinto
  *   pnpm tenancy --esperado-abierto       sale 0 aunque NO aísle (para medir
  *                                          el estado actual sin romper el CI)
@@ -35,11 +41,17 @@ neonConfig.webSocketConstructor = globalThis.WebSocket as never;
 
 const args = process.argv.slice(2);
 const urlArg = args.indexOf("--url");
-const url = (urlArg >= 0 ? args[urlArg + 1] : process.env.DATABASE_URL)?.trim();
+const url = (
+  urlArg >= 0
+    ? args[urlArg + 1]
+    : // El rol restringido primero. Se cae a DATABASE_URL sólo para que el
+      // script siga sirviendo en una base que todavía no tiene rol propio.
+      (process.env.DATABASE_URL_APP ?? process.env.DATABASE_URL)
+)?.trim();
 const esperadoAbierto = args.includes("--esperado-abierto");
 
 if (!url) {
-  console.error("Falta DATABASE_URL (o pasá --url).");
+  console.error("Falta DATABASE_URL_APP (o pasá --url).");
     process.exit(2);
 }
 

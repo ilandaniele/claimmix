@@ -10,11 +10,15 @@
  * script no toca ninguna variable de entorno: crea, concede, verifica e
  * informa. Es aditivo y reversible.
  *
- * ⚠ NO cambiar DATABASE_URL todavía. El código no pone el contexto de inquilino
- *   en ninguna consulta (no hay un solo `set_config` en `src/`), así que bajo un
- *   rol que obedece RLS **toda consulta devolvería cero filas**. Eso es
- *   exactamente lo que este script mide al final, para que el número quede a la
- *   vista en vez de descubrirse en producción.
+ * **`DATABASE_URL` se queda como está, apuntando al dueño.** No es un paso
+ *   pendiente: son dos roles a propósito. El dueño corre las migraciones, el
+ *   limitador de tráfico y las sondas de infraestructura; `claimmix_app` corre
+ *   todo lo demás, a través de la capa de datos. Lo que sí hay que actualizar al
+ *   rotar es `DATABASE_URL_APP`, en `.env.local` y en Vercel.
+ *
+ * Al final mide cuántas filas ve el rol sin poner contexto. Cero es lo
+ * correcto: significa que RLS lo está filtrando. Cualquier otro número es una
+ * fuga y lo dice.
  *
  * Uso:
  *   pnpm rol-app                      contra DATABASE_URL
@@ -127,10 +131,19 @@ try {
       console.log(`     como ${ROL}:      ${conRol.rows[0].n} caso(s)`);
       console.log(`     como el dueño:      ${conDuenio.rows[0].n} caso(s)`);
       if (conRol.rows[0].n === 0 && conDuenio.rows[0].n > 0) {
-        aviso("La app quedaría CIEGA: ninguna consulta suya pone el contexto.");
-        console.log("       No hay un solo `set_config` en src/. Cambiar DATABASE_URL");
-        console.log("       ahora sería una caída total, no un riesgo.");
-        console.log("       → El rol queda creado y esperando a la capa de datos (Fase 1).");
+        // Cero sin contexto es lo CORRECTO, no una alarma.
+        //
+        // Este aviso decía "la app quedaría ciega" y era cierto cuando se
+        // escribió: no había un solo `set_config` en `src/`. Ahora existe la
+        // capa de datos y toda consulta pone el contexto antes de leer, así que
+        // ver cero acá significa que RLS está haciendo su trabajo. Dejarlo como
+        // advertencia mandaba a la gente a "arreglar" lo único que estaba bien.
+        ok(
+          `0 sin contexto y ${conDuenio.rows[0].n} con el dueño: ` +
+            "RLS separa como corresponde"
+        );
+        console.log("       La capa pone el contexto en cada consulta; comprobalo");
+        console.log("       de punta a punta con `pnpm capa-datos`.");
       } else if (conRol.rows[0].n > 0) {
         aviso("el rol ve casos sin poner contexto: revisar RLS antes de seguir");
       }

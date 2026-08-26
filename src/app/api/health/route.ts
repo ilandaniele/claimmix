@@ -26,7 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 
-import { db } from "@/lib/db";
+import { db, tables } from "@/lib/db";
 import { gmailAccounts } from "@/lib/db/schema";
 
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
@@ -58,6 +58,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const checks = await Promise.all([
     checkDatabase(),
+    checkDataLayer(),
     checkSchema(),
     checkStorage(deep),
     checkModel(deep),
@@ -108,17 +109,18 @@ function down(name: string, detail: string): Check {
 }
 
 function why(err: unknown): string {
-  return (
-    (err as { code?: string })?.code ??
-    (err instanceof Error ? err.message.slice(0, 120) : "error desconocido")
-  );
+  // El `||` en vez de `??` no es un descuido. Los errores del driver de Neon
+  // traen `code: ""` —la propiedad existe y está vacía— y `??` sólo atrapa
+  // null o undefined, así que el chequeo salía "down" con el detalle en
+  // blanco: la peor forma de fallar, porque avisa sin decir de qué.
+  const codigo = (err as { code?: string })?.code;
+  if (codigo) return codigo;
+  return err instanceof Error ? err.message.slice(0, 120) : "error desconocido";
 }
 
 /**
  * The rows from a raw query.
  *
- // sin-inquilino: Chequeo de infraestructura: lee el catálogo y las migraciones, que
- // no son de ningún inquilino y necesitan el rol dueño para verse.
  * `db.execute` hands back the driver's result object, not an array — and code
  * that assumed an array got an empty list, which here meant reporting every
  * migration as missing on a database where all of them were applied.
@@ -140,6 +142,47 @@ async function checkDatabase(): Promise<Check> {
     return ok("base de datos", "responde");
   } catch (err) {
     return down("base de datos", why(err));
+  }
+}
+
+/**
+ * ¿La capa de datos puede consultar, con el rol restringido?
+ *
+ * `checkDatabase` de arriba usa el `db` del módulo, que entra con el rol dueño.
+ * Que ése responda no dice nada sobre el que la aplicación usa de verdad: son
+ * dos conexiones distintas, con dos credenciales distintas, y desde que la capa
+ * existe **todas las consultas del producto pasan por la segunda**.
+ *
+ * El agujero que esto tapa es concreto. `DATABASE_URL_APP` vive en Vercel
+ * marcada como sensible, así que su valor no se puede leer de vuelta ni
+ * comparar con el que uno cree haber puesto: `vercel env pull` devuelve
+ * `"[SENSITIVE]"`. Un carácter de más al pegarla no se descubre en ningún lado
+ * — ni en la CI, que usa su propio secreto — hasta que un analista abre la
+ * bandeja y no hay nada.
+ *
+ * Consulta con un inquilino que no existe, a propósito: el objetivo es que la
+ * conexión y el contexto funcionen, no leer datos de nadie. Cero filas es el
+ * resultado correcto.
+ */
+async function checkDataLayer(): Promise<Check> {
+  try {
+    await enTenant({ tenantId: "00000000-0000-0000-0000-000000000000" }, (dbApp) =>
+      dbApp.select({ id: tables.cases.id }).from(tables.cases).limit(1)
+    );
+    return ok("capa de datos", "el rol restringido consulta y RLS responde");
+  } catch (err) {
+    const detalle = why(err);
+    // Se mira el mensaje crudo y no `why(err)`: cuando el error trae código,
+    // `why` devuelve el código y el texto que distingue una contraseña vieja
+    // de cualquier otro fallo se pierde.
+    const crudo = err instanceof Error ? err.message : String(err);
+    if (/password authentication failed/i.test(crudo)) {
+      return down("capa de datos", "DATABASE_URL_APP no autentica — contraseña vieja o mal pegada");
+    }
+    if (/falta DATABASE_URL_APP/i.test(crudo)) {
+      return down("capa de datos", "falta DATABASE_URL_APP en el entorno");
+    }
+    return down("capa de datos", detalle);
   }
 }
 

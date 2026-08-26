@@ -914,13 +914,73 @@ await refuseIfMocked();
 await refuseIfBudgetSpent();
 await sweepOldRehearsalCases();
 
+/*
+ * Una diferencia se confirma corriendo el escenario otra vez.
+ *
+ * Del otro lado hay un modelo, no una función: la misma conversación puede
+ * terminar distinto entre corridas. Medido sobre `goteo`, que falló una vez en
+ * CI: tres corridas seguidas después, cero diferencias. El escenario estaba
+ * bien y el modelo, esa vez, eligió callarse.
+ *
+ * Reintentar no es aflojar la exigencia — la afirmación sigue siendo la misma —
+ * sino separar dos cosas que se ven iguales en un reporte: una regresión, que
+ * falla siempre, y una variación, que casi nunca falla dos veces seguidas.
+ *
+ * Y es lo que decide si este ensayo sirve como compuerta. Un rojo intermitente
+ * después de cada deploy enseña a no mirar los rojos, y entonces el que importa
+ * pasa igual de desapercibido.
+ *
+ * Cuesta una conversación más, y sólo cuando algo difirió.
+ */
 const created: string[] = [];
 for (const scenario of chosen) {
+  const antes = failures.length;
   try {
     const id = await runScenario(scenario);
     if (id) created.push(id);
   } catch (err) {
     note(scenario.id, 0, `se cayó: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (failures.length === antes) continue;
+
+  const primeras = failures.splice(antes);
+  console.log(`
+   ↻ ${scenario.id} difirió. Se repite para separar variación de regresión.`);
+
+  const segundoIntento = failures.length;
+  let seCayo = false;
+  try {
+    const id = await runScenario(scenario);
+    if (id) created.push(id);
+  } catch (err) {
+    seCayo = true;
+    note(scenario.id, 0, `se cayó al repetir: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const segundas = failures.splice(segundoIntento);
+
+  /*
+   * Se compara POR TURNO, no por el texto del reproche.
+   *
+   * La primera versión comparaba `${turno}:${motivo}` y dejaba pasar una
+   * regresión determinista: el reintento reusa el hilo, así que los conteos
+   * arrastran —"esperaba 5, hubo 1" la primera vez y "esperaba 5, hubo 4" la
+   * segunda— y dos mensajes distintos parecían dos problemas distintos. O sea:
+   * el chequeo declaraba "variación" con la evidencia de lo contrario delante.
+   *
+   * Lo que identifica al problema es QUÉ turno difirió. Si el mismo turno
+   * difiere dos veces seguidas, el modelo no está tirando la moneda.
+   */
+  const turnosDeNuevo = new Set(segundas.map((x) => x.turn));
+  const enLasDos = primeras.filter((x) => turnosDeNuevo.has(x.turn));
+
+  if (seCayo || enLasDos.length > 0) {
+    // Se reporta el reproche de la SEGUNDA corrida: describe el estado que
+    // quedó, que es contra el que alguien va a ir a mirar.
+    for (const x of segundas) note(x.scenario, x.turn, x.why);
+  } else {
+    console.log(`   · no se repitió: era variación del modelo, no una regresión.`);
+    for (const x of primeras) console.log(`     (primera vez: turno ${x.turn} — ${x.why})`);
   }
 }
 

@@ -44,11 +44,11 @@ function normalizeUsage(row?: {
 
 export async function GET() {
   try {
-    const { db, userRow } = await requireRole(...ALL_ROLES);
+    const { userRow } = await requireRole(...ALL_ROLES);
     const tenantId = userRow.tenant_id;
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
-    const tenantCtx: TenantContext = { tenantId: tenantId };
+    const tenantCtx: TenantContext = { tenantId };
 
     // ── Date window: current calendar month ──────────────────────────────────
     const now = new Date();
@@ -103,13 +103,15 @@ export async function GET() {
         ),
 
         // Escalated this month
-        db.$count(
-          cases,
-          and(
-            eq(cases.tenant_id, tenantId),
-            eq(cases.status, "escalado"),
-            gte(cases.created_at, monthStart),
-            lt(cases.created_at, monthEnd)
+        enTenant(tenantCtx, (db) =>
+          db.$count(
+            cases,
+            and(
+              eq(cases.tenant_id, tenantId),
+              eq(cases.status, "escalado"),
+              gte(cases.created_at, monthStart),
+              lt(cases.created_at, monthEnd)
+            )
           )
         ),
 

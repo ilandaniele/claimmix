@@ -60,24 +60,28 @@ export async function POST(
   if (!caseRow) return err(new AppError("NOT_FOUND"));
 
   // ── Extracted fields ─────────────────────────────────────────────────────────
-  const fields = await db
-    .select({ field_key: extractedFields.field_key, field_value: extractedFields.field_value, confidence: extractedFields.confidence })
-    .from(extractedFields)
-    .where(eq(extractedFields.case_id, caseId));
+  const fields = await enTenant(tenantCtx, (db) =>
+    db
+      .select({ field_key: extractedFields.field_key, field_value: extractedFields.field_value, confidence: extractedFields.confidence })
+      .from(extractedFields)
+      .where(eq(extractedFields.case_id, caseId))
+  );
 
   // ── Missing docs ─────────────────────────────────────────────────────────────
-  const docs = await db
-    .select({
-      doc_key: missingDocs.doc_key,
-      requested_at: missingDocs.requested_at,
-      satisfied_at: missingDocs.satisfied_at,
-      // Carried through separately: the core system must not read "the
-      // claimant says no such report exists" as "we have the report".
-      declined_at: missingDocs.declined_at,
-      declined_note: missingDocs.declined_note,
-    })
-    .from(missingDocs)
-    .where(eq(missingDocs.case_id, caseId));
+  const docs = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        doc_key: missingDocs.doc_key,
+        requested_at: missingDocs.requested_at,
+        satisfied_at: missingDocs.satisfied_at,
+        // Carried through separately: the core system must not read "the
+        // claimant says no such report exists" as "we have the report".
+        declined_at: missingDocs.declined_at,
+        declined_note: missingDocs.declined_note,
+      })
+      .from(missingDocs)
+      .where(eq(missingDocs.case_id, caseId))
+  );
 
   // ── Build core-system payload ─────────────────────────────────────────────────
   const payload = {

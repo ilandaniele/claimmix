@@ -48,10 +48,12 @@ export async function seedRequiredDocs(
   if (!claimType) return;
 
   try {
-    const configured = await db
-      .select({ doc_key: requiredDocsConfig.doc_key })
-      .from(requiredDocsConfig)
-      .where(eq(requiredDocsConfig.claim_type, claimType));
+    const configured = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ doc_key: requiredDocsConfig.doc_key })
+        .from(requiredDocsConfig)
+        .where(eq(requiredDocsConfig.claim_type, claimType))
+    );
 
     if (configured.length === 0) return;
 
@@ -66,13 +68,15 @@ export async function seedRequiredDocs(
     const fresh = configured.map((c) => c.doc_key).filter((k) => !known.has(k));
     if (fresh.length === 0) return;
 
-    await db.insert(missingDocs).values(
-      fresh.map((doc_key) => ({
-        case_id: caseId,
-        tenant_id: tenantId,
-        doc_key,
-        satisfied_at: null,
-      }))
+    await enTenant(tenantCtx, (db) =>
+      db.insert(missingDocs).values(
+        fresh.map((doc_key) => ({
+          case_id: caseId,
+          tenant_id: tenantId,
+          doc_key,
+          satisfied_at: null,
+        }))
+      )
     );
   } catch (err) {
     console.error("[documents] seed failed:", errCode(err), "case:", caseId);

@@ -21,7 +21,7 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { db, userRow } = await requireAdmin();
+    const { userRow } = await requireAdmin();
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };

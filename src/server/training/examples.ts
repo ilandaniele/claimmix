@@ -159,7 +159,7 @@ export async function approveTrainingExample(
   const { tenantId, agentRunId, approvedBy } = params;
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   // Este contexto es lo único que le dice de quién son los datos.
-  const tenantCtx: TenantContext = { tenantId: tenantId };
+  const tenantCtx: TenantContext = { tenantId };
 
   // ── 1. Load the agent run ───────────────────────────────────────────────────
   let run: {
@@ -272,21 +272,23 @@ export async function approveTrainingExample(
   let exampleId: string;
   try {
     const inserted = firstRow(
-      await db
-        .insert(tables.trainingExamples)
-        .values({
-          tenant_id: tenantId,
-          agent_run_id: agentRunId,
-          case_id: run.case_id,
-          claim_message_id: run.claim_message_id,
-          claim_type: claimType,
-          input_payload: run.input_payload ?? {},
-          expected_output: expectedOutput,
-          status: "approved",
-          approved_by: approvedBy,
-          approved_at: nowIso,
-        })
-        .returning({ id: tables.trainingExamples.id })
+      await enTenant(tenantCtx, (db) =>
+        db
+          .insert(tables.trainingExamples)
+          .values({
+            tenant_id: tenantId,
+            agent_run_id: agentRunId,
+            case_id: run.case_id,
+            claim_message_id: run.claim_message_id,
+            claim_type: claimType,
+            input_payload: run.input_payload ?? {},
+            expected_output: expectedOutput,
+            status: "approved",
+            approved_by: approvedBy,
+            approved_at: nowIso,
+          })
+          .returning({ id: tables.trainingExamples.id })
+      )
     );
 
     if (!inserted) {
@@ -370,17 +372,19 @@ export async function maybeQueueFineTuneJob(
     if (openJobs.length > 0) return null;
 
     const job = firstRow(
-      await db
-        .insert(mtj)
-        .values({
-          tenant_id: tenantId,
-          status: "draft",
-          provider: "gemini",
-          base_model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
-          training_example_count: approvedCount,
-          created_by: createdBy,
-        })
-        .returning({ id: mtj.id })
+      await enTenant(tenantCtx, (db) =>
+        db
+          .insert(mtj)
+          .values({
+            tenant_id: tenantId,
+            status: "draft",
+            provider: "gemini",
+            base_model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
+            training_example_count: approvedCount,
+            created_by: createdBy,
+          })
+          .returning({ id: mtj.id })
+      )
     );
 
     if (!job) return null;

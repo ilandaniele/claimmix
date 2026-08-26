@@ -856,24 +856,26 @@ async function recordLookedUpFields(
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
-    await db
-      .insert(extractedFields)
-      .values(
-        resolved.map((r) => ({
-          case_id: caseId,
-          tenant_id: tenantId,
-          field_key: canonicalFieldKey(r.field),
-          field_value: r.value,
-          confidence: "0.95",
-        }))
-      )
-      .onConflictDoUpdate({
-        target: [extractedFields.case_id, extractedFields.field_key],
-        set: {
-          field_value: sql`excluded.field_value`,
-          confidence: sql`excluded.confidence`,
-        },
-      });
+    await enTenant(tenantCtx, (db) =>
+      db
+        .insert(extractedFields)
+        .values(
+          resolved.map((r) => ({
+            case_id: caseId,
+            tenant_id: tenantId,
+            field_key: canonicalFieldKey(r.field),
+            field_value: r.value,
+            confidence: "0.95",
+          }))
+        )
+        .onConflictDoUpdate({
+          target: [extractedFields.case_id, extractedFields.field_key],
+          set: {
+            field_value: sql`excluded.field_value`,
+            confidence: sql`excluded.confidence`,
+          },
+        })
+    );
 
     // Closes the request too, so the next round does not ask for the document
     // or field we just filled in ourselves.
@@ -937,7 +939,7 @@ async function escalate(opts: {
   const { caseId, tenantId, severity } = opts;
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   // Este contexto es lo único que le dice de quién son los datos.
-  const tenantCtx: TenantContext = { tenantId: tenantId };
+  const tenantCtx: TenantContext = { tenantId };
 
   await setStatus(caseId, tenantId, "requiere_especialista");
 
@@ -1169,17 +1171,21 @@ async function upsertFieldConfirmation(
     };
 
     if (existing) {
-      await db
-        .update(claimFieldConfirmations)
-        .set(values)
-        .where(eq(claimFieldConfirmations.id, existing.id));
+      await enTenant(tenantCtx, (db) =>
+        db
+          .update(claimFieldConfirmations)
+          .set(values)
+          .where(eq(claimFieldConfirmations.id, existing.id))
+      );
     } else {
-      await db.insert(claimFieldConfirmations).values({
-        case_id: caseId,
-        tenant_id: tenantId,
-        field_name: row.field_key,
-        ...values,
-      });
+      await enTenant(tenantCtx, (db) =>
+        db.insert(claimFieldConfirmations).values({
+          case_id: caseId,
+          tenant_id: tenantId,
+          field_name: row.field_key,
+          ...values,
+        })
+      );
     }
   } catch (err) {
     console.error("[orchestrate] Failed to upsert claim_field_confirmations:", errCode(err));

@@ -244,17 +244,19 @@ export async function rehostAndRecordAttachments(
     if (!result) continue;
 
     try {
-      await db.insert(claimAttachments).values({
-        case_id: caseId,
-        tenant_id: tenantId,
-        claim_message_id: messageId,
-        file_name: attachment.Name,
-        content_type: attachment.ContentType,
-        size_bytes: attachment.ContentLength,
-        storage_path: result.stored ? result.storagePath : null,
-        content_hash: result.stored ? result.contentHash : null,
-        rejected_reason: result.stored ? null : result.reason,
-      });
+      await enTenant({ tenantId }, (db) =>
+        db.insert(claimAttachments).values({
+          case_id: caseId,
+          tenant_id: tenantId,
+          claim_message_id: messageId,
+          file_name: attachment.Name,
+          content_type: attachment.ContentType,
+          size_bytes: attachment.ContentLength,
+          storage_path: result.stored ? result.storagePath : null,
+          content_hash: result.stored ? result.contentHash : null,
+          rejected_reason: result.stored ? null : result.reason,
+        })
+      );
     } catch (err) {
       const code =
         (err as { code?: string })?.code ??

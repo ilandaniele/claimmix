@@ -399,17 +399,19 @@ export async function createVertexAiTuningDraft(
 
   const baseModel = getBaseModel();
   const job = firstRow(
-    await db
-      .insert(t)
-      .values({
-        tenant_id: tenantId,
-        status: "draft",
-        provider: "vertex_ai_gemini",
-        base_model: baseModel,
-        training_example_count: examples.length,
-        created_by: userId,
-      })
-      .returning({ id: t.id, status: t.status, provider: t.provider })
+    await enTenant(tenantCtx, (db) =>
+      db
+        .insert(t)
+        .values({
+          tenant_id: tenantId,
+          status: "draft",
+          provider: "vertex_ai_gemini",
+          base_model: baseModel,
+          training_example_count: examples.length,
+          created_by: userId,
+        })
+        .returning({ id: t.id, status: t.status, provider: t.provider })
+    )
   );
   if (!job) throw new Error("INSERT_FAILED");
 
@@ -706,21 +708,11 @@ export async function activateVertexAiModel(
   const tunedModelId = job.fine_tuned_model_id;
 
   // Upsert tenantAiSettings to point at the new tuned model
-  await db
-    .insert(settings)
-    .values({
-      tenant_id: tenantId,
-      provider: "gemini",
-      active_model_provider: "gemini",
-      active_model: tunedModelId,
-      previous_model: previous,
-      model_activated_by: userId,
-      model_activated_at: now,
-      updated_at: now,
-    })
-    .onConflictDoUpdate({
-      target: settings.tenant_id,
-      set: {
+  await enTenant(tenantCtx, (db) =>
+    db
+      .insert(settings)
+      .values({
+        tenant_id: tenantId,
         provider: "gemini",
         active_model_provider: "gemini",
         active_model: tunedModelId,
@@ -728,8 +720,20 @@ export async function activateVertexAiModel(
         model_activated_by: userId,
         model_activated_at: now,
         updated_at: now,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: settings.tenant_id,
+        set: {
+          provider: "gemini",
+          active_model_provider: "gemini",
+          active_model: tunedModelId,
+          previous_model: previous,
+          model_activated_by: userId,
+          model_activated_at: now,
+          updated_at: now,
+        },
+      })
+  );
 
   await enTenant(tenantCtx, (db) =>
     db
@@ -783,21 +787,11 @@ export async function rollbackVertexAiModel(tenantId: string, userId: string) {
 
   const now = new Date().toISOString();
 
-  await db
-    .insert(settings)
-    .values({
-      tenant_id: tenantId,
-      provider: "gemini",
-      active_model_provider: "gemini",
-      active_model: rollbackTo,
-      previous_model: current?.active_model ?? null,
-      model_activated_by: userId,
-      model_activated_at: now,
-      updated_at: now,
-    })
-    .onConflictDoUpdate({
-      target: settings.tenant_id,
-      set: {
+  await enTenant(tenantCtx, (db) =>
+    db
+      .insert(settings)
+      .values({
+        tenant_id: tenantId,
         provider: "gemini",
         active_model_provider: "gemini",
         active_model: rollbackTo,
@@ -805,8 +799,20 @@ export async function rollbackVertexAiModel(tenantId: string, userId: string) {
         model_activated_by: userId,
         model_activated_at: now,
         updated_at: now,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: settings.tenant_id,
+        set: {
+          provider: "gemini",
+          active_model_provider: "gemini",
+          active_model: rollbackTo,
+          previous_model: current?.active_model ?? null,
+          model_activated_by: userId,
+          model_activated_at: now,
+          updated_at: now,
+        },
+      })
+  );
 
   await writeAuditLog({
     tenant_id: tenantId,

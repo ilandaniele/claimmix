@@ -32,6 +32,7 @@ import type { ClaimType } from "@/lib/schemas/cases";
 import { internalAuthHeaders, isInternalRequest } from "@/lib/security/internal-auth";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { BATCH_BUDGET_MS, MAX_CHAIN, fitsAnotherCase } from "@/server/intake/batch-budget";
+import { enTenant } from "@/data/scope";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -185,7 +186,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       }
     }
 
-    const { db: adminDb, user, userRow } = await requireAdmin();
+    const { user, userRow } = await requireAdmin();
 
     const ip = getClientIp(request);
     const rlKey = `batch-simulate:${userRow.id}`;
@@ -245,19 +246,21 @@ export async function POST(request: NextRequest): Promise<Response> {
 
       try {
         const newCase = firstRow(
-          await adminDb
-            .insert(cases)
-            .values({
-              tenant_id: userRow.tenant_id,
-              policy_number: policyNumber,
-              policyholder_name: policyholderName,
-              claim_type: finalClaimType,
-              status: "procesando",
-              confidence_min: null,
-              assigned_to: userRow.id,
-              channel: "email_sim",
-            })
-            .returning({ id: cases.id, created_at: cases.created_at })
+          await enTenant({ tenantId: userRow.tenant_id }, (db) =>
+            db
+              .insert(cases)
+              .values({
+                tenant_id: userRow.tenant_id,
+                policy_number: policyNumber,
+                policyholder_name: policyholderName,
+                claim_type: finalClaimType,
+                status: "procesando",
+                confidence_min: null,
+                assigned_to: userRow.id,
+                channel: "email_sim",
+              })
+              .returning({ id: cases.id, created_at: cases.created_at })
+          )
         );
 
         if (!newCase) {
@@ -271,16 +274,18 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
         caseIds.push(newCase.id);
 
-        await adminDb.insert(rawMessages).values({
-          case_id: newCase.id,
-          tenant_id: userRow.tenant_id,
-          channel: "email_sim",
-          from_addr: policyholderName
-            ? `${policyholderName.toLowerCase().replace(/\s+/g, ".")}@example.com`
-            : null,
-          subject: `[batch_sim] Siniestro - ${finalClaimType} - ${scenario.id}`,
-          body: rawText,
-        }).catch(() => undefined);
+        await enTenant({ tenantId: userRow.tenant_id }, (db) =>
+          db.insert(rawMessages).values({
+            case_id: newCase.id,
+            tenant_id: userRow.tenant_id,
+            channel: "email_sim",
+            from_addr: policyholderName
+              ? `${policyholderName.toLowerCase().replace(/\s+/g, ".")}@example.com`
+              : null,
+            subject: `[batch_sim] Siniestro - ${finalClaimType} - ${scenario.id}`,
+            body: rawText,
+          })
+        ).catch(() => undefined);
       } catch (e) {
         // Skip this case but surface why — a silent catch here previously made
         // a broken cases INSERT look like `accepted: 0` with no explanation.

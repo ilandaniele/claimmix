@@ -53,7 +53,7 @@ const CUSTOM_FIELD_COLUMNS = {
 
 export async function GET() {
   try {
-    const { db, userRow } = await requireAdmin();
+    const { userRow } = await requireAdmin();
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
@@ -78,29 +78,31 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { db, user, userRow } = await requireAdmin();
+    const { user, userRow } = await requireAdmin();
     const parsed = CreateCustomFieldSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
     }
 
     const field = firstRow(
-      await db
-        .insert(t)
-        .values({
-          tenant_id: userRow.tenant_id,
-          key: parsed.data.key,
-          label: parsed.data.label,
-          description: parsed.data.description,
-          field_type: parsed.data.field_type,
-          claim_type: parsed.data.claim_type ?? null,
-          required: parsed.data.required,
-          ask_if_missing: parsed.data.ask_if_missing,
-          enum_values: parsed.data.enum_values,
-          active: parsed.data.active,
-          created_by: user.id,
-        })
-        .returning(CUSTOM_FIELD_COLUMNS)
+      await enTenant({ tenantId: userRow.tenant_id }, (db) =>
+        db
+          .insert(t)
+          .values({
+            tenant_id: userRow.tenant_id,
+            key: parsed.data.key,
+            label: parsed.data.label,
+            description: parsed.data.description,
+            field_type: parsed.data.field_type,
+            claim_type: parsed.data.claim_type ?? null,
+            required: parsed.data.required,
+            ask_if_missing: parsed.data.ask_if_missing,
+            enum_values: parsed.data.enum_values,
+            active: parsed.data.active,
+            created_by: user.id,
+          })
+          .returning(CUSTOM_FIELD_COLUMNS)
+      )
     );
 
     if (!field) return err(new AppError("INTERNAL_ERROR"));

@@ -20,14 +20,17 @@ import { users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 
 export interface AdminContext {
-  db: Db;
   user: { id: string; email?: string };
   userRow: { id: string; tenant_id: string; role: string };
 }
 
 /**
  * Validate that the current request has an admin session.
- * Returns the db handle, the session user, and the public.users row.
+ * No devuelve un handle de base a propósito. Cuando devolvía uno, era el del
+ * rol dueño, y toda ruta que escribiera `const { db } = await requireRole()`
+ * quedaba consultando por afuera de RLS sin que se notara: la consulta anda,
+ * devuelve filas, y las filas son de todos los inquilinos. Para leer o
+ * escribir, `enTenant({ tenantId: userRow.tenant_id }, …)`.
  *
  * @throws AppError('MISSING_SESSION') — no authenticated user
  * @throws AppError('FORBIDDEN_ROLE')  — authenticated but not admin/owner
@@ -53,7 +56,6 @@ export async function requireAdmin(): Promise<AdminContext> {
   }
 
   return {
-    db,
     user: { id: session.user.id, email: session.user.email ?? undefined },
     userRow,
   };

@@ -216,22 +216,24 @@ export async function PATCH(
     // ── 7b. Upsert extracted_fields with confirmed value ───────────────────
     if (confirmedValue !== null && confirmedValue !== undefined) {
       try {
-        await db
-          .insert(extractedFields)
-          .values({
-            case_id: caseId,
-            tenant_id: tenantId,
-            field_key: fieldKey,
-            field_value: confirmedValue,
-            confidence: "1.00", // Human-confirmed fields have 100% confidence.
-          })
-          .onConflictDoUpdate({
-            target: [extractedFields.case_id, extractedFields.field_key],
-            set: {
-              field_value: sql`excluded.field_value`,
-              confidence: sql`excluded.confidence`,
-            },
-          });
+        await enTenant(tenantCtx, (db) =>
+          db
+            .insert(extractedFields)
+            .values({
+              case_id: caseId,
+              tenant_id: tenantId,
+              field_key: fieldKey,
+              field_value: confirmedValue,
+              confidence: "1.00", // Human-confirmed fields have 100% confidence.
+            })
+            .onConflictDoUpdate({
+              target: [extractedFields.case_id, extractedFields.field_key],
+              set: {
+                field_value: sql`excluded.field_value`,
+                confidence: sql`excluded.confidence`,
+              },
+            })
+        );
       } catch (e) {
         console.error("[confirm-field] extracted_fields upsert error:", dbErrCode(e));
       }

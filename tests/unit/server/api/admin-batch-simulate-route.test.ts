@@ -27,9 +27,12 @@ const {
   mockWriteAuditLog,
   mockGetRandomScenario,
   mockGetScenarioById,
+  baseSimulada,
 } = vi.hoisted(() => {
+  const baseSimulada = { actual: null as unknown };
   const afterCallbacks: Array<() => unknown | Promise<unknown>> = [];
   return {
+    baseSimulada,
     afterCallbacks,
     mockAfter: vi.fn((cb: () => unknown | Promise<unknown>) => {
       afterCallbacks.push(cb);
@@ -46,6 +49,17 @@ const {
 });
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
+
+// La capa de datos, apuntada a la misma base simulada que el test le pasaba
+// antes por `requireAdmin`/`requireRole`. Esas ayudas ya no reparten un handle
+// —repartían el del rol dueño, que no obedece RLS— así que la ruta la busca
+// acá, y el test la deja acá.
+vi.mock("@/data/scope", () => ({
+  enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
+    Promise.resolve(armar(baseSimulada.actual)),
+  enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
+    Promise.all(armar(baseSimulada.actual)),
+}));
 
 vi.mock("server-only", () => ({}));
 
@@ -146,7 +160,7 @@ describe("POST /api/admin/batch-simulate", () => {
     caseInsertSeq = 0;
 
     mockRequireAdmin.mockResolvedValue({
-      db: makeAdminDbMock(),
+      db: (baseSimulada.actual = makeAdminDbMock()),
       user: { id: USER_ID },
       userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "admin" },
     });
@@ -314,7 +328,7 @@ describe("POST /api/admin/batch-simulate", () => {
 
     afterCallbacks.length = 0;
     mockRequireAdmin.mockResolvedValue({
-      db: makeAdminDbMock(),
+      db: (baseSimulada.actual = makeAdminDbMock()),
       user: { id: USER_ID },
       userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "admin" },
     });
@@ -349,7 +363,7 @@ describe("POST /api/admin/batch-simulate", () => {
       })),
     };
     mockRequireAdmin.mockResolvedValue({
-      db: failingDb,
+      db: (baseSimulada.actual = failingDb),
       user: { id: USER_ID },
       userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "admin" },
     });
@@ -381,7 +395,7 @@ describe("POST /api/admin/batch-simulate", () => {
       })),
     };
     mockRequireAdmin.mockResolvedValue({
-      db: failingDb,
+      db: (baseSimulada.actual = failingDb),
       user: { id: USER_ID },
       userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "admin" },
     });

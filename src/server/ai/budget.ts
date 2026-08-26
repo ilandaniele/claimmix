@@ -233,19 +233,21 @@ export async function checkBudget(
 
   let monthlyCostUsd = 0;
   try {
-    const [monthly] = await db
-      .select({
-        total: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8`,
-      })
-      .from(tables.aiUsage)
-      .where(
-        demoTenantId
-          ? and(
-              gte(tables.aiUsage.created_at, monthStart.toISOString()),
-              ne(tables.aiUsage.tenant_id, demoTenantId)
-            )
-          : gte(tables.aiUsage.created_at, monthStart.toISOString())
-      );
+    const [monthly] = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          total: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8`,
+        })
+        .from(tables.aiUsage)
+        .where(
+          demoTenantId
+            ? and(
+                gte(tables.aiUsage.created_at, monthStart.toISOString()),
+                ne(tables.aiUsage.tenant_id, demoTenantId)
+              )
+            : gte(tables.aiUsage.created_at, monthStart.toISOString())
+        )
+    );
     monthlyCostUsd = monthly?.total ?? 0;
   } catch (e) {
     // Fail open on DB error (don't block users due to budget check failure).
@@ -295,17 +297,19 @@ export async function checkBudget(
   if (userId) {
     let userDayTokens = 0;
     try {
-      const [userDay] = await db
-        .select({
-          total: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
-        })
-        .from(tables.aiUsage)
-        .where(
-          and(
-            eq(tables.aiUsage.user_id, userId),
-            gte(tables.aiUsage.created_at, dayStart.toISOString())
+      const [userDay] = await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            total: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
+          })
+          .from(tables.aiUsage)
+          .where(
+            and(
+              eq(tables.aiUsage.user_id, userId),
+              gte(tables.aiUsage.created_at, dayStart.toISOString())
+            )
           )
-        );
+      );
       userDayTokens = userDay?.total ?? 0;
     } catch (e) {
       console.error("[budget] User daily check error:", (e as { code?: string })?.code);
@@ -343,14 +347,16 @@ export async function recordUsage(
   costUsd: number
 ): Promise<void> {
   try {
-    await db.insert(tables.aiUsage).values({
-      tenant_id: tenantId,
-      user_id: userId,
-      model,
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      cost_usd: costUsd.toFixed(4),
-    });
+    await enTenant({ tenantId }, (db) =>
+      db.insert(tables.aiUsage).values({
+        tenant_id: tenantId,
+        user_id: userId,
+        model,
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        cost_usd: costUsd.toFixed(4),
+      })
+    );
   } catch (e) {
     const name = e instanceof Error ? e.name : "UnknownError";
     console.error("[budget] Exception recording AI usage:", name);

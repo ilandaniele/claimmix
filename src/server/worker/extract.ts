@@ -266,14 +266,16 @@ export async function runExtractionWorker(
 
     // Create outbound_messages stub (AC6).
     try {
-      await db.insert(outboundMessages).values({
-        case_id: caseId,
-        tenant_id: tenantId,
-        channel: "email_sim",
-        template: "request_missing_docs",
-        rendered_body: `Se solicita la documentación faltante para el caso ${caseId}: ${gapResult.missing_doc_keys.join(", ")}`,
-        status: "queued",
-      });
+      await enTenant(tenantCtx, (db) =>
+        db.insert(outboundMessages).values({
+          case_id: caseId,
+          tenant_id: tenantId,
+          channel: "email_sim",
+          template: "request_missing_docs",
+          rendered_body: `Se solicita la documentación faltante para el caso ${caseId}: ${gapResult.missing_doc_keys.join(", ")}`,
+          status: "queued",
+        })
+      );
     } catch (err) {
       console.error("[worker] Failed to create outbound_messages:", dbErrCode(err));
     }

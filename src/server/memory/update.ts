@@ -114,28 +114,30 @@ export async function updateMemoryFromConfirmation(
     // ── 3. Upsert into claim_memory ───────────────────────────────────────────
     // Unique key: idx_claim_memory_tenant_type_key (tenant_id, memory_type, key).
     try {
-      await db
-        .insert(t)
-        .values({
-          tenant_id: tenantId,
-          memory_type: "field_correction",
-          key: senderEmail,
-          value: updatedValue,
-          confidence: CONFIRMATION_CONFIDENCE,
-          source: "human_confirmation",
-          use_count: useCount,
-          last_used_at: now,
-        })
-        .onConflictDoUpdate({
-          target: [t.tenant_id, t.memory_type, t.key],
-          set: {
+      await enTenant(tenantCtx, (db) =>
+        db
+          .insert(t)
+          .values({
+            tenant_id: tenantId,
+            memory_type: "field_correction",
+            key: senderEmail,
             value: updatedValue,
             confidence: CONFIRMATION_CONFIDENCE,
             source: "human_confirmation",
             use_count: useCount,
             last_used_at: now,
-          },
-        });
+          })
+          .onConflictDoUpdate({
+            target: [t.tenant_id, t.memory_type, t.key],
+            set: {
+              value: updatedValue,
+              confidence: CONFIRMATION_CONFIDENCE,
+              source: "human_confirmation",
+              use_count: useCount,
+              last_used_at: now,
+            },
+          })
+      );
     } catch (e) {
       console.error("[memory/update] upsert error:", (e as { code?: string })?.code);
       // Do not throw — audit log still attempted below.
@@ -220,21 +222,23 @@ export async function seedMemoryFromExtraction(
     // Unique key: idx_claim_memory_tenant_type_key (tenant_id, memory_type, key).
     try {
       const t = tables.claimMemory;
-      await db
-        .insert(t)
-        .values({
-          tenant_id: tenantId,
-          memory_type: "sender_profile",
-          key: senderEmail,
-          value: profileValue,
-          confidence: seedConfidence,
-          source: "auto_extracted",
-          last_used_at: now,
-        })
-        // ON CONFLICT DO NOTHING: do NOT overwrite an existing confirmed row.
-        .onConflictDoNothing({
-          target: [t.tenant_id, t.memory_type, t.key],
-        });
+      await enTenant({ tenantId }, (db) =>
+        db
+          .insert(t)
+          .values({
+            tenant_id: tenantId,
+            memory_type: "sender_profile",
+            key: senderEmail,
+            value: profileValue,
+            confidence: seedConfidence,
+            source: "auto_extracted",
+            last_used_at: now,
+          })
+          // ON CONFLICT DO NOTHING: do NOT overwrite an existing confirmed row.
+          .onConflictDoNothing({
+            target: [t.tenant_id, t.memory_type, t.key],
+          })
+      );
     } catch (e) {
       console.error(
         "[memory/update] seedMemoryFromExtraction upsert error:",

@@ -24,6 +24,7 @@ import { cases, claimMessages } from "@/lib/db/schema";
 import { threadLookup } from "@/server/email/thread-lookup";
 import { classifyInboundEmailForIntake } from "@/server/email/relevance-prefilter";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { enTenant } from "@/data/scope";
 
 export interface InboundEmail {
   tenantId: string;
@@ -106,21 +107,23 @@ export async function ingestInboundEmail(
   if (!caseId) {
     try {
       const created = firstRow(
-        await db
-          .insert(cases)
-          .values({
-            tenant_id: tenantId,
-            channel,
-            status: "recibido",
-            email_message_id: email.messageId,
-            email_thread_id: email.threadId ?? null,
-            // Unknown until the extractor decides. Seeding `true` made every
-            // un-analysed message read as "¿Es reclamo? Sí" in the UI, and the
-            // value stuck forever when extraction failed.
-            is_claim: null,
-            claim_type: null,
-          })
-          .returning({ id: cases.id })
+        await enTenant({ tenantId }, (db) =>
+          db
+            .insert(cases)
+            .values({
+              tenant_id: tenantId,
+              channel,
+              status: "recibido",
+              email_message_id: email.messageId,
+              email_thread_id: email.threadId ?? null,
+              // Unknown until the extractor decides. Seeding `true` made every
+              // un-analysed message read as "¿Es reclamo? Sí" in the UI, and the
+              // value stuck forever when extraction failed.
+              is_claim: null,
+              claim_type: null,
+            })
+            .returning({ id: cases.id })
+        )
       );
       if (!created) return { outcome: "skipped", reason: "case_insert_no_row" };
       caseId = created.id;
@@ -164,27 +167,29 @@ async function insertInboundMessage(
 ): Promise<string | null> {
   try {
     const inserted = firstRow(
-      await db
-        .insert(claimMessages)
-        .values({
-          case_id: caseId,
-          tenant_id: email.tenantId,
-          direction: "inbound",
-          provider: email.channel === "email_sim" ? "simulated" : "gmail",
-          provider_message_id: email.messageId,
-          thread_id: email.threadId ?? null,
-          in_reply_to: email.inReplyTo ?? null,
-          from_addr: email.fromAddr,
-          to_addr: email.toAddr ?? null,
-          subject: email.subject,
-          body_text: email.bodyText,
-          body_html: email.bodyHtml ?? null,
-          headers: email.headers ?? [],
-          raw_payload: email.rawPayload ?? {},
-          status: "received",
-          received_at: new Date().toISOString(),
-        })
-        .returning({ id: claimMessages.id })
+      await enTenant({ tenantId: email.tenantId }, (db) =>
+        db
+          .insert(claimMessages)
+          .values({
+            case_id: caseId,
+            tenant_id: email.tenantId,
+            direction: "inbound",
+            provider: email.channel === "email_sim" ? "simulated" : "gmail",
+            provider_message_id: email.messageId,
+            thread_id: email.threadId ?? null,
+            in_reply_to: email.inReplyTo ?? null,
+            from_addr: email.fromAddr,
+            to_addr: email.toAddr ?? null,
+            subject: email.subject,
+            body_text: email.bodyText,
+            body_html: email.bodyHtml ?? null,
+            headers: email.headers ?? [],
+            raw_payload: email.rawPayload ?? {},
+            status: "received",
+            received_at: new Date().toISOString(),
+          })
+          .returning({ id: claimMessages.id })
+      )
     );
     return inserted?.id ?? null;
   } catch (err) {

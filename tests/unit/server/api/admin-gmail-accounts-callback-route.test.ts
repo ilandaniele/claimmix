@@ -25,12 +25,25 @@ const {
   mockGetProfile,
   mockInsert,
   mockRequireRole,
+  baseSimulada,
 } = vi.hoisted(() => ({
+  baseSimulada: { actual: null as unknown },
   mockSetupGmailWatch: vi.fn(),
   mockGetToken: vi.fn(),
   mockGetProfile: vi.fn(),
   mockInsert: vi.fn(),
   mockRequireRole: vi.fn(),
+}));
+
+// La capa de datos, apuntada a la misma base simulada que el test le pasaba
+// antes por `requireAdmin`/`requireRole`. Esas ayudas ya no reparten un handle
+// —repartían el del rol dueño, que no obedece RLS— así que la ruta la busca
+// acá, y el test la deja acá.
+vi.mock("@/data/scope", () => ({
+  enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
+    Promise.resolve(armar(baseSimulada.actual)),
+  enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
+    Promise.all(armar(baseSimulada.actual)),
 }));
 
 vi.mock("@/server/email/gmail/watch", () => ({
@@ -98,7 +111,7 @@ describe("GET /api/admin/gmail-accounts/callback", () => {
     process.env.PUBSUB_TOPIC = TOPIC;
 
     mockRequireRole.mockResolvedValue({
-      db: { insert: mockInsert },
+      db: (baseSimulada.actual = { insert: mockInsert }),
       user: { id: USER },
       userRow: { tenant_id: TENANT },
     });
@@ -182,7 +195,7 @@ describe("GET /api/admin/gmail-accounts/callback", () => {
 
   it("rechaza un state de otro tenant", async () => {
     mockRequireRole.mockResolvedValue({
-      db: { insert: mockInsert },
+      db: (baseSimulada.actual = { insert: mockInsert }),
       user: { id: USER },
       userRow: { tenant_id: "otro-tenant" },
     });

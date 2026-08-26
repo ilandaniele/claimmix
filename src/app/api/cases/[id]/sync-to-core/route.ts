@@ -103,10 +103,12 @@ export async function POST(
   }
 
   // ── 7. Build CoreSyncPayload ──────────────────────────────────────────────────
-  const fieldRows = await db
-    .select({ field_key: extractedFields.field_key, field_value: extractedFields.field_value })
-    .from(extractedFields)
-    .where(eq(extractedFields.case_id, caseId));
+  const fieldRows = await enTenant(tenantCtx, (db) =>
+    db
+      .select({ field_key: extractedFields.field_key, field_value: extractedFields.field_value })
+      .from(extractedFields)
+      .where(eq(extractedFields.case_id, caseId))
+  );
 
   const extractedFieldsMap: Record<string, string> = {};
   for (const row of fieldRows) extractedFieldsMap[row.field_key] = row.field_value;
@@ -129,7 +131,9 @@ export async function POST(
   const now = new Date().toISOString();
 
   if (result.success) {
-    await db.update(cases).set({ status: SUCCESS_STATUS, core_external_id: result.externalId, core_sent_at: now, updated_at: now }).where(eq(cases.id, caseId));
+    await enTenant(tenantCtx, (db) =>
+      db.update(cases).set({ status: SUCCESS_STATUS, core_external_id: result.externalId, core_sent_at: now, updated_at: now }).where(eq(cases.id, caseId))
+    );
 
     await writeAuditLog({
       tenant_id: tenantId,
@@ -144,7 +148,9 @@ export async function POST(
   } else {
     const errorMessage = result.errorMessage ?? "Error desconocido al sincronizar.";
 
-    await db.update(cases).set({ status: FAILURE_STATUS, core_error_message: errorMessage, updated_at: now }).where(eq(cases.id, caseId));
+    await enTenant(tenantCtx, (db) =>
+      db.update(cases).set({ status: FAILURE_STATUS, core_error_message: errorMessage, updated_at: now }).where(eq(cases.id, caseId))
+    );
 
     await writeAuditLog({
       tenant_id: tenantId,

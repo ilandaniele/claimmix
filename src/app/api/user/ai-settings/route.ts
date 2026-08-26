@@ -2,7 +2,10 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
-import { tables } from "@/lib/db";
+// `user_ai_settings` no tiene columna de inquilino: la clave es el usuario.
+// Por eso estas consultas van por el `db` del módulo y no por `enTenant` —
+// no hay inquilino que fijar, y la capa no tendría nada que filtrar.
+import { db, tables } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -15,7 +18,7 @@ const PatchSchema = z.object({
 
 export async function GET() {
   try {
-    const { db, user } = await requireRole(...ALL_ROLES);
+    const { user } = await requireRole(...ALL_ROLES);
 
     const row = firstRow(
       await db

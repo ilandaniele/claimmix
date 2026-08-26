@@ -355,18 +355,20 @@ async function createWhatsAppCase(
   let data: { id: string } | null;
   try {
     data = firstRow(
-      await db
-        .insert(tables.cases)
-        .values({
-          tenant_id: tenantId,
-          channel,
-          status: "recibido",
-          email_thread_id: threadId,
-          // Unknown until the extractor decides — see the same fix in gmail-poller.
-          is_claim: null,
-          claim_type: null,
-        })
-        .returning({ id: tables.cases.id })
+      await enTenant({ tenantId }, (db) =>
+        db
+          .insert(tables.cases)
+          .values({
+            tenant_id: tenantId,
+            channel,
+            status: "recibido",
+            email_thread_id: threadId,
+            // Unknown until the extractor decides — see the same fix in gmail-poller.
+            is_claim: null,
+            claim_type: null,
+          })
+          .returning({ id: tables.cases.id })
+      )
     );
   } catch (e) {
     const code = (e as { code?: string })?.code;
@@ -395,22 +397,24 @@ async function insertWhatsAppMessage(
 
   try {
     const inserted = firstRow(
-      await db.insert(tables.claimMessages).values({
-      case_id: input.caseId,
-      tenant_id: input.tenantId,
-      direction: "inbound",
-      provider: "whatsapp",
-      provider_message_id: input.providerMessageId,
-      thread_id: input.threadId,
-      from_addr: input.from,
-      subject: "WhatsApp",
-      body_text: input.body,
-      body_html: null,
-      headers: {},
-      raw_payload: {},
-      status: "received",
-      received_at: now,
-    }).returning({ id: tables.claimMessages.id })
+      await enTenant({ tenantId: input.tenantId }, (db) =>
+        db.insert(tables.claimMessages).values({
+        case_id: input.caseId,
+        tenant_id: input.tenantId,
+        direction: "inbound",
+        provider: "whatsapp",
+        provider_message_id: input.providerMessageId,
+        thread_id: input.threadId,
+        from_addr: input.from,
+        subject: "WhatsApp",
+        body_text: input.body,
+        body_html: null,
+        headers: {},
+        raw_payload: {},
+        status: "received",
+        received_at: now,
+      }).returning({ id: tables.claimMessages.id })
+      )
     );
     claimMessageId = inserted?.id ?? null;
   } catch (e) {
@@ -423,15 +427,17 @@ async function insertWhatsAppMessage(
   }
 
   try {
-    await db.insert(tables.rawMessages).values({
-      case_id: input.caseId,
-      tenant_id: input.tenantId,
-      channel: "whatsapp",
-      from_addr: input.from,
-      subject: "WhatsApp",
-      body: input.body,
-      received_at: now,
-    });
+    await enTenant({ tenantId: input.tenantId }, (db) =>
+      db.insert(tables.rawMessages).values({
+        case_id: input.caseId,
+        tenant_id: input.tenantId,
+        channel: "whatsapp",
+        from_addr: input.from,
+        subject: "WhatsApp",
+        body: input.body,
+        received_at: now,
+      })
+    );
   } catch {
     // The Neon call ignored insert errors here — preserve that behaviour.
   }

@@ -88,22 +88,24 @@ export async function computeStatement(
   const cases = tables.cases;
   const aiUsage = tables.aiUsage;
 
-  const [tenantRow] = await db
-    .select({
-      id: tables.tenants.id,
-      name: tables.tenants.name,
-      plan: tables.tenants.plan,
-      billing_status: tables.tenants.billing_status,
-      monthly_fee_usd: tables.tenants.monthly_fee_usd,
-      included_claims: tables.tenants.included_claims,
-      overage_price_usd: tables.tenants.overage_price_usd,
-      contact_email: tables.tenants.contact_email,
-      trial_ends_at: tables.tenants.trial_ends_at,
-      activated_at: tables.tenants.activated_at,
-    })
-    .from(tables.tenants)
-    .where(eq(tables.tenants.id, tenantId))
-    .limit(1);
+  const [tenantRow] = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        id: tables.tenants.id,
+        name: tables.tenants.name,
+        plan: tables.tenants.plan,
+        billing_status: tables.tenants.billing_status,
+        monthly_fee_usd: tables.tenants.monthly_fee_usd,
+        included_claims: tables.tenants.included_claims,
+        overage_price_usd: tables.tenants.overage_price_usd,
+        contact_email: tables.tenants.contact_email,
+        trial_ends_at: tables.tenants.trial_ends_at,
+        activated_at: tables.tenants.activated_at,
+      })
+      .from(tables.tenants)
+      .where(eq(tables.tenants.id, tenantId))
+      .limit(1)
+  );
 
   if (!tenantRow) return null;
 
@@ -114,15 +116,17 @@ export async function computeStatement(
   );
 
   // One pass over the period: every bucket an invoice line might need.
-  const [counts] = await db
-    .select({
-      total: sql<number>`count(*)::int`,
-      billable: sql<number>`count(*) filter (where is_claim is true)::int`,
-      rejected: sql<number>`count(*) filter (where is_claim is false)::int`,
-      unresolved: sql<number>`count(*) filter (where is_claim is null)::int`,
-    })
-    .from(cases)
-    .where(inPeriod);
+  const [counts] = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        total: sql<number>`count(*)::int`,
+        billable: sql<number>`count(*) filter (where is_claim is true)::int`,
+        rejected: sql<number>`count(*) filter (where is_claim is false)::int`,
+        unresolved: sql<number>`count(*) filter (where is_claim is null)::int`,
+      })
+      .from(cases)
+      .where(inPeriod)
+  );
 
   const [spend] = await enTenant(tenantCtx, (db) =>
     db
@@ -240,25 +244,27 @@ export async function getStatement(
     return { ...live, frozen: false, frozen_at: null };
   }
 
-  await db
-    .insert(tables.billingInvoices)
-    .values({
-      tenant_id: tenantId,
-      month: range.month,
-      period_start: range.start,
-      period_end: range.next,
-      billable_claims: live.volume.billable_claims,
-      total_usd: live.invoice.total_usd.toFixed(2),
-      ai_cost_usd: live.ai_cost.cost_usd.toFixed(4),
-      plan: live.tenant.plan,
-      monthly_fee_usd: live.invoice.monthly_fee_usd.toFixed(2),
-      included_claims: live.invoice.included_claims,
-      overage_price_usd: live.invoice.overage_price_usd.toFixed(4),
-      payload: { ...live, frozen: true },
-    })
-    .onConflictDoNothing({
-      target: [tables.billingInvoices.tenant_id, tables.billingInvoices.month],
-    });
+  await enTenant({ tenantId }, (db) =>
+    db
+      .insert(tables.billingInvoices)
+      .values({
+        tenant_id: tenantId,
+        month: range.month,
+        period_start: range.start,
+        period_end: range.next,
+        billable_claims: live.volume.billable_claims,
+        total_usd: live.invoice.total_usd.toFixed(2),
+        ai_cost_usd: live.ai_cost.cost_usd.toFixed(4),
+        plan: live.tenant.plan,
+        monthly_fee_usd: live.invoice.monthly_fee_usd.toFixed(2),
+        included_claims: live.invoice.included_claims,
+        overage_price_usd: live.invoice.overage_price_usd.toFixed(4),
+        payload: { ...live, frozen: true },
+      })
+      .onConflictDoNothing({
+        target: [tables.billingInvoices.tenant_id, tables.billingInvoices.month],
+      })
+  );
 
   // Read back rather than return what we just built: under a race the row that
   // survived may be the other request's, and one invoice per month is the whole

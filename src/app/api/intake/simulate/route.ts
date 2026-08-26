@@ -37,6 +37,7 @@ import {
 } from "@/lib/rate-limit/index";
 import type { ClaimType } from "@/lib/schemas/cases";
 import { waitForSimulationTurn } from "@/server/intake/simulation-throttle";
+import { enTenant } from "@/data/scope";
 
 export const maxDuration = 180;
 
@@ -177,19 +178,21 @@ export async function POST(request: NextRequest): Promise<Response> {
   let caseCreatedAt: string | null = null;
   try {
     const newCase = firstRow(
-      await db
-        .insert(cases)
-        .values({
-          tenant_id: userRow.tenant_id,
-          policy_number: policyNumber,
-          policyholder_name: policyholderName,
-          claim_type: claimType,
-          status: "procesando",
-          confidence_min: null,
-          assigned_to: userRow.id,
-          channel: "email_sim",
-        })
-        .returning({ id: cases.id, created_at: cases.created_at })
+      await enTenant({ tenantId: userRow.tenant_id }, (db) =>
+        db
+          .insert(cases)
+          .values({
+            tenant_id: userRow.tenant_id,
+            policy_number: policyNumber,
+            policyholder_name: policyholderName,
+            claim_type: claimType,
+            status: "procesando",
+            confidence_min: null,
+            assigned_to: userRow.id,
+            channel: "email_sim",
+          })
+          .returning({ id: cases.id, created_at: cases.created_at })
+      )
     );
     if (!newCase) {
       console.error("[intake/simulate] Failed to create case: no_row");
@@ -205,16 +208,18 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // Create raw_message row (stores full email body verbatim — PII stored, never logged).
   try {
-    await db.insert(rawMessages).values({
-      case_id: caseId,
-      tenant_id: userRow.tenant_id,
-      channel: "email_sim",
-      from_addr: policyholderName
-        ? `${policyholderName.toLowerCase().replace(/\s+/g, ".")}@example.com`
-        : null,
-      subject: `[email_sim] Siniestro - ${claimType} - ${input.scenario_id ?? "custom"}`,
-      body: rawText,
-    });
+    await enTenant({ tenantId: userRow.tenant_id }, (db) =>
+      db.insert(rawMessages).values({
+        case_id: caseId,
+        tenant_id: userRow.tenant_id,
+        channel: "email_sim",
+        from_addr: policyholderName
+          ? `${policyholderName.toLowerCase().replace(/\s+/g, ".")}@example.com`
+          : null,
+        subject: `[email_sim] Siniestro - ${claimType} - ${input.scenario_id ?? "custom"}`,
+        body: rawText,
+      })
+    );
   } catch (e) {
     const code = (e as { code?: string })?.code;
     console.error("[intake/simulate] Failed to create raw_message:", code);

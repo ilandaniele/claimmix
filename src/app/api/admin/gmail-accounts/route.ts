@@ -26,22 +26,24 @@ const ACCOUNT_COLUMNS = {
 
 export async function GET() {
   try {
-    const { db, user, userRow } = await requireRole(...ALL_ROLES);
+    const { user, userRow } = await requireRole(...ALL_ROLES);
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
     const isAdmin = userRow.role === "admin" || userRow.role === "owner";
 
     let data;
     try {
-      data = await db
-        .select(ACCOUNT_COLUMNS)
-        .from(t)
-        .where(
-          isAdmin
-            ? eq(t.tenant_id, userRow.tenant_id)
-            : and(eq(t.tenant_id, userRow.tenant_id), eq(t.connected_by, user.id))
-        )
-        .orderBy(asc(t.created_at));
+      data = await enTenant(tenantCtx, (db) =>
+        db
+          .select(ACCOUNT_COLUMNS)
+          .from(t)
+          .where(
+            isAdmin
+              ? eq(t.tenant_id, userRow.tenant_id)
+              : and(eq(t.tenant_id, userRow.tenant_id), eq(t.connected_by, user.id))
+          )
+          .orderBy(asc(t.created_at))
+      );
     } catch (e) {
       const code = (e as { code?: string })?.code;
       if (code === "42P01") return ok({ accounts: [] });
@@ -57,7 +59,7 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { db, user, userRow } = await requireRole(...ADMIN_ROLES);
+    const { user, userRow } = await requireRole(...ADMIN_ROLES);
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
     const isAdmin = userRow.role === "admin" || userRow.role === "owner";
@@ -107,7 +109,7 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { db, user, userRow } = await requireRole(...ADMIN_ROLES);
+    const { user, userRow } = await requireRole(...ADMIN_ROLES);
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };

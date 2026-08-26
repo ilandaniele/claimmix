@@ -197,14 +197,16 @@ async function createOrRefreshGeminiContextJob(
         )
       )
     : firstRow(
-        await db
-          .insert(t)
-          .values({
-            tenant_id: tenantId,
-            created_by: userId,
-            ...values,
-          })
-          .returning({ id: t.id })
+        await enTenant(tenantCtx, (db) =>
+          db
+            .insert(t)
+            .values({
+              tenant_id: tenantId,
+              created_by: userId,
+              ...values,
+            })
+            .returning({ id: t.id })
+        )
       );
 
   if (!job) throw new Error("INSERT_FAILED");
@@ -283,17 +285,19 @@ export async function createDraftFineTuneJob(
 
   const baseModel = await getTenantOpenAIModel(tenantId);
   const job = firstRow(
-    await db
-      .insert(t)
-      .values({
-        tenant_id: tenantId,
-        status: "draft",
-        provider: "openai",
-        base_model: baseModel || getDefaultOpenAIModel(),
-        training_example_count: examples.length,
-        created_by: userId,
-      })
-      .returning({ id: t.id })
+    await enTenant(tenantCtx, (db) =>
+      db
+        .insert(t)
+        .values({
+          tenant_id: tenantId,
+          status: "draft",
+          provider: "openai",
+          base_model: baseModel || getDefaultOpenAIModel(),
+          training_example_count: examples.length,
+          created_by: userId,
+        })
+        .returning({ id: t.id })
+    )
   );
   if (!job) throw new Error("INSERT_FAILED");
 
@@ -590,21 +594,11 @@ export async function activateFineTunedModel(tenantId: string, userId: string, j
   const previous = current?.active_model || current?.openai_model || getDefaultOpenAIModel();
   const now = new Date().toISOString();
 
-  await db
-    .insert(settings)
-    .values({
-      tenant_id: tenantId,
-      provider: "openai",
-      active_model_provider: "openai",
-      active_model: job.fine_tuned_model_id,
-      previous_model: previous,
-      model_activated_by: userId,
-      model_activated_at: now,
-      updated_at: now,
-    })
-    .onConflictDoUpdate({
-      target: settings.tenant_id,
-      set: {
+  await enTenant(tenantCtx, (db) =>
+    db
+      .insert(settings)
+      .values({
+        tenant_id: tenantId,
         provider: "openai",
         active_model_provider: "openai",
         active_model: job.fine_tuned_model_id,
@@ -612,8 +606,20 @@ export async function activateFineTunedModel(tenantId: string, userId: string, j
         model_activated_by: userId,
         model_activated_at: now,
         updated_at: now,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: settings.tenant_id,
+        set: {
+          provider: "openai",
+          active_model_provider: "openai",
+          active_model: job.fine_tuned_model_id,
+          previous_model: previous,
+          model_activated_by: userId,
+          model_activated_at: now,
+          updated_at: now,
+        },
+      })
+  );
 
   await enTenant(tenantCtx, (db) =>
     db
@@ -652,21 +658,11 @@ export async function rollbackFineTunedModel(tenantId: string, userId: string) {
   );
   const rollbackTo = current?.previous_model || current?.openai_model || getDefaultOpenAIModel();
   const now = new Date().toISOString();
-  await db
-    .insert(settings)
-    .values({
-      tenant_id: tenantId,
-      provider: "openai",
-      active_model_provider: "openai",
-      active_model: rollbackTo,
-      previous_model: current?.active_model ?? null,
-      model_activated_by: userId,
-      model_activated_at: now,
-      updated_at: now,
-    })
-    .onConflictDoUpdate({
-      target: settings.tenant_id,
-      set: {
+  await enTenant(tenantCtx, (db) =>
+    db
+      .insert(settings)
+      .values({
+        tenant_id: tenantId,
         provider: "openai",
         active_model_provider: "openai",
         active_model: rollbackTo,
@@ -674,8 +670,20 @@ export async function rollbackFineTunedModel(tenantId: string, userId: string) {
         model_activated_by: userId,
         model_activated_at: now,
         updated_at: now,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: settings.tenant_id,
+        set: {
+          provider: "openai",
+          active_model_provider: "openai",
+          active_model: rollbackTo,
+          previous_model: current?.active_model ?? null,
+          model_activated_by: userId,
+          model_activated_at: now,
+          updated_at: now,
+        },
+      })
+  );
 
   await writeAuditLog({
     tenant_id: tenantId,

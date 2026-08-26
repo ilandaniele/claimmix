@@ -2,7 +2,6 @@ import "server-only";
 
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 
-import type { Db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import * as tables from "@/lib/db/schema";
 import type { UserRole } from "@/lib/auth/require-role";
@@ -294,7 +293,7 @@ export function buildApprovedExamplesCsvSummary(examples: ApprovedExampleExportR
   return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
-async function loadProviderSettings(db: Db, tenantId: string) {
+async function loadProviderSettings(tenantId: string) {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const t = tables.tenantAiSettings;
@@ -348,11 +347,11 @@ async function loadProviderSettings(db: Db, tenantId: string) {
   };
 }
 
-async function loadConfigSection(db: Db, tenantId: string) {
+async function loadConfigSection(tenantId: string) {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const [providerSettings, promptVersions, customFields, promptRules] = await Promise.all([
-    loadProviderSettings(db, tenantId),
+    loadProviderSettings(tenantId),
     enTenant(tenantCtx, (db) =>
       db
         .select({
@@ -411,7 +410,7 @@ async function loadConfigSection(db: Db, tenantId: string) {
   };
 }
 
-async function loadApprovedExampleRows(db: Db, tenantId: string) {
+async function loadApprovedExampleRows(tenantId: string) {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const t = tables.trainingExamples;
@@ -444,7 +443,7 @@ async function loadApprovedExampleRows(db: Db, tenantId: string) {
   );
 }
 
-async function loadTrainingExamples(db: Db, tenantId: string, status: "approved" | "rejected") {
+async function loadTrainingExamples(tenantId: string, status: "approved" | "rejected") {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const t = tables.trainingExamples;
@@ -469,7 +468,7 @@ async function loadTrainingExamples(db: Db, tenantId: string, status: "approved"
   );
 }
 
-async function loadMemorySection(db: Db, tenantId: string) {
+async function loadMemorySection(tenantId: string) {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const [
@@ -479,8 +478,8 @@ async function loadMemorySection(db: Db, tenantId: string) {
     claimMemory,
     knownClaimPatterns,
   ] = await Promise.all([
-    loadTrainingExamples(db, tenantId, "approved"),
-    loadTrainingExamples(db, tenantId, "rejected"),
+    loadTrainingExamples(tenantId, "approved"),
+    loadTrainingExamples(tenantId, "rejected"),
     enTenant(tenantCtx, (db) =>
       db
         .select({
@@ -513,26 +512,28 @@ async function loadMemorySection(db: Db, tenantId: string) {
         .from(tables.claimMemory)
         .orderBy(desc(tables.claimMemory.updated_at))
     ),
-    db
-      .select({
-        id: tables.knownClaimPatterns.id,
-        tenant_id: tables.knownClaimPatterns.tenant_id,
-        pattern_text: tables.knownClaimPatterns.pattern_text,
-        pattern_type: tables.knownClaimPatterns.pattern_type,
-        claim_type: tables.knownClaimPatterns.claim_type,
-        severity_hint: tables.knownClaimPatterns.severity_hint,
-        language: tables.knownClaimPatterns.language,
-        enabled: tables.knownClaimPatterns.enabled,
-        created_at: tables.knownClaimPatterns.created_at,
-      })
-      .from(tables.knownClaimPatterns)
-      .where(
-        and(
-          or(isNull(tables.knownClaimPatterns.tenant_id), eq(tables.knownClaimPatterns.tenant_id, tenantId)),
-          eq(tables.knownClaimPatterns.enabled, true)
+    enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: tables.knownClaimPatterns.id,
+          tenant_id: tables.knownClaimPatterns.tenant_id,
+          pattern_text: tables.knownClaimPatterns.pattern_text,
+          pattern_type: tables.knownClaimPatterns.pattern_type,
+          claim_type: tables.knownClaimPatterns.claim_type,
+          severity_hint: tables.knownClaimPatterns.severity_hint,
+          language: tables.knownClaimPatterns.language,
+          enabled: tables.knownClaimPatterns.enabled,
+          created_at: tables.knownClaimPatterns.created_at,
+        })
+        .from(tables.knownClaimPatterns)
+        .where(
+          and(
+            or(isNull(tables.knownClaimPatterns.tenant_id), eq(tables.knownClaimPatterns.tenant_id, tenantId)),
+            eq(tables.knownClaimPatterns.enabled, true)
+          )
         )
-      )
-      .orderBy(desc(tables.knownClaimPatterns.created_at)),
+        .orderBy(desc(tables.knownClaimPatterns.created_at))
+    ),
   ]);
 
   return {
@@ -547,7 +548,7 @@ async function loadMemorySection(db: Db, tenantId: string) {
   };
 }
 
-async function loadFullMetadata(db: Db, tenantId: string) {
+async function loadFullMetadata(tenantId: string) {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const [agentRuns, claimEvents] = await Promise.all([
@@ -592,32 +593,30 @@ async function loadFullMetadata(db: Db, tenantId: string) {
 }
 
 export async function loadApprovedExamplesForExport(
-  db: Db,
   tenantId: string,
   piiMode: AgentExportPiiMode,
   canExportFullPii: boolean
 ): Promise<ApprovedExampleExportRow[]> {
-  const rows = await loadApprovedExampleRows(db, tenantId);
+  const rows = await loadApprovedExampleRows(tenantId);
   return sanitizeExportPayload(rows, piiMode, canExportFullPii);
 }
 
 export async function buildAgentMemoryConfigExport(params: {
-  db: Db;
   tenantId: string;
   exportedBy: string;
   exportType: AgentExportType;
   piiMode: AgentExportPiiMode;
   canExportFullPii: boolean;
 }) {
-  const { db, tenantId, exportedBy, exportType, piiMode, canExportFullPii } = params;
+  const { tenantId, exportedBy, exportType, piiMode, canExportFullPii } = params;
   const includeConfig = exportType === "config_only" || exportType === "full";
   const includeMemory = exportType === "memory_only" || exportType === "full";
 
   const [providerSettings, config, memory, metadata] = await Promise.all([
-    includeConfig ? Promise.resolve(null) : loadProviderSettings(db, tenantId),
-    includeConfig ? loadConfigSection(db, tenantId) : Promise.resolve(null),
-    includeMemory ? loadMemorySection(db, tenantId) : Promise.resolve(null),
-    exportType === "full" ? loadFullMetadata(db, tenantId) : Promise.resolve(null),
+    includeConfig ? Promise.resolve(null) : loadProviderSettings(tenantId),
+    includeConfig ? loadConfigSection(tenantId) : Promise.resolve(null),
+    includeMemory ? loadMemorySection(tenantId) : Promise.resolve(null),
+    exportType === "full" ? loadFullMetadata(tenantId) : Promise.resolve(null),
   ]);
 
   const provider = config?.provider ?? providerSettings?.provider;

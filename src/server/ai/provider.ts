@@ -128,21 +128,23 @@ export async function getTenantGeminiKey(tenantId: string, userId?: string): Pro
 export async function setTenantGeminiKey(tenantId: string, apiKey: string): Promise<void> {
   const encrypted = encryptApiKey(apiKey);
   const t = tables.tenantAiSettings;
-  await db
-    .insert(t)
-    .values({
-      tenant_id: tenantId,
-      provider: DEFAULT_AI_PROVIDER,
-      active_model_provider: DEFAULT_AI_PROVIDER,
-      active_model: null,
-      gemini_model: getDefaultGeminiModel(),
-      gemini_api_key_encrypted: encrypted,
-      updated_at: new Date().toISOString(),
-    })
-    .onConflictDoUpdate({
-      target: t.tenant_id,
-      set: { gemini_api_key_encrypted: encrypted, updated_at: new Date().toISOString() },
-    });
+  await enTenant({ tenantId }, (db) =>
+    db
+      .insert(t)
+      .values({
+        tenant_id: tenantId,
+        provider: DEFAULT_AI_PROVIDER,
+        active_model_provider: DEFAULT_AI_PROVIDER,
+        active_model: null,
+        gemini_model: getDefaultGeminiModel(),
+        gemini_api_key_encrypted: encrypted,
+        updated_at: new Date().toISOString(),
+      })
+      .onConflictDoUpdate({
+        target: t.tenant_id,
+        set: { gemini_api_key_encrypted: encrypted, updated_at: new Date().toISOString() },
+      })
+  );
 }
 
 // ── Provider key checks ───────────────────────────────────────────────────────

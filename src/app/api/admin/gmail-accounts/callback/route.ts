@@ -4,6 +4,7 @@ import { requireRole, ADMIN_ROLES } from "@/lib/auth/require-role";
 import { tables } from "@/lib/db";
 import { encryptRefreshToken } from "@/server/email/gmail/accounts";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
+import { enTenant } from "@/data/scope";
 
 type StatePayload = {
   tenantId?: string;
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { db, user, userRow } = await requireRole(...ADMIN_ROLES);
+    const { user, userRow } = await requireRole(...ADMIN_ROLES);
     if (state.tenantId !== userRow.tenant_id || state.userId !== user.id) {
       return NextResponse.redirect(new URL("/configuracion?gmail=invalid_state", origin));
     }
@@ -64,29 +65,31 @@ export async function GET(request: NextRequest) {
     const refreshTokenEncrypted = encryptRefreshToken(tokens.refresh_token);
 
     try {
-      await db
-        .insert(t)
-        .values({
-          tenant_id: userRow.tenant_id,
-          email,
-          refresh_token_encrypted: refreshTokenEncrypted,
-          enabled: true,
-          connected_by: user.id,
-          last_connected_at: now,
-          last_error: null,
-          updated_at: now,
-        })
-        .onConflictDoUpdate({
-          target: [t.tenant_id, t.email],
-          set: {
+      await enTenant({ tenantId: userRow.tenant_id }, (db) =>
+        db
+          .insert(t)
+          .values({
+            tenant_id: userRow.tenant_id,
+            email,
             refresh_token_encrypted: refreshTokenEncrypted,
             enabled: true,
             connected_by: user.id,
             last_connected_at: now,
             last_error: null,
             updated_at: now,
-          },
-        });
+          })
+          .onConflictDoUpdate({
+            target: [t.tenant_id, t.email],
+            set: {
+              refresh_token_encrypted: refreshTokenEncrypted,
+              enabled: true,
+              connected_by: user.id,
+              last_connected_at: now,
+              last_error: null,
+              updated_at: now,
+            },
+          })
+      );
     } catch (e) {
       console.error(
         "[gmail-accounts callback] upsert:",

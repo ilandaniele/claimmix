@@ -34,7 +34,7 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { db, user, userRow } = await requireAdmin();
+    const { user, userRow } = await requireAdmin();
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };

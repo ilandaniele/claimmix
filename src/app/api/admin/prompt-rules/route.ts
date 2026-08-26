@@ -58,7 +58,7 @@ const RULE_COLUMNS = {
 
 export async function GET() {
   try {
-    const { db, userRow } = await requireAdmin();
+    const { userRow } = await requireAdmin();
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
@@ -87,7 +87,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { db, user, userRow } = await requireAdmin();
+    const { user, userRow } = await requireAdmin();
 
     const rl = await rateLimit(
       buildUserKey(user.id, "prompt-rules"),
@@ -104,17 +104,19 @@ export async function POST(request: NextRequest) {
     let data;
     try {
       data = firstRow(
-        await db
-          .insert(t)
-          .values({
-            tenant_id: userRow.tenant_id,
-            title: parsed.data.title,
-            rule_text: parsed.data.rule_text,
-            rule_type: parsed.data.rule_type,
-            active: parsed.data.active,
-            created_by: user.id,
-          })
-          .returning(RULE_COLUMNS)
+        await enTenant({ tenantId: userRow.tenant_id }, (db) =>
+          db
+            .insert(t)
+            .values({
+              tenant_id: userRow.tenant_id,
+              title: parsed.data.title,
+              rule_text: parsed.data.rule_text,
+              rule_type: parsed.data.rule_type,
+              active: parsed.data.active,
+              created_by: user.id,
+            })
+            .returning(RULE_COLUMNS)
+        )
       );
     } catch (e) {
       console.error(

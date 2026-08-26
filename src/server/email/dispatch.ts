@@ -201,15 +201,17 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     // 'sent' — but an operator can now read exactly what the agent composed.
     try {
       const preview = renderTemplate(template, data);
-      await db.insert(outboundMessages).values({
-        case_id: caseId,
-        tenant_id: tenantId,
-        channel: "email",
-        template,
-        rendered_body: preview.html,
-        status: "skipped_simulated",
-        asked_keys: askedKeys(data),
-      });
+      await enTenant({ tenantId }, (db) =>
+        db.insert(outboundMessages).values({
+          case_id: caseId,
+          tenant_id: tenantId,
+          channel: "email",
+          template,
+          rendered_body: preview.html,
+          status: "skipped_simulated",
+          asked_keys: askedKeys(data),
+        })
+      );
     } catch (err) {
       // Must not break the simulation flow — but must not vanish either. The
       // first version of this swallowed the error silently, and a CHECK
@@ -273,26 +275,28 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   let claimMessageId: string | undefined;
   try {
     const inserted = firstRow(
-      await db
-        .insert(claimMessages)
-        .values({
-          tenant_id: tenantId,
-          case_id: caseId,
-          direction: "outbound",
-          provider: provider.name,
-          provider_message_id: null, // set after send
-          thread_id: replyThreadId ?? null,
-          in_reply_to: replyToMessageId ?? null,
-          from_addr: fromAddress,
-          to_addr: to,
-          subject: outboundSubject,
-          body_text: rendered.text,
-          template,
-          status: "queued",
-          headers: [],
-          received_at: new Date().toISOString(),
-        })
-        .returning({ id: claimMessages.id })
+      await enTenant({ tenantId }, (db) =>
+        db
+          .insert(claimMessages)
+          .values({
+            tenant_id: tenantId,
+            case_id: caseId,
+            direction: "outbound",
+            provider: provider.name,
+            provider_message_id: null, // set after send
+            thread_id: replyThreadId ?? null,
+            in_reply_to: replyToMessageId ?? null,
+            from_addr: fromAddress,
+            to_addr: to,
+            subject: outboundSubject,
+            body_text: rendered.text,
+            template,
+            status: "queued",
+            headers: [],
+            received_at: new Date().toISOString(),
+          })
+          .returning({ id: claimMessages.id })
+      )
     );
 
     if (inserted) {
@@ -307,18 +311,20 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   let outboundMsgId: string | undefined;
   try {
     const inserted = firstRow(
-      await db
-        .insert(outboundMessages)
-        .values({
-          case_id: caseId,
-          tenant_id: tenantId,
-          channel: "email",
-          template,
-          rendered_body: rendered.html,
-          status: "queued",
-          asked_keys: askedKeys(data),
-        })
-        .returning({ id: outboundMessages.id })
+      await enTenant({ tenantId }, (db) =>
+        db
+          .insert(outboundMessages)
+          .values({
+            case_id: caseId,
+            tenant_id: tenantId,
+            channel: "email",
+            template,
+            rendered_body: rendered.html,
+            status: "queued",
+            asked_keys: askedKeys(data),
+          })
+          .returning({ id: outboundMessages.id })
+      )
     );
 
     if (inserted) {

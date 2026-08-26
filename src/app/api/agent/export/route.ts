@@ -76,7 +76,7 @@ function clientIp(request: Request): string | null {
 export async function GET(request: Request) {
   try {
     const parsed = parseQuery(request);
-    const { db, user, userRow } = await requireRole(...ALL_ROLES);
+    const { user, userRow } = await requireRole(...ALL_ROLES);
     const canExportFullPii = userRow.role === "owner" || userRow.role === "admin";
 
     if (!canExportAgentData(userRow.role, parsed)) {
@@ -89,7 +89,6 @@ export async function GET(request: Request) {
     let content: string;
     if (parsed.format === "json") {
       const exportPayload = await buildAgentMemoryConfigExport({
-        db,
         tenantId: userRow.tenant_id,
         exportedBy: user.id,
         exportType: parsed.exportType,
@@ -99,7 +98,6 @@ export async function GET(request: Request) {
       content = JSON.stringify(exportPayload, null, 2);
     } else {
       const examples = await loadApprovedExamplesForExport(
-        db,
         userRow.tenant_id,
         parsed.piiMode,
         canExportFullPii

@@ -39,14 +39,17 @@ export const ADMIN_ROLES: UserRole[] = ["owner", "admin"];
 export const CASE_EDITOR_ROLES: UserRole[] = ["owner", "admin", "specialist", "analyst"];
 
 export interface RoleContext {
-  db: Db;
   user: { id: string; email?: string };
   userRow: { id: string; tenant_id: string; role: UserRole };
 }
 
 /**
  * Validate the session and require one of the given roles.
- * Returns the db handle, the session user, and the public.users row.
+ * No devuelve un handle de base a propósito. Cuando devolvía uno, era el del
+ * rol dueño, y toda ruta que escribiera `const { db } = await requireRole()`
+ * quedaba consultando por afuera de RLS sin que se notara: la consulta anda,
+ * devuelve filas, y las filas son de todos los inquilinos. Para leer o
+ * escribir, `enTenant({ tenantId: userRow.tenant_id }, …)`.
  */
 export async function requireRole(...roles: UserRole[]): Promise<RoleContext> {
   const session = await getSessionContext();
@@ -68,7 +71,6 @@ export async function requireRole(...roles: UserRole[]): Promise<RoleContext> {
   }
 
   return {
-    db,
     user: { id: session.user.id, email: session.user.email ?? undefined },
     userRow: userRow as RoleContext["userRow"],
   };

@@ -27,6 +27,7 @@ import type { EmailTemplate } from "@/server/email/render";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
 import { isReservedTestNumber } from "@/lib/phone/reserved";
+import { enTenant } from "@/data/scope";
 
 export interface AgentMessage {
   caseId: string;
@@ -317,17 +318,19 @@ async function recordOutbound(
   status: "sent" | "failed" | "skipped_simulated"
 ): Promise<void> {
   try {
-    await db.insert(outboundMessages).values({
-      case_id: message.caseId,
-      tenant_id: message.tenantId,
-      channel: "whatsapp",
-      template: WHATSAPP_TEMPLATE_NAMES[message.template] ?? message.template,
-      rendered_body: body,
-      status,
-      asked_keys: Array.isArray(message.data.missingFields)
-        ? (message.data.missingFields as unknown[]).map(String)
-        : null,
-    });
+    await enTenant({ tenantId: message.tenantId }, (db) =>
+      db.insert(outboundMessages).values({
+        case_id: message.caseId,
+        tenant_id: message.tenantId,
+        channel: "whatsapp",
+        template: WHATSAPP_TEMPLATE_NAMES[message.template] ?? message.template,
+        rendered_body: body,
+        status,
+        asked_keys: Array.isArray(message.data.missingFields)
+          ? (message.data.missingFields as unknown[]).map(String)
+          : null,
+      })
+    );
   } catch (err) {
     const code =
       (err as { code?: string })?.code ??

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { authUsers, users } from "@/lib/db/schema";
+import { enTenant } from "@/data/scope";
 
 interface NewAuthUser {
   id: string;
@@ -147,12 +148,14 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
 
   const isAdmin = isAllowlistedAdmin(user.email, user.emailVerified);
 
-  await db.insert(users).values({
-    id: user.id,
-    tenant_id: tenantId,
-    full_name: user.name || user.email || "Analyst",
-    role: isAdmin ? "admin" : "analyst",
-  });
+  await enTenant({ tenantId }, (db) =>
+    db.insert(users).values({
+      id: user.id,
+      tenant_id: tenantId,
+      full_name: user.name || user.email || "Analyst",
+      role: isAdmin ? "admin" : "analyst",
+    })
+  );
 
   if (isAdmin) {
     // Keep the Better Auth role in sync so the admin plugin agrees with

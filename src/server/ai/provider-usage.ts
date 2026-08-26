@@ -9,6 +9,7 @@
 
 import "server-only";
 import { db, tables } from "@/lib/db";
+import { enTenant } from "@/data/scope";
 
 export interface UsageEventInput {
   tenantId: string;
@@ -26,21 +27,23 @@ export interface UsageEventInput {
 
 export async function logProviderUsage(event: UsageEventInput): Promise<void> {
   try {
-    await db.insert(tables.providerUsageEvents).values({
-      tenant_id: event.tenantId,
-      provider: event.provider,
-      model: event.model,
-      operation: event.operation ?? "extraction",
-      status: event.status,
-      latency_ms: event.latencyMs ?? null,
-      error_code: event.errorCode ?? null,
-      error_message: event.errorMessage
-        ? event.errorMessage.slice(0, 500)
-        : null,
-      retry_count: event.retryCount ?? 0,
-      prompt_tokens: event.promptTokens ?? 0,
-      completion_tokens: event.completionTokens ?? 0,
-    });
+    await enTenant({ tenantId: event.tenantId }, (db) =>
+      db.insert(tables.providerUsageEvents).values({
+        tenant_id: event.tenantId,
+        provider: event.provider,
+        model: event.model,
+        operation: event.operation ?? "extraction",
+        status: event.status,
+        latency_ms: event.latencyMs ?? null,
+        error_code: event.errorCode ?? null,
+        error_message: event.errorMessage
+          ? event.errorMessage.slice(0, 500)
+          : null,
+        retry_count: event.retryCount ?? 0,
+        prompt_tokens: event.promptTokens ?? 0,
+        completion_tokens: event.completionTokens ?? 0,
+      })
+    );
   } catch {
     // Non-fatal — usage logging must never block extraction.
   }

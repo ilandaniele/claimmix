@@ -17,7 +17,9 @@
 
 import { desc } from "drizzle-orm";
 import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
-import { tables } from "@/lib/db";
+// `gmail_poll_state` es del sistema, no de un inquilino (no tiene la
+// columna). Va por el `db` del módulo a propósito.
+import { db, tables } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -47,7 +49,7 @@ const EMPTY_RESPONSE: GmailStatusResponse = {
 export async function GET() {
   try {
     // ── 1. Auth + admin role check ────────────────────────────────────────────
-    const { db, user } = await requireRole(...ALL_ROLES);
+    const { user } = await requireRole(...ALL_ROLES);
 
     // ── 2. Rate limit ─────────────────────────────────────────────────────────
     const rateLimitResult = await rateLimit(

@@ -657,6 +657,53 @@ hacerla corta, y el script ahora lo dice antes de que pase:
 respalda la casilla y el login). Rotarlos corta la casilla y obliga a
 reconectar; quedó dicho que esos se mantienen. Siguen anotados como expuestos.
 
+### 🛡️ Auditoría de seguridad (2026-08-26)
+
+Punto por punto, con el número medido al lado. Lo que dice "sí" está comprobado
+contra producción o con un test que falla si deja de ser cierto.
+
+| Punto | Estado |
+|---|---|
+| Aislamiento entre inquilinos (RLS) | 29 tablas con FORCE y política, rol sin BYPASSRLS, y la capa se planta si le dan uno que saltea |
+| CORS | ningún `Access-Control-Allow-Origin` para un origen ajeno |
+| Credenciales fuera del código | gitleaks en cada push, en verde |
+| Límite de tráfico | por (IP, cuenta) **y** por IP sola — el segundo se agregó hoy |
+| Inyección SQL | drizzle parametriza; 3 `sql.raw` y los tres con enteros acotados |
+| Autenticación y validación | 37 de 54 rutas con zod; las 17 restantes no leen cuerpo o validan a mano |
+| Cabeceras de seguridad | las 6, verificadas en producción |
+| GET no filtran secretos | 19 comprobaciones sobre 15 rutas, con sesión y sin ella |
+| Listados acotados | `per_page=100000` devuelve 100 |
+| Columnas de más | el listado pasó de 24 campos a 18 |
+| Peso en el navegador | 273 kB comprimidos, tope 300 |
+| Índices | medidos; RLS **no** los anula (comprobado con 300.000 filas) |
+| Tests | 2190 unitarios, 223 de integración, 55 e2e, 30 intentos de pen test |
+| Pruebas de carga | `pnpm load`, p95 de 299 ms con 20 analistas |
+
+**Lo que NO está, y es una decisión pendiente:**
+
+- **Recuperación de contraseña**: no existe el flujo. No hay enlace que pueda no
+  expirar, pero tampoco hay forma de recuperar una contraseña sin un admin.
+- **Dominio propio**: corre en `claimmix.vercel.app`. Hace falta comprar y
+  configurar uno.
+- **VPS**: no aplica. Esto es serverless; no hay puertos ni SSH que cerrar.
+
+**Dos cosas que encontró la revisión, en código escrito el mismo día:**
+
+El techo del login frenaba a quien ataca UNA cuenta y no a quien recorre una
+lista de diez mil direcciones — cinco intentos en cada una y ninguno en total.
+Ahora hay un segundo cupo por IP.
+
+Y el guardia que comprueba el rol cacheaba su promesa pasara lo que pasara: un
+error de red de un segundo dejaba la capa de datos rota hasta reciclar la
+instancia. Ahora sólo se cachea el resultado bueno.
+
+**Y una que casi reporto mal:** `getClientIp` toma el valor de más a la
+izquierda de `X-Forwarded-For`, que en general lo escribe quien llama. Probado
+contra producción —doce pedidos con una IP falsa fija y doce rotándola
+compartieron cupo— Vercel la sobrescribe en el borde. No es una vulnerabilidad;
+es una garantía de la plataforma de la que dependen todos los topes, y ahora
+está escrita en el código.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

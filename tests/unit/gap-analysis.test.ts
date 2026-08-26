@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { analyzeGaps } from "@/server/ai/gap-analysis";
+import { analyzeGaps } from "@/core/case/gap-analysis";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 
 // ── Helper ────────────────────────────────────────────────────────────────────

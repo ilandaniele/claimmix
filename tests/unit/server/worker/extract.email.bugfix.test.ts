@@ -120,7 +120,7 @@ vi.mock("@/server/ai/severity-classifier", () => ({
   requiresSpecialist: vi.fn().mockReturnValue(false),
 }));
 
-vi.mock("@/server/cases/fsm", () => ({
+vi.mock("@/core/case/fsm", () => ({
   isValidTransition: vi.fn().mockReturnValue(true),
 }));
 

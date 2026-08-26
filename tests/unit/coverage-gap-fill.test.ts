@@ -120,7 +120,7 @@ describe("getScenarioById", () => {
 
 // ── required-docs.ts ──────────────────────────────────────────────────────────
 
-import { getRequiredDocs, getAllDocKeys } from "@/server/ai/required-docs";
+import { getRequiredDocs, getAllDocKeys } from "@/core/case/required-docs";
 
 describe("getRequiredDocs", () => {
   it("returns required docs for choque", () => {

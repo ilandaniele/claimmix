@@ -9,7 +9,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { stripQuotedReply } from "@/server/worker/extract";
+// Del núcleo, y no de `@/server/worker/extract`, aunque desde ahí también se
+// re-exporten. Importarlas desde el worker obliga a este archivo a cargar mil
+// quinientas líneas que hablan con la base, y por eso más abajo hay dos
+// `vi.mock` que nada tienen que ver con partir un texto en dos.
+import { stripQuotedReply } from "@/core/email/conversation";
 
 describe("stripQuotedReply", () => {
   it("drops the copy of our own email that a reply quotes back", () => {
@@ -152,7 +156,7 @@ describe("loadInboundConversation", () => {
 
 // ── Dates in the rendered conversation ───────────────────────────────────────
 
-import { buildConversationBody } from "@/server/worker/extract";
+import { buildConversationBody } from "@/core/email/conversation";
 
 describe("buildConversationBody — when each message was sent", () => {
   // "Choqué ayer" was read as the 18th on the day it arrived and, two days

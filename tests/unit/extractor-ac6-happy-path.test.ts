@@ -110,11 +110,11 @@ vi.mock("@/server/confirmations/orchestrate", () => ({
   orchestratePostExtraction: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/server/cases/fsm", () => ({
+vi.mock("@/core/case/fsm", () => ({
   isValidTransition: vi.fn().mockReturnValue(true),
 }));
 
-vi.mock("@/server/ai/gap-analysis", () => ({
+vi.mock("@/core/case/gap-analysis", () => ({
   analyzeGaps: vi.fn().mockReturnValue({
     recommended_status: "listo",
     confidence_min: 0.9,

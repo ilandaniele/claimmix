@@ -11,7 +11,7 @@ import {
   isValidTransition,
   getAllowedTransitions,
   validateTransition,
-} from "@/server/cases/fsm";
+} from "@/core/case/fsm";
 import type { CaseStatus } from "@/lib/schemas/cases";
 
 // ── FSM_TRANSITIONS shape ─────────────────────────────────────────────────────

@@ -22,7 +22,7 @@
 
 import { describe, it, expect } from "vitest";
 import { bareAddress, isReservedTestAddress } from "@/lib/email/reserved";
-import { isReservedTestNumber } from "@/lib/phone/reserved";
+import { isReservedTestNumber } from "@/core/phone/reserved";
 
 describe("bareAddress", () => {
   it("saca la dirección de adentro de los ángulos", () => {

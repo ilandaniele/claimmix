@@ -12,12 +12,18 @@
 
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
-import { getRequiredDocs } from "./required-docs";
+import { getRequiredDocs } from "@/core/case/required-docs";
 
-/** Default confidence threshold from env or spec default 0.70. */
-export const DEFAULT_CONFIDENCE_THRESHOLD = parseFloat(
-  process.env.CONFIDENCE_THRESHOLD ?? "0.70"
-);
+/**
+ * El umbral por omisión, como número y no como lectura del entorno.
+ *
+ * Leer `process.env` acá adentro ataba esta función al proceso que la corre:
+ * para probar otro umbral había que cambiar una variable de entorno global, y
+ * el resultado dependía de con qué configuración arrancó el servidor. Ahora el
+ * valor entra por parámetro y quien lo lee del entorno es el borde
+ * (`src/server/worker/extract.ts`), que es el que tiene entorno.
+ */
+export const UMBRAL_POR_OMISION = 0.7;
 
 export interface GapAnalysisResult {
   /**
@@ -55,12 +61,13 @@ export interface GapAnalysisResult {
  *
  * @param claimType   - The case claim type (choque, robo, granizo, incendio)
  * @param fields      - Extracted fields from the AI extractor
- * @param threshold   - Confidence threshold; defaults to CONFIDENCE_THRESHOLD env / 0.70
+ * @param threshold   - Umbral de confianza. Quien lo lea del entorno es el
+ *                      borde; acá entra ya resuelto.
  */
 export function analyzeGaps(
   claimType: ClaimType,
   fields: ExtractedField[],
-  threshold: number = DEFAULT_CONFIDENCE_THRESHOLD
+  threshold: number = UMBRAL_POR_OMISION
 ): GapAnalysisResult {
   const requiredDocs = getRequiredDocs(claimType);
   const extractedKeySet = new Set(fields.map((f) => f.field_key));

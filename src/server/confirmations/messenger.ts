@@ -26,7 +26,7 @@ import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import type { EmailTemplate } from "@/server/email/render";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
-import { isReservedTestNumber } from "@/lib/phone/reserved";
+import { isReservedTestNumber } from "@/core/phone/reserved";
 import { enTenant } from "@/data/scope";
 
 export interface AgentMessage {

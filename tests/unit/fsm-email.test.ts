@@ -19,7 +19,7 @@ import {
   isAiAllowedStatus,
   EMAIL_INITIAL_STATUS,
   AI_ALLOWED_STATUSES,
-} from "@/server/cases/fsm";
+} from "@/core/case/fsm";
 import type { CaseStatus } from "@/lib/schemas/cases";
 
 // ── All statuses present in FSM map ──────────────────────────────────────────

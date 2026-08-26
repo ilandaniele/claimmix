@@ -22,7 +22,7 @@ import { cases } from "@/lib/db/schema";
 import type { CaseInsert, CaseRow, UserRow } from "@/lib/db/types";
 import type { CasePatch } from "@/lib/schemas/cases";
 import type { CaseStatus } from "@/lib/schemas/cases";
-import { validateTransition } from "@/server/cases/fsm";
+import { validateTransition } from "@/core/case/fsm";
 import { writeAuditLog, AuditEvent, type AuditEventType } from "@/lib/audit/log";
 import { AppError } from "@/lib/errors";
 

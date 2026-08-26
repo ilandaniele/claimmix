@@ -40,7 +40,7 @@ import {
   RATE_LIMIT_CONFIGS,
   buildUserKey,
 } from "@/lib/rate-limit/index";
-import { isValidTransition } from "@/server/cases/fsm";
+import { isValidTransition } from "@/core/case/fsm";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import { z } from "zod";
 

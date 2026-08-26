@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { analyzeGaps } from "@/server/ai/gap-analysis";
+import { analyzeGaps } from "@/core/case/gap-analysis";
 import { runMockExtractor } from "@/server/ai/mock-extractor";
 import { buildSystemPrompt, buildUserMessage } from "@/server/ai/prompt";
 import { redactString } from "@/lib/audit/redact";

@@ -186,7 +186,7 @@ function registerCommonMocks(
     requiresSpecialist:  vi.fn().mockReturnValue(false),
   }));
 
-  vi.doMock("@/server/cases/fsm", () => ({
+  vi.doMock("@/core/case/fsm", () => ({
     isValidTransition: vi.fn().mockReturnValue(true),
   }));
 

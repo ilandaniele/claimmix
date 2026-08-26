@@ -22,7 +22,7 @@ import { cases } from "@/lib/db/schema";
 import { CaseStatusSchema } from "@/lib/schemas/cases";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
-import { isTerminalStatus } from "@/server/cases/fsm";
+import { isTerminalStatus } from "@/core/case/fsm";
 import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";

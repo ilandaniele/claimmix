@@ -42,6 +42,39 @@ function archivos(dir, ext = [".ts", ".tsx"]) {
   return out;
 }
 
+/**
+ * El archivo sin sus comentarios ni sus cadenas.
+ *
+ * Un archivo del núcleo puede —y suele— nombrar `process.env` en un comentario
+ * que explica por qué NO lo lee. Buscar sobre el texto crudo convierte esa
+ * explicación en una infracción, y entonces la manera de que el chequeo pase es
+ * borrar el comentario: se pierde el porqué y se conserva el chequeo, que es
+ * exactamente al revés de lo que conviene.
+ */
+function sinComentarios(s) {
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '"' || c === "'" || c === "`") {
+      const q = c;
+      out += c;
+      for (i++; i < s.length && s[i] !== q; i++) {
+        if (s[i] === "\\") i++;
+      }
+      out += q;
+    } else if (c === "/" && s[i + 1] === "/") {
+      while (i < s.length && s[i] !== "\n") i++;
+      out += "\n";
+    } else if (c === "/" && s[i + 1] === "*") {
+      const fin = s.indexOf("*/", i + 2);
+      i = fin === -1 ? s.length : fin + 1;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
 const problemas = [];
 const bien = (t) => console.log(`   ✓ ${t}`);
 const mal = (t) => {
@@ -71,7 +104,7 @@ if (core.length === 0) {
 } else {
   let sucios = 0;
   for (const f of core) {
-    const s = readFileSync(f, "utf8");
+    const s = sinComentarios(readFileSync(f, "utf8"));
     const encontrados = PROHIBIDO.filter((p) => s.includes(p));
     if (encontrados.length) {
       mal(`${f} importa ${encontrados.join(", ")}`);

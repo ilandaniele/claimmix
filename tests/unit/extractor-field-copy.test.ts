@@ -106,11 +106,11 @@ vi.mock("@/server/confirmations/orchestrate", () => ({
   orchestratePostExtraction: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/server/cases/fsm", () => ({
+vi.mock("@/core/case/fsm", () => ({
   isValidTransition: vi.fn().mockReturnValue(true),
 }));
 
-vi.mock("@/server/ai/gap-analysis", () => ({
+vi.mock("@/core/case/gap-analysis", () => ({
   analyzeGaps: vi.fn().mockReturnValue({
     recommended_status: "listo",
     confidence_min: 0.9,
@@ -191,7 +191,7 @@ vi.mock("@/server/ai/mock-extractor", () => ({
 
 import { db } from "@/lib/db";
 import { checkBudget } from "@/server/ai/budget";
-import { isValidTransition } from "@/server/cases/fsm";
+import { isValidTransition } from "@/core/case/fsm";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";

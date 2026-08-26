@@ -24,6 +24,30 @@ if (!url) {
   process.exit(2);
 }
 
+/**
+ * Traducir el error del driver a algo accionable.
+ *
+ * "password authentication failed" sale como una excepción cruda con un stack
+ * de veinte líneas del driver, y no dice ninguna de las dos cosas que hacen
+ * falta: qué se rompió y cómo se arregla.
+ */
+function explicar(e: unknown): never {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/password authentication failed/i.test(msg)) {
+    console.error("\n✗ La contraseña de DATABASE_URL_APP no autentica.");
+    console.error("");
+    console.error("  El rol existe; lo que no sirve es la contraseña guardada.");
+    console.error("  Suele pasar después de rotarla en un lado y no en el otro.");
+    console.error("");
+    console.error("  1. pnpm rol-app --rotar        genera una nueva y la imprime");
+    console.error("  2. pegala en .env.local");
+    console.error("  3. vercel env rm DATABASE_URL_APP production");
+    console.error("     vercel env add DATABASE_URL_APP production");
+    process.exit(2);
+  }
+  throw e;
+}
+
 const rol = /:\/\/([^:]+):/.exec(url)?.[1] ?? "?";
 const sql = neon(url);
 
@@ -45,7 +69,7 @@ const tablas = (await sql`
       where a.attrelid = c.oid and a.attname = 'tenant_id' and a.attnum > 0
     )
   order by c.relname
-`) as Array<{ tabla: string; rls: boolean; forzado: boolean }>;
+`.catch(explicar)) as Array<{ tabla: string; rls: boolean; forzado: boolean }>;
 
 /**
  * Qué privilegios tiene el rol sobre cada una.

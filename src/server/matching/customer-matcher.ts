@@ -20,6 +20,7 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import type { ClaimFields } from "@/lib/schemas/extracted-claim";
 
 /** A single customer match result. */
@@ -133,6 +134,8 @@ async function matchByPolicyNumber(
   policyNumber: string,
   fields: Partial<ClaimFields>
 ): Promise<CustomerMatch[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const p = tables.policies;
   const c = tables.customers;
 
@@ -142,21 +145,23 @@ async function matchByPolicyNumber(
     customer: { id: string; full_name: string; email: string | null; dni: string | null } | null;
   }>;
   try {
-    data = await db
-      .select({
-        id: p.id,
-        customer_id: p.customer_id,
-        customer: {
-          id: c.id,
-          full_name: c.full_name,
-          email: c.email,
-          dni: c.dni,
-        },
-      })
-      .from(p)
-      .leftJoin(c, eq(p.customer_id, c.id))
-      .where(and(eq(p.tenant_id, tenantId), eq(p.policy_number, policyNumber)))
-      .limit(5);
+    data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: p.id,
+          customer_id: p.customer_id,
+          customer: {
+            id: c.id,
+            full_name: c.full_name,
+            email: c.email,
+            dni: c.dni,
+          },
+        })
+        .from(p)
+        .leftJoin(c, eq(p.customer_id, c.id))
+        .where(eq(p.policy_number, policyNumber))
+        .limit(5)
+    );
   } catch (e) {
     console.error("[customer-matcher] Policy lookup error:", (e as { code?: string })?.code);
     return [];
@@ -181,15 +186,19 @@ async function matchByDni(
   dni: string,
   fields: Partial<ClaimFields>
 ): Promise<CustomerMatch[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const c = tables.customers;
 
   let data: Array<{ id: string; full_name: string; email: string | null; dni: string | null }>;
   try {
-    data = await db
-      .select({ id: c.id, full_name: c.full_name, email: c.email, dni: c.dni })
-      .from(c)
-      .where(and(eq(c.tenant_id, tenantId), eq(c.dni, dni)))
-      .limit(5);
+    data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: c.id, full_name: c.full_name, email: c.email, dni: c.dni })
+        .from(c)
+        .where(eq(c.dni, dni))
+        .limit(5)
+    );
   } catch (e) {
     console.error("[customer-matcher] DNI lookup error:", (e as { code?: string })?.code);
     return [];
@@ -213,15 +222,19 @@ async function matchByEmail(
   email: string,
   fields: Partial<ClaimFields>
 ): Promise<CustomerMatch[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const c = tables.customers;
 
   let data: Array<{ id: string; full_name: string; email: string | null; dni: string | null }>;
   try {
-    data = await db
-      .select({ id: c.id, full_name: c.full_name, email: c.email, dni: c.dni })
-      .from(c)
-      .where(and(eq(c.tenant_id, tenantId), eq(c.email, email.toLowerCase())))
-      .limit(5);
+    data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: c.id, full_name: c.full_name, email: c.email, dni: c.dni })
+        .from(c)
+        .where(and( eq(c.email, email.toLowerCase())))
+        .limit(5)
+    );
   } catch (e) {
     console.error("[customer-matcher] Email lookup error:", (e as { code?: string })?.code);
     return [];
@@ -245,6 +258,8 @@ async function matchByPhone(
   phone: string,
   fields: Partial<ClaimFields>
 ): Promise<CustomerMatch[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   // Normalize phone: strip spaces, dashes, parentheses for matching.
   const normalized = phone.replace(/[\s\-().+]/g, "");
 
@@ -256,26 +271,27 @@ async function matchByPhone(
     customer: { id: string; full_name: string; email: string | null; dni: string | null } | null;
   }>;
   try {
-    data = await db
-      .select({
-        customer_id: cc.customer_id,
-        customer: {
-          id: c.id,
-          full_name: c.full_name,
-          email: c.email,
-          dni: c.dni,
-        },
-      })
-      .from(cc)
-      .leftJoin(c, eq(cc.customer_id, c.id))
-      .where(
-        and(
-          eq(cc.tenant_id, tenantId),
-          eq(cc.contact_type, "phone"),
-          eq(cc.value, phone)
+    data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          customer_id: cc.customer_id,
+          customer: {
+            id: c.id,
+            full_name: c.full_name,
+            email: c.email,
+            dni: c.dni,
+          },
+        })
+        .from(cc)
+        .leftJoin(c, eq(cc.customer_id, c.id))
+        .where(
+          and(
+            eq(cc.contact_type, "phone"),
+            eq(cc.value, phone)
+          )
         )
-      )
-      .limit(5);
+        .limit(5)
+    );
   } catch (e) {
     console.error("[customer-matcher] Phone lookup error:", (e as { code?: string })?.code);
     return [];

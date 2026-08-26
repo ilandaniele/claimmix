@@ -16,6 +16,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
 import type { CaseInsert, CaseRow, UserRow } from "@/lib/db/types";
@@ -53,15 +54,19 @@ export async function patchCase(
   ip: string | null,
   ua: string | null
 ): Promise<PatchResult> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId: actor.tenant_id };
   // ── 1. Fetch current case (tenant-scoped — wrong tenant → null) ───────────
   let current: CaseRow | null;
   try {
     current = firstRow(
-      await db
-        .select()
-        .from(cases)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, actor.tenant_id)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select()
+          .from(cases)
+          .where(eq(cases.id, caseId))
+          .limit(1)
+      )
     );
   } catch {
     current = null;
@@ -111,11 +116,13 @@ export async function patchCase(
   let updated: CaseRow | null;
   try {
     updated = firstRow(
-      await db
-        .update(cases)
-        .set(updateData)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, actor.tenant_id)))
-        .returning()
+      await enTenant(tenantCtx, (db) =>
+        db
+          .update(cases)
+          .set(updateData)
+          .where(eq(cases.id, caseId))
+          .returning()
+      )
     );
   } catch {
     updated = null;

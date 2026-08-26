@@ -24,6 +24,7 @@
 import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { renderTemplate, type EmailTemplate } from "./render";
@@ -84,29 +85,32 @@ async function resolveReplyContext(
   threadId?: string;
   originalSubject?: string;
 }> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   let inReplyTo: string | undefined;
   let threadId: string | undefined;
   let originalSubject: string | undefined;
 
   try {
     const inbound = firstRow(
-      await db
-        .select({
-          to_addr: claimMessages.to_addr,
-          thread_id: claimMessages.thread_id,
-          headers: claimMessages.headers,
-          subject: claimMessages.subject,
-        })
-        .from(claimMessages)
-        .where(
-          and(
-            eq(claimMessages.case_id, caseId),
-            eq(claimMessages.tenant_id, tenantId),
-            eq(claimMessages.direction, "inbound")
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            to_addr: claimMessages.to_addr,
+            thread_id: claimMessages.thread_id,
+            headers: claimMessages.headers,
+            subject: claimMessages.subject,
+          })
+          .from(claimMessages)
+          .where(
+            and(
+              eq(claimMessages.case_id, caseId),
+              eq(claimMessages.direction, "inbound")
+            )
           )
-        )
-        .orderBy(asc(claimMessages.received_at))
-        .limit(1)
+          .orderBy(asc(claimMessages.received_at))
+          .limit(1)
+      )
     );
 
     if (inbound) {

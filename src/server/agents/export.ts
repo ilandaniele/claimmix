@@ -412,32 +412,36 @@ async function loadConfigSection(db: Db, tenantId: string) {
 }
 
 async function loadApprovedExampleRows(db: Db, tenantId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const t = tables.trainingExamples;
   const c = tables.cases;
   const r = tables.agentRuns;
-  return (await db
-    .select({
-      id: t.id,
-      tenant_id: t.tenant_id,
-      agent_run_id: t.agent_run_id,
-      case_id: t.case_id,
-      claim_message_id: t.claim_message_id,
-      claim_type: t.claim_type,
-      input_payload: t.input_payload,
-      expected_output: t.expected_output,
-      status: t.status,
-      approved_by: t.approved_by,
-      approved_at: t.approved_at,
-      created_at: t.created_at,
-      severity: c.severity,
-      case_status: c.status,
-      trainability_score: r.trainability_score,
-    })
-    .from(t)
-    .leftJoin(c, eq(c.id, t.case_id))
-    .leftJoin(r, eq(r.id, t.agent_run_id))
-    .where(and(eq(t.tenant_id, tenantId), eq(t.status, "approved")))
-    .orderBy(desc(t.approved_at))) as ApprovedExampleExportRow[];
+  return (await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        id: t.id,
+        tenant_id: t.tenant_id,
+        agent_run_id: t.agent_run_id,
+        case_id: t.case_id,
+        claim_message_id: t.claim_message_id,
+        claim_type: t.claim_type,
+        input_payload: t.input_payload,
+        expected_output: t.expected_output,
+        status: t.status,
+        approved_by: t.approved_by,
+        approved_at: t.approved_at,
+        created_at: t.created_at,
+        severity: c.severity,
+        case_status: c.status,
+        trainability_score: r.trainability_score,
+      })
+      .from(t)
+      .leftJoin(c, eq(c.id, t.case_id))
+      .leftJoin(r, eq(r.id, t.agent_run_id))
+      .where(eq(t.status, "approved"))
+      .orderBy(desc(t.approved_at))) as ApprovedExampleExportRow[]
+  );
 }
 
 async function loadTrainingExamples(db: Db, tenantId: string, status: "approved" | "rejected") {

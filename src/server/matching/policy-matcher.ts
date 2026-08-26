@@ -11,6 +11,7 @@
 import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 
 /** A single policy match result. */
 export interface PolicyMatch {
@@ -87,6 +88,8 @@ async function matchByPolicyNumber(
   tenantId: string,
   policyNumber: string
 ): Promise<PolicyMatch[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const p = tables.policies;
   const c = tables.customers;
 
@@ -98,18 +101,20 @@ async function matchByPolicyNumber(
     customer_full_name: string | null;
   }>;
   try {
-    data = await db
-      .select({
-        id: p.id,
-        policy_number: p.policy_number,
-        policy_type: p.policy_type,
-        status: p.status,
-        customer_full_name: c.full_name,
-      })
-      .from(p)
-      .leftJoin(c, eq(p.customer_id, c.id))
-      .where(and(eq(p.tenant_id, tenantId), eq(p.policy_number, policyNumber)))
-      .limit(5);
+    data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: p.id,
+          policy_number: p.policy_number,
+          policy_type: p.policy_type,
+          status: p.status,
+          customer_full_name: c.full_name,
+        })
+        .from(p)
+        .leftJoin(c, eq(p.customer_id, c.id))
+        .where(eq(p.policy_number, policyNumber))
+        .limit(5)
+    );
   } catch (e) {
     console.error("[policy-matcher] Policy number lookup error:", (e as { code?: string })?.code);
     return [];
@@ -133,6 +138,8 @@ async function matchByCustomerId(
   tenantId: string,
   customerId: string
 ): Promise<PolicyMatch[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const p = tables.policies;
   const c = tables.customers;
 
@@ -144,19 +151,21 @@ async function matchByCustomerId(
     customer_full_name: string | null;
   }>;
   try {
-    data = await db
-      .select({
-        id: p.id,
-        policy_number: p.policy_number,
-        policy_type: p.policy_type,
-        status: p.status,
-        customer_full_name: c.full_name,
-      })
-      .from(p)
-      .leftJoin(c, eq(p.customer_id, c.id))
-      .where(and(eq(p.tenant_id, tenantId), eq(p.customer_id, customerId)))
-      .orderBy(asc(p.status)) // 'active' < 'cancelled' < 'expired' alphabetically
-      .limit(20);
+    data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: p.id,
+          policy_number: p.policy_number,
+          policy_type: p.policy_type,
+          status: p.status,
+          customer_full_name: c.full_name,
+        })
+        .from(p)
+        .leftJoin(c, eq(p.customer_id, c.id))
+        .where(eq(p.customer_id, customerId))
+        .orderBy(asc(p.status)) // 'active' < 'cancelled' < 'expired' alphabetically
+        .limit(20)
+    );
   } catch (e) {
     console.error("[policy-matcher] Customer policy lookup error:", (e as { code?: string })?.code);
     return [];

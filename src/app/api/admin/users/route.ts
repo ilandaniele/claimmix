@@ -13,6 +13,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -22,19 +23,23 @@ import { AppError } from "@/lib/errors";
 export async function GET() {
   try {
     const { userRow } = await requireAdmin();
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
-    const rows = await db
-      .select({
-        id: users.id,
-        full_name: users.full_name,
-        role: users.role,
-        created_at: users.created_at,
-        email: authUsers.email,
-      })
-      .from(users)
-      .leftJoin(authUsers, eq(users.id, authUsers.id))
-      .where(eq(users.tenant_id, userRow.tenant_id))
-      .orderBy(users.created_at);
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: users.id,
+          full_name: users.full_name,
+          role: users.role,
+          created_at: users.created_at,
+          email: authUsers.email,
+        })
+        .from(users)
+        .leftJoin(authUsers, eq(users.id, authUsers.id))
+        .orderBy(users.created_at)
+    );
 
     return ok({
       users: rows.map((r) => ({

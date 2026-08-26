@@ -10,6 +10,7 @@ import { redirect } from "next/navigation";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { AdminUsersClient } from "./AdminUsersClient";
@@ -34,20 +35,24 @@ export default async function AdminUsersPage() {
   }
 
   const { userRow } = ctx;
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
   // Fetch all users in this tenant joined with auth_users for email
-  const rows = await db
-    .select({
-      id: users.id,
-      full_name: users.full_name,
-      role: users.role,
-      created_at: users.created_at,
-      email: authUsers.email,
-    })
-    .from(users)
-    .leftJoin(authUsers, eq(users.id, authUsers.id))
-    .where(eq(users.tenant_id, userRow.tenant_id))
-    .orderBy(users.created_at);
+  const rows = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        id: users.id,
+        full_name: users.full_name,
+        role: users.role,
+        created_at: users.created_at,
+        email: authUsers.email,
+      })
+      .from(users)
+      .leftJoin(authUsers, eq(users.id, authUsers.id))
+      .orderBy(users.created_at)
+  );
 
   const initialUsers: UserRow[] = rows.map((r) => ({
     id: r.id,

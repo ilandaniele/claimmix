@@ -81,12 +81,16 @@ async function isSimulatedCase(caseId: string): Promise<boolean> {
 }
 
 async function recipientsFor(tenantId: string): Promise<string[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId: tenantId };
   const byRoles = async (roles: TenantRole[]) => {
-    const rows = await db
-      .select({ email: authUsers.email })
-      .from(users)
-      .innerJoin(authUsers, eq(authUsers.id, users.id))
-      .where(and(eq(users.tenant_id, tenantId), inArray(users.role, roles)));
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ email: authUsers.email })
+        .from(users)
+        .innerJoin(authUsers, eq(authUsers.id, users.id))
+        .where(and( inArray(users.role, roles)))
+    );
     return rows.map((r) => r.email).filter(Boolean);
   };
 

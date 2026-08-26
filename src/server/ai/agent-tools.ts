@@ -27,6 +27,7 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { customers, insuredAssets, policies } from "@/lib/db/schema";
 
 export interface ToolContext {
@@ -74,10 +75,14 @@ function normalizePolicyNumber(raw: string): string {
  * nothing on the hit.
  */
 async function hasPolicyData(tenantId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(policies)
-    .where(eq(policies.tenant_id, tenantId));
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
+  const [row] = await enTenant(tenantCtx, (db) =>
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(policies)
+      
+  );
   return (row?.n ?? 0) > 0;
 }
 
@@ -105,28 +110,31 @@ const verificarPoliza: AgentTool = {
   },
 
   async run(args, ctx) {
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    const tenantCtx: TenantContext = { tenantId: ctx.tenantId };
     const raw = str(args, "numero_poliza");
     if (!raw) return { error: "falta numero_poliza" };
 
     const number = normalizePolicyNumber(raw);
 
-    const rows = await db
-      .select({
-        id: policies.id,
-        status: policies.status,
-        type: policies.policy_type,
-        endDate: policies.end_date,
-        holderDni: customers.dni,
-      })
-      .from(policies)
-      .leftJoin(customers, eq(policies.customer_id, customers.id))
-      .where(
-        and(
-          eq(policies.tenant_id, ctx.tenantId),
-          sql`upper(replace(${policies.policy_number}, ' ', '')) = ${number}`
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: policies.id,
+          status: policies.status,
+          type: policies.policy_type,
+          endDate: policies.end_date,
+          holderDni: customers.dni,
+        })
+        .from(policies)
+        .leftJoin(customers, eq(policies.customer_id, customers.id))
+        .where(
+          and(
+            sql`upper(replace(${policies.policy_number}, ' ', '')) = ${number}`
+          )
         )
-      )
-      .limit(1);
+        .limit(1)
+    );
 
     const policy = rows[0];
     if (!policy) {
@@ -167,17 +175,21 @@ const verificarPoliza: AgentTool = {
 };
 
 async function vehiclesFor(policyId: string, tenantId: string): Promise<string[]> {
-  const rows = await db
-    .select({
-      make: insuredAssets.make,
-      model: insuredAssets.model,
-      year: insuredAssets.year,
-      plate: insuredAssets.plate,
-    })
-    .from(insuredAssets)
-    .where(
-      and(eq(insuredAssets.policy_id, policyId), eq(insuredAssets.tenant_id, tenantId))
-    );
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
+  const rows = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        make: insuredAssets.make,
+        model: insuredAssets.model,
+        year: insuredAssets.year,
+        plate: insuredAssets.plate,
+      })
+      .from(insuredAssets)
+      .where(
+        eq(insuredAssets.policy_id, policyId)
+      )
+  );
 
   return rows
     .map((r) =>
@@ -200,28 +212,31 @@ const polizasPorDni: AgentTool = {
   args: { dni: "El DNI de la persona, como lo escribió." },
 
   async run(args, ctx) {
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    const tenantCtx: TenantContext = { tenantId: ctx.tenantId };
     const given = str(args, "dni");
     if (!given) return { error: "falta dni" };
 
     const dni = normalizeDni(given);
     if (!dni) return { error: "el DNI no tiene un formato reconocible" };
 
-    const rows = await db
-      .select({
-        number: policies.policy_number,
-        status: policies.status,
-        type: policies.policy_type,
-        endDate: policies.end_date,
-      })
-      .from(policies)
-      .innerJoin(customers, eq(policies.customer_id, customers.id))
-      .where(
-        and(
-          eq(policies.tenant_id, ctx.tenantId),
-          sql`regexp_replace(coalesce(${customers.dni}, ''), '[^0-9]', '', 'g') = ${dni}`
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          number: policies.policy_number,
+          status: policies.status,
+          type: policies.policy_type,
+          endDate: policies.end_date,
+        })
+        .from(policies)
+        .innerJoin(customers, eq(policies.customer_id, customers.id))
+        .where(
+          and(
+            sql`regexp_replace(coalesce(${customers.dni}, ''), '[^0-9]', '', 'g') = ${dni}`
+          )
         )
-      )
-      .limit(10);
+        .limit(10)
+    );
 
     if (rows.length === 0) {
       if (!(await hasPolicyData(ctx.tenantId))) return NO_BOOK;
@@ -255,32 +270,35 @@ const historialDelCaso: AgentTool = {
   args: {},
 
   async run(_args, ctx) {
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    const tenantCtx: TenantContext = { tenantId: ctx.tenantId };
     const { extractedFields, missingDocs } = await import("@/lib/db/schema");
 
-    const fields = await db
-      .select({
-        key: extractedFields.field_key,
-        value: extractedFields.field_value,
-        confidence: extractedFields.confidence,
-      })
-      .from(extractedFields)
-      .where(
-        and(
-          eq(extractedFields.case_id, ctx.caseId),
-          eq(extractedFields.tenant_id, ctx.tenantId)
+    const fields = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          key: extractedFields.field_key,
+          value: extractedFields.field_value,
+          confidence: extractedFields.confidence,
+        })
+        .from(extractedFields)
+        .where(
+          eq(extractedFields.case_id, ctx.caseId)
         )
-      );
+    );
 
-    const docs = await db
-      .select({
-        key: missingDocs.doc_key,
-        satisfied: missingDocs.satisfied_at,
-        declined: missingDocs.declined_at,
-      })
-      .from(missingDocs)
-      .where(
-        and(eq(missingDocs.case_id, ctx.caseId), eq(missingDocs.tenant_id, ctx.tenantId))
-      );
+    const docs = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          key: missingDocs.doc_key,
+          satisfied: missingDocs.satisfied_at,
+          declined: missingDocs.declined_at,
+        })
+        .from(missingDocs)
+        .where(
+          eq(missingDocs.case_id, ctx.caseId)
+        )
+    );
 
     return {
       datos: fields.map((f) => ({

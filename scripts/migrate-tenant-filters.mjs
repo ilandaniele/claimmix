@@ -144,10 +144,14 @@ for (let i = lineas.length - 1; i >= 0; i--) {
     saltados.push({ linea: i + 1, motivo: "tiene un or() — puede ser el caso de las filas globales" });
     continue;
   }
-  if (/\.(leftJoin|innerJoin|rightJoin|fullJoin)\(/.test(texto)) {
-    saltados.push({ linea: i + 1, motivo: "tiene un join — el filtro puede estar acotando la otra tabla" });
-    continue;
-  }
+  // Los joins SÍ se tocan, y eso se midió antes de habilitarlo.
+  //
+  // La duda era razonable: si la política sólo se aplicara a la tabla del FROM,
+  // el filtro a mano estaría cubriendo la del JOIN y sacarlo abriría una fuga
+  // por el costado. Se probó con dos tablas y una fila ajena colgada de un padre
+  // propio —la fila que sólo aparecería si la política no cubriera ese lado— y
+  // no apareció: **RLS filtra las dos tablas**. Postgres aplica la política a
+  // cada relación de la consulta, no sólo a la principal.
   if (/enTenant\(/.test(texto)) {
     saltados.push({ linea: i + 1, motivo: "ya pasa por la capa" });
     continue;

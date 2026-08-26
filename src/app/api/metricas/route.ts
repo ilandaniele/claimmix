@@ -114,18 +114,19 @@ export async function GET() {
         ),
 
         // Top 5 analysts by cases closed this month
-        db
-          .select({ assigned_to: cases.assigned_to, full_name: users.full_name })
-          .from(cases)
-          .leftJoin(users, eq(users.id, cases.assigned_to))
-          .where(
-            and(
-              eq(cases.tenant_id, tenantId),
-              eq(cases.status, "cerrado"),
-              gte(cases.closed_at, monthStart),
-              lt(cases.closed_at, monthEnd)
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({ assigned_to: cases.assigned_to, full_name: users.full_name })
+            .from(cases)
+            .leftJoin(users, eq(users.id, cases.assigned_to))
+            .where(
+              and(
+                eq(cases.status, "cerrado"),
+                gte(cases.closed_at, monthStart),
+                lt(cases.closed_at, monthEnd)
+              )
             )
-          ),
+        ),
         enTenant(tenantCtx, (db) =>
           db
             .select({
@@ -153,27 +154,28 @@ export async function GET() {
             .from(aiUsage)
             
         ),
-        db
-          .select({
-            user_id: aiUsage.user_id,
-            full_name: users.full_name,
-            email: authUsers.email,
-            calls: count(),
-            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
-            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
-            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
-          })
-          .from(aiUsage)
-          .leftJoin(users, eq(users.id, aiUsage.user_id))
-          .leftJoin(authUsers, eq(authUsers.id, aiUsage.user_id))
-          .where(
-            and(
-              eq(aiUsage.tenant_id, tenantId),
-              gte(aiUsage.created_at, monthStart),
-              lt(aiUsage.created_at, monthEnd)
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({
+              user_id: aiUsage.user_id,
+              full_name: users.full_name,
+              email: authUsers.email,
+              calls: count(),
+              prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+              completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+              cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+            })
+            .from(aiUsage)
+            .leftJoin(users, eq(users.id, aiUsage.user_id))
+            .leftJoin(authUsers, eq(authUsers.id, aiUsage.user_id))
+            .where(
+              and(
+                gte(aiUsage.created_at, monthStart),
+                lt(aiUsage.created_at, monthEnd)
+              )
             )
-          )
-          .groupBy(aiUsage.user_id, users.full_name, authUsers.email),
+            .groupBy(aiUsage.user_id, users.full_name, authUsers.email)
+        ),
         enTenant(tenantCtx, (db) =>
           db
             .select({

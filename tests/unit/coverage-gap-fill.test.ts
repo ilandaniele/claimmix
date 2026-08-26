@@ -12,10 +12,27 @@
  */
 
 // vi.mock() must be at module top level — Vitest hoists these calls.
-vi.mock("@/data/scope", () => ({
-  enTenant: vi.fn().mockResolvedValue([]),
-  enTenantVarias: vi.fn(),
-}));
+// La capa de datos, corriendo contra el db que este test ya simula.
+//
+// Tiene que EJECUTAR el armador contra `mod.db`, no devolver un valor fijo:
+// un tapón que responde `[]` deja pasar los tests que esperan vacío y hace
+// fallar todos los demás sin decir por qué.
+//
+// Se lee `mod.db` en CADA llamada y no se desestructura, porque el mock de
+// abajo se reprograma test por test con mockReturnValue.
+vi.mock("@/data/scope", async () => {
+  const mod = await import("@/lib/db");
+  return {
+    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
+      Promise.resolve(armar(mod.db)),
+    // Éste va como vi.fn y no como función suelta: los tests de listado lo
+    // reprograman con mockResolvedValue en vez de simular la cadena entera.
+    // El puente queda de implementación por defecto para todos los demás.
+    enTenantVarias: vi.fn((_ctx: unknown, armar: (d: unknown) => unknown[]) =>
+      Promise.all(armar(mod.db))
+    ),
+  };
+});
 
 vi.mock("@/lib/db", () => ({
   db: {

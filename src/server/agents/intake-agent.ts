@@ -2,6 +2,7 @@ import "server-only";
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { downloadWhatsAppMedia, type WhatsAppMediaRef } from "@/server/whatsapp/cloud-api";
@@ -79,20 +80,24 @@ type CaseRow = {
  * write a non-PII decision audit event, and delegate to the extraction worker.
  */
 export async function runIntakeAgent(input: IntakeAgentInput): Promise<IntakeAgentResult> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId: input.tenantId };
   let caseRow: CaseRow | null;
   try {
     const c = tables.cases;
     caseRow = (firstRow(
-      await db
-        .select({
-          id: c.id,
-          tenant_id: c.tenant_id,
-          channel: c.channel,
-          status: c.status,
-        })
-        .from(c)
-        .where(and(eq(c.id, input.caseId), eq(c.tenant_id, input.tenantId)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            id: c.id,
+            tenant_id: c.tenant_id,
+            channel: c.channel,
+            status: c.status,
+          })
+          .from(c)
+          .where(eq(c.id, input.caseId))
+          .limit(1)
+      )
     ) as CaseRow | null);
   } catch {
     caseRow = null;
@@ -303,33 +308,36 @@ async function findExistingWhatsAppCase(
   threadId: string,
   channel: "whatsapp" | "whatsapp_sim" = "whatsapp"
 ): Promise<string | null> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const c = tables.cases;
     const data = firstRow(
-      await db
-        .select({ id: c.id })
-        .from(c)
-        .where(
-          and(
-            eq(c.tenant_id, tenantId),
-            eq(c.channel, channel),
-            eq(c.email_thread_id, threadId),
-            sql`coalesce(${c.updated_at}, ${c.created_at}) > now() - interval '${sql.raw(String(WHATSAPP_THREAD_WINDOW_DAYS))} days'`,
-            // Only statuses where the conversation is genuinely still open.
-            //
-            // `listo_para_core` and `listo` used to be here, and they are the
-            // reason a finished claim swallowed the next message from that
-            // number: the case is complete and waiting on the insurer, not on
-            // the person. Their next message is new information at best and a
-            // new accident at worst — either way it deserves its own case.
-            //
-            // `requiere_especialista` stays out for the same reason: a human
-            // owns it, and the agent has already said it will not write again.
-            inArray(c.status, ["recibido", "info_faltante", "confirmacion_pendiente"])
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: c.id })
+          .from(c)
+          .where(
+            and(
+              eq(c.channel, channel),
+              eq(c.email_thread_id, threadId),
+              sql`coalesce(${c.updated_at}, ${c.created_at}) > now() - interval '${sql.raw(String(WHATSAPP_THREAD_WINDOW_DAYS))} days'`,
+              // Only statuses where the conversation is genuinely still open.
+              //
+              // `listo_para_core` and `listo` used to be here, and they are the
+              // reason a finished claim swallowed the next message from that
+              // number: the case is complete and waiting on the insurer, not on
+              // the person. Their next message is new information at best and a
+              // new accident at worst — either way it deserves its own case.
+              //
+              // `requiere_especialista` stays out for the same reason: a human
+              // owns it, and the agent has already said it will not write again.
+              inArray(c.status, ["recibido", "info_faltante", "confirmacion_pendiente"])
+            )
           )
-        )
-        .orderBy(desc(c.created_at))
-        .limit(1)
+          .orderBy(desc(c.created_at))
+          .limit(1)
+      )
     );
 
     return data?.id ?? null;

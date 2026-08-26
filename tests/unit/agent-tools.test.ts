@@ -24,6 +24,26 @@ const rows: Record<string, unknown[]> = {};
  */
 let policiesOnFile = 500;
 
+// La capa de datos, corriendo contra el db que este test ya simula.
+//
+// Se lee `mod.db` en CADA llamada y no se desestructura: el mock de @/lib/db
+// suele exponer `db` con un getter para que los tests puedan intercambiar la
+// base simulada entre corridas, y un `const { db } = ...` congelaría el valor
+// de la primera llamada.
+//
+// Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
+// eso se verifica en tests/unit/data-scope-sin-rol.test.ts y, contra bases de
+// verdad, en `pnpm capa-datos` y `pnpm tenancy`.
+vi.mock("@/data/scope", async () => {
+  const mod = await import("@/lib/db");
+  return {
+    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
+      Promise.resolve(armar(mod.db)),
+    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
+      Promise.all(armar(mod.db)),
+  };
+});
+
 vi.mock("@/lib/db", () => ({
   db: { select: vi.fn(() => chain()) },
 }));
@@ -40,15 +60,22 @@ function chain() {
   return {
     from: (t: unknown) => {
       name = (t as Record<symbol, string>)[DRIZZLE_NAME] ?? "";
+      const resultado = () =>
+        name === "policies" ? Promise.resolve([{ n: policiesOnFile }]) : found();
       return {
         leftJoin: joined,
         innerJoin: joined,
         // A bare where() with no join and no limit is one of two queries: the
         // policy count, or the vehicles on a policy.
-        where: () =>
-          name === "policies"
-            ? Promise.resolve([{ n: policiesOnFile }])
-            : found(),
+        where: resultado,
+        // Y desde que el filtro por inquilino lo pone la base, hay consultas
+        // que no tienen where en absoluto: `.from(t)` y nada más. En drizzle
+        // eso es válido —significa "sin WHERE"— así que el mock también tiene
+        // que poder resolverse ahí. Sin esto, esas consultas devolvían el
+        // objeto de la cadena en vez de filas.
+        then: (ok: (v: unknown) => void, err?: (e: unknown) => void) =>
+          resultado().then(ok, err),
+        catch: (err: (e: unknown) => void) => resultado().catch(err),
       };
     },
   };

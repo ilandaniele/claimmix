@@ -199,25 +199,40 @@ async function attackSurface(): Promise<void> {
         args: [{ caseId: "x", tenantId: "x", userId: "x", caseCreatedAt: null }],
       }),
     });
-    // Un rebote al login también es un "no", igual que en el recorrido de
-    // rutas de arriba. Vale la pena decir de dónde viene cada rechazo:
-    //
-    //   307 → /login   lo frena el proxy. Es lo que pasa HOY, antes de que el
-    //                  deploy incluya el motor de flujos.
-    //   401/403/404    lo frena el propio motor. Es lo que tiene que pasar
-    //                  DESPUÉS, porque el proxy deja de mirar estas rutas: hubo
-    //                  que excluirlas de su matcher o el SDK no puede
-    //                  despacharse los pasos a sí mismo.
-    //
-    // Que el número cambie de 307 a 401 en el próximo deploy es lo esperado.
-    // Que cambie a 200 es que quedó abierta.
+    /*
+     * Lo que decide acá NO es el código de estado.
+     *
+     * En Vercel, el SDK registra estos manejadores como alcanzables sólo por la
+     * cola (`experimentalTriggers` en `.vc-config.json`), así que un POST normal
+     * nunca les llega: cae en el enrutador de páginas, que devuelve la página
+     * 404 de Next **con estado 200**. La primera versión de esta sonda miraba
+     * sólo el número y reportaba "abierta" — un falso positivo que, en un
+     * chequeo de seguridad, es tan caro como un falso negativo: se deja de
+     * mirar.
+     *
+     * La señal correcta es el cuerpo. Un motor de flujos que aceptó trabajo
+     * devuelve JSON con un identificador de corrida. Una página HTML significa
+     * que la petición ni siquiera llegó al motor.
+     */
     const donde = r.headers.get("location") ?? "";
     const rebotado = [301, 302, 307, 308].includes(r.status) && /\/login/.test(donde);
+    const esPagina = /^\s*<!DOCTYPE html|^\s*<html/i.test(r.body);
+    const arrancoAlgo = /wrun_[a-z0-9]/i.test(r.body) || /"runId"/.test(r.body);
+
     probe(
       `${ruta} no acepta invocaciones de afuera`,
-      [401, 403, 404, 405].includes(r.status) || rebotado,
+      !arrancoAlgo &&
+        ([401, 403, 404, 405].includes(r.status) || rebotado || esPagina),
       "encolar trabajo en nombre de cualquier aseguradora: correr el agente sobre casos ajenos, gastar el presupuesto de IA, y hacerle escribir a quien el atacante elija",
-      `(${r.status}${rebotado ? " → login, lo frena el proxy" : ""})`
+      `(${r.status}${
+        arrancoAlgo
+          ? " y DEVOLVIÓ UNA CORRIDA"
+          : rebotado
+            ? " → login, lo frena el proxy"
+            : esPagina
+              ? ", HTML — no llegó al motor"
+              : ""
+      })`
     );
   }
 

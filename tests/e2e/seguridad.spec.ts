@@ -49,9 +49,27 @@ test.describe("el motor de flujos no acepta trabajo de afuera", () => {
         maxRedirects: 0,
       });
 
-      // Cualquier cosa menos un 2xx. Un 400 vale: significa que ni siquiera
-      // llegó a mirar qué le pidieron.
-      expect(res.status(), `${ruta} respondió ${res.status()}`).toBeGreaterThanOrEqual(300);
+      /*
+       * Lo que decide NO es el código de estado.
+       *
+       * En local el mundo de flujos contesta 400/405. En Vercel, en cambio, el
+       * SDK registra estos manejadores como alcanzables sólo por la cola, así
+       * que un POST normal nunca les llega: cae en el enrutador de páginas y
+       * devuelve la página 404 de Next **con estado 200**.
+       *
+       * Un test que exigiera `>= 300` pasaría en local y daría rojo en
+       * producción por la razón equivocada. La señal correcta es el cuerpo: un
+       * motor que aceptó trabajo devuelve un identificador de corrida.
+       */
+      const cuerpo = await res.text();
+      expect(cuerpo, `${ruta} devolvió una corrida`).not.toMatch(/wrun_[a-z0-9]/i);
+      expect(cuerpo, `${ruta} devolvió una corrida`).not.toContain('"runId"');
+
+      const esPagina = /^\s*<!DOCTYPE html|^\s*<html/i.test(cuerpo);
+      expect(
+        res.status() >= 300 || esPagina,
+        `${ruta} respondió ${res.status()} con cuerpo que no es una página`
+      ).toBeTruthy();
     });
   }
 

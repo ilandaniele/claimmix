@@ -129,3 +129,52 @@ describe("el rol con el que entra la capa", () => {
     expect(consultadas).toHaveLength(1);
   });
 });
+
+describe("un fallo pasajero no deja la capa rota", () => {
+  it("vuelve a preguntar después de un error de red", async () => {
+    let intentos = 0;
+    vi.doMock("drizzle-orm/neon-http", () => ({
+      drizzle: () => ({
+        execute: (q: unknown) => {
+          if (JSON.stringify(q).includes("rolbypassrls")) {
+            intentos += 1;
+            // El primero se cae como se caería un hipo de red.
+            if (intentos === 1) return Promise.reject(new Error("fetch failed"));
+            return Promise.resolve([{ ...rol }]);
+          }
+          return { tipo: "consulta", q };
+        },
+        batch: () => Promise.resolve([{}, ["fila"]]),
+      }),
+    }));
+
+    const { enTenant } = await import("@/data/scope");
+
+    await expect(enTenant(CTX, (db) => db.execute("q") as never)).rejects.toThrow(
+      /fetch failed/
+    );
+
+    /*
+     * Éste es el test que importa.
+     *
+     * La primera versión cacheaba la promesa pasara lo que pasara, así que un
+     * error de un segundo dejaba guardada una promesa RECHAZADA y TODAS las
+     * consultas siguientes esperaban esa misma. La capa quedaba rota hasta que
+     * se reciclara la instancia, con un mensaje de red que no insinuaba que la
+     * respuesta estaba guardada.
+     */
+    await expect(enTenant(CTX, (db) => db.execute("q") as never)).resolves.toEqual([
+      "fila",
+    ]);
+    expect(intentos).toBe(2);
+  });
+
+  it("un rol con BYPASSRLS sigue fallando en cada intento", async () => {
+    rol = { usuario: "neondb_owner", saltea: true, es_super: false };
+    const { enTenant } = await import("@/data/scope");
+
+    // Olvidar el fallo no puede convertirse en dejarlo pasar la segunda vez.
+    await expect(enTenant(CTX, (db) => db.execute("q") as never)).rejects.toThrow(/BYPASSRLS/);
+    await expect(enTenant(CTX, (db) => db.execute("q") as never)).rejects.toThrow(/BYPASSRLS/);
+  });
+});

@@ -119,6 +119,20 @@ function cliente(): ClienteDatos {
 let rolComprobado: Promise<void> | null = null;
 
 function exigirRolSinBypass(db: ClienteDatos): Promise<void> {
+  /*
+   * Sólo se cachea el resultado BUENO. Un fallo se olvida.
+   *
+   * La primera versión guardaba la promesa pasara lo que pasara. Si la consulta
+   * se caía por algo pasajero —un hipo de red, un arranque en frío de Neon—
+   * quedaba cacheada una promesa RECHAZADA, y todas las consultas siguientes
+   * esperaban esa misma promesa. Un error de un segundo dejaba la capa de datos
+   * rota hasta que se reciclara la instancia, con un mensaje de red que no
+   * insinuaba en ningún momento que la respuesta estaba guardada.
+   *
+   * Ahora el `catch` limpia el caché y vuelve a tirar. El próximo pedido
+   * pregunta de nuevo: si el problema era pasajero, sigue; si es el rol
+   * equivocado, vuelve a fallar igual y con el mismo mensaje.
+   */
   rolComprobado ??= (async () => {
     const r = (await db.execute(
       sql`SELECT current_user::text AS usuario,
@@ -131,8 +145,8 @@ function exigirRolSinBypass(db: ClienteDatos): Promise<void> {
       | undefined;
     if (!fila) return; // No se pudo averiguar: no se bloquea por las dudas.
     if (fila.saltea || fila.es_super) {
-      // Se limpia para que un arreglo de la variable no exija reiniciar.
-      rolComprobado = null;
+      // El cliente también se tira: si alguien arregla la variable, que no haga
+      // falta reiniciar para que se tome la nueva.
       cacheCliente = null;
       cacheCadena = null;
       throw new Error(
@@ -143,7 +157,10 @@ function exigirRolSinBypass(db: ClienteDatos): Promise<void> {
           "(claimmix_app); se crea y se rota con `pnpm rol-app --rotar`."
       );
     }
-  })();
+  })().catch((e) => {
+    rolComprobado = null;
+    throw e;
+  });
   return rolComprobado;
 }
 

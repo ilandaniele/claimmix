@@ -29,17 +29,42 @@ const shouldSkip = !process.env.TEST_BASE_URL && !process.env.INTEGRATION_ENABLE
 
 // ── Helper: sign in and extract cookies ──────────────────────────────────────
 
+/**
+ * La sesión, una sola vez para todo el archivo.
+ *
+ * Antes cada test iniciaba sesión de nuevo, y desde que el endpoint tiene techo
+ * —cinco intentos cada diez segundos— el sexto test se comía un 429 y a partir
+ * de ahí fallaba todo. El techo no está de más: es la defensa contra adivinar
+ * contraseñas, y hasta hoy no existía en la ruta HTTP.
+ *
+ * Reusar la cookie tampoco es un truco para esquivarlo: es lo que hace
+ * cualquier cliente de verdad. Un navegador inicia sesión una vez y manda la
+ * misma cookie durante toda la tarde.
+ */
+let cookieMemorizada: string | null = null;
+
 async function signIn(email = TEST_EMAIL, password = TEST_PASSWORD): Promise<string> {
-  const res = await fetch(`${BASE_URL}/api/auth/sign-in`, {
+  if (email === TEST_EMAIL && cookieMemorizada) return cookieMemorizada;
+  const res = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json",
+        // Un navegador SIEMPRE manda Origin; `fetch` de Node no.
+        // Better Auth exige la cabecera en todo pedido que cambia estado
+        // —es su defensa contra CSRF— y sin ella responde
+        // MISSING_OR_NULL_ORIGIN. Mandarla no debilita nada: es lo que hace
+        // el navegador de un analista.
+        Origin: BASE_URL },
     body: JSON.stringify({ email, password }),
   });
   // Extract Set-Cookie header for subsequent requests
   const setCookie = res.headers.get("set-cookie") ?? "";
   if (!setCookie) {
-    throw new Error("sign-in did not return a session cookie");
+    throw new Error(
+      `sign-in did not return a session cookie (${res.status}). ` +
+        `Sembrá la base con \`pnpm sembrar\` y levantá el servidor.`
+    );
   }
+  if (email === TEST_EMAIL) cookieMemorizada = setCookie;
   return setCookie;
 }
 
@@ -237,7 +262,13 @@ describe.skipIf(shouldSkip)("PATCH /api/cases/:id", () => {
       `${BASE_URL}/api/cases/00000000-0000-0000-0000-000000000001`,
       {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json",
+        // Un navegador SIEMPRE manda Origin; `fetch` de Node no.
+        // Better Auth exige la cabecera en todo pedido que cambia estado
+        // —es su defensa contra CSRF— y sin ella responde
+        // MISSING_OR_NULL_ORIGIN. Mandarla no debilita nada: es lo que hace
+        // el navegador de un analista.
+        Origin: BASE_URL },
         body: JSON.stringify({ status: "cerrado" }),
       }
     );

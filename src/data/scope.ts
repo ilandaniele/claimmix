@@ -99,6 +99,54 @@ function cliente(): ClienteDatos {
   return cacheCliente;
 }
 
+/**
+ * Que el rol con el que entra esta capa NO saltee RLS.
+ *
+ * Es la única suposición de todo el aislamiento, y hasta acá no la comprobaba
+ * nadie: si `DATABASE_URL_APP` apunta a un rol con BYPASSRLS, las políticas no
+ * se aplican, las consultas —que ya no llevan `WHERE tenant_id`— devuelven las
+ * filas de **todos** los inquilinos, y no hay ningún error en el medio.
+ *
+ * No es hipotético. Pasó al armar los tests de integración: se apuntó
+ * `DATABASE_URL_APP` a la cadena del ensayo, que es la del dueño, y `/api/cases`
+ * empezó a servir casos de tres aseguradoras distintas con un 200 impecable. Lo
+ * agarró un test que comparaba los `tenant_id` de la respuesta; sin ese test,
+ * la pantalla se veía perfecta.
+ *
+ * Cuesta una consulta la primera vez que se usa el cliente, y nada después. Al
+ * lado de lo que evita, es gratis.
+ */
+let rolComprobado: Promise<void> | null = null;
+
+function exigirRolSinBypass(db: ClienteDatos): Promise<void> {
+  rolComprobado ??= (async () => {
+    const r = (await db.execute(
+      sql`SELECT current_user::text AS usuario,
+                 rolbypassrls AS saltea,
+                 rolsuper AS es_super
+            FROM pg_roles WHERE rolname = current_user`
+    )) as unknown as { rows?: Array<{ usuario: string; saltea: boolean; es_super: boolean }> };
+    const fila = (Array.isArray(r) ? r[0] : r?.rows?.[0]) as
+      | { usuario: string; saltea: boolean; es_super: boolean }
+      | undefined;
+    if (!fila) return; // No se pudo averiguar: no se bloquea por las dudas.
+    if (fila.saltea || fila.es_super) {
+      // Se limpia para que un arreglo de la variable no exija reiniciar.
+      rolComprobado = null;
+      cacheCliente = null;
+      cacheCadena = null;
+      throw new Error(
+        `[data] DATABASE_URL_APP entra como "${fila.usuario}", que ` +
+          `${fila.es_super ? "es superusuario" : "tiene BYPASSRLS"}. Ese rol ignora las ` +
+          "políticas de RLS, y como estas consultas ya no llevan filtro por inquilino, " +
+          "devolverían los datos de TODOS. Apuntá DATABASE_URL_APP al rol restringido " +
+          "(claimmix_app); se crea y se rota con `pnpm rol-app --rotar`."
+      );
+    }
+  })();
+  return rolComprobado;
+}
+
 /** La sentencia que pone el contexto. Va primera en cada lote. */
 function ponerContexto(db: ClienteDatos, tenantId: string) {
   return db.execute(sql`SELECT set_config('claimmix.tenant_id', ${tenantId}, true)`);
@@ -152,6 +200,7 @@ export async function enTenant<T>(
   armar: (db: ClienteDatos) => Promise<T>
 ): Promise<T> {
   const db = cliente();
+  await exigirRolSinBypass(db);
   // `batch` acepta las consultas ya armadas, no una promesa a la que esperar:
   // por eso la función de arriba se invoca sin await. Drizzle tipa `batch` con
   // tuplas, y expresar eso acá pelearía con la firma simple que hace que esto
@@ -186,6 +235,7 @@ export async function enTenantVarias<T extends readonly unknown[]>(
   armar: (db: ClienteDatos) => { [K in keyof T]: Promise<T[K]> } | readonly unknown[]
 ): Promise<T> {
   const db = cliente();
+  await exigirRolSinBypass(db);
   const consultas = armar(db) as readonly unknown[];
   for (const c of consultas) exigirConsulta(c);
   const res = (await (

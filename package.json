@@ -48,7 +48,8 @@
     "listo": "pnpm permisos && pnpm capa-datos && pnpm tenancy && pnpm arquitectura",
     "cobertura": "vitest run --coverage",
     "busqueda": "tsx --tsconfig tsconfig.rehearsal.json scripts/medir-busqueda.mts",
-    "explicar-busqueda": "tsx --tsconfig tsconfig.rehearsal.json scripts/explicar-busqueda.mts"
+    "explicar-busqueda": "tsx --tsconfig tsconfig.rehearsal.json scripts/explicar-busqueda.mts",
+    "sembrar": "tsx --tsconfig tsconfig.rehearsal.json scripts/sembrar-para-integracion.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

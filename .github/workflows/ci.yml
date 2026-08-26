@@ -210,49 +210,68 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Estos 204 tests NUNCA corrieron en CI, y no es por falta de un secreto.
+      # Estos 204 tests no corrieron nunca hasta hoy.
       #
-      # Hacen `fetch` contra un servidor HTTP y se autentican como un analista
-      # de verdad. Para correr necesitan tres cosas: un servidor levantado, una
-      # base con datos, y un usuario con contraseña. La tercera es la que no se
-      # puede resolver acá: el alta exige que la dirección esté verificada
-      # (`if (!emailVerified) return false` en provision.ts), y un alta por
-      # contraseña nunca lo está. Es una defensa deliberada —evita que alguien
-      # se dé de alta como una dirección de la lista blanca que todavía no se
-      # registró— y no se va a debilitar para que corra la CI.
+      # Necesitan tres cosas: una base con datos, un usuario con contraseña, y
+      # un servidor HTTP contra el que hacer `fetch`. La segunda parecía
+      # imposible —el alta exige dirección verificada, que es una defensa
+      # deliberada— hasta que se vio que eso gobierna la PROVISIÓN y no la
+      # creación de la cuenta. `pnpm sembrar` hace lo mismo que hace un admin
+      # cuando da de alta a alguien: crea la cuenta y después escribe el perfil.
       #
-      # La primera versión de este paso fallaba duro en `main` por el secreto
-      # faltante. Estaba mal: una compuerta que nadie puede satisfacer se
-      # termina desactivando, y entonces no queda ni el aviso. Ahora falla sólo
-      # si alguien la prendió y los tests se caen — y si no, deja constancia en
-      # el resumen del run de que 204 tests no corrieron y por qué.
+      # Corren contra el ENSAYO y con su rol restringido. Nunca contra
+      # producción: sembrar un usuario con contraseña conocida en la base donde
+      # viven denuncias reales es una puerta abierta con la llave puesta. El
+      # script se planta solo si le pasan la cadena de producción.
+      - name: Sembrar la base del ensayo
+        if: ${{ secrets.STAGING_DATABASE_URL != '' }}
+        run: pnpm sembrar
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+
+      - name: Levantar el servidor
+        if: ${{ secrets.STAGING_DATABASE_URL != '' }}
+        run: |
+          pnpm dev > /tmp/dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null "http://localhost:3000/api/health" && break
+            # 401 es "está arriba y pide credenciales", que alcanza.
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health)" = "401" ] && break
+            sleep 2
+          done
+          curl -s -o /dev/null -w "servidor: %{http_code}" http://localhost:3000/api/health
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          # El rol RESTRINGIDO del ensayo, no el dueño. Con el dueño, RLS no
+          # aplica y la aplicación sirve los datos de todos los inquilinos —
+          # pasó exactamente eso al armar estos tests. La capa ahora se planta
+          # sola si le dan un rol con BYPASSRLS, y este job lo comprueba de
+          # punta a punta.
+          DATABASE_URL_APP: ${{ secrets.STAGING_DATABASE_URL_APP }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          MOCK_AI: "true"
+
       - name: Run integration tests
         run: |
-          if [ "${{ secrets.INTEGRATION_ENABLED }}" = "true" ]; then
-            pnpm test:integration
+          if [ "${{ secrets.STAGING_DATABASE_URL }}" != "" ]; then
+            INTEGRATION_ENABLED=true pnpm test:integration
           else
             {
               echo "### 204 tests de integración no corrieron"
               echo ""
-              echo "Necesitan un servidor HTTP levantado, una base sembrada y un"
-              echo "usuario con contraseña. Lo último no se puede armar acá: el alta"
-              echo "exige dirección verificada, y un alta por contraseña nunca lo"
-              echo "está. Es una defensa a propósito, no un descuido."
+              echo "Falta el secreto \`STAGING_DATABASE_URL\` (y \`STAGING_DATABASE_URL_APP\`)."
+              echo "Corren contra el ensayo, nunca contra producción."
               echo ""
-              echo "Corren en local con \`pnpm check\`, contra el servidor de desarrollo."
-              echo ""
-              echo "Para prenderlos acá haría falta sembrar el usuario directamente en"
-              echo "la base, con un hash compatible con Better Auth, y levantar el"
-              echo "servidor en el job. Está anotado en docs/PROJECT_STATUS.md."
+              echo "En local: \`pnpm sembrar\`, levantar el servidor, y \`pnpm test:integration\`."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::notice title=Integración sin correr::204 tests no corrieron — ver el resumen del run. Corren en local con pnpm check."
+            echo "::warning title=Integración sin correr::Falta STAGING_DATABASE_URL — ver el resumen del run."
           fi
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
-          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
+          DATABASE_URL_APP: ${{ secrets.STAGING_DATABASE_URL_APP || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'placeholder-secret' }}
           MOCK_AI: "true"
-          INTEGRATION_ENABLED: ${{ secrets.INTEGRATION_ENABLED || 'false' }}
 
   # ── Cobertura, como trinquete ────────────────────────────────────────────────
   #

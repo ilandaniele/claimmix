@@ -113,10 +113,11 @@ export async function POST(request: NextRequest) {
      * la lista blanca— para que el rol y el inquilino que eligió el admin
      * ganen sobre los que puso el alta automática.
      *
-     * sin-inquilino: es la operación que CRUZA el borde a propósito. Toma a
-     * alguien que todavía no es de ningún inquilino y lo mete en el del admin;
-     * adentro de `enTenant` no vería la fila que va a crear.
+     * Y cruza el borde entre inquilinos a propósito: toma a alguien que todavía
+     * no es de ninguno y lo mete en el del admin.
      */
+    // sin-inquilino: adentro de `enTenant` no vería la fila que va a crear —
+    // el usuario nuevo todavía no pertenece a ningún inquilino.
     const perfil = await db
       .insert(users)
       .values({

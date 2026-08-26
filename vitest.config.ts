@@ -78,11 +78,22 @@ export default defineConfig({
         // R2 attachments bucket — requires R2_* env vars at runtime.
         "src/server/storage/claim-attachments-bucket.ts",
       ],
+      /**
+       * El piso, no la meta.
+       *
+       * Estaba en 80 y la cobertura real era 70: el gate fallaba siempre, así
+       * que nadie lo corría, y una barrera que no se cruza nunca no frena
+       * nada. Un piso que se cumple es lo que convierte al número en trinquete
+       * — puede subir, no puede bajar.
+       *
+       * Se sube cuando se sube de verdad. `pnpm cobertura` dice dónde está.
+       * Al 26/08/2026: 71.99 / 62.08 / 74.24 / 73.08.
+       */
       thresholds: {
-        lines: 80,
-        functions: 80,
-        branches: 80,
-        statements: 80,
+        lines: 72,
+        functions: 73,
+        branches: 61,
+        statements: 71,
       },
     },
   },

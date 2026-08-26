@@ -210,14 +210,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Mismo criterio que los e2e: en `main` no se saltea en silencio.
       - name: Run integration tests
-        # Skip gracefully when INTEGRATION_ENABLED is not set (no live Neon credentials)
         run: |
           if [ "${{ secrets.INTEGRATION_ENABLED }}" = "true" ]; then
             pnpm test:integration
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "::error title=Integración sin correr::Falta INTEGRATION_ENABLED=true. En main tienen que correr, o el check verde miente sobre lo que se probó."
+            exit 1
           else
-            echo "[skip] Integration tests skipped — INTEGRATION_ENABLED secret not set."
-            echo "       Set INTEGRATION_ENABLED=true + DATABASE_URL in GitHub Actions secrets to enable."
+            echo "::warning title=Integración sin correr::Falta INTEGRATION_ENABLED — normal en un fork. NO se probaron en este PR."
           fi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
@@ -226,10 +228,62 @@ jobs:
           MOCK_AI: "true"
           INTEGRATION_ENABLED: ${{ secrets.INTEGRATION_ENABLED || 'false' }}
 
+  # ── Cobertura, como trinquete ────────────────────────────────────────────────
+  #
+  # El piso está en `vitest.config.ts` y es el número real de hoy, no una
+  # aspiración: estaba en 80 con una cobertura de 70, así que fallaba siempre y
+  # nadie lo miraba. Una barrera que no se cruza nunca no frena nada.
+  #
+  # Así el número puede subir y no puede bajar. Cuando sube de verdad, se sube
+  # el piso en el mismo commit.
+  cobertura:
+    name: Cobertura
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Medir
+        run: pnpm cobertura
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
+          MOCK_AI: "true"
+
+      - name: Qué significa que esto falle
+        if: failure()
+        run: |
+          echo "::error title=La cobertura bajó::Un cambio agregó código sin tests, o borró tests."
+          echo ""
+          echo "  Reproducilo con: pnpm cobertura"
+          echo "  El detalle por archivo sale en la tabla que imprime."
+          echo ""
+          echo "  Si el código nuevo es imposible de probar en unitarios, va al"
+          echo "  \`exclude\` de vitest.config.ts CON EL MOTIVO — no se baja el piso."
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # ── 6. E2E tests ─────────────────────────────────────────────────────────────
   #
-  # Requiere una base viva. Sin el secreto se saltea, y saltearse es distinto de
-  # fallar: el paso lo dice en voz alta y no inventa un verde.
+  # Requiere una base viva para que arranque el servidor. Sin el secreto: aviso
+  # en un pull request —puede venir de un fork, que no recibe secretos— y ERROR
+  # en `main`, donde sí están y que falten significa que alguien los sacó.
   #
   # Tenía `continue-on-error: true`, o sea que un rojo acá no rompía nada. Y
   # estuvo en rojo, sin que nadie lo viera, durante días: un test exigía que
@@ -270,12 +324,26 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
+      # Sin secreto NO se saltea en silencio.
+      #
+      # Antes esto imprimía "[skip] E2E tests skipped" y el job quedaba en
+      # VERDE. Un check verde que no probó nada es peor que no tenerlo: se lee
+      # como cobertura y no existe. Los e2e necesitan una base para que arranque
+      # el servidor, así que no se pueden correr sin ella — pero eso tiene que
+      # verse.
+      #
+      # En un pull request queda como aviso: puede venir de un fork, que por
+      # diseño no recibe secretos. En `main` falla, porque ahí sí están y que
+      # falten significa que alguien los sacó.
       - name: Run E2E tests
         run: |
           if [ "${{ secrets.DATABASE_URL }}" != "" ]; then
             pnpm test:e2e --project=chromium
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "::error title=E2E sin correr::Falta el secreto DATABASE_URL. En main los e2e tienen que correr: un check verde que no probó nada se lee como cobertura y no existe."
+            exit 1
           else
-            echo "[skip] E2E tests skipped — DATABASE_URL secret not configured."
+            echo "::warning title=E2E sin correr::Falta DATABASE_URL — normal en un fork. Los e2e NO se probaron en este PR."
           fi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}

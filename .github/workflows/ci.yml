@@ -534,20 +534,29 @@ jobs:
           MOCK_AI: "true"
           ANALYZE: "true"
 
-      - name: Check bundle size (warn if > 300KB gzipped first-load JS)
-        run: |
-          # Parse Next.js build output for first-load JS size
-          # Next.js prints "First Load JS" in its build output
-          # We warn (non-blocking) if the shared chunk exceeds 300KB
-          BUILD_OUTPUT=$(cat .next/build-manifest.json 2>/dev/null || echo '{}')
-          echo "Build completed. Bundle size check passed."
-          echo "Manual check: run 'pnpm build' locally and inspect 'First Load JS' in output."
-          echo "Target: < 300 KB gzipped (spec: < 200 KB for main chunk)"
-          # Size-limit integration (when .size-limit.cjs is present)
-          if [ -f ".size-limit.cjs" ]; then
-            pnpm exec size-limit || true
-          fi
+      # Este paso imprimía "Bundle size check passed" SIEMPRE.
+      #
+      # Leía el manifiesto y lo tiraba, y después corría
+      # `size-limit || true` — un paquete que ni siquiera está instalado.
+      # O sea: un verde por commit, durante meses, sobre un número que
+      # nadie miró nunca.
+      #
+      # `pnpm peso` comprime los chunks del build con gzip y compara contra
+      # un presupuesto. Sin dependencias nuevas, y falla si se pasa.
+      - name: Cuánto JavaScript le llega al navegador
+        run: pnpm peso
 
+      - name: Qué significa que esto falle
+        if: failure()
+        run: |
+          echo "::error title=El paquete engordó::Algo agregó peso al JavaScript que baja el navegador."
+          echo ""
+          echo "  Reproducilo con: pnpm build && pnpm peso"
+          echo "  Muestra los chunks más grandes, que es por dónde empezar."
+          echo ""
+          echo "  Si el peso nuevo hace falta de verdad, subí el tope en"
+          echo "  scripts/medir-peso.mjs y decí en el commit por qué. Un tope que"
+          echo "  se sube solo cada vez que alguien lo pasa no es un tope."
   # ── 9. Integration tests (Gmail polling) ────────────────────────────────────
   # Replaces the old Postmark intake integration tests (W5: Postmark removed).
   # Tests Gmail polling, 410 stub, and route auth — all mock-only (no real Gmail creds).

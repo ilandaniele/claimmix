@@ -625,6 +625,38 @@ satisface en treinta segundos, no una imposible.
 **Estado de los pipelines:** CI en verde. Post-deploy con smoke, pen test,
 permisos, carga y timbre en verde.
 
+### 🔑 Credenciales rotadas (2026-08-26)
+
+Cuatro credenciales reales quedaron en el transcripto de una sesión de trabajo,
+y la razón principal era que `pnpm rol-app --rotar` **imprimía** la contraseña
+que acababa de generar. Ahora va del generador al archivo sin pasar por pantalla:
+una credencial que aparece en una terminal termina en un registro, una captura o
+el historial, y no hay forma de saber en cuál de los tres.
+
+| Rotada | Alcance |
+|---|---|
+| `claimmix_app` producción | la que usa la aplicación para todo |
+| `claimmix_app` ensayo | idem, en la base de pruebas |
+| `neondb_owner` ensayo | dueño de las tablas del ensayo |
+| Clave de API de Neon | **la de mayor alcance**: crea ramas, lee las cadenas de todas, fabrica más claves |
+
+La clave de Neon vieja responde 401 — comprobado.
+
+**Rotar dejó producción caída unos minutos.** El deploy que corre tiene las
+variables horneadas y no las relee, así que la capa de datos empezó a fallar la
+autenticación. Un redeploy lo resolvió. No hay forma de evitar esa ventana
+—Postgres no admite dos contraseñas a la vez para el mismo rol— pero sí de
+hacerla corta, y el script ahora lo dice antes de que pase:
+
+1. rotar
+2. subir la variable a Vercel
+3. **redesplegar** — el deploy que corre no relee las variables
+4. mirar `/api/health`
+
+**Sin rotar, a propósito:** el token de WhatsApp y el secreto de Google (que
+respalda la casilla y el login). Rotarlos corta la casilla y obliga a
+reconectar; quedó dicho que esos se mantienen. Siguen anotados como expuestos.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

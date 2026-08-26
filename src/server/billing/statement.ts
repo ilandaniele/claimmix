@@ -27,6 +27,7 @@
 import "server-only";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
 import type { BillingPeriod } from "@/lib/billing/period";
 
@@ -82,6 +83,8 @@ export async function computeStatement(
   tenantId: string,
   range: BillingPeriod
 ): Promise<StatementCore | null> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const cases = tables.cases;
   const aiUsage = tables.aiUsage;
 
@@ -121,21 +124,22 @@ export async function computeStatement(
     .from(cases)
     .where(inPeriod);
 
-  const [spend] = await db
-    .select({
-      calls: sql<number>`count(*)::int`,
-      prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::int`,
-      completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::int`,
-      cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
-    })
-    .from(aiUsage)
-    .where(
-      and(
-        eq(aiUsage.tenant_id, tenantId),
-        gte(aiUsage.created_at, range.start),
-        lt(aiUsage.created_at, range.next)
+  const [spend] = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        calls: sql<number>`count(*)::int`,
+        prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::int`,
+        completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::int`,
+        cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+      })
+      .from(aiUsage)
+      .where(
+        and(
+          gte(aiUsage.created_at, range.start),
+          lt(aiUsage.created_at, range.next)
+        )
       )
-    );
+  );
 
   // The tenant's stored terms are authoritative — they are what was signed.
   // The catalog only fills in for a row written before migration 0010.
@@ -189,19 +193,20 @@ export async function readFrozenStatement(
   tenantId: string,
   month: string
 ): Promise<Statement | null> {
-  const [row] = await db
-    .select({
-      payload: tables.billingInvoices.payload,
-      frozen_at: tables.billingInvoices.frozen_at,
-    })
-    .from(tables.billingInvoices)
-    .where(
-      and(
-        eq(tables.billingInvoices.tenant_id, tenantId),
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
+  const [row] = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        payload: tables.billingInvoices.payload,
+        frozen_at: tables.billingInvoices.frozen_at,
+      })
+      .from(tables.billingInvoices)
+      .where(
         eq(tables.billingInvoices.month, month)
       )
-    )
-    .limit(1);
+      .limit(1)
+  );
 
   if (!row) return null;
 

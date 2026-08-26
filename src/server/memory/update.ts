@@ -16,6 +16,7 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { redactObject } from "@/lib/audit/redact";
@@ -69,6 +70,8 @@ export async function updateMemoryFromConfirmation(
   actorId?: string,
   oldValue?: string
 ): Promise<void> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const now = new Date().toISOString();
     const t = tables.claimMemory;
@@ -77,17 +80,18 @@ export async function updateMemoryFromConfirmation(
     let existing: { id: string; value: unknown; use_count: number } | null = null;
     try {
       existing = firstRow(
-        await db
-          .select({ id: t.id, value: t.value, use_count: t.use_count })
-          .from(t)
-          .where(
-            and(
-              eq(t.tenant_id, tenantId),
-              eq(t.memory_type, "field_correction"),
-              eq(t.key, senderEmail)
+        await enTenant(tenantCtx, (db) =>
+          db
+            .select({ id: t.id, value: t.value, use_count: t.use_count })
+            .from(t)
+            .where(
+              and(
+                eq(t.memory_type, "field_correction"),
+                eq(t.key, senderEmail)
+              )
             )
-          )
-          .limit(1)
+            .limit(1)
+        )
       );
     } catch (e) {
       console.error("[memory/update] fetch error:", (e as { code?: string })?.code);

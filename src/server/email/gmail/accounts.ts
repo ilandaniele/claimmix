@@ -3,6 +3,7 @@ import "server-only";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { gmailAccounts } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 
@@ -132,25 +133,26 @@ export async function listEnabledGmailAccounts(): Promise<GmailAccount[]> {
 export async function getGmailAccountForTenant(
   tenantId: string
 ): Promise<GmailAccount | null> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const data = firstRow(
-      await db
-        .select({
-          id: gmailAccounts.id,
-          tenant_id: gmailAccounts.tenant_id,
-          email: gmailAccounts.email,
-          refresh_token_encrypted: gmailAccounts.refresh_token_encrypted,
-          enabled: gmailAccounts.enabled,
-        })
-        .from(gmailAccounts)
-        .where(
-          and(
-            eq(gmailAccounts.tenant_id, tenantId),
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            id: gmailAccounts.id,
+            tenant_id: gmailAccounts.tenant_id,
+            email: gmailAccounts.email,
+            refresh_token_encrypted: gmailAccounts.refresh_token_encrypted,
+            enabled: gmailAccounts.enabled,
+          })
+          .from(gmailAccounts)
+          .where(
             eq(gmailAccounts.enabled, true)
           )
-        )
-        .orderBy(asc(gmailAccounts.created_at), asc(gmailAccounts.id))
-        .limit(1)
+          .orderBy(asc(gmailAccounts.created_at), asc(gmailAccounts.id))
+          .limit(1)
+      )
     );
 
     if (!data) return null;

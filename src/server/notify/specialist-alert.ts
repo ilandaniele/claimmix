@@ -19,6 +19,7 @@ import "server-only";
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, cases, users } from "@/lib/db/schema";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
@@ -119,6 +120,9 @@ function renderAlert(input: SpecialistAlertInput, caseUrl: string) {
  */
 export async function alertSpecialists(input: SpecialistAlertInput): Promise<void> {
   const { caseId, tenantId } = input;
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: tenantId };
 
   try {
     if (await isSimulatedCase(caseId)) {
@@ -215,19 +219,22 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
 
 /** Has anyone already been told about this case? */
 async function alreadyAlerted(caseId: string, tenantId: string): Promise<boolean> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const { auditLog } = await import("@/lib/db/schema");
-    const rows = await db
-      .select({ id: auditLog.id })
-      .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.tenant_id, tenantId),
-          eq(auditLog.target_id, caseId),
-          eq(auditLog.event_type, AuditEvent.SPECIALIST_ALERTED)
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: auditLog.id })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.target_id, caseId),
+            eq(auditLog.event_type, AuditEvent.SPECIALIST_ALERTED)
+          )
         )
-      )
-      .limit(1);
+        .limit(1)
+    );
     return rows.length > 0;
   } catch {
     // Unknown means send: a duplicate alert is noise, a missing one is a claim

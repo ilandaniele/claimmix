@@ -21,6 +21,7 @@
 import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import {
   claimFieldConfirmations,
   extractedFields as extractedFieldsTable,
@@ -238,20 +239,21 @@ async function fetchStoredFields(
   caseId: string,
   tenantId: string
 ): Promise<ExtractedField[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
-    const rows = await db
-      .select({
-        field_key: extractedFieldsTable.field_key,
-        field_value: extractedFieldsTable.field_value,
-        confidence: extractedFieldsTable.confidence,
-      })
-      .from(extractedFieldsTable)
-      .where(
-        and(
-          eq(extractedFieldsTable.case_id, caseId),
-          eq(extractedFieldsTable.tenant_id, tenantId)
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          field_key: extractedFieldsTable.field_key,
+          field_value: extractedFieldsTable.field_value,
+          confidence: extractedFieldsTable.confidence,
+        })
+        .from(extractedFieldsTable)
+        .where(
+          eq(extractedFieldsTable.case_id, caseId)
         )
-      );
+    );
 
     return rows.map((r) => ({
       field_key: r.field_key,
@@ -279,18 +281,21 @@ async function fetchMissingDocKeys(
   caseId: string,
   tenantId: string
 ): Promise<string[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
-    const data = await db
-      .select({ doc_key: missingDocs.doc_key })
-      .from(missingDocs)
-      .where(
-        and(
-          eq(missingDocs.case_id, caseId),
-          eq(missingDocs.tenant_id, tenantId),
-          isNull(missingDocs.satisfied_at),
-          isNull(missingDocs.declined_at)
+    const data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ doc_key: missingDocs.doc_key })
+        .from(missingDocs)
+        .where(
+          and(
+            eq(missingDocs.case_id, caseId),
+            isNull(missingDocs.satisfied_at),
+            isNull(missingDocs.declined_at)
+          )
         )
-      );
+    );
 
     // Canonical, so a `numero_poliza` gap and a `policy_number` gap are the
     // same gap rather than two.
@@ -314,24 +319,27 @@ async function fetchPendingConfirmations(
   conflict_with_value: string | null;
   confidence: number;
 }>> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     // Column names in the Neon schema are field_name / suggested_value —
     // aliased here to preserve the internal field_key / proposed_value shape.
-    const data = await db
-      .select({
-        field_key: claimFieldConfirmations.field_name,
-        proposed_value: claimFieldConfirmations.suggested_value,
-        conflict_with_value: claimFieldConfirmations.conflict_with_value,
-        confidence: claimFieldConfirmations.confidence,
-      })
-      .from(claimFieldConfirmations)
-      .where(
-        and(
-          eq(claimFieldConfirmations.case_id, caseId),
-          eq(claimFieldConfirmations.tenant_id, tenantId),
-          eq(claimFieldConfirmations.status, "pending")
+    const data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          field_key: claimFieldConfirmations.field_name,
+          proposed_value: claimFieldConfirmations.suggested_value,
+          conflict_with_value: claimFieldConfirmations.conflict_with_value,
+          confidence: claimFieldConfirmations.confidence,
+        })
+        .from(claimFieldConfirmations)
+        .where(
+          and(
+            eq(claimFieldConfirmations.case_id, caseId),
+            eq(claimFieldConfirmations.status, "pending")
+          )
         )
-      );
+    );
 
     // numeric columns come back as strings from Drizzle — normalize to number.
     return data.map((row) => ({

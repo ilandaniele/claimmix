@@ -29,6 +29,7 @@
 import "server-only";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {
   cases,
@@ -666,6 +667,8 @@ async function resolveAnsweredConfirmations(
   fields: ExtractedClaim["fields"],
   latestMessageText?: string
 ): Promise<void> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const settled = new Set(
     fields
       .filter((f) => f.confidence >= MEDIUM_CONFIDENCE_HIGH)
@@ -689,17 +692,18 @@ async function resolveAnsweredConfirmations(
   if (settled.size === 0) return;
 
   try {
-    await db
-      .update(claimFieldConfirmations)
-      .set({ status: "confirmed" })
-      .where(
-        and(
-          eq(claimFieldConfirmations.case_id, caseId),
-          eq(claimFieldConfirmations.tenant_id, tenantId),
-          eq(claimFieldConfirmations.status, "pending"),
-          inArray(claimFieldConfirmations.field_name, [...settled])
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(claimFieldConfirmations)
+        .set({ status: "confirmed" })
+        .where(
+          and(
+            eq(claimFieldConfirmations.case_id, caseId),
+            eq(claimFieldConfirmations.status, "pending"),
+            inArray(claimFieldConfirmations.field_name, [...settled])
+          )
         )
-      );
+    );
   } catch (err) {
     console.error("[orchestrate] Failed to resolve confirmations:", errCode(err));
   }
@@ -722,20 +726,23 @@ async function askedPendingFields(
   tenantId: string,
   fields: ExtractedClaim["fields"]
 ): Promise<string[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const recorded = await lastAskedKeys(caseId, tenantId);
   if (recorded.length > 0) return recorded;
 
   try {
-    const rows = await db
-      .select({ field_name: claimFieldConfirmations.field_name })
-      .from(claimFieldConfirmations)
-      .where(
-        and(
-          eq(claimFieldConfirmations.case_id, caseId),
-          eq(claimFieldConfirmations.tenant_id, tenantId),
-          eq(claimFieldConfirmations.status, "pending")
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ field_name: claimFieldConfirmations.field_name })
+        .from(claimFieldConfirmations)
+        .where(
+          and(
+            eq(claimFieldConfirmations.case_id, caseId),
+            eq(claimFieldConfirmations.status, "pending")
+          )
         )
-      );
+    );
 
     const ranked = collectConfirmableFields(
       rows.map((r) => r.field_name),
@@ -847,6 +854,8 @@ async function recordLookedUpFields(
   tenantId: string,
   resolved: Array<{ field: string; value: string }>
 ): Promise<void> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     await db
       .insert(extractedFields)
@@ -869,20 +878,21 @@ async function recordLookedUpFields(
 
     // Closes the request too, so the next round does not ask for the document
     // or field we just filled in ourselves.
-    await db
-      .update(missingDocs)
-      .set({ satisfied_at: new Date().toISOString() })
-      .where(
-        and(
-          eq(missingDocs.case_id, caseId),
-          eq(missingDocs.tenant_id, tenantId),
-          isNull(missingDocs.satisfied_at),
-          inArray(
-            missingDocs.doc_key,
-            resolved.flatMap((r) => [r.field, canonicalFieldKey(r.field)])
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(missingDocs)
+        .set({ satisfied_at: new Date().toISOString() })
+        .where(
+          and(
+            eq(missingDocs.case_id, caseId),
+            isNull(missingDocs.satisfied_at),
+            inArray(
+              missingDocs.doc_key,
+              resolved.flatMap((r) => [r.field, canonicalFieldKey(r.field)])
+            )
           )
         )
-      );
+    );
 
     console.info(
       JSON.stringify({
@@ -926,6 +936,9 @@ async function escalate(opts: {
   reason: string;
 }): Promise<void> {
   const { caseId, tenantId, severity } = opts;
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: tenantId };
 
   await setStatus(caseId, tenantId, "requiere_especialista");
 
@@ -1096,14 +1109,18 @@ async function setStatus(
   tenantId: string,
   status: string
 ): Promise<void> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
-    await db
-      .update(cases)
-      .set({
-        status: status as CaseRow["status"],
-        updated_at: new Date().toISOString(),
-      })
-      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(cases)
+        .set({
+          status: status as CaseRow["status"],
+          updated_at: new Date().toISOString(),
+        })
+        .where(eq(cases.id, caseId))
+    );
   } catch (err) {
     console.error("[orchestrate] Failed to update case status:", errCode(err), "case:", caseId);
   }
@@ -1126,19 +1143,22 @@ async function upsertFieldConfirmation(
     conflict_with_value: string | null;
   }
 ): Promise<void> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const existing = firstRow(
-      await db
-        .select({ id: claimFieldConfirmations.id })
-        .from(claimFieldConfirmations)
-        .where(
-          and(
-            eq(claimFieldConfirmations.case_id, caseId),
-            eq(claimFieldConfirmations.tenant_id, tenantId),
-            eq(claimFieldConfirmations.field_name, row.field_key)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: claimFieldConfirmations.id })
+          .from(claimFieldConfirmations)
+          .where(
+            and(
+              eq(claimFieldConfirmations.case_id, caseId),
+              eq(claimFieldConfirmations.field_name, row.field_key)
+            )
           )
-        )
-        .limit(1)
+          .limit(1)
+      )
     );
 
     const values = {
@@ -1211,25 +1231,28 @@ async function alreadyAskedFor(
  * working on.
  */
 async function lastAskedKeys(caseId: string, tenantId: string): Promise<string[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const last = firstRow(
-      await db
-        .select({ asked_keys: outboundMessages.asked_keys })
-        .from(outboundMessages)
-        .where(
-          and(
-            eq(outboundMessages.case_id, caseId),
-            eq(outboundMessages.tenant_id, tenantId),
-            // A simulated message counts. It is the message that would have
-            // gone out, composed by the same writer, and a rehearsal in which
-            // the agent never remembers having spoken is rehearsing something
-            // other than production.
-            inArray(outboundMessages.status, ["sent", "skipped_simulated"]),
-            isNotNull(outboundMessages.asked_keys)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ asked_keys: outboundMessages.asked_keys })
+          .from(outboundMessages)
+          .where(
+            and(
+              eq(outboundMessages.case_id, caseId),
+              // A simulated message counts. It is the message that would have
+              // gone out, composed by the same writer, and a rehearsal in which
+              // the agent never remembers having spoken is rehearsing something
+              // other than production.
+              inArray(outboundMessages.status, ["sent", "skipped_simulated"]),
+              isNotNull(outboundMessages.asked_keys)
+            )
           )
-        )
-        .orderBy(desc(outboundMessages.created_at))
-        .limit(1)
+          .orderBy(desc(outboundMessages.created_at))
+          .limit(1)
+      )
     );
     return last?.asked_keys ?? [];
   } catch (err) {
@@ -1255,35 +1278,39 @@ async function filesArrivedSinceWeLastSpoke(
   caseId: string,
   tenantId: string
 ): Promise<boolean> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const spoke = firstRow(
-      await db
-        .select({ created_at: outboundMessages.created_at })
-        .from(outboundMessages)
-        .where(
-          and(
-            eq(outboundMessages.case_id, caseId),
-            eq(outboundMessages.tenant_id, tenantId),
-            inArray(outboundMessages.status, ["sent", "skipped_simulated"])
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ created_at: outboundMessages.created_at })
+          .from(outboundMessages)
+          .where(
+            and(
+              eq(outboundMessages.case_id, caseId),
+              inArray(outboundMessages.status, ["sent", "skipped_simulated"])
+            )
           )
-        )
-        .orderBy(desc(outboundMessages.created_at))
-        .limit(1)
+          .orderBy(desc(outboundMessages.created_at))
+          .limit(1)
+      )
     );
     if (!spoke?.created_at) return false;
 
     const since = firstRow(
-      await db
-        .select({ id: claimAttachments.id })
-        .from(claimAttachments)
-        .where(
-          and(
-            eq(claimAttachments.case_id, caseId),
-            eq(claimAttachments.tenant_id, tenantId),
-            gt(claimAttachments.created_at, spoke.created_at)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: claimAttachments.id })
+          .from(claimAttachments)
+          .where(
+            and(
+              eq(claimAttachments.case_id, caseId),
+              gt(claimAttachments.created_at, spoke.created_at)
+            )
           )
-        )
-        .limit(1)
+          .limit(1)
+      )
     );
     return Boolean(since);
   } catch (err) {
@@ -1312,35 +1339,39 @@ async function factsLearnedSinceWeLastSpoke(
   caseId: string,
   tenantId: string
 ): Promise<boolean> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const spoke = firstRow(
-      await db
-        .select({ created_at: outboundMessages.created_at })
-        .from(outboundMessages)
-        .where(
-          and(
-            eq(outboundMessages.case_id, caseId),
-            eq(outboundMessages.tenant_id, tenantId),
-            inArray(outboundMessages.status, ["sent", "skipped_simulated"])
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ created_at: outboundMessages.created_at })
+          .from(outboundMessages)
+          .where(
+            and(
+              eq(outboundMessages.case_id, caseId),
+              inArray(outboundMessages.status, ["sent", "skipped_simulated"])
+            )
           )
-        )
-        .orderBy(desc(outboundMessages.created_at))
-        .limit(1)
+          .orderBy(desc(outboundMessages.created_at))
+          .limit(1)
+      )
     );
     if (!spoke?.created_at) return false;
 
     const since = firstRow(
-      await db
-        .select({ id: extractedFields.id })
-        .from(extractedFields)
-        .where(
-          and(
-            eq(extractedFields.case_id, caseId),
-            eq(extractedFields.tenant_id, tenantId),
-            gt(extractedFields.extracted_at, spoke.created_at)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: extractedFields.id })
+          .from(extractedFields)
+          .where(
+            and(
+              eq(extractedFields.case_id, caseId),
+              gt(extractedFields.extracted_at, spoke.created_at)
+            )
           )
-        )
-        .limit(1)
+          .limit(1)
+      )
     );
     return Boolean(since);
   } catch (err) {
@@ -1352,17 +1383,18 @@ async function factsLearnedSinceWeLastSpoke(
 
 /** Whether anything has already gone out to the claimant on this case. */
 async function hasPriorOutbound(caseId: string, tenantId: string): Promise<boolean> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
-    const rows = await db
-      .select({ id: outboundMessages.id })
-      .from(outboundMessages)
-      .where(
-        and(
-          eq(outboundMessages.case_id, caseId),
-          eq(outboundMessages.tenant_id, tenantId)
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: outboundMessages.id })
+        .from(outboundMessages)
+        .where(
+          eq(outboundMessages.case_id, caseId)
         )
-      )
-      .limit(1);
+        .limit(1)
+    );
     return rows.length > 0;
   } catch (err) {
     // Fall back to the first-contact wording: greeting someone twice is a
@@ -1380,18 +1412,21 @@ async function checkConfirmationAlreadySent(
   caseId: string,
   tenantId: string
 ): Promise<boolean> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
-    const data = await db
-      .select({ id: outboundMessages.id })
-      .from(outboundMessages)
-      .where(
-        and(
-          eq(outboundMessages.case_id, caseId),
-          eq(outboundMessages.tenant_id, tenantId),
-          eq(outboundMessages.template, "confirmation_received")
+    const data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: outboundMessages.id })
+        .from(outboundMessages)
+        .where(
+          and(
+            eq(outboundMessages.case_id, caseId),
+            eq(outboundMessages.template, "confirmation_received")
+          )
         )
-      )
-      .limit(1);
+        .limit(1)
+    );
 
     return data.length > 0;
   } catch (err) {

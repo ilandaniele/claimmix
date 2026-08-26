@@ -9,6 +9,7 @@
 import "server-only";
 import { and, asc, eq, or, isNull } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 
 export interface AgentCustomField {
   id: string;
@@ -27,28 +28,32 @@ export async function loadActiveCustomFields(
   tenantId: string,
   claimType?: string | null
 ): Promise<AgentCustomField[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const t = tables.agentCustomFields;
     const claimFilter = claimType
       ? or(isNull(t.claim_type), eq(t.claim_type, claimType))
       : isNull(t.claim_type);
 
-    return (await db
-      .select({
-        id: t.id,
-        key: t.key,
-        label: t.label,
-        description: t.description,
-        field_type: t.field_type,
-        claim_type: t.claim_type,
-        required: t.required,
-        ask_if_missing: t.ask_if_missing,
-        enum_values: t.enum_values,
-        active: t.active,
-      })
-      .from(t)
-      .where(and(eq(t.tenant_id, tenantId), eq(t.active, true), claimFilter))
-      .orderBy(asc(t.key))) as AgentCustomField[];
+    return (await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: t.id,
+          key: t.key,
+          label: t.label,
+          description: t.description,
+          field_type: t.field_type,
+          claim_type: t.claim_type,
+          required: t.required,
+          ask_if_missing: t.ask_if_missing,
+          enum_values: t.enum_values,
+          active: t.active,
+        })
+        .from(t)
+        .where(and( eq(t.active, true), claimFilter))
+        .orderBy(asc(t.key))) as AgentCustomField[]
+    );
   } catch (e) {
     const code = (e as { code?: string })?.code;
     if (code && code !== "42P01" && code !== "42703") {

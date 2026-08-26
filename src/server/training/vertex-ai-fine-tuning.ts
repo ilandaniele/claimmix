@@ -24,6 +24,7 @@ import { GoogleAuth } from "google-auth-library";
 import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
@@ -183,18 +184,22 @@ function toGeminiJsonlLine(example: {
 }
 
 async function approvedExamplesForTenant(tenantId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const t = tables.trainingExamples;
-  const rows = await db
-    .select({
-      id: t.id,
-      input_payload: t.input_payload,
-      expected_output: t.expected_output,
-      created_at: t.created_at,
-    })
-    .from(t)
-    .where(and(eq(t.tenant_id, tenantId), eq(t.status, "approved")))
-    .orderBy(desc(t.created_at))
-    .limit(500);
+  const rows = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        id: t.id,
+        input_payload: t.input_payload,
+        expected_output: t.expected_output,
+        created_at: t.created_at,
+      })
+      .from(t)
+      .where(eq(t.status, "approved"))
+      .orderBy(desc(t.created_at))
+      .limit(500)
+  );
 
   const seen = new Set<string>();
   return rows
@@ -358,6 +363,8 @@ export async function createVertexAiTuningDraft(
   tenantId: string,
   userId: string
 ) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   if (!isTuningEnabled()) {
     throw new Error("VERTEX_AI_TUNING_DISABLED");
   }
@@ -375,17 +382,18 @@ export async function createVertexAiTuningDraft(
   // Block if an open Vertex AI job already exists for this tenant
   const OPEN_JOB_STATUSES = ["draft", "queued", "running", "eval_pending", "approved"];
   const existing = firstRow(
-    await db
-      .select({ id: t.id })
-      .from(t)
-      .where(
-        and(
-          eq(t.tenant_id, tenantId),
-          eq(t.provider, "vertex_ai_gemini"),
-          inArray(t.status, OPEN_JOB_STATUSES)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: t.id })
+        .from(t)
+        .where(
+          and(
+            eq(t.provider, "vertex_ai_gemini"),
+            inArray(t.status, OPEN_JOB_STATUSES)
+          )
         )
-      )
-      .limit(1)
+        .limit(1)
+    )
   );
   if (existing) return existing;
 
@@ -430,22 +438,26 @@ export async function startVertexAiTuningJob(
   userId: string,
   jobId: string
 ) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   if (!isTuningEnabled()) {
     throw new Error("VERTEX_AI_TUNING_DISABLED");
   }
 
   const t = tables.modelTrainingJobs;
   const job = firstRow(
-    await db
-      .select({
-        id: t.id,
-        status: t.status,
-        provider: t.provider,
-        base_model: t.base_model,
-      })
-      .from(t)
-      .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: t.id,
+          status: t.status,
+          provider: t.provider,
+          base_model: t.base_model,
+        })
+        .from(t)
+        .where(eq(t.id, jobId))
+        .limit(1)
+    )
   );
   if (!job) throw new Error("NOT_FOUND");
   if (job.provider !== "vertex_ai_gemini") throw new Error("WRONG_PROVIDER");
@@ -493,28 +505,30 @@ export async function startVertexAiTuningJob(
     : "queued";
 
   const updated = firstRow(
-    await db
-      .update(t)
-      .set({
-        status: mappedStatus,
-        // Reuse openai_fine_tuning_job_id for the Vertex AI job resource name
-        openai_fine_tuning_job_id: vertexJob.name ?? vertexJobId,
-        // Reuse training_file_id / validation_file_id for GCS URIs
-        training_file_id: trainingUri,
-        validation_file_id: validationUri,
-        training_jsonl: jsonl.trainingJsonl,
-        validation_jsonl: jsonl.validationJsonl || null,
-        training_example_count: jsonl.trainingCount + jsonl.validationCount,
-        eval_result: {
-          vertex_job_name: vertexJob.name,
-          vertex_state: vertexJob.state,
-          validation_count: jsonl.validationCount,
-        },
-        error_message: null,
-        started_at: new Date().toISOString(),
-      })
-      .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
-      .returning({ id: t.id, status: t.status })
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(t)
+        .set({
+          status: mappedStatus,
+          // Reuse openai_fine_tuning_job_id for the Vertex AI job resource name
+          openai_fine_tuning_job_id: vertexJob.name ?? vertexJobId,
+          // Reuse training_file_id / validation_file_id for GCS URIs
+          training_file_id: trainingUri,
+          validation_file_id: validationUri,
+          training_jsonl: jsonl.trainingJsonl,
+          validation_jsonl: jsonl.validationJsonl || null,
+          training_example_count: jsonl.trainingCount + jsonl.validationCount,
+          eval_result: {
+            vertex_job_name: vertexJob.name,
+            vertex_state: vertexJob.state,
+            validation_count: jsonl.validationCount,
+          },
+          error_message: null,
+          started_at: new Date().toISOString(),
+        })
+        .where(eq(t.id, jobId))
+        .returning({ id: t.id, status: t.status })
+    )
   );
 
   await writeAuditLog({
@@ -542,23 +556,27 @@ export async function syncVertexAiTuningJobStatus(
   userId: string,
   jobId: string
 ) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   if (!isTuningEnabled()) {
     throw new Error("VERTEX_AI_TUNING_DISABLED");
   }
 
   const t = tables.modelTrainingJobs;
   const job = firstRow(
-    await db
-      .select({
-        id: t.id,
-        provider: t.provider,
-        status: t.status,
-        openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
-        eval_result: t.eval_result,
-      })
-      .from(t)
-      .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: t.id,
+          provider: t.provider,
+          status: t.status,
+          openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
+          eval_result: t.eval_result,
+        })
+        .from(t)
+        .where(eq(t.id, jobId))
+        .limit(1)
+    )
   );
   if (!job) throw new Error("NOT_FOUND");
   if (job.provider !== "vertex_ai_gemini") throw new Error("WRONG_PROVIDER");
@@ -595,22 +613,24 @@ export async function syncVertexAiTuningJobStatus(
       : {};
 
   const updated = firstRow(
-    await db
-      .update(t)
-      .set({
-        status: mappedStatus,
-        fine_tuned_model_id: tunedModelId,
-        error_message: vertexJob.error?.message ?? null,
-        eval_result: {
-          ...existingEval,
-          vertex_state: vertexJob.state,
-          vertex_error: vertexJob.error ?? null,
-          tuned_model: vertexJob.tunedModel ?? null,
-        },
-        completed_at: isTerminal ? new Date().toISOString() : null,
-      })
-      .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
-      .returning({ id: t.id, status: t.status, fine_tuned_model_id: t.fine_tuned_model_id })
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(t)
+        .set({
+          status: mappedStatus,
+          fine_tuned_model_id: tunedModelId,
+          error_message: vertexJob.error?.message ?? null,
+          eval_result: {
+            ...existingEval,
+            vertex_state: vertexJob.state,
+            vertex_error: vertexJob.error ?? null,
+            tuned_model: vertexJob.tunedModel ?? null,
+          },
+          completed_at: isTerminal ? new Date().toISOString() : null,
+        })
+        .where(eq(t.id, jobId))
+        .returning({ id: t.id, status: t.status, fine_tuned_model_id: t.fine_tuned_model_id })
+    )
   );
 
   await writeAuditLog({
@@ -638,6 +658,8 @@ export async function activateVertexAiModel(
   userId: string,
   jobId: string
 ) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   if (!isTuningEnabled()) {
     throw new Error("VERTEX_AI_TUNING_DISABLED");
   }
@@ -646,17 +668,19 @@ export async function activateVertexAiModel(
   const settings = tables.tenantAiSettings;
 
   const job = firstRow(
-    await db
-      .select({
-        id: mtj.id,
-        status: mtj.status,
-        provider: mtj.provider,
-        base_model: mtj.base_model,
-        fine_tuned_model_id: mtj.fine_tuned_model_id,
-      })
-      .from(mtj)
-      .where(and(eq(mtj.id, jobId), eq(mtj.tenant_id, tenantId)))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: mtj.id,
+          status: mtj.status,
+          provider: mtj.provider,
+          base_model: mtj.base_model,
+          fine_tuned_model_id: mtj.fine_tuned_model_id,
+        })
+        .from(mtj)
+        .where(eq(mtj.id, jobId))
+        .limit(1)
+    )
   );
   if (!job) throw new Error("NOT_FOUND");
   if (job.provider !== "vertex_ai_gemini") throw new Error("WRONG_PROVIDER");
@@ -665,14 +689,15 @@ export async function activateVertexAiModel(
 
   // Read the current active model for rollback tracking
   const current = firstRow(
-    await db
-      .select({
-        active_model: settings.active_model,
-        gemini_model: settings.gemini_model,
-      })
-      .from(settings)
-      .where(eq(settings.tenant_id, tenantId))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          active_model: settings.active_model,
+          gemini_model: settings.gemini_model,
+        })
+        .from(settings)
+        .limit(1)
+    )
   );
   const previous =
     current?.active_model || current?.gemini_model || job.base_model;
@@ -706,10 +731,12 @@ export async function activateVertexAiModel(
       },
     });
 
-  await db
-    .update(mtj)
-    .set({ status: "deployed", activated_by: userId, activated_at: now })
-    .where(and(eq(mtj.id, jobId), eq(mtj.tenant_id, tenantId)));
+  await enTenant(tenantCtx, (db) =>
+    db
+      .update(mtj)
+      .set({ status: "deployed", activated_by: userId, activated_at: now })
+      .where(eq(mtj.id, jobId))
+  );
 
   await writeAuditLog({
     tenant_id: tenantId,
@@ -731,18 +758,21 @@ export async function activateVertexAiModel(
  * Reverts tenantAiSettings.gemini_model (active_model) to previous_model.
  */
 export async function rollbackVertexAiModel(tenantId: string, userId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const settings = tables.tenantAiSettings;
 
   const current = firstRow(
-    await db
-      .select({
-        active_model: settings.active_model,
-        previous_model: settings.previous_model,
-        gemini_model: settings.gemini_model,
-      })
-      .from(settings)
-      .where(eq(settings.tenant_id, tenantId))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          active_model: settings.active_model,
+          previous_model: settings.previous_model,
+          gemini_model: settings.gemini_model,
+        })
+        .from(settings)
+        .limit(1)
+    )
   );
 
   const rollbackTo =
@@ -797,43 +827,11 @@ export async function rollbackVertexAiModel(tenantId: string, userId: string) {
  * Lists all Vertex AI training jobs for a tenant, newest first.
  */
 export async function listVertexAiTuningJobs(tenantId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const t = tables.modelTrainingJobs;
-  return db
-    .select({
-      id: t.id,
-      status: t.status,
-      provider: t.provider,
-      base_model: t.base_model,
-      fine_tuned_model_id: t.fine_tuned_model_id,
-      openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
-      training_file_id: t.training_file_id,
-      validation_file_id: t.validation_file_id,
-      error_message: t.error_message,
-      training_example_count: t.training_example_count,
-      eval_result: t.eval_result,
-      created_at: t.created_at,
-      started_at: t.started_at,
-      completed_at: t.completed_at,
-      activated_at: t.activated_at,
-    })
-    .from(t)
-    .where(
-      and(
-        eq(t.tenant_id, tenantId),
-        eq(t.provider, "vertex_ai_gemini")
-      )
-    )
-    .orderBy(desc(t.created_at))
-    .limit(50);
-}
-
-/**
- * Returns a single Vertex AI tuning job by ID (tenant-scoped).
- */
-export async function getVertexAiTuningJob(tenantId: string, jobId: string) {
-  const t = tables.modelTrainingJobs;
-  return firstRow(
-    await db
+  return enTenant(tenantCtx, (db) =>
+    db
       .select({
         id: t.id,
         status: t.status,
@@ -843,7 +841,6 @@ export async function getVertexAiTuningJob(tenantId: string, jobId: string) {
         openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
         training_file_id: t.training_file_id,
         validation_file_id: t.validation_file_id,
-        result_files: t.result_files,
         error_message: t.error_message,
         training_example_count: t.training_example_count,
         eval_result: t.eval_result,
@@ -854,13 +851,50 @@ export async function getVertexAiTuningJob(tenantId: string, jobId: string) {
       })
       .from(t)
       .where(
-        and(
-          eq(t.id, jobId),
-          eq(t.tenant_id, tenantId),
-          eq(t.provider, "vertex_ai_gemini")
-        )
+        eq(t.provider, "vertex_ai_gemini")
       )
-      .limit(1)
+      .orderBy(desc(t.created_at))
+      .limit(50)
+  );
+}
+
+/**
+ * Returns a single Vertex AI tuning job by ID (tenant-scoped).
+ */
+export async function getVertexAiTuningJob(tenantId: string, jobId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
+  const t = tables.modelTrainingJobs;
+  return firstRow(
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: t.id,
+          status: t.status,
+          provider: t.provider,
+          base_model: t.base_model,
+          fine_tuned_model_id: t.fine_tuned_model_id,
+          openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
+          training_file_id: t.training_file_id,
+          validation_file_id: t.validation_file_id,
+          result_files: t.result_files,
+          error_message: t.error_message,
+          training_example_count: t.training_example_count,
+          eval_result: t.eval_result,
+          created_at: t.created_at,
+          started_at: t.started_at,
+          completed_at: t.completed_at,
+          activated_at: t.activated_at,
+        })
+        .from(t)
+        .where(
+          and(
+            eq(t.id, jobId),
+            eq(t.provider, "vertex_ai_gemini")
+          )
+        )
+        .limit(1)
+    )
   );
 }
 

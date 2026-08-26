@@ -11,6 +11,7 @@
 import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 
 export type PromptRuleType =
   | "extraction"
@@ -40,19 +41,23 @@ const MAX_RULES_CHARS = 6_000;
 export async function loadActivePromptRules(
   tenantId: string
 ): Promise<PromptRule[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const t = tables.agentPromptRules;
-    const data = await db
-      .select({
-        id: t.id,
-        title: t.title,
-        rule_text: t.rule_text,
-        rule_type: t.rule_type,
-      })
-      .from(t)
-      .where(and(eq(t.tenant_id, tenantId), eq(t.active, true)))
-      .orderBy(asc(t.created_at))
-      .limit(MAX_ACTIVE_RULES);
+    const data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: t.id,
+          title: t.title,
+          rule_text: t.rule_text,
+          rule_type: t.rule_type,
+        })
+        .from(t)
+        .where(eq(t.active, true))
+        .orderBy(asc(t.created_at))
+        .limit(MAX_ACTIVE_RULES)
+    );
 
     return data as PromptRule[];
   } catch (e) {

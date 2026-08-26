@@ -19,6 +19,26 @@ import type { CustomerMatch } from "@/server/matching/customer-matcher";
 
 // Mock the entire @/lib/db module — drizzle requires DATABASE_URL at init time
 // which is not available in unit tests. We provide a chainable mock instead.
+// La capa de datos, corriendo contra el db que este test ya simula.
+//
+// Se lee `mod.db` en CADA llamada y no se desestructura: el mock de @/lib/db
+// suele exponer `db` con un getter para que los tests puedan intercambiar la
+// base simulada entre corridas, y un `const { db } = ...` congelaría el valor
+// de la primera llamada.
+//
+// Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
+// eso se verifica en tests/unit/data-scope-sin-rol.test.ts y, contra bases de
+// verdad, en `pnpm capa-datos` y `pnpm tenancy`.
+vi.mock("@/data/scope", async () => {
+  const mod = await import("@/lib/db");
+  return {
+    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
+      Promise.resolve(armar(mod.db)),
+    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
+      Promise.all(armar(mod.db)),
+  };
+});
+
 vi.mock("@/lib/db", () => {
   const mockDb = {
     select: vi.fn(),

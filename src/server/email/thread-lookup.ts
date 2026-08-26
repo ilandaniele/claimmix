@@ -23,6 +23,7 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 
@@ -48,6 +49,8 @@ export async function threadLookup(
   references: string,
   subject: string = ""
 ): Promise<ThreadLookupResult> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   // Collect candidate thread IDs from both headers (angle brackets stripped).
   const candidates = buildCandidates(inReplyTo, references);
 
@@ -57,17 +60,18 @@ export async function threadLookup(
   // claim_messages.provider_message_id with direction='outbound'.
   try {
     const claimMsgRow = candidates.length === 0 ? null : firstRow(
-      await db
-        .select({ case_id: claimMessages.case_id })
-        .from(claimMessages)
-        .where(
-          and(
-            eq(claimMessages.tenant_id, tenantId),
-            eq(claimMessages.direction, "outbound"),
-            inArray(claimMessages.provider_message_id, candidates)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ case_id: claimMessages.case_id })
+          .from(claimMessages)
+          .where(
+            and(
+              eq(claimMessages.direction, "outbound"),
+              inArray(claimMessages.provider_message_id, candidates)
+            )
           )
-        )
-        .limit(1)
+          .limit(1)
+      )
     );
 
     if (claimMsgRow) {
@@ -85,16 +89,17 @@ export async function threadLookup(
   //   - Any rows that predate the claim_messages table (migration 0009)
   try {
     const caseRow = candidates.length === 0 ? null : firstRow(
-      await db
-        .select({ id: cases.id, email_thread_id: cases.email_thread_id })
-        .from(cases)
-        .where(
-          and(
-            eq(cases.tenant_id, tenantId),
-            inArray(cases.email_thread_id, candidates)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: cases.id, email_thread_id: cases.email_thread_id })
+          .from(cases)
+          .where(
+            and(
+              inArray(cases.email_thread_id, candidates)
+            )
           )
-        )
-        .limit(1)
+          .limit(1)
+      )
     );
 
     if (caseRow) {
@@ -116,11 +121,13 @@ export async function threadLookup(
   if (subjectCaseId) {
     try {
       const caseRow = firstRow(
-        await db
-          .select({ id: cases.id })
-          .from(cases)
-          .where(and(eq(cases.tenant_id, tenantId), eq(cases.id, subjectCaseId)))
-          .limit(1)
+        await enTenant(tenantCtx, (db) =>
+          db
+            .select({ id: cases.id })
+            .from(cases)
+            .where(eq(cases.id, subjectCaseId))
+            .limit(1)
+        )
       );
       if (caseRow) return { existingCaseId: caseRow.id };
     } catch (err) {

@@ -18,6 +18,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { computeContentHash, uploadAttachment } from "@/server/storage/claim-attachments-bucket";
@@ -64,19 +65,22 @@ async function findExistingByHash(
   caseId: string,
   contentHash: string
 ): Promise<string | null> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const row = firstRow(
-      await db
-        .select({ storage_path: claimAttachments.storage_path })
-        .from(claimAttachments)
-        .where(
-          and(
-            eq(claimAttachments.tenant_id, tenantId),
-            eq(claimAttachments.case_id, caseId),
-            eq(claimAttachments.content_hash, contentHash)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ storage_path: claimAttachments.storage_path })
+          .from(claimAttachments)
+          .where(
+            and(
+              eq(claimAttachments.case_id, caseId),
+              eq(claimAttachments.content_hash, contentHash)
+            )
           )
-        )
-        .limit(1)
+          .limit(1)
+      )
     );
 
     return row?.storage_path ?? null;

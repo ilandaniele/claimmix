@@ -20,6 +20,7 @@
 import "server-only";
 import { and, eq, gte, ne, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 
 /** @deprecated Legacy constants for gpt-4o-mini. Use computeCostUsd(tokens, tokens, model). */
 export const COST_PER_PROMPT_TOKEN = 0.00000015;
@@ -130,6 +131,9 @@ export async function checkDemoBudget(): Promise<BudgetCheckResult> {
   if (!demoTenantId) {
     return { exceeded: true, reason: "La demo no tiene tenant propio configurado." };
   }
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: demoTenantId };
 
   const dailyTokenCap = readCap(process.env.AI_DEMO_DAILY_TOKEN_CAP, 300_000);
   const monthlyCapUsd = readCap(process.env.DEMO_MONTHLY_BUDGET_USD, 10);
@@ -141,31 +145,33 @@ export async function checkDemoBudget(): Promise<BudgetCheckResult> {
   monthStart.setHours(0, 0, 0, 0);
 
   try {
-    const [day] = await db
-      .select({
-        tokens: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
-      })
-      .from(tables.aiUsage)
-      .where(
-        and(
-          eq(tables.aiUsage.tenant_id, demoTenantId),
-          gte(tables.aiUsage.created_at, dayStart.toISOString())
+    const [day] = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          tokens: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
+        })
+        .from(tables.aiUsage)
+        .where(
+          and(
+            gte(tables.aiUsage.created_at, dayStart.toISOString())
+          )
         )
-      );
+    );
 
     if ((day?.tokens ?? 0) >= dailyTokenCap) {
       return { exceeded: true, reason: "La demo alcanzó su cupo diario." };
     }
 
-    const [month] = await db
-      .select({ usd: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8` })
-      .from(tables.aiUsage)
-      .where(
-        and(
-          eq(tables.aiUsage.tenant_id, demoTenantId),
-          gte(tables.aiUsage.created_at, monthStart.toISOString())
+    const [month] = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ usd: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8` })
+        .from(tables.aiUsage)
+        .where(
+          and(
+            gte(tables.aiUsage.created_at, monthStart.toISOString())
+          )
         )
-      );
+    );
 
     if ((month?.usd ?? 0) >= monthlyCapUsd) {
       return { exceeded: true, reason: "La demo alcanzó su cupo mensual." };
@@ -202,6 +208,8 @@ export async function checkBudget(
   tenantId: string,
   userId?: string | null
 ): Promise<BudgetCheckResult> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const monthlyCapUsd = readCap(process.env.MONTHLY_BUDGET_USD, 200);
   const tenantDailyTokenCap = readCap(process.env.AI_TENANT_DAILY_TOKEN_CAP, 5_000_000);
   const userDailyTokenCap = readCap(process.env.AI_USER_DAILY_TOKEN_CAP, 100_000);
@@ -258,17 +266,18 @@ export async function checkBudget(
 
   let tenantDayTokens = 0;
   try {
-    const [tenantDay] = await db
-      .select({
-        total: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
-      })
-      .from(tables.aiUsage)
-      .where(
-        and(
-          eq(tables.aiUsage.tenant_id, tenantId),
-          gte(tables.aiUsage.created_at, dayStart.toISOString())
+    const [tenantDay] = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          total: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
+        })
+        .from(tables.aiUsage)
+        .where(
+          and(
+            gte(tables.aiUsage.created_at, dayStart.toISOString())
+          )
         )
-      );
+    );
     tenantDayTokens = tenantDay?.total ?? 0;
   } catch (e) {
     console.error("[budget] Tenant daily check error:", (e as { code?: string })?.code);

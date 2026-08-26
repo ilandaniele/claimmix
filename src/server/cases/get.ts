@@ -17,6 +17,7 @@
 
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { auditLog, cases, extractedFields, missingDocs } from "@/lib/db/schema";
 import type {
@@ -51,15 +52,19 @@ export async function getCaseDetail(
   tenantId: string,
   caseId: string
 ): Promise<CaseDetail | null> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   // ── 1. Fetch the case row (explicitly tenant-scoped) ──────────────────────
   let caseRow: CaseRow | null;
   try {
     caseRow = firstRow(
-      await db
-        .select()
-        .from(cases)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select()
+          .from(cases)
+          .where(eq(cases.id, caseId))
+          .limit(1)
+      )
     );
   } catch {
     // Any error here (including invalid uuid) → 404 (never 403).
@@ -72,38 +77,40 @@ export async function getCaseDetail(
   // Each related query degrades to an empty array on failure — matching the
   // previous behavior where related-query errors were silently ignored.
   const [extractedData, missingDocsData, auditData] = await Promise.all([
-    db
-      .select()
-      .from(extractedFields)
-      .where(
-        and(
-          eq(extractedFields.case_id, caseId),
-          eq(extractedFields.tenant_id, tenantId)
+    enTenant(tenantCtx, (db) =>
+      db
+        .select()
+        .from(extractedFields)
+        .where(
+          eq(extractedFields.case_id, caseId)
         )
-      )
-      .orderBy(asc(extractedFields.extracted_at))
-      .catch(() => [] as ExtractedFieldRow[]),
-    db
-      .select()
-      .from(missingDocs)
-      .where(
-        and(eq(missingDocs.case_id, caseId), eq(missingDocs.tenant_id, tenantId))
-      )
-      .orderBy(asc(missingDocs.requested_at))
-      .catch(() => [] as MissingDocRow[]),
-    db
-      .select()
-      .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.tenant_id, tenantId),
-          eq(auditLog.target_type, "case"),
-          eq(auditLog.target_id, caseId)
+        .orderBy(asc(extractedFields.extracted_at))
+        .catch(() => [] as ExtractedFieldRow[])
+    ),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select()
+        .from(missingDocs)
+        .where(
+          eq(missingDocs.case_id, caseId)
         )
-      )
-      .orderBy(desc(auditLog.created_at))
-      .limit(20)
-      .catch(() => [] as AuditLogRow[]),
+        .orderBy(asc(missingDocs.requested_at))
+        .catch(() => [] as MissingDocRow[])
+    ),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select()
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.target_type, "case"),
+            eq(auditLog.target_id, caseId)
+          )
+        )
+        .orderBy(desc(auditLog.created_at))
+        .limit(20)
+        .catch(() => [] as AuditLogRow[])
+    ),
   ]);
 
   return {

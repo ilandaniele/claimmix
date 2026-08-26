@@ -3,6 +3,7 @@ import "server-only";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 
 import type { Db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import * as tables from "@/lib/db/schema";
 import type { UserRole } from "@/lib/auth/require-role";
 
@@ -294,24 +295,27 @@ export function buildApprovedExamplesCsvSummary(examples: ApprovedExampleExportR
 }
 
 async function loadProviderSettings(db: Db, tenantId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const t = tables.tenantAiSettings;
   const row = firstRow(
-    await db
-      .select({
-        tenant_id: t.tenant_id,
-        provider: t.provider,
-        openai_model: t.openai_model,
-        gemini_model: t.gemini_model,
-        active_model_provider: t.active_model_provider,
-        active_model: t.active_model,
-        previous_model: t.previous_model,
-        model_activated_by: t.model_activated_by,
-        model_activated_at: t.model_activated_at,
-        updated_at: t.updated_at,
-      })
-      .from(t)
-      .where(eq(t.tenant_id, tenantId))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          tenant_id: t.tenant_id,
+          provider: t.provider,
+          openai_model: t.openai_model,
+          gemini_model: t.gemini_model,
+          active_model_provider: t.active_model_provider,
+          active_model: t.active_model,
+          previous_model: t.previous_model,
+          model_activated_by: t.model_activated_by,
+          model_activated_at: t.model_activated_at,
+          updated_at: t.updated_at,
+        })
+        .from(t)
+        .limit(1)
+    )
   );
 
   const defaultProvider = toProvider(row?.provider) ?? getExportDefaultProvider();
@@ -345,53 +349,58 @@ async function loadProviderSettings(db: Db, tenantId: string) {
 }
 
 async function loadConfigSection(db: Db, tenantId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const [providerSettings, promptVersions, customFields, promptRules] = await Promise.all([
     loadProviderSettings(db, tenantId),
-    db
-      .select({
-        id: tables.promptVersions.id,
-        version: tables.promptVersions.version,
-        system_prompt: tables.promptVersions.system_prompt,
-        active: tables.promptVersions.active,
-        created_by: tables.promptVersions.created_by,
-        created_at: tables.promptVersions.created_at,
-      })
-      .from(tables.promptVersions)
-      .where(eq(tables.promptVersions.tenant_id, tenantId))
-      .orderBy(desc(tables.promptVersions.created_at)),
-    db
-      .select({
-        id: tables.agentCustomFields.id,
-        key: tables.agentCustomFields.key,
-        label: tables.agentCustomFields.label,
-        description: tables.agentCustomFields.description,
-        field_type: tables.agentCustomFields.field_type,
-        claim_type: tables.agentCustomFields.claim_type,
-        required: tables.agentCustomFields.required,
-        ask_if_missing: tables.agentCustomFields.ask_if_missing,
-        enum_values: tables.agentCustomFields.enum_values,
-        active: tables.agentCustomFields.active,
-        created_by: tables.agentCustomFields.created_by,
-        created_at: tables.agentCustomFields.created_at,
-        updated_at: tables.agentCustomFields.updated_at,
-      })
-      .from(tables.agentCustomFields)
-      .where(eq(tables.agentCustomFields.tenant_id, tenantId))
-      .orderBy(desc(tables.agentCustomFields.created_at)),
-    db
-      .select({
-        id: tables.agentPromptRules.id,
-        title: tables.agentPromptRules.title,
-        rule_text: tables.agentPromptRules.rule_text,
-        rule_type: tables.agentPromptRules.rule_type,
-        active: tables.agentPromptRules.active,
-        created_by: tables.agentPromptRules.created_by,
-        created_at: tables.agentPromptRules.created_at,
-        updated_at: tables.agentPromptRules.updated_at,
-      })
-      .from(tables.agentPromptRules)
-      .where(eq(tables.agentPromptRules.tenant_id, tenantId))
-      .orderBy(desc(tables.agentPromptRules.created_at)),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: tables.promptVersions.id,
+          version: tables.promptVersions.version,
+          system_prompt: tables.promptVersions.system_prompt,
+          active: tables.promptVersions.active,
+          created_by: tables.promptVersions.created_by,
+          created_at: tables.promptVersions.created_at,
+        })
+        .from(tables.promptVersions)
+        .orderBy(desc(tables.promptVersions.created_at))
+    ),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: tables.agentCustomFields.id,
+          key: tables.agentCustomFields.key,
+          label: tables.agentCustomFields.label,
+          description: tables.agentCustomFields.description,
+          field_type: tables.agentCustomFields.field_type,
+          claim_type: tables.agentCustomFields.claim_type,
+          required: tables.agentCustomFields.required,
+          ask_if_missing: tables.agentCustomFields.ask_if_missing,
+          enum_values: tables.agentCustomFields.enum_values,
+          active: tables.agentCustomFields.active,
+          created_by: tables.agentCustomFields.created_by,
+          created_at: tables.agentCustomFields.created_at,
+          updated_at: tables.agentCustomFields.updated_at,
+        })
+        .from(tables.agentCustomFields)
+        .orderBy(desc(tables.agentCustomFields.created_at))
+    ),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: tables.agentPromptRules.id,
+          title: tables.agentPromptRules.title,
+          rule_text: tables.agentPromptRules.rule_text,
+          rule_type: tables.agentPromptRules.rule_type,
+          active: tables.agentPromptRules.active,
+          created_by: tables.agentPromptRules.created_by,
+          created_at: tables.agentPromptRules.created_at,
+          updated_at: tables.agentPromptRules.updated_at,
+        })
+        .from(tables.agentPromptRules)
+        .orderBy(desc(tables.agentPromptRules.created_at))
+    ),
   ]);
 
   return {
@@ -432,27 +441,33 @@ async function loadApprovedExampleRows(db: Db, tenantId: string) {
 }
 
 async function loadTrainingExamples(db: Db, tenantId: string, status: "approved" | "rejected") {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const t = tables.trainingExamples;
-  return db
-    .select({
-      id: t.id,
-      agent_run_id: t.agent_run_id,
-      case_id: t.case_id,
-      claim_message_id: t.claim_message_id,
-      claim_type: t.claim_type,
-      input_payload: t.input_payload,
-      expected_output: t.expected_output,
-      status: t.status,
-      approved_by: t.approved_by,
-      approved_at: t.approved_at,
-      created_at: t.created_at,
-    })
-    .from(t)
-    .where(and(eq(t.tenant_id, tenantId), eq(t.status, status)))
-    .orderBy(desc(t.approved_at));
+  return enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        id: t.id,
+        agent_run_id: t.agent_run_id,
+        case_id: t.case_id,
+        claim_message_id: t.claim_message_id,
+        claim_type: t.claim_type,
+        input_payload: t.input_payload,
+        expected_output: t.expected_output,
+        status: t.status,
+        approved_by: t.approved_by,
+        approved_at: t.approved_at,
+        created_at: t.created_at,
+      })
+      .from(t)
+      .where(eq(t.status, status))
+      .orderBy(desc(t.approved_at))
+  );
 }
 
 async function loadMemorySection(db: Db, tenantId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const [
     approvedTrainingExamples,
     rejectedTrainingExamples,
@@ -462,36 +477,38 @@ async function loadMemorySection(db: Db, tenantId: string) {
   ] = await Promise.all([
     loadTrainingExamples(db, tenantId, "approved"),
     loadTrainingExamples(db, tenantId, "rejected"),
-    db
-      .select({
-        id: tables.agentFeedback.id,
-        agent_run_id: tables.agentFeedback.agent_run_id,
-        reviewer_id: tables.agentFeedback.reviewer_id,
-        original_output: tables.agentFeedback.original_output,
-        corrected_output: tables.agentFeedback.corrected_output,
-        feedback_type: tables.agentFeedback.feedback_type,
-        approved_for_training: tables.agentFeedback.approved_for_training,
-        created_at: tables.agentFeedback.created_at,
-      })
-      .from(tables.agentFeedback)
-      .where(eq(tables.agentFeedback.tenant_id, tenantId))
-      .orderBy(desc(tables.agentFeedback.created_at)),
-    db
-      .select({
-        id: tables.claimMemory.id,
-        memory_type: tables.claimMemory.memory_type,
-        key: tables.claimMemory.key,
-        value: tables.claimMemory.value,
-        confidence: tables.claimMemory.confidence,
-        source: tables.claimMemory.source,
-        last_used_at: tables.claimMemory.last_used_at,
-        use_count: tables.claimMemory.use_count,
-        created_at: tables.claimMemory.created_at,
-        updated_at: tables.claimMemory.updated_at,
-      })
-      .from(tables.claimMemory)
-      .where(eq(tables.claimMemory.tenant_id, tenantId))
-      .orderBy(desc(tables.claimMemory.updated_at)),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: tables.agentFeedback.id,
+          agent_run_id: tables.agentFeedback.agent_run_id,
+          reviewer_id: tables.agentFeedback.reviewer_id,
+          original_output: tables.agentFeedback.original_output,
+          corrected_output: tables.agentFeedback.corrected_output,
+          feedback_type: tables.agentFeedback.feedback_type,
+          approved_for_training: tables.agentFeedback.approved_for_training,
+          created_at: tables.agentFeedback.created_at,
+        })
+        .from(tables.agentFeedback)
+        .orderBy(desc(tables.agentFeedback.created_at))
+    ),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: tables.claimMemory.id,
+          memory_type: tables.claimMemory.memory_type,
+          key: tables.claimMemory.key,
+          value: tables.claimMemory.value,
+          confidence: tables.claimMemory.confidence,
+          source: tables.claimMemory.source,
+          last_used_at: tables.claimMemory.last_used_at,
+          use_count: tables.claimMemory.use_count,
+          created_at: tables.claimMemory.created_at,
+          updated_at: tables.claimMemory.updated_at,
+        })
+        .from(tables.claimMemory)
+        .orderBy(desc(tables.claimMemory.updated_at))
+    ),
     db
       .select({
         id: tables.knownClaimPatterns.id,
@@ -527,40 +544,44 @@ async function loadMemorySection(db: Db, tenantId: string) {
 }
 
 async function loadFullMetadata(db: Db, tenantId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const [agentRuns, claimEvents] = await Promise.all([
-    db
-      .select({
-        id: tables.agentRuns.id,
-        case_id: tables.agentRuns.case_id,
-        claim_message_id: tables.agentRuns.claim_message_id,
-        model_provider: tables.agentRuns.model_provider,
-        model_name: tables.agentRuns.model_name,
-        prompt_version_id: tables.agentRuns.prompt_version_id,
-        prompt_version: tables.agentRuns.prompt_version,
-        missing_fields: tables.agentRuns.missing_fields,
-        is_trainable_suggestion: tables.agentRuns.is_trainable_suggestion,
-        trainability_score: tables.agentRuns.trainability_score,
-        trainability_reasons: tables.agentRuns.trainability_reasons,
-        blocking_reasons: tables.agentRuns.blocking_reasons,
-        created_at: tables.agentRuns.created_at,
-      })
-      .from(tables.agentRuns)
-      .where(eq(tables.agentRuns.tenant_id, tenantId))
-      .orderBy(desc(tables.agentRuns.created_at))
-      .limit(500),
-    db
-      .select({
-        id: tables.auditLog.id,
-        event_type: tables.auditLog.event_type,
-        target_type: tables.auditLog.target_type,
-        target_id: tables.auditLog.target_id,
-        payload: tables.auditLog.payload,
-        created_at: tables.auditLog.created_at,
-      })
-      .from(tables.auditLog)
-      .where(eq(tables.auditLog.tenant_id, tenantId))
-      .orderBy(desc(tables.auditLog.created_at))
-      .limit(500),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: tables.agentRuns.id,
+          case_id: tables.agentRuns.case_id,
+          claim_message_id: tables.agentRuns.claim_message_id,
+          model_provider: tables.agentRuns.model_provider,
+          model_name: tables.agentRuns.model_name,
+          prompt_version_id: tables.agentRuns.prompt_version_id,
+          prompt_version: tables.agentRuns.prompt_version,
+          missing_fields: tables.agentRuns.missing_fields,
+          is_trainable_suggestion: tables.agentRuns.is_trainable_suggestion,
+          trainability_score: tables.agentRuns.trainability_score,
+          trainability_reasons: tables.agentRuns.trainability_reasons,
+          blocking_reasons: tables.agentRuns.blocking_reasons,
+          created_at: tables.agentRuns.created_at,
+        })
+        .from(tables.agentRuns)
+        .orderBy(desc(tables.agentRuns.created_at))
+        .limit(500)
+    ),
+    enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: tables.auditLog.id,
+          event_type: tables.auditLog.event_type,
+          target_type: tables.auditLog.target_type,
+          target_id: tables.auditLog.target_id,
+          payload: tables.auditLog.payload,
+          created_at: tables.auditLog.created_at,
+        })
+        .from(tables.auditLog)
+        .orderBy(desc(tables.auditLog.created_at))
+        .limit(500)
+    ),
   ]);
 
   return { agent_runs: agentRuns, claim_events: claimEvents };

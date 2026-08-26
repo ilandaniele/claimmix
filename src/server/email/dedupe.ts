@@ -15,6 +15,7 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 
@@ -46,19 +47,20 @@ export async function checkDuplicate(
   tenantId: string,
   providerMessageId: string
 ): Promise<boolean> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   // Primary check: claim_messages table (new path — W4 onwards).
   try {
     const row = firstRow(
-      await db
-        .select({ id: claimMessages.id })
-        .from(claimMessages)
-        .where(
-          and(
-            eq(claimMessages.tenant_id, tenantId),
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: claimMessages.id })
+          .from(claimMessages)
+          .where(
             eq(claimMessages.provider_message_id, providerMessageId)
           )
-        )
-        .limit(1)
+          .limit(1)
+      )
     );
 
     return row !== null;
@@ -86,6 +88,8 @@ export async function dedupe(
   messageId: string,
   tenantId: string
 ): Promise<DedupeResult> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const normalised = normalizeMessageId(messageId);
 
   // 1. New path: check claim_messages by provider_message_id (AC2).
@@ -96,16 +100,15 @@ export async function dedupe(
     let msgRow: { case_id: string } | null = null;
     try {
       msgRow = firstRow(
-        await db
-          .select({ case_id: claimMessages.case_id })
-          .from(claimMessages)
-          .where(
-            and(
-              eq(claimMessages.tenant_id, tenantId),
+        await enTenant(tenantCtx, (db) =>
+          db
+            .select({ case_id: claimMessages.case_id })
+            .from(claimMessages)
+            .where(
               eq(claimMessages.provider_message_id, normalised)
             )
-          )
-          .limit(1)
+            .limit(1)
+        )
       );
     } catch {
       // Best-effort — duplicate already established; case id resolution failed.
@@ -122,16 +125,15 @@ export async function dedupe(
   let caseRow: { id: string } | null = null;
   try {
     caseRow = firstRow(
-      await db
-        .select({ id: cases.id })
-        .from(cases)
-        .where(
-          and(
-            eq(cases.tenant_id, tenantId),
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: cases.id })
+          .from(cases)
+          .where(
             eq(cases.email_message_id, normalised)
           )
-        )
-        .limit(1)
+          .limit(1)
+      )
     );
   } catch (err) {
     const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");

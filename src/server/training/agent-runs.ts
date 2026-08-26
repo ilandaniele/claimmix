@@ -15,6 +15,7 @@
 import "server-only";
 import { and, desc, eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { getDefaultGeminiModel } from "@/server/ai/provider";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
@@ -215,32 +216,36 @@ export async function getLatestAgentRun(
   tenantId: string,
   caseId: string
 ): Promise<AgentRunRow | null> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const t = tables.agentRuns;
     const data = firstRow(
-      await db
-        .select({
-          id: t.id,
-          case_id: t.case_id,
-          claim_message_id: t.claim_message_id,
-          provider_message_id: t.provider_message_id,
-          model_provider: t.model_provider,
-          model_name: t.model_name,
-          prompt_version: t.prompt_version,
-          input_payload: t.input_payload,
-          output_payload: t.output_payload,
-          confidence_payload: t.confidence_payload,
-          missing_fields: t.missing_fields,
-          is_trainable_suggestion: t.is_trainable_suggestion,
-          trainability_score: t.trainability_score,
-          trainability_reasons: t.trainability_reasons,
-          blocking_reasons: t.blocking_reasons,
-          created_at: t.created_at,
-        })
-        .from(t)
-        .where(and(eq(t.tenant_id, tenantId), eq(t.case_id, caseId)))
-        .orderBy(desc(t.created_at))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            id: t.id,
+            case_id: t.case_id,
+            claim_message_id: t.claim_message_id,
+            provider_message_id: t.provider_message_id,
+            model_provider: t.model_provider,
+            model_name: t.model_name,
+            prompt_version: t.prompt_version,
+            input_payload: t.input_payload,
+            output_payload: t.output_payload,
+            confidence_payload: t.confidence_payload,
+            missing_fields: t.missing_fields,
+            is_trainable_suggestion: t.is_trainable_suggestion,
+            trainability_score: t.trainability_score,
+            trainability_reasons: t.trainability_reasons,
+            blocking_reasons: t.blocking_reasons,
+            created_at: t.created_at,
+          })
+          .from(t)
+          .where(eq(t.case_id, caseId))
+          .orderBy(desc(t.created_at))
+          .limit(1)
+      )
     );
 
     if (!data) return null;

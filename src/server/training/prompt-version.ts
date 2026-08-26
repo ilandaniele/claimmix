@@ -11,6 +11,7 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 
 /** Version label recorded when no tenant prompt_versions row is active. */
@@ -38,14 +39,18 @@ const BUILTIN: ActivePromptVersion = {
 export async function getActivePromptVersion(
   tenantId: string
 ): Promise<ActivePromptVersion> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const t = tables.promptVersions;
     const row = firstRow(
-      await db
-        .select({ id: t.id, version: t.version, system_prompt: t.system_prompt })
-        .from(t)
-        .where(and(eq(t.tenant_id, tenantId), eq(t.active, true)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: t.id, version: t.version, system_prompt: t.system_prompt })
+          .from(t)
+          .where(eq(t.active, true))
+          .limit(1)
+      )
     );
 
     if (!row) return BUILTIN;

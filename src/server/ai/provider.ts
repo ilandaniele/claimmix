@@ -20,6 +20,7 @@ import "server-only";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 
 export type AiProvider = "openai" | "gemini";
@@ -102,17 +103,20 @@ export async function setUserGeminiKey(userId: string, apiKey: string): Promise<
  * then global GEMINI_API_KEY env var.
  */
 export async function getTenantGeminiKey(tenantId: string, userId?: string): Promise<string | null> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   if (userId) {
     const userKey = await getUserGeminiKey(userId);
     if (userKey) return userKey;
   }
   try {
-    const row = await db
-      .select({ enc: tables.tenantAiSettings.gemini_api_key_encrypted })
-      .from(tables.tenantAiSettings)
-      .where(eq(tables.tenantAiSettings.tenant_id, tenantId))
-      .limit(1)
-      .then(firstRow);
+    const row = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ enc: tables.tenantAiSettings.gemini_api_key_encrypted })
+        .from(tables.tenantAiSettings)
+        .limit(1)
+        .then(firstRow)
+    );
     if (row?.enc) return decryptApiKey(row.enc);
   } catch {
     // DB error — fall through to env
@@ -165,17 +169,20 @@ export function getDefaultGeminiModel(): string {
 
 export async function getTenantOpenAIModel(tenantId?: string | null): Promise<string> {
   if (!tenantId) return getDefaultOpenAIModel();
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
-    const row = await db
-      .select({
-        openai_model: tables.tenantAiSettings.openai_model,
-        active_model_provider: tables.tenantAiSettings.active_model_provider,
-        active_model: tables.tenantAiSettings.active_model,
-      })
-      .from(tables.tenantAiSettings)
-      .where(eq(tables.tenantAiSettings.tenant_id, tenantId))
-      .limit(1)
-      .then(firstRow);
+    const row = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          openai_model: tables.tenantAiSettings.openai_model,
+          active_model_provider: tables.tenantAiSettings.active_model_provider,
+          active_model: tables.tenantAiSettings.active_model,
+        })
+        .from(tables.tenantAiSettings)
+        .limit(1)
+        .then(firstRow)
+    );
 
     if (row?.active_model_provider === "openai" && row.active_model?.trim()) {
       return row.active_model.trim();
@@ -188,17 +195,20 @@ export async function getTenantOpenAIModel(tenantId?: string | null): Promise<st
 
 export async function getTenantGeminiModel(tenantId?: string | null): Promise<string> {
   if (!tenantId) return getDefaultGeminiModel();
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
-    const row = await db
-      .select({
-        gemini_model: tables.tenantAiSettings.gemini_model,
-        active_model_provider: tables.tenantAiSettings.active_model_provider,
-        active_model: tables.tenantAiSettings.active_model,
-      })
-      .from(tables.tenantAiSettings)
-      .where(eq(tables.tenantAiSettings.tenant_id, tenantId))
-      .limit(1)
-      .then(firstRow);
+    const row = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          gemini_model: tables.tenantAiSettings.gemini_model,
+          active_model_provider: tables.tenantAiSettings.active_model_provider,
+          active_model: tables.tenantAiSettings.active_model,
+        })
+        .from(tables.tenantAiSettings)
+        .limit(1)
+        .then(firstRow)
+    );
 
     if (row?.active_model_provider === "gemini" && row.active_model?.trim()) {
       return row.active_model.trim();
@@ -287,13 +297,16 @@ export function getDefaultProvider(): AiProvider {
 export async function getTenantAiProvider(
   tenantId: string
 ): Promise<AiProvider> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const data = firstRow(
-      await db
-        .select({ provider: tables.tenantAiSettings.provider })
-        .from(tables.tenantAiSettings)
-        .where(eq(tables.tenantAiSettings.tenant_id, tenantId))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ provider: tables.tenantAiSettings.provider })
+          .from(tables.tenantAiSettings)
+          .limit(1)
+      )
     );
 
     if (!data) return getDefaultProvider();

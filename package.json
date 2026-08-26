@@ -40,7 +40,8 @@
     "filtros": "node scripts/count-tenant-filters.mjs",
     "filtros:analizar": "node scripts/analyze-tenant-filters.mjs",
     "filtros:migrar": "node scripts/migrate-tenant-filters.mjs",
-    "puente": "node scripts/add-scope-bridge.mjs"
+    "puente": "node scripts/add-scope-bridge.mjs",
+    "ctx": "node scripts/declare-tenant-ctx.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

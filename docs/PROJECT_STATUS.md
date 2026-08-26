@@ -484,6 +484,58 @@ inquilino es la sesión. Cada una lleva `// sin-inquilino: <por qué>` encima, y
   — y el cambio llegaba al rol de producción. Ya está arreglado: el ensayo usa
   `claimmix_app_ensayo`, propio.
 
+### ⏱️ El trabajo deja de morir con la invocación que lo arrancó (2026-08-26)
+
+La carga simulada corría en un `after()` de Vercel: la respuesta salía y el
+trabajo seguía en la misma invocación. Funciona hasta que no. Cuando se encolan
+muchos casos, el presupuesto de tiempo de la función se agota y Vercel
+**descarta** los `after()` que no alcanzaron a arrancar. El caso queda en
+`procesando` para siempre — el INSERT ocurrió y el agente nunca corrió.
+`reap-stuck.ts` es un barrido nocturno escrito sólo para tapar eso.
+
+Ahora ese flujo es durable (SDK `workflow` de Vercel, 4.8.5). Se encola y cada
+paso corre en su propia petición; si el proceso muere, retoma en el paso que
+seguía. El barrido queda como red por debajo, no como el mecanismo.
+
+Y está **probado**, no supuesto. `pnpm flujos` corre un flujo de tres pasos
+donde el del medio falla dos veces a propósito y verifica que el del medio
+corrió tres veces mientras el primero corrió **una**. Sin esa prueba no habría
+manera de saberlo: sin el compilador, `"use workflow"` y `"use step"` son
+literales de cadena, la función corre igual, y cualquier test que sólo mire el
+valor devuelto pasaría con la durabilidad apagada.
+
+**Cuatro cosas que costaron encontrar y conviene no volver a pisar:**
+
+- El primer test contaba en una variable de módulo y daba **cero siempre**. Los
+  pasos se compilan a un paquete aparte: la variable que el test miraba y la que
+  los pasos tocaban eran dos distintas con el mismo nombre. Un cero que parece
+  "no se ejecutó" cuando es "no lo estás mirando".
+- Un `import "node:fs"` en el grafo del flujo **no compila**, aunque el uso esté
+  adentro de un `"use step"`. El chequeo mira el módulo, no dónde cae la llamada.
+- El SDK empaqueta `builtin-modules` y emite su import de JSON sin
+  `with {type:"json"}`. Node 24 lo rechaza y **todo flujo se cuelga** hasta que
+  el test expira, con un error que no menciona ni a Node ni al JSON. Va parchado
+  (`patches/builtin-modules@5.0.0.patch`), con la lista escrita: leerla de
+  `node:module` tampoco sirve, porque el flujo corre en una VM donde eso no está.
+- `.well-known/workflow/` tiene que quedar afuera del matcher de `src/proxy.ts`.
+  Si lo intercepta, el síntoma es `detached ArrayBuffer`.
+
+Si encolar falla, se cae al `after()` de antes: un flujo que no arranca es peor
+que un `after()` que quizás sí.
+
+### 🧩 El núcleo, con las decisiones adentro (2026-08-26)
+
+`src/core/` pasó de un archivo a seis, y son los que más criterio concentran: la
+máquina de estados de un caso, qué documentos pide cada tipo de siniestro, qué
+falta todavía, cómo se arma la conversación que lee el extractor, qué números
+son de prueba, y cuándo contestar.
+
+Ninguno hablaba con la base ni con la red; estaban donde estaban por costumbre.
+Lo que cambia en la práctica: `tests/unit/conversation-body.test.ts` probaba que
+una respuesta citada se recorta bien, y para eso simulaba `@/lib/db` y
+`@/data/scope` — porque el import arrastraba mil seiscientas líneas de worker.
+Ahora importa del núcleo y no simula nada.
+
 ### 🙋 Waiting on you (not code)
 
 - **La contraseña de `claimmix_app` en producción quedó rotada y hay que

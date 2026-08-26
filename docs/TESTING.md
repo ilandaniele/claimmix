@@ -25,9 +25,21 @@ en rojo su resultado no dice nada.
 
 ### 1. `pnpm verify` — segundos, gratis
 
-Tipos, lint y ~1950 tests unitarios y de integración. Atrapa todo lo que está
-mal por sí solo: una función que devuelve lo que no debe, una guarda que dejó
-de guardar, un tipo que no cierra.
+Tipos, lint, ~2100 tests unitarios y de integración, los tests de flujos
+durables, y las invariantes de arquitectura. Atrapa todo lo que está mal por sí
+solo: una función que devuelve lo que no debe, una guarda que dejó de guardar,
+un tipo que no cierra.
+
+Los flujos durables van aparte de los unitarios (`pnpm flujos`) porque necesitan
+el compilador que traduce `"use workflow"` y `"use step"`. Sin él esas
+directivas son literales de cadena: la función corre igual, el test pasa, y la
+durabilidad no existe.
+
+Las invariantes (`pnpm arquitectura`) son las cuatro cosas que, de romperse, no
+se ven al leer un diff: que el núcleo no toque infraestructura, que ninguna
+consulta quede fuera de la capa de datos sin decir por qué, que los filtros
+escritos a mano no vuelvan a crecer, y que la capa no pueda caer al rol que
+saltea RLS.
 
 Lo que **no** puede ver: cómo se comporta el agente cuando extracción, análisis
 de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
@@ -336,6 +348,9 @@ que aprueba porque el sistema estaba apagado es peor que no correrlo.
 | Antes de un piloto con volumen real | `pnpm load --write --claimants 100` |
 | Después de tocar el agente o los prompts | `pnpm pentest --agent` |
 | Después de cambiar la casilla, el número o sus credenciales | `pnpm knock` |
+| **Antes de desplegar la capa de datos** | `pnpm listo` |
+| Después de agregar una tabla con `tenant_id` | `pnpm permisos` |
+| Dudás de si una consulta filtra por inquilino | `pnpm arquitectura` |
 
 `--fast` saltea el ensayo (gratis, sin tokens). `--local` saltea el chequeo de
 producción.

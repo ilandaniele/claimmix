@@ -536,6 +536,49 @@ una respuesta citada se recorta bien, y para eso simulaba `@/lib/db` y
 `@/data/scope` — porque el import arrastraba mil seiscientas líneas de worker.
 Ahora importa del núcleo y no simula nada.
 
+### 🧪 Lo que ahora se prueba solo (2026-08-26)
+
+Tres zonas del producto no tenían un solo test, y las tres deciden algo que
+importa. Escribírselos destapó **dos defectos reales**:
+
+**Un nombre salía a medias enmascarar.** `maskByKey` preguntaba
+`includes("policy")` antes que `includes("name")`, y `policyholder_name`
+*contiene* "policy". El nombre del asegurado se enmascaraba con la regla de los
+números de póliza y "Roberto Paz" salía del sistema como `Roberto***Paz`. En una
+ciudad chica, eso es la persona.
+
+**Quince consultas reventaban en producción.** El codemod que migró todo a la
+capa envolvió también el `.catch(() => [])` del final de las cadenas, y ese
+`.catch` las resuelve en una promesa — `batch` necesita el constructor. La
+página de un caso, la corrida del agente y el export estaban rotos. Los 2168
+tests pasaban en verde: el puente que usan los tests hace
+`Promise.resolve(armar(db))`, que con una promesa funciona igual, y por eso
+escondía justo esta clase de error.
+
+**Lo que se agregó:**
+
+| | Qué cuida |
+|---|---|
+| 13 e2e de seguridad | rutas del motor de flujos, nonce de la CSP por pedido, iframe, límite de tráfico |
+| 24 tests de PII | que ningún secreto salga, en ningún modo, ni siendo dueño |
+| 14 de las guardas | quién entra y quién no — estaban EXCLUIDAS de la cobertura |
+| 13 de la capa | que el `set_config` viaje primero en el lote, con el inquilino correcto |
+| 7 del flujo durable | que esperar el turno y correr el agente sigan en pasos separados |
+
+**Y dos chequeos que mentían.** Los jobs de e2e e integración se salteaban sin
+secretos, imprimían `[skip]` y quedaban **en verde**: se leen como cobertura y
+no existen. Ahora es aviso en un pull request —puede venir de un fork— y error
+en `main`. El piso de cobertura estaba en 80 con una cobertura real de 70, así
+que fallaba siempre y nadie lo corría; queda en el número de hoy, como
+trinquete.
+
+`pnpm audit`: 7 vulnerabilidades → 0. Entraban con el SDK de flujos (`undici`,
+con un aviso de *cross-user information disclosure*). El arreglo obvio rompió el
+lint, y vale la pena el porqué: `">=1.1.18"` no tiene techo, así que 5.0.9
+también lo satisface, y pnpm se la dio a `minimatch@3`, que hace `require()` —
+`TypeError: expand is not a function` desde adentro de eslint. Un override sin
+`<mayor+1` no fija una versión: autoriza cualquier futuro.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

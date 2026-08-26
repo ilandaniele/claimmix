@@ -579,6 +579,46 @@ también lo satisface, y pnpm se la dio a `minimatch@3`, que hace `require()` �
 `TypeError: expand is not a function` desde adentro de eslint. Un override sin
 `<mayor+1` no fija una versión: autoriza cualquier futuro.
 
+### ⚙️ La CI, y qué prueba de verdad (2026-08-26)
+
+Dos jobs pasaban en verde **sin correr nada**: se salteaban cuando faltaba un
+secreto, imprimían `[skip]`, y el check quedaba verde. Un verde que no probó
+nada se lee como cobertura y no existe.
+
+Al arreglarlo aparecieron tres cosas distintas:
+
+**El post-deploy estaba roto por una omisión propia.** El commit que enseñó a la
+CI el rol nuevo agregó `DATABASE_URL_APP` a los jobs de `ci.yml` y no a los de
+`post-deploy.yml`. Cuatro jobs corrían media tarea antes de romper: lo que va por
+el rol dueño andaba, y lo que pasa por `enTenant` tiraba "falta
+DATABASE_URL_APP". En el pen test el síntoma se leía como **"la pared entre
+inquilinos falló"**, porque esa prueba pasa por `listCases`. Un rojo que señala
+mal cuesta más que uno que no aparece. Hay una invariante que ahora lo comprueba.
+
+**Los 204 tests de integración no pueden correr en CI, y no es por un secreto.**
+Hacen `fetch` contra un servidor HTTP y se autentican como un analista: necesitan
+servidor levantado, base sembrada y un usuario con contraseña. Lo último no se
+puede armar en un job — el alta exige dirección verificada (`if (!emailVerified)
+return false`) y un alta por contraseña nunca lo está. Es una defensa deliberada,
+puesta después de que agregar una casilla a la lista blanca abriera exactamente
+esa ventana. **No se va a debilitar para que corra la CI.** Corren en local con
+`pnpm check`; el job lo deja anotado en el resumen de cada run.
+
+**Los e2e sí se pueden prender, y falta hacerlo.** Trece de ellos no necesitan
+datos —cabeceras, nonce de la CSP por pedido, iframe, límite de tráfico, y que
+las rutas del motor de flujos no acepten trabajo de afuera—, sólo que el servidor
+levante. Apuntando al ENSAYO, nunca a producción:
+
+```bash
+gh secret set DATABASE_URL --body "$STAGING_DATABASE_URL"
+```
+
+Hasta que estén, ese job falla en `main` a propósito: es una exigencia que se
+satisface en treinta segundos, no una imposible.
+
+**Estado de los pipelines:** CI en verde. Post-deploy con smoke, pen test,
+permisos, carga y timbre en verde.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

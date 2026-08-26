@@ -37,6 +37,9 @@ deploy que está corriendo. **No le manda un mensaje a nadie.**
 `pnpm prove --whatsapp <número>` / `--email <dirección>` es el único que manda
 algo de verdad, para comprobar que la salida funciona.
 
+`pnpm arquitectura` comprueba que ninguna consulta se salga de la capa de datos
+y `pnpm permisos` que el rol restringido pueda hacer lo que ella le pide.
+
 `pnpm load` mide cuánto aguanta y `pnpm pentest` pregunta qué se consigue sin
 credenciales. Las mitades gratis de las dos corren solas después de cada deploy.
 
@@ -436,7 +439,61 @@ and the pen test walks every one of them unauthenticated on each deploy.
 
 Every deploy since checks `ƒ Proxy (Middleware)` is in the build output.
 
+### 🧱 La base separa a las aseguradoras, no el código (2026-08-25)
+
+Antes, que una aseguradora no viera los datos de otra dependía de que cada
+consulta llevara escrito `eq(tabla.tenant_id, tenantId)`. Había 198. Una que se
+olvidara no daba error ni salía en los tests: devolvía filas de todos.
+
+Ahora lo hace Postgres. Las 29 tablas con columna de inquilino tienen RLS
+**forzado** y política propia, y la aplicación entra con `claimmix_app`, un rol
+sin `BYPASSRLS`. La capa (`src/data/scope.ts`) abre la transacción, fija el
+inquilino y corre la consulta adentro:
+
+```ts
+const filas = await enTenant({ tenantId }, (db) =>
+  db.select().from(cases).where(eq(cases.status, "escalado"))
+);
+```
+
+Sin `WHERE` por inquilino. Y si alguien intenta insertar en otro, la base lo
+**rechaza** — una defensa que antes no existía en ninguna forma.
+
+**Lo que se comprueba solo, en cada `pnpm check`:**
+
+| Chequeo | Qué mira |
+|---|---|
+| `pnpm arquitectura` | que ninguna consulta quede fuera de la capa sin decir por qué |
+| `pnpm permisos` | que `claimmix_app` pueda hacer lo que la capa le pide, en las 29 tablas |
+| `pnpm tenancy` | que la base esconda de verdad lo ajeno |
+| `pnpm capa-datos` | lo mismo, pero a través del código TypeScript |
+
+**Las 46 consultas que quedaron afuera no son deuda.** El limitador de tráfico
+cuenta por IP antes de saber quién llama; `gmail_poll_state` no tiene columna de
+inquilino; los barridos nocturnos recorren a todos a propósito; el reporte de
+facturación los agrega de una; y las de login son las que *averiguan* de qué
+inquilino es la sesión. Cada una lleva `// sin-inquilino: <por qué>` encima, y
+`pnpm arquitectura` falla con cualquiera que no lo lleve.
+
+**Dos trampas que costaron caro y conviene no volver a pisar:**
+
+- **`FORCE` no alcanza.** Un rol con `BYPASSRLS` ignora las políticas aunque la
+  tabla las fuerce. El rol nuevo era obligatorio, no una prolijidad.
+- **En Neon los roles viven en el proyecto, no en la rama.** El ensayo creaba
+  una rama temporal y ahí adentro le cambiaba la contraseña a `claimmix_app`
+  — y el cambio llegaba al rol de producción. Ya está arreglado: el ensayo usa
+  `claimmix_app_ensayo`, propio.
+
 ### 🙋 Waiting on you (not code)
+
+- **La contraseña de `claimmix_app` en producción quedó rotada y hay que
+  reponerla.** El ensayo se la cambió por una aleatoria que descartó (ver "La
+  base separa a las aseguradoras"), así que `DATABASE_URL_APP` —en `.env.local`
+  y en Vercel— ya no autentica. **No hay caída**: lo desplegado todavía usa el
+  rol viejo. Pero es lo primero que hay que hacer antes de desplegar la capa de
+  datos, o la aplicación arranca sin poder consultar nada.
+  Se repone con `pnpm rol-app`, que genera una nueva y la imprime; después va a
+  `.env.local` y a Vercel (`vercel env rm` + `vercel env add DATABASE_URL_APP`).
 
 - ~~**Write to it once, from a real phone and a real mailbox**~~ ✅ **DONE 2026-08-24.**
   See "The last metre" below: a real mail, two real WhatsApps and a real photograph,

@@ -351,8 +351,9 @@ export async function maybeQueueFineTuneJob(
   try {
     const te = tables.trainingExamples;
     const approvedCount = await countRows(
+      tenantCtx,
       te,
-      and(eq(te.tenant_id, tenantId), eq(te.status, "approved"))
+      eq(te.status, "approved")
     );
 
     const threshold = getFineTuneMinExamples();

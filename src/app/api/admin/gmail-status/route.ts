@@ -71,6 +71,7 @@ export async function GET() {
     } | null;
     try {
       row = firstRow(
+        // sin-inquilino: `gmail_poll_state` no tiene columna de inquilino: es estado del sistema.
         await db
           .select({
             gmail_account_email: t.gmail_account_email,

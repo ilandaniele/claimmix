@@ -1,7 +1,7 @@
 import { ilike, or, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { PgTable } from "drizzle-orm/pg-core";
-import { db } from "./index";
+import { enTenant, type TenantContext } from "@/data/scope";
 
 /** Returns the first row of a result set, or null when empty. */
 export const firstRow = <T>(rows: T[]): T | null => rows[0] ?? null;
@@ -19,12 +19,20 @@ export function ilikeAny(cols: AnyPgColumn[], q: string): SQL | undefined {
 }
 
 /**
- * Counts rows in a table (optionally filtered). Thin wrapper over
- * `db.$count`, available in the installed drizzle-orm (0.45.x).
+ * Cuenta filas de una tabla, del inquilino que se le pase.
+ *
+ * El contexto es obligatorio y no tiene default a propósito. Antes esto envolvía
+ * `db.$count` a secas y el filtro lo ponía cada quien al llamar:
+ * `countRows(cases, eq(cases.tenant_id, tenantId))`. Contar de más no rompe
+ * nada visible —devuelve un número más grande— así que un olvido ahí no se cae
+ * ni sale en los tests: sólo muestra en la bandeja de uno los casos de todos.
+ *
+ * Con el contexto en la firma, esa forma de llamarlo mal ya no compila.
  */
 export async function countRows(
+  ctx: TenantContext,
   table: PgTable | SQLWrapper,
-  where?: SQL,
+  where?: SQL
 ): Promise<number> {
-  return db.$count(table, where);
+  return enTenant(ctx, (db) => db.$count(table, where));
 }

@@ -48,6 +48,8 @@ export async function getOrCreatePollState(
   // history_id). Conflict target: unique index idx_gmail_poll_state_account
   // on gmail_account_email.
   try {
+    // sin-inquilino: `gmail_poll_state` no tiene columna de inquilino: es estado del
+    // poller, uno por casilla, del sistema y no de un inquilino.
     await db
       .insert(gmailPollState)
       .values({ gmail_account_email: gmailEmail, history_id: "1" })
@@ -63,6 +65,8 @@ export async function getOrCreatePollState(
   let data: { id: string; history_id: string } | null;
   try {
     data = firstRow(
+      // sin-inquilino: `gmail_poll_state` no tiene columna de inquilino: es estado del
+      // poller, uno por casilla, del sistema y no de un inquilino.
       await db
         .select({ id: gmailPollState.id, history_id: gmailPollState.history_id })
         .from(gmailPollState)
@@ -105,6 +109,8 @@ export async function advancePollState(
   newHistoryId: string
 ): Promise<void> {
   try {
+    // sin-inquilino: `gmail_poll_state` no tiene columna de inquilino: es estado del
+    // poller, uno por casilla, del sistema y no de un inquilino.
     await db
       .update(gmailPollState)
       .set({
@@ -142,6 +148,8 @@ export async function recordPollError(
   const truncated = error.slice(0, 500);
 
   try {
+    // sin-inquilino: `gmail_poll_state` no tiene columna de inquilino: es estado del
+    // poller, uno por casilla, del sistema y no de un inquilino.
     await db
       .update(gmailPollState)
       .set({
@@ -176,6 +184,8 @@ export async function getWatchExpiration(
   let data: { watch_expiration: string | null } | null;
   try {
     data = firstRow(
+      // sin-inquilino: `gmail_poll_state` no tiene columna de inquilino: es estado del
+      // poller, uno por casilla, del sistema y no de un inquilino.
       await db
         .select({ watch_expiration: gmailPollState.watch_expiration })
         .from(gmailPollState)
@@ -218,6 +228,8 @@ export async function setWatchState(
   watchHistoryId: string
 ): Promise<void> {
   try {
+    // sin-inquilino: `gmail_poll_state` no tiene columna de inquilino: es estado del
+    // poller, uno por casilla, del sistema y no de un inquilino.
     await db
       .insert(gmailPollState)
       .values({

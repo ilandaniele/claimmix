@@ -42,6 +42,8 @@ export async function requireAdmin(): Promise<AdminContext> {
   }
 
   const userRow = firstRow(
+    // sin-inquilino: El arranque de toda petición: de acá sale el inquilino que después
+    // usa `enTenant`. Por definición no puede ir adentro.
     await db
       .select({ id: users.id, tenant_id: users.tenant_id, role: users.role })
       .from(users)

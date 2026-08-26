@@ -76,6 +76,8 @@ export async function listEnabledGmailAccounts(): Promise<GmailAccount[]> {
     enabled: boolean;
   }>;
   try {
+    // sin-inquilino: El poller mira TODAS las casillas, de todos los inquilinos, a
+    // propósito: cada fila trae su propio tenant_id y con ése se sigue.
     data = await db
       .select({
         id: gmailAccounts.id,
@@ -185,6 +187,8 @@ export async function getGmailAccountByEmail(
   } | null;
   try {
     data = firstRow(
+      // sin-inquilino: Resuelve una casilla por su dirección de correo, que es única en
+      // toda la base. Todavía no se sabe de qué inquilino es: eso sale de acá.
       await db
         .select({
           id: gmailAccounts.id,

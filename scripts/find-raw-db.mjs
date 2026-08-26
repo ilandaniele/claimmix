@@ -15,6 +15,8 @@
 import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 
+const SALTO = String.fromCharCode(10);
+
 /** Los tramos `enTenant(…)` de un archivo, como pares [inicio, fin). */
 function tramosDeLaCapa(s) {
   const tramos = [];
@@ -51,6 +53,7 @@ const archivos = execSync(
   .filter((f) => !f.startsWith("src/data/"));
 
 const crudas = [];
+let declaradas = 0;
 for (const f of archivos) {
   const s = readFileSync(f, "utf8");
   const tramos = tramosDeLaCapa(s);
@@ -67,6 +70,15 @@ for (const f of archivos) {
     const t =
       /\.(?:from|into)\(\s*([\w.]+)/.exec(cerca) ||
       /\b(?:insert|update|delete|\$count)\(\s*([\w.]+)/.exec(cerca);
+    // Una consulta puede quedar afuera de la capa, pero tiene que decir por qué.
+    // El motivo va pegado a la consulta y no en una lista en otro archivo: la
+    // lista se desactualiza y nadie la lee; el comentario lo ve el que edita.
+    const arriba = s.slice(0, pos).split(SALTO).slice(-4).join(SALTO);
+    if (/sin-inquilino:/.test(arriba)) {
+      declaradas++;
+      continue;
+    }
+
     crudas.push({
       f,
       linea: s.slice(0, pos).split("\n").length,
@@ -77,4 +89,8 @@ for (const f of archivos) {
 }
 
 for (const c of crudas) console.log(`${c.f}:${c.linea}	${c.tabla}	db.${c.op}`);
-console.log(`\n${crudas.length} consulta(s) fuera de la capa de datos`);
+console.log(
+  `${SALTO}${crudas.length} consulta(s) fuera de la capa sin declarar` +
+    ` · ${declaradas} declarada(s) sin inquilino`
+);
+if (crudas.length > 0) process.exitCode = 1;

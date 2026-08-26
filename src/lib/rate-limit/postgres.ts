@@ -51,6 +51,8 @@ export async function checkRateLimitPostgres(
   const resetAt = windowStart.getTime() + windowMs;
 
   try {
+    // sin-inquilino: `rate_limit_counters` se cuenta por IP o por usuario, no por
+    // inquilino, y tiene que funcionar antes de saber quién es el que llama.
     const result = await db.execute(sql`
       insert into rate_limit_counters (bucket_key, window_start, hits)
       values (${key}, ${windowStart.toISOString()}, 1)
@@ -59,6 +61,7 @@ export async function checkRateLimitPostgres(
       returning hits
     `);
 
+    // sin-inquilino: Idem: es el resultado del mismo insert de arriba.
     // db.execute devuelve { rows: [...] }, no un arreglo.
     const rows = (result as unknown as { rows: { hits: number | string }[] }).rows ?? [];
     const hits = Number(rows[0]?.hits ?? 1);
@@ -95,6 +98,7 @@ export async function checkRateLimitPostgres(
 export async function purgeExpiredRateLimits(olderThanMs = 24 * 60 * 60_000): Promise<number> {
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
   try {
+    // sin-inquilino: La limpieza del contador, que tampoco es de nadie en particular.
     const result = await db.execute(
       sql`delete from rate_limit_counters where window_start < ${cutoff}`
     );

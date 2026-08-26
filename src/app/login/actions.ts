@@ -112,6 +112,8 @@ export async function signIn(
   }
 
   // ── 4. Fetch public.users row for tenant_id + role ─────────────────────────
+  // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es el que entra.
+  // Es el arranque de la sesión: todavía no hay inquilino que fijar.
   const [userRow] = await db
     .select({ tenant_id: users.tenant_id, role: users.role })
     .from(users)
@@ -144,6 +146,7 @@ export async function signOut(): Promise<void> {
   const session = await getSessionContext();
 
   if (session?.user) {
+    // sin-inquilino: Idem.
     const [userRow] = await db
       .select({ tenant_id: users.tenant_id })
       .from(users)

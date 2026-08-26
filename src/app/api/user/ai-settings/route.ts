@@ -21,6 +21,7 @@ export async function GET() {
     const { user } = await requireRole(...ALL_ROLES);
 
     const row = firstRow(
+      // sin-inquilino: `user_ai_settings` no tiene columna de inquilino: la clave es el usuario.
       await db
         .select({ enc: tables.userAiSettings.gemini_api_key_encrypted })
         .from(tables.userAiSettings)
@@ -45,6 +46,7 @@ export async function PATCH(request: NextRequest) {
 
     if (clearGeminiKey) {
       await import("@/lib/db").then(({ db }) =>
+        // sin-inquilino: Idem.
         db
           .update(tables.userAiSettings)
           .set({ gemini_api_key_encrypted: null, updated_at: new Date().toISOString() })

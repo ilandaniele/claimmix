@@ -116,11 +116,14 @@ function why(err: unknown): string {
 /**
  * The rows from a raw query.
  *
+ // sin-inquilino: Chequeo de infraestructura: lee el catálogo y las migraciones, que
+ // no son de ningún inquilino y necesitan el rol dueño para verse.
  * `db.execute` hands back the driver's result object, not an array — and code
  * that assumed an array got an empty list, which here meant reporting every
  * migration as missing on a database where all of them were applied.
  */
 async function rowsOf<T>(query: SQL): Promise<T[]> {
+  // sin-inquilino: Idem: el resultado crudo del driver, no filas de una tabla.
   const result = (await db.execute(query)) as unknown;
   if (Array.isArray(result)) return result as T[];
   const rows = (result as { rows?: unknown })?.rows;
@@ -131,6 +134,7 @@ async function rowsOf<T>(query: SQL): Promise<T[]> {
 
 async function checkDatabase(): Promise<Check> {
   try {
+    // sin-inquilino: `select 1` — no toca ninguna tabla.
     await db.execute(sql`select 1`);
     return ok("base de datos", "responde");
   } catch (err) {

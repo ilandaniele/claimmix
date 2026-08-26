@@ -27,6 +27,8 @@ export async function GET() {
     );
   }
 
+  // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
+  // No puede pasar por una capa que necesita el dato que ella busca.
   const [userRow] = await db
     .select({
       id: users.id,
@@ -80,6 +82,8 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
+  // sin-inquilino: Mismo caso que arriba: la clave es el id de sesión, que es único
+  // en toda la base, no dentro de un inquilino.
   await db
     .update(users)
     .set({ locale: parsed.data.locale })

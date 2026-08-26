@@ -126,9 +126,9 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
 
   // Fetch counts for all statuses in parallel (tenant-scoped).
   const [totalCount, ...statusCounts] = await Promise.all([
-    countRows(cases, eq(cases.tenant_id, tenantId)),
+    countRows({ tenantId }, cases),
     ...VALID_STATUSES.map((s) =>
-      countRows(cases, and(eq(cases.tenant_id, tenantId), eq(cases.status, s)))
+      countRows({ tenantId }, cases, eq(cases.status, s))
     ),
   ]);
 

@@ -166,6 +166,15 @@ describe("listCases", () => {
 describe("listCasesForExport", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Acá `enTenant` sí tiene que EJECUTAR el armador contra el db simulado.
+    // El tapón de arriba —que devuelve vacío— existe para la hidratación de
+    // `listCases`, donde lo normal es que no haya nada que hidratar; la
+    // exportación, en cambio, es la consulta misma.
+    vi.mocked(enTenant).mockImplementation(
+      ((_ctx: unknown, armar: (d: unknown) => unknown) =>
+        Promise.resolve(armar(db))) as never
+    );
   });
 
   it("returns array of case rows", async () => {

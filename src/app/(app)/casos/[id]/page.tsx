@@ -416,7 +416,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
             >
               {t("case.detail.rawEmail")}
             </h2>
-            <RawEmailAccordion caseId={caseRow.id} />
+            <RawEmailAccordion tenantId={tenantId} caseId={caseRow.id} />
           </section>
 
           {/* Messages thread — only shown for email channel cases (AC11, AC12) */}
@@ -663,25 +663,35 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
  *
  * Isolated here so it can be wrapped in <Suspense> later.
  */
-async function RawEmailAccordion({ caseId }: { caseId: string }) {
+async function RawEmailAccordion({
+  tenantId,
+  caseId,
+}: {
+  tenantId: string;
+  caseId: string;
+}) {
   const locale = await getServerLocale();
   const t = getT(locale);
 
   let messages: { body: string; subject: string | null; received_at: string }[] =
-    await db
-      .select({ body: rawMessages.body, subject: rawMessages.subject, received_at: rawMessages.received_at })
-      .from(rawMessages)
-      .where(eq(rawMessages.case_id, caseId))
-      .orderBy(asc(rawMessages.received_at))
-      .limit(5);
+    await enTenant({ tenantId }, (db) =>
+      db
+        .select({ body: rawMessages.body, subject: rawMessages.subject, received_at: rawMessages.received_at })
+        .from(rawMessages)
+        .where(eq(rawMessages.case_id, caseId))
+        .orderBy(asc(rawMessages.received_at))
+        .limit(5)
+    );
 
   if (messages.length === 0) {
-    const fallback = await db
-      .select({ body_text: claimMessages.body_text, subject: claimMessages.subject, received_at: claimMessages.received_at })
-      .from(claimMessages)
-      .where(and(eq(claimMessages.case_id, caseId), eq(claimMessages.direction, "inbound")))
-      .orderBy(asc(claimMessages.received_at))
-      .limit(5);
+    const fallback = await enTenant({ tenantId }, (db) =>
+      db
+        .select({ body_text: claimMessages.body_text, subject: claimMessages.subject, received_at: claimMessages.received_at })
+        .from(claimMessages)
+        .where(and(eq(claimMessages.case_id, caseId), eq(claimMessages.direction, "inbound")))
+        .orderBy(asc(claimMessages.received_at))
+        .limit(5)
+    );
 
     messages = fallback.map((msg) => ({
       body: msg.body_text ?? "",
@@ -771,16 +781,18 @@ function InjurySeverityBadge({ severity }: { severity: string }) {
 }
 
 async function getLatestEmailText(
-  _tenantId: string,
+  tenantId: string,
   caseId: string
 ): Promise<{ subject: string; body: string; senderEmail: string }> {
-  const rawMsg = await db
-    .select({ body: rawMessages.body, subject: rawMessages.subject, from_addr: rawMessages.from_addr })
-    .from(rawMessages)
-    .where(eq(rawMessages.case_id, caseId))
-    .orderBy(desc(rawMessages.received_at))
-    .limit(1)
-    .then((rows) => rows[0] ?? null);
+  const rawMsg = await enTenant({ tenantId }, (db) =>
+    db
+      .select({ body: rawMessages.body, subject: rawMessages.subject, from_addr: rawMessages.from_addr })
+      .from(rawMessages)
+      .where(eq(rawMessages.case_id, caseId))
+      .orderBy(desc(rawMessages.received_at))
+      .limit(1)
+      .then((rows) => rows[0] ?? null)
+  );
 
   if (rawMsg) {
     return {
@@ -790,13 +802,15 @@ async function getLatestEmailText(
     };
   }
 
-  const claimMsg = await db
-    .select({ body_text: claimMessages.body_text, subject: claimMessages.subject, from_addr: claimMessages.from_addr })
-    .from(claimMessages)
-    .where(and(eq(claimMessages.case_id, caseId), eq(claimMessages.direction, "inbound")))
-    .orderBy(desc(claimMessages.received_at))
-    .limit(1)
-    .then((rows) => rows[0] ?? null);
+  const claimMsg = await enTenant({ tenantId }, (db) =>
+    db
+      .select({ body_text: claimMessages.body_text, subject: claimMessages.subject, from_addr: claimMessages.from_addr })
+      .from(claimMessages)
+      .where(and(eq(claimMessages.case_id, caseId), eq(claimMessages.direction, "inbound")))
+      .orderBy(desc(claimMessages.received_at))
+      .limit(1)
+      .then((rows) => rows[0] ?? null)
+  );
 
   return {
     subject: claimMsg?.subject ?? "",

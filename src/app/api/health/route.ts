@@ -30,6 +30,7 @@ import { db } from "@/lib/db";
 import { gmailAccounts } from "@/lib/db/schema";
 
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
+import { enTenant } from "@/data/scope";
 
 const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
 const UNA_HORA_MS = 60 * 60 * 1000;
@@ -331,28 +332,30 @@ async function checkGmail(): Promise<Check> {
     // columns are called, and reported "gmail no se pudo verificar" on a
     // perfectly healthy mailbox. A health check that cries wolf gets ignored,
     // which is worse than not having one.
-    const rows = await db
-      .select({
-        email: gmailAccounts.email,
-        enabled: gmailAccounts.enabled,
-        lastError: gmailAccounts.last_error,
-        tokenEncrypted: gmailAccounts.refresh_token_encrypted,
-        lastConnectedAt: gmailAccounts.last_connected_at,
-      })
-      .from(gmailAccounts)
-      // La que trabaja, no una cualquiera.
-      //
-      // Esto pedía una fila del tenant sin filtrar y sin ordenar. Mientras
-      // hubo una sola casilla dio igual; el día que se cambió la casilla de
-      // entrada quedaron tres —dos apagadas y la que atiende— y Postgres
-      // devolvió una apagada. Producción sana, salud en amarillo, y el aviso
-      // apuntando a una casilla que se apagó a propósito.
-      //
-      // Es la falla contra la que advierte el comentario de acá arriba, dos
-      // versiones después: un chequeo que grita sin motivo se deja de mirar.
-      .where(and(eq(gmailAccounts.tenant_id, tenantId), eq(gmailAccounts.enabled, true)))
-      .orderBy(asc(gmailAccounts.created_at))
-      .limit(1);
+    const rows = await enTenant({ tenantId }, (db) =>
+      db
+        .select({
+          email: gmailAccounts.email,
+          enabled: gmailAccounts.enabled,
+          lastError: gmailAccounts.last_error,
+          tokenEncrypted: gmailAccounts.refresh_token_encrypted,
+          lastConnectedAt: gmailAccounts.last_connected_at,
+        })
+        .from(gmailAccounts)
+        // La que trabaja, no una cualquiera.
+        //
+        // Esto pedía una fila del tenant sin filtrar y sin ordenar. Mientras
+        // hubo una sola casilla dio igual; el día que se cambió la casilla de
+        // entrada quedaron tres —dos apagadas y la que atiende— y Postgres
+        // devolvió una apagada. Producción sana, salud en amarillo, y el aviso
+        // apuntando a una casilla que se apagó a propósito.
+        //
+        // Es la falla contra la que advierte el comentario de acá arriba, dos
+        // versiones después: un chequeo que grita sin motivo se deja de mirar.
+        .where(and(eq(gmailAccounts.tenant_id, tenantId), eq(gmailAccounts.enabled, true)))
+        .orderBy(asc(gmailAccounts.created_at))
+        .limit(1)
+    );
 
     const account = rows[0];
     if (!account) return degraded("gmail", "ninguna casilla activa");

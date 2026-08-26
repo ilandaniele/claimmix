@@ -16,6 +16,21 @@ const { mockExecute, mockSelect } = vi.hoisted(() => ({
   mockSelect: vi.fn(),
 }));
 
+// La capa de datos, corriendo contra el db que este test ya simula.
+//
+// Se lee `mod.db` en CADA llamada y no se desestructura: hay tests que
+// intercambian la base simulada entre casos, y un `const { db } = ...`
+// congelaría el valor de la primera.
+vi.mock("@/data/scope", async () => {
+  const mod = await import("@/lib/db");
+  return {
+    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
+      Promise.resolve(armar(mod.db)),
+    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
+      Promise.all(armar(mod.db)),
+  };
+});
+
 vi.mock("@/lib/db", () => ({
   db: { execute: mockExecute, select: mockSelect },
 }));

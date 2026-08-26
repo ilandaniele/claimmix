@@ -262,22 +262,24 @@ export async function listCasesForExport(
 
   try {
     // Max 1000 rows per export.
-    const data = await db
-      .select({
-        id: cases.id,
-        policy_number: cases.policy_number,
-        policyholder_name: cases.policyholder_name,
-        claim_type: cases.claim_type,
-        status: cases.status,
-        confidence_min: cases.confidence_min,
-        assigned_to: cases.assigned_to,
-        channel: cases.channel,
-        created_at: cases.created_at,
-      })
-      .from(cases)
-      .where(and(...conditions))
-      .orderBy(desc(cases.created_at))
-      .limit(1000);
+    const data = await enTenant({ tenantId }, (db) =>
+      db
+        .select({
+          id: cases.id,
+          policy_number: cases.policy_number,
+          policyholder_name: cases.policyholder_name,
+          claim_type: cases.claim_type,
+          status: cases.status,
+          confidence_min: cases.confidence_min,
+          assigned_to: cases.assigned_to,
+          channel: cases.channel,
+          created_at: cases.created_at,
+        })
+        .from(cases)
+        .where(and(...conditions))
+        .orderBy(desc(cases.created_at))
+        .limit(1000)
+    );
 
     return data as unknown as CaseRow[];
   } catch (err) {

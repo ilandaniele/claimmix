@@ -5,6 +5,7 @@ import { and, eq, gte, lt, lte, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
+import { enTenant } from "@/data/scope";
 
 const DEFAULT_SIMULATE_WORKER_DELAY_MS =
   process.env.NODE_ENV === "test" ? 0 : 5_000;
@@ -94,23 +95,29 @@ export async function getSimulationWorkerDelayMs(input: {
     60 * 60_000
   );
   const lookbackStart = new Date(createdAtMs - lookbackMs).toISOString();
+  // Fijado antes de entrar al armador a propósito: TypeScript ya sabe, por el
+  // `return 0` de arriba, que esto no es null — pero ese estrechamiento no
+  // cruza el borde de una función flecha, y adentro vuelve a ser `string | null`.
+  const desdeCuando = input.caseCreatedAt;
 
   try {
     const row = firstRow(
-      await db
-        .select({ queued_count: sql<number>`count(*)::int` })
-        .from(cases)
-        .where(
-          and(
-            eq(cases.tenant_id, input.tenantId),
-            eq(cases.channel, "email_sim"),
-            gte(cases.created_at, lookbackStart),
-            or(
-              lt(cases.created_at, input.caseCreatedAt),
-              and(eq(cases.created_at, input.caseCreatedAt), lte(cases.id, input.caseId))
+      await enTenant({ tenantId: input.tenantId }, (db) =>
+        db
+          .select({ queued_count: sql<number>`count(*)::int` })
+          .from(cases)
+          .where(
+            and(
+              eq(cases.tenant_id, input.tenantId),
+              eq(cases.channel, "email_sim"),
+              gte(cases.created_at, lookbackStart),
+              or(
+                lt(cases.created_at, desdeCuando),
+                and(eq(cases.created_at, desdeCuando), lte(cases.id, input.caseId))
+              )
             )
           )
-        )
+      )
     );
 
     const queuedCount = Number(row?.queued_count ?? 1);
@@ -139,28 +146,34 @@ export async function getEarlierPendingSimulationCount(input: {
     60 * 60_000
   );
   const lookbackStart = new Date(createdAtMs - lookbackMs).toISOString();
+  // Fijado antes de entrar al armador a propósito: TypeScript ya sabe, por el
+  // `return 0` de arriba, que esto no es null — pero ese estrechamiento no
+  // cruza el borde de una función flecha, y adentro vuelve a ser `string | null`.
+  const desdeCuando = input.caseCreatedAt;
   const staleCutoff = new Date(
     Date.now() - getSimulateWorkerStaleAfterMs()
   ).toISOString();
 
   try {
     const row = firstRow(
-      await db
-        .select({ queued_count: sql<number>`count(*)::int` })
-        .from(cases)
-        .where(
-          and(
-            eq(cases.tenant_id, input.tenantId),
-            eq(cases.channel, "email_sim"),
-            eq(cases.status, "procesando"),
-            gte(cases.created_at, lookbackStart),
-            gte(cases.created_at, staleCutoff),
-            or(
-              lt(cases.created_at, input.caseCreatedAt),
-              and(eq(cases.created_at, input.caseCreatedAt), lt(cases.id, input.caseId))
+      await enTenant({ tenantId: input.tenantId }, (db) =>
+        db
+          .select({ queued_count: sql<number>`count(*)::int` })
+          .from(cases)
+          .where(
+            and(
+              eq(cases.tenant_id, input.tenantId),
+              eq(cases.channel, "email_sim"),
+              eq(cases.status, "procesando"),
+              gte(cases.created_at, lookbackStart),
+              gte(cases.created_at, staleCutoff),
+              or(
+                lt(cases.created_at, desdeCuando),
+                and(eq(cases.created_at, desdeCuando), lt(cases.id, input.caseId))
+              )
             )
           )
-        )
+      )
     );
 
     return Math.max(0, Number(row?.queued_count ?? 0));
@@ -205,26 +218,31 @@ export async function getEarlierPendingEmailCount(input: {
   if (!Number.isFinite(createdAtMs)) return 0;
 
   const lookbackStart = new Date(createdAtMs - 15 * 60_000).toISOString();
+  // Igual que en las otras dos de este archivo: el estrechamiento del
+  // `return 0` de arriba no cruza el borde de la función flecha.
+  const desdeCuando = input.caseCreatedAt;
   const staleCutoff = new Date(Date.now() - 10 * 60_000).toISOString();
 
   try {
     const row = firstRow(
-      await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(cases)
-        .where(
-          and(
-            eq(cases.tenant_id, input.tenantId),
-            eq(cases.channel, "email"),
-            eq(cases.status, "recibido"),
-            gte(cases.created_at, lookbackStart),
-            gte(cases.created_at, staleCutoff),
-            or(
-              lt(cases.created_at, input.caseCreatedAt),
-              and(eq(cases.created_at, input.caseCreatedAt), lt(cases.id, input.caseId))
+      await enTenant({ tenantId: input.tenantId }, (db) =>
+        db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(cases)
+          .where(
+            and(
+              eq(cases.tenant_id, input.tenantId),
+              eq(cases.channel, "email"),
+              eq(cases.status, "recibido"),
+              gte(cases.created_at, lookbackStart),
+              gte(cases.created_at, staleCutoff),
+              or(
+                lt(cases.created_at, desdeCuando),
+                and(eq(cases.created_at, desdeCuando), lt(cases.id, input.caseId))
+              )
             )
           )
-        )
+      )
     );
     return Math.max(0, Number(row?.count ?? 0));
   } catch (e) {

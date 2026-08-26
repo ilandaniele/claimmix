@@ -4,15 +4,21 @@
  * Una arquitectura escrita en un documento se degrada en seis meses; una
  * comprobada en cada `pnpm check`, no. Esto es lo segundo.
  *
- * Comprueba tres invariantes, en orden de importancia:
+ * Comprueba cuatro invariantes, en orden de importancia:
  *
  *   1. `src/core/` no toca infraestructura. Recibe datos y devuelve decisiones;
  *      si importa la base, la red o el entorno, deja de poder probarse sin
  *      montar media aplicación — que es el problema que la capa vino a resolver.
- *   2. Los filtros por inquilino escritos a mano no crecen. No se exige cero
+ *   2. Ninguna consulta queda fuera de la capa de datos sin decir por qué. Las
+ *      que se quedan afuera existen y son legítimas —el limitador de tráfico
+ *      cuenta por IP antes de saber quién llama, las de login averiguan de qué
+ *      inquilino es la sesión— pero cada una lleva su motivo escrito al lado.
+ *      Una consulta suelta sin explicación devuelve los datos de todos los
+ *      inquilinos y no da ningún error.
+ *   3. Los filtros por inquilino escritos a mano no crecen. No se exige cero
  *      todavía —quedan los que piden criterio— pero sí que el número baje o se
  *      quede igual. Un tope que sube solo no es un tope.
- *   3. La capa de datos no cae al rol viejo. `src/data/` no puede leer
+ *   4. La capa de datos no cae al rol viejo. `src/data/` no puede leer
  *      `DATABASE_URL`: sus consultas no llevan filtro por inquilino, y el rol
  *      viejo saltea RLS, así que usarlo devolvería los datos de todos.
  *
@@ -20,9 +26,10 @@
  * cosas que, de romperse, no se notan hasta que es tarde.
  */
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
-const TOPE_FILTROS = 44;
+const TOPE_FILTROS = 14;
 
 function archivos(dir, ext = [".ts", ".tsx"]) {
   if (!existsSync(dir)) return [];
@@ -74,7 +81,34 @@ if (core.length === 0) {
   if (sucios === 0) bien(`${core.length} archivo(s), ninguno toca infraestructura`);
 }
 
-// ── 2. Los filtros a mano no crecen ────────────────────────────────────────
+// ── 2. Ninguna consulta suelta sin explicación ─────────────────────────────
+console.log("\n▸ Consultas fuera de la capa de datos");
+{
+  let salida = "";
+  let codigo = 0;
+  try {
+    salida = execFileSync("node", ["scripts/find-raw-db.mjs"], { encoding: "utf8" });
+  } catch (e) {
+    salida = (e.stdout ?? "") + (e.stderr ?? "");
+    codigo = e.status ?? 1;
+  }
+  const sueltas = salida
+    .split(/\r?\n/)
+    .filter((l) => /\tdb\.\w/.test(l))
+    .map((l) => l.split("\t")[0]);
+  if (codigo !== 0 || sueltas.length > 0) {
+    mal(`${sueltas.length} consulta(s) sin declarar`);
+    for (const s of sueltas.slice(0, 10)) console.log(`     ${s}`);
+    if (sueltas.length > 10) console.log(`     …y ${sueltas.length - 10} más`);
+    console.log("     O va por enTenant(ctx, (db) => …), o lleva arriba un");
+    console.log("     comentario `// sin-inquilino: <por qué>` que lo justifique.");
+  } else {
+    const m = /(\d+) declarada/.exec(salida);
+    bien(`todas por la capa, salvo ${m ? m[1] : "0"} declaradas con su motivo`);
+  }
+}
+
+// ── 3. Los filtros a mano no crecen ────────────────────────────────────────
 console.log("\n▸ Filtros por inquilino escritos a mano");
 const FILTRO = /\beq\(\s*[\w.]*tenant_?[iI]d\b/;
 let filtros = 0;
@@ -96,7 +130,7 @@ if (filtros > TOPE_FILTROS) {
   }
 }
 
-// ── 3. La capa de datos no cae al rol viejo ────────────────────────────────
+// ── 4. La capa de datos no cae al rol viejo ────────────────────────────────
 console.log("\n▸ src/data/ usa sólo el rol restringido");
 const scope = "src/data/scope.ts";
 if (!existsSync(scope)) {

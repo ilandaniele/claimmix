@@ -67,6 +67,8 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
   const days = getAbandonAfterDays();
 
   try {
+    // sin-inquilino: Barrido de sistema: recorre los casos de TODOS los inquilinos, que
+    // es para lo que existe. El cron no corre en nombre de ninguno.
     const closed = await db
       .update(cases)
       .set({

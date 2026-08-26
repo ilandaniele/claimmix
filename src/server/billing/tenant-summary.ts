@@ -57,6 +57,8 @@ export async function listTenantSummaries(month?: string | null): Promise<{
   const range = resolveBillingPeriod(month ?? null)!;
   const demoTenantId = getDemoTenantId();
 
+  // sin-inquilino: Reporte de facturación: mira a todos los inquilinos de una, que es
+  // exactamente lo que un dueño necesita ver y lo que RLS impediría.
   const tenantRows = await db
     .select({
       id: tables.tenants.id,
@@ -74,6 +76,7 @@ export async function listTenantSummaries(month?: string | null): Promise<{
     .where(demoTenantId ? ne(tables.tenants.id, demoTenantId) : undefined)
     .orderBy(tables.tenants.created_at);
 
+  // sin-inquilino: Idem: agrega casos de todos los inquilinos en una sola pasada.
   const caseRows = await db
     .select({
       tenant_id: tables.cases.tenant_id,
@@ -89,6 +92,7 @@ export async function listTenantSummaries(month?: string | null): Promise<{
     )
     .groupBy(tables.cases.tenant_id);
 
+  // sin-inquilino: Idem: el consumo de IA de todos, para la misma pantalla.
   const usageRows = await db
     .select({
       tenant_id: tables.aiUsage.tenant_id,

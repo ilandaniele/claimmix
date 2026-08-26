@@ -17,6 +17,7 @@ import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
+import { enTenant } from "@/data/scope";
 
 interface Customer {
   id: string;
@@ -62,19 +63,25 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
     .limit(1);
   if (!userRow) redirect("/login");
 
+  const tenantId = userRow.tenant_id;
+  // El filtro por inquilino lo pone la base; acá sólo queda la búsqueda.
   const whereClause = search
-    ? and(eq(customers.tenant_id, userRow.tenant_id), ilike(customers.full_name, `%${search}%`))
-    : eq(customers.tenant_id, userRow.tenant_id);
+    ? ilike(customers.full_name, `%${search}%`)
+    : undefined;
 
   const [[{ total }], customersData] = await Promise.all([
-    db.select({ total: count() }).from(customers).where(whereClause),
-    db
-      .select({ id: customers.id, full_name: customers.full_name, dni: customers.dni, email: customers.email, phone: customers.phone, created_at: customers.created_at })
-      .from(customers)
-      .where(whereClause)
-      .orderBy(desc(customers.created_at))
-      .limit(PER_PAGE)
-      .offset((page - 1) * PER_PAGE),
+    enTenant({ tenantId }, (db) =>
+      db.select({ total: count() }).from(customers).where(whereClause)
+    ),
+    enTenant({ tenantId }, (db) =>
+      db
+        .select({ id: customers.id, full_name: customers.full_name, dni: customers.dni, email: customers.email, phone: customers.phone, created_at: customers.created_at })
+        .from(customers)
+        .where(whereClause)
+        .orderBy(desc(customers.created_at))
+        .limit(PER_PAGE)
+        .offset((page - 1) * PER_PAGE)
+    ),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));

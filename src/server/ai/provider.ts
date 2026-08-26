@@ -70,6 +70,7 @@ function decryptApiKey(encryptedKey: string): string {
  */
 export async function getUserGeminiKey(userId: string): Promise<string | null> {
   try {
+    // sin-inquilino: `user_ai_settings` no tiene columna de inquilino: la clave es el usuario.
     const row = await db
       .select({ enc: tables.userAiSettings.gemini_api_key_encrypted })
       .from(tables.userAiSettings)
@@ -87,6 +88,7 @@ export async function getUserGeminiKey(userId: string): Promise<string | null> {
 export async function setUserGeminiKey(userId: string, apiKey: string): Promise<void> {
   const encrypted = encryptApiKey(apiKey);
   const t = tables.userAiSettings;
+  // sin-inquilino: Idem.
   await db
     .insert(t)
     .values({ user_id: userId, gemini_api_key_encrypted: encrypted, updated_at: new Date().toISOString() })
@@ -237,24 +239,26 @@ export async function setTenantModelDefaults(
     active_model: null,
     updated_at: now,
   };
-  await db
-    .insert(t)
-    .values(insertValues)
-    .onConflictDoUpdate({
-      target: t.tenant_id,
-      set: {
-        ...(values.provider
-          ? {
-              provider: values.provider,
-              active_model_provider: values.provider,
-              active_model: null,
-            }
-          : {}),
-        ...(values.openaiModel ? { openai_model: values.openaiModel.trim() } : {}),
-        ...(values.geminiModel ? { gemini_model: values.geminiModel.trim() } : {}),
-        updated_at: now,
-      },
-    });
+  await enTenant({ tenantId }, (db) =>
+    db
+      .insert(t)
+      .values(insertValues)
+      .onConflictDoUpdate({
+        target: t.tenant_id,
+        set: {
+          ...(values.provider
+            ? {
+                provider: values.provider,
+                active_model_provider: values.provider,
+                active_model: null,
+              }
+            : {}),
+          ...(values.openaiModel ? { openai_model: values.openaiModel.trim() } : {}),
+          ...(values.geminiModel ? { gemini_model: values.geminiModel.trim() } : {}),
+          updated_at: now,
+        },
+      })
+  );
 }
 
 /** True when the provider has a usable API key (user → tenant → env). */

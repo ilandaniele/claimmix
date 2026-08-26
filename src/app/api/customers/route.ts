@@ -24,6 +24,7 @@ import {
   buildUserKey,
 } from "@/lib/rate-limit/index";
 import { z } from "zod";
+import { enTenant } from "@/data/scope";
 
 // ── Query schema ──────────────────────────────────────────────────────────────
 
@@ -114,24 +115,28 @@ export async function GET(request: NextRequest) {
     const where = and(...conditions);
 
     // Count query
-    const total = await db.$count(customers, where);
+    const total = await enTenant({ tenantId }, (db) =>
+      db.$count(customers, where)
+    );
 
     // Data query
     const from = (page - 1) * per_page;
-    const data = await db
-      .select({
-        id: customers.id,
-        full_name: customers.full_name,
-        dni: customers.dni,
-        email: customers.email,
-        phone: customers.phone,
-        created_at: customers.created_at,
-      })
-      .from(customers)
-      .where(where)
-      .orderBy(desc(customers.created_at))
-      .limit(per_page)
-      .offset(from);
+    const data = await enTenant({ tenantId }, (db) =>
+      db
+        .select({
+          id: customers.id,
+          full_name: customers.full_name,
+          dni: customers.dni,
+          email: customers.email,
+          phone: customers.phone,
+          created_at: customers.created_at,
+        })
+        .from(customers)
+        .where(where)
+        .orderBy(desc(customers.created_at))
+        .limit(per_page)
+        .offset(from)
+    );
 
     return ok({
       data,

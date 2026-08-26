@@ -61,6 +61,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let cases: UnclassifiedCase[];
   try {
+    // sin-inquilino: Reproceso de sistema: junta los casos sin clasificar de todos los
+    // inquilinos a propósito. Cada fila trae su tenant_id y con ése se sigue.
     cases = await db
       .select({ id: t.id, tenant_id: t.tenant_id })
       .from(t)
@@ -102,6 +104,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // failures), flip them to procesando first — otherwise they're silently
   // skipped with wrong_status and the retry is a no-op.
   try {
+    // sin-inquilino: Idem: marca las mismas filas que juntó la consulta de arriba.
     await db
       .update(t)
       .set({ status: "procesando", updated_at: new Date().toISOString() })

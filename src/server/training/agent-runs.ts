@@ -88,10 +88,12 @@ export async function logAgentRun(
 
   try {
     const data = firstRow(
-      await db
-        .insert(tables.agentRuns)
-        .values(row)
-        .returning({ id: tables.agentRuns.id })
+      await enTenant({ tenantId: row.tenant_id }, (db) =>
+        db
+          .insert(tables.agentRuns)
+          .values(row)
+          .returning({ id: tables.agentRuns.id })
+      )
     );
 
     if (!data) {
@@ -173,10 +175,12 @@ export async function logAgentRunError(
 
   try {
     const data = firstRow(
-      await db
-        .insert(tables.agentRuns)
-        .values(row)
-        .returning({ id: tables.agentRuns.id })
+      await enTenant({ tenantId: row.tenant_id }, (db) =>
+        db
+          .insert(tables.agentRuns)
+          .values(row)
+          .returning({ id: tables.agentRuns.id })
+      )
     );
     return data?.id ?? null;
   } catch (e) {

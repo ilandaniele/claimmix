@@ -14,9 +14,10 @@
  */
 
 import "server-only";
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, or, type SQL } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { enTenant } from "@/data/scope";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -79,7 +80,10 @@ export async function loadMemoryHints(
     const t = tables.claimMemory;
 
     // Build an OR filter for sender email / phone keys (parameterized).
-    const keyConditions = [];
+    // El tipo va escrito: un `[]` vacío infiere su tipo por cómo se usa
+    // después, y ese razonamiento no cruza el borde de la función flecha
+    // del armador. Sin la anotación queda en `any[]`.
+    const keyConditions: SQL[] = [];
     if (senderEmail) keyConditions.push(eq(t.key, senderEmail));
     if (senderPhone) keyConditions.push(eq(t.key, senderPhone));
 
@@ -93,26 +97,28 @@ export async function loadMemoryHints(
       last_used_at: string | null;
     }>;
     try {
-      data = await db
-        .select({
-          id: t.id,
-          memory_type: t.memory_type,
-          key: t.key,
-          value: t.value,
-          confidence: t.confidence,
-          source: t.source,
-          last_used_at: t.last_used_at,
-        })
-        .from(t)
-        .where(
-          and(
-            eq(t.tenant_id, tenantId),
-            inArray(t.memory_type, [...MEMORY_TYPES_TO_LOAD]),
-            or(...keyConditions)
+      data = await enTenant({ tenantId }, (db) =>
+        db
+          .select({
+            id: t.id,
+            memory_type: t.memory_type,
+            key: t.key,
+            value: t.value,
+            confidence: t.confidence,
+            source: t.source,
+            last_used_at: t.last_used_at,
+          })
+          .from(t)
+          .where(
+            and(
+              eq(t.tenant_id, tenantId),
+              inArray(t.memory_type, [...MEMORY_TYPES_TO_LOAD]),
+              or(...keyConditions)
+            )
           )
-        )
-        .orderBy(desc(t.confidence), desc(t.last_used_at))
-        .limit(MEMORY_LOAD_LIMIT);
+          .orderBy(desc(t.confidence), desc(t.last_used_at))
+          .limit(MEMORY_LOAD_LIMIT)
+      );
     } catch (e) {
       console.error("[memory/load] claim_memory fetch error:", (e as { code?: string })?.code);
       return [];
@@ -158,7 +164,7 @@ export async function loadMemoryHints(
       }
 
       // Fire-and-forget: update last_used_at on fetched rows.
-      void updateLastUsedAt(data.map((r) => r.id));
+      void updateLastUsedAt(tenantId, data.map((r) => r.id));
     }
 
     return hints;
@@ -175,13 +181,15 @@ export async function loadMemoryHints(
  * Update last_used_at on the fetched memory rows.
  * Fire-and-forget — failures are logged but not propagated.
  */
-async function updateLastUsedAt(ids: string[]): Promise<void> {
+async function updateLastUsedAt(tenantId: string, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   try {
-    await db
-      .update(tables.claimMemory)
-      .set({ last_used_at: new Date().toISOString() })
-      .where(inArray(tables.claimMemory.id, ids));
+    await enTenant({ tenantId }, (db) =>
+      db
+        .update(tables.claimMemory)
+        .set({ last_used_at: new Date().toISOString() })
+        .where(inArray(tables.claimMemory.id, ids))
+    );
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
     console.error("[memory/load] last_used_at update exception:", errName);

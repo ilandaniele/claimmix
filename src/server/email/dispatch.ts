@@ -376,14 +376,16 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     // Update claim_messages — set provider_message_id + status='sent' + sent_at
     if (claimMessageId) {
       try {
-        await db
-          .update(claimMessages)
-          .set({
-            provider_message_id: storedMessageId,
-            status: "sent",
-            sent_at: new Date().toISOString(),
-          })
-          .where(eq(claimMessages.id, claimMessageId));
+        await enTenant({ tenantId }, (db) =>
+          db
+            .update(claimMessages)
+            .set({
+              provider_message_id: storedMessageId,
+              status: "sent",
+              sent_at: new Date().toISOString(),
+            })
+            .where(eq(claimMessages.id, claimMessageId))
+        );
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
         console.error("[dispatch] Failed to update claim_messages status (sent):", name); // crew-debug-ok
@@ -393,10 +395,12 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     // Update outbound_messages (dual-write window)
     if (outboundMsgId) {
       try {
-        await db
-          .update(outboundMessages)
-          .set({ status: "sent" })
-          .where(eq(outboundMessages.id, outboundMsgId));
+        await enTenant({ tenantId }, (db) =>
+          db
+            .update(outboundMessages)
+            .set({ status: "sent" })
+            .where(eq(outboundMessages.id, outboundMsgId))
+        );
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
         console.error("[dispatch] Failed to update outbound_messages status (sent):", name); // crew-debug-ok
@@ -424,10 +428,12 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     // Update claim_messages — set status='failed' + error_code
     if (claimMessageId) {
       try {
-        await db
-          .update(claimMessages)
-          .set({ status: "failed", error_code: errorCode })
-          .where(eq(claimMessages.id, claimMessageId));
+        await enTenant({ tenantId }, (db) =>
+          db
+            .update(claimMessages)
+            .set({ status: "failed", error_code: errorCode })
+            .where(eq(claimMessages.id, claimMessageId))
+        );
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
         console.error("[dispatch] Failed to update claim_messages status (failed):", name); // crew-debug-ok
@@ -437,10 +443,12 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     // Update outbound_messages (dual-write window)
     if (outboundMsgId) {
       try {
-        await db
-          .update(outboundMessages)
-          .set({ status: "failed" })
-          .where(eq(outboundMessages.id, outboundMsgId));
+        await enTenant({ tenantId }, (db) =>
+          db
+            .update(outboundMessages)
+            .set({ status: "failed" })
+            .where(eq(outboundMessages.id, outboundMsgId))
+        );
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
         console.error("[dispatch] Failed to update outbound_messages status (failed):", name); // crew-debug-ok

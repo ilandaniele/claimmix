@@ -66,13 +66,15 @@ export interface SpecialistAlertInput {
  * urgent emails about fires that did not happen is how an insurer stops
  * trusting the product.
  */
-async function isSimulatedCase(caseId: string): Promise<boolean> {
+async function isSimulatedCase(tenantId: string, caseId: string): Promise<boolean> {
   try {
-    const rows = await db
-      .select({ channel: cases.channel })
-      .from(cases)
-      .where(eq(cases.id, caseId))
-      .limit(1);
+    const rows = await enTenant({ tenantId }, (db) =>
+      db
+        .select({ channel: cases.channel })
+        .from(cases)
+        .where(eq(cases.id, caseId))
+        .limit(1)
+    );
     const channel = rows[0]?.channel;
     return channel === "email_sim" || channel === "whatsapp_sim";
   } catch {
@@ -129,7 +131,7 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
   const tenantCtx: TenantContext = { tenantId: tenantId };
 
   try {
-    if (await isSimulatedCase(caseId)) {
+    if (await isSimulatedCase(input.tenantId, caseId)) {
       // Logged rather than passed over: an operator watching a rehearsal
       // should be able to see the alert was deliberately withheld, not
       // wonder whether it silently failed.

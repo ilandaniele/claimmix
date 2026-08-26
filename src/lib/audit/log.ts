@@ -18,6 +18,7 @@ import { db } from "@/lib/db";
 import { auditLog } from "@/lib/db/schema";
 import type { AuditLogInsert } from "@/lib/db/types";
 import type { AuditPayload } from "./redact";
+import { enTenant } from "@/data/scope";
 
 export interface AuditLogEntry {
   tenant_id: string;
@@ -52,7 +53,9 @@ export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
       ua: entry.ua ?? null,
     };
 
-    await db.insert(auditLog).values(insertRow);
+    await enTenant({ tenantId: insertRow.tenant_id }, (db) =>
+      db.insert(auditLog).values(insertRow)
+    );
   } catch (err) {
     // Log the error code/name only — never the full error (may contain PII).
     const code = (err as { code?: string })?.code;

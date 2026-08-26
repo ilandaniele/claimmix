@@ -60,6 +60,8 @@ export async function reapStuckProcessingCases(opts?: {
 
   let stuck: Array<{ id: string; tenant_id: string }>;
   try {
+    // sin-inquilino: Barrido de sistema: recorre los casos de TODOS los inquilinos, que
+    // es para lo que existe. El cron no corre en nombre de ninguno.
     stuck = await db
       .select({ id: cases.id, tenant_id: cases.tenant_id })
       .from(cases)
@@ -85,6 +87,7 @@ export async function reapStuckProcessingCases(opts?: {
   try {
     // Guard on status so a case that just finished between SELECT and UPDATE
     // is not clobbered back to escalado.
+    // sin-inquilino: Idem: rescata las filas que encontró la consulta de arriba.
     const updated = await db
       .update(cases)
       .set({ status: "escalado", updated_at: sql`now()` })

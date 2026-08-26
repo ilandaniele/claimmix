@@ -25,6 +25,7 @@ import {
   buildUserKey,
 } from "@/lib/rate-limit/index";
 import { z } from "zod";
+import { enTenant } from "@/data/scope";
 
 // ── Query schema ──────────────────────────────────────────────────────────────
 
@@ -112,29 +113,33 @@ export async function GET(request: NextRequest) {
     const where = and(...conditions);
 
     // Count query
-    const total = await db.$count(policies, where);
+    const total = await enTenant({ tenantId }, (db) =>
+      db.$count(policies, where)
+    );
 
     // Data query with customer join (schema columns are start_date/end_date;
     // the API contract keeps exposing them as valid_from/valid_to).
     const from = (page - 1) * per_page;
-    const rawData = await db
-      .select({
-        id: policies.id,
-        policy_number: policies.policy_number,
-        policy_type: policies.policy_type,
-        status: policies.status,
-        customer_id: policies.customer_id,
-        valid_from: policies.start_date,
-        valid_to: policies.end_date,
-        created_at: policies.created_at,
-        customer_name: customers.full_name,
-      })
-      .from(policies)
-      .leftJoin(customers, eq(customers.id, policies.customer_id))
-      .where(where)
-      .orderBy(desc(policies.created_at))
-      .limit(per_page)
-      .offset(from);
+    const rawData = await enTenant({ tenantId }, (db) =>
+      db
+        .select({
+          id: policies.id,
+          policy_number: policies.policy_number,
+          policy_type: policies.policy_type,
+          status: policies.status,
+          customer_id: policies.customer_id,
+          valid_from: policies.start_date,
+          valid_to: policies.end_date,
+          created_at: policies.created_at,
+          customer_name: customers.full_name,
+        })
+        .from(policies)
+        .leftJoin(customers, eq(customers.id, policies.customer_id))
+        .where(where)
+        .orderBy(desc(policies.created_at))
+        .limit(per_page)
+        .offset(from)
+    );
 
     const data = rawData.map((row) => ({
       id: row.id,

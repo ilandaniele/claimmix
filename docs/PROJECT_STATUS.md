@@ -655,3 +655,40 @@ cascading paths — `case_id`, and `agent_run_id` → `agent_runs.case_id` — s
 delete silently destroys the whole training set. `reset-cases-keep-training.mjs` detaches
 both (`case_id` is nullable on each) before deleting, and rolls back if the approved
 count moves.
+
+### 🧱 El refactor arrancó (2026-08-25)
+
+Las Fases 0-A, 1 y el primer pedazo de la 2, con producción andando todo el
+tiempo. Todo está en `docs/ARQUITECTURA*.md`; acá el estado.
+
+**La tenencia ya no depende de la memoria.** Producción tiene RLS, FORCE y
+política en las 29 tablas, y existe `claimmix_app`, un rol sin `BYPASSRLS`. Los
+filtros escritos a mano bajaron de **198 a 44**, y los que quedan están anotados
+uno por uno.
+
+```
+pnpm tenancy        ¿la base separa, o sólo el código?
+pnpm capa-datos     ¿la capa usa bien lo que la base ofrece?
+pnpm esquemas       ¿los archivos de migración reproducen la base que corre?
+pnpm arquitectura   las invariantes, en cada pnpm verify
+```
+
+⛔ **`DATABASE_URL` sigue apuntando al rol viejo, y es correcto.** El cambio
+ocurre cuando no queden filtros escritos a mano: hasta entonces, algunas
+consultas todavía se apoyan en ellos y otras ya no llevan ninguno. Con el rol
+restringido, las primeras seguirían andando y las segundas devolverían cero. La
+cadena está en `DATABASE_URL_APP`, ya cargada en Vercel.
+
+**Lo que quedó pendiente, con motivo.** `agent-tools` y `customer-matcher`
+rompen sus tests de una forma que no es el puente ni el contexto: piden entender
+el mock a fondo. Los 44 filtros restantes son los que el análisis marcó como no
+mecánicos — joins que pueden estar acotando la tabla del otro lado, y `or(` que
+pueden ser el caso de las filas globales.
+
+**Y algo que conviene saber antes de confiar en `pnpm rehearse`:** falla con
+diferencias distintas en cada corrida, porque conversa con el modelo real. Al
+comparar dos versiones del orquestador, una tenía 3 diferencias y la otra 4, y
+ninguna de las dos las mismas. Sirve para leer transcriptos —para eso está— pero
+**no sirve como portón de CI tal como está**: un chequeo que falla al azar se
+deja de mirar, que es exactamente cómo se perdieron las 28 políticas de RLS
+durante meses.

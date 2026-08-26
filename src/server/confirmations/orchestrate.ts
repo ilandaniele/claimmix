@@ -29,6 +29,7 @@
 import "server-only";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {
@@ -469,37 +470,35 @@ export async function orchestratePostExtraction(
   // recognise what it was.
   const somethingArrived = await filesArrivedSinceWeLastSpoke(caseId, tenantId);
 
-  const askOnHold =
-    (askAlreadyMade || agentIsWaiting) && !owesAnAnswer && !somethingArrived;
-  const askIsNew = askItems.fields.length > 0 && !askOnHold;
+  // La decisión se toma en el núcleo, que es puro y está probado con siete
+  // booleanos: src/core/case/reply-decision.ts. Acá sólo se juntan las señales.
+  //
+  // El razonamiento largo que estaba en este lugar —por qué no se repite el
+  // pedido, por qué callarse no es lo mismo que no tener nada que decir, y por
+  // qué un «ok» no merece acuse— se mudó con la función. Está donde se puede
+  // leer al lado de las reglas que describe, y donde hay un test por cada una.
+  const señalesBase = {
+    yaSePidio: askAlreadyMade,
+    elAgenteEspera: agentIsWaiting,
+    nosPreguntoAlgo: owesAnAnswer,
+    llegoUnArchivo: somethingArrived,
+    datosQueFaltan: askItems.fields.length,
+    esGrave: isHighSeverity,
+  } as const;
 
-  // Pero callarse no es lo mismo que no tener nada que decir.
-  //
-  // Alguien que contesta «fue un choque, ayer a la tarde» mientras siguen
-  // faltando el nombre, la póliza y el DNI no cambió el pedido: la regla de no
-  // repetirse lo deja en silencio, y del otro lado eso se lee como que nadie
-  // está leyendo. Que es el problema que este producto existe para arreglar.
-  //
-  // Entonces cuando el pedido queda en espera Y nos enteramos de algo que antes
-  // no sabíamos, sale un acuse corto: tomamos nota, seguimos esperando lo de
-  // antes. Sin la lista — volver a ponerla es exactamente lo que la regla evita.
-  // Dos condiciones, y la primera es el juicio del agente.
-  //
-  // "Nos enteramos de algo nuevo" por sí solo no alcanza: la extracción relee
-  // la conversación entera en cada vuelta, así que un `ok` puede producir
-  // campos que antes no estaban guardados — de mensajes viejos, no del
-  // último. Con esa señal sola, un "ok" y un "gracias" recibían un acuse cada
-  // uno, que es el hostigamiento que la regla de no repetirse evita, sólo que
-  // con otra plantilla.
-  //
-  // Cuando el agente deliberó y dijo `wait`, ya juzgó que el mensaje no
-  // aportó nada. Eso se respeta: el acuse es para quien contó algo y no
-  // recibió respuesta, no para quien dijo `ok`.
-  const acknowledgeOnly =
-    askOnHold &&
-    !agentIsWaiting &&
-    !isHighSeverity &&
-    (await factsLearnedSinceWeLastSpoke(caseId, tenantId));
+  const askOnHold = elPedidoQuedaEnEspera({ ...señalesBase, aprendimosAlgo: false });
+
+  // La consulta de «¿aprendimos algo?» sólo se hace si puede cambiar la
+  // decisión. Antes el `&&` la salteaba por corto circuito y sería una pena
+  // perder eso: es una ida a la base por cada caso que no está en espera.
+  const aprendimosAlgo =
+    askOnHold && !agentIsWaiting && !isHighSeverity
+      ? await factsLearnedSinceWeLastSpoke(caseId, tenantId)
+      : false;
+
+  const decision = queHacer({ ...señalesBase, aprendimosAlgo });
+  const askIsNew = decision === "pedir";
+  const acknowledgeOnly = decision === "acusar-recibo";
 
   if (askIsNew && !confirmationEmailDispatched && !isHighSeverity) {
     await messenger.send({

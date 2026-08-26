@@ -124,6 +124,10 @@ jobs:
         run: pnpm rehearse
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # La capa de datos entra por acá. Sin esto, toda consulta que pase por
+          # `enTenant` rompe con "falta DATABASE_URL_APP" — que en el pen test se
+          # lee como "la pared entre inquilinos falló" y no como "falta una variable".
+          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
           GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
@@ -194,6 +198,10 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # La capa de datos entra por acá. Sin esto, toda consulta que pase por
+          # `enTenant` rompe con "falta DATABASE_URL_APP" — que en el pen test se
+          # lee como "la pared entre inquilinos falló" y no como "falta una variable".
+          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
           GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
@@ -247,6 +255,10 @@ jobs:
         run: pnpm load
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # La capa de datos entra por acá. Sin esto, toda consulta que pase por
+          # `enTenant` rompe con "falta DATABASE_URL_APP" — que en el pen test se
+          # lee como "la pared entre inquilinos falló" y no como "falta una variable".
+          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
           GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
 
@@ -345,6 +357,10 @@ jobs:
           # La fase de la pared necesita la base y DOS tenants. Sin el segundo
           # se saltea y lo dice — que es distinto de darla por probada.
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # La capa de datos entra por acá. Sin esto, toda consulta que pase por
+          # `enTenant` rompe con "falta DATABASE_URL_APP" — que en el pen test se
+          # lee como "la pared entre inquilinos falló" y no como "falta una variable".
+          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
           GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
           DEMO_TENANT_ID: ${{ secrets.DEMO_TENANT_ID }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}

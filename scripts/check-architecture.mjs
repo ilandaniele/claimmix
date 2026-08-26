@@ -4,7 +4,7 @@
  * Una arquitectura escrita en un documento se degrada en seis meses; una
  * comprobada en cada `pnpm check`, no. Esto es lo segundo.
  *
- * Comprueba cinco invariantes, en orden de importancia:
+ * Comprueba seis invariantes, en orden de importancia:
  *
  *   1. `src/core/` no toca infraestructura. Recibe datos y devuelve decisiones;
  *      si importa la base, la red o el entorno, deja de poder probarse sin
@@ -245,6 +245,70 @@ console.log("\n▸ El destinatario no sale del modelo");
     for (const x of sospechosos) console.log(`     ${x}`);
     console.log("     Una inyección de instrucciones se vuelve una fuga si el");
     console.log("     agente puede elegir a quién le escribe.");
+  }
+}
+
+// ── 6. Los jobs de CI conocen los dos roles ────────────────────────────────
+//
+// Desde que existe la capa de datos hay DOS credenciales, y un job que reciba
+// sólo `DATABASE_URL` puede correr media tarea antes de romper: lo que va por
+// el rol dueño anda, y lo que pasa por `enTenant` tira "falta DATABASE_URL_APP".
+//
+// El síntoma engaña. En el pen test se leyó como **"la pared entre inquilinos
+// falló"** —porque la prueba de la pared pasa por `listCases`— cuando lo que
+// faltaba era una variable de entorno. Un rojo que apunta al lugar equivocado
+// cuesta más que uno que no aparece.
+//
+// Pasó dos veces el mismo día: primero en `ci.yml` y después en
+// `post-deploy.yml`, porque agregar la variable en un archivo no la agrega en
+// el otro.
+console.log("\n▸ Los jobs de CI conocen los dos roles");
+{
+  const flujos = existsSync(".github/workflows")
+    ? readdirSync(".github/workflows").filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+    : [];
+  const cojos = [];
+  for (const nombre of flujos) {
+    const lineas = readFileSync(join(".github/workflows", nombre), "utf8").split(/\r?\n/);
+
+    /*
+     * Se mira BLOQUE por bloque, no el total del archivo.
+     *
+     * La primera versión contaba cuántos `DATABASE_URL:` y cuántos
+     * `DATABASE_URL_APP:` había en todo el archivo y los comparaba. Daba verde
+     * con una variable faltante, porque hay un job —`permisos`— que lleva el
+     * rol de la app y NO lleva el del dueño: ese sobrante compensaba el que
+     * faltaba en otro lado y la cuenta cerraba.
+     *
+     * Ahora, por cada `DATABASE_URL:` se busca su compañero entre las líneas de
+     * la misma sangría, que es lo que delimita un bloque `env:` en YAML.
+     */
+    for (let i = 0; i < lineas.length; i++) {
+      const m = /^(\s+)DATABASE_URL:/.exec(lineas[i]);
+      if (!m) continue;
+      const sangria = m[1];
+      let tieneApp = false;
+      // Hacia abajo y hacia arriba mientras siga el mismo bloque.
+      for (const paso of [1, -1]) {
+        for (let k = i + paso; k >= 0 && k < lineas.length; k += paso) {
+          const l = lineas[k];
+          if (l.trim() === "") continue;
+          const propia = /^(\s*)/.exec(l)[1];
+          if (propia.length !== sangria.length) break;
+          if (l.trim().startsWith("DATABASE_URL_APP:")) tieneApp = true;
+        }
+      }
+      if (!tieneApp) cojos.push(`${nombre}:${i + 1} — DATABASE_URL sin DATABASE_URL_APP al lado`);
+    }
+  }
+  if (flujos.length === 0) {
+    console.log("     (no hay workflows: nada que comprobar)");
+  } else if (cojos.length === 0) {
+    bien(`${flujos.length} workflow(s), todos los jobs con base reciben los dos roles`);
+  } else {
+    mal(`${cojos.length} workflow(s) con jobs que sólo conocen el rol dueño`);
+    for (const c of cojos) console.log(`     ${c}`);
+    console.log("     Al lado de cada `DATABASE_URL:` va `DATABASE_URL_APP:`.");
   }
 }
 

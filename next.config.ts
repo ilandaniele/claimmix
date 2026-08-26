@@ -1,3 +1,4 @@
+import { withWorkflow } from "workflow/next";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -43,4 +44,7 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// `withWorkflow` habilita las directivas "use workflow" y "use step". Sin
+// esto, una función marcada con ellas corre como una función normal: anda, y no
+// es durable — que es la peor de las dos fallas posibles, porque no se nota.
+export default withWorkflow(nextConfig);

@@ -38,6 +38,8 @@ import {
 import type { ClaimType } from "@/lib/schemas/cases";
 import { waitForSimulationTurn } from "@/server/intake/simulation-throttle";
 import { enTenant } from "@/data/scope";
+import { start } from "workflow/api";
+import { procesarCasoSimulado } from "@/workflows/intake-simulado";
 
 export const maxDuration = 180;
 
@@ -244,39 +246,38 @@ export async function POST(request: NextRequest): Promise<Response> {
     ua: request.headers.get("user-agent") ?? undefined,
   });
 
-  // ── 7. Trigger extraction worker after response is sent ──────────────────────
-  // after() keeps the Vercel function alive until the worker finishes.
-  scheduleAfterResponse(async () => {
-    try {
-      const turn = await waitForSimulationTurn({
-        tenantId: userRow.tenant_id,
-        caseId,
-        caseCreatedAt,
-      });
-      if (turn.timedOut) {
-        console.warn(
-          JSON.stringify({
-            level: "warn",
-            service: "claimmix",
-            msg: "intake.simulate.queue_wait_timed_out",
-            case_id: caseId,
-            blockers: turn.blockers,
-            waited_ms: turn.waitedMs,
-          })
-        );
+  // ── 7. Arrancar el flujo durable ────────────────────────────────────────────
+  //
+  // Esto ya no es un `after()`. `after()` mantiene viva ESTA invocación hasta
+  // que el trabajo termina, y cuando hay muchos casos encolados Vercel descarta
+  // los que no alcanzaron a arrancar: el caso queda en `procesando` para
+  // siempre. El barrido de `reap-stuck.ts` existe por eso.
+  //
+  // `start()` encola el flujo y vuelve. El trabajo corre en sus propias
+  // peticiones, y si el proceso muere retoma en el paso que seguía.
+  try {
+    await start(procesarCasoSimulado, [
+      { caseId, tenantId: userRow.tenant_id, userId: userRow.id, caseCreatedAt },
+    ]);
+  } catch (e: unknown) {
+    // Si no se pudo encolar, se cae al camino de antes en vez de dejar el caso
+    // colgado. Un flujo que no arranca es peor que un `after()` que quizás sí.
+    const name = e instanceof Error ? e.name : "UnknownError";
+    console.error("[intake/simulate] no pude encolar el flujo:", name, "caso:", caseId);
+    scheduleAfterResponse(async () => {
+      try {
+        await runIntakeAgent({
+          caseId,
+          tenantId: userRow.tenant_id,
+          userId: userRow.id,
+          source: "simulate",
+        });
+      } catch (e2: unknown) {
+        const n = e2 instanceof Error ? e2.name : "UnknownError";
+        console.error("[intake/simulate] Worker error:", n, "case:", caseId);
       }
-
-      await runIntakeAgent({
-        caseId,
-        tenantId: userRow.tenant_id,
-        userId: userRow.id,
-        source: "simulate",
-      });
-    } catch (e: unknown) {
-      const name = e instanceof Error ? e.name : "UnknownError";
-      console.error("[intake/simulate] Worker error:", name, "case:", caseId);
-    }
-  });
+    });
+  }
 
   // ── 8. Return 202 immediately ─────────────────────────────────────────────────
   return accepted({

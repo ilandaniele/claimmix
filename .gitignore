@@ -101,3 +101,11 @@ check.log
 # sigue.
 Arquitectura*ClaimMix.html
 Arquitectura*ClaimMix.md
+/.swc
+
+# Datos de los flujos durables en local: estado de cada corrida, se regenera.
+.workflow-data/
+.workflow-vitest/
+
+# Rutas que el SDK de flujos genera en cada build.
+src/app/.well-known/workflow/

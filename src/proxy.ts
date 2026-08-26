@@ -173,6 +173,10 @@ export const config = {
     // además rompe las que se autentican por token: /api/health con su Bearer
     // recibía 401 antes de llegar al handler, y con eso se caen el smoke, los
     // dos crons y el timbre.
-    "/((?!api|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff|woff2)$).*)",
+    // `.well-known/workflow/` queda afuera igual que /api: es por donde el SDK
+    // de workflows se despacha a sí mismo los pasos. Si el proxy lo intercepta,
+    // el síntoma es "Queue operation failed … detached ArrayBuffer", que no se
+    // parece en nada a un problema de middleware.
+    "/((?!api|_next/static|_next/image|favicon\\.ico|\\.well-known/workflow/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff|woff2)$).*)",
   ],
 };

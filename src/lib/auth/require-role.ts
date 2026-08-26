@@ -21,7 +21,7 @@
 import { eq } from "drizzle-orm";
 
 import { getSessionContext } from "@/lib/auth/session";
-import { db, type Db } from "@/lib/db";
+import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";

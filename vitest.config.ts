@@ -19,10 +19,31 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "lcov", "json-summary"],
       reportsDirectory: "./coverage",
-      include: ["src/lib/**", "src/server/**"],
+      // `src/core/**` y `src/data/**` no estaban, y son el código donde vive
+      // ahora la decisión (el núcleo) y el aislamiento entre aseguradoras (la
+      // capa). Medir cobertura sin ellos daba un número que subía mientras la
+      // parte que más importa quedaba sin mirar.
+      include: [
+        "src/lib/**",
+        "src/server/**",
+        "src/core/**",
+        "src/data/**",
+        "src/workflows/**",
+      ],
       exclude: [
         // Type definition files
         "**/*.d.ts",
+        // Las tablas de drizzle son declaraciones, no lógica: `pgTable("cases",
+        // { … })` y callbacks de referencia como `() => tenants.id`. v8 cuenta
+        // cada columna como una sentencia y cada referencia como una función
+        // sin cubrir, así que una tabla que ningún test toca hunde el número
+        // sin que exista nada que probar. Incluirlas medía cuántas tablas usan
+        // los tests, no cuánto código está probado.
+        "src/lib/db/schema/**",
+        // Piezas de prueba del suite de flujos durables: corren con
+        // `pnpm flujos`, que necesita el compilador de directivas y por eso va
+        // en su propia configuración. Acá figuran como código sin cubrir.
+        "src/workflows/_prueba*",
         // Drizzle db index — requires DATABASE_URL at runtime; tested via integration tests.
         "src/lib/db/index.ts",
         // Observability — require Sentry DSN and pino runtime at module init.
@@ -45,10 +66,6 @@ export default defineConfig({
         // All constituent modules are individually unit-tested.
         // Covered end-to-end via integration tests.
         "src/server/worker/extract.ts",
-        // Auth guards — require Next.js cookies() runtime.
-        // Logic is tested transitively via route handler tests.
-        "src/lib/auth/require-admin.ts",
-        "src/lib/auth/require-role.ts",
         // Server-only i18n loader — uses `server-only` guard; intentionally excluded from
         // client bundle. The shared logic lives in locale-shared.ts which is unit-tested.
         "src/lib/i18n/locale.ts",

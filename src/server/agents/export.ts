@@ -134,6 +134,20 @@ function excludeStringPatterns(value: string): string {
 
 function maskByKey(key: string, value: string): string {
   const normalized = key.toLowerCase();
+
+  // El nombre se pregunta PRIMERO, y no es capricho de orden.
+  //
+  // `policyholder_name` contiene "policy". Cuando la pregunta por póliza iba
+  // antes, el nombre del asegurado se enmascaraba con la regla de los números
+  // de póliza —prefijo de letras + tres caracteres del final— y "Roberto Paz"
+  // salía del sistema como "Roberto***Paz". El nombre de pila entero y las
+  // últimas tres letras del apellido: en un padrón de una ciudad chica, eso es
+  // la persona.
+  //
+  // No hay clave que lleve "name" y deba enmascararse como otra cosa, así que
+  // la pregunta va arriba de todo.
+  if (normalized.includes("name")) return "[name_masked]";
+
   if (normalized.includes("dni") || normalized.includes("document")) return maskDni(value);
   if (normalized.includes("policy") || normalized.includes("poliza")) {
     return maskPolicy(value);
@@ -168,7 +182,6 @@ function maskByKey(key: string, value: string): string {
   ) {
     return "[bank_data_masked]";
   }
-  if (normalized.includes("name")) return "[name_masked]";
   return maskStringPatterns(value);
 }
 

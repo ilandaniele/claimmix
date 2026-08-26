@@ -247,6 +247,16 @@ jobs:
             sleep 2
           done
           curl -s -o /dev/null -w "servidor: %{http_code}" http://localhost:3000/api/health
+          # Calentar las rutas que los tests van a golpear.
+          #
+          # En modo desarrollo Next compila cada ruta la primera vez que alguien
+          # la pide, y esa primera vez se come varios segundos. El primer test
+          # que inicia sesion se llevaba ese costo y se pasaba del tiempo: un
+          # rojo que no dice nada del producto, solo de cuando llego.
+          for r in /login /api/auth/get-session /api/cases; do
+            curl -s -o /dev/null -m 30 "http://localhost:3000$r" || true
+          done
+          echo "rutas calientes"
         env:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           # El rol RESTRINGIDO del ensayo, no el dueño. Con el dueño, RLS no

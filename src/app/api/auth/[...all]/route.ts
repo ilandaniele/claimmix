@@ -61,9 +61,25 @@ export async function POST(req: NextRequest) {
       ? RATE_LIMIT_CONFIGS.AUTH_SIGN_UP
       : RATE_LIMIT_CONFIGS.AUTH_SIGN_IN;
 
+    /*
+     * Dos cupos, porque son dos ataques distintos.
+     *
+     * El de arriba es por (IP, dirección): frena a quien prueba contraseñas
+     * contra UNA cuenta. Pero con sólo ese, alguien que tenga una lista de diez
+     * mil direcciones tiene cinco intentos en cada una y ninguno en total —
+     * cincuenta mil pruebas desde una sola IP sin tocar el techo. Es el ataque
+     * más común contra un login: no adivinar la contraseña de una persona sino
+     * probar una contraseña conocida contra mucha gente.
+     *
+     * El de abajo es por IP sola, con un número más alto: una oficina entera
+     * detrás de un NAT tiene que poder entrar, y el que recorre una lista no.
+     */
+    const porIp = await rateLimit(`auth:ip:${ip}`, RATE_LIMIT_CONFIGS.AUTH_POR_IP);
+
     const permitido = await rateLimit(clave, config);
-    if (!permitido.allowed) {
-      const esperar = Math.max(1, Math.ceil((permitido.resetAt - Date.now()) / 1000));
+    if (!permitido.allowed || !porIp.allowed) {
+      const cual = !porIp.allowed ? porIp : permitido;
+      const esperar = Math.max(1, Math.ceil((cual.resetAt - Date.now()) / 1000));
       // El formato de error del resto de la API, no el de Better Auth: quien
       // consume estos endpoints ya sabe leer `{ error: { code } }`, y tener
       // dos formas de decir "no" en la misma aplicación es una trampa para el

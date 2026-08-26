@@ -59,6 +59,18 @@ export function checkRateLimit(
 export const RATE_LIMIT_CONFIGS = {
   /** Sign-in: 5 attempts per 10 seconds per IP+email */
   AUTH_SIGN_IN: { limit: 5, windowMs: 10_000 },
+  /**
+   * Intentos de autenticación por IP, sin mirar contra qué cuenta.
+   *
+   * El cupo de arriba es por (IP, dirección) y frena a quien ataca UNA cuenta.
+   * Éste frena al que recorre una lista: treinta intentos por minuto desde una
+   * misma IP, contra las direcciones que sea.
+   *
+   * Treinta y no cinco porque una oficina entera comparte IP detrás de un NAT,
+   * y media docena de personas entrando a las nueve de la mañana no puede
+   * quedar trabada. Un atacante recorriendo diez mil direcciones sí.
+   */
+  AUTH_POR_IP: { limit: 30, windowMs: 60_000 },
   /** Sign-up: 3 new accounts per minute per IP */
   AUTH_SIGN_UP: { limit: 3, windowMs: 60_000 },
   /** Intake simulation: 30 per minute per user */
@@ -169,6 +181,29 @@ export function buildUserKey(userId: string, endpoint: string): string {
  * On non-Vercel hosts, strip user-supplied x-forwarded-for at the load balancer.
  */
 export function getClientIp(request: Request): string {
+  /*
+   * Esto toma el valor de más a la IZQUIERDA de `X-Forwarded-For`, que en el
+   * caso general lo escribe quien llama y no vale nada. Acá sirve por una razón
+   * concreta, y conviene que esté escrita: **Vercel sobrescribe esa cabecera en
+   * el borde** con la IP real, así que lo que llega al código no es lo que mandó
+   * el cliente.
+   *
+   * Comprobado contra producción: doce pedidos con `X-Forwarded-For: 9.9.9.9` y
+   * después doce rotando `10.0.0.1..12`. Si la cabecera forjada llegara, la
+   * segunda tanda habría estrenado cupo doce veces; dio 429 las doce, o sea que
+   * las veinticuatro compartieron el cupo de la IP de verdad.
+   *
+   * Lo que esto significa: el límite de tráfico —el del login, el de la pantalla
+   * pública, el del webhook— depende de una garantía de la plataforma. El día
+   * que esto corra detrás de otro proxy, o directo, la cabecera vuelve a ser del
+   * atacante y todos los topes se saltean rotando un valor.
+   *
+   * Por eso `x-vercel-forwarded-for` va primero cuando está: la pone Vercel y
+   * sólo Vercel, así que no depende de que nadie más se comporte.
+   */
+  const deVercel = request.headers.get("x-vercel-forwarded-for");
+  if (deVercel) return deVercel.split(",")[0].trim();
+
   const xff = request.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
   const xReal = request.headers.get("x-real-ip");

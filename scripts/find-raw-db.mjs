@@ -121,6 +121,43 @@ for (const f of archivos) {
   }
 }
 
+// ── Consultas resueltas antes de tiempo ─────────────────────────────────────
+//
+// `batch` necesita el constructor de consulta de drizzle, no una promesa: le
+// llama a `_prepare()`. Un `.catch(...)` o un `.then(...)` al final de la
+// cadena, ADENTRO del armador, la resuelve antes y drizzle revienta con
+// `query._prepare is not a function` — quince líneas de stack de node_modules
+// sin mencionar ni el `.catch` ni la capa.
+//
+// Pasó de verdad: el codemod que migró las consultas envolvió también el
+// `.catch` que ya estaba, y quedaron quince rutas rotas. Ningún test lo agarró
+// porque el puente de los tests hace `Promise.resolve(armar(db))`, que con una
+// promesa funciona igual.
+//
+// Hay un guardia en tiempo de ejecución en `enTenant`, pero sólo salta cuando
+// ese código corre. Esto lo encuentra sin correrlo.
+const anticipadas = [];
+for (const f of archivos) {
+  const s = readFileSync(f, "utf8");
+  for (const [a, b] of tramosDeLaCapa(s)) {
+    const tramo = s.slice(a, b);
+    for (const met of [".catch(", ".then(", ".finally("]) {
+      if (tramo.includes(met)) {
+        anticipadas.push(`${f}:${s.slice(0, a).split(SALTO).length}	${met.slice(0, -1)} adentro del armador`);
+        break;
+      }
+    }
+  }
+}
+for (const x of anticipadas) console.log(x);
+if (anticipadas.length > 0) {
+  console.log(
+    `${SALTO}${anticipadas.length} consulta(s) resueltas antes de tiempo` +
+      ` — el .catch/.then va AFUERA: enTenant(ctx, (db) => …).catch(…)`
+  );
+  process.exitCode = 1;
+}
+
 for (const c of crudas) console.log(`${c.f}:${c.linea}	${c.tabla}	db.${c.op}`);
 console.log(
   `${SALTO}${crudas.length} consulta(s) fuera de la capa sin declarar` +

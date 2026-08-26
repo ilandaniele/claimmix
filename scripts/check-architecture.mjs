@@ -125,19 +125,39 @@ console.log("\n▸ Consultas fuera de la capa de datos");
     salida = (e.stdout ?? "") + (e.stderr ?? "");
     codigo = e.status ?? 1;
   }
-  const sueltas = salida
-    .split(/\r?\n/)
-    .filter((l) => /\tdb\.\w/.test(l))
+  const lineas = salida.split(/\r?\n/);
+  const sueltas = lineas.filter((l) => /\tdb\.\w/.test(l)).map((l) => l.split("\t")[0]);
+  // Dos fallas distintas, con dos arreglos distintos. Reportarlas juntas daba
+  // el consejo equivocado: "0 consultas sin declarar" seguido de las
+  // instrucciones para declarar una.
+  const anticipadas = lineas
+    .filter((l) => /adentro del armador/.test(l))
     .map((l) => l.split("\t")[0]);
-  if (codigo !== 0 || sueltas.length > 0) {
+
+  if (sueltas.length > 0) {
     mal(`${sueltas.length} consulta(s) sin declarar`);
     for (const s of sueltas.slice(0, 10)) console.log(`     ${s}`);
     if (sueltas.length > 10) console.log(`     …y ${sueltas.length - 10} más`);
     console.log("     O va por enTenant(ctx, (db) => …), o lleva arriba un");
     console.log("     comentario `// sin-inquilino: <por qué>` que lo justifique.");
-  } else {
-    const m = /(\d+) declarada/.exec(salida);
-    bien(`todas por la capa, salvo ${m ? m[1] : "0"} declaradas con su motivo`);
+  }
+
+  if (anticipadas.length > 0) {
+    mal(`${anticipadas.length} consulta(s) resueltas antes de tiempo`);
+    for (const s of anticipadas.slice(0, 10)) console.log(`     ${s}`);
+    console.log("     Un .catch/.then adentro del armador resuelve la cadena, y");
+    console.log("     drizzle tira `query._prepare is not a function`. Va afuera:");
+    console.log("     enTenant(ctx, (db) => db.select()...).catch(() => [])");
+  }
+
+  if (sueltas.length === 0 && anticipadas.length === 0) {
+    if (codigo !== 0) {
+      mal("find-raw-db.mjs falló sin decir por qué");
+      console.log(lineas.slice(-6).join("\n"));
+    } else {
+      const m = /(\d+) declarada/.exec(salida);
+      bien(`todas por la capa, salvo ${m ? m[1] : "0"} declaradas con su motivo`);
+    }
   }
 }
 

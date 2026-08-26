@@ -276,6 +276,53 @@ jobs:
   # Los ataques al agente (--agent) NO corren acá: gastan tokens del mismo cupo
   # que atiende a los asegurados. Se corren a mano al tocar el agente o los
   # prompts, con `pnpm pentest --agent`.
+  # ── Permisos del rol de la aplicación ────────────────────────────────────────
+  #
+  # La aplicación ya no consulta con el rol dueño de las tablas: usa
+  # `claimmix_app`, que obedece RLS. Un GRANT que falte no se ve como un error
+  # visible — casi todas las escrituras están adentro de un `try/catch` que
+  # traga el fallo a propósito, así que el síntoma es una aplicación que anda y
+  # no guarda nada. Se pregunta al catálogo después de cada deploy.
+  #
+  # Sólo lee.
+  permisos:
+    name: Permisos del rol
+    runs-on: ubuntu-latest
+    needs: [smoke]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Preguntarle al catálogo qué puede hacer el rol
+        run: pnpm permisos
+        env:
+          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
+
+      - name: Qué significa que esto falle
+        if: failure()
+        run: |
+          echo "::error::El rol de la aplicación no tiene lo que la capa de datos le pide."
+          echo ""
+          echo "  · 'le falta INSERT'   → una tabla nueva nació sin permisos. Los"
+          echo "                          ALTER DEFAULT PRIVILEGES cubren las que se"
+          echo "                          crean después; una migración que las crea"
+          echo "                          con otro rol dueño se saltea eso."
+          echo "  · 'sin forzar'        → le falta FORCE ROW LEVEL SECURITY. Sin él,"
+          echo "                          el dueño de la tabla ignora sus propias"
+          echo "                          políticas."
+          echo "  · 'sin ninguna'       → tabla con RLS y sin política: no filtra,"
+          echo "                          niega todo. Se ve como una tabla vacía."
+          echo ""
+          echo "Reproducilo con: pnpm permisos"
+
   pentest:
     name: Pen test (superficie)
     runs-on: ubuntu-latest

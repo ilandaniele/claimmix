@@ -50,6 +50,9 @@ jobs:
         run: pnpm type-check
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          # La capa de datos usa su propio rol. Sin esta variable, cualquier
+          # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
 
   # ── 2. Lint ──────────────────────────────────────────────────────────────────
   lint:
@@ -116,6 +119,22 @@ jobs:
         run: pnpm test:unit
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          # La capa de datos usa su propio rol. Sin esta variable, cualquier
+          # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
+          MOCK_AI: "true"
+
+      # Aparte de los unitarios porque necesitan el compilador de flujos, que
+      # traduce las directivas "use workflow" / "use step". Sin él esas
+      # directivas son literales de cadena que no hacen nada: la función corre
+      # igual, el test pasa, y la durabilidad no existe. No tocan la base.
+      - name: Run durable-workflow tests
+        run: pnpm flujos
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          # La capa de datos usa su propio rol. Sin esta variable, cualquier
+          # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
           MOCK_AI: "true"
 
   # ── 4. Build ─────────────────────────────────────────────────────────────────
@@ -152,6 +171,9 @@ jobs:
         run: pnpm build
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          # La capa de datos usa su propio rol. Sin esta variable, cualquier
+          # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
           BETTER_AUTH_SECRET: placeholder-secret-for-build-only
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN || '' }}
           MOCK_AI: "true"
@@ -199,6 +221,7 @@ jobs:
           fi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
+          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'placeholder-secret' }}
           MOCK_AI: "true"
           INTEGRATION_ENABLED: ${{ secrets.INTEGRATION_ENABLED || 'false' }}
@@ -256,6 +279,7 @@ jobs:
           fi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
+          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'placeholder-secret' }}
           MOCK_AI: "true"
 
@@ -355,6 +379,9 @@ jobs:
         run: pnpm build
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          # La capa de datos usa su propio rol. Sin esta variable, cualquier
+          # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
           BETTER_AUTH_SECRET: placeholder-secret-for-build-only
           MOCK_AI: "true"
           ANALYZE: "true"
@@ -412,6 +439,9 @@ jobs:
         run: pnpm vitest run tests/integration/intake-email-gone.test.ts tests/integration/gmail-poll.test.ts tests/integration/rls-email.test.ts tests/integration/llm-email-probes.test.ts
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          # La capa de datos usa su propio rol. Sin esta variable, cualquier
+          # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
           MOCK_AI: "true"
 
   # ── 10. License audit ────────────────────────────────────────────────────────

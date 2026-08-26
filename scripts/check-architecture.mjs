@@ -4,7 +4,7 @@
  * Una arquitectura escrita en un documento se degrada en seis meses; una
  * comprobada en cada `pnpm check`, no. Esto es lo segundo.
  *
- * Comprueba cuatro invariantes, en orden de importancia:
+ * Comprueba cinco invariantes, en orden de importancia:
  *
  *   1. `src/core/` no toca infraestructura. Recibe datos y devuelve decisiones;
  *      si importa la base, la red o el entorno, deja de poder probarse sin
@@ -203,6 +203,48 @@ if (!existsSync(scope)) {
     mal("lee DATABASE_URL: con el rol viejo, sus consultas devuelven datos de todos");
   } else {
     bien("no hay forma de que caiga al rol que saltea RLS");
+  }
+}
+
+// ── 5. El agente no elige a quién le escribe ───────────────────────────────
+//
+// El destinatario de todo mensaje saliente sale del remitente del propio caso
+// —`senderEmail`, `senderPhone`— y nunca del texto que devuelve el modelo. Esa
+// es la razón por la que una inyección de instrucciones no puede convertirse en
+// una fuga: aunque alguien logre que el agente diga algo que no debía, se lo
+// dice a la misma persona que escribió.
+//
+// El día que un `to:` salga de un campo del plan, esa propiedad se pierde en
+// silencio: el código compila, los tests pasan, y el agente le contesta a quien
+// el atacante haya puesto en el cuerpo de un WhatsApp.
+console.log("\n▸ El destinatario no sale del modelo");
+{
+  const FUENTES_OK = /^(opts\.|input\.|caso\.|row\.)?(sender(Email|Phone)|to|from|fromAddr|from_addr|toAddr|to_addr|email|phone|destinatario)$/i;
+  const sospechosos = [];
+  for (const f of archivos("src/server")) {
+    const s = sinComentarios(readFileSync(f, "utf8"));
+    const re = /\bto:\s*([^,\n]+)/g;
+    let m;
+    while ((m = re.exec(s))) {
+      const valor = m[1].trim().replace(/,$/, "");
+      // Sólo interesan los `to:` que arman un mensaje, no los de un objeto
+      // cualquiera. Se mira que cerca haya un envío.
+      const cerca = s.slice(Math.max(0, m.index - 400), m.index + 200);
+      if (!/messenger\.send|dispatchOutbound|sendWhatsApp/.test(cerca)) continue;
+      if (FUENTES_OK.test(valor)) continue;
+      // Un campo que sale del plan del modelo: `plan.x`, `decision.x`, `claim.x`.
+      if (/\b(plan|decision|decisión|respuesta|reply|extracted|claim|fields)\b/i.test(valor)) {
+        sospechosos.push(`${f}: to: ${valor}`);
+      }
+    }
+  }
+  if (sospechosos.length === 0) {
+    bien("todo `to:` sale del remitente del caso, no del plan del modelo");
+  } else {
+    mal(`${sospechosos.length} destinatario(s) que podrían salir del modelo`);
+    for (const x of sospechosos) console.log(`     ${x}`);
+    console.log("     Una inyección de instrucciones se vuelve una fuga si el");
+    console.log("     agente puede elegir a quién le escribe.");
   }
 }
 

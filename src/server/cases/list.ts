@@ -139,14 +139,25 @@ export async function listCases(
         severity: cases.severity,
         customer_id: cases.customer_id,
         policy_id: cases.policy_id,
-        email_message_id: cases.email_message_id,
-        email_thread_id: cases.email_thread_id,
         is_claim: cases.is_claim,
-        not_relevant_reason: cases.not_relevant_reason,
         requires_specialist: cases.requires_specialist,
-        core_external_id: cases.core_external_id,
-        core_error_message: cases.core_error_message,
-        core_sent_at: cases.core_sent_at,
+        /*
+         * Seis columnas que este listado devolvía y nadie leía.
+         *
+         * `email_message_id`, `email_thread_id`, `not_relevant_reason`,
+         * `core_external_id`, `core_error_message` y `core_sent_at` salían en
+         * cada fila de cada página. Los dos únicos consumidores del listado —la
+         * bandeja y `/api/cases`— no tocan ninguna: se usan en el detalle de un
+         * caso y en el worker, que las consultan por su cuenta.
+         *
+         * No era una fuga, y tampoco es sólo peso. `core_error_message` guarda
+         * lo que devolvió el sistema del asegurador cuando falló un envío: texto
+         * que escribió un tercero, en una respuesta que la pantalla no muestra y
+         * nadie mira. Una columna que sale y no se usa es superficie regalada.
+         *
+         * Si alguna vuelve a hacer falta acá, se agrega — pero que sea porque
+         * alguien la va a leer.
+         */
         // Whether the claimant has actually been written back to, on whichever
         // channel they used. Computed from the outbound ledger instead of a
         // column on `cases` so it cannot drift from what was really sent, and

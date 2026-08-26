@@ -19,6 +19,7 @@
  *   pnpm smoke --url https://…  # a preview deployment instead of production
  */
 
+import { execFileSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as dotenv from "dotenv";
@@ -53,6 +54,15 @@ const EXPECT_COMMIT = flag("expect-commit")?.slice(0, 7) ?? null;
 const WAIT_FOR_ALIAS_MS = 3 * 60 * 1000;
 
 const SECRET = process.env.CRON_SECRET;
+
+/**
+ * Este chequeo quedó viejo: otro deploy pasó por encima mientras esperaba.
+ *
+ * No es un éxito ni un fracaso, y por eso no alcanza con devolver true: el
+ * resumen del final tiene que decir que no se comprobó nada, o el verde miente
+ * igual que el rojo mentía antes.
+ */
+let obsoleto = false;
 if (!SECRET) {
   console.error("Falta CRON_SECRET en .env.local — es la llave del endpoint de salud.");
   process.exit(1);
@@ -112,11 +122,48 @@ async function checkHealthIsProtected(): Promise<boolean> {
 }
 
 /**
+ * ¿El commit que está sirviendo producción viene DESPUÉS del que esperábamos?
+ *
+ * `merge-base --is-ancestor A B` sale 0 cuando A es antepasado de B. Si el que
+ * esperábamos es antepasado del que está sirviendo, producción está adelante y
+ * no atrás.
+ *
+ * Devuelve null cuando no se puede saber —historia superficial, commit que el
+ * clon no tiene—, y eso NO se trata como "adelante": ante la duda, el chequeo
+ * se comporta como antes y falla.
+ */
+function vieneDespues(esperado: string, sirviendo: string): boolean | null {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${esperado}^{commit}`], { stdio: "ignore" });
+    execFileSync("git", ["cat-file", "-e", `${sirviendo}^{commit}`], { stdio: "ignore" });
+  } catch {
+    return null;
+  }
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", esperado, sirviendo], {
+      stdio: "ignore",
+    });
+    return true;
+  } catch (e) {
+    // Salida 1 es "no es antepasado". Cualquier otra cosa es que git no pudo.
+    return (e as { status?: number }).status === 1 ? false : null;
+  }
+}
+
+/**
  * Wait until the alias is serving the deployment we were asked about.
  *
- * Returns false if it never arrives, which is itself a failure worth
- * reporting: the deploy said success and the traffic is still going somewhere
- * else.
+ * Dos formas de no coincidir, y son opuestas:
+ *
+ *   producción ATRÁS      el deploy dijo que salió y el tráfico sigue yendo a
+ *                         otro lado. Es una falla y hay que gritarla.
+ *   producción ADELANTE   otro deploy más nuevo pasó por encima mientras este
+ *                         chequeo esperaba. Este run quedó viejo: su resultado
+ *                         no dice nada, ni bueno ni malo.
+ *
+ * Tratarlas igual —que es lo que hacía— convierte "pushear tres veces seguidas"
+ * en tres post-deploy rojos que no significan nada. Y un rojo que no significa
+ * nada se deja de mirar.
  */
 async function waitForCommit(expected: string): Promise<boolean> {
   const deadline = Date.now() + WAIT_FOR_ALIAS_MS;
@@ -131,6 +178,13 @@ async function waitForCommit(expected: string): Promise<boolean> {
       last = body.commit ?? null;
       if (last === expected) {
         console.log(`  ✓ sirviendo el commit ${expected}`);
+        return true;
+      }
+      if (last && vieneDespues(expected, last) === true) {
+        console.log(`  · producción ya sirve ${last}, que viene después de ${expected}.`);
+        console.log(`    Otro deploy pasó por encima: este chequeo quedó viejo y se corta acá.`);
+        console.log(`    El que corra para ${last} es el que vale.`);
+        obsoleto = true;
         return true;
       }
     } catch {
@@ -152,6 +206,17 @@ async function main() {
   if (!(await checkReachable())) failures++;
   if (!(await checkHealthIsProtected())) failures++;
   if (EXPECT_COMMIT && !(await waitForCommit(EXPECT_COMMIT))) failures++;
+
+  // Si otro deploy pasó por encima, lo que siga mide OTRA cosa que la que este
+  // run venía a comprobar. Sale 0 —no hay nada roto— pero lo dice, porque un
+  // verde que no comprobó lo que decía comprobar miente igual que el rojo que
+  // no significaba nada.
+  if (obsoleto) {
+    console.log(`\n${"─".repeat(60)}`);
+    console.log(`· Este chequeo NO comprobó ${EXPECT_COMMIT}: producción ya está más adelante.`);
+    console.log("  No hay nada roto, y tampoco hay nada verificado acá.");
+    process.exit(0);
+  }
 
   console.log("\nDependencias:");
   let body: {

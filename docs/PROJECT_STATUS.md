@@ -538,15 +538,22 @@ Ahora importa del núcleo y no simula nada.
 
 ### 🙋 Waiting on you (not code)
 
-- **La contraseña de `claimmix_app` en producción quedó rotada y hay que
-  reponerla.** El ensayo se la cambió por una aleatoria que descartó (ver "La
-  base separa a las aseguradoras"), así que `DATABASE_URL_APP` —en `.env.local`
-  y en Vercel— ya no autentica. **No hay caída**: lo desplegado todavía usa el
-  rol viejo. Pero es lo primero que hay que hacer antes de desplegar la capa de
-  datos, o la aplicación arranca sin poder consultar nada.
-  Se repone con `pnpm rol-app`, que genera una nueva y la imprime; después va a
-  `.env.local` y a Vercel (`vercel env rm` + `vercel env add DATABASE_URL_APP`).
+- ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada
+  con `pnpm rol-app --rotar`, puesta en `.env.local` y en Vercel (producción), y
+  verificada de punta a punta con `pnpm listo`: permisos sobre las 29 tablas, la
+  capa aislando contra la base real —incluido que **rechace escribir** en la
+  aseguradora de al lado— y las invariantes de arquitectura. Las cuatro en verde.
 
+  Lo que NO se pudo verificar por comparación: el valor guardado en Vercel. Está
+  marcado como sensible, así que `vercel env pull` devuelve `"[SENSITIVE]"` y no
+  hay forma de contrastarlo con el local. Por eso `/api/health` ahora tiene una
+  sonda propia de la capa de datos, que consulta con el rol restringido: si el
+  valor de Vercel estuviera mal, el primer deploy lo dice —`DATABASE_URL_APP no
+  autentica`— en vez de descubrirse cuando un analista abre la bandeja vacía.
+
+- **La contraseña nueva de `claimmix_app` quedó impresa en el transcripto** de la
+  sesión donde se rotó. Misma categoría que el token de WhatsApp y la clave de
+  Google de más abajo: no se sabe filtrada, y ya no está sólo donde debería.
 - ~~**Write to it once, from a real phone and a real mailbox**~~ ✅ **DONE 2026-08-24.**
   See "The last metre" below: a real mail, two real WhatsApps and a real photograph,
   all answered. Do it again after the next change to the mailbox, the number or their

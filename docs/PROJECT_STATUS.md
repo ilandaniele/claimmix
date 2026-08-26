@@ -595,14 +595,20 @@ DATABASE_URL_APP". En el pen test el síntoma se leía como **"la pared entre
 inquilinos falló"**, porque esa prueba pasa por `listCases`. Un rojo que señala
 mal cuesta más que uno que no aparece. Hay una invariante que ahora lo comprueba.
 
-**Los 204 tests de integración no pueden correr en CI, y no es por un secreto.**
-Hacen `fetch` contra un servidor HTTP y se autentican como un analista: necesitan
-servidor levantado, base sembrada y un usuario con contraseña. Lo último no se
-puede armar en un job — el alta exige dirección verificada (`if (!emailVerified)
-return false`) y un alta por contraseña nunca lo está. Es una defensa deliberada,
-puesta después de que agregar una casilla a la lista blanca abriera exactamente
-esa ventana. **No se va a debilitar para que corra la CI.** Corren en local con
-`pnpm check`; el job lo deja anotado en el resumen de cada run.
+**Los 204 tests de integración corren, por primera vez.** Los di por imposibles
+y me apuré: el alta exige dirección verificada, sí, pero eso gobierna la
+PROVISIÓN —el perfil que ata a alguien a una aseguradora— no la creación de la
+cuenta. `pnpm sembrar` hace lo mismo que hace un admin: crea la cuenta y después
+escribe el perfil. Corren contra el ensayo y con su rol restringido, nunca
+contra producción — el script se planta solo si le pasan esa cadena.
+
+Al ponerlos a correr salieron cuatro cosas que llevaban meses tapadas: apuntaban
+a un endpoint que ya no existe, no mandaban `Origin` (que Better Auth exige
+contra CSRF), **no había techo de intentos en la ruta HTTP de login** —el límite
+existía pero sólo lo aplicaba la Server Action del formulario, o sea el camino
+de una persona y no el de quien adivina contraseñas— y **la capa de datos no
+comprobaba su propia suposición**: con `DATABASE_URL_APP` apuntando al rol
+dueño, `/api/cases` sirvió casos de tres aseguradoras con un 200 impecable.
 
 **Los e2e sí se pueden prender, y falta hacerlo.** Trece de ellos no necesitan
 datos —cabeceras, nonce de la CSP por pedido, iframe, límite de tráfico, y que

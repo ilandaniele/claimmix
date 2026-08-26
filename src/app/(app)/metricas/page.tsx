@@ -12,6 +12,7 @@
 
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { eq, and, gte, lt, count, sql } from "drizzle-orm";
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
@@ -87,6 +88,9 @@ async function fetchMetricas(): Promise<MetricasData | null> {
       .from(users)
       .where(eq(users.id, session.user.id))
       .limit(1);
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
     if (!userRow) return null;
 
     // ── Date window ────────────────────────────────────────────────────────────
@@ -105,31 +109,37 @@ async function fetchMetricas(): Promise<MetricasData | null> {
       usageByUserRows,
       usageByModelRows,
     ] = await Promise.all([
-        db
-          .select({ id: cases.id, status: cases.status, created_at: cases.created_at, closed_at: cases.closed_at })
-          .from(cases)
-          .where(and(
-            eq(cases.tenant_id, userRow.tenant_id),
-            gte(cases.created_at, monthStart),
-            lt(cases.created_at, monthEnd),
-          )),
-        db
-          .select({ status: cases.status })
-          .from(cases)
-          .where(eq(cases.tenant_id, userRow.tenant_id)),
-        db
-          .select({ claim_type: cases.claim_type })
-          .from(cases)
-          .where(eq(cases.tenant_id, userRow.tenant_id)),
-        db
-          .select({ n: count() })
-          .from(cases)
-          .where(and(
-            eq(cases.tenant_id, userRow.tenant_id),
-            eq(cases.status, "escalado"),
-            gte(cases.created_at, monthStart),
-            lt(cases.created_at, monthEnd),
-          )),
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({ id: cases.id, status: cases.status, created_at: cases.created_at, closed_at: cases.closed_at })
+            .from(cases)
+            .where(and(
+              gte(cases.created_at, monthStart),
+              lt(cases.created_at, monthEnd),
+            ))
+        ),
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({ status: cases.status })
+            .from(cases)
+            
+        ),
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({ claim_type: cases.claim_type })
+            .from(cases)
+            
+        ),
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({ n: count() })
+            .from(cases)
+            .where(and(
+              eq(cases.status, "escalado"),
+              gte(cases.created_at, monthStart),
+              lt(cases.created_at, monthEnd),
+            ))
+        ),
         db
           .select({ assigned_to: cases.assigned_to, full_name: users.full_name })
           .from(cases)
@@ -140,28 +150,31 @@ async function fetchMetricas(): Promise<MetricasData | null> {
             gte(cases.closed_at, monthStart),
             lt(cases.closed_at, monthEnd),
           )),
-        db
-          .select({
-            calls: count(),
-            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
-            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
-            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
-          })
-          .from(aiUsage)
-          .where(and(
-            eq(aiUsage.tenant_id, userRow.tenant_id),
-            gte(aiUsage.created_at, monthStart),
-            lt(aiUsage.created_at, monthEnd),
-          )),
-        db
-          .select({
-            calls: count(),
-            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
-            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
-            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
-          })
-          .from(aiUsage)
-          .where(eq(aiUsage.tenant_id, userRow.tenant_id)),
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({
+              calls: count(),
+              prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+              completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+              cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+            })
+            .from(aiUsage)
+            .where(and(
+              gte(aiUsage.created_at, monthStart),
+              lt(aiUsage.created_at, monthEnd),
+            ))
+        ),
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({
+              calls: count(),
+              prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+              completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+              cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+            })
+            .from(aiUsage)
+            
+        ),
         db
           .select({
             user_id: aiUsage.user_id,
@@ -181,21 +194,22 @@ async function fetchMetricas(): Promise<MetricasData | null> {
             lt(aiUsage.created_at, monthEnd),
           ))
           .groupBy(aiUsage.user_id, users.full_name, authUsers.email),
-        db
-          .select({
-            model: aiUsage.model,
-            calls: count(),
-            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
-            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
-            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
-          })
-          .from(aiUsage)
-          .where(and(
-            eq(aiUsage.tenant_id, userRow.tenant_id),
-            gte(aiUsage.created_at, monthStart),
-            lt(aiUsage.created_at, monthEnd),
-          ))
-          .groupBy(aiUsage.model),
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({
+              model: aiUsage.model,
+              calls: count(),
+              prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
+              completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
+              cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+            })
+            .from(aiUsage)
+            .where(and(
+              gte(aiUsage.created_at, monthStart),
+              lt(aiUsage.created_at, monthEnd),
+            ))
+            .groupBy(aiUsage.model)
+        ),
       ]);
 
     const totalCasesMonth = casesThisMonth.length;

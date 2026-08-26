@@ -8,6 +8,7 @@ import { asc, eq } from "drizzle-orm";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -53,12 +54,16 @@ const CUSTOM_FIELD_COLUMNS = {
 export async function GET() {
   try {
     const { db, userRow } = await requireAdmin();
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
     try {
-      const fields = await db
-        .select(CUSTOM_FIELD_COLUMNS)
-        .from(t)
-        .where(eq(t.tenant_id, userRow.tenant_id))
-        .orderBy(asc(t.key));
+      const fields = await enTenant(tenantCtx, (db) =>
+        db
+          .select(CUSTOM_FIELD_COLUMNS)
+          .from(t)
+          .orderBy(asc(t.key))
+      );
       return ok({ fields });
     } catch (e) {
       const code = (e as { code?: string })?.code;

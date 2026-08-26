@@ -17,6 +17,7 @@ import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/require-role";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, extractedFields } from "@/lib/db/schema";
 import { SyncToCoreSchema } from "@/lib/schemas/cases";
 import { getCoreSyncClient } from "@/server/core-sync/client";
@@ -47,6 +48,9 @@ export async function POST(
     throw e;
   }
   const { userRow } = ctx;
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
   // ── 2. Rate limit ─────────────────────────────────────────────────────────────
   const rlKey = buildUserKey(userRow.id, "sync-to-core");
@@ -72,19 +76,21 @@ export async function POST(
   const { force } = parsed.data;
 
   // ── 5. Fetch case (explicit tenant filter = IDOR protection) ─────────────────
-  const [caseRow] = await db
-    .select({
-      id: cases.id,
-      status: cases.status,
-      tenant_id: cases.tenant_id,
-      claim_type: cases.claim_type,
-      severity: cases.severity,
-      policy_number: cases.policy_number,
-      policyholder_name: cases.policyholder_name,
-    })
-    .from(cases)
-    .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
-    .limit(1);
+  const [caseRow] = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        id: cases.id,
+        status: cases.status,
+        tenant_id: cases.tenant_id,
+        claim_type: cases.claim_type,
+        severity: cases.severity,
+        policy_number: cases.policy_number,
+        policyholder_name: cases.policyholder_name,
+      })
+      .from(cases)
+      .where(eq(cases.id, caseId))
+      .limit(1)
+  );
 
   if (!caseRow) return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
 

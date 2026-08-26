@@ -17,6 +17,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, extractedFields } from "@/lib/db/schema";
 import { err } from "@/lib/api/respond";
@@ -45,6 +46,9 @@ export async function GET(
     // ── 1. Auth ──────────────────────────────────────────────────────────────
     const { user, userRow } = await requireRole(...ALL_ROLES);
     const tenantId = userRow.tenant_id;
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: tenantId };
 
     // ── 2. Rate limit ────────────────────────────────────────────────────────
     const rl = await rateLimit(
@@ -63,16 +67,18 @@ export async function GET(
 
     // ── 4. Case (explicit tenant filter — IDOR-safe 404) ─────────────────────
     const caseRow = firstRow(
-      await db
-        .select({
-          id: cases.id,
-          tenant_id: cases.tenant_id,
-          claim_type: cases.claim_type,
-          status: cases.status,
-        })
-        .from(cases)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            id: cases.id,
+            tenant_id: cases.tenant_id,
+            claim_type: cases.claim_type,
+            status: cases.status,
+          })
+          .from(cases)
+          .where(eq(cases.id, caseId))
+          .limit(1)
+      )
     );
     if (!caseRow) {
       return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
@@ -90,21 +96,20 @@ export async function GET(
     }
 
     // Current (analyst-corrected) extracted values complement the raw output.
-    const fieldRows = await db
-      .select({
-        field_key: extractedFields.field_key,
-        field_value: extractedFields.field_value,
-        confidence: extractedFields.confidence,
-        extracted_at: extractedFields.extracted_at,
-      })
-      .from(extractedFields)
-      .where(
-        and(
-          eq(extractedFields.case_id, caseId),
-          eq(extractedFields.tenant_id, tenantId)
+    const fieldRows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          field_key: extractedFields.field_key,
+          field_value: extractedFields.field_value,
+          confidence: extractedFields.confidence,
+          extracted_at: extractedFields.extracted_at,
+        })
+        .from(extractedFields)
+        .where(
+          eq(extractedFields.case_id, caseId)
         )
-      )
-      .catch(() => []);
+        .catch(() => [])
+    );
 
     const output = run.output_payload ?? ({} as Record<string, unknown>);
 

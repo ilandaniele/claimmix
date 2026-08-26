@@ -17,6 +17,7 @@ import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {
   claimAttachments,
@@ -118,6 +119,9 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
     redirect("/login");
   }
   const tenantId = me.tenant_id;
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: tenantId };
 
   const detail = await getCaseDetail(tenantId, id);
 
@@ -136,45 +140,43 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
 
   const [confirmationRows, attachmentRows] = await Promise.all([
     isEmailCase
-      ? db
-          .select({
-            id: claimFieldConfirmations.id,
-            field_key: claimFieldConfirmations.field_name,
-            proposed_value: claimFieldConfirmations.suggested_value,
-            conflict_with_value: claimFieldConfirmations.conflict_with_value,
-            confidence: claimFieldConfirmations.confidence,
-            status: claimFieldConfirmations.status,
-            resolved_at: claimFieldConfirmations.confirmed_at,
-          })
-          .from(claimFieldConfirmations)
-          .where(
-            and(
-              eq(claimFieldConfirmations.case_id, id),
-              eq(claimFieldConfirmations.tenant_id, tenantId)
+      ? enTenant(tenantCtx, (db) =>
+        db
+            .select({
+              id: claimFieldConfirmations.id,
+              field_key: claimFieldConfirmations.field_name,
+              proposed_value: claimFieldConfirmations.suggested_value,
+              conflict_with_value: claimFieldConfirmations.conflict_with_value,
+              confidence: claimFieldConfirmations.confidence,
+              status: claimFieldConfirmations.status,
+              resolved_at: claimFieldConfirmations.confirmed_at,
+            })
+            .from(claimFieldConfirmations)
+            .where(
+              eq(claimFieldConfirmations.case_id, id)
             )
-          )
-          .orderBy(asc(claimFieldConfirmations.created_at))
-          .catch(() => [])
+            .orderBy(asc(claimFieldConfirmations.created_at))
+            .catch(() => [])
+      )
       : Promise.resolve([]),
     isEmailCase
-      ? db
-          .select({
-            id: claimAttachments.id,
-            filename: claimAttachments.file_name,
-            content_type: claimAttachments.content_type,
-            size_bytes: claimAttachments.size_bytes,
-            external_url: claimAttachments.external_url,
-            uploaded_at: claimAttachments.created_at,
-          })
-          .from(claimAttachments)
-          .where(
-            and(
-              eq(claimAttachments.case_id, id),
-              eq(claimAttachments.tenant_id, tenantId)
+      ? enTenant(tenantCtx, (db) =>
+        db
+            .select({
+              id: claimAttachments.id,
+              filename: claimAttachments.file_name,
+              content_type: claimAttachments.content_type,
+              size_bytes: claimAttachments.size_bytes,
+              external_url: claimAttachments.external_url,
+              uploaded_at: claimAttachments.created_at,
+            })
+            .from(claimAttachments)
+            .where(
+              eq(claimAttachments.case_id, id)
             )
-          )
-          .orderBy(asc(claimAttachments.created_at))
-          .catch(() => [])
+            .orderBy(asc(claimAttachments.created_at))
+            .catch(() => [])
+      )
       : Promise.resolve([]),
   ]);
 

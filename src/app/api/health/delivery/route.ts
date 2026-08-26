@@ -28,6 +28,7 @@ import { timingSafeEqual } from "crypto";
 import { and, desc, eq, gt } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { auditLog } from "@/lib/db/schema";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
@@ -52,6 +53,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { status: 500 }
     );
   }
+
+  // Después de la guarda a propósito: antes, tenantId puede ser undefined.
+  const tenantCtx: TenantContext = { tenantId };
 
   let body: { channel?: unknown; to?: unknown };
   try {
@@ -109,20 +113,22 @@ function authorized(req: NextRequest): boolean {
 
 /** Has a test message gone out in the last minute? */
 async function sentRecently(tenantId: string): Promise<boolean> {
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const since = new Date(Date.now() - MIN_SECONDS_BETWEEN_SENDS * 1000).toISOString();
-    const rows = await db
-      .select({ id: auditLog.id })
-      .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.tenant_id, tenantId),
-          eq(auditLog.event_type, AuditEvent.DELIVERY_TEST),
-          gt(auditLog.created_at, since)
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: auditLog.id })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.event_type, AuditEvent.DELIVERY_TEST),
+            gt(auditLog.created_at, since)
+          )
         )
-      )
-      .orderBy(desc(auditLog.created_at))
-      .limit(1);
+        .orderBy(desc(auditLog.created_at))
+        .limit(1)
+    );
     return rows.length > 0;
   } catch {
     // A rate limit that cannot read its own history should not block the

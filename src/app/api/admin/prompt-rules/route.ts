@@ -17,6 +17,7 @@ import { z } from "zod";
 import { desc, eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -58,14 +59,18 @@ const RULE_COLUMNS = {
 export async function GET() {
   try {
     const { db, userRow } = await requireAdmin();
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
     let data;
     try {
-      data = await db
-        .select(RULE_COLUMNS)
-        .from(t)
-        .where(eq(t.tenant_id, userRow.tenant_id))
-        .orderBy(desc(t.created_at));
+      data = await enTenant(tenantCtx, (db) =>
+        db
+          .select(RULE_COLUMNS)
+          .from(t)
+          .orderBy(desc(t.created_at))
+      );
     } catch (e) {
       const code = (e as { code?: string })?.code;
       // 42P01 = migration not applied yet — return empty list, not a 500.

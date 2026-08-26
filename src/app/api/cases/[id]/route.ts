@@ -13,6 +13,7 @@ import { type NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
 import { CasePatchSchema } from "@/lib/schemas/cases";
@@ -119,6 +120,9 @@ export async function DELETE(
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
   const { userRow } = ctx;
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
   // Viewers are read-only.
   if (userRow.role === "viewer") {
@@ -145,11 +149,13 @@ export async function DELETE(
   let existing: { id: string } | null;
   try {
     existing = firstRow(
-      await db
-        .select({ id: cases.id })
-        .from(cases)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: cases.id })
+          .from(cases)
+          .where(eq(cases.id, caseId))
+          .limit(1)
+      )
     );
   } catch {
     existing = null;
@@ -161,9 +167,11 @@ export async function DELETE(
 
   // ── 5. Hard delete (explicit tenant_id filter ensures isolation) ──────────
   try {
-    await db
-      .delete(cases)
-      .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)));
+    await enTenant(tenantCtx, (db) =>
+      db
+        .delete(cases)
+        .where(eq(cases.id, caseId))
+    );
 
     return ok({ deleted: true });
   } catch (error) {

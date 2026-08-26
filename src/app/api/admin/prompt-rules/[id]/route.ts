@@ -11,6 +11,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -61,6 +62,9 @@ export async function PATCH(
 ) {
   try {
     const { db, user, userRow } = await requireAdmin();
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
     const rl = await rateLimit(
       buildUserKey(user.id, "prompt-rules"),
@@ -85,16 +89,15 @@ export async function PATCH(
     let existing: { id: string; active: boolean } | null;
     try {
       existing = firstRow(
-        await db
-          .select({ id: t.id, active: t.active })
-          .from(t)
-          .where(
-            and(
-              eq(t.id, parsedParams.data.id),
-              eq(t.tenant_id, userRow.tenant_id)
+        await enTenant(tenantCtx, (db) =>
+          db
+            .select({ id: t.id, active: t.active })
+            .from(t)
+            .where(
+              eq(t.id, parsedParams.data.id)
             )
-          )
-          .limit(1)
+            .limit(1)
+        )
       );
     } catch {
       existing = null;
@@ -107,16 +110,15 @@ export async function PATCH(
     let data;
     try {
       data = firstRow(
-        await db
-          .update(t)
-          .set(parsed.data)
-          .where(
-            and(
-              eq(t.id, parsedParams.data.id),
-              eq(t.tenant_id, userRow.tenant_id)
+        await enTenant(tenantCtx, (db) =>
+          db
+            .update(t)
+            .set(parsed.data)
+            .where(
+              eq(t.id, parsedParams.data.id)
             )
-          )
-          .returning(RULE_COLUMNS)
+            .returning(RULE_COLUMNS)
+        )
       );
     } catch (e) {
       console.error(

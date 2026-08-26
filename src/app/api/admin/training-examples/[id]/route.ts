@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -24,6 +25,9 @@ export async function PATCH(
 ) {
   try {
     const { db, user, userRow } = await requireAdmin();
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
     const params = ParamsSchema.safeParse(await context.params);
     if (!params.success) throw new AppError("NOT_FOUND");
     const parsed = PatchSchema.safeParse(await request.json().catch(() => null));
@@ -33,15 +37,17 @@ export async function PATCH(
 
     const t = tables.trainingExamples;
     const example = firstRow(
-      await db
-        .update(t)
-        .set({
-          status: parsed.data.status,
-          approved_by: parsed.data.status === "approved" ? user.id : null,
-          approved_at: parsed.data.status === "approved" ? new Date().toISOString() : null,
-        })
-        .where(and(eq(t.id, params.data.id), eq(t.tenant_id, userRow.tenant_id)))
-        .returning({ id: t.id, case_id: t.case_id, status: t.status })
+      await enTenant(tenantCtx, (db) =>
+        db
+          .update(t)
+          .set({
+            status: parsed.data.status,
+            approved_by: parsed.data.status === "approved" ? user.id : null,
+            approved_at: parsed.data.status === "approved" ? new Date().toISOString() : null,
+          })
+          .where(eq(t.id, params.data.id))
+          .returning({ id: t.id, case_id: t.case_id, status: t.status })
+      )
     );
 
     if (!example) throw new AppError("NOT_FOUND");

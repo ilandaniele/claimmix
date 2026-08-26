@@ -16,6 +16,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
 import { CaseStatusSchema } from "@/lib/schemas/cases";
@@ -56,6 +57,9 @@ export async function POST(
     return err(new AppError("MISSING_SESSION"));
   }
   const { userRow } = ctx;
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
   // Viewers are read-only.
   if (userRow.role === "viewer") {
@@ -82,11 +86,13 @@ export async function POST(
   let caseRow: { id: string; status: string } | null;
   try {
     caseRow = firstRow(
-      await db
-        .select({ id: cases.id, status: cases.status })
-        .from(cases)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: cases.id, status: cases.status })
+          .from(cases)
+          .where(eq(cases.id, caseId))
+          .limit(1)
+      )
     );
   } catch {
     caseRow = null;
@@ -118,11 +124,13 @@ export async function POST(
   // ── Reset case to procesando ──────────────────────────────────────────────────
   try {
     const resetCase = firstRow(
-      await db
-      .update(cases)
-      .set({ status: "procesando", updated_at: new Date().toISOString() })
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
-        .returning({ id: cases.id, status: cases.status })
+      await enTenant(tenantCtx, (db) =>
+        db
+        .update(cases)
+        .set({ status: "procesando", updated_at: new Date().toISOString() })
+          .where(eq(cases.id, caseId))
+          .returning({ id: cases.id, status: cases.status })
+      )
     );
     if (!resetCase || resetCase.status !== "procesando") {
       return err(

@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/require-role";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, extractedFields, missingDocs } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -43,13 +44,18 @@ export async function POST(
     throw e;
   }
   const { userRow } = ctx;
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
   // ── Case detail (explicit tenant filter = IDOR protection) ───────────────────
-  const [caseRow] = await db
-    .select()
-    .from(cases)
-    .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
-    .limit(1);
+  const [caseRow] = await enTenant(tenantCtx, (db) =>
+    db
+      .select()
+      .from(cases)
+      .where(eq(cases.id, caseId))
+      .limit(1)
+  );
 
   if (!caseRow) return err(new AppError("NOT_FOUND"));
 

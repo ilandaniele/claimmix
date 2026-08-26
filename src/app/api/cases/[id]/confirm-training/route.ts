@@ -23,6 +23,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { requireRole, TRAINING_APPROVER_ROLES } from "@/lib/auth/require-role";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
@@ -48,6 +49,9 @@ export async function POST(
   try {
     // ── 1. Auth + role (only admin/specialist/owner can confirm training) ───
     const { user, userRow } = await requireRole(...TRAINING_APPROVER_ROLES);
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    // Este contexto es lo único que le dice de quién son los datos.
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
     // ── 2. Rate limit ────────────────────────────────────────────────────────
     const rl = await rateLimit(
@@ -77,11 +81,13 @@ export async function POST(
 
     // ── 4. IDOR check — case must exist within the user's tenant ─────────────
     const caseRow = firstRow(
-      await db
-        .select({ id: cases.id })
-        .from(cases)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: cases.id })
+          .from(cases)
+          .where(eq(cases.id, caseId))
+          .limit(1)
+      )
     );
     if (!caseRow) {
       return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));

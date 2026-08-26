@@ -19,6 +19,7 @@ import { type NextRequest } from "next/server";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {
   cases,
@@ -72,6 +73,11 @@ export async function PATCH(
   }
   const { userRow } = ctx;
 
+  // El contexto de inquilino, apenas se sabe de quién es la sesión. Se arma acá
+  // y no en cada consulta: las de abajo ya no llevan filtro por inquilino, así
+  // que este objeto es lo único que le dice a la base de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
+
   // Viewers are read-only: they can inspect claims but never mutate them.
   if (userRow.role === "viewer") {
     return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
@@ -119,15 +125,17 @@ export async function PATCH(
   let caseRow: { id: string; status: string; tenant_id: string } | null;
   try {
     caseRow = firstRow(
-      await db
-        .select({
-          id: cases.id,
-          status: cases.status,
-          tenant_id: cases.tenant_id,
-        })
-        .from(cases)
-        .where(and(eq(cases.id, caseId), eq(cases.tenant_id, userRow.tenant_id)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            id: cases.id,
+            status: cases.status,
+            tenant_id: cases.tenant_id,
+          })
+          .from(cases)
+          .where(eq(cases.id, caseId))
+          .limit(1)
+      )
     );
   } catch {
     caseRow = null;
@@ -152,23 +160,24 @@ export async function PATCH(
   } | null;
   try {
     confirmationRow = firstRow(
-      await db
-        .select({
-          id: claimFieldConfirmations.id,
-          proposed_value: claimFieldConfirmations.suggested_value,
-          conflict_with_value: claimFieldConfirmations.conflict_with_value,
-          status: claimFieldConfirmations.status,
-        })
-        .from(claimFieldConfirmations)
-        .where(
-          and(
-            eq(claimFieldConfirmations.case_id, caseId),
-            eq(claimFieldConfirmations.tenant_id, tenantId),
-            eq(claimFieldConfirmations.field_name, fieldKey),
-            eq(claimFieldConfirmations.status, "pending")
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            id: claimFieldConfirmations.id,
+            proposed_value: claimFieldConfirmations.suggested_value,
+            conflict_with_value: claimFieldConfirmations.conflict_with_value,
+            status: claimFieldConfirmations.status,
+          })
+          .from(claimFieldConfirmations)
+          .where(
+            and(
+              eq(claimFieldConfirmations.case_id, caseId),
+              eq(claimFieldConfirmations.field_name, fieldKey),
+              eq(claimFieldConfirmations.status, "pending")
+            )
           )
-        )
-        .limit(1)
+          .limit(1)
+      )
     );
   } catch (e) {
     console.error("[confirm-field] claim_field_confirmations fetch error:", dbErrCode(e));
@@ -187,19 +196,18 @@ export async function PATCH(
     // ── 7a. Update claim_field_confirmations status ────────────────────────
     if (confirmationRow) {
       try {
-        await db
-          .update(claimFieldConfirmations)
-          .set({
-            status: action === "confirm" ? "confirmed" : "corrected",
-            confirmed_by: userRow.id,
-            confirmed_at: now,
-          })
-          .where(
-            and(
-              eq(claimFieldConfirmations.id, confirmationRow.id),
-              eq(claimFieldConfirmations.tenant_id, tenantId)
+        await enTenant(tenantCtx, (db) =>
+          db
+            .update(claimFieldConfirmations)
+            .set({
+              status: action === "confirm" ? "confirmed" : "corrected",
+              confirmed_by: userRow.id,
+              confirmed_at: now,
+            })
+            .where(
+              eq(claimFieldConfirmations.id, confirmationRow.id)
             )
-          );
+        );
       } catch (e) {
         console.error("[confirm-field] confirmation update error:", dbErrCode(e));
       }
@@ -230,17 +238,18 @@ export async function PATCH(
 
       // ── 7c. Satisfy missing_docs if this field was missing ────────────────
       try {
-        await db
-          .update(missingDocs)
-          .set({ satisfied_at: now })
-          .where(
-            and(
-              eq(missingDocs.case_id, caseId),
-              eq(missingDocs.tenant_id, tenantId),
-              eq(missingDocs.doc_key, fieldKey),
-              isNull(missingDocs.satisfied_at)
+        await enTenant(tenantCtx, (db) =>
+          db
+            .update(missingDocs)
+            .set({ satisfied_at: now })
+            .where(
+              and(
+                eq(missingDocs.case_id, caseId),
+                eq(missingDocs.doc_key, fieldKey),
+                isNull(missingDocs.satisfied_at)
+              )
             )
-          );
+        );
       } catch (e) {
         console.error("[confirm-field] missing_docs update error:", dbErrCode(e));
       }
@@ -304,19 +313,18 @@ export async function PATCH(
     // ── 7g. Reject: mark confirmation as rejected ─────────────────────────
     if (confirmationRow) {
       try {
-        await db
-          .update(claimFieldConfirmations)
-          .set({
-            status: "rejected",
-            confirmed_by: userRow.id,
-            confirmed_at: now,
-          })
-          .where(
-            and(
-              eq(claimFieldConfirmations.id, confirmationRow.id),
-              eq(claimFieldConfirmations.tenant_id, tenantId)
+        await enTenant(tenantCtx, (db) =>
+          db
+            .update(claimFieldConfirmations)
+            .set({
+              status: "rejected",
+              confirmed_by: userRow.id,
+              confirmed_at: now,
+            })
+            .where(
+              eq(claimFieldConfirmations.id, confirmationRow.id)
             )
-          );
+        );
       } catch (e) {
         console.error("[confirm-field] reject update error:", dbErrCode(e));
       }
@@ -361,16 +369,19 @@ async function getSenderEmail(
   caseId: string,
   tenantId: string
 ): Promise<string | null> {
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const row = firstRow(
-      await db
-        .select({ from_addr: rawMessages.from_addr })
-        .from(rawMessages)
-        .where(
-          and(eq(rawMessages.case_id, caseId), eq(rawMessages.tenant_id, tenantId))
-        )
-        .orderBy(asc(rawMessages.received_at))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ from_addr: rawMessages.from_addr })
+          .from(rawMessages)
+          .where(
+            eq(rawMessages.case_id, caseId)
+          )
+          .orderBy(asc(rawMessages.received_at))
+          .limit(1)
+      )
     );
 
     return row?.from_addr ?? null;
@@ -395,21 +406,21 @@ async function reEvaluateStatus(
   tenantId: string,
   actorId: string
 ): Promise<string> {
+  const tenantCtx: TenantContext = { tenantId };
   try {
     // Fetch current extracted fields for gap analysis.
-    const fields = await db
-      .select({
-        field_key: extractedFields.field_key,
-        field_value: extractedFields.field_value,
-        confidence: extractedFields.confidence,
-      })
-      .from(extractedFields)
-      .where(
-        and(
-          eq(extractedFields.case_id, caseId),
-          eq(extractedFields.tenant_id, tenantId)
+    const fields = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          field_key: extractedFields.field_key,
+          field_value: extractedFields.field_value,
+          confidence: extractedFields.confidence,
+        })
+        .from(extractedFields)
+        .where(
+          eq(extractedFields.case_id, caseId)
         )
-      );
+    );
 
     // numeric → string under Drizzle; convert. The Neon schema has no `source`
     // column — default to "ai" (matches the previous `?? "ai"` fallback).
@@ -427,13 +438,15 @@ async function reEvaluateStatus(
     // Only transition if FSM allows it.
     if (newStatus !== currentStatus && isValidTransition(currentStatus, newStatus)) {
       try {
-        await db
-          .update(cases)
-          .set({
-            status: newStatus,
-            updated_at: new Date().toISOString(),
-          })
-          .where(and(eq(cases.id, caseId), eq(cases.tenant_id, tenantId)));
+        await enTenant(tenantCtx, (db) =>
+          db
+            .update(cases)
+            .set({
+              status: newStatus,
+              updated_at: new Date().toISOString(),
+            })
+            .where(eq(cases.id, caseId))
+        );
       } catch (e) {
         console.error("[confirm-field] status update error:", dbErrCode(e));
         return currentStatus;

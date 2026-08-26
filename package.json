@@ -37,7 +37,10 @@
     "esquemas": "tsx --tsconfig tsconfig.rehearsal.json scripts/compare-schemas.mts",
     "rol-app": "tsx --tsconfig tsconfig.rehearsal.json scripts/create-app-role.mts",
     "capa-datos": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-data-layer.mts",
-    "filtros": "node scripts/count-tenant-filters.mjs"
+    "filtros": "node scripts/count-tenant-filters.mjs",
+    "filtros:analizar": "node scripts/analyze-tenant-filters.mjs",
+    "filtros:migrar": "node scripts/migrate-tenant-filters.mjs",
+    "puente": "node scripts/add-scope-bridge.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

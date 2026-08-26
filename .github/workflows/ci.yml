@@ -210,16 +210,42 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Mismo criterio que los e2e: en `main` no se saltea en silencio.
+      # Estos 204 tests NUNCA corrieron en CI, y no es por falta de un secreto.
+      #
+      # Hacen `fetch` contra un servidor HTTP y se autentican como un analista
+      # de verdad. Para correr necesitan tres cosas: un servidor levantado, una
+      # base con datos, y un usuario con contraseña. La tercera es la que no se
+      # puede resolver acá: el alta exige que la dirección esté verificada
+      # (`if (!emailVerified) return false` en provision.ts), y un alta por
+      # contraseña nunca lo está. Es una defensa deliberada —evita que alguien
+      # se dé de alta como una dirección de la lista blanca que todavía no se
+      # registró— y no se va a debilitar para que corra la CI.
+      #
+      # La primera versión de este paso fallaba duro en `main` por el secreto
+      # faltante. Estaba mal: una compuerta que nadie puede satisfacer se
+      # termina desactivando, y entonces no queda ni el aviso. Ahora falla sólo
+      # si alguien la prendió y los tests se caen — y si no, deja constancia en
+      # el resumen del run de que 204 tests no corrieron y por qué.
       - name: Run integration tests
         run: |
           if [ "${{ secrets.INTEGRATION_ENABLED }}" = "true" ]; then
             pnpm test:integration
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "::error title=Integración sin correr::Falta INTEGRATION_ENABLED=true. En main tienen que correr, o el check verde miente sobre lo que se probó."
-            exit 1
           else
-            echo "::warning title=Integración sin correr::Falta INTEGRATION_ENABLED — normal en un fork. NO se probaron en este PR."
+            {
+              echo "### 204 tests de integración no corrieron"
+              echo ""
+              echo "Necesitan un servidor HTTP levantado, una base sembrada y un"
+              echo "usuario con contraseña. Lo último no se puede armar acá: el alta"
+              echo "exige dirección verificada, y un alta por contraseña nunca lo"
+              echo "está. Es una defensa a propósito, no un descuido."
+              echo ""
+              echo "Corren en local con \`pnpm check\`, contra el servidor de desarrollo."
+              echo ""
+              echo "Para prenderlos acá haría falta sembrar el usuario directamente en"
+              echo "la base, con un hash compatible con Better Auth, y levantar el"
+              echo "servidor en el job. Está anotado en docs/PROJECT_STATUS.md."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice title=Integración sin correr::204 tests no corrieron — ver el resumen del run. Corren en local con pnpm check."
           fi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
@@ -340,7 +366,26 @@ jobs:
           if [ "${{ secrets.DATABASE_URL }}" != "" ]; then
             pnpm test:e2e --project=chromium
           elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "::error title=E2E sin correr::Falta el secreto DATABASE_URL. En main los e2e tienen que correr: un check verde que no probó nada se lee como cobertura y no existe."
+            {
+              echo "### Los e2e no corrieron"
+              echo ""
+              echo "Falta el secreto \`DATABASE_URL\`. Playwright levanta el servidor"
+              echo "con \`pnpm dev\`, y sin base el servidor no arranca."
+              echo ""
+              echo "**Trece de estos tests no necesitan datos**: cabeceras, nonce de la"
+              echo "CSP por pedido, iframe, límite de tráfico, y que las rutas del motor"
+              echo "de flujos no acepten trabajo de afuera. Sólo necesitan que el"
+              echo "servidor levante."
+              echo ""
+              echo "Se prende apuntando al ENSAYO, nunca a producción:"
+              echo ""
+              echo '```'
+              echo 'gh secret set DATABASE_URL --body "$STAGING_DATABASE_URL"'
+              echo 'gh secret set DATABASE_URL_APP --body "$STAGING_DATABASE_URL"'
+              echo 'gh secret set BETTER_AUTH_SECRET --body "$(openssl rand -hex 32)"'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=E2E sin correr::Falta el secreto DATABASE_URL. 13 tests de seguridad que no necesitan datos quedaron sin correr — el resumen del run tiene el comando exacto."
             exit 1
           else
             echo "::warning title=E2E sin correr::Falta DATABASE_URL — normal en un fork. Los e2e NO se probaron en este PR."

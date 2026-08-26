@@ -234,7 +234,21 @@ async function explainPlans(): Promise<void> {
     },
     {
       name: "búsqueda",
+      // Ésta SÍ recorre la tabla entera hoy, y está bien que lo haga.
+      //
+      // Existen los índices de trigramas (migración 0020), pero con 460 casos
+      // recorrer la tabla es genuinamente más barato que ir al índice y volver,
+      // y el planificador lo sabe. Medido en el ensayo, el cambio ocurre solo:
+      //
+      //        460 casos    Seq Scan       0,2 ms
+      //    200.000 casos    Bitmap Index   5 ms   (sin índice: 97 ms)
+      //
+      // Por eso `mustUseIndex` es false: exigir el índice acá haría fallar el
+      // chequeo por una decisión correcta del planificador. Lo que hay que
+      // vigilar es que el índice EXISTA — si alguien lo borra, a los cien mil
+      // casos la búsqueda se cae sola y nadie va a saber por qué.
       mustUseIndex: false,
+      requiereIndice: ["idx_cases_policyholder_name_trgm", "idx_cases_policy_number_trgm"],
       text:
         `select id from cases where tenant_id = '${TENANT_ID}' ` +
         `and (policyholder_name ilike '%gonzalez%' or policy_number ilike '%gonzalez%') ` +
@@ -251,15 +265,55 @@ async function explainPlans(): Promise<void> {
       const seq = /Seq Scan/i.test(explained);
       const idx = explained.match(/Index (?:Only )?Scan(?: Backward)? using (\w+)/i);
       if (seq && plan.mustUseIndex) readFailed = true;
+      // Un Seq Scan sobre una tabla chica no es un problema si el índice está
+      // ahí para cuando crezca. Decirlo así evita que alguien "arregle" lo que
+      // no está roto — o peor, que se acostumbre a verlo y no note el día que
+      // el índice deje de existir.
+      const cuandoCrezca =
+        seq && plan.requiereIndice ? ` — con el índice listo para cuando crezca` : "";
       console.log(
         `  ${plan.name.padEnd(10)} ${
           seq ? "recorre la tabla entera (Seq Scan)" : idx ? `usa ${idx[1]}` : "plan mixto"
-        }${seq && plan.mustUseIndex ? "   ← regresión" : ""}`
+        }${cuandoCrezca}${seq && plan.mustUseIndex ? "   ← regresión" : ""}`
       );
     } catch (err) {
       console.log(
         `  ${plan.name.padEnd(10)} no se pudo explicar: ${err instanceof Error ? err.name : "error"}`
       );
+    }
+  }
+
+  /*
+   * Que los índices que la búsqueda va a necesitar sigan existiendo.
+   *
+   * El plan de hoy no los usa —con 460 casos el Seq Scan gana— así que su
+   * ausencia no se nota en ninguna medición. Se notaría a los cien mil, de
+   * golpe, y el síntoma sería "el tablero se puso lento" sin nada en el diff
+   * que lo explique: el índice se habría ido meses antes.
+   *
+   * Por eso se comprueba la existencia y no el uso.
+   */
+  const declarados = plans.flatMap((p) => p.requiereIndice ?? []);
+  if (declarados.length > 0) {
+    const r = await db.execute(
+      sql.raw(
+        `select indexname from pg_indexes where tablename = 'cases' and indexname in (${declarados
+          .map((n) => `'${n}'`)
+          .join(", ")})`
+      )
+    );
+    const hay = new Set(
+      ((r as unknown as { rows: { indexname: string }[] }).rows ?? []).map((x) => x.indexname)
+    );
+    const faltan = declarados.filter((n) => !hay.has(n));
+    console.log("");
+    if (faltan.length === 0) {
+      console.log(`  ✓ los ${declarados.length} índices de búsqueda están, listos para cuando crezca`);
+    } else {
+      readFailed = true;
+      console.log(`  ✗ faltan ${faltan.length} índice(s) de búsqueda: ${faltan.join(", ")}`);
+      console.log(`     La búsqueda anda igual hoy y se cae sola a los cien mil casos.`);
+      console.log(`     Se reponen con la migración 0020.`);
     }
   }
 }

@@ -46,7 +46,9 @@
     "permisos": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-grants.mts",
     "flujos": "vitest run --config vitest.workflows.config.ts",
     "listo": "pnpm permisos && pnpm capa-datos && pnpm tenancy && pnpm arquitectura",
-    "cobertura": "vitest run --coverage"
+    "cobertura": "vitest run --coverage",
+    "busqueda": "tsx --tsconfig tsconfig.rehearsal.json scripts/medir-busqueda.mts",
+    "explicar-busqueda": "tsx --tsconfig tsconfig.rehearsal.json scripts/explicar-busqueda.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

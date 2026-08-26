@@ -53,6 +53,8 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
 
   const session = await getSessionContext();
   if (!session?.user) redirect("/login");
+  // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
+  // No puede pasar por una capa que necesita el dato que ella busca.
   const [userRow] = await db
     .select({ tenant_id: users.tenant_id })
     .from(users)

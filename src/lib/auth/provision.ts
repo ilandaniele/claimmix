@@ -117,6 +117,8 @@ export function resolveDefaultTenantId(): string | null {
  * half-granted access, and an admin can still attach the person later.
  */
 export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
+  // sin-inquilino: Pregunta si el perfil ya existe, antes de que haya inquilino alguno.
+  // Es el alta: el contexto todavía no existe.
   const existing = await db
     .select({ id: users.id })
     .from(users)
@@ -161,6 +163,7 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
     // Keep the Better Auth role in sync so the admin plugin agrees with
     // requireAdmin. Best-effort: profile row above is the source of truth.
     try {
+      // sin-inquilino: `auth_users` es la tabla de Better Auth, sin columna de inquilino.
       await db.update(authUsers).set({ role: "admin" }).where(eq(authUsers.id, user.id));
     } catch {
       // non-fatal — admin plugin role can be aligned manually

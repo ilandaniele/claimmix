@@ -41,6 +41,8 @@ export async function GET() {
   let dbError: string | undefined;
 
   try {
+    // sin-inquilino: Sonda de infraestructura: cuenta que la tabla `tenants` responda.
+    // No lee datos de nadie, y `tenants` no es de un inquilino sino de todos.
     await db.select({ id: tables.tenants.id }).from(tables.tenants).limit(1);
   } catch (e) {
     // Known code: schema not yet applied (pre-migration) — still "connected".

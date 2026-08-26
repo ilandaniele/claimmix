@@ -52,18 +52,51 @@ const archivos = execSync(
   .filter(Boolean)
   .filter((f) => !f.startsWith("src/data/"));
 
+/**
+ * Los tramos de comentario de un archivo, como pares [inicio, fin).
+ *
+ * Recorre carácter por carácter en vez de usar una expresión regular, porque
+ * hay que saltear también las cadenas: una regex encuentra un "comentario"
+ * adentro de `"https://ejemplo"` y a partir de ahí desalinea todo el archivo.
+ */
+function comentarios(s) {
+  const tramos = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '"' || c === "'" || c === "`") {
+      for (i++; i < s.length && s[i] !== c; i++) if (s[i] === "\\") i++;
+    } else if (c === "/" && s[i + 1] === "/") {
+      const ini = i;
+      while (i < s.length && s[i] !== SALTO) i++;
+      tramos.push([ini, i]);
+    } else if (c === "/" && s[i + 1] === "*") {
+      const ini = i;
+      i = s.indexOf("*/", i + 2);
+      if (i === -1) i = s.length;
+      tramos.push([ini, i + 2]);
+      i += 1;
+    }
+  }
+  return tramos;
+}
+
 const crudas = [];
 let declaradas = 0;
 for (const f of archivos) {
   const s = readFileSync(f, "utf8");
   const tramos = tramosDeLaCapa(s);
+  // Un `db.$count` nombrado en un comentario no es una consulta. Sin esto la
+  // regla reportaba trabajo inexistente, que es la manera más rápida de que
+  // alguien deje de mirarla.
+  const dichos = comentarios(s);
   // El \s* del medio no es adorno: las consultas largas se escriben con
   // `await db` y el `.select(` en la línea siguiente, y sin eso la regla
   // dejaba pasar justo las más grandes.
   const re = /(?:^|[^.\w])(db)\s*\.\s*(select|insert|update|delete|\$count|execute)\b/g;
   let m;
   while ((m = re.exec(s))) {
-    const pos = m.index;
+    const pos = s.indexOf("db", m.index);
+    if (dichos.some(([a, b]) => pos > a && pos < b)) continue;
     if (tramos.some(([a, b]) => pos > a && pos < b)) continue;
     // Qué tabla toca, para poder separar las de inquilino de las globales.
     const cerca = s.slice(pos, pos + 400);

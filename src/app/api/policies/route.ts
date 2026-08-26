@@ -51,6 +51,8 @@ export async function GET(request: NextRequest) {
   // Policy data contains sensitive information (policy_number, coverage details).
   // Only privileged roles may enumerate this endpoint. Analysts may not access it.
   const userRow = firstRow(
+    // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
+    // No puede pasar por una capa que necesita el dato que ella busca.
     await db
       .select({ role: users.role, tenant_id: users.tenant_id })
       .from(users)

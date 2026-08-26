@@ -101,6 +101,8 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const session = await getSessionContext();
   if (!session?.user) redirect("/login");
   const userRow = firstRow(
+    // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
+    // No puede pasar por una capa que necesita el dato que ella busca.
     await db
       .select({ tenant_id: users.tenant_id })
       .from(users)

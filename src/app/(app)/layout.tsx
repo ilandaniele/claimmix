@@ -38,6 +38,8 @@ export default async function AppLayout({
   if (user?.id) {
     try {
       userRow = firstRow(
+        // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
+        // No puede pasar por una capa que necesita el dato que ella busca.
         await db
           .select({
             full_name: users.full_name,

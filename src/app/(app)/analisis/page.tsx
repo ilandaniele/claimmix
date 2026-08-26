@@ -49,6 +49,8 @@ async function fetchAnalisis(): Promise<AnalisisData | null> {
     const session = await getSessionContext();
     if (!session?.user) return null;
 
+    // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
+    // No puede pasar por una capa que necesita el dato que ella busca.
     const [userRow] = await db
       .select({ tenant_id: users.tenant_id })
       .from(users)

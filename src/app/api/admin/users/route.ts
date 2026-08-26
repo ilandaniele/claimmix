@@ -95,6 +95,9 @@ export async function POST(request: NextRequest) {
     const newUserId = result.user.id;
 
     // Update the provisioned profile to the admin's tenant and the requested role
+    // sin-inquilino: Ésta es justamente la operación que CRUZA el borde: toma un usuario
+    // recién dado de alta —que todavía no es de ningún inquilino— y lo mete
+    // en el del admin. Adentro de `enTenant` no vería la fila que va a mover.
     await db
       .update(users)
       .set({ tenant_id: adminRow.tenant_id, full_name, role })

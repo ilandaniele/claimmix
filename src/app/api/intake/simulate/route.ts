@@ -65,6 +65,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   const userRow = firstRow(
+    // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
+    // No puede pasar por una capa que necesita el dato que ella busca.
     await db.select().from(users).where(eq(users.id, user.id)).limit(1)
   );
   if (!userRow) {

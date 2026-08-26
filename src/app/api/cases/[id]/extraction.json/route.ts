@@ -108,8 +108,7 @@ export async function GET(
         .where(
           eq(extractedFields.case_id, caseId)
         )
-        .catch(() => [])
-    );
+    ).catch(() => []);
 
     const output = run.output_payload ?? ({} as Record<string, unknown>);
 

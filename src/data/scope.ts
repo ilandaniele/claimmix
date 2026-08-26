@@ -105,6 +105,37 @@ function ponerContexto(db: ClienteDatos, tenantId: string) {
 }
 
 /**
+ * Que lo que llega sea una consulta y no una promesa.
+ *
+ * `batch` necesita el constructor de consulta de drizzle porque le llama a
+ * `_prepare()` para armar el lote. Un `.catch(() => [])` o un `.then(...)` al
+ * final de la cadena la resuelven antes de tiempo y lo que llega acá es una
+ * promesa común.
+ *
+ * Sin este chequeo, el error es `query._prepare is not a function`, tirado
+ * desde adentro de drizzle, sin mencionar ni el `.catch` ni esta capa. Aparecen
+ * quince líneas de stack de node_modules y ninguna pista de qué escribir
+ * distinto.
+ *
+ * Y no lo atrapa ningún test, porque el puente que usan los tests corre
+ * `Promise.resolve(armar(db))`, que con una promesa anda igual. Es más
+ * permisivo que la implementación de verdad, así que esconde exactamente esto.
+ *
+ * Los constructores de drizzle son "thenable" pero NO son `Promise`, así que
+ * `instanceof` los distingue sin falsos positivos.
+ */
+function exigirConsulta(valor: unknown): void {
+  if (valor instanceof Promise) {
+    throw new Error(
+      "[data] a enTenant le llegó una promesa, no una consulta. Suele ser un " +
+        "`.catch(...)` o un `.then(...)` al final de la cadena: eso la resuelve " +
+        "antes de que la capa pueda ponerle el contexto. Va afuera:\n" +
+        "  enTenant(ctx, (db) => db.select()...).catch(() => [])"
+    );
+  }
+}
+
+/**
  * Correr una consulta dentro del contexto del inquilino.
  *
  * Se le pasa una función que arma la consulta con drizzle, igual que se
@@ -126,6 +157,7 @@ export async function enTenant<T>(
   // tuplas, y expresar eso acá pelearía con la firma simple que hace que esto
   // valga la pena, así que el cast queda contenido en este único lugar.
   const consulta = armar(db) as unknown;
+  exigirConsulta(consulta);
   const [, resultado] = (await (
     db as unknown as { batch: (q: unknown[]) => Promise<unknown[]> }
   ).batch([ponerContexto(db, ctx.tenantId), consulta])) as [unknown, T];
@@ -155,6 +187,7 @@ export async function enTenantVarias<T extends readonly unknown[]>(
 ): Promise<T> {
   const db = cliente();
   const consultas = armar(db) as readonly unknown[];
+  for (const c of consultas) exigirConsulta(c);
   const res = (await (
     db as unknown as { batch: (q: unknown[]) => Promise<unknown[]> }
   ).batch([ponerContexto(db, ctx.tenantId), ...consultas])) as unknown[];

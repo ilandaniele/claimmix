@@ -85,8 +85,7 @@ export async function getCaseDetail(
           eq(extractedFields.case_id, caseId)
         )
         .orderBy(asc(extractedFields.extracted_at))
-        .catch(() => [] as ExtractedFieldRow[])
-    ),
+    ).catch(() => [] as ExtractedFieldRow[]),
     enTenant(tenantCtx, (db) =>
       db
         .select()
@@ -95,8 +94,7 @@ export async function getCaseDetail(
           eq(missingDocs.case_id, caseId)
         )
         .orderBy(asc(missingDocs.requested_at))
-        .catch(() => [] as MissingDocRow[])
-    ),
+    ).catch(() => [] as MissingDocRow[]),
     enTenant(tenantCtx, (db) =>
       db
         .select()
@@ -109,8 +107,7 @@ export async function getCaseDetail(
         )
         .orderBy(desc(auditLog.created_at))
         .limit(20)
-        .catch(() => [] as AuditLogRow[])
-    ),
+    ).catch(() => [] as AuditLogRow[]),
   ]);
 
   return {

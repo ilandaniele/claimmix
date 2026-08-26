@@ -109,8 +109,7 @@ export async function GET(
             eq(extractedFields.case_id, caseId)
           )
           .orderBy(asc(extractedFields.field_key))
-          .catch(() => [])
-      ),
+      ).catch(() => []),
       enTenant(tenantCtx, (db) =>
         db
           .select({
@@ -124,8 +123,7 @@ export async function GET(
               isNull(missingDocs.satisfied_at)
             )
           )
-          .catch(() => [])
-      ),
+      ).catch(() => []),
       enTenant(tenantCtx, (db) =>
         db
           .select({
@@ -143,8 +141,7 @@ export async function GET(
               eq(claimFieldConfirmations.status, "pending")
             )
           )
-          .catch(() => [])
-      ),
+      ).catch(() => []),
     ]);
 
     // ── 6. Already approved? ─────────────────────────────────────────────────
@@ -159,8 +156,7 @@ export async function GET(
               eq(trainingExamples.agent_run_id, run.id)
             )
             .limit(1)
-            .catch(() => [] as Array<{ id: string }>)
-        )
+        ).catch(() => [] as Array<{ id: string }>)
       );
       alreadyApproved = Boolean(existing);
     }

@@ -117,8 +117,7 @@ export async function getTenantGeminiKey(tenantId: string, userId?: string): Pro
         .select({ enc: tables.tenantAiSettings.gemini_api_key_encrypted })
         .from(tables.tenantAiSettings)
         .limit(1)
-        .then(firstRow)
-    );
+    ).then(firstRow);
     if (row?.enc) return decryptApiKey(row.enc);
   } catch {
     // DB error — fall through to env
@@ -185,8 +184,7 @@ export async function getTenantOpenAIModel(tenantId?: string | null): Promise<st
         })
         .from(tables.tenantAiSettings)
         .limit(1)
-        .then(firstRow)
-    );
+    ).then(firstRow);
 
     if (row?.active_model_provider === "openai" && row.active_model?.trim()) {
       return row.active_model.trim();
@@ -211,8 +209,7 @@ export async function getTenantGeminiModel(tenantId?: string | null): Promise<st
         })
         .from(tables.tenantAiSettings)
         .limit(1)
-        .then(firstRow)
-    );
+    ).then(firstRow);
 
     if (row?.active_model_provider === "gemini" && row.active_model?.trim()) {
       return row.active_model.trim();

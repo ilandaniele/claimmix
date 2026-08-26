@@ -172,6 +172,55 @@ async function attackSurface(): Promise<void> {
     open.length ? `\n      abiertas: ${open.join(", ")}` : ""
   );
 
+  // ── Las rutas que publica el SDK de flujos ─────────────────────────────────
+  //
+  // No están en `src/app/api`, así que el recorrido de arriba no las ve: viven
+  // en `src/app/.well-known/workflow/`, las genera el build, y aparecieron el
+  // día que se migró la carga simulada a ejecución durable. Superficie nueva
+  // que nadie declaró.
+  //
+  // Lo que hay que impedir es que alguien de afuera encole un paso. En Vercel
+  // el SDK las registra como alcanzables sólo por la cola —`experimentalTriggers`
+  // en `.vc-config.json`— pero eso es una promesa de la documentación, y la
+  // diferencia entre una promesa y una defensa es exactamente esta sonda.
+  console.log("\nRutas internas del motor de flujos:\n");
+
+  for (const ruta of [
+    "/.well-known/workflow/v1/flow",
+    "/.well-known/workflow/v1/step",
+  ]) {
+    const r = await head(`${BASE}${ruta}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Un cuerpo con forma de invocación real, no vacío: un 400 ante `{}`
+      // sólo dice que valida el esquema, no que pida credenciales.
+      body: JSON.stringify({
+        workflowId: "workflow//./src/workflows/intake-simulado//procesarCasoSimulado",
+        args: [{ caseId: "x", tenantId: "x", userId: "x", caseCreatedAt: null }],
+      }),
+    });
+    // Un rebote al login también es un "no", igual que en el recorrido de
+    // rutas de arriba. Vale la pena decir de dónde viene cada rechazo:
+    //
+    //   307 → /login   lo frena el proxy. Es lo que pasa HOY, antes de que el
+    //                  deploy incluya el motor de flujos.
+    //   401/403/404    lo frena el propio motor. Es lo que tiene que pasar
+    //                  DESPUÉS, porque el proxy deja de mirar estas rutas: hubo
+    //                  que excluirlas de su matcher o el SDK no puede
+    //                  despacharse los pasos a sí mismo.
+    //
+    // Que el número cambie de 307 a 401 en el próximo deploy es lo esperado.
+    // Que cambie a 200 es que quedó abierta.
+    const donde = r.headers.get("location") ?? "";
+    const rebotado = [301, 302, 307, 308].includes(r.status) && /\/login/.test(donde);
+    probe(
+      `${ruta} no acepta invocaciones de afuera`,
+      [401, 403, 404, 405].includes(r.status) || rebotado,
+      "encolar trabajo en nombre de cualquier aseguradora: correr el agente sobre casos ajenos, gastar el presupuesto de IA, y hacerle escribir a quien el atacante elija",
+      `(${r.status}${rebotado ? " → login, lo frena el proxy" : ""})`
+    );
+  }
+
   // ── Los webhooks, que son públicos pero autenticados ───────────────────────
   console.log("\nWebhooks (públicos por fuerza, autenticados por firma):\n");
 

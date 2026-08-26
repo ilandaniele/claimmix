@@ -212,3 +212,61 @@ describe("el cliente", () => {
     expect(cadenas).toEqual([APP]);
   });
 });
+
+describe("una promesa no es una consulta", () => {
+  it("rechaza un `.catch()` pegado al final de la cadena", async () => {
+    const { enTenant } = await import("@/data/scope");
+
+    // Este es el error que se coló en quince lugares al migrar, y que no
+    // detectó ningún test: el puente que los tests usan hace
+    // `Promise.resolve(armar(db))`, que con una promesa funciona igual. Es más
+    // permisivo que `batch`, así que escondía exactamente esto.
+    //
+    // En producción salía como `query._prepare is not a function`, tirado desde
+    // adentro de drizzle, con quince líneas de stack de node_modules y ninguna
+    // mención al `.catch` ni a la capa.
+    await expect(
+      enTenant({ tenantId: "x" }, (db) =>
+        // `Promise.resolve(...)` es lo que deja atrás un `.catch()` sobre una
+        // cadena de drizzle: una promesa común, sin `_prepare`.
+        Promise.resolve(db.execute("q")).catch(() => []) as never
+      )
+    ).rejects.toThrow(/una promesa, no una consulta/);
+  });
+
+  it("el mensaje dice dónde va el .catch", async () => {
+    const { enTenant } = await import("@/data/scope");
+    const error = await enTenant({ tenantId: "x" }, (db) =>
+      Promise.resolve(db.execute("q")).then((x) => x) as never
+    ).catch((e: Error) => e);
+
+    // No alcanza con rechazar: el que se lo encuentre tiene que saber qué
+    // escribir distinto sin ir a leer la implementación.
+    expect((error as Error).message).toContain("enTenant(ctx, (db) => db.select()...)");
+  });
+
+  it("enTenantVarias revisa TODAS, no sólo la primera", async () => {
+    const { enTenantVarias } = await import("@/data/scope");
+    respuesta = [{}, [], []];
+
+    // La segunda es la rota. Revisar sólo la primera dejaría pasar el lote y
+    // el error volvería a salir desde adentro de drizzle.
+    await expect(
+      enTenantVarias({ tenantId: "x" }, (db) => [
+        db.execute("buena") as never,
+        Promise.resolve(db.execute("mala")).catch(() => []) as never,
+      ])
+    ).rejects.toThrow(/una promesa, no una consulta/);
+  });
+
+  it("deja pasar una consulta normal", async () => {
+    // El guardia tiene que distinguir, no bloquear todo: los constructores de
+    // drizzle son "thenable" pero no son `Promise`, y ésa es la diferencia.
+    const { enTenant } = await import("@/data/scope");
+    respuesta = [{}, ["fila"]];
+
+    await expect(
+      enTenant({ tenantId: "x" }, (db) => db.execute("q") as never)
+    ).resolves.toEqual(["fila"]);
+  });
+});

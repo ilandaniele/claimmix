@@ -158,8 +158,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
               eq(claimFieldConfirmations.case_id, id)
             )
             .orderBy(asc(claimFieldConfirmations.created_at))
-            .catch(() => [])
-      )
+      ).catch(() => [])
       : Promise.resolve([]),
     isEmailCase
       ? enTenant(tenantCtx, (db) =>
@@ -177,8 +176,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
               eq(claimAttachments.case_id, id)
             )
             .orderBy(asc(claimAttachments.created_at))
-            .catch(() => [])
-      )
+      ).catch(() => [])
       : Promise.resolve([]),
   ]);
 
@@ -791,8 +789,7 @@ async function getLatestEmailText(
       .where(eq(rawMessages.case_id, caseId))
       .orderBy(desc(rawMessages.received_at))
       .limit(1)
-      .then((rows) => rows[0] ?? null)
-  );
+  ).then((rows) => rows[0] ?? null);
 
   if (rawMsg) {
     return {
@@ -809,8 +806,7 @@ async function getLatestEmailText(
       .where(and(eq(claimMessages.case_id, caseId), eq(claimMessages.direction, "inbound")))
       .orderBy(desc(claimMessages.received_at))
       .limit(1)
-      .then((rows) => rows[0] ?? null)
-  );
+  ).then((rows) => rows[0] ?? null);
 
   return {
     subject: claimMsg?.subject ?? "",

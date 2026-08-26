@@ -126,8 +126,31 @@ jobs:
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
 
+      # Una diferencia se confirma con una segunda corrida.
+      #
+      # Del otro lado hay un modelo, no una función: la misma conversación puede
+      # terminar distinto. Medido sobre `goteo`, que difirió una vez acá: tres
+      # corridas seguidas después, cero diferencias. El escenario estaba bien y
+      # el modelo, esa vez, eligió callarse.
+      #
+      # Reintentar no afloja la exigencia —la afirmación es la misma— sino que
+      # separa dos cosas que en un reporte se ven iguales: una regresión, que
+      # falla siempre, y una variación, que casi nunca falla dos veces.
+      #
+      # Va acá y no adentro del script porque cada corrida necesita identidades
+      # nuevas, y el ensayo las deriva de una constante por proceso. Intentarlo
+      # adentro hacía que el reintento cayera en el mismo hilo: las respuestas
+      # del primer intento se contaban en el turno 1 del segundo. Un proceso
+      # nuevo lo resuelve sin tocar nada.
+      #
+      # Cuesta una corrida más, y sólo cuando algo difirió.
       - name: Ensayar las doce conversaciones
-        run: pnpm rehearse
+        run: |
+          if pnpm rehearse; then
+            exit 0
+          fi
+          echo "::notice title=Se repite el ensayo::Difirió algo. Segunda corrida para separar variación de regresión."
+          pnpm rehearse
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # La capa de datos entra por acá. Sin esto, toda consulta que pase por

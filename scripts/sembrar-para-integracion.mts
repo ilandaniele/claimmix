@@ -32,6 +32,31 @@ if (!destino) {
   console.error("Falta SEED_DATABASE_URL (o STAGING_DATABASE_URL).");
   process.exit(2);
 }
+/*
+ * Que la cadena sea una cadena, antes de dársela al driver.
+ *
+ * Un valor con comillas alrededor —`"postgresql://…"`— pasa desapercibido en
+ * local, porque dotenv se las saca al leer el archivo. Guardado como secreto en
+ * CI, en cambio, las comillas van adentro del valor, y el driver responde
+ * `TypeError: Invalid URL` con una pila de quince líneas de node_modules y el
+ * valor enmascarado como `***`. O sea: el mensaje no dice ni qué variable era
+ * ni qué tenía de malo.
+ *
+ * Pasó exactamente eso al configurar los secretos del ensayo.
+ */
+try {
+  new URL(destino.replace(/^postgres(ql)?:/, "https:"));
+} catch {
+  const comillas = /^["']|["']$/.test(destino);
+  console.error("✗ La cadena de conexión no es una URL válida.");
+  if (comillas) {
+    console.error("  Tiene comillas alrededor. En `.env.local` dotenv se las saca sola,");
+    console.error("  pero guardada como secreto viajan adentro del valor.");
+  }
+  console.error(`  Empieza con: ${destino.slice(0, 16)}…`);
+  process.exit(2);
+}
+
 if (produccion && destino === produccion) {
   console.error("✗ Esa es la cadena de PRODUCCIÓN.");
   console.error("  Este script crea un usuario con contraseña conocida. En la base donde");

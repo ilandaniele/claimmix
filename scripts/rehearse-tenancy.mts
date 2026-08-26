@@ -220,6 +220,22 @@ try {
     paso("Creando el rol de aplicación (sin BYPASSRLS)");
     const passRol = randomBytes(24).toString("base64url");
 
+    // El ensayo usa un rol PROPIO, y no el de producción, por algo concreto:
+    // en Neon los roles viven en el proyecto, no en la rama. Un
+    // `ALTER ROLE claimmix_app WITH PASSWORD` corrido acá adentro —en una rama
+    // temporal que se borra en cinco minutos— le llega igual al rol de la rama
+    // de producción, y le deja una contraseña aleatoria que este script
+    // descarta al terminar.
+    //
+    // Se descubrió así: `pnpm permisos` andaba, se corrió el ensayo, y a la
+    // vuelta el rol de producción no autenticaba. La API de Neon lo confirma:
+    // el rol de la rama por omisión queda con `updated_at` a la hora en que
+    // corrió el ensayo.
+    //
+    // Mientras la aplicación desplegada usaba el rol viejo esto no se notaba.
+    // Con la capa de datos en producción, cada ensayo sería una caída.
+    const ROL_ENSAYO = "claimmix_app_ensayo";
+
     // El rol se reutiliza en vez de recrearse.
     //
     // Borrarlo exige soltar antes todo lo que se le concedió (DROP OWNED BY), y
@@ -238,29 +254,29 @@ try {
     // NOBYPASSRLS, en cambio, sí se puede y es el que importa: es el atributo
     // que decide si las políticas se obedecen o se ignoran.
     const yaExiste =
-      ((await cx.query(`SELECT 1 FROM pg_roles WHERE rolname = 'claimmix_app'`)).rowCount ?? 0) > 0;
+      ((await cx.query(`SELECT 1 FROM pg_roles WHERE rolname = '${ROL_ENSAYO}'`)).rowCount ?? 0) > 0;
     await cx.query(
       yaExiste
-        ? `ALTER ROLE claimmix_app WITH LOGIN PASSWORD '${passRol}' NOBYPASSRLS`
-        : `CREATE ROLE claimmix_app WITH LOGIN PASSWORD '${passRol}'
+        ? `ALTER ROLE ${ROL_ENSAYO} WITH LOGIN PASSWORD '${passRol}' NOBYPASSRLS`
+        : `CREATE ROLE ${ROL_ENSAYO} WITH LOGIN PASSWORD '${passRol}'
              NOCREATEDB NOCREATEROLE NOBYPASSRLS`
     );
-    await cx.query(`GRANT USAGE ON SCHEMA public TO claimmix_app`);
+    await cx.query(`GRANT USAGE ON SCHEMA public TO ${ROL_ENSAYO}`);
     await cx.query(
-      `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO claimmix_app`
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${ROL_ENSAYO}`
     );
-    await cx.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO claimmix_app`);
-    await cx.query(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO claimmix_app`);
+    await cx.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${ROL_ENSAYO}`);
+    await cx.query(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${ROL_ENSAYO}`);
     // Para que una tabla futura no nazca sin permisos y rompa en producción.
     await cx.query(
       `ALTER DEFAULT PRIVILEGES IN SCHEMA public
-         GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO claimmix_app`
+         GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${ROL_ENSAYO}`
     );
     await cx.query(
       `ALTER DEFAULT PRIVILEGES IN SCHEMA public
-         GRANT USAGE, SELECT ON SEQUENCES TO claimmix_app`
+         GRANT USAGE, SELECT ON SEQUENCES TO ${ROL_ENSAYO}`
     );
-    ok("claimmix_app creado, con permisos sobre el esquema public");
+    ok(`${ROL_ENSAYO} creado, con permisos sobre el esquema public`);
 
     // ── Dos inquilinos con casos, o la prueba no prueba nada ────────────────
     //
@@ -301,7 +317,7 @@ try {
 
     // ── La prueba, contra el rol nuevo ──────────────────────────────────────
     const urlRol = new URL(urlRama.replace(/^postgres(ql)?:\/\//, "https://"));
-    urlRol.username = "claimmix_app";
+    urlRol.username = ROL_ENSAYO;
     urlRol.password = passRol;
     const urlRolFinal = urlRol.toString().replace(/^https:\/\//, "postgresql://");
 

@@ -42,7 +42,8 @@
     "filtros:migrar": "node scripts/migrate-tenant-filters.mjs",
     "puente": "node scripts/add-scope-bridge.mjs",
     "ctx": "node scripts/declare-tenant-ctx.mjs",
-    "arquitectura": "node scripts/check-architecture.mjs"
+    "arquitectura": "node scripts/check-architecture.mjs",
+    "permisos": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-grants.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

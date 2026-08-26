@@ -94,14 +94,56 @@ export async function POST(request: NextRequest) {
 
     const newUserId = result.user.id;
 
-    // Update the provisioned profile to the admin's tenant and the requested role
-    // sin-inquilino: Ésta es justamente la operación que CRUZA el borde: toma un usuario
-    // recién dado de alta —que todavía no es de ningún inquilino— y lo mete
-    // en el del admin. Adentro de `enTenant` no vería la fila que va a mover.
-    await db
-      .update(users)
-      .set({ tenant_id: adminRow.tenant_id, full_name, role })
-      .where(and(eq(users.id, newUserId)));
+    /*
+     * El perfil se INSERTA, no se actualiza.
+     *
+     * Antes esto era un UPDATE, y tocaba **cero filas**. El hook que crea el
+     * perfil al dar de alta se saltea a quien no está en la lista blanca —y un
+     * usuario recién creado por un admin nunca lo está—, así que no había fila
+     * que actualizar. El resultado: el admin veía "usuario creado", la persona
+     * podía entrar, y no llegaba a ningún dato. Sin un error en el medio, ni en
+     * la pantalla ni en los registros.
+     *
+     * El admin ES la autoridad que aprueba a esta persona: eso es lo que
+     * significa crearla desde acá. Por eso el perfil se crea en este punto, que
+     * es exactamente el "un admin puede atacharla después" que describe
+     * provision.ts.
+     *
+     * `onConflictDoUpdate` por si el hook SÍ corrió —si la dirección estaba en
+     * la lista blanca— para que el rol y el inquilino que eligió el admin
+     * ganen sobre los que puso el alta automática.
+     *
+     * sin-inquilino: es la operación que CRUZA el borde a propósito. Toma a
+     * alguien que todavía no es de ningún inquilino y lo mete en el del admin;
+     * adentro de `enTenant` no vería la fila que va a crear.
+     */
+    const perfil = await db
+      .insert(users)
+      .values({
+        id: newUserId,
+        tenant_id: adminRow.tenant_id,
+        full_name,
+        role,
+      })
+      .onConflictDoUpdate({
+        target: users.id,
+        set: { tenant_id: adminRow.tenant_id, full_name, role },
+      })
+      .returning({ id: users.id });
+
+    // Que no vuelva a fallar en silencio. Si el perfil no quedó, la cuenta de
+    // Better Auth existe y no sirve para nada: es peor que no haberla creado,
+    // porque el admin cree que la persona ya tiene acceso.
+    if (perfil.length === 0) {
+      console.error("[admin/users POST] la cuenta se creó y el perfil no");
+      return err(
+        new AppError(
+          "INTERNAL_ERROR",
+          "La cuenta se creó pero no se le pudo asignar la aseguradora. " +
+            "Avisá antes de que la persona intente entrar."
+        )
+      );
+    }
 
     return ok(
       {

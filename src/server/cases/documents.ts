@@ -22,6 +22,7 @@ import "server-only";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments, missingDocs, requiredDocsConfig } from "@/lib/db/schema";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
@@ -42,6 +43,8 @@ export async function seedRequiredDocs(
   tenantId: string,
   claimType: string | null | undefined
 ): Promise<void> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   if (!claimType) return;
 
   try {
@@ -52,10 +55,12 @@ export async function seedRequiredDocs(
 
     if (configured.length === 0) return;
 
-    const existing = await db
-      .select({ doc_key: missingDocs.doc_key })
-      .from(missingDocs)
-      .where(and(eq(missingDocs.case_id, caseId), eq(missingDocs.tenant_id, tenantId)));
+    const existing = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ doc_key: missingDocs.doc_key })
+        .from(missingDocs)
+        .where(eq(missingDocs.case_id, caseId))
+    );
 
     const known = new Set(existing.map((r) => r.doc_key));
     const fresh = configured.map((c) => c.doc_key).filter((k) => !known.has(k));
@@ -79,22 +84,25 @@ export async function pendingDocKeys(
   caseId: string,
   tenantId: string
 ): Promise<string[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
-    const rows = await db
-      .select({ doc_key: missingDocs.doc_key })
-      .from(missingDocs)
-      .where(
-        and(
-          eq(missingDocs.case_id, caseId),
-          eq(missingDocs.tenant_id, tenantId),
-          isNull(missingDocs.satisfied_at),
-          // A document the claimant told us does not exist is not
-          // outstanding. Asking again for the accident report they already
-          // said nobody filled in is the same failure as asking for the photo
-          // we already have, arriving by a different door.
-          isNull(missingDocs.declined_at)
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ doc_key: missingDocs.doc_key })
+        .from(missingDocs)
+        .where(
+          and(
+            eq(missingDocs.case_id, caseId),
+            isNull(missingDocs.satisfied_at),
+            // A document the claimant told us does not exist is not
+            // outstanding. Asking again for the accident report they already
+            // said nobody filled in is the same failure as asking for the photo
+            // we already have, arriving by a different door.
+            isNull(missingDocs.declined_at)
+          )
         )
-      );
+    );
 
     // Only the ones that are genuinely files. missing_docs also holds
     // low-confidence field keys, which the field branches already handle —
@@ -137,6 +145,8 @@ export async function reconcileAttachments(
   tenantId: string,
   claimTypeLabel: string | null
 ): Promise<void> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const pending = await pendingDocKeys(caseId, tenantId);
     if (pending.length === 0) return;
@@ -156,17 +166,18 @@ export async function reconcileAttachments(
 
     if (satisfied.size === 0) return;
 
-    await db
-      .update(missingDocs)
-      .set({ satisfied_at: new Date().toISOString() })
-      .where(
-        and(
-          eq(missingDocs.case_id, caseId),
-          eq(missingDocs.tenant_id, tenantId),
-          isNull(missingDocs.satisfied_at),
-          inArray(missingDocs.doc_key, [...satisfied])
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(missingDocs)
+        .set({ satisfied_at: new Date().toISOString() })
+        .where(
+          and(
+            eq(missingDocs.case_id, caseId),
+            isNull(missingDocs.satisfied_at),
+            inArray(missingDocs.doc_key, [...satisfied])
+          )
         )
-      );
+    );
 
     await writeAuditLog({
       tenant_id: tenantId,
@@ -196,17 +207,21 @@ async function unmatchedAttachments(
   caseId: string,
   tenantId: string
 ): Promise<AttachmentRow[]> {
-  const rows = await db
-    .select({
-      id: claimAttachments.id,
-      filename: claimAttachments.file_name,
-      contentType: claimAttachments.content_type,
-      storagePath: claimAttachments.storage_path,
-    })
-    .from(claimAttachments)
-    .where(
-      and(eq(claimAttachments.case_id, caseId), eq(claimAttachments.tenant_id, tenantId))
-    );
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
+  const rows = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        id: claimAttachments.id,
+        filename: claimAttachments.file_name,
+        contentType: claimAttachments.content_type,
+        storagePath: claimAttachments.storage_path,
+      })
+      .from(claimAttachments)
+      .where(
+        eq(claimAttachments.case_id, caseId)
+      )
+  );
 
   return rows.map((r) => ({
     id: r.id,
@@ -355,6 +370,8 @@ export async function resolveDeclinedDocs(
    */
   alreadyAsked: string[]
 ): Promise<void> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const said = (latestMessageText ?? "").trim();
   if (said.length === 0) return;
   if (alreadyAsked.length === 0) return;
@@ -368,18 +385,19 @@ export async function resolveDeclinedDocs(
     const declined = await identifyDeclined(said, pending);
     if (declined.length === 0) return;
 
-    await db
-      .update(missingDocs)
-      .set({ declined_at: new Date().toISOString(), declined_note: said.slice(0, 500) })
-      .where(
-        and(
-          eq(missingDocs.case_id, caseId),
-          eq(missingDocs.tenant_id, tenantId),
-          isNull(missingDocs.satisfied_at),
-          isNull(missingDocs.declined_at),
-          inArray(missingDocs.doc_key, declined)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(missingDocs)
+        .set({ declined_at: new Date().toISOString(), declined_note: said.slice(0, 500) })
+        .where(
+          and(
+            eq(missingDocs.case_id, caseId),
+            isNull(missingDocs.satisfied_at),
+            isNull(missingDocs.declined_at),
+            inArray(missingDocs.doc_key, declined)
+          )
         )
-      );
+    );
 
     await writeAuditLog({
       tenant_id: tenantId,
@@ -530,22 +548,25 @@ export async function satisfyContactDocsWeAlreadyHave(
   tenantId: string,
   fields: Array<{ field_key: string; field_value?: string | null }>
 ): Promise<void> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const closable = contactDocsToClose(fields);
   if (closable.length === 0) return;
 
   try {
-    await db
-      .update(missingDocs)
-      .set({ satisfied_at: new Date().toISOString() })
-      .where(
-        and(
-          eq(missingDocs.case_id, caseId),
-          eq(missingDocs.tenant_id, tenantId),
-          isNull(missingDocs.satisfied_at),
-          isNull(missingDocs.declined_at),
-          inArray(missingDocs.doc_key, closable)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(missingDocs)
+        .set({ satisfied_at: new Date().toISOString() })
+        .where(
+          and(
+            eq(missingDocs.case_id, caseId),
+            isNull(missingDocs.satisfied_at),
+            isNull(missingDocs.declined_at),
+            inArray(missingDocs.doc_key, closable)
+          )
         )
-      );
+    );
   } catch (err) {
     // Que no se cierre no rompe nada: se vuelve a preguntar, que es la falla
     // barata. Lo caro es lo contrario.

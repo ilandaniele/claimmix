@@ -20,6 +20,7 @@
 import "server-only";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { countRows, firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { UNSAFE_BLOCKING_REASONS } from "./trainability";
@@ -50,6 +51,8 @@ export async function loadApprovedExamples(
   tenantId: string,
   claimType?: string | null
 ): Promise<ApprovedExample[]> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const t = tables.trainingExamples;
     const collected: Array<{
@@ -59,36 +62,39 @@ export async function loadApprovedExamples(
     }> = [];
 
     if (claimType) {
-      const data = (await db
-        .select({
-          id: t.id,
-          input_payload: t.input_payload,
-          expected_output: t.expected_output,
-        })
-        .from(t)
-        .where(
-          and(
-            eq(t.tenant_id, tenantId),
-            eq(t.status, "approved"),
-            eq(t.claim_type, claimType)
+      const data = (await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            id: t.id,
+            input_payload: t.input_payload,
+            expected_output: t.expected_output,
+          })
+          .from(t)
+          .where(
+            and(
+              eq(t.status, "approved"),
+              eq(t.claim_type, claimType)
+            )
           )
-        )
-        .orderBy(desc(t.approved_at))
-        .limit(MAX_EXAMPLES)) as typeof collected;
+          .orderBy(desc(t.approved_at))
+          .limit(MAX_EXAMPLES)) as typeof collected
+      );
       collected.push(...data);
     }
 
     if (collected.length < MAX_EXAMPLES) {
-      const data = (await db
-        .select({
-          id: t.id,
-          input_payload: t.input_payload,
-          expected_output: t.expected_output,
-        })
-        .from(t)
-        .where(and(eq(t.tenant_id, tenantId), eq(t.status, "approved")))
-        .orderBy(desc(t.approved_at))
-        .limit(MAX_EXAMPLES * 2)) as typeof collected;
+      const data = (await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            id: t.id,
+            input_payload: t.input_payload,
+            expected_output: t.expected_output,
+          })
+          .from(t)
+          .where(eq(t.status, "approved"))
+          .orderBy(desc(t.approved_at))
+          .limit(MAX_EXAMPLES * 2)) as typeof collected
+      );
       for (const row of data) {
         if (collected.length >= MAX_EXAMPLES) break;
         if (!collected.some((c) => c.id === row.id)) collected.push(row);
@@ -151,6 +157,9 @@ export async function approveTrainingExample(
   params: ApproveTrainingExampleParams
 ): Promise<ApproveResult> {
   const { tenantId, agentRunId, approvedBy } = params;
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  // Este contexto es lo único que le dice de quién son los datos.
+  const tenantCtx: TenantContext = { tenantId: tenantId };
 
   // ── 1. Load the agent run ───────────────────────────────────────────────────
   let run: {
@@ -164,18 +173,20 @@ export async function approveTrainingExample(
   try {
     const t = tables.agentRuns;
     run = firstRow(
-      await db
-        .select({
-          id: t.id,
-          case_id: t.case_id,
-          claim_message_id: t.claim_message_id,
-          input_payload: t.input_payload,
-          output_payload: t.output_payload,
-          blocking_reasons: t.blocking_reasons,
-        })
-        .from(t)
-        .where(and(eq(t.id, agentRunId), eq(t.tenant_id, tenantId)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            id: t.id,
+            case_id: t.case_id,
+            claim_message_id: t.claim_message_id,
+            input_payload: t.input_payload,
+            output_payload: t.output_payload,
+            blocking_reasons: t.blocking_reasons,
+          })
+          .from(t)
+          .where(eq(t.id, agentRunId))
+          .limit(1)
+      )
     );
   } catch {
     run = null;
@@ -208,23 +219,35 @@ export async function approveTrainingExample(
   let claimType: string | null = null;
 
   if (run.case_id) {
+    // Se captura antes de las consultas a propósito.
+    //
+    // El `if` de arriba angosta `run.case_id` a string, pero ese angostamiento
+    // se pierde dentro de la función flecha que recibe la capa de datos: el
+    // compilador no puede probar que la propiedad no cambió en el medio. Con
+    // el filtro escrito a mano esto no pasaba porque la expresión estaba en la
+    // consulta, no en un callback.
+    const caseId = run.case_id;
     try {
       const ef = tables.extractedFields;
       const c = tables.cases;
       const [fields, caseRows] = await Promise.all([
-        db
-          .select({
-            field_key: ef.field_key,
-            field_value: ef.field_value,
-            confidence: ef.confidence,
-          })
-          .from(ef)
-          .where(and(eq(ef.tenant_id, tenantId), eq(ef.case_id, run.case_id))),
-        db
-          .select({ claim_type: c.claim_type })
-          .from(c)
-          .where(and(eq(c.tenant_id, tenantId), eq(c.id, run.case_id)))
-          .limit(1),
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({
+              field_key: ef.field_key,
+              field_value: ef.field_value,
+              confidence: ef.confidence,
+            })
+            .from(ef)
+            .where(eq(ef.case_id, caseId))
+        ),
+        enTenant(tenantCtx, (db) =>
+          db
+            .select({ claim_type: c.claim_type })
+            .from(c)
+            .where(eq(c.id, caseId))
+            .limit(1)
+        ),
       ]);
       // numeric → string under Drizzle; convert to keep the stored JSON shape.
       confirmedFields = fields.map((f) => ({
@@ -321,6 +344,8 @@ export async function maybeQueueFineTuneJob(
   tenantId: string,
   createdBy: string | null
 ): Promise<string | null> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   try {
     const te = tables.trainingExamples;
     const approvedCount = await countRows(
@@ -332,13 +357,15 @@ export async function maybeQueueFineTuneJob(
     if (approvedCount < threshold) return null;
 
     const mtj = tables.modelTrainingJobs;
-    const openJobs = await db
-      .select({ id: mtj.id })
-      .from(mtj)
-      .where(
-        and(eq(mtj.tenant_id, tenantId), inArray(mtj.status, OPEN_JOB_STATUSES))
-      )
-      .limit(1);
+    const openJobs = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: mtj.id })
+        .from(mtj)
+        .where(
+          and( inArray(mtj.status, OPEN_JOB_STATUSES))
+        )
+        .limit(1)
+    );
 
     if (openJobs.length > 0) return null;
 

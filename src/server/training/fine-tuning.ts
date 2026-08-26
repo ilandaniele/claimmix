@@ -13,6 +13,7 @@ import OpenAI, { toFile } from "openai";
 import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db, tables } from "@/lib/db";
+import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import {
@@ -85,18 +86,22 @@ function toJsonlLine(example: {
 }
 
 async function approvedExamplesForTenant(tenantId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const t = tables.trainingExamples;
-  const rows = await db
-    .select({
-      id: t.id,
-      input_payload: t.input_payload,
-      expected_output: t.expected_output,
-      created_at: t.created_at,
-    })
-    .from(t)
-    .where(and(eq(t.tenant_id, tenantId), eq(t.status, "approved")))
-    .orderBy(desc(t.created_at))
-    .limit(500);
+  const rows = await enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        id: t.id,
+        input_payload: t.input_payload,
+        expected_output: t.expected_output,
+        created_at: t.created_at,
+      })
+      .from(t)
+      .where(eq(t.status, "approved"))
+      .orderBy(desc(t.created_at))
+      .limit(500)
+  );
 
   const seen = new Set<string>();
   return rows
@@ -136,6 +141,8 @@ async function createOrRefreshGeminiContextJob(
   userId: string,
   existingJobId?: string
 ) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const jsonl = await buildFineTuneJsonl(tenantId);
   if (jsonl.trainingCount < 1) throw new Error("NO_APPROVED_EXAMPLES");
 
@@ -146,11 +153,13 @@ async function createOrRefreshGeminiContextJob(
   let targetId = existingJobId;
   if (!targetId) {
     const existing = firstRow(
-      await db
-        .select({ id: t.id })
-        .from(t)
-        .where(and(eq(t.tenant_id, tenantId), eq(t.provider, "gemini"), inArray(t.status, OPEN_JOB_STATUSES)))
-        .limit(1)
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: t.id })
+          .from(t)
+          .where(and( eq(t.provider, "gemini"), inArray(t.status, OPEN_JOB_STATUSES)))
+          .limit(1)
+      )
     );
     targetId = existing?.id;
   }
@@ -179,11 +188,13 @@ async function createOrRefreshGeminiContextJob(
 
   const job = targetId
     ? firstRow(
-        await db
-          .update(t)
-          .set(values)
-          .where(and(eq(t.id, targetId), eq(t.tenant_id, tenantId), eq(t.provider, "gemini")))
-          .returning({ id: t.id })
+        await enTenant(tenantCtx, (db) =>
+          db
+            .update(t)
+            .set(values)
+            .where(and(eq(t.id, targetId), eq(t.provider, "gemini")))
+            .returning({ id: t.id })
+        )
       )
     : firstRow(
         await db
@@ -216,30 +227,33 @@ async function createOrRefreshGeminiContextJob(
 }
 
 export async function listFineTuneJobs(tenantId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const t = tables.modelTrainingJobs;
-  return db
-    .select({
-      id: t.id,
-      status: t.status,
-      provider: t.provider,
-      base_model: t.base_model,
-      fine_tuned_model_id: t.fine_tuned_model_id,
-      openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
-      training_file_id: t.training_file_id,
-      validation_file_id: t.validation_file_id,
-      result_files: t.result_files,
-      error_message: t.error_message,
-      training_example_count: t.training_example_count,
-      eval_result: t.eval_result,
-      created_at: t.created_at,
-      started_at: t.started_at,
-      completed_at: t.completed_at,
-      activated_at: t.activated_at,
-    })
-    .from(t)
-    .where(eq(t.tenant_id, tenantId))
-    .orderBy(desc(t.created_at))
-    .limit(50);
+  return enTenant(tenantCtx, (db) =>
+    db
+      .select({
+        id: t.id,
+        status: t.status,
+        provider: t.provider,
+        base_model: t.base_model,
+        fine_tuned_model_id: t.fine_tuned_model_id,
+        openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
+        training_file_id: t.training_file_id,
+        validation_file_id: t.validation_file_id,
+        result_files: t.result_files,
+        error_message: t.error_message,
+        training_example_count: t.training_example_count,
+        eval_result: t.eval_result,
+        created_at: t.created_at,
+        started_at: t.started_at,
+        completed_at: t.completed_at,
+        activated_at: t.activated_at,
+      })
+      .from(t)
+      .orderBy(desc(t.created_at))
+      .limit(50)
+  );
 }
 
 export async function createDraftFineTuneJob(
@@ -247,6 +261,8 @@ export async function createDraftFineTuneJob(
   userId: string,
   provider?: AiProvider
 ) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const examples = await approvedExamplesForTenant(tenantId);
   if (examples.length < 1) throw new Error("NO_APPROVED_EXAMPLES");
 
@@ -256,11 +272,13 @@ export async function createDraftFineTuneJob(
   }
 
   const t = tables.modelTrainingJobs;
-  const open = await db
-    .select({ id: t.id })
-    .from(t)
-    .where(and(eq(t.tenant_id, tenantId), eq(t.provider, "openai"), inArray(t.status, OPEN_JOB_STATUSES)))
-    .limit(1);
+  const open = await enTenant(tenantCtx, (db) =>
+    db
+      .select({ id: t.id })
+      .from(t)
+      .where(and( eq(t.provider, "openai"), inArray(t.status, OPEN_JOB_STATUSES)))
+      .limit(1)
+  );
   if (open.length > 0) return open[0];
 
   const baseModel = await getTenantOpenAIModel(tenantId);
@@ -305,13 +323,17 @@ export async function buildFineTuneJsonl(tenantId: string) {
 }
 
 export async function startFineTuneJob(tenantId: string, userId: string, jobId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const t = tables.modelTrainingJobs;
   const job = firstRow(
-    await db
-      .select({ id: t.id, status: t.status, provider: t.provider, base_model: t.base_model })
-      .from(t)
-      .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({ id: t.id, status: t.status, provider: t.provider, base_model: t.base_model })
+        .from(t)
+        .where(eq(t.id, jobId))
+        .limit(1)
+    )
   );
   if (!job) throw new Error("NOT_FOUND");
   if (job.provider === "gemini") {
@@ -342,22 +364,24 @@ export async function startFineTuneJob(tenantId: string, userId: string, jobId: 
   });
 
   const updated = firstRow(
-    await db
-      .update(t)
-      .set({
-        status: mapOpenAIStatus(openaiJob.status),
-        openai_fine_tuning_job_id: openaiJob.id,
-        training_file_id: trainingFile.id,
-        validation_file_id: validationFile?.id ?? null,
-        training_jsonl: jsonl.trainingJsonl,
-        validation_jsonl: jsonl.validationJsonl || null,
-        training_example_count: jsonl.trainingCount + jsonl.validationCount,
-        eval_result: { openai_status: openaiJob.status, validation_count: jsonl.validationCount },
-        error_message: null,
-        started_at: new Date().toISOString(),
-      })
-      .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
-      .returning({ id: t.id })
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(t)
+        .set({
+          status: mapOpenAIStatus(openaiJob.status),
+          openai_fine_tuning_job_id: openaiJob.id,
+          training_file_id: trainingFile.id,
+          validation_file_id: validationFile?.id ?? null,
+          training_jsonl: jsonl.trainingJsonl,
+          validation_jsonl: jsonl.validationJsonl || null,
+          training_example_count: jsonl.trainingCount + jsonl.validationCount,
+          eval_result: { openai_status: openaiJob.status, validation_count: jsonl.validationCount },
+          error_message: null,
+          started_at: new Date().toISOString(),
+        })
+        .where(eq(t.id, jobId))
+        .returning({ id: t.id })
+    )
   );
 
   await writeAuditLog({
@@ -373,17 +397,21 @@ export async function startFineTuneJob(tenantId: string, userId: string, jobId: 
 }
 
 export async function syncFineTuneJob(tenantId: string, userId: string, jobId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const t = tables.modelTrainingJobs;
   const job = firstRow(
-    await db
-      .select({
-        id: t.id,
-        provider: t.provider,
-        openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
-      })
-      .from(t)
-      .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: t.id,
+          provider: t.provider,
+          openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
+        })
+        .from(t)
+        .where(eq(t.id, jobId))
+        .limit(1)
+    )
   );
   if (!job) throw new Error("NOT_FOUND");
   if (job.provider === "gemini") {
@@ -395,24 +423,26 @@ export async function syncFineTuneJob(tenantId: string, userId: string, jobId: s
   const status = mapOpenAIStatus(openaiJob.status);
   const completed = status === "eval_pending" || status === "failed";
   const updated = firstRow(
-    await db
-      .update(t)
-      .set({
-        status,
-        fine_tuned_model_id: openaiJob.fine_tuned_model,
-        result_files: openaiJob.result_files ?? [],
-        training_file_id: openaiJob.training_file,
-        validation_file_id: openaiJob.validation_file,
-        error_message: openaiJob.error?.message ?? null,
-        eval_result: {
-          openai_status: openaiJob.status,
-          trained_tokens: openaiJob.trained_tokens,
-          error: openaiJob.error,
-        },
-        completed_at: completed ? new Date().toISOString() : null,
-      })
-      .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
-      .returning({ id: t.id, status: t.status, fine_tuned_model_id: t.fine_tuned_model_id })
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(t)
+        .set({
+          status,
+          fine_tuned_model_id: openaiJob.fine_tuned_model,
+          result_files: openaiJob.result_files ?? [],
+          training_file_id: openaiJob.training_file,
+          validation_file_id: openaiJob.validation_file,
+          error_message: openaiJob.error?.message ?? null,
+          eval_result: {
+            openai_status: openaiJob.status,
+            trained_tokens: openaiJob.trained_tokens,
+            error: openaiJob.error,
+          },
+          completed_at: completed ? new Date().toISOString() : null,
+        })
+        .where(eq(t.id, jobId))
+        .returning({ id: t.id, status: t.status, fine_tuned_model_id: t.fine_tuned_model_id })
+    )
   );
 
   await writeAuditLog({
@@ -428,28 +458,34 @@ export async function syncFineTuneJob(tenantId: string, userId: string, jobId: s
 }
 
 export async function approveFineTuneJob(tenantId: string, userId: string, jobId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const t = tables.modelTrainingJobs;
   const job = firstRow(
-    await db
-      .select({
-        id: t.id,
-        status: t.status,
-        provider: t.provider,
-        fine_tuned_model_id: t.fine_tuned_model_id,
-        eval_result: t.eval_result,
-      })
-      .from(t)
-      .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: t.id,
+          status: t.status,
+          provider: t.provider,
+          fine_tuned_model_id: t.fine_tuned_model_id,
+          eval_result: t.eval_result,
+        })
+        .from(t)
+        .where(eq(t.id, jobId))
+        .limit(1)
+    )
   );
   if (!job) throw new Error("NOT_FOUND");
   if (job.provider === "gemini") {
     const updated = firstRow(
-      await db
-        .update(t)
-        .set({ status: "approved", completed_at: new Date().toISOString() })
-        .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId), eq(t.provider, "gemini")))
-        .returning({ id: t.id, status: t.status, fine_tuned_model_id: t.fine_tuned_model_id })
+      await enTenant(tenantCtx, (db) =>
+        db
+          .update(t)
+          .set({ status: "approved", completed_at: new Date().toISOString() })
+          .where(and(eq(t.id, jobId), eq(t.provider, "gemini")))
+          .returning({ id: t.id, status: t.status, fine_tuned_model_id: t.fine_tuned_model_id })
+      )
     );
     await writeAuditLog({
       tenant_id: tenantId,
@@ -470,17 +506,19 @@ export async function approveFineTuneJob(tenantId: string, userId: string, jobId
       ? { ...(job.eval_result as Record<string, unknown>) }
       : {};
   const updated = firstRow(
-    await db
-      .update(t)
-      .set({
-        status: "approved",
-        eval_result: {
-          ...evalResult,
-          manual_eval: { approved_by: userId, approved_at: now },
-        },
-      })
-      .where(and(eq(t.id, jobId), eq(t.tenant_id, tenantId)))
-      .returning({ id: t.id, status: t.status, fine_tuned_model_id: t.fine_tuned_model_id })
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(t)
+        .set({
+          status: "approved",
+          eval_result: {
+            ...evalResult,
+            manual_eval: { approved_by: userId, approved_at: now },
+          },
+        })
+        .where(eq(t.id, jobId))
+        .returning({ id: t.id, status: t.status, fine_tuned_model_id: t.fine_tuned_model_id })
+    )
   );
 
   await writeAuditLog({
@@ -496,20 +534,24 @@ export async function approveFineTuneJob(tenantId: string, userId: string, jobId
 }
 
 export async function activateFineTunedModel(tenantId: string, userId: string, jobId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const mtj = tables.modelTrainingJobs;
   const settings = tables.tenantAiSettings;
   const job = firstRow(
-    await db
-      .select({
-        id: mtj.id,
-        status: mtj.status,
-        provider: mtj.provider,
-        base_model: mtj.base_model,
-        fine_tuned_model_id: mtj.fine_tuned_model_id,
-      })
-      .from(mtj)
-      .where(and(eq(mtj.id, jobId), eq(mtj.tenant_id, tenantId)))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          id: mtj.id,
+          status: mtj.status,
+          provider: mtj.provider,
+          base_model: mtj.base_model,
+          fine_tuned_model_id: mtj.fine_tuned_model_id,
+        })
+        .from(mtj)
+        .where(eq(mtj.id, jobId))
+        .limit(1)
+    )
   );
   if (!job) throw new Error("NOT_FOUND");
   if (job.provider === "gemini") {
@@ -518,10 +560,12 @@ export async function activateFineTunedModel(tenantId: string, userId: string, j
       geminiModel: job.base_model || getDefaultGeminiModel(),
     });
     const now = new Date().toISOString();
-    await db
-      .update(mtj)
-      .set({ status: "deployed", activated_by: userId, activated_at: now })
-      .where(and(eq(mtj.id, jobId), eq(mtj.tenant_id, tenantId), eq(mtj.provider, "gemini")));
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(mtj)
+        .set({ status: "deployed", activated_by: userId, activated_at: now })
+        .where(and(eq(mtj.id, jobId), eq(mtj.provider, "gemini")))
+    );
     await writeAuditLog({
       tenant_id: tenantId,
       actor_id: userId,
@@ -536,11 +580,12 @@ export async function activateFineTunedModel(tenantId: string, userId: string, j
   if (job.status !== "approved") throw new Error("JOB_NOT_APPROVED");
 
   const current = firstRow(
-    await db
-      .select({ active_model: settings.active_model, openai_model: settings.openai_model })
-      .from(settings)
-      .where(eq(settings.tenant_id, tenantId))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({ active_model: settings.active_model, openai_model: settings.openai_model })
+        .from(settings)
+        .limit(1)
+    )
   );
   const previous = current?.active_model || current?.openai_model || getDefaultOpenAIModel();
   const now = new Date().toISOString();
@@ -570,10 +615,12 @@ export async function activateFineTunedModel(tenantId: string, userId: string, j
       },
     });
 
-  await db
-    .update(mtj)
-    .set({ status: "deployed", activated_by: userId, activated_at: now })
-    .where(and(eq(mtj.id, jobId), eq(mtj.tenant_id, tenantId)));
+  await enTenant(tenantCtx, (db) =>
+    db
+      .update(mtj)
+      .set({ status: "deployed", activated_by: userId, activated_at: now })
+      .where(eq(mtj.id, jobId))
+  );
 
   await writeAuditLog({
     tenant_id: tenantId,
@@ -588,17 +635,20 @@ export async function activateFineTunedModel(tenantId: string, userId: string, j
 }
 
 export async function rollbackFineTunedModel(tenantId: string, userId: string) {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
   const settings = tables.tenantAiSettings;
   const current = firstRow(
-    await db
-      .select({
-        active_model: settings.active_model,
-        previous_model: settings.previous_model,
-        openai_model: settings.openai_model,
-      })
-      .from(settings)
-      .where(eq(settings.tenant_id, tenantId))
-      .limit(1)
+    await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          active_model: settings.active_model,
+          previous_model: settings.previous_model,
+          openai_model: settings.openai_model,
+        })
+        .from(settings)
+        .limit(1)
+    )
   );
   const rollbackTo = current?.previous_model || current?.openai_model || getDefaultOpenAIModel();
   const now = new Date().toISOString();

@@ -83,7 +83,7 @@ function check(label: string, ok: boolean, detail?: string): void {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const { db } = await import("@/lib/db");
-const { cases, outboundMessages, extractedFields } = await import("@/lib/db/schema");
+const { cases, claimMessages, outboundMessages, extractedFields } = await import("@/lib/db/schema");
 const { and, desc, eq, like, sql } = await import("drizzle-orm");
 
 /**
@@ -355,6 +355,39 @@ try {
   } else if (created.length > 0) {
     for (const id of created) await db.delete(cases).where(eq(cases.id, id));
     console.log(`\n${created.length} caso(s) de prueba borrados.`);
+  }
+
+  /*
+   * Y los que dejaron las corridas que fallaron.
+   *
+   * El timbre borra lo que encuentra, y cuando no encontraba su caso —el bug
+   * de buscar por `policy_number`— tampoco lo borraba: cada corrida en rojo
+   * dejaba un siniestro inventado en producción. Al 27 de agosto de 2026 había
+   * cinco, desde el 25.
+   *
+   * No es sólo prolijidad. Esos casos entran a los conteos por canal y por
+   * estado, así que un número que alguien mira para decidir algo incluye mails
+   * que nos mandamos nosotros.
+   *
+   * El filtro es el remitente, `timbre.<algo>@example.com`. `example.com` está
+   * reservado por la IANA: no le pertenece a nadie y nunca va a pertenecerle,
+   * así que esto no puede alcanzar el caso de una persona.
+   */
+  if (!KEEP) {
+    const viejos = await db
+      .selectDistinct({ id: cases.id })
+      .from(cases)
+      .innerJoin(claimMessages, eq(claimMessages.case_id, cases.id))
+      .where(
+        and(
+          eq(cases.tenant_id, TENANT!),
+          like(claimMessages.from_addr, "%timbre.%@example.com%")
+        )
+      );
+    if (viejos.length > 0) {
+      for (const { id } of viejos) await db.delete(cases).where(eq(cases.id, id));
+      console.log(`${viejos.length} caso(s) de corridas anteriores, barridos.`);
+    }
   }
 
   console.log("\n" + "─".repeat(70));

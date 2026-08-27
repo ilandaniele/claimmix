@@ -35,11 +35,19 @@ el compilador que traduce `"use workflow"` y `"use step"`. Sin él esas
 directivas son literales de cadena: la función corre igual, el test pasa, y la
 durabilidad no existe.
 
-Las invariantes (`pnpm arquitectura`) son las cuatro cosas que, de romperse, no
-se ven al leer un diff: que el núcleo no toque infraestructura, que ninguna
-consulta quede fuera de la capa de datos sin decir por qué, que los filtros
-escritos a mano no vuelvan a crecer, y que la capa no pueda caer al rol que
-saltea RLS.
+Las invariantes (`pnpm arquitectura`) son las cosas que, de romperse, no se ven
+al leer un diff: que el núcleo no toque infraestructura, que ninguna consulta
+quede fuera de la capa de datos sin decir por qué, que los filtros escritos a
+mano no vuelvan a crecer, que la capa no pueda caer al rol que saltea RLS, y que
+nadie use `db.$count` —que no devuelve una consulta sino un objeto que se puede
+esperar, así que la capa no lo puede armar para pegarle el contexto del
+inquilino—.
+
+Esa última se agregó el 27 de agosto de 2026 después de que `db.$count` tuviera
+caídos, en producción, los contadores de la bandeja, el listado de clientes, el
+de pólizas y la pantalla de métricas. La capa ahora también lo rechaza en
+caliente con un mensaje que dice con qué reemplazarlo, pero eso avisa recién
+cuando alguien abre la pantalla.
 
 Lo que **no** puede ver: cómo se comporta el agente cuando extracción, análisis
 de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
@@ -334,6 +342,63 @@ que aprueba porque el sistema estaba apagado es peor que no correrlo.
 
 ---
 
+### 8. `pnpm test:e2e` — la pantalla, con un navegador de verdad
+
+Playwright levanta el servidor y maneja Chromium. 68 tests: que las rutas
+privadas manden al login, que las cabeceras y el nonce de la CSP estén, que el
+límite de tráfico corte, que un analista entre y salga, que la conversación de
+un caso se vea y que simular un mail cree un caso que aparece solo en la tabla.
+
+**Corren contra la base de ENSAYO, nunca contra producción.** Tienen secretos
+propios —`E2E_DATABASE_URL` y `E2E_DATABASE_URL_APP`— y ese es todo el punto:
+antes usaban `DATABASE_URL` y por eso escribían en la base de los clientes. Para
+que vuelvan a tocar producción hay que ir a crear un secreto con ese nombre y
+pegarle adentro la cadena de producción, que ya no es un descuido sino una
+decisión.
+
+Para correrlos en local hacen falta las cuentas y los dos casos de prueba:
+
+```
+pnpm sembrar          # crea las cuatro cuentas, los dos casos y el estado de la casilla
+pnpm test:e2e
+```
+
+`pnpm sembrar` se planta si la cadena es la de producción, y necesita en
+`.env.local`:
+
+| variable | para qué |
+| --- | --- |
+| `STAGING_DATABASE_URL` | la base donde siembra |
+| `INTEGRATION_TEST_PASSWORD` | la analista de los tests de integración |
+| `INTEGRATION_ADMIN_PASSWORD` | la cuenta admin — sin valor por omisión, a propósito |
+| `INTEGRATION_LOGIN_PASSWORD` | la cuenta de los tests que prueban el login |
+| `INTEGRATION_E2E_PASSWORD` | la cuenta de los e2e |
+
+**Entrecomillá los valores.** Una contraseña con `#` adentro, sin comillas,
+dotenv la corta ahí porque toma el resto como comentario: el sembrado guarda una
+clave truncada, el navegador manda la entera, y el login responde «Credenciales
+inválidas» sobre una cuenta recién creada. Costó una hora y media el 27 de
+agosto de 2026.
+
+Y después las diez variables que leen los tests (`PLAYWRIGHT_TEST_EMAIL` y
+compañía). Están en `.github/workflows/ci.yml`, en el paso *Run E2E tests*, con
+el nombre del secreto al lado de cada una.
+
+#### Por qué hay cuatro cuentas y no una
+
+El login limita a cinco intentos cada diez segundos por IP y correo. Es la
+defensa contra el rociado de contraseñas y no se toca: un test que sólo pasa con
+la defensa apagada no prueba el producto que se despliega.
+
+Pero eso significa que hay un cupo compartido, y se gasta rápido. La suite entra
+**dos veces en total** —una por rol— y guarda la sesión en un archivo que el
+resto de los tests levanta (`auth.setup.ts`); los cuatro que sí prueban el login
+tienen su propia cuenta. En CI los e2e corren **después** de los de integración
+y no en paralelo, porque los dos entran por `localhost` y para el limitador eso
+es la misma IP.
+
+---
+
 ## Cuándo correr qué
 
 | Situación | Comando |
@@ -431,15 +496,24 @@ archivo de verdad y llama al modelo de verdad.
 
 Dicho de frente, para que nadie lea "todo verde" como "todo probado":
 
-- **La interfaz, casi entera.** Hay siete archivos de Playwright y corren en
-  cada push, pero cubren poco: que el health conteste, que el login no cicle,
-  que las pantallas no exploten. El grueso de las pantallas se sigue probando
-  mirándolas.
+- **La interfaz, buena parte.** Siete archivos de Playwright, 68 tests, y
+  cubren más que antes: el login y el cierre de sesión de verdad, que un caso
+  muestre su conversación, que simular un mail cree un caso visible en la tabla,
+  y las cabeceras y límites que no necesitan datos. El grueso de las pantallas
+  —los formularios largos, el detalle de un caso— se sigue probando mirándolas.
 
-  Hasta el 22 de agosto de 2026 esos tests **estaban en rojo y no se notaba**:
-  el trabajo tenía `continue-on-error: true`, así que CI decía "success" en cada
-  push mientras un test fallaba desde hacía días. Ya no lo tiene. Una suite que
-  no puede hacer fallar el build es un adorno.
+  Dos veces esta suite dijo cosas que no eran. Hasta el 22 de agosto de 2026
+  **estaba en rojo y no se notaba**: el trabajo tenía `continue-on-error: true`,
+  así que CI decía "success" en cada push mientras un test fallaba desde hacía
+  días. Y hasta el 27 de agosto, **catorce de estos tests se salteaban** por
+  falta de credenciales de Playwright: no era un verde mentiroso —el motivo
+  salía en el reporte— pero eran catorce comprobaciones que no existían. Al
+  encenderlas aparecieron tres fallas reales en producción, entre ellas los
+  contadores de la bandeja caídos y una ruta de admin abierta a cualquier
+  usuario con sesión.
+
+  La moraleja de las dos: un test que no corre no es cobertura, y cuesta más que
+  no tenerlo, porque se cuenta igual.
 - **El acuse de recibo**, que es lo que sale cuando alguien cuenta algo y lo que
   falta sigue siendo lo mismo que ya le pedimos. La plantilla, el redactor y los
   dos canales están cubiertos por tests; lo que el ensayo **no** puede garantizar

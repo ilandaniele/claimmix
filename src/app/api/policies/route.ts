@@ -14,7 +14,7 @@
 import { type NextRequest } from "next/server";
 import { and, desc, eq, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { firstRow } from "@/lib/db/helpers";
+import { countRows, firstRow } from "@/lib/db/helpers";
 import { customers, policies, users } from "@/lib/db/schema";
 import { getSessionContext } from "@/lib/auth/session";
 import { ok, err } from "@/lib/api/respond";
@@ -112,10 +112,8 @@ export async function GET(request: NextRequest) {
 
     const where = and(...conditions);
 
-    // Count query
-    const total = await enTenant({ tenantId }, (db) =>
-      db.$count(policies, where)
-    );
+    // Count query — `countRows`, no `db.$count`: ver customers/route.ts.
+    const total = await countRows({ tenantId }, policies, where);
 
     // Data query with customer join (schema columns are start_date/end_date;
     // the API contract keeps exposing them as valid_from/valid_to).

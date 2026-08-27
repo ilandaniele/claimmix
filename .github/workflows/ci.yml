@@ -306,6 +306,19 @@ jobs:
           DATABASE_URL_APP: ${{ secrets.STAGING_DATABASE_URL_APP || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'placeholder-secret' }}
           MOCK_AI: "true"
+          # Las mismas contrasenas que uso el sembrado, y por eso estan aca.
+          #
+          # Sin ellas los tests caen a su valor por omision mientras el sembrado
+          # dejo la de verdad: cada login devuelve 401, y a los cinco fallidos el
+          # limitador responde 429. El sintoma no se parece a la causa — media
+          # suite fallaba con 429, incluso tests que esperaban un 400 por
+          # validacion — y manda a buscar un problema de limites donde hay uno de
+          # credenciales.
+          #
+          # Sembrado y tests tienen que leer la contrasena del mismo lugar.
+          INTEGRATION_TEST_PASSWORD: ${{ secrets.INTEGRATION_TEST_PASSWORD }}
+          INTEGRATION_ADMIN_PASSWORD: ${{ secrets.INTEGRATION_ADMIN_PASSWORD }}
+          INTEGRATION_LOGIN_PASSWORD: ${{ secrets.INTEGRATION_LOGIN_PASSWORD }}
 
   # ── Cobertura, como trinquete ────────────────────────────────────────────────
   #

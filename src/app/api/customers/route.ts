@@ -13,7 +13,7 @@
 import { type NextRequest } from "next/server";
 import { and, desc, eq, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { firstRow, ilikeAny } from "@/lib/db/helpers";
+import { countRows, firstRow, ilikeAny } from "@/lib/db/helpers";
 import { customers, users } from "@/lib/db/schema";
 import { getSessionContext } from "@/lib/auth/session";
 import { ok, err } from "@/lib/api/respond";
@@ -115,9 +115,12 @@ export async function GET(request: NextRequest) {
     const where = and(...conditions);
 
     // Count query
-    const total = await enTenant({ tenantId }, (db) =>
-      db.$count(customers, where)
-    );
+    //
+    // Por `countRows` y no por `db.$count` adentro de `enTenant`: eso ultimo no
+    // devuelve una consulta sino un objeto que se puede esperar, y la capa manda
+    // todo por `batch()`, que necesita armarla. Reventaba con
+    // "query._prepare is not a function" en cada listado.
+    const total = await countRows({ tenantId }, customers, where);
 
     // Data query
     const from = (page - 1) * per_page;

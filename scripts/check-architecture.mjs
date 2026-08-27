@@ -312,6 +312,33 @@ console.log("\n▸ Los jobs de CI conocen los dos roles");
   }
 }
 
+// ── Nada que la capa no pueda armar ─────────────────────────
+//
+// `db.$count(tabla, where)` no devuelve una consulta: devuelve un objeto que
+// se puede esperar. La capa manda todo por `batch()` para pegarle adelante el
+// contexto del inquilino, y para eso necesita ARMAR la consulta.
+//
+// Estuvo roto en produccion: los contadores de la bandeja, el listado de
+// clientes, el de polizas y la pantalla de metricas, todos con
+// `TypeError: query._prepare is not a function`. La capa ahora lo rechaza en
+// caliente con un mensaje claro, pero eso avisa cuando alguien abre la
+// pantalla; esto avisa antes de desplegar.
+console.log("\n▸ nadie usa db.$count (la capa no lo puede armar)");
+{
+  const conCount = [];
+  for (const ruta of archivos("src")) {
+    const txt = sinComentarios(readFileSync(ruta, "utf8"));
+    if (txt.includes(".$count(")) conCount.push(ruta);
+  }
+  if (conCount.length === 0) {
+    bien("ningun archivo lo usa");
+  } else {
+    mal(`${conCount.length} archivo(s) usan db.$count`);
+    for (const c of conCount) console.log(`     ${c}`);
+    console.log("     Va countRows(ctx, tabla, where), de @/lib/db/helpers.");
+  }
+}
+
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(66));
 if (problemas.length === 0) {

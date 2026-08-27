@@ -23,6 +23,7 @@ import { and, eq, gte, lt, count, sql } from "drizzle-orm";
 import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
+import { countRows } from "@/lib/db/helpers";
 import { enTenant, type TenantContext } from "@/data/scope";
 
 function normalizeUsage(row?: {
@@ -103,15 +104,19 @@ export async function GET() {
         ),
 
         // Escalated this month
-        enTenant(tenantCtx, (db) =>
-          db.$count(
-            cases,
-            and(
-              eq(cases.tenant_id, tenantId),
-              eq(cases.status, "escalado"),
-              gte(cases.created_at, monthStart),
-              lt(cases.created_at, monthEnd)
-            )
+        //
+        // Por `countRows` y no por `db.$count` adentro de `enTenant`: eso ultimo
+        // no devuelve una consulta sino un objeto que se puede esperar, y la capa
+        // manda todo por `batch()`, que necesita armarla. Reventaba con
+        // "query._prepare is not a function" cada vez que alguien abria metricas.
+        countRows(
+          tenantCtx,
+          cases,
+          and(
+            eq(cases.tenant_id, tenantId),
+            eq(cases.status, "escalado"),
+            gte(cases.created_at, monthStart),
+            lt(cases.created_at, monthEnd)
           )
         ),
 

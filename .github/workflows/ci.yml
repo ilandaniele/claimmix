@@ -6,6 +6,13 @@ on:
   push:
     branches: [main]
 
+# Una corrida por rama. Acá sí se cancela la anterior: no toca nada de afuera
+# —tipos, lint, tests, build en un runner limpio— así que el resultado del
+# commit viejo no le importa a nadie apenas llegó uno nuevo.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

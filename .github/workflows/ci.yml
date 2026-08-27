@@ -376,7 +376,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    needs: [build]
+    # Después de los de integración, y no en paralelo.
+    #
+    # Los dos entran por `localhost` contra la misma base de ensayo, así que
+    # para el limitador de intentos de login son la misma IP — y los contadores
+    # viven en esa base, compartidos entre jobs. Uno de los tests de integración
+    # agota el cupo A PROPÓSITO, porque lo que prueba es el limitador; con los
+    # e2e entrando al mismo tiempo, ese cupo se acababa antes y los de
+    # integración terminaban con 429 en tests que no tenían nada que ver.
+    #
+    # Aflojar el limitador para que convivan sería apagar la defensa que uno de
+    # los dos está probando. Correrlos en serie cuesta unos minutos de reloj y
+    # deja a cada uno con la ventana entera.
+    #
+    # `always()` porque esto es orden, no dependencia: si los de integración se
+    # saltean —en un fork no hay secretos— los e2e tienen que correr igual.
+    needs: [build, integration-tests]
+    if: always() && needs.build.result == 'success'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 

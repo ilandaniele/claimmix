@@ -23,6 +23,12 @@ import { buildCsp, generateNonce } from "@/lib/security/csp";
 import { auth } from "@/lib/auth";
 
 /** Public paths that do not require authentication. */
+/**
+ * Las que tienen sentido solo sin sesion: si ya entraste, no vas al formulario
+ * de entrada, vas a tu bandeja.
+ */
+const SOLO_ANONIMOS = ["/login", "/registro"];
+
 const PUBLIC_PREFIXES = [
   "/login",
   "/registro",
@@ -108,6 +114,22 @@ export async function proxy(request: NextRequest) {
 
   // ── 4. Skip auth for public paths ─────────────────────────────────────────
   if (isPublic(pathname)) {
+    /*
+     * Publicas para quien NO tiene sesion, que no es lo mismo que publicas.
+     *
+     * El paso 7 dice «redirigir a los autenticados fuera de login/registro» y
+     * para esas dos rutas nunca corria: son publicas, y este return las devuelve
+     * tres pasos antes. Quedaba andando solo para «/». O sea que alguien con la
+     * sesion abierta volvia a ver el formulario de entrada, y el codigo que lo
+     * evitaba estaba escrito, comentado y muerto.
+     *
+     * No lo agarro nadie porque el test que lo comprueba se salteaba por falta
+     * de credenciales de Playwright.
+     */
+    if (SOLO_ANONIMOS.includes(pathname)) {
+      const yaEntro = await getUser(request);
+      if (yaEntro) return NextResponse.redirect(new URL("/bandeja", request.url));
+    }
     return response;
   }
 
@@ -150,8 +172,10 @@ export async function proxy(request: NextRequest) {
     return redirectResponse;
   }
 
-  // ── 7. Redirect authenticated users away from login/registro ──────────────
-  if (pathname === "/login" || pathname === "/registro" || pathname === "/") {
+  // ── 7. Redirect authenticated users away from the root ────────────────────
+  // login y registro se resuelven arriba, en el paso 4: son publicas y salen de
+  // esta funcion antes de llegar aca.
+  if (pathname === "/") {
     return NextResponse.redirect(new URL("/bandeja", request.url));
   }
 

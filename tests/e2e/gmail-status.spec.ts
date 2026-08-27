@@ -18,6 +18,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { SESION_ADMIN, SESION_ANALISTA } from "./sesiones";
 
 const ADMIN_EMAIL = process.env.PLAYWRIGHT_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.PLAYWRIGHT_ADMIN_PASSWORD;
@@ -70,27 +71,37 @@ test.describe("Gmail status panel — admin user visibility (Scenario 1)", () =>
   // To enable: set PLAYWRIGHT_ADMIN_EMAIL and PLAYWRIGHT_ADMIN_PASSWORD env vars.
   test.skip(!HAS_ADMIN_CREDS, "Skipped: PLAYWRIGHT_ADMIN_EMAIL not set — requires admin Neon account");
 
-  test("admin user sees 'Bandeja de entrada Gmail' section in /configuracion", async ({ page }) => {
-    // Sign in as admin
-    await page.goto("/login");
-    await page.fill('[name="email"]', ADMIN_EMAIL!);
-    await page.fill('[name="password"]', ADMIN_PASSWORD!);
-    await page.click('[type="submit"]');
-    await page.waitForURL(/\/bandeja/);
+  /*
+   * La sesión de admin sale del archivo que dejó `auth.setup.ts`.
+   *
+   * Antes cada test se logueaba de cero, y entre los tres archivos eso eran
+   * nueve inicios de sesión seguidos. El login limita a cinco cada diez
+   * segundos por IP y correo, así que los tests se comían su propio cupo y
+   * fallaban con «Demasiados intentos» — que se lee como un login roto y no
+   * lo es.
+   */
+  test.use({ storageState: SESION_ADMIN });
 
-    // Navigate to /configuracion
+  /*
+   * Esto buscaba un encabezado «Bandeja de entrada Gmail» que ya no existe.
+   *
+   * La pantalla se reorganizo: la seccion se llama «Cuentas Gmail de ingreso» y
+   * la dibuja `GmailAccountsPanel`. El componente viejo, `GmailStatusSection`,
+   * quedo en el arbol sin que lo importe nadie.
+   *
+   * El test no lo agarro porque nunca corrio: se salteaba por falta de
+   * credenciales de Playwright. Se descubrio al crearlas.
+   *
+   * Se afirma lo que el producto hace HOY. La separacion de roles de verdad no
+   * vive en este encabezado —se muestra a todo el mundo a proposito— sino en la
+   * API, y eso se comprueba abajo.
+   */
+  test("un admin abre configuracion y ve la seccion de cuentas Gmail", async ({ page }) => {
     await page.goto("/configuracion");
     await expect(page).not.toHaveURL(/\/login/);
 
-    // The section heading is rendered by configuracion/page.tsx when role='admin'
-    const heading = page.getByRole("heading", { name: /bandeja de entrada gmail/i });
+    const heading = page.getByRole("heading", { name: /cuentas gmail de ingreso/i });
     await expect(heading).toBeVisible();
-
-    // Expect one of the three possible status pills to be visible
-    const statusPill = page.getByRole("status");
-    await expect(statusPill).toBeVisible();
-    const pillText = await statusPill.textContent();
-    expect(STATUS_PILL_TEXTS.some((s) => pillText?.includes(s))).toBe(true);
   });
 });
 
@@ -101,33 +112,30 @@ test.describe("Gmail status panel — analyst user invisibility (Scenario 2)", (
   // To enable: set PLAYWRIGHT_ANALYST_EMAIL and PLAYWRIGHT_ANALYST_PASSWORD env vars.
   test.skip(!HAS_ANALYST_CREDS, "Skipped: PLAYWRIGHT_ANALYST_EMAIL not set — requires analyst Neon account");
 
-  test("analyst user does NOT see 'Bandeja de entrada Gmail' section in /configuracion", async ({ page }) => {
-    // Sign in as analyst
-    await page.goto("/login");
-    await page.fill('[name="email"]', ANALYST_EMAIL!);
-    await page.fill('[name="password"]', ANALYST_PASSWORD!);
-    await page.click('[type="submit"]');
-    await page.waitForURL(/\/bandeja/);
+  // Sesión de analista, por lo mismo que el bloque de arriba. Lo que se
+  // prueba acá es qué NO ve un analista, no cómo entra.
+  test.use({ storageState: SESION_ANALISTA });
 
-    // Navigate to /configuracion
+  /*
+   * Un analista ve la MISMA seccion, y eso es deliberado.
+   *
+   * Antes esto afirmaba que no la veia, y pasaba —pero por la razon equivocada:
+   * buscaba un encabezado que ya no existe para nadie. Un verde asi se lee como
+   * separacion de roles comprobada, y no comprobaba nada.
+   *
+   * Lo que separa a un analista de un admin es la API: `GET
+   * /api/admin/gmail-accounts` le devuelve solo las cuentas que conecto el, y
+   * `/api/admin/gmail-status` le responde 403. Eso es lo que se afirma.
+   */
+  test("un analista ve la seccion, que es lo que corresponde hoy", async ({ page }) => {
     await page.goto("/configuracion");
     await expect(page).not.toHaveURL(/\/login/);
 
-    // The Gmail section is conditionally rendered server-side only for role='admin'.
-    // For analyst: configuracion/page.tsx does not render the <Section> block,
-    // and GmailStatusSection itself returns null on 403 from /api/admin/gmail-status.
-    const heading = page.getByRole("heading", { name: /bandeja de entrada gmail/i });
-    await expect(heading).not.toBeVisible();
+    const heading = page.getByRole("heading", { name: /cuentas gmail de ingreso/i });
+    await expect(heading).toBeVisible();
   });
 
   test("GET /api/admin/gmail-status as analyst returns 403 FORBIDDEN_ROLE", async ({ page }) => {
-    // Sign in as analyst
-    await page.goto("/login");
-    await page.fill('[name="email"]', ANALYST_EMAIL!);
-    await page.fill('[name="password"]', ANALYST_PASSWORD!);
-    await page.click('[type="submit"]');
-    await page.waitForURL(/\/bandeja/);
-
     // Call the admin-only endpoint — should return 403
     const res = await page.request.get("/api/admin/gmail-status");
     expect(res.status()).toBe(403);

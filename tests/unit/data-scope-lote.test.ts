@@ -37,7 +37,11 @@ vi.mock("drizzle-orm/neon-http", () => ({
     __cadena: crudo.__cadena,
     // Cada "consulta" es sólo una etiqueta: lo que importa es cuál llega y en
     // qué posición, no que sea SQL de verdad.
-    execute: (q: unknown) => ({ tipo: "execute", q }),
+    // `_prepare` es lo que distingue una consulta de drizzle de un objeto
+    // cualquiera: la capa lo exige porque `batch` la tiene que armar. Sin esto
+    // el mock simula algo que drizzle nunca devuelve, y el guardia —con razon—
+    // lo rechaza.
+    execute: (q: unknown) => ({ tipo: "execute", q, _prepare: () => ({}) }),
     batch: (consultas: unknown[]) => {
       lotes.push(consultas);
       return Promise.resolve(respuesta);
@@ -267,6 +271,65 @@ describe("una promesa no es una consulta", () => {
 
     await expect(
       enTenant({ tenantId: "x" }, (db) => db.execute("q") as never)
+    ).resolves.toEqual(["fila"]);
+  });
+});
+
+/**
+ * Lo que no es una promesa y tampoco es una consulta.
+ *
+ * El guardia miraba sólo `instanceof Promise`, y `db.$count(...)` no lo es:
+ * drizzle devuelve un objeto que se puede esperar pero que no se puede armar.
+ * Pasaba el control y reventaba adentro de `batch` con «query._prepare is not a
+ * function», sin decir quién lo llamó.
+ *
+ * No era teórico: `countRows` lo usaba, así que los contadores de la bandeja y
+ * el conteo de ejemplos del entrenamiento estuvieron rotos en producción hasta
+ * que un e2e con sesión —de los que se salteaban— abrió la bandeja.
+ */
+describe("lo que batch no puede armar", () => {
+  it("rechaza un thenable de drizzle, como el que devuelve $count", async () => {
+    const { enTenant } = await import("@/data/scope");
+
+    // La forma exacta de `$count`: se puede esperar, no se puede armar.
+    const comoDolarCount = {
+      then: (r: (v: number) => void) => r(0),
+      _prepare: undefined,
+    };
+
+    await expect(
+      enTenant(CTX, () => comoDolarCount as never)
+    ).rejects.toThrow(/no es una consulta que se pueda armar/);
+  });
+
+  it("el mensaje dice con qué reemplazarlo", async () => {
+    const { enTenant } = await import("@/data/scope");
+    const error = await enTenant(CTX, () => ({ then: () => {} }) as never).catch(
+      (e: Error) => e
+    );
+
+    // Quien se lo encuentre tiene que poder arreglarlo sin leer la capa.
+    const m = (error as Error).message;
+    expect(m).toContain("$count");
+    expect(m).toContain("db.select(");
+  });
+
+  it("rechaza null y undefined nombrándolos", async () => {
+    const { enTenant } = await import("@/data/scope");
+
+    await expect(enTenant(CTX, () => null as never)).rejects.toThrow(/null/);
+    await expect(enTenant(CTX, () => undefined as never)).rejects.toThrow(
+      /undefined/
+    );
+  });
+
+  it("deja pasar una consulta de verdad", async () => {
+    // La otra mitad: un guardia que rechaza todo también "pasa" este archivo.
+    const { enTenant } = await import("@/data/scope");
+    respuesta = [{}, ["fila"]];
+
+    await expect(
+      enTenant(CTX, (db) => db.execute("q") as never)
     ).resolves.toEqual(["fila"]);
   });
 });

@@ -1,4 +1,4 @@
-import { ilike, or, type SQL, type SQLWrapper } from "drizzle-orm";
+import { ilike, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { enTenant, type TenantContext } from "@/data/scope";
@@ -28,11 +28,33 @@ export function ilikeAny(cols: AnyPgColumn[], q: string): SQL | undefined {
  * ni sale en los tests: sólo muestra en la bandeja de uno los casos de todos.
  *
  * Con el contexto en la firma, esa forma de llamarlo mal ya no compila.
+ *
+ * ── Por qué un `select count(*)` a mano y no `db.$count` ────────────────────
+ *
+ * Porque `$count` no devuelve una consulta: devuelve un objeto que se puede
+ * esperar. Y la capa de datos manda las consultas por `batch()`, que necesita
+ * armarlas —llamarles `_prepare()`— para pegarles adelante el contexto del
+ * inquilino. A un thenable no se le puede.
+ *
+ * El resultado era `TypeError: query._prepare is not a function` en CADA
+ * llamada: los contadores de las pestañas de la bandeja y el conteo de ejemplos
+ * aprobados del entrenamiento, rotos en producción.
+ *
+ * No lo agarró nadie porque el guardia de la capa sólo rechazaba
+ * `instanceof Promise`, y esto no es una promesa de verdad; y porque el e2e que
+ * abre la bandeja con sesión se salteaba por falta de credenciales de
+ * Playwright. Se descubrió al crearlas.
  */
 export async function countRows(
   ctx: TenantContext,
   table: PgTable | SQLWrapper,
   where?: SQL
 ): Promise<number> {
-  return enTenant(ctx, (db) => db.$count(table, where));
+  const filas = await enTenant<Array<{ n: number }>>(ctx, (db) =>
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(table as PgTable)
+      .where(where)
+  );
+  return filas[0]?.n ?? 0;
 }

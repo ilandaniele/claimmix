@@ -184,15 +184,33 @@ describe("GET /api/admin/gmail-status", () => {
     });
   });
 
-  it("AC6: returns 200 for analyst role (gmail-status open to all users)", async () => {
+  /*
+   * AC6: un analista NO entra. Esto afirmaba lo contrario.
+   *
+   * Decia «gmail-status open to all users» y pasaba, porque el codigo llamaba
+   * a `requireRole(...ALL_ROLES)`. Pero el encabezado de la ruta dice desde
+   * siempre «AC6: Non-admin users get 403 FORBIDDEN», y el e2e que lo
+   * comprobaba afirmaba 403 — solo que nunca corria, salteado por falta de
+   * credenciales de Playwright. O sea: dos tests que se contradecian, y el
+   * unico que corria era el que acompanaba al codigo.
+   *
+   * Se resolvio hacia lo restrictivo. `gmail_poll_state` es estado del SISTEMA
+   * —no tiene columna de inquilino— asi que abrirlo a todos los roles le
+   * contaba a cualquier usuario de cualquier aseguradora cual es la casilla de
+   * entrada del producto y que error dio la ultima conexion.
+   *
+   * Si la decision de producto fuera abrirlo a proposito, se cambia en un
+   * lugar: `ADMIN_ROLES` por `ALL_ROLES` en la ruta, y este test de vuelta.
+   */
+  it("AC6: un analista recibe 403 FORBIDDEN_ROLE", async () => {
     setupSession("analyst");
     setupDbMock("analyst", null);
 
     const response = await GET();
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.is_connected).toBe(false);
+    expect(response.status).toBe(403);
+    expect(body.error.code).toBe("FORBIDDEN_ROLE");
   });
 
   it("returns 401 MISSING_SESSION when not authenticated", async () => {

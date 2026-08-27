@@ -417,21 +417,10 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
             <RawEmailAccordion tenantId={tenantId} caseId={caseRow.id} />
           </section>
 
-          {/* Messages thread — only shown for email channel cases (AC11, AC12) */}
-          {isEmailCase && (
-            <section
-              aria-labelledby="messages-thread-heading"
-              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-            >
-              <h2
-                id="messages-thread-heading"
-                className="text-sm font-semibold text-slate-900 mb-4"
-              >
-                {t("messages.thread.title")}
-              </h2>
-              <MessagesThread caseId={caseRow.id} />
-            </section>
-          )}
+          {/* Messages thread — only shown for email channel cases (AC11, AC12).
+              El marco y el titulo los pone el componente: solo el sabe si hay
+              mensajes, y sin ellos la tarjeta no tiene que existir. */}
+          {isEmailCase && <MessagesThread caseId={caseRow.id} />}
 
           {/* Email-specific sections — only shown for email channel cases */}
           {isEmailCase && (

@@ -16,7 +16,7 @@
  */
 
 import { desc } from "drizzle-orm";
-import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
+import { requireRole, ADMIN_ROLES } from "@/lib/auth/require-role";
 // `gmail_poll_state` es del sistema, no de un inquilino (no tiene la
 // columna). Va por el `db` del módulo a propósito.
 import { db, tables } from "@/lib/db";
@@ -49,7 +49,23 @@ const EMPTY_RESPONSE: GmailStatusResponse = {
 export async function GET() {
   try {
     // ── 1. Auth + admin role check ────────────────────────────────────────────
-    const { user } = await requireRole(...ALL_ROLES);
+    /*
+     * Sólo admin y owner. Decía ALL_ROLES, o sea cualquiera con sesión.
+     *
+     * El encabezado de este mismo archivo dice desde siempre «AC6: Non-admin
+     * users get 403 FORBIDDEN» y «requireAdmin() checks role=admin». La
+     * documentación estaba bien y el código no la cumplía, que es la forma más
+     * incómoda de tener un agujero: quien lee el archivo se queda tranquilo.
+     *
+     * Lo que devolvía a un analista no es inocuo. `gmail_poll_state` es estado
+     * del SISTEMA —no tiene columna de inquilino— así que cualquier usuario de
+     * cualquier aseguradora se enteraba de la casilla de entrada del producto y
+     * del último error de la conexión.
+     *
+     * Había un test que lo comprobaba y nunca corrió: se salteaba por falta de
+     * credenciales de Playwright. Se descubrió al crearlas.
+     */
+    const { user } = await requireRole(...ADMIN_ROLES);
 
     // ── 2. Rate limit ─────────────────────────────────────────────────────────
     const rateLimitResult = await rateLimit(

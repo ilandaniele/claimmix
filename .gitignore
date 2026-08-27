@@ -109,3 +109,6 @@ Arquitectura*ClaimMix.md
 
 # Rutas que el SDK de flujos genera en cada build.
 src/app/.well-known/workflow/
+tests/e2e/.sesiones/
+.e2e-env.sh
+.dev.log

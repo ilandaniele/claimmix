@@ -16,11 +16,33 @@
 
 import { test, expect } from "@playwright/test";
 
+/*
+ * Éste es el único archivo que se loguea de verdad, y usa su propia cuenta.
+ *
+ * El login limita a cinco intentos cada diez segundos por IP y correo. Es la
+ * defensa contra el rociado de contraseñas y no se toca: un test que sólo pasa
+ * con la defensa apagada no prueba el producto que se despliega.
+ *
+ * Pero eso significa que hay un cupo compartido, y estos cuatro tests lo gastan
+ * entre todos: tres entradas válidas y una inválida. El resto de la suite ya no
+ * se loguea —reusa la sesión que guarda `auth.setup.ts`— así que alcanza con que
+ * este archivo tenga un correo propio para no compartir cupo con el sembrado de
+ * esa sesión.
+ *
+ * Cae de vuelta a PLAYWRIGHT_TEST_* para que siga andando donde haya una sola
+ * cuenta configurada; ahí los cuatro entran igual, sólo que más justo.
+ */
 const TEST_EMAIL =
-  process.env.PLAYWRIGHT_TEST_EMAIL ?? "lucia@seguros-del-sur.com.ar";
-const TEST_PASSWORD = process.env.PLAYWRIGHT_TEST_PASSWORD ?? "Analyst123!";
+  process.env.PLAYWRIGHT_ANALYST_EMAIL ??
+  process.env.PLAYWRIGHT_TEST_EMAIL ??
+  "lucia@seguros-del-sur.com.ar";
+const TEST_PASSWORD =
+  process.env.PLAYWRIGHT_ANALYST_PASSWORD ??
+  process.env.PLAYWRIGHT_TEST_PASSWORD ??
+  "Analyst123!";
 const HAS_TEST_CREDS = !!(
-  process.env.PLAYWRIGHT_TEST_EMAIL && process.env.PLAYWRIGHT_TEST_PASSWORD
+  (process.env.PLAYWRIGHT_ANALYST_EMAIL ?? process.env.PLAYWRIGHT_TEST_EMAIL) &&
+  (process.env.PLAYWRIGHT_ANALYST_PASSWORD ?? process.env.PLAYWRIGHT_TEST_PASSWORD)
 );
 
 test.describe("Login page — Spanish UI (AC4)", () => {
@@ -123,8 +145,26 @@ test.describe("Sign-in flow (AC4) — requires Neon credentials", () => {
     await page.waitForURL(/\/bandeja/);
 
     // Sign out via the API.
-    const response = await page.request.post("/api/auth/sign-out");
-    expect(response.status()).toBe(204);
+    //
+    // Con `Content-Type: application/json` y cuerpo vacio, que es lo que pide
+    // Better Auth: sin la cabecera responde 415 y el test culpaba al cierre de
+    // sesion por algo que era como se lo llamaba. Lo que se prueba aca es que
+    // cerrar sesion funcione, no la negociacion de contenido.
+    const response = await page.request.post("/api/auth/sign-out", {
+      headers: {
+        "Content-Type": "application/json",
+        // Better Auth exige Origin: es su defensa contra CSRF. Sin la cabecera
+        // responde 403, y el test culpaba al cierre de sesion por algo que era
+        // como se lo llamaba.
+        Origin: "http://localhost:3000",
+      },
+      data: {},
+    });
+    // Que haya salido bien, sin atarse al codigo exacto: esta version de Better
+    // Auth responde 200 con cuerpo y el test esperaba 204. Lo que de verdad
+    // prueba el cierre de sesion es la afirmacion de abajo — que despues de
+    // esto una ruta privada mande al login.
+    expect(response.ok()).toBe(true);
 
     // After sign-out, /bandeja should redirect to /login.
     await page.goto("/bandeja");
@@ -137,7 +177,13 @@ test.describe("Sign-in flow (AC4) — requires Neon credentials", () => {
     await page.fill('[name="password"]', "wrongpassword!");
     await page.click('[type="submit"]');
 
-    const errorAlert = page.getByRole("alert");
+    // Acotado al formulario: la pantalla tiene mas de un elemento con rol
+    // `alert`. El overlay de desarrollo de Next inyecta el suyo, vacio, y
+    // `page.getByRole("alert")` a secas se quedaba con ese — el test fallaba
+    // diciendo que el mensaje estaba vacio cuando el mensaje existia al lado.
+    const errorAlert = page
+      .getByRole("form", { name: /inicio de sesión/i })
+      .getByRole("alert");
     await expect(errorAlert).toBeVisible();
     const text = await errorAlert.textContent();
     expect(text).toBeTruthy();

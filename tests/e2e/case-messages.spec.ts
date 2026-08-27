@@ -21,6 +21,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { SESION_ANALISTA } from "./sesiones";
 
 const TEST_EMAIL = process.env.PLAYWRIGHT_TEST_EMAIL;
 const TEST_PASSWORD = process.env.PLAYWRIGHT_TEST_PASSWORD;
@@ -76,14 +77,15 @@ test.describe("Messages thread — Gmail case with messages (Scenario 1)", () =>
     "Skipped: PLAYWRIGHT_TEST_EMAIL or PLAYWRIGHT_EMAIL_CASE_ID not set — requires a live case with channel='email' and claim_messages"
   );
 
-  test.beforeEach(async ({ page }) => {
-    // Sign in before each test
-    await page.goto("/login");
-    await page.fill('[name="email"]', TEST_EMAIL!);
-    await page.fill('[name="password"]', TEST_PASSWORD!);
-    await page.click('[type="submit"]');
-    await page.waitForURL(/\/bandeja/);
-  });
+  /*
+   * La sesión sale del archivo que dejó `auth.setup.ts`, no de loguearse acá.
+   *
+   * Estos tests no prueban el login: prueban qué muestra la pantalla de un caso.
+   * Entrar de nuevo en cada uno gastaba el cupo del límite de tráfico —cinco
+   * intentos cada diez segundos— y los hacía fallar con «Demasiados intentos»,
+   * que en el reporte se lee como si el login estuviera roto.
+   */
+  test.use({ storageState: SESION_ANALISTA });
 
   test("case detail shows 'Mensajes recibidos' heading for email case", async ({ page }) => {
     await page.goto(`/casos/${EMAIL_CASE_ID}`);
@@ -141,13 +143,15 @@ test.describe("Messages thread — case with no messages (Scenario 2)", () => {
     "Skipped: PLAYWRIGHT_TEST_EMAIL or PLAYWRIGHT_EMPTY_CASE_ID not set — requires a live case with channel='email' and 0 claim_messages"
   );
 
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.fill('[name="email"]', TEST_EMAIL!);
-    await page.fill('[name="password"]', TEST_PASSWORD!);
-    await page.click('[type="submit"]');
-    await page.waitForURL(/\/bandeja/);
-  });
+  /*
+   * La sesión sale del archivo que dejó `auth.setup.ts`, no de loguearse acá.
+   *
+   * Estos tests no prueban el login: prueban qué muestra la pantalla de un caso.
+   * Entrar de nuevo en cada uno gastaba el cupo del límite de tráfico —cinco
+   * intentos cada diez segundos— y los hacía fallar con «Demasiados intentos»,
+   * que en el reporte se lee como si el login estuviera roto.
+   */
+  test.use({ storageState: SESION_ANALISTA });
 
   test("'Mensajes recibidos' heading NOT present when case has no claim_messages (AC12)", async ({ page }) => {
     await page.goto(`/casos/${EMPTY_CASE_ID}`);

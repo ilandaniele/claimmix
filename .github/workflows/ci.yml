@@ -450,6 +450,25 @@ jobs:
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
           DATABASE_URL_APP: ${{ secrets.E2E_DATABASE_URL_APP || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'placeholder-secret' }}
+          # Las cuentas y los casos que viven en la base de ensayo.
+          #
+          # Sin esto, catorce tests se salteaban con un mensaje claro — no era
+          # un verde mentiroso, pero eran catorce comprobaciones que no
+          # existian: el login, el cierre de sesion, la conversacion de un caso
+          # y la separacion entre lo que ve un admin y lo que ve un analista.
+          #
+          # Las siembra 'pnpm sembrar', que se niega a correr contra produccion.
+          PLAYWRIGHT_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_TEST_EMAIL }}
+          PLAYWRIGHT_TEST_PASSWORD: ${{ secrets.PLAYWRIGHT_TEST_PASSWORD }}
+          PLAYWRIGHT_ANALYST_EMAIL: ${{ secrets.PLAYWRIGHT_ANALYST_EMAIL }}
+          PLAYWRIGHT_ANALYST_PASSWORD: ${{ secrets.PLAYWRIGHT_ANALYST_PASSWORD }}
+          PLAYWRIGHT_ADMIN_EMAIL: ${{ secrets.PLAYWRIGHT_ADMIN_EMAIL }}
+          PLAYWRIGHT_ADMIN_PASSWORD: ${{ secrets.PLAYWRIGHT_ADMIN_PASSWORD }}
+          PLAYWRIGHT_EMAIL_CASE_ID: ${{ secrets.PLAYWRIGHT_EMAIL_CASE_ID }}
+          PLAYWRIGHT_EMPTY_CASE_ID: ${{ secrets.PLAYWRIGHT_EMPTY_CASE_ID }}
+          # simulate-flow.spec.ts usa otros nombres para lo mismo.
+          TEST_ANALYST_EMAIL: ${{ secrets.TEST_ANALYST_EMAIL }}
+          TEST_ANALYST_PASSWORD: ${{ secrets.TEST_ANALYST_PASSWORD }}
           MOCK_AI: "true"
 
       - name: Upload Playwright report

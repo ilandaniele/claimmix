@@ -26,7 +26,7 @@ vi.mock("drizzle-orm/neon-http", () => ({
       // La consulta del guardia se reconoce por su contenido; cualquier otra
       // devuelve una fila vacía.
       if (texto.includes("rolbypassrls")) return Promise.resolve([{ ...rol }]);
-      return { tipo: "consulta", q };
+      return { tipo: "consulta", q, _prepare: () => ({}) };
     },
     batch: () => Promise.resolve([{}, []]),
   }),
@@ -113,7 +113,7 @@ describe("el rol con el que entra la capa", () => {
             consultadas.push("guardia");
             return Promise.resolve([{ ...rol }]);
           }
-          return { tipo: "consulta", q };
+          return { tipo: "consulta", q, _prepare: () => ({}) };
         },
         batch: () => Promise.resolve([{}, []]),
       }),
@@ -142,7 +142,7 @@ describe("un fallo pasajero no deja la capa rota", () => {
             if (intentos === 1) return Promise.reject(new Error("fetch failed"));
             return Promise.resolve([{ ...rol }]);
           }
-          return { tipo: "consulta", q };
+          return { tipo: "consulta", q, _prepare: () => ({}) };
         },
         batch: () => Promise.resolve([{}, ["fila"]]),
       }),

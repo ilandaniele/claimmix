@@ -74,6 +74,54 @@ const CORREO = process.env.INTEGRATION_TEST_EMAIL ?? "lucia@seguros-del-sur.com.
 const CLAVE = process.env.INTEGRATION_TEST_PASSWORD ?? "Analyst123!";
 const INQUILINO = "10000000-0000-0000-0000-000000000001";
 
+/*
+ * La cuenta con rol `admin`, que es la mitad que faltaba.
+ *
+ * Catorce tests e2e se saltean sin ella, y no son cualquiera: son los que
+ * comprueban que el login funcione y que un analista NO vea lo que ve un
+ * admin. Playwright los saltea con un mensaje claro, así que no era un verde
+ * mentiroso — pero catorce tests de separación de roles que nunca corren son
+ * catorce tests que no existen.
+ *
+ * La contraseña NO tiene valor por omisión, a diferencia de la del analista.
+ * Ésa arrastra `Analyst123!` desde antes y se queda por compatibilidad; poner
+ * un default para la de admin sería escribir la contraseña de una cuenta
+ * administradora en un repositorio público. Sin la variable, esto se planta:
+ * es preferible a crear en silencio una cuenta cuya clave no coincide con la
+ * que guardó CI, que se descubre como catorce tests que siguen sin correr.
+ */
+const ADMIN_CORREO = process.env.INTEGRATION_ADMIN_EMAIL ?? "mariela@seguros-del-sur.com.ar";
+const ADMIN_CLAVE = process.env.INTEGRATION_ADMIN_PASSWORD;
+
+/*
+ * Una segunda cuenta de analista, sólo para los tests que prueban el login.
+ *
+ * El login tiene límite de tráfico —cinco intentos cada diez segundos por IP y
+ * correo— y es una defensa que no se toca. Pero eso significa que los tests que
+ * se loguean de verdad comparten cupo con todo lo demás que se loguea, y nueve
+ * inicios de sesión seguidos lo agotan: los e2e fallaban con «Demasiados
+ * intentos» y parecía que el login estaba roto.
+ *
+ * El resto de los tests ya no se loguea —reusa una sesión guardada— y estos
+ * cuatro, que no pueden, tienen su propio correo y por lo tanto su propio cupo.
+ * Se arregla el ensayo sin aflojarle al producto.
+ */
+const LOGIN_CORREO = process.env.INTEGRATION_LOGIN_EMAIL ?? "sofia@seguros-del-sur.com.ar";
+const LOGIN_CLAVE = process.env.INTEGRATION_LOGIN_PASSWORD ?? CLAVE;
+
+/*
+ * Los dos casos que piden los e2e de la conversación, con id fijo.
+ *
+ * Fijo y no aleatorio porque el id viaja como secreto de CI: si cambiara en
+ * cada sembrado, el secreto quedaría viejo y los tests volverían a saltearse.
+ *
+ * Uno con mensajes y otro sin ninguno, que es la distinción que prueban: que
+ * la pantalla de conversación muestre lo que hay y no se rompa cuando no hay
+ * nada.
+ */
+const CASO_CON_MENSAJES = "e2e00000-0000-4000-8000-000000000001";
+const CASO_SIN_MENSAJES = "e2e00000-0000-4000-8000-000000000002";
+
 const { Pool, neonConfig } = await import("@neondatabase/serverless");
 neonConfig.webSocketConstructor = globalThis.WebSocket as never;
 const pool = new Pool({ connectionString: destino });
@@ -93,37 +141,80 @@ try {
   );
   console.log(`\n▸ Inquilino\n   ✓ Seguros del Sur S.A.`);
 
-  // ── El usuario ─────────────────────────────────────────────────────────────
-  console.log(`\n▸ Usuario de prueba`);
-  const { rows: yaEsta } = await cx.query(`select id from "user" where email = $1`, [CORREO]);
+  // ── Las cuentas ────────────────────────────────────────────────────────────
+  /**
+   * Crea la cuenta si no está, y le escribe el perfil siempre.
+   *
+   * Son dos pasos porque el producto los tiene separados a propósito: el alta
+   * crea la cuenta para cualquiera, y el perfil —lo que la ata a una aseguradora
+   * y le da un rol— sólo lo escribe un admin. Es el mismo camino que usa el
+   * panel; no se debilita el alta ni se inventa un atajo.
+   */
+  async function alta(correo: string, clave: string, nombre: string, rol: string) {
+    const { rows: yaEsta } = await cx.query(`select id from "user" where email = $1`, [correo]);
 
-  let id: string;
-  if (yaEsta.length > 0) {
-    id = yaEsta[0].id;
-    console.log(`   · la cuenta ya existía (${id.slice(0, 8)})`);
-  } else {
-    const { auth } = await import("@/lib/auth");
-    const r = await auth.api.signUpEmail({
-      body: { name: "Lucía Fernández", email: CORREO, password: CLAVE },
-      headers: new Headers(),
-    });
-    id = r.user.id;
-    console.log(`   ✓ cuenta creada (${id.slice(0, 8)})`);
+    let id: string;
+    if (yaEsta.length > 0) {
+      id = yaEsta[0].id;
+      console.log(`   · ${rol}: la cuenta ya existía (${id.slice(0, 8)})`);
+
+      /*
+       * Y se le pone la contraseña que pide quien sembró, aunque ya exista.
+       *
+       * Sin esto el sembrado no es idempotente en lo único que importa. La
+       * cuenta del analista ya estaba de un sembrado anterior, así que el alta
+       * la salteaba y su contraseña seguía siendo la vieja — mientras el secreto
+       * de CI guardaba la nueva. El síntoma no es un error: es que los tests se
+       * siguen salteando, o peor, fallan en el login y parece que el login está
+       * roto.
+       *
+       * Es una base de ensayo y estas cuentas existen para esto. Pisar la
+       * contraseña es lo correcto acá y sería inaceptable en cualquier otro lado,
+       * y por eso el script se planta si la cadena es la de producción.
+       */
+      const { auth } = await import("@/lib/auth");
+      const ctx = await auth.$context;
+      await ctx.internalAdapter.updatePassword(id, await ctx.password.hash(clave));
+      console.log(`   ✓ ${rol}: contraseña puesta al día`);
+    } else {
+      const { auth } = await import("@/lib/auth");
+      const r = await auth.api.signUpEmail({
+        body: { name: nombre, email: correo, password: clave },
+        headers: new Headers(),
+      });
+      id = r.user.id;
+      console.log(`   ✓ ${rol}: cuenta creada (${id.slice(0, 8)})`);
+    }
+
+    await cx.query(
+      `insert into users (id, tenant_id, full_name, role)
+       values ($1, $2, $3, $4)
+       on conflict (id) do update set tenant_id = excluded.tenant_id, role = excluded.role`,
+      [id, INQUILINO, nombre, rol]
+    );
+    const { rows: perfil } = await cx.query(
+      `select tenant_id::text as t, role from users where id = $1`,
+      [id]
+    );
+    if (perfil.length === 0) throw new Error(`el perfil de ${correo} no quedó`);
+    console.log(`   ✓ ${rol}: perfil en ${perfil[0].t.slice(0, 8)}`);
   }
 
-  // El perfil, que es lo que el alta NO crea para quien no está en la lista.
-  await cx.query(
-    `insert into users (id, tenant_id, full_name, role)
-     values ($1, $2, 'Lucía Fernández', 'analyst')
-     on conflict (id) do update set tenant_id = excluded.tenant_id, role = excluded.role`,
-    [id, INQUILINO]
-  );
-  const { rows: perfil } = await cx.query(
-    `select tenant_id::text as t, role from users where id = $1`,
-    [id]
-  );
-  if (perfil.length === 0) throw new Error("el perfil no quedó");
-  console.log(`   ✓ perfil: ${perfil[0].role} en ${perfil[0].t.slice(0, 8)}`);
+  console.log(``);
+  console.log("▸ Cuentas de prueba");
+  await alta(CORREO, CLAVE, "Lucía Fernández", "analyst");
+
+  if (!ADMIN_CLAVE) {
+    console.error("");
+    console.error("✗ Falta INTEGRATION_ADMIN_PASSWORD.");
+    console.error("  Sin ella no se crea la cuenta admin, y los catorce e2e de");
+    console.error("  separación de roles se siguen salteando. No hay valor por omisión");
+    console.error("  a propósito: sería la contraseña de una cuenta administradora");
+    console.error("  escrita en un repositorio público.");
+    process.exit(2);
+  }
+  await alta(ADMIN_CORREO, ADMIN_CLAVE, "Mariela Sosa", "admin");
+  await alta(LOGIN_CORREO, LOGIN_CLAVE, "Sofía Bianchi", "analyst");
 
   // ── Un caso, para que los listados tengan qué devolver ─────────────────────
   const { rows: casos } = await cx.query(
@@ -141,9 +232,76 @@ try {
     console.log(`\n▸ Datos\n   · ya había ${casos[0].n} caso(s)`);
   }
 
+  // ── Los dos casos que piden los e2e de la conversación ─────────────────────
+  //
+  // Uno con mensajes y otro sin ninguno. La distinción es la que prueban: que
+  // la pantalla muestre la conversación cuando la hay, y que no se rompa cuando
+  // no hay nada. Un caso vacío es el estado de todo siniestro recién entrado,
+  // así que es el que más se ve y el que menos se prueba.
+  for (const [id, quien, poliza] of [
+    [CASO_CON_MENSAJES, "Roberto Paz", "POL-4471-A"],
+    [CASO_SIN_MENSAJES, "Elena Duarte", "POL-9920-C"],
+  ] as const) {
+    await cx.query(
+      `insert into cases (id, tenant_id, policyholder_name, policy_number, claim_type, status, channel)
+       values ($1, $2, $3, $4, 'choque', 'recibido', 'email')
+       on conflict (id) do update set policyholder_name = excluded.policyholder_name`,
+      [id, INQUILINO, quien, poliza]
+    );
+  }
+
+  // El mensaje entrante del primero. `on conflict` sobre un id fijo, para que
+  // sembrar dos veces no deje dos copias de la misma conversación.
+  await cx.query(
+    `insert into claim_messages
+       (id, tenant_id, case_id, direction, status, provider, from_addr, subject, body_text, received_at)
+     values ($1, $2, $3, 'inbound', 'received', 'gmail',
+             'roberto.paz@example.com', 'Choque en Alem al 2300',
+             'Buenas, choqué ayer a la tarde en Alem al 2300. Soy Roberto Paz.', now())
+     on conflict (id) do nothing`,
+    ["e2e00000-0000-4000-8000-00000000000a", INQUILINO, CASO_CON_MENSAJES]
+  );
+
+  const { rows: cuenta } = await cx.query(
+    `select count(*)::int as n from claim_messages where case_id = $1`,
+    [CASO_CON_MENSAJES]
+  );
+  console.log(``);
+  // ── El estado de la casilla, para la pantalla de configuracion ─────────────
+  //
+  // La seccion «Bandeja de entrada Gmail» solo se dibuja si hay algo que
+  // contar: sin una fila aca, la ruta devuelve el vacio y el componente no
+  // pinta nada. El e2e que comprueba que un admin la ve —y que un analista NO—
+  // necesita entonces que la casilla exista.
+  //
+  // Es una direccion `example.com`, reservada: no le pertenece a nadie y el
+  // despachador se niega a escribirle.
+  await cx.query(
+    `insert into gmail_poll_state (id, gmail_account_email, last_polled_at, last_error)
+     values ($1, 'intake.ensayo@example.com', now(), null)
+     on conflict (id) do update set last_polled_at = now(), last_error = null`,
+    ["e2e00000-0000-4000-8000-0000000000b0"]
+  );
+
+  console.log("▸ Casos para los e2e");
+  console.log(`   ✓ con mensajes: ${CASO_CON_MENSAJES}  (${cuenta[0].n})`);
+  console.log(`   ✓ sin mensajes: ${CASO_SIN_MENSAJES}`);
+
   console.log(`\n${"─".repeat(66)}`);
   console.log("✓ Listo. Los tests de integración pueden correr contra esta base.");
   console.log(`  Usuario: ${CORREO}`);
+  console.log(`  Admin:   ${ADMIN_CORREO}`);
+  console.log(``);
+  console.log("  Para que los e2e de login y roles dejen de saltearse, estos ocho");
+  console.log("  valores van como secretos del repositorio:");
+  console.log(`    PLAYWRIGHT_TEST_EMAIL      ${CORREO}`);
+  console.log("    PLAYWRIGHT_TEST_PASSWORD   (la de INTEGRATION_TEST_PASSWORD)");
+  console.log(`    PLAYWRIGHT_ANALYST_EMAIL   ${LOGIN_CORREO}`);
+  console.log("    PLAYWRIGHT_ANALYST_PASSWORD(la de INTEGRATION_LOGIN_PASSWORD)");
+  console.log(`    PLAYWRIGHT_ADMIN_EMAIL     ${ADMIN_CORREO}`);
+  console.log("    PLAYWRIGHT_ADMIN_PASSWORD  (la de INTEGRATION_ADMIN_PASSWORD)");
+  console.log(`    PLAYWRIGHT_EMAIL_CASE_ID   ${CASO_CON_MENSAJES}`);
+  console.log(`    PLAYWRIGHT_EMPTY_CASE_ID   ${CASO_SIN_MENSAJES}`);
 } finally {
   cx.release();
   await pool.end();

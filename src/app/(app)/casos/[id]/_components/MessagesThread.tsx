@@ -216,6 +216,33 @@ interface MessagesThreadProps {
   caseId: string;
 }
 
+/**
+ * El marco de la conversacion: borde, titulo y adentro lo que haya.
+ *
+ * A nivel de modulo y no adentro de MessagesThread: un componente declarado
+ * durante el render se vuelve a crear en cada pasada, y React lo trata como
+ * otro componente — le reinicia el estado a todo lo que tenga adentro. Acá hoy
+ * no habria roto nada porque las tarjetas no guardan estado, pero es la clase
+ * de bug que aparece el dia que alguien agrega un desplegable.
+ */
+function Marco({ children }: { children: React.ReactNode }) {
+  const t = useT();
+  return (
+    <section
+      aria-labelledby="messages-thread-heading"
+      className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+    >
+      <h2
+        id="messages-thread-heading"
+        className="text-sm font-semibold text-slate-900 mb-4"
+      >
+        {t("messages.thread.title")}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
 export function MessagesThread({ caseId }: MessagesThreadProps) {
   const t = useT();
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -251,22 +278,40 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
     };
   }, [caseId]);
 
+  /*
+   * La tarjeta entera, titulo incluido, vive aca adentro.
+   *
+   * Estaba en page.tsx, envolviendo a este componente: el encabezado
+   * «Mensajes recibidos» se pintaba para TODO caso de mail, y este componente
+   * devolvia null cuando no habia ninguno. Resultado: una tarjeta con titulo y
+   * nada abajo en cualquier siniestro recien entrado — que es el estado mas
+   * frecuente de todos y el que mas se mira.
+   *
+   * Quien sabe si hay algo que mostrar es este componente, asi que el marco es
+   * suyo. Asi «no hay mensajes» hace desaparecer la tarjeta entera y no queda
+   * un titulo huerfano.
+   */
+
   // Loading: show skeleton cards.
   if (loadState === "loading") {
     return (
-      <div className="space-y-3">
-        <MessageSkeleton />
-        <MessageSkeleton />
-      </div>
+      <Marco>
+        <div className="space-y-3">
+          <MessageSkeleton />
+          <MessageSkeleton />
+        </div>
+      </Marco>
     );
   }
 
   // Error: show generic error message (no PII).
   if (loadState === "error") {
     return (
-      <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
-        {t("error.generic")}
-      </div>
+      <Marco>
+        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+          {t("error.generic")}
+        </div>
+      </Marco>
     );
   }
 
@@ -276,12 +321,14 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
   }
 
   return (
-    <div data-testid="messages-thread">
-      <div className="space-y-3">
-        {messages.map((message) => (
-          <MessageCard key={message.id} message={message} />
-        ))}
+    <Marco>
+      <div data-testid="messages-thread">
+        <div className="space-y-3">
+          {messages.map((message) => (
+            <MessageCard key={message.id} message={message} />
+          ))}
+        </div>
       </div>
-    </div>
+    </Marco>
   );
 }

@@ -197,6 +197,39 @@ function exigirConsulta(valor: unknown): void {
         "antes de que la capa pueda ponerle el contexto. Va afuera:\n" +
         "  enTenant(ctx, (db) => db.select()...).catch(() => [])"
     );
+  }
+
+  /*
+   * Y lo que no es una promesa pero tampoco es una consulta.
+   *
+   * Este guardia miraba solo `instanceof Promise`, y por ahi se colo
+   * `db.$count(...)`: drizzle devuelve un objeto que se puede esperar pero que
+   * no es una promesa de verdad, asi que pasaba el control y reventaba despues,
+   * adentro de `batch`, con "query._prepare is not a function" — un mensaje que
+   * no dice quien lo llamo ni que hacer.
+   *
+   * Estuvo roto en produccion: los contadores de la bandeja y el conteo de
+   * ejemplos del entrenamiento, en cada carga.
+   *
+   * Lo que `batch` necesita es poder ARMAR la consulta, y eso se pregunta
+   * directamente. Cualquier cosa que no sepa hacerlo se rechaza aca, con el
+   * nombre de lo que llego, en vez de treinta lineas mas adelante.
+   */
+  const armable =
+    typeof (valor as { _prepare?: unknown } | null)?._prepare === "function";
+  if (!armable) {
+    const que =
+      valor === null || valor === undefined
+        ? String(valor)
+        : ((valor as { constructor?: { name?: string } }).constructor?.name ??
+          typeof valor);
+    throw new Error(
+      `[data] a enTenant le llego un ${que}, que no es una consulta que se pueda ` +
+        "armar. La capa manda todo por batch() para pegarle adelante el " +
+        "contexto del inquilino, y para eso necesita la consulta sin resolver. " +
+        "db.$count(tabla, where) NO sirve: usa db.select({ n: count }).from(tabla).where(where). " +
+        "db.execute(...) tampoco: devuelve el resultado, no la consulta."
+    );
   }
 }
 

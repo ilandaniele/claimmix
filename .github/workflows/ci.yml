@@ -405,36 +405,50 @@ jobs:
       # falten significa que alguien los sacó.
       - name: Run E2E tests
         run: |
-          if [ "${{ secrets.DATABASE_URL }}" != "" ]; then
+          if [ "${{ secrets.E2E_DATABASE_URL }}" != "" ]; then
             pnpm test:e2e --project=chromium
           elif [ "${{ github.event_name }}" = "push" ]; then
             {
               echo "### Los e2e no corrieron"
               echo ""
-              echo "Falta el secreto \`DATABASE_URL\`. Playwright levanta el servidor"
-              echo "con \`pnpm dev\`, y sin base el servidor no arranca."
+              echo "Falta el secreto `E2E_DATABASE_URL`. Playwright levanta el servidor"
+              echo "con `pnpm dev`, y sin base el servidor no arranca."
               echo ""
               echo "**Trece de estos tests no necesitan datos**: cabeceras, nonce de la"
               echo "CSP por pedido, iframe, límite de tráfico, y que las rutas del motor"
               echo "de flujos no acepten trabajo de afuera. Sólo necesitan que el"
               echo "servidor levante."
               echo ""
-              echo "Se prende apuntando al ENSAYO, nunca a producción:"
+              echo "Se prende apuntando al ENSAYO:"
               echo ""
               echo '```'
-              echo 'gh secret set DATABASE_URL --body "$STAGING_DATABASE_URL"'
-              echo 'gh secret set DATABASE_URL_APP --body "$STAGING_DATABASE_URL"'
-              echo 'gh secret set BETTER_AUTH_SECRET --body "$(openssl rand -hex 32)"'
+              echo 'gh secret set E2E_DATABASE_URL --body "$STAGING_DATABASE_URL"'
+              echo 'gh secret set E2E_DATABASE_URL_APP --body "$STAGING_DATABASE_URL_APP"'
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error title=E2E sin correr::Falta el secreto DATABASE_URL. 13 tests de seguridad que no necesitan datos quedaron sin correr — el resumen del run tiene el comando exacto."
+            echo "::error title=E2E sin correr::Falta el secreto E2E_DATABASE_URL. 13 tests de seguridad que no necesitan datos quedaron sin correr — el resumen del run tiene el comando exacto."
             exit 1
           else
-            echo "::warning title=E2E sin correr::Falta DATABASE_URL — normal en un fork. Los e2e NO se probaron en este PR."
+            echo "::warning title=E2E sin correr::Falta E2E_DATABASE_URL — normal en un fork. Los e2e NO se probaron en este PR."
           fi
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
-          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
+          # Secretos PROPIOS, y no los de producción, y ese es todo el punto.
+          #
+          # Esto corría con `secrets.DATABASE_URL`, o sea contra la base de los
+          # clientes. El aviso de más abajo decía desde siempre «se prende apuntando
+          # al ENSAYO, nunca a producción» y alguien igual puso la de producción: es
+          # la misma variable, así que apuntarla mal es un descuido de un segundo y
+          # no se ve en ningún lado después.
+          #
+          # Con un nombre distinto deja de depender de que alguien se acuerde. Para
+          # que los e2e toquen producción hay que ir a crear un secreto que se llama
+          # E2E_DATABASE_URL y pegarle adentro la cadena de producción, que ya no es
+          # un descuido sino una decisión.
+          #
+          # Los e2e escriben: crean casos, sesiones, filas de límite de tráfico. En
+          # la base de ensayo eso es lo que tiene que pasar.
+          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
+          DATABASE_URL_APP: ${{ secrets.E2E_DATABASE_URL_APP || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'placeholder-secret' }}
           MOCK_AI: "true"
 

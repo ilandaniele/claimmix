@@ -610,17 +610,40 @@ de una persona y no el de quien adivina contraseñas— y **la capa de datos no
 comprobaba su propia suposición**: con `DATABASE_URL_APP` apuntando al rol
 dueño, `/api/cases` sirvió casos de tres aseguradoras con un 200 impecable.
 
-**Los e2e sí se pueden prender, y falta hacerlo.** Trece de ellos no necesitan
-datos —cabeceras, nonce de la CSP por pedido, iframe, límite de tráfico, y que
-las rutas del motor de flujos no acepten trabajo de afuera—, sólo que el servidor
-levante. Apuntando al ENSAYO, nunca a producción:
+**Los e2e están prendidos desde el 27 de agosto de 2026, y ninguno se saltea.**
+68 tests: login y cierre de sesión de verdad, la conversación de un caso,
+simular un mail y verlo aparecer en la tabla, más las cabeceras y límites que
+no necesitan datos.
 
-```bash
-gh secret set DATABASE_URL --body "$STAGING_DATABASE_URL"
-```
+Corren contra el ENSAYO con secretos PROPIOS —`E2E_DATABASE_URL` y
+`E2E_DATABASE_URL_APP`— y ese es todo el punto. Antes usaban `DATABASE_URL`, o
+sea la base de los clientes, y los e2e escriben. El aviso del propio job decía
+desde siempre «apuntando al ENSAYO, nunca a producción» y estaba mal igual:
+con la misma variable, apuntarla mal es un descuido de un segundo que después
+no se ve. Con un nombre distinto, para que toquen producción hay que ir a crear
+un secreto con ese nombre y pegarle adentro esa cadena — ya no es un descuido
+sino una decisión.
 
-Hasta que estén, ese job falla en `main` a propósito: es una exigencia que se
-satisface en treinta segundos, no una imposible.
+Cómo correrlos en local está en `docs/TESTING.md`, sección 8: `pnpm sembrar` y
+`pnpm test:e2e`.
+
+**Encenderlos destapó tres fallas reales, todas en producción:**
+
+- `countRows` estaba caído en cada carga de la bandeja, y también en el listado
+  de clientes, el de pólizas y la pantalla de métricas. Envolvía `db.$count`,
+  que no devuelve una consulta sino un objeto que se puede esperar: la capa
+  manda todo por `batch()` y necesita ARMARLA. La bandeja mostraba «This page
+  couldn't load». Hay una invariante nueva que lo prohíbe.
+- `/api/admin/gmail-status` dejaba entrar a cualquier usuario con sesión,
+  mientras el encabezado del propio archivo decía «AC6: Non-admin users get
+  403». Había dos tests contradiciéndose y sólo corría el que acompañaba al
+  código. Esa ruta y su pantalla huérfana ya no existen.
+- El bloque que saca a un usuario con sesión de `/login` era código muerto: el
+  proxy devuelve temprano para las rutas públicas y `/login` es pública.
+
+Catorce de esos tests se salteaban con un mensaje claro, así que no era un
+verde mentiroso. Pero eran catorce comprobaciones que no existían y se contaban
+como cobertura. Un test que no corre cuesta más que no tenerlo.
 
 **Estado de los pipelines:** CI en verde. Post-deploy con smoke, pen test,
 permisos, carga y timbre en verde.
@@ -686,6 +709,12 @@ contra producción o con un test que falla si deja de ser cierto.
 - **Dominio propio**: corre en `claimmix.vercel.app`. Hace falta comprar y
   configurar uno.
 - **VPS**: no aplica. Esto es serverless; no hay puertos ni SSH que cerrar.
+- **Nadie tiene rol `specialist` ni `owner`.** Los avisos de «siniestro
+  derivado a especialista» funcionan sólo porque la lista de destinatarios
+  está fijada a mano en el despliegue (`SPECIALIST_ALERT_EMAILS`). Si esa
+  variable se borra, el respaldo busca un `owner`, no encuentra ninguno, y los
+  avisos se apagan sin ruido: el caso queda en `requiere_especialista` y nadie
+  se entera. Asignarle el rol a alguien lo cierra.
 
 **Dos cosas que encontró la revisión, en código escrito el mismo día:**
 

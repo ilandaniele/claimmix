@@ -159,6 +159,32 @@ async function knockByMail(): Promise<void> {
   }
   check("el mensaje quedó en la casilla", true, body.mailbox);
 
+  /*
+   * El identificador con el que vamos a reconocer nuestro propio caso.
+   *
+   * Gmail le pone un id al mensaje que acabamos de depositar, la ruta nos lo
+   * devuelve, y el poller escribe EXACTAMENTE ese id en `cases.email_message_id`
+   * cuando lo levanta. Hay un índice único `(tenant_id, email_message_id)`
+   * detrás, así que apunta a un caso y a uno solo.
+   *
+   * Antes esto se buscaba por `policy_number = "POL-8812-C"`, o sea por un
+   * campo que decide el modelo. Cuando la extracción no dejaba ese número en la
+   * columna del caso —cosa que pasa, y a propósito: el código no escribe ahí lo
+   * que sólo encontró el parser de respaldo— el timbre no encontraba nada y
+   * reportaba "no se creó el caso" sobre un caso que sí existía. Falló así el
+   * 26 de agosto a las 22:39 y pasó diez minutos después con el mismo código.
+   *
+   * Y había un falso verde escondido en la misma consulta: con `order by
+   * created_at desc limit 1`, un caso viejo de otra corrida con esa misma
+   * póliza habría dado el chequeo por bueno sin que la corrida de hoy hubiera
+   * creado nada.
+   */
+  if (!body.message_id) {
+    check("el deploy devolvió el id del mensaje", false, "sin message_id");
+    return;
+  }
+  const messageId = body.message_id;
+
   // El watch avisa a Google, no a nosotros: se dispara el poller igual que a las
   // tres de la mañana, que es el mismo camino que recorre un mail real.
   const poll = await fetch(`${BASE}/api/cron/gmail-poll`, {
@@ -166,18 +192,38 @@ async function knockByMail(): Promise<void> {
   });
   check("el poller lo levantó", poll.ok, `HTTP ${poll.status}`);
 
-  const found = await waitForCase(async () => {
+  /*
+   * Se pregunta dos cosas distintas y se informan por separado.
+   *
+   * Antes había un solo `check("se creó el caso")` que se ponía rojo por tres
+   * motivos que no se parecen en nada: que el caso no exista, que exista y no
+   * lo encontremos, y que exista y todavía esté procesándose. El rojo decía
+   * siempre lo mismo, y mandó a buscar un bug de ingesta que no existía.
+   */
+  const existe = async () => {
     const [row] = await db
       .select({ id: cases.id, status: cases.status })
       .from(cases)
-      .where(and(eq(cases.tenant_id, TENANT!), like(cases.policy_number, "POL-8812-C")))
-      .orderBy(desc(cases.created_at))
+      .where(and(eq(cases.tenant_id, TENANT!), eq(cases.email_message_id, messageId)))
       .limit(1);
     return row ?? null;
-  });
+  };
 
-  check("se creó el caso", Boolean(found), found?.id);
-  if (!found) return;
+  const found = await waitForCase(existe);
+
+  if (!found) {
+    // Una última pregunta sin condición de estado, para poder distinguir "no
+    // entró" de "entró y todavía no terminó". Son dos problemas distintos y
+    // sólo uno de los dos es de la ingesta.
+    const crudo = await existe();
+    check("se creó el caso", Boolean(crudo), crudo?.id ?? `sin caso para ${messageId}`);
+    if (crudo) {
+      check("terminó de procesarse", false, `quedó en ${crudo.status}`);
+    }
+    return;
+  }
+
+  check("se creó el caso", true, found.id);
   created.push(found.id);
 
   const [fields] = await fieldsFor(found.id);

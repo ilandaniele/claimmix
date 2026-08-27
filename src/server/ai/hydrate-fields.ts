@@ -117,12 +117,19 @@ export function scrubPiiFromSummary(extracted: ExtractedClaim): ExtractedClaim {
     // 1. Replace full name if we know it (case-insensitive, whole-token match).
     if (fullName && fullName.length >= 3) {
       const escaped = fullName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // Regla detect-non-literal-regexp. `escaped` sale de la línea de
+      // arriba, que escapa todos los metacaracteres. La regla es sintáctica y
+      // no ve el escape; el valor entra como texto literal, no como patrón.
+      // nosemgrep
       out = out.replace(new RegExp(escaped, "gi"), "el asegurado");
     }
 
     // 2. Replace extracted DNI value by its literal string.
     if (dniValue && /^\d[\d.]*$/.test(dniValue)) {
       out = out.replace(
+        // Regla detect-non-literal-regexp. escapado en la misma expresión,
+        // y además `dniValue` ya pasó por una validación de sólo dígitos y puntos.
+        // nosemgrep
         new RegExp(dniValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
         "[DNI omitido]"
       );
@@ -131,6 +138,8 @@ export function scrubPiiFromSummary(extracted: ExtractedClaim): ExtractedClaim {
     // 3. Replace extracted policy_number by its literal string.
     if (policyValue) {
       out = out.replace(
+        // Regla detect-non-literal-regexp. escapado en la misma expresión.
+        // nosemgrep
         new RegExp(policyValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
         "[póliza omitida]"
       );

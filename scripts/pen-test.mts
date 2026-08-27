@@ -492,8 +492,33 @@ async function attackTenantWall(): Promise<void> {
   const TENANT_A = process.env.GMAIL_TENANT_ID;
   const TENANT_B = process.env.DEMO_TENANT_ID;
 
-  if (!process.env.DATABASE_URL || !TENANT_A || !TENANT_B) {
-    console.log("\n(sin DATABASE_URL o sin segundo tenant: no se prueba la pared)");
+  /*
+   * `DATABASE_URL_APP` entra a la guarda, y no es un detalle de configuración.
+   *
+   * Toda la capa de datos entra por el rol restringido; sin esa variable,
+   * `enTenant` lanza y `getCaseDetail` se traga el error devolviendo null. El
+   * resultado es que la sonda de control —«el caso del tenant B existe y B lo
+   * ve»— se pone en ROJO, y todas las sondas de la pared quedan en VERDE,
+   * porque tampoco encuentran nada.
+   *
+   * O sea: falta una variable de entorno y la salida se lee como si el
+   * aislamiento entre inquilinos estuviera roto. Pasó, y mandó a investigar
+   * una fuga que no existía. Saltearse diciendo QUÉ falta es la diferencia
+   * entre una configuración incompleta y una alarma.
+   */
+  const faltantes = [
+    !process.env.DATABASE_URL && "DATABASE_URL",
+    !process.env.DATABASE_URL_APP && "DATABASE_URL_APP",
+    !TENANT_A && "GMAIL_TENANT_ID",
+    !TENANT_B && "DEMO_TENANT_ID",
+  ].filter(Boolean);
+
+  // La condición se escribe entera, y no `faltantes.length`, porque es la que
+  // le estrecha el tipo a TypeScript: con el largo del array, TENANT_B sigue
+  // siendo `string | undefined` diez líneas más abajo.
+  if (!process.env.DATABASE_URL || !process.env.DATABASE_URL_APP || !TENANT_A || !TENANT_B) {
+    console.log("");
+    console.log(`(falta ${faltantes.join(", ")}: no se prueba la pared)`);
     return;
   }
 

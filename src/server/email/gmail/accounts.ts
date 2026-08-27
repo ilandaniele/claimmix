@@ -35,9 +35,30 @@ function getTokenKey(): Buffer {
   return createHash("sha256").update(secret).digest();
 }
 
+/*
+ * El largo de la etiqueta se fija a mano, y no es cosmético.
+ *
+ * En GCM la etiqueta de autenticación es lo único que distingue un texto
+ * cifrado legítimo de uno fabricado. Node, si no se le dice el largo, acepta
+ * al descifrar etiquetas de 4, 8, 12, 13, 14, 15 o 16 bytes: quien pueda
+ * escribir el texto cifrado guardado puede mandar una de 4 bytes y bajar el
+ * costo de falsificarla de 2^128 a 2^32, que es un rato de CPU.
+ *
+ * Acá adentro viaja el token de Gmail —el permiso permanente para leer y
+ * escribir en la casilla— así que el largo se declara en los dos lados y una
+ * etiqueta de otro tamaño se rechaza antes de intentar descifrar.
+ *
+ * Compatible con lo ya guardado: `getAuthTag()` viene devolviendo 16 bytes,
+ * que es el valor por omisión. Esto no cambia lo que se escribe; cierra lo
+ * que se acepta.
+ */
+const TAG_BYTES = 16;
+
 export function encryptRefreshToken(refreshToken: string): string {
   const iv = randomBytes(12);
-  const cipher = createCipheriv(TOKEN_ALGORITHM, getTokenKey(), iv);
+  const cipher = createCipheriv(TOKEN_ALGORITHM, getTokenKey(), iv, {
+    authTagLength: TAG_BYTES,
+  });
   const encrypted = Buffer.concat([
     cipher.update(refreshToken, "utf8"),
     cipher.final(),
@@ -52,12 +73,18 @@ export function decryptRefreshToken(encryptedToken: string): string {
     throw new Error("Invalid Gmail token payload");
   }
 
+  const tag = Buffer.from(tagRaw, "base64url");
+  if (tag.length !== TAG_BYTES) {
+    throw new Error("Invalid Gmail token payload");
+  }
+
   const decipher = createDecipheriv(
     TOKEN_ALGORITHM,
     getTokenKey(),
-    Buffer.from(ivRaw, "base64url")
+    Buffer.from(ivRaw, "base64url"),
+    { authTagLength: TAG_BYTES }
   );
-  decipher.setAuthTag(Buffer.from(tagRaw, "base64url"));
+  decipher.setAuthTag(tag);
   const decrypted = Buffer.concat([
     decipher.update(Buffer.from(encryptedRaw, "base64url")),
     decipher.final(),

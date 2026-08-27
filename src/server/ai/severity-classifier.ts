@@ -46,6 +46,10 @@ function matchesPattern(text: string, pattern: string): boolean {
   // Match if the keyword is preceded and followed by a non-word character.
   // We include Spanish accented letters as word characters.
   const escaped = lower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Regla detect-non-literal-regexp. `escaped` viene de la línea anterior,
+  // que escapa los metacaracteres, y el patrón sale de una tabla fija del código,
+  // no de nada que escriba un denunciante.
+  // nosemgrep
   const re = new RegExp(
     `(?:^|[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9])${escaped}(?:[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9]|$)`,
     "i"

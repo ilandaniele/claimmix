@@ -486,11 +486,20 @@ jobs:
             --exclude="*.test.ts" \
             --exclude="*.test.tsx" \
             --exclude="*.spec.ts" \
-            --exclude="*.spec.tsx" \
-            || true
-        # `|| true` — semgrep rule updates may flag false positives in CI.
-        # For production hardening: remove `|| true` and fix all findings.
-        continue-on-error: true
+            --exclude="*.spec.tsx"
+        # Sin `|| true` y sin `continue-on-error`, que es lo que tenía.
+        #
+        # Con las dos redes puestas, Semgrep venía encontrando 6 hallazgos —cuatro
+        # marcados Blocking por él mismo— y el job quedaba verde en cada commit.
+        # Nadie los miró nunca porque el ícono estaba bien. Dos eran de verdad:
+        # `gcm-no-tag-length` en los dos lugares donde se descifra un token de
+        # Gmail, o sea el permiso permanente sobre la casilla de una aseguradora.
+        #
+        # Los otros cuatro eran falsos positivos y están marcados uno por uno en el
+        # código con `// nosemgrep` y el motivo al lado. Ésa es la salida cuando una
+        # regla se equivoca: nombrar el caso, no apagar el chequeo entero. Si una
+        # actualización de reglas trae ruido nuevo, esto se pone rojo — que es
+        # exactamente lo que tiene que pasar para que alguien lo mire.
 
   # ── 8. Bundle size check ─────────────────────────────────────────────────────
   bundle-size:
@@ -607,7 +616,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    continue-on-error: true
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -625,6 +633,10 @@ jobs:
           # Install license checker
           pnpm dlx license-checker-rseidelsohn --failOn 'GPL;AGPL;LGPL;SSPL' \
             --excludePrivatePackages \
-            --production \
-            || echo "[warn] License check found potentially problematic licenses — review manually."
-        continue-on-error: true
+            --production
+        # Sin `|| echo` y sin `continue-on-error`. Eran tres redes sobre el mismo
+        # chequeo —el `|| echo` ya forzaba salida 0, así que los dos
+        # `continue-on-error` ni llegaban a actuar— y el resultado era un job que
+        # no podía fallar por ningún camino. Hoy pasa limpio: comprobado corriendo
+        # el checker a mano antes de sacarle la red. Si mañana entra una
+        # dependencia GPL, ahora se entera alguien.

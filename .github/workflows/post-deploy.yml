@@ -345,27 +345,35 @@ jobs:
   # Los ataques al agente (--agent) NO corren acá: gastan tokens del mismo cupo
   # que atiende a los asegurados. Se corren a mano al tocar el agente o los
   # prompts, con `pnpm pentest --agent`.
-  # ── Las dos listas que tienen que decir lo mismo ─────────────────────────────
+  # ── Que el código y la base digan lo mismo ───────────────────────────────────
   #
-  # Hay pares de cosas que se escriben en dos lados y que nada comparaba:
+  # El checklist de documentos por tipo de siniestro vive en dos lados: en el
+  # código, que es de donde el agente saca qué papeles pedir, y en
+  # `required_docs_config`, que es de donde el caso saca qué registrar como
+  # pendiente. Nada comparaba las dos listas, y divergieron durante meses: el
+  # código conocía ocho tipos de siniestro y la tabla tenía cuatro.
   #
-  #   · el checklist de documentos por tipo de siniestro vive en el código (lo
-  #     usa el agente para pedir los papeles) y en `required_docs_config` (lo usa
-  #     el caso para registrarlos como pendientes). Divergieron durante meses: el
-  #     código conocía ocho tipos y la tabla tenía cuatro, y el síntoma era mudo
-  #     porque el sembrador se vuelve sin hacer nada cuando no encuentra filas.
-  #     Cuarenta y cinco casos de producción sin seguimiento de documentación, y
-  #     en pantalla se veían completos.
+  # El síntoma era mudo, que es lo que lo hizo durar. El sembrador se vuelve sin
+  # hacer nada cuando no encuentra filas para el tipo, así que el agente pedía
+  # bien los papeles y el caso no registraba ninguno. Cuarenta y cinco casos de
+  # producción sin seguimiento de documentación, y en la pantalla del analista
+  # se veían completos.
   #
-  #   · los archivos de migración y el esquema que realmente corre. Ésa es la
-  #     divergencia que causó el apagón de las migraciones 0006-0009: escritas,
-  #     nunca aplicadas, y cada INSERT en `cases` fallando hasta que alguien
-  #     comparó el esquema vivo a mano.
+  # Una divergencia así se descubre sola cuando ya hizo daño. Preguntarlo
+  # después de cada deploy cuesta una consulta.
   #
-  # Las dos clases de divergencia se descubren solas cuando ya hicieron daño.
-  # Preguntarlo después de cada deploy cuesta dos consultas.
+  # `pnpm esquemas` —la otra comparación de esta familia, entre los archivos de
+  # migración y el esquema que corre— NO está acá, y vale decir por qué: necesita
+  # `STAGING_DATABASE_URL`, porque compara staging contra producción, y que
+  # alguien mantenga staging al día. Sin eso se pondría rojo por drift de
+  # staging en vez de por drift de producción, que es justo la clase de rojo que
+  # enseña a no mirar el reporte. Se corre a mano.
   #
-  # Sólo leen.
+  # Lo anoto porque lo cableé sin comprobarlo y la CI se puso roja: pasa local
+  # porque la variable está en .env.local, y en el runner no existe. Que un
+  # chequeo pase en mi máquina no dice nada sobre si puede correr allá.
+  #
+  # Sólo lee.
   listas-parejas:
     name: Código y base dicen lo mismo
     runs-on: ubuntu-latest
@@ -390,16 +398,6 @@ jobs:
           # directo— pero la variable va igual: la invariante pide que estén las dos
           # juntas para que nadie tenga que averiguar cuál necesita cuál.
           DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
-
-      - name: Migraciones contra el esquema que corre
-        run: pnpm esquemas
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # Ninguno de estos dos entra por la capa de datos —consultan el catálogo
-          # directo— pero la variable va igual: la invariante pide que estén las dos
-          # juntas para que nadie tenga que averiguar cuál necesita cuál.
-          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
-
       - name: Qué significa que esto falle
         if: failure()
         run: |
@@ -414,7 +412,7 @@ jobs:
           echo "  · esquema distinto    → hay una migración escrita y sin aplicar, o"
           echo "                          alguien tocó la base a mano."
           echo ""
-          echo "Reproducilo con: pnpm docs-config  y  pnpm esquemas"
+          echo "Reproducilo con: pnpm docs-config"
 
   # ── Permisos del rol de la aplicación ────────────────────────────────────────
   #

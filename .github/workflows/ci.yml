@@ -252,6 +252,7 @@ jobs:
           INTEGRATION_TEST_PASSWORD: ${{ secrets.INTEGRATION_TEST_PASSWORD }}
           INTEGRATION_ADMIN_PASSWORD: ${{ secrets.INTEGRATION_ADMIN_PASSWORD }}
           INTEGRATION_LOGIN_PASSWORD: ${{ secrets.INTEGRATION_LOGIN_PASSWORD }}
+          INTEGRATION_E2E_PASSWORD: ${{ secrets.INTEGRATION_E2E_PASSWORD }}
 
       - name: Levantar el servidor
         if: env.HAY_ENSAYO != ''

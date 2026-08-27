@@ -110,6 +110,20 @@ const LOGIN_CORREO = process.env.INTEGRATION_LOGIN_EMAIL ?? "sofia@seguros-del-s
 const LOGIN_CLAVE = process.env.INTEGRATION_LOGIN_PASSWORD ?? CLAVE;
 
 /*
+ * Y una cuarta, para que los e2e no compartan cuenta con los de integracion.
+ *
+ * En CI los dos jobs corren en paralelo contra esta misma base y los dos le
+ * pegan a localhost, asi que para el limitador son la misma IP. Usando la
+ * misma cuenta caian en el mismo cupo —cinco intentos cada diez segundos— y se
+ * lo gastaban entre los dos: los de integracion terminaban con 429 a mitad de
+ * la corrida, y el motivo estaba en otro job.
+ *
+ * Una cuenta por job y el cupo deja de ser compartido.
+ */
+const E2E_CORREO = process.env.INTEGRATION_E2E_EMAIL ?? "paula@seguros-del-sur.com.ar";
+const E2E_CLAVE = process.env.INTEGRATION_E2E_PASSWORD ?? CLAVE;
+
+/*
  * Los dos casos que piden los e2e de la conversación, con id fijo.
  *
  * Fijo y no aleatorio porque el id viaja como secreto de CI: si cambiara en
@@ -215,6 +229,7 @@ try {
   }
   await alta(ADMIN_CORREO, ADMIN_CLAVE, "Mariela Sosa", "admin");
   await alta(LOGIN_CORREO, LOGIN_CLAVE, "Sofía Bianchi", "analyst");
+  await alta(E2E_CORREO, E2E_CLAVE, "Paula Vidal", "analyst");
 
   // ── Un caso, para que los listados tengan qué devolver ─────────────────────
   const { rows: casos } = await cx.query(
@@ -294,7 +309,7 @@ try {
   console.log(``);
   console.log("  Para que los e2e de login y roles dejen de saltearse, estos ocho");
   console.log("  valores van como secretos del repositorio:");
-  console.log(`    PLAYWRIGHT_TEST_EMAIL      ${CORREO}`);
+  console.log(`    PLAYWRIGHT_TEST_EMAIL      ${E2E_CORREO}`);
   console.log("    PLAYWRIGHT_TEST_PASSWORD   (la de INTEGRATION_TEST_PASSWORD)");
   console.log(`    PLAYWRIGHT_ANALYST_EMAIL   ${LOGIN_CORREO}`);
   console.log("    PLAYWRIGHT_ANALYST_PASSWORD(la de INTEGRATION_LOGIN_PASSWORD)");

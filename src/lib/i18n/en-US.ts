@@ -352,13 +352,6 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.auditReason": "Reason",
 
   // ── Gmail status panel ─────────────────────────────────────────────────────
-  "gmail.status.title": "Gmail inbox",
-  "gmail.status.label": "Status",
-  "gmail.status.connected": "Connected",
-  "gmail.status.error": "Error",
-  "gmail.status.not_configured": "Not configured",
-  "gmail.status.last_sync": "Last sync",
-  "gmail.status.account": "Account",
   "gmail.accounts.title": "Gmail intake accounts",
   "gmail.accounts.helper": "Connect one or more Gmail inboxes to create claims automatically from each mailbox.",
   "gmail.accounts.connect": "Connect Gmail",

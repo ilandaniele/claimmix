@@ -354,14 +354,6 @@ export const esAR = {
   "case.detail.agentAnalysis": "Análisis del agente",
   "case.detail.auditReason": "Motivo",
 
-  // ── Gmail status panel (W1) ─────────────────────────────────────────────────
-  "gmail.status.title": "Bandeja de entrada Gmail",
-  "gmail.status.label": "Estado",
-  "gmail.status.connected": "Conectado",
-  "gmail.status.error": "Error",
-  "gmail.status.not_configured": "Sin configurar",
-  "gmail.status.last_sync": "Último sync",
-  "gmail.status.account": "Cuenta",
   "gmail.accounts.title": "Cuentas Gmail de ingreso",
   "gmail.accounts.helper": "Conectá una o más casillas Gmail para crear siniestros automáticamente desde cada inbox.",
   "gmail.accounts.connect": "Conectar Gmail",

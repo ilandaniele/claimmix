@@ -242,6 +242,16 @@ jobs:
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          # Las mismas contrasenas que reciben los e2e, y por eso estan aca.
+          #
+          # Sin ellas el sembrado cae a su valor por omision y PISA la clave de
+          # las cuentas de ensayo. Los dos jobs corren en paralelo contra la
+          # misma base, asi que este paso le rompia la sesion al de Playwright:
+          # el e2e fallaba en el login con las credenciales correctas, y el
+          # motivo estaba en otro job.
+          INTEGRATION_TEST_PASSWORD: ${{ secrets.INTEGRATION_TEST_PASSWORD }}
+          INTEGRATION_ADMIN_PASSWORD: ${{ secrets.INTEGRATION_ADMIN_PASSWORD }}
+          INTEGRATION_LOGIN_PASSWORD: ${{ secrets.INTEGRATION_LOGIN_PASSWORD }}
 
       - name: Levantar el servidor
         if: env.HAY_ENSAYO != ''

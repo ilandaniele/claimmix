@@ -90,6 +90,25 @@ interface Turn {
    * behaviour for an image nobody can identify.
    */
   photo?: string | boolean;
+  /**
+   * El asunto, cuando el que inventa el ensayo no sirve.
+   *
+   * Por omisión todos los mails del ensayo entran con el asunto «Denuncia de
+   * siniestro», que es cómodo para las conversaciones y arruina el único
+   * escenario que prueba lo contrario: «siniestro» es señal de siniestro para
+   * el filtro de entrada, así que el newsletter pasaba de largo, llegaba al
+   * modelo y gastaba diez mil tokens en decir que no era un reclamo. El
+   * escenario decía probar que el filtro lo frena «antes de gastar un solo
+   * token», y lo que probaba era lo contrario sin que nadie lo notara.
+   */
+  subject?: string;
+  /**
+   * Las cabeceras del mensaje.
+   *
+   * Un newsletter de verdad trae `List-Unsubscribe`, y el filtro lo mira. Sin
+   * ellas, el fixture no se parece a lo que dice estar imitando.
+   */
+  headers?: Array<{ name: string; value: string }>;
   expect?: {
     /** The reply must mention each of these, case-insensitively. */
     mentions?: string[];
@@ -116,6 +135,20 @@ interface Turn {
     recognisesNothing?: boolean;
     /** Exactly how many messages this turn should produce. 0 means silence. */
     replies?: number;
+    /**
+     * Que el filtro de entrada lo haya frenado antes de gastar un token.
+     *
+     * `replies: 0` no alcanza para esto, y por eso existe. Dos caminos muy
+     * distintos producen cero respuestas: que el filtro lo descarte —lo
+     * correcto— y que NO lo descarte, abra una denuncia en la bandeja del
+     * analista, y encima el agente se quede callado. El segundo es el fallo que
+     * este escenario existe para agarrar, y contando respuestas se ve idéntico
+     * al éxito.
+     *
+     * Lo que sí los distingue no depende del modelo: la entrega devuelve `null`
+     * cuando el filtro rechaza, y un id de caso cuando no.
+     */
+    prefiltered?: boolean;
     status?: string;
   };
 }
@@ -352,7 +385,16 @@ const SCENARIOS: Scenario[] = [
           "",
           "Si no querés recibir más estos correos, hacé clic acá para desuscribirte.",
         ].join("\n"),
-        expect: { replies: 0 },
+        // Con el sobre que trae un newsletter de verdad. Sin esto el ensayo le
+        // ponía el asunto «Denuncia de siniestro» a este mensaje también, y el
+        // filtro lo dejaba pasar por la palabra «siniestro» del propio asunto
+        // que el ensayo le había inventado.
+        subject: "NEWSLETTER SEPTIEMBRE — Novedades del sector asegurador",
+        headers: [
+          { name: "List-Unsubscribe", value: "<https://newsletter.example.com/baja>" },
+          { name: "Precedence", value: "bulk" },
+        ],
+        expect: { replies: 0, prefiltered: true },
       },
     ],
   },
@@ -440,6 +482,22 @@ function fixturePath(name: string): string {
 function imageFor(photo: string | boolean): Buffer {
   if (haveRealPhoto(photo)) return fs.readFileSync(fixturePath(photo as string));
   return fs.readFileSync(path.resolve("tests/fixtures/placeholder.jpg"));
+}
+
+/**
+ * Qué documentos del caso están dados por recibidos en este momento.
+ *
+ * Se mira antes y después de entregar un turno: lo que aparece en la
+ * diferencia es lo que cerró el archivo que acaba de llegar, y es lo único
+ * que se le puede atribuir a él. Mirar el total absoluto contaría también lo
+ * que cerró un turno anterior.
+ */
+async function closedDocKeys(id: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ key: missingDocs.doc_key })
+    .from(missingDocs)
+    .where(and(eq(missingDocs.case_id, id), isNotNull(missingDocs.satisfied_at)));
+  return new Set(rows.map((r) => r.key));
 }
 
 function note(scenario: string, turn: number, why: string) {
@@ -554,9 +612,9 @@ async function deliverEmail(
   address: string,
   caseId: string | null
 ): Promise<string | null> {
-  const subject = caseId
-    ? `Re: Denuncia de siniestro — caso #${caseId}`
-    : "Denuncia de siniestro";
+  const subject =
+    turn.subject ??
+    (caseId ? `Re: Denuncia de siniestro — caso #${caseId}` : "Denuncia de siniestro");
 
   const result = await ingestInboundEmail({
     tenantId: TENANT_ID!,
@@ -567,6 +625,7 @@ async function deliverEmail(
     bodyText: turn.say,
     messageId: `rehearsal.${RUN}.${scenario.id}.${i}@example.com`,
     threadId: `thread.${RUN}.${scenario.id}`,
+    headers: turn.headers,
   });
 
   if (result.outcome === "skipped") return null;
@@ -644,9 +703,21 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
     for (const [i, turn] of scenario.turns.entries()) {
       console.log(`\n   [${i + 1}] 👤 ${turn.say}${turn.photo ? "  📎" : ""}`);
 
+      // Qué estaba cerrado antes de este turno. En el primero no hay caso
+      // todavía, y por lo tanto no hay nada cerrado.
+      const cerradosAntes = caseId ? await closedDocKeys(caseId) : new Set<string>();
+
       const delivered = byEmail
         ? await deliverEmail(scenario, turn, i, address, caseId)
         : await deliverWhatsApp(scenario, turn, i, phone);
+
+      if (turn.expect?.prefiltered === true && delivered !== null) {
+        note(
+          scenario.id,
+          i + 1,
+          "el filtro de entrada NO lo descartó: se abrió una denuncia con esto"
+        );
+      }
 
       if (delivered === null) {
         // The prefilter turned it away. That is an outcome, not a failure —
@@ -702,6 +773,45 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           .where(eq(cases.id, active));
         if (row[0]?.status !== want.status) {
           note(scenario.id, i + 1, `estado ${row[0]?.status}, esperaba ${want.status}`);
+        }
+      }
+
+      /*
+       * El reconocimiento de documentos, que estaba declarado y no se miraba.
+       *
+       * `recognises` y `recognisesNothing` viven en la interfaz `Turn` desde
+       * siempre y se usan en tres turnos, pero el bloque de arriba sólo evaluaba
+       * `replies`, `mentions`, `avoids`, `attachments` y `status`. O sea: tres
+       * expectativas escritas, cero comprobadas, y el ensayo terminando con «sin
+       * diferencias con lo esperado».
+       *
+       * De las dos, la que más importa es `recognisesNothing`, y por eso se
+       * comprueba con cualquier archivo: un documento marcado como recibido sin
+       * haber llegado desaparece de la lista del analista, y nadie se entera
+       * hasta que la denuncia se muere esperando algo que nunca vino.
+       */
+      if (want.recognisesNothing || want.recognises?.length) {
+        const ahora = await closedDocKeys(active);
+        const cerroAhora = [...ahora].filter((k) => !cerradosAntes.has(k));
+
+        if (want.recognisesNothing && cerroAhora.length > 0) {
+          note(scenario.id, i + 1, `dio por recibido ${cerroAhora.join(", ")} y no debía cerrar nada`);
+        }
+
+        if (want.recognises?.length) {
+          if (!haveRealPhoto(turn.photo ?? false)) {
+            // Con el marcador de 1×1 el reconocedor no identifica nada, y hace
+            // bien: afirmar lo contrario sería afirmar un bug. Se anota como no
+            // ensayado para que la ausencia se lea al final, en vez de pasar por
+            // un verde.
+            unrehearsed.add(String(turn.photo));
+          } else {
+            for (const key of want.recognises) {
+              if (!cerroAhora.includes(key)) {
+                note(scenario.id, i + 1, `no reconoció ${key} en la foto`);
+              }
+            }
+          }
         }
       }
     }
@@ -764,7 +874,25 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
 
 const args = process.argv.slice(2);
 const keep = args.includes("--keep");
-const only = args.filter((a) => !a.startsWith("--"));
+/**
+ * Dónde dejar las diferencias, para poder comparar dos corridas.
+ *
+ * Del otro lado hay un modelo: la misma conversación puede terminar distinto.
+ * Reintentar entera y exigir que la segunda salga limpia no separa variación
+ * de regresión — con medio centenar de afirmaciones que dependen del modelo,
+ * que TODAS salgan bien a la vez es improbable, así que el reintento terminaba
+ * reportando otras diferencias en vez de confirmar las primeras.
+ *
+ * Lo que sí las separa es la intersección: una regresión aparece en las dos
+ * corridas, una variación casi nunca aparece dos veces. Para intersecar hay
+ * que poder leerlas, y para eso están estos archivos.
+ */
+const reporteIdx = args.indexOf("--reporte");
+const reporte = reporteIdx !== -1 ? args[reporteIdx + 1] : null;
+// El valor de `--reporte` es un argumento suelto y no un nombre de escenario.
+const only = args.filter(
+  (a, i) => !a.startsWith("--") && !(reporteIdx !== -1 && i === reporteIdx + 1)
+);
 const chosen = only.length > 0 ? SCENARIOS.filter((s) => only.includes(s.id)) : SCENARIOS;
 
 if (chosen.length === 0) {
@@ -932,6 +1060,12 @@ if (failures.length === 0) {
   for (const f of failures) {
     console.log(`  ${f.scenario}${f.turn ? ` turno ${f.turn}` : " (final)"}: ${f.why}`);
   }
+}
+
+if (reporte) {
+  fs.writeFileSync(reporte, JSON.stringify(failures, null, 2));
+  console.log(`
+(diferencias escritas en ${reporte})`);
 }
 
 if (unrehearsed.size > 0) {

@@ -53,7 +53,8 @@
     "indices": "tsx --tsconfig tsconfig.rehearsal.json scripts/auditar-indices.mts",
     "rls-indices": "tsx --tsconfig tsconfig.rehearsal.json scripts/medir-rls-indices.mts",
     "peso": "node scripts/medir-peso.mjs",
-    "docs-config": "tsx --tsconfig tsconfig.rehearsal.json scripts/verificar-docs-config.mts"
+    "docs-config": "tsx --tsconfig tsconfig.rehearsal.json scripts/verificar-docs-config.mts",
+    "comparar-ensayos": "node scripts/comparar-ensayos.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",

@@ -153,6 +153,17 @@ jobs:
       # separa dos cosas que en un reporte se ven iguales: una regresión, que
       # falla siempre, y una variación, que casi nunca falla dos veces.
       #
+      # Lo que separa las dos es la INTERSECCIÓN de las dos corridas, y eso es lo
+      # que faltaba. Antes el reintento pedía que la segunda corrida saliera
+      # limpia entera, que con medio centenar de afirmaciones dependientes del
+      # modelo es tirar otro dado en vez de confirmar el primero: salía rojo por
+      # diferencias DISTINTAS cada vez. Un rojo que cambia de motivo en cada
+      # corrida enseña a no mirar el reporte, que es peor que no tenerlo.
+      #
+      # `|| true` en la segunda es a propósito: su código de salida ya no decide
+      # nada, decide la comparación. Y un reporte que falta no cuenta como cero
+      # diferencias — si el ensayo se cayó antes de escribirlo, eso es rojo.
+      #
       # Va acá y no adentro del script porque cada corrida necesita identidades
       # nuevas, y el ensayo las deriva de una constante por proceso. Intentarlo
       # adentro hacía que el reintento cayera en el mismo hilo: las respuestas
@@ -162,11 +173,12 @@ jobs:
       # Cuesta una corrida más, y sólo cuando algo difirió.
       - name: Ensayar las doce conversaciones
         run: |
-          if pnpm rehearse; then
+          if pnpm rehearse --reporte primera.json; then
             exit 0
           fi
           echo "::notice title=Se repite el ensayo::Difirió algo. Segunda corrida para separar variación de regresión."
-          pnpm rehearse
+          pnpm rehearse --reporte segunda.json || true
+          node scripts/comparar-ensayos.mjs primera.json segunda.json
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # La capa de datos entra por acá. Sin esto, toda consulta que pase por
@@ -374,11 +386,19 @@ jobs:
         run: pnpm docs-config
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Ninguno de estos dos entra por la capa de datos —consultan el catálogo
+          # directo— pero la variable va igual: la invariante pide que estén las dos
+          # juntas para que nadie tenga que averiguar cuál necesita cuál.
+          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
 
       - name: Migraciones contra el esquema que corre
         run: pnpm esquemas
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Ninguno de estos dos entra por la capa de datos —consultan el catálogo
+          # directo— pero la variable va igual: la invariante pide que estén las dos
+          # juntas para que nadie tenga que averiguar cuál necesita cuál.
+          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
 
       - name: Qué significa que esto falle
         if: failure()

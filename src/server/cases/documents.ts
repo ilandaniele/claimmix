@@ -544,6 +544,20 @@ Lista vacía si no niega ninguno.`;
  * Pura, y separada de la escritura, porque es acá donde se puede meter la
  * pata: cerrar de más es marcar como recibido algo que nadie mandó.
  */
+/**
+ * Los datos de contacto que el canal mismo satisface.
+ *
+ * Si alguien escribe por WhatsApp, su teléfono es el remitente: pedírselo es
+ * de las cosas que hacen que deje de contestar. Lo mismo el correo por mail.
+ *
+ * Está exportado porque el pen test necesita la misma lista. Ahí las sondas
+ * preguntan si un ataque logró marcar como recibido algo que nunca llegó, y
+ * estos tres SÍ llegaron —por el transporte— así que contarlos daba un rojo
+ * sobre comportamiento correcto. Con la lista duplicada a mano, el día que
+ * alguien agregue un cuarto contacto acá el pen test vuelve a mentir.
+ */
+export const CONTACT_DOC_KEYS = ["phone", "telefono_contacto", "email"] as const;
+
 export function contactDocsToClose(
   fields: Array<{ field_key: string; field_value?: string | null }>
 ): string[] {
@@ -553,9 +567,7 @@ export function contactDocsToClose(
       .map((f) => canonicalFieldKey(f.field_key))
   );
 
-  return ["phone", "telefono_contacto", "email"].filter((key) =>
-    held.has(canonicalFieldKey(key))
-  );
+  return [...CONTACT_DOC_KEYS].filter((key) => held.has(canonicalFieldKey(key)));
 }
 
 export async function satisfyContactDocsWeAlreadyHave(

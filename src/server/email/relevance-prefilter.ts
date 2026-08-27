@@ -100,6 +100,35 @@ export function classifyInboundEmailForIntake(
 ): IntakePrefilterDecision {
   const headers = input.headers ?? [];
   const body = `${input.bodyText}\n${visibleHtmlText(input.bodyHtml)}`.trim();
+
+  /*
+   * `List-Unsubscribe` se mira ANTES que la señal de siniestro, y el orden es
+   * todo el arreglo.
+   *
+   * La señal de siniestro devolvía `allow` de entrada, así que las cabeceras no
+   * se consultaban nunca para un mensaje que hablara de seguros. Y un newsletter
+   * del rubro habla de seguros por definición: «Novedades del sector asegurador»
+   * contiene «asegurado», que está en la lista de más arriba. O sea que los
+   * únicos newsletters que este filtro no podía frenar eran exactamente los que
+   * recibe la casilla de una aseguradora.
+   *
+   * Se mueve sólo `List-Unsubscribe`, y no las otras dos cabeceras. Ésa la pone
+   * quien manda una lista de correo y nadie más: el cliente de mail de alguien
+   * que acaba de chocar no la agrega. `Precedence: bulk` y `Auto-Submitted` se
+   * quedan abajo, porque un mail reenviado en automático sí puede traerlas y sí
+   * puede ser una denuncia de verdad.
+   *
+   * La dirección de cautela importa: frenar una denuncia real es mucho peor que
+   * gastar seis milésimos de dólar en un newsletter.
+   */
+  if (headerValue(headers, "List-Unsubscribe")) {
+    return {
+      action: "skip",
+      reason: "mailing_list_unsubscribe_header",
+      category: "bulk_non_claim",
+    };
+  }
+
   if (hasClaimSignal(input.subject, body)) return { action: "allow" };
 
   const from = normalize(input.fromAddr);

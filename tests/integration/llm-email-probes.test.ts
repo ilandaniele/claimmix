@@ -1,20 +1,33 @@
 /**
- * LLM email probe tests — prompt injection, PII masking.
+ * Lo que se puede afirmar sobre el modelo sin llamarlo, que es menos de lo que
+ * este archivo decía.
  *
- * AC25: Prompt injection in email body does not flip is_claim or severity.
- * LLM01: XML sentinel isolation — user content inside <email_body> tags cannot
- *         affect system instructions.
- * AC24: PII masking in outbound email templates (DNI and policy_number masked).
+ * Se llamaba «prompt injection probe» y su primer test le pasaba un intento de
+ * inyección a `runMockExtractor` —un extractor de expresiones regulares— y
+ * afirmaba `is_claim === true`. El comentario de al lado lo confesaba: «Mock
+ * extractor always returns is_claim=true». O sea que verificaba una constante
+ * del simulador y lo reportaba en CI como resistencia a inyección del modelo.
+ * Es el falso verde en su forma más limpia: un tilde sobre una propiedad del
+ * LLM que nadie comprobó.
  *
- * These tests use MOCK_AI=true (no real OpenAI calls).
- * They verify the structural safeguards around LLM input/output.
+ * Lo que sí se prueba acá, y sirve:
+ *   · que el simulador devuelva un `ExtractedClaim` bien formado pase lo que
+ *     pase por el cuerpo, porque media suite depende de que no explote;
+ *   · que el armador de prompts envuelva el cuerpo del mail en `<email_body>`,
+ *     que es una propiedad del armador y no del modelo;
+ *   · el enmascarado de DNI y número de póliza en lo que sale.
+ *
+ * Lo que NO se prueba acá es si el modelo se deja inyectar. Eso necesita el
+ * modelo de verdad y vive en `pnpm pentest --agent`, que no corre en el
+ * post-deploy a propósito: gasta tokens del mismo cupo que atiende a los
+ * asegurados. Se corre a mano al tocar el agente o los prompts.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("AC25: LLM prompt injection probe", () => {
+describe("el extractor simulado, con un cuerpo que intenta inyectarse", () => {
   beforeEach(() => {
     process.env.MOCK_AI = "true";
     vi.clearAllMocks();
@@ -24,7 +37,10 @@ describe("AC25: LLM prompt injection probe", () => {
     delete process.env.MOCK_AI;
   });
 
-  it("mock extractor returns a valid ExtractedClaim regardless of injection body", async () => {
+  // Afirma la forma, no la resistencia: que el simulador devuelva un objeto
+  // bien formado aunque el cuerpo traiga texto raro. Que `is_claim` sea true
+  // es una constante suya, no una conclusión sobre nada.
+  it("devuelve un ExtractedClaim bien formado igual", async () => {
     const { runMockExtractor } = await import("@/server/ai/mock-extractor");
 
     // Body contains injection attempt AND actual claim content.
@@ -38,11 +54,15 @@ describe("AC25: LLM prompt injection probe", () => {
 
     const result = runMockExtractor(injectionBody, "incendio");
 
-    // The mock extractor should return a valid ExtractedClaim object.
-    // It uses regex on the body — injection text does not change the structure.
+    // La forma, que es lo único que este camino puede afirmar.
     expect(result).toBeDefined();
     expect(typeof result.is_claim).toBe("boolean");
-    // Mock extractor always returns is_claim=true (default for non-special bodies)
+    expect(Array.isArray(result.fields)).toBe(true);
+
+    // `is_claim === true` es el valor por omisión del simulador para cualquier
+    // cuerpo que no sea uno de sus casos especiales. Se afirma para que un
+    // cambio en el simulador se note, y NO como evidencia de que la inyección
+    // no funcionó: acá no hay modelo al que inyectarle nada.
     expect(result.is_claim).toBe(true);
   });
 

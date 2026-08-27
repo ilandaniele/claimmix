@@ -348,9 +348,43 @@ export async function callGemini(
   }
 
   const data = (await res.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+      finishReason?: string;
+    }>;
     usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
   };
+
+  /*
+   * Una respuesta cortada por el tope no es una respuesta.
+   *
+   * Gemini avisa con `finishReason: "MAX_TOKENS"` cuando se queda sin lugar, y
+   * hasta acá nadie lo leía: el HTTP era 200, se devolvía el texto parcial, y
+   * aguas abajo se parseaba lo que hubiera llegado. Los campos que faltaban
+   * faltaban en silencio.
+   *
+   * Pasa en el 2% de las extracciones de producción —71 de 3.627— y el promedio
+   * de salida es 1.497 tokens, así que las que llegan a 8.192 no son respuestas
+   * largas: son respuestas que se fueron de largo.
+   *
+   * Lo que se veía en su lugar era el sistema pidiéndole al asegurado algo que
+   * acababa de decir. En el ensayo: «¡Gracias, Roberto! Necesitamos que nos
+   * envíes: • Tu nombre y apellido completo.» El modelo leyó el nombre —lo usa
+   * en el saludo— pero el JSON se cortó antes de guardarlo, así que el análisis
+   * de faltantes lo seguía contando como faltante.
+   *
+   * Tirar acá lo manda al segundo intento, que corre con un prompt más estricto
+   * — que es justo lo que hay que hacer con un modelo que se fue por las ramas.
+   * Un fallo técnico se levanta como fallo técnico y no se convierte en un dato
+   * que falta.
+   */
+  const finishReason = data.candidates?.[0]?.finishReason;
+  if (finishReason === "MAX_TOKENS") {
+    throw new GeminiExtractionError(
+      "Gemini cortó la respuesta en el tope de tokens (finishReason=MAX_TOKENS)",
+      { status: 200, code: "MAX_TOKENS" }
+    );
+  }
 
   const text =
     data.candidates?.[0]?.content?.parts

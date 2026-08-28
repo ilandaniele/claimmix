@@ -152,13 +152,15 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   );
 
   /*
-   * El total suma TODAS las filas, no sólo las de los estados conocidos.
+   * El total suma TODAS las filas que devuelve el grupo, no sólo las de los
+   * estados de la lista de arriba.
    *
-   * `cases.status` es `text` sin CHECK ni enum: los trece valores válidos viven
-   * en Zod y copiados a mano acá arriba. El `countRows` que esto reemplaza
-   * contaba la tabla entera, así que un caso con un estado fuera de la lista
-   * entraba igual al total. Sumar sólo lo mapeado cambiaría la tarjeta «Total
-   * casos» sin que nadie se entere.
+   * Hoy da lo mismo: la base tiene `cases_status_check` con exactamente estos
+   * trece valores, así que no puede haber una fila fuera. Se suma todo igual
+   * porque `VALID_STATUSES` es una copia a mano de esa lista, y el día que el
+   * CHECK sume un estado y esta copia no, la tarjeta «Total casos» bajaría sin
+   * error visible. Sumar lo que vuelve no depende de que las dos listas estén
+   * sincronizadas; sumar lo mapeado sí.
    */
   const cuenta = new Map(porEstado.map((r) => [r.status, r.n]));
   const totalCount = porEstado.reduce((acc, r) => acc + r.n, 0);

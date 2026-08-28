@@ -288,15 +288,30 @@ export function DashboardClient({
     async (ids: string[], onDone: () => void) => {
       try {
         const deletedRows = cases.filter((c) => ids.includes(c.id));
-        const results = await Promise.all(
-          ids.map(async (id) => {
-            const res = await fetch(`/api/cases/${id}`, { method: "DELETE" });
-            return { id, ok: res.ok };
-          })
-        );
 
-        const deletedIds = results.filter((result) => result.ok).map((result) => result.id);
-        const failedCount = results.length - deletedIds.length;
+        /*
+         * Un pedido, no uno por caso.
+         *
+         * Esto mandaba un DELETE por id. Con la página de cien eso se comía el
+         * cupo del minuto entero —la API permite cien— y con cualquier borrado
+         * previo parte de la tanda volvía 429: el usuario veía «se borraron 62
+         * de 100» sin ninguna razón visible.
+         *
+         * El servidor responde con los ids que de verdad borró, así que el
+         * manejo de borrado parcial de abajo sigue igual: ahora el parcial es
+         * real (un caso que ya no estaba) y no un efecto del límite de tráfico.
+         */
+        const res = await fetch("/api/cases", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        // `ok()` responde con el dato pelado, no envuelto en `data`.
+        const cuerpo = (await res.json().catch(() => null)) as
+          | { deleted?: string[] }
+          | null;
+        const deletedIds = res.ok ? (cuerpo?.deleted ?? []) : [];
+        const failedCount = ids.length - deletedIds.length;
 
         if (deletedIds.length > 0) {
           setCases((prev) => prev.filter((c) => !deletedIds.includes(c.id)));

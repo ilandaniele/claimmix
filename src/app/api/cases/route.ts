@@ -19,6 +19,13 @@ import { CaseQuerySchema } from "@/lib/schemas/cases";
 import { listCases } from "@/server/cases/list";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { z } from "zod";
+import { deleteCases } from "@/server/cases/delete";
+
+/** Hasta cien, que es el tope de la página: más no lo puede pedir la pantalla. */
+const BorradoSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(100),
+});
 import {
   rateLimit,
   RATE_LIMIT_CONFIGS,
@@ -93,6 +100,70 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
     console.error("[GET /api/cases] query error:", errName, ip);
+    return err(new AppError("INTERNAL_ERROR"));
+  }
+}
+
+// ── DELETE /api/cases ─────────────────────────────────────────────────────────
+
+/**
+ * Borrado múltiple, en un pedido y una transacción.
+ *
+ * La bandeja borraba mandando un DELETE por caso seleccionado. Con la página de
+ * cien eso son cien pedidos que se comen el cupo del minuto entero, se
+ * serializan por el lock del contador, y dejan un subconjunto arbitrario borrado
+ * si uno falla a la mitad. Ver src/server/cases/delete.ts.
+ *
+ * Responde con los ids que de verdad se borraron. Un id de otra aseguradora no
+ * coincide con ninguna fila —lo impide la base, no un chequeo previo— así que no
+ * aparece en la respuesta, y quien llama compara contra lo que pidió. Devolver
+ * 404 por la tanda entera sería peor: haría fallar un borrado legítimo de
+ * noventa y nueve por un id que ya no estaba.
+ */
+export async function DELETE(request: NextRequest) {
+  let rol: RoleContext;
+  try {
+    rol = await requireRole(...ALL_ROLES);
+  } catch (e) {
+    return err(e);
+  }
+  const { userRow } = rol;
+
+  if (userRow.role === "viewer") {
+    return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
+  }
+
+  const rl = await rateLimit(
+    buildUserKey(userRow.id, "cases-delete"),
+    RATE_LIMIT_CONFIGS.CASES_API
+  );
+  if (!rl.allowed) {
+    return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes."));
+  }
+
+  const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown } | null;
+  const parsed = BorradoSchema.safeParse(cuerpo);
+  if (!parsed.success) {
+    return err(
+      new AppError(
+        "VALIDATION_FAILED",
+        "Se espera { ids: string[] } con al menos un identificador.",
+        parsed.error.flatten().fieldErrors
+      )
+    );
+  }
+
+  try {
+    const deleted = await deleteCases(
+      { tenantId: userRow.tenant_id },
+      parsed.data.ids
+    );
+    return ok({ deleted });
+  } catch (error) {
+    console.error(
+      "[DELETE /api/cases]",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return err(new AppError("INTERNAL_ERROR"));
   }
 }

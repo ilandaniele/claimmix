@@ -140,8 +140,18 @@ export const AuditEvent = {
 
   /**
    * CONFIRMATION_REQUESTED: analyst must confirm a medium-confidence or conflicting field.
-   * Payload: { case_id, field_key } — value NOT included (PII).
    * AC7, AC9.
+   *
+   * Dos formas de payload, según de dónde venga:
+   *   · `{ field_keys: string[] }` — el pedido de confirmación por campos
+   *     dudosos, que se anota UNA vez con todas las claves. Antes era un evento
+   *     por campo, que es la misma información repetida N veces sobre el mismo
+   *     caso en el mismo instante.
+   *   · `{ field_key, reason: "conflict" }` — un conflicto con los datos que ya
+   *     tenemos del cliente, que sí es un evento por campo porque cada uno tiene
+   *     su propio motivo.
+   *
+   * En ninguna de las dos va el valor: es dato de una persona.
    */
   CONFIRMATION_REQUESTED: "claim.confirmation_requested",
 

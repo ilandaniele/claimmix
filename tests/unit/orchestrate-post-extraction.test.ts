@@ -183,11 +183,18 @@ function setupDbMocks({
       }
 
       // claim_field_confirmations (or any other table) — return empty so upsert inserts.
-      return {
-        where: () => ({
-          limit: () => Promise.resolve([]),
-        }),
+      //
+      // `where()` tiene que ser esperable ADEMÁS de tener `.limit()`:
+      // `guardarConfirmaciones` lee todas las claves de una con `inArray` y sin
+      // `.limit()`, mientras otras consultas de este archivo sí lo usan. Sin
+      // esto el mock tiraba TypeError, el `catch` del orquestador lo tragaba, y
+      // el test fallaba por el mock y no por el código.
+      const vacio = {
+        limit: () => Promise.resolve([]),
+        then: (r: (v: unknown) => void, j?: (e: unknown) => void) =>
+          Promise.resolve([]).then(r, j),
       };
+      return { where: () => vacio };
     },
   }));
 
@@ -693,7 +700,9 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
       (call) => call[0].event_type === "claim.confirmation_requested"
     );
     expect(confirmationAudit).toBeDefined();
-    expect(confirmationAudit?.[0].payload?.field_key).toBe("accident_date");
+    // Un evento con TODAS las claves, no uno por campo: es el mismo pedido, del
+    // mismo caso, en el mismo instante. Antes se anotaba N veces.
+    expect(confirmationAudit?.[0].payload?.field_keys).toContain("accident_date");
     // PII check: the proposed value must NOT appear in the audit payload
     expect(JSON.stringify(confirmationAudit?.[0].payload)).not.toContain("2024-03-15");
   });

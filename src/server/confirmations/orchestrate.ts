@@ -218,25 +218,42 @@ export async function orchestratePostExtraction(
     extractedClaim.fields
   );
 
-  for (const field of pendingConfirmationFields) {
-    const { fieldKey, proposedValue, confidence } = field;
+  /*
+   * Todos los campos de una, no tres viajes por campo.
+   *
+   * Esto era un bucle con `upsertFieldConfirmation` —que por dentro son DOS
+   * `enTenant`: un SELECT del id y después UPDATE o INSERT— más un
+   * `writeAuditLog`, que es un tercero. Con cinco u ocho campos dudosos, que es
+   * lo normal en un primer mensaje, son quince a veinticuatro viajes de red
+   * secuenciales.
+   *
+   * Y no bajaban entre rondas: la lista se arma con las filas que YA están
+   * pendientes, así que la quinta ronda con seis campos sin responder volvía a
+   * pagar dieciocho viajes reescribiendo filas idénticas.
+   *
+   * Corre después de CADA mensaje entrante, en el mismo tramo donde el agente
+   * llama a Gemini y contra un tope de 180 segundos.
+   *
+   * La forma ya estaba en este archivo: `resolveAnsweredConfirmations` hace un
+   * solo UPDATE con `inArray` sobre esta misma tabla.
+   */
+  if (pendingConfirmationFields.length > 0) {
+    await guardarConfirmaciones(caseId, tenantId, pendingConfirmationFields);
 
-    // Insert claim_field_confirmations row (upsert to avoid duplicates).
-    await upsertFieldConfirmation(caseId, tenantId, {
-      field_key: fieldKey,
-      proposed_value: proposedValue,
-      confidence,
-      conflict_with_value: null,
-    });
-
-    // Audit: CONFIRMATION_REQUESTED (field key only — no PII value in payload).
+    /*
+     * Un evento con todas las claves, y no uno por campo.
+     *
+     * Es el mismo pedido de confirmación, del mismo caso, en el mismo instante.
+     * Anotarlo N veces no agrega información y multiplica las escrituras.
+     */
     await writeAuditLog({
       tenant_id: tenantId,
       actor_id: null,
       event_type: AuditEvent.CONFIRMATION_REQUESTED,
       target_type: "case",
       target_id: caseId,
-      payload: { field_key: fieldKey },
+      // Sólo las claves: el valor propuesto es dato de una persona.
+      payload: { field_keys: pendingConfirmationFields.map((f) => f.fieldKey) },
     });
   }
 
@@ -1134,6 +1151,90 @@ async function setStatus(
  * so the "only one row per field per case" rule is emulated with an
  * update-then-insert (no ON CONFLICT target available).
  */
+/**
+ * Escribe (o pisa) las filas de confirmación de varios campos en tres viajes
+ * fijos, en vez de tres por campo.
+ *
+ * No usa `onConflictDoUpdate` porque no hay índice único en
+ * `(case_id, field_name)` — la 0001 indexa sólo `case_id`— y agregarlo pide una
+ * migración a mano sobre datos que ya pueden tener duplicados. Con una lectura
+ * previa alcanza y no hay que tocar el esquema.
+ */
+async function guardarConfirmaciones(
+  caseId: string,
+  tenantId: string,
+  campos: Array<{ fieldKey: string; proposedValue: string; confidence: number }>
+): Promise<void> {
+  const tenantCtx: TenantContext = { tenantId };
+  const ahora = new Date().toISOString();
+
+  try {
+    const claves = campos.map((c) => c.fieldKey);
+    const existentes = await enTenant<Array<{ id: string; field_name: string }>>(
+      tenantCtx,
+      (db) =>
+        db
+          .select({
+            id: claimFieldConfirmations.id,
+            field_name: claimFieldConfirmations.field_name,
+          })
+          .from(claimFieldConfirmations)
+          .where(
+            and(
+              eq(claimFieldConfirmations.case_id, caseId),
+              inArray(claimFieldConfirmations.field_name, claves)
+            )
+          )
+    );
+
+    const porClave = new Map(existentes.map((e) => [e.field_name, e.id]));
+    const nuevos = campos.filter((c) => !porClave.has(c.fieldKey));
+    const aPisar = campos.filter((c) => porClave.has(c.fieldKey));
+
+    if (nuevos.length > 0) {
+      await enTenant(tenantCtx, (db) =>
+        db.insert(claimFieldConfirmations).values(
+          nuevos.map((c) => ({
+            case_id: caseId,
+            tenant_id: tenantId,
+            field_name: c.fieldKey,
+            suggested_value: c.proposedValue,
+            conflict_with_value: null,
+            confidence: c.confidence.toFixed(2),
+            status: "pending",
+            created_at: ahora,
+          }))
+        )
+      );
+    }
+
+    /*
+     * Los que ya estaban se pisan de a uno, y eso está bien acá.
+     *
+     * Cada uno lleva su propio valor y su propia confianza, así que un UPDATE
+     * masivo pediría un CASE por columna. Y en la práctica esta rama casi
+     * siempre está vacía o tiene uno: los repetidos son los que el asegurado
+     * todavía no contestó y cuyo valor no cambió.
+     */
+    for (const c of aPisar) {
+      await enTenant(tenantCtx, (db) =>
+        db
+          .update(claimFieldConfirmations)
+          .set({
+            suggested_value: c.proposedValue,
+            conflict_with_value: null,
+            confidence: c.confidence.toFixed(2),
+            status: "pending",
+            created_at: ahora,
+          })
+          .where(eq(claimFieldConfirmations.id, porClave.get(c.fieldKey)!))
+      );
+    }
+  } catch (err) {
+    console.error("[orchestrate] guardarConfirmaciones:", errCode(err), "case:", caseId);
+  }
+}
+
 async function upsertFieldConfirmation(
   caseId: string,
   tenantId: string,

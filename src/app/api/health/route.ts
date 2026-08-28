@@ -65,6 +65,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     checkWhatsApp(),
     checkGmail(),
     checkAgentConfig(),
+    checkPresupuesto(),
   ]);
 
   const worst: Status = checks.some((c) => c.status === "down")
@@ -466,6 +467,61 @@ async function checkGmail(): Promise<Check> {
     return ok("gmail", `${account.email} conectada, token legible, push al día`);
   } catch (err) {
     return degraded("gmail", `no se pudo verificar: ${why(err)}`);
+  }
+}
+
+/**
+ * Cuánto queda del presupuesto mensual de IA.
+ *
+ * Es el único límite que, al llegar, **frena las denuncias** — `checkBudget`
+ * devuelve `exceeded` y el caso se queda esperando con un warn en los
+ * registros como única señal. Nadie mira los registros hasta que algo se ve
+ * roto, y esto no se ve roto: se ve quieto.
+ *
+ * Por eso avisa antes. A partir del 80% queda en `degraded`, que es el mismo
+ * estado que usa WhatsApp para «calidad amarilla, vigilalo»: sale en el
+ * `smoke` de cada despliegue sin voltear el chequeo. Sólo el 100% es `down`,
+ * porque ahí ya dejó de procesar.
+ *
+ * Importa más ahora que la decisión es quedarse en los planes gratuitos: el
+ * techo dejó de ser un número lejano y pasó a ser el modo de falla más
+ * probable.
+ *
+ * Excluye al inquilino de la demo por el mismo motivo que `checkBudget`: ese
+ * endpoint corre sin autenticación y su gasto no puede frenar una denuncia
+ * real.
+ */
+async function checkPresupuesto(): Promise<Check> {
+  const tope = Number.parseFloat(process.env.MONTHLY_BUDGET_USD ?? "") || 200;
+  const demo = process.env.DEMO_TENANT_ID?.trim() || null;
+
+  try {
+    const inicio = new Date();
+    inicio.setDate(1);
+    inicio.setHours(0, 0, 0, 0);
+
+    // sin-inquilino: el tope es del proyecto entero, no de una aseguradora.
+    const filas = await rowsOf<{ total: number }>(
+      demo
+        ? sql`select coalesce(sum(cost_usd), 0)::float8 as total from ai_usage
+               where created_at >= ${inicio.toISOString()} and tenant_id <> ${demo}`
+        : sql`select coalesce(sum(cost_usd), 0)::float8 as total from ai_usage
+               where created_at >= ${inicio.toISOString()}`
+    );
+
+    const gastado = Number(filas[0]?.total ?? 0);
+    const parte = tope > 0 ? gastado / tope : 0;
+    const cuanto = `US$${gastado.toFixed(2)} de US$${tope.toFixed(0)} (${Math.round(parte * 100)}%)`;
+
+    if (parte >= 1) {
+      return down("presupuesto", `${cuanto} — la extracción está frenada`);
+    }
+    if (parte >= 0.8) {
+      return degraded("presupuesto", `${cuanto} — cerca del tope, vigilalo`);
+    }
+    return ok("presupuesto", cuanto);
+  } catch (err) {
+    return degraded("presupuesto", `no se pudo consultar: ${why(err)}`);
   }
 }
 

@@ -43,6 +43,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/health/route";
 
+/** Lo que el chequeo de presupuesto va a ver como gastado este mes. */
+let gastadoUsd = 0;
+
 const SECRET = "un-secreto-largo-y-aburrido";
 
 function request(auth?: string, query = ""): NextRequest {
@@ -69,7 +72,15 @@ beforeEach(() => {
 
   // A database with every migration applied, so a test that wants one missing
   // has to say so.
-  mockExecute.mockResolvedValue({
+  // El chequeo de presupuesto consulta la MISMA `db.execute`, así que el mock
+  // tiene que distinguir por la consulta: si no, le llegan filas de
+  // information_schema y suma cero sin que nadie lo note.
+  gastadoUsd = 0;
+  mockExecute.mockImplementation((q: unknown) => {
+    if (JSON.stringify(q).includes("ai_usage")) {
+      return Promise.resolve({ rows: [{ total: gastadoUsd }] });
+    }
+    return Promise.resolve({
     rows: [
       { table_name: "missing_docs", column_name: "declined_at" },
       { table_name: "outbound_messages", column_name: "asked_keys" },
@@ -79,6 +90,7 @@ beforeEach(() => {
       { table_name: "billing_invoices", column_name: "id" },
       { table_name: "rate_limit_counters", column_name: "key" },
     ],
+    });
   });
   mockSelect.mockReturnValue({
     from: () => ({
@@ -333,5 +345,67 @@ describe("GET /api/health — a connected mailbox that cannot be read", () => {
 
     const gmail = await gmailCheck();
     expect(gmail.status).toBe("degraded");
+  });
+});
+
+/**
+ * El presupuesto es el único límite que, al llegar, frena las denuncias.
+ *
+ * `checkBudget` devuelve `exceeded` y el caso se queda esperando con un warn en
+ * los registros. Nadie mira los registros hasta que algo se ve roto, y esto no
+ * se ve roto: se ve quieto. Por eso el chequeo avisa antes de llegar.
+ *
+ * Los umbrales se prueban acá porque un `>` donde va un `>=`, o una división
+ * dada vuelta, no avisaría nunca — y eso tampoco se ve.
+ */
+describe("cuánto queda del presupuesto de IA", () => {
+  const leer = async () => {
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const body = await res.json();
+    return body.checks.find((c: { name: string }) => c.name === "presupuesto");
+  };
+
+  it("lejos del tope, en verde y con el número", async () => {
+    gastadoUsd = 20;
+    const p = await leer();
+    expect(p.status).toBe("ok");
+    expect(p.detail).toContain("US$20.00 de US$200");
+    expect(p.detail).toContain("10%");
+  });
+
+  it("a partir del 80% avisa, sin voltear el chequeo", async () => {
+    gastadoUsd = 160;
+    const p = await leer();
+    // `degraded` y no `down`: todavía procesa. Es el mismo estado que usa
+    // WhatsApp para "calidad amarilla, vigilalo".
+    expect(p.status).toBe("degraded");
+    expect(p.detail).toContain("vigilalo");
+  });
+
+  it("justo debajo del umbral sigue en verde", async () => {
+    // El borde importa: con `>` en vez de `>=`, el aviso del 80% no saldría.
+    gastadoUsd = 159.99;
+    expect((await leer()).status).toBe("ok");
+  });
+
+  it("agotado es `down`, y dice que la extracción está frenada", async () => {
+    gastadoUsd = 200;
+    const p = await leer();
+    expect(p.status).toBe("down");
+    expect(p.detail).toContain("frenada");
+  });
+
+  it("si la consulta falla, avisa en vez de decir que está todo bien", async () => {
+    mockExecute.mockImplementation((q: unknown) => {
+      if (JSON.stringify(q).includes("ai_usage")) {
+        return Promise.reject(new Error("timeout"));
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const p = await leer();
+    // Un cero silencioso sería peor que un error: diría "queda todo el
+    // presupuesto" justo cuando no se sabe cuánto queda.
+    expect(p.status).toBe("degraded");
+    expect(p.detail).toContain("no se pudo consultar");
   });
 });

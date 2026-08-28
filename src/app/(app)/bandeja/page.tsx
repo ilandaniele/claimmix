@@ -15,10 +15,11 @@
 
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { countRows, firstRow } from "@/lib/db/helpers";
+import { enTenant } from "@/data/scope";
+import { firstRow } from "@/lib/db/helpers";
 import { cases, users } from "@/lib/db/schema";
 import { listCases } from "@/server/cases/list";
 import { SCENARIOS } from "@/server/intake/scenarios";
@@ -126,20 +127,47 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     is_claim,
   });
 
-  // Fetch counts for all statuses in parallel (tenant-scoped).
-  const [totalCount, ...statusCounts] = await Promise.all([
-    countRows({ tenantId }, cases),
-    ...VALID_STATUSES.map((s) =>
-      countRows({ tenantId }, cases, eq(cases.status, s))
-    ),
-  ]);
+  /*
+   * Un solo viaje para los catorce contadores.
+   *
+   * Eran catorce `countRows` en un `Promise.all`: uno por estado más el total.
+   * Estar en paralelo no los junta — cada `enTenant` abre su propio `batch()`
+   * contra Neon con su `set_config` adelante, así que la pantalla principal
+   * arrancaba con catorce transacciones HTTP en vez de una.
+   *
+   * No era lento por la base: hay índice `(tenant_id, status)` y cada COUNT era
+   * un scan barato. Lo que se ahorra son trece viajes y trece transacciones.
+   *
+   * `count(*)::int` escrito a mano y no `db.$count`: eso último devuelve algo
+   * que se puede esperar pero que `batch()` no puede armar, y rompió estos
+   * mismos contadores en producción. Ver src/lib/db/helpers.ts.
+   */
+  const porEstado = await enTenant<Array<{ status: string; n: number }>>(
+    { tenantId },
+    (db) =>
+      db
+        .select({ status: cases.status, n: sql<number>`count(*)::int` })
+        .from(cases)
+        .groupBy(cases.status)
+  );
+
+  /*
+   * El total suma TODAS las filas, no sólo las de los estados conocidos.
+   *
+   * `cases.status` es `text` sin CHECK ni enum: los trece valores válidos viven
+   * en Zod y copiados a mano acá arriba. El `countRows` que esto reemplaza
+   * contaba la tabla entera, así que un caso con un estado fuera de la lista
+   * entraba igual al total. Sumar sólo lo mapeado cambiaría la tarjeta «Total
+   * casos» sin que nadie se entere.
+   */
+  const cuenta = new Map(porEstado.map((r) => [r.status, r.n]));
+  const totalCount = porEstado.reduce((acc, r) => acc + r.n, 0);
 
   const allStatusCounts: { status: CaseStatus | "todos"; count: number }[] = [
     { status: "todos", count: totalCount },
-    ...VALID_STATUSES.map((s, i) => ({
-      status: s,
-      count: statusCounts[i],
-    })),
+    // Se recorre VALID_STATUSES y no el resultado: un estado sin casos no
+    // vuelve del GROUP BY, y su pestaña tiene que mostrar 0, no desaparecer.
+    ...VALID_STATUSES.map((s) => ({ status: s, count: cuenta.get(s) ?? 0 })),
   ];
 
   const criticalCount = allStatusCounts.find(s => s.status === "escalado")?.count ?? 0;

@@ -246,7 +246,30 @@ const SCENARIOS: Scenario[] = [
     what: "Los datos llegan de a uno; no se vuelve a pedir lo ya contestado",
     turns: [
       { say: "Buenas, tuve un accidente con el auto", expect: { replies: 1 } },
-      { say: "Fue un choque, ayer a la tarde", expect: { replies: 1 } },
+      /*
+       * Este turno no afirma que haya respuesta, y es a propósito.
+       *
+       * Exigía `replies: 1` y fallaba una de cada cinco corridas. No es una
+       * regresión —cuatro corridas seguidas en verde después de la roja, y el
+       * método de este mismo archivo dice que una regresión aparece en las dos—
+       * sino que la entrada cae justo sobre el límite entre dos comportamientos
+       * que los dos son correctos.
+       *
+       * «Fue un choque, ayer a la tarde» agrega datos, así que contestar tiene
+       * sentido; pero si el pedido pendiente no cambió, callarse también, y es
+       * exactamente la regla que este producto quiso tener: no repetirle el
+       * pedido a alguien que no movió el caso. El agente devuelve a veces
+       * `intent: wait` acá, y `reply-decision.ts` lo respeta.
+       *
+       * Lo que este escenario existe para probar lo afirma el turno de abajo:
+       * que después de dar el nombre no se lo vuelvan a pedir. Y el silencio
+       * tiene su propio escenario, `silencio`, con entradas donde la respuesta
+       * no es ambigua: a un «ok» no se le contesta nada.
+       *
+       * Un ensayo que falla por azar deja de mirarse, y entonces tampoco avisa
+       * cuando la falla es de verdad.
+       */
+      { say: "Fue un choque, ayer a la tarde" },
       { say: "Soy Roberto Paz, DNI 25.888.101", expect: { replies: 1, avoids: ["nombre"] } },
       { say: "La póliza es POL-3311-B", expect: { replies: 1 } },
     ],

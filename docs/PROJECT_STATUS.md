@@ -709,12 +709,17 @@ contra producción o con un test que falla si deja de ser cierto.
 - **Dominio propio**: corre en `claimmix.vercel.app`. Hace falta comprar y
   configurar uno.
 - **VPS**: no aplica. Esto es serverless; no hay puertos ni SSH que cerrar.
-- **Nadie tiene rol `specialist` ni `owner`.** Los avisos de «siniestro
-  derivado a especialista» funcionan sólo porque la lista de destinatarios
-  está fijada a mano en el despliegue (`SPECIALIST_ALERT_EMAILS`). Si esa
-  variable se borra, el respaldo busca un `owner`, no encuentra ninguno, y los
-  avisos se apagan sin ruido: el caso queda en `requiere_especialista` y nadie
-  se entera. Asignarle el rol a alguien lo cierra.
+- **No hay ningún `owner`.** Ya no bloquea nada: desde el 28 de agosto de 2026
+  `veltra.soporte@gmail.com` tiene rol `specialist`, y el aviso de derivación
+  busca especialistas ANTES de caer al respaldo por `owner`. `owner` sólo se
+  necesita para que un admin pueda ascender a otro a ese rol.
+
+  Cómo quedó el aviso: `SPECIALIST_ALERT_EMAILS` se borró de producción a
+  propósito. Mientras esa lista tenía direcciones ganaba sobre los roles, así
+  que sumar un especialista no cambiaba nada. Ahora el destinatario se decide
+  por el rol —lo que se ve en la pantalla de usuarios— y no por una variable
+  del despliegue. La variable sigue existiendo como escotilla para el caso en
+  que no haya ningún especialista.
 
 **Dos cosas que encontró la revisión, en código escrito el mismo día:**
 

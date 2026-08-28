@@ -73,6 +73,21 @@ export const RATE_LIMIT_CONFIGS = {
   AUTH_POR_IP: { limit: 30, windowMs: 60_000 },
   /** Sign-up: 3 new accounts per minute per IP */
   AUTH_SIGN_UP: { limit: 3, windowMs: 60_000 },
+
+  /*
+   * Pedir un enlace de recuperacion: tres por hora y por direccion.
+   *
+   * Este endpoint MANDA UN MAIL a una direccion que elige quien llama, asi que
+   * sin techo es un amplificador: uno pide mil veces y la casilla de otro
+   * recibe mil mensajes desde una direccion en la que confia. No hace falta
+   * adivinar nada para que moleste.
+   *
+   * La ventana es larga a proposito. Recuperar la contrasena es algo que una
+   * persona hace una vez y despues va a buscar el mail; reintentar tres veces
+   * en una hora ya es raro, y el cuarto intento no le sirve de nada porque el
+   * enlace anterior sigue vivo.
+   */
+  AUTH_RESET: { limit: 3, windowMs: 60 * 60_000 },
   /** Intake simulation: 30 per minute per user */
   INTAKE_SIMULATE: { limit: 30, windowMs: 60_000 },
   /** Cases API: 100 per minute per user */

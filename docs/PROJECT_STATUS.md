@@ -704,8 +704,13 @@ contra producción o con un test que falla si deja de ser cierto.
 
 **Lo que NO está, y es una decisión pendiente:**
 
-- **Recuperación de contraseña**: no existe el flujo. No hay enlace que pueda no
-  expirar, pero tampoco hay forma de recuperar una contraseña sin un admin.
+- ~~**Recuperación de contraseña**~~: hecha el 28 de agosto de 2026. Enlace por
+  correo que vence en una hora y sirve una sola vez, desde la casilla de la
+  aseguradora de esa persona. La respuesta del formulario es siempre la misma
+  exista o no la cuenta, y el enlace no se registra en ningún lado — es la
+  credencial mientras dura. Techo de tres pedidos por hora y por dirección,
+  aplicado en la Server Action Y en la ruta HTTP, que son dos puertas al mismo
+  cuarto.
 - **Dominio propio**: corre en `claimmix.vercel.app`. Hace falta comprar y
   configurar uno.
 - **VPS**: no aplica. Esto es serverless; no hay puertos ni SSH que cerrar.

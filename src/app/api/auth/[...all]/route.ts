@@ -30,8 +30,14 @@ import { rateLimit, getClientIp, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/ind
 
 const handler = toNextJsHandler(auth);
 
-/** Las operaciones que gastan un secreto, y por eso llevan techo. */
-const CON_TECHO = ["/sign-in", "/sign-up"];
+/**
+ * Las operaciones que gastan algo, y por eso llevan techo.
+ *
+ * `sign-in` y `sign-up` gastan un secreto. `request-password-reset` gasta algo
+ * distinto y igual de real: manda un mail a una direccion que elige quien
+ * llama, desde una casilla en la que esa persona confia.
+ */
+const CON_TECHO = ["/sign-in", "/sign-up", "/request-password-reset"];
 
 /**
  * La dirección que viene en el cuerpo, si la hay.
@@ -56,10 +62,18 @@ export async function POST(req: NextRequest) {
   if (CON_TECHO.some((p) => ruta.includes(p))) {
     const ip = getClientIp(req);
     const direccion = await direccionDelCuerpo(req);
-    const clave = `auth:${ruta.includes("sign-up") ? "up" : "in"}:${ip}:${direccion}`;
-    const config = ruta.includes("sign-up")
-      ? RATE_LIMIT_CONFIGS.AUTH_SIGN_UP
-      : RATE_LIMIT_CONFIGS.AUTH_SIGN_IN;
+    const cual = ruta.includes("sign-up")
+      ? "up"
+      : ruta.includes("request-password-reset")
+        ? "reset"
+        : "in";
+    const clave = `auth:${cual}:${ip}:${direccion}`;
+    const config =
+      cual === "up"
+        ? RATE_LIMIT_CONFIGS.AUTH_SIGN_UP
+        : cual === "reset"
+          ? RATE_LIMIT_CONFIGS.AUTH_RESET
+          : RATE_LIMIT_CONFIGS.AUTH_SIGN_IN;
 
     /*
      * Dos cupos, porque son dos ataques distintos.

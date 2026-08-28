@@ -27,11 +27,17 @@ import { auth } from "@/lib/auth";
  * Las que tienen sentido solo sin sesion: si ya entraste, no vas al formulario
  * de entrada, vas a tu bandeja.
  */
-const SOLO_ANONIMOS = ["/login", "/registro"];
+const SOLO_ANONIMOS = ["/login", "/registro", "/recuperar"];
 
 const PUBLIC_PREFIXES = [
   "/login",
   "/registro",
+  // Recuperar la contraseña: quien la necesita, por definición, no puede
+  // entrar. `/restablecer` NO está en SOLO_ANONIMOS —a diferencia de
+  // `/recuperar`— porque alguien con sesión abierta que sigue el enlace de su
+  // mail tiene que poder terminar de cambiarla igual.
+  "/recuperar",
+  "/restablecer",
   // Las tres páginas que tienen que poder verse SIN cuenta, y que no podían.
   //
   // /demo es la pantalla que ve un prospecto: estaba detrás del login, o sea
@@ -49,6 +55,10 @@ const PUBLIC_PREFIXES = [
   "/terms",
   "/api/auth/sign-in",
   "/api/auth/sign-out",
+  // Los dos pasos de la recuperación. Sin esto el proxy los rechaza con 401
+  // antes de que la ruta pueda atenderlos, y el flujo no existe.
+  "/api/auth/request-password-reset",
+  "/api/auth/reset-password",
   "/api/auth/callback",
   "/api/admin/health",
   // Internal-only endpoints authenticated by CRON_SECRET or X-Internal-Worker header

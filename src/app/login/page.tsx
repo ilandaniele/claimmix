@@ -34,6 +34,19 @@ export default function LoginPage() {
           <SignInForm />
         </div>
 
+        {/*
+          Antes no había ningún enlace acá, porque no había flujo: recuperar la
+          contraseña pedía escribirle a un admin. Eso empuja a mandarlas por chat.
+        */}
+        <p className="mt-4 text-center text-sm text-zinc-500">
+          <Link
+            href="/recuperar"
+            className="font-medium text-zinc-700 underline-offset-2 hover:underline"
+          >
+            ¿Olvidaste tu contraseña?
+          </Link>
+        </p>
+
         <p className="mt-4 text-center text-sm text-zinc-500">
           ¿No tenés cuenta?{" "}
           <Link

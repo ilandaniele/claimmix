@@ -11,26 +11,26 @@ import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { eq, and, gte, count } from "drizzle-orm";
 import { cases, users } from "@/lib/db/schema";
+import { statusOptions, claimTypeOptions } from "@/lib/labels/case-catalog";
 import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
 
 // ── Status and type labels ─────────────────────────────────────────────────────
 
-const STATUS_LABELS: Record<string, string> = {
-  listo: "Listos",
-  esperando: "Esperando",
-  escalado: "Escalados",
-  procesando: "Procesando",
-  cerrado: "Cerrados",
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  choque: "Choque",
-  robo: "Robo",
-  granizo: "Granizo",
-  incendio: "Incendio",
-};
+/*
+ * Los estados y los tipos salen del esquema, no de una copia acá.
+ *
+ * Estaban escritos a mano con cinco estados de trece y cuatro tipos de nueve:
+ * esta pantalla no listaba cristales, responsabilidad civil, robo de contenido
+ * ni accidente personal, así que sus casos no aparecían en la distribución por
+ * más que existieran. Ocho estados corrían la misma suerte.
+ *
+ * De paso los rótulos pasan de plural a singular ("Listos" → "Listo"), que es
+ * como los tiene el diccionario y como se ven en el resto del producto.
+ */
+const STATUS_OPCIONES = statusOptions();
+const TIPO_OPCIONES = claimTypeOptions();
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
@@ -246,7 +246,7 @@ export default async function AnalisisPage() {
                 Distribución por tipo
               </h2>
               <div className="space-y-3">
-                {Object.entries(TYPE_LABELS).map(([key, label]) => (
+                {TIPO_OPCIONES.map(({ value: key, label }) => (
                   <DistributionRow
                     key={key}
                     label={label}
@@ -272,7 +272,7 @@ export default async function AnalisisPage() {
                 Distribución por estado
               </h2>
               <div className="space-y-3">
-                {Object.entries(STATUS_LABELS).map(([key, label]) => (
+                {STATUS_OPCIONES.map(({ value: key, label }) => (
                   <DistributionRow
                     key={key}
                     label={label}

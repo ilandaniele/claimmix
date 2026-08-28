@@ -194,6 +194,68 @@ describe("listCasesForExport", () => {
     expect(result).toHaveLength(2);
   });
 
+  /*
+   * El export tiene que aplicar los MISMOS filtros que el listado.
+   *
+   * Se quedó con status/type/q y nunca recibió los cinco que se agregaron
+   * después. Su propio contrato dice «acepta los mismos filtros que listCases»,
+   * y no era cierto: filtrar la bandeja por críticos y tocar Exportar bajaba
+   * mil filas de todas las severidades, sin ningún aviso.
+   *
+   * Se comprueba mirando el WHERE que se le pasa a la consulta y no el
+   * resultado, porque el bug era justamente que el filtro nunca llegaba: un
+   * test sobre las filas devueltas lo habría dejado pasar con un mock que
+   * devuelve lo que sea.
+   */
+  /*
+   * Uno por uno, y solo.
+   *
+   * La primera versión de este test pasaba los cinco filtros juntos y afirmaba
+   * que el WHERE quedaba definido. Eso no probaba nada: sacando uno del código,
+   * los otros cuatro seguían armando un WHERE y el test seguía verde. Lo agarré
+   * corriéndolo contra el código roto a propósito.
+   *
+   * Con un filtro solo, si el código lo ignora no queda ninguna condición y el
+   * WHERE es `undefined` — que es exactamente el bug que había.
+   */
+  it.each([
+    ["severity", { severity: "critical" }],
+    ["channel", { channel: "email" }],
+    ["is_claim", { is_claim: true }],
+    ["customer_id", { customer_id: "c-1" }],
+    ["policy_id", { policy_id: "p-1" }],
+  ])("aplica %s aunque sea el único filtro", async (_nombre, filtro) => {
+    const chain: any = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    await listCasesForExport(TENANT_ID, filtro as never);
+
+    expect(chain.where).toHaveBeenCalledTimes(1);
+    expect(chain.where.mock.calls[0][0]).toBeDefined();
+  });
+
+  it("sin filtros no arma WHERE, y no inventa uno por inquilino", async () => {
+    // La otra mitad: si `where` recibiera siempre algo, el test de arriba
+    // pasaría aunque el filtro no se aplicara. Y el filtro por inquilino lo
+    // pone la base, no esta función.
+    const chain: any = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    await listCasesForExport(TENANT_ID, {} as never);
+
+    expect(chain.where.mock.calls[0][0]).toBeUndefined();
+  });
+
   it("returns empty array when no cases match", async () => {
     const chain: any = {
       from: vi.fn().mockReturnThis(),

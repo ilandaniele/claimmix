@@ -47,6 +47,47 @@ const SORT_COLUMNS = {
 } as const satisfies Record<SortColumn, unknown>;
 
 /**
+ * El WHERE de un listado de casos, a partir de los filtros de la consulta.
+ *
+ * Existe porque estaba escrito dos veces y las dos copias divergieron:
+ * `listCasesForExport` se quedó con status/type/q y nunca recibió los cinco
+ * que se agregaron después —severidad, canal, is_claim, cliente y póliza—
+ * aunque su propio contrato dice «acepta los mismos filtros que listCases».
+ *
+ * El síntoma lo veía el usuario: filtrar la bandeja por críticos y tocar
+ * Exportar bajaba mil filas de todas las severidades, sin ningún aviso.
+ *
+ * Acá NO va `eq(cases.tenant_id, …)`. Lo pone la base, a partir del contexto
+ * que viaja con el lote. Si alguna vez volviera a aparecer escrito a mano,
+ * sería redundante y —peor— haría pensar que sin él la consulta filtraría de
+ * menos, cuando lo que pasaría es que no devolvería nada.
+ */
+function buildCaseFilters(
+  query: Omit<CaseQuery, "page" | "per_page" | "sort" | "order">
+): SQL | undefined {
+  const { status, type, q, severity, customer_id, policy_id, channel, is_claim } =
+    query;
+  const conditions: (SQL | undefined)[] = [];
+
+  if (status) conditions.push(eq(cases.status, status));
+  if (type) conditions.push(eq(cases.claim_type, type));
+  if (q) {
+    // Case-insensitive substring search on policyholder_name and policy_number.
+    // Parameterized via Drizzle — no raw SQL string interpolation.
+    conditions.push(ilikeAny([cases.policyholder_name, cases.policy_number], q));
+  }
+  // AC18: Email-intake filters
+  if (severity) conditions.push(eq(cases.severity, severity));
+  if (customer_id) conditions.push(eq(cases.customer_id, customer_id));
+  if (policy_id) conditions.push(eq(cases.policy_id, policy_id));
+  if (channel) conditions.push(eq(cases.channel, channel));
+  if (is_claim !== undefined) conditions.push(eq(cases.is_claim, is_claim));
+
+  // `and()` sin condiciones devuelve undefined, que para drizzle es «sin WHERE».
+  return conditions.length > 0 ? and(...conditions) : undefined;
+}
+
+/**
  * Query cases with filtering, sorting, and pagination.
  *
  * **Ninguna consulta de acá filtra por inquilino.** No es un olvido: el filtro
@@ -84,31 +125,7 @@ export async function listCases(
     is_claim,
   } = query;
 
-  // ── Shared filters ─────────────────────────────────────────────────────────
-  //
-  // Acá NO va `eq(cases.tenant_id, …)`. Lo pone la base, a partir del contexto
-  // que viaja con el lote. Si alguna vez volviera a aparecer escrito a mano,
-  // sería redundante y —peor— haría pensar que sin él la consulta filtraría de
-  // menos, cuando lo que pasaría es que no devolvería nada.
-  const conditions: (SQL | undefined)[] = [];
-
-  if (status) conditions.push(eq(cases.status, status));
-  if (type) conditions.push(eq(cases.claim_type, type));
-  if (q) {
-    // Case-insensitive substring search on policyholder_name and policy_number.
-    // Parameterized via Drizzle — no raw SQL string interpolation.
-    conditions.push(ilikeAny([cases.policyholder_name, cases.policy_number], q));
-  }
-  // AC18: Email-intake filters
-  if (severity) conditions.push(eq(cases.severity, severity));
-  if (customer_id) conditions.push(eq(cases.customer_id, customer_id));
-  if (policy_id) conditions.push(eq(cases.policy_id, policy_id));
-  if (channel) conditions.push(eq(cases.channel, channel));
-  if (is_claim !== undefined) conditions.push(eq(cases.is_claim, is_claim));
-
-  // `and()` sin condiciones devuelve undefined, que para drizzle es "sin WHERE".
-  // Correcto: la restricción por inquilino ya no vive en el WHERE.
-  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const where = buildCaseFilters(query);
 
   const sortColumn = SORT_COLUMNS[sort];
   const from = (page - 1) * per_page;
@@ -262,14 +279,10 @@ export async function listCasesForExport(
   tenantId: string,
   query: Omit<CaseQuery, "page" | "per_page" | "sort" | "order">
 ): Promise<CaseRow[]> {
-  const { status, type, q } = query;
-
-  const conditions: (SQL | undefined)[] = [eq(cases.tenant_id, tenantId)];
-  if (status) conditions.push(eq(cases.status, status));
-  if (type) conditions.push(eq(cases.claim_type, type));
-  if (q) {
-    conditions.push(ilikeAny([cases.policyholder_name, cases.policy_number], q));
-  }
+  // El mismo WHERE que el listado, que es lo que su contrato dice desde
+  // siempre. El `eq(cases.tenant_id, …)` que estaba acá era el último que
+  // quedaba escrito a mano en este archivo: lo pone la base.
+  const where = buildCaseFilters(query);
 
   try {
     // Max 1000 rows per export.
@@ -287,7 +300,7 @@ export async function listCasesForExport(
           created_at: cases.created_at,
         })
         .from(cases)
-        .where(and(...conditions))
+        .where(where)
         .orderBy(desc(cases.created_at))
         .limit(1000)
     );

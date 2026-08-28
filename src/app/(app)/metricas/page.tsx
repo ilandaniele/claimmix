@@ -12,6 +12,7 @@
 
 import { getSessionContext } from "@/lib/auth/session";
 import { formatUsd as formatUsdShared } from "@/lib/utils";
+import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { eq, and, gte, lt, count, sql, isNotNull } from "drizzle-orm";
@@ -272,7 +273,11 @@ async function fetchMetricas(): Promise<MetricasData | null> {
     for (const row of byTypeRows) {
       if (row.claim_type) byType[row.claim_type] = row.n;
     }
-    for (const t of ["choque", "robo", "granizo", "incendio"]) {
+    // Los nueve tipos del esquema, no los cuatro de cuando esto se escribió.
+    // Sembrar sólo cuatro dejaba a cristales, RC, robo de contenido,
+    // accidente personal y `other` fuera del gráfico salvo que hubiera casos,
+    // así que la distribución se leía como si esos tipos no existieran.
+    for (const t of ClaimTypeSchema.options) {
       if (!(t in byType)) byType[t] = 0;
     }
 

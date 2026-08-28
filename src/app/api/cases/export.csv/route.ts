@@ -92,10 +92,21 @@ export async function GET(request: NextRequest) {
 
   // ── 3. Parse query params (same schema as list, but page/per_page ignored) ─
   const searchParams = request.nextUrl.searchParams;
+  // Los mismos filtros que la pantalla, no tres de ocho.
+  //
+  // Leía sólo status/type/q, así que quien filtraba la bandeja por severidad,
+  // canal o is_claim y tocaba Exportar se bajaba mil filas SIN esos filtros y
+  // sin ningún aviso: el CSV decía otra cosa que la pantalla desde la que se
+  // pidió.
   const rawQuery = {
     status: searchParams.get("status") ?? undefined,
     type: searchParams.get("type") ?? undefined,
     q: searchParams.get("q") ?? undefined,
+    severity: searchParams.get("severity") ?? undefined,
+    channel: searchParams.get("channel") ?? undefined,
+    is_claim: searchParams.get("is_claim") ?? undefined,
+    customer_id: searchParams.get("customer_id") ?? undefined,
+    policy_id: searchParams.get("policy_id") ?? undefined,
     // page/per_page/sort/order are ignored for export (always max 1000, date desc)
     page: "1",
     per_page: "100",
@@ -121,6 +132,11 @@ export async function GET(request: NextRequest) {
       status: parsed.data.status,
       type: parsed.data.type,
       q: parsed.data.q,
+      severity: parsed.data.severity,
+      channel: parsed.data.channel,
+      is_claim: parsed.data.is_claim,
+      customer_id: parsed.data.customer_id,
+      policy_id: parsed.data.policy_id,
     });
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";

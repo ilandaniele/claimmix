@@ -246,6 +246,14 @@ export function DashboardClient({
   const searchParams = useSearchParams();
   const activeStatus = (searchParams.get("status") as CaseStatus) || undefined;
   const activeType = (searchParams.get("type") as ClaimType) || undefined;
+
+  // Lo que va al CSV: todo lo que filtra la pantalla, sin la paginación.
+  const exportQuery = (() => {
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete("page");
+    p.delete("per_page");
+    return p.toString();
+  })();
   const activePage = parseInt(searchParams.get("page") ?? "1", 10) || 1;
   const activeChannel =
     (searchParams.get("channel") as "email" | "email_sim") || undefined;
@@ -456,7 +464,19 @@ export function DashboardClient({
             </div>
             <div className="flex items-center gap-3">
               <a
-                href={`/api/cases/export.csv${activeStatus || activeType ? "?" + new URLSearchParams({ ...(activeStatus ? { status: activeStatus } : {}), ...(activeType ? { type: activeType } : {}) }).toString() : ""}`}
+                /*
+                 * El CSV se pide con los MISMOS filtros que muestra la pantalla.
+                 *
+                 * Este href armaba el querystring con status y type elegidos a
+                 * mano, así que filtrar por severidad o por canal y tocar Exportar
+                 * bajaba un archivo que no coincidía con lo que se estaba mirando.
+                 *
+                 * Se reenvían los parámetros de la URL tal cual, menos los de
+                 * paginación: el export siempre trae hasta mil filas y ordenadas
+                 * por fecha, así que `page` y `per_page` no significan nada acá y
+                 * mandarlos sólo invita a que alguien los interprete.
+                 */
+                href={`/api/cases/export.csv${exportQuery ? `?${exportQuery}` : ""}`}
                 className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
                 aria-label={t("bandeja.export")}
               >

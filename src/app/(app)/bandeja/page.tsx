@@ -24,6 +24,7 @@ import { cases, users } from "@/lib/db/schema";
 import { listCases } from "@/server/cases/list";
 import { SCENARIOS } from "@/server/intake/scenarios";
 import { DashboardClient, PER_PAGE_OPTIONS } from "./DashboardClient";
+import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 
 const VALID_STATUSES: CaseStatus[] = [
@@ -41,7 +42,18 @@ const VALID_STATUSES: CaseStatus[] = [
   "error_core",
   "no_relevante",
 ];
-const VALID_TYPES: ClaimType[] = ["choque", "robo", "granizo", "incendio"];
+/*
+ * Los tipos que este filtro acepta salen del esquema, no de una lista a mano.
+ *
+ * Eran cuatro de nueve, y los chips de la pantalla ofrecen ocho. Tocar
+ * "Cristales", "Resp. Civil", "Robo de contenido" o "Accidente personal"
+ * mandaba el parametro, este whitelist lo descartaba, y el servidor devolvia la
+ * pagina SIN filtrar. El cliente despues la recortaba, asi que se veia una
+ * lista casi vacia con un paginador prometiendo paginas que no existian.
+ *
+ * Cuatro filtros que no filtraban, y ninguno fallaba en voz alta.
+ */
+const VALID_TYPES: ClaimType[] = ClaimTypeSchema.options;
 const VALID_SEVERITIES: Severity[] = ["low", "medium", "high", "critical"];
 const VALID_CHANNELS = ["email_sim", "email", "whatsapp_sim", "whatsapp"] as const;
 

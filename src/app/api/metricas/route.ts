@@ -20,6 +20,7 @@
  */
 
 import { and, eq, gte, lt, count, sql } from "drizzle-orm";
+import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
@@ -240,7 +241,11 @@ export async function GET() {
       byType[key] = (byType[key] ?? 0) + 1;
     }
     // Ensure all 4 types are present even with 0 counts
-    for (const t of ["choque", "robo", "granizo", "incendio"]) {
+    // Los nueve tipos del esquema, no los cuatro de cuando esto se escribió.
+    // Sembrar sólo cuatro dejaba a cristales, RC, robo de contenido,
+    // accidente personal y `other` fuera del gráfico salvo que hubiera casos,
+    // así que la distribución se leía como si esos tipos no existieran.
+    for (const t of ClaimTypeSchema.options) {
       if (!(t in byType)) byType[t] = 0;
     }
 

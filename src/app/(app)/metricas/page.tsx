@@ -13,7 +13,7 @@
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { eq, and, gte, lt, count, sql } from "drizzle-orm";
+import { eq, and, gte, lt, count, sql, isNotNull } from "drizzle-orm";
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";
@@ -101,7 +101,7 @@ async function fetchMetricas(): Promise<MetricasData | null> {
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
 
     const [
-      casesThisMonth,
+      [resumenMes],
       byStatusRows,
       byTypeRows,
       [escalatedRow],
@@ -111,26 +111,46 @@ async function fetchMetricas(): Promise<MetricasData | null> {
       usageByUserRows,
       usageByModelRows,
     ] = await Promise.all([
+        /*
+         * Los tres números del mes en una fila, en vez de traer los casos.
+         *
+         * Esto devolvía una fila por caso del mes —455 en producción— para
+         * contarlas en JS. La suma y el promedio los sabe hacer la base, y lo
+         * que viaja pasa de cientos de filas a una.
+         *
+         * `sum` y `count` por separado y la división en JS a propósito: así el
+         * redondeo es exactamente el mismo `Math.round(total / n)` de antes, y
+         * el número que ve la pantalla no se mueve.
+         */
         enTenant(tenantCtx, (db) =>
           db
-            .select({ id: cases.id, status: cases.status, created_at: cases.created_at, closed_at: cases.closed_at })
+            .select({
+              total: sql<number>`count(*)::int`,
+              listo: sql<number>`count(*) filter (where ${cases.status} = 'listo')::int`,
+              cerrados: sql<number>`count(*) filter (where ${cases.status} = 'cerrado' and ${cases.closed_at} is not null)::int`,
+              minutos: sql<number>`coalesce(sum(extract(epoch from (${cases.closed_at} - ${cases.created_at})) / 60) filter (where ${cases.status} = 'cerrado' and ${cases.closed_at} is not null), 0)::float8`,
+            })
             .from(cases)
             .where(and(
               gte(cases.created_at, monthStart),
               lt(cases.created_at, monthEnd),
             ))
         ),
+        // Agrupado en la base: traía las 458 filas de `cases` para contarlas.
         enTenant(tenantCtx, (db) =>
           db
-            .select({ status: cases.status })
+            .select({ status: cases.status, n: sql<number>`count(*)::int` })
             .from(cases)
-            
+            .groupBy(cases.status)
         ),
+        // Idem, y el `is not null` reemplaza al `if (row.claim_type)` que
+        // descartaba esas filas después de haberlas traído.
         enTenant(tenantCtx, (db) =>
           db
-            .select({ claim_type: cases.claim_type })
+            .select({ claim_type: cases.claim_type, n: sql<number>`count(*)::int` })
             .from(cases)
-            
+            .where(isNotNull(cases.claim_type))
+            .groupBy(cases.claim_type)
         ),
         enTenant(tenantCtx, (db) =>
           db
@@ -142,16 +162,32 @@ async function fetchMetricas(): Promise<MetricasData | null> {
               lt(cases.created_at, monthEnd),
             ))
         ),
+        /*
+         * Los cinco de arriba, contados y ordenados por la base.
+         *
+         * El desempate por nombre es nuevo y deliberado: el `.sort()` de JS es
+         * estable sobre el orden en que llegaron las filas, y un `order by`
+         * sin criterio secundario no. Sin esto, dos analistas con la misma
+         * cantidad podían intercambiarse entre dos cargas de la pantalla.
+         */
         enTenant(tenantCtx, (db) =>
           db
-            .select({ assigned_to: cases.assigned_to, full_name: users.full_name })
+            .select({
+              assigned_to: cases.assigned_to,
+              full_name: users.full_name,
+              n: sql<number>`count(*)::int`,
+            })
             .from(cases)
             .leftJoin(users, eq(cases.assigned_to, users.id))
             .where(and(
               eq(cases.status, "cerrado"),
               gte(cases.closed_at, monthStart),
               lt(cases.closed_at, monthEnd),
+              isNotNull(cases.assigned_to),
             ))
+            .groupBy(cases.assigned_to, users.full_name)
+            .orderBy(sql`count(*) desc, ${users.full_name} asc`)
+            .limit(5)
         ),
         enTenant(tenantCtx, (db) =>
           db
@@ -216,53 +252,33 @@ async function fetchMetricas(): Promise<MetricasData | null> {
         ),
       ]);
 
-    const totalCasesMonth = casesThisMonth.length;
+    const totalCasesMonth = resumenMes?.total ?? 0;
 
-    // Avg opening time
-    const closedCases = casesThisMonth.filter(
-      (c) => c.status === "cerrado" && c.closed_at
-    );
-    let avgOpeningMinutes: number | null = null;
-    if (closedCases.length > 0) {
-      const total = closedCases.reduce((s, c) => {
-        return (
-          s +
-          (new Date(c.closed_at!).getTime() - new Date(c.created_at).getTime()) /
-            60_000
-        );
-      }, 0);
-      avgOpeningMinutes = Math.round(total / closedCases.length);
-    }
+    // El mismo Math.round(total / n) de antes, con la suma hecha por la base.
+    const avgOpeningMinutes: number | null =
+      resumenMes && resumenMes.cerrados > 0
+        ? Math.round(resumenMes.minutos / resumenMes.cerrados)
+        : null;
 
-    const listoCount = casesThisMonth.filter((c) => c.status === "listo").length;
+    const listoCount = resumenMes?.listo ?? 0;
     const autoCompletionRate =
       totalCasesMonth > 0 ? Math.round((listoCount / totalCasesMonth) * 100) : 0;
 
     const byStatus: Record<string, number> = {};
-    for (const row of byStatusRows) {
-      byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
-    }
+    for (const row of byStatusRows) byStatus[row.status] = row.n;
 
     const byType: Record<string, number> = {};
     for (const row of byTypeRows) {
-      if (row.claim_type) byType[row.claim_type] = (byType[row.claim_type] ?? 0) + 1;
+      if (row.claim_type) byType[row.claim_type] = row.n;
     }
     for (const t of ["choque", "robo", "granizo", "incendio"]) {
       if (!(t in byType)) byType[t] = 0;
     }
 
-    const analystCounts: Record<string, { name: string; count: number }> = {};
-    for (const row of topAnalystsRows) {
-      const assignedId = row.assigned_to as string | null;
-      if (!assignedId) continue;
-      const name = row.full_name ?? "Analista";
-      if (!analystCounts[assignedId]) analystCounts[assignedId] = { name, count: 0 };
-      analystCounts[assignedId].count += 1;
-    }
-    const topAnalysts = Object.values(analystCounts)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5)
-      .map((a) => ({ full_name: a.name, closed_count: a.count }));
+    const topAnalysts = topAnalystsRows.map((row) => ({
+      full_name: row.full_name ?? "Analista",
+      closed_count: row.n,
+    }));
 
     const usageByUser: AiUsageByUser[] = usageByUserRows
       .map((row) => ({

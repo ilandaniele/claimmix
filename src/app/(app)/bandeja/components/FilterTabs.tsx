@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useFilterParam } from "./useFilterParam";
 import { useCallback } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { CaseStatus } from "@/lib/schemas/cases";
@@ -17,9 +18,7 @@ interface FilterTabsProps {
 
 export function FilterTabs({ counts, activeStatus }: FilterTabsProps) {
   const t = useT();
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const setFilter = useFilterParam();
 
   const TABS: { key: CaseStatus | "todos"; label: string }[] = [
     { key: "todos", label: t("tabs.todos") },
@@ -31,18 +30,11 @@ export function FilterTabs({ counts, activeStatus }: FilterTabsProps) {
   ];
 
   const handleTabClick = useCallback(
-    (status: CaseStatus | "todos") => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (status === "todos") {
-        params.delete("status");
-      } else {
-        params.set("status", status);
-      }
-      params.delete("page");
-      router.push(`${pathname}?${params.toString()}`);
-    },
-    [router, pathname, searchParams]
-  );
+      (status: CaseStatus | "todos") => {
+        setFilter("status", status === "todos" ? null : status);
+      },
+      [setFilter]
+    );
 
   const countMap = new Map(counts.map((c) => [c.status, c.count]));
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useFilterParam } from "./useFilterParam";
 import { useCallback } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { ClaimType } from "@/lib/schemas/cases";
@@ -11,9 +12,7 @@ interface TypeFilterChipsProps {
 
 export function TypeFilterChips({ activeType }: TypeFilterChipsProps) {
   const t = useT();
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const setFilter = useFilterParam();
 
   const CHIPS: { key: ClaimType | "todos"; label: string }[] = [
     { key: "todos", label: t("type.todos") },
@@ -28,18 +27,11 @@ export function TypeFilterChips({ activeType }: TypeFilterChipsProps) {
   ];
 
   const handleChipClick = useCallback(
-    (type: ClaimType | "todos") => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (type === "todos") {
-        params.delete("type");
-      } else {
-        params.set("type", type);
-      }
-      params.delete("page");
-      router.push(`${pathname}?${params.toString()}`);
-    },
-    [router, pathname, searchParams]
-  );
+      (type: ClaimType | "todos") => {
+        setFilter("type", type === "todos" ? null : type);
+      },
+      [setFilter]
+    );
 
   return (
     <div

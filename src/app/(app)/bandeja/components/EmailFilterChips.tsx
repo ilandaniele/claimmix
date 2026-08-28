@@ -8,6 +8,7 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useFilterParam } from "./useFilterParam";
 import { useCallback } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { Severity } from "@/lib/schemas/cases";
@@ -22,9 +23,7 @@ interface ChannelFilterChipsProps {
 
 export function ChannelFilterChips({ activeChannel }: ChannelFilterChipsProps) {
   const t = useT();
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const setFilter = useFilterParam();
 
   const CHANNEL_CHIPS: { key: ChannelFilter; label: string }[] = [
     { key: "todos", label: t("channel.todos") },
@@ -33,18 +32,11 @@ export function ChannelFilterChips({ activeChannel }: ChannelFilterChipsProps) {
   ];
 
   const handleClick = useCallback(
-    (channel: ChannelFilter) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (channel === "todos") {
-        params.delete("channel");
-      } else {
-        params.set("channel", channel);
-      }
-      params.delete("page");
-      router.push(`${pathname}?${params.toString()}`);
-    },
-    [router, pathname, searchParams]
-  );
+      (channel: ChannelFilter) => {
+        setFilter("channel", channel === "todos" ? null : channel);
+      },
+      [setFilter]
+    );
 
   return (
     <div
@@ -98,9 +90,7 @@ export function SeverityFilterChips({
   activeSeverity,
 }: SeverityFilterChipsProps) {
   const t = useT();
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const setFilter = useFilterParam();
 
   const SEVERITY_CHIPS: { key: SeverityFilter; label: string; color: string }[] =
     [
@@ -133,18 +123,11 @@ export function SeverityFilterChips({
     ];
 
   const handleClick = useCallback(
-    (severity: SeverityFilter) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (severity === "todos") {
-        params.delete("severity");
-      } else {
-        params.set("severity", severity);
-      }
-      params.delete("page");
-      router.push(`${pathname}?${params.toString()}`);
-    },
-    [router, pathname, searchParams]
-  );
+      (severity: SeverityFilter) => {
+        setFilter("severity", severity === "todos" ? null : severity);
+      },
+      [setFilter]
+    );
 
   return (
     <div
@@ -186,9 +169,7 @@ interface IsClaimFilterChipsProps {
 
 export function IsClaimFilterChips({ activeIsClaim }: IsClaimFilterChipsProps) {
   const t = useT();
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const setFilter = useFilterParam();
 
   const IS_CLAIM_CHIPS: { key: IsClaimFilter; label: string }[] = [
     { key: "todos", label: t("filter.todos") },
@@ -197,18 +178,11 @@ export function IsClaimFilterChips({ activeIsClaim }: IsClaimFilterChipsProps) {
   ];
 
   const handleClick = useCallback(
-    (isClaim: IsClaimFilter) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (isClaim === "todos") {
-        params.delete("is_claim");
-      } else {
-        params.set("is_claim", isClaim);
-      }
-      params.delete("page");
-      router.push(`${pathname}?${params.toString()}`);
-    },
-    [router, pathname, searchParams]
-  );
+      (isClaim: IsClaimFilter) => {
+        setFilter("is_claim", isClaim === "todos" ? null : isClaim);
+      },
+      [setFilter]
+    );
 
   return (
     <div

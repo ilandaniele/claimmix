@@ -17,6 +17,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isInternalRequest } from "@/lib/security/internal-auth";
 import { timingSafeEqual } from "crypto";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
@@ -33,20 +34,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const authHeader = req.headers.get("authorization") ?? "";
-  const expected = `Bearer ${secret}`;
-  let isAuthorized = false;
-  try {
-    const expectedBuf = Buffer.from(expected, "utf-8");
-    const actualBuf = Buffer.from(authHeader, "utf-8");
-    if (expectedBuf.length === actualBuf.length) {
-      isAuthorized = timingSafeEqual(expectedBuf, actualBuf);
-    }
-  } catch {
-    isAuthorized = false;
-  }
-
-  if (!isAuthorized) {
+  /*
+   * La comparación sale de `isInternalRequest`, que es este mismo
+   * `timingSafeEqual` contra `Bearer ${CRON_SECRET}` escrito una sola vez.
+   *
+   * Lo que NO se centraliza es el 500 de arriba. Que falte el secreto es una
+   * mala configuración del despliegue y no un llamador sin permiso, y la
+   * diferencia está fijada por tests a propósito.
+   */
+  if (!isInternalRequest(req)) {
     return NextResponse.json(
       { error: { code: "UNAUTHORIZED", message: "Invalid or missing Authorization header." } },
       { status: 401 }

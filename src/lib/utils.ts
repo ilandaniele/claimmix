@@ -58,3 +58,28 @@ export function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
   return str.slice(0, maxLength - 3) + "...";
 }
+
+/**
+ * Un monto en dólares, escrito igual en todo el producto.
+ *
+ * Estaba implementado tres veces con dos locales distintos, y el peor caso no
+ * era entre pantallas sino DENTRO de una: en métricas convivían un
+ * `formatNumber` en `es-AR` y un `formatUsd` en `en-US`, así que dos tarjetas
+ * contiguas mostraban `1.234.567` y `$1,234.56` — separador de miles al revés
+ * en la misma fila.
+ *
+ * Gana `es-AR`, que es el idioma del resto del producto.
+ *
+ * `precision` existe porque hay dos usos con necesidades opuestas: la
+ * facturación muestra montos de decenas o cientos y dos decimales alcanzan; el
+ * costo de IA por llamada es de milésimas y con dos decimales todo se ve
+ * `$0,01`. No es configurabilidad especulativa: son los dos casos que hay.
+ */
+export function formatUsd(value: number, precision: 2 | 4 = 2): string {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: precision,
+  }).format(value);
+}

@@ -11,6 +11,7 @@
  */
 
 import { getSessionContext } from "@/lib/auth/session";
+import { formatUsd as formatUsdShared } from "@/lib/utils";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { eq, and, gte, lt, count, sql, isNotNull } from "drizzle-orm";
@@ -342,14 +343,9 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("es-AR").format(Math.round(value));
 }
 
-function formatUsd(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  }).format(value);
-}
+// El costo de IA por llamada es de milésimas: con dos decimales todo se ve
+// $0,01. De ahí el 4.
+const formatUsd = (value: number) => formatUsdShared(value, 4);
 
 // ── Status bar chart ──────────────────────────────────────────────────────────
 

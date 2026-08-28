@@ -807,20 +807,15 @@ export async function runEmailExtractionWorker(
     // a provider/schema error, NOT a genuine is_claim=false classification.
     // Set escalado so a human can re-trigger, never no_relevante.
     if (extractedClaim.parse_failed === true) {
-      await enTenant(tenantCtx, (db) =>
-        db
-          .update(cases)
-          .set({ status: "escalado", updated_at: new Date().toISOString() })
-          .where(eq(cases.id, caseId))
-      );
-      await writeAuditLog({
-        tenant_id: tenantId,
-        actor_id: userId,
-        event_type: AuditEvent.AI_EXTRACTED,
-        target_type: "case",
-        target_id: caseId,
-        payload: { new_status: "escalado", reason: "parse_failed", error_code: "ai_parse_error" },
-      });
+      // `escalateCase` es este mismo cuerpo, y está treinta líneas más abajo en
+      // este archivo: mismo `escalado`, mismo `updated_at`, mismo payload de
+      // auditoría. Estaba escrito dos veces.
+      //
+      // Una diferencia que vale nombrar: `escalateCase` pasa por
+      // `updateCaseStatus`, que atrapa el error de base y lo registra en vez de
+      // propagarlo. Es el mismo comportamiento que ya tenía el escalado por
+      // error de Gemini, así que esto los unifica.
+      await escalateCase(caseId, tenantCtx, userId, "parse_failed", "ai_parse_error");
       console.warn(JSON.stringify({ level: "warn", service: "claimmix", msg: "email_worker.parse_failed_escalated", case_id: caseId }));
       return;
     }

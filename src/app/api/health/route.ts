@@ -22,7 +22,8 @@
  * free to call often.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { isInternalRequest } from "@/lib/security/internal-auth";
 import { timingSafeEqual } from "crypto";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 
@@ -88,15 +89,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   );
 }
 
+/*
+ * La comparación sale de `isInternalRequest`: el mismo `timingSafeEqual`
+ * contra `Bearer ${CRON_SECRET}`, escrito una sola vez. Acá el secreto
+ * faltante da 401 igual que un header inválido, que es lo que ya hacía.
+ */
 function authorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-
-  const given = req.headers.get("authorization") ?? "";
-  const expected = `Bearer ${secret}`;
-  const a = Buffer.from(given, "utf-8");
-  const b = Buffer.from(expected, "utf-8");
-  return a.length === b.length && timingSafeEqual(a, b);
+  return isInternalRequest(req);
 }
 
 function ok(name: string, detail: string): Check {

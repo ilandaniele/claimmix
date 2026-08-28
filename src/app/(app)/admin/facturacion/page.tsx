@@ -15,6 +15,7 @@
  */
 
 import Link from "next/link";
+import { formatUsd } from "@/lib/utils";
 import { redirect } from "next/navigation";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
@@ -24,8 +25,8 @@ import { getStatement } from "@/server/billing/statement";
 
 export const dynamic = "force-dynamic";
 
-const money = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+// Uno solo para todo el producto: ver formatUsd en lib/utils.
+const money = (n: number) => formatUsd(n);
 
 /** `2026-03` → `marzo de 2026`, para que el encabezado se lea como una fecha. */
 function monthLabel(month: string): string {

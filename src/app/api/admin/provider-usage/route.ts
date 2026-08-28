@@ -11,7 +11,7 @@
 import { ok, err } from "@/lib/api/respond";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db, tables } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enTenant, type TenantContext, enTenantVarias } from "@/data/scope";
 import { and, eq, gte, sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -35,62 +35,71 @@ export async function GET() {
     const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
     const since7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    // Aggregate stats per provider/model for last 24h
-    const stats24h = await enTenant(tenantCtx, (db) =>
-      db
-        .select({
-          provider: t.provider,
-          model: t.model,
-          total: sql<number>`count(*)::int`,
-          success: sql<number>`count(*) filter (where status = 'success')::int`,
-          error: sql<number>`count(*) filter (where status = 'error')::int`,
-          rate_limited: sql<number>`count(*) filter (where status = 'rate_limited')::int`,
-          quota_exceeded: sql<number>`count(*) filter (where status = 'quota_exceeded')::int`,
-          invalid_json: sql<number>`count(*) filter (where status = 'invalid_json')::int`,
-          avg_latency_ms: sql<number>`round(avg(latency_ms) filter (where latency_ms is not null))::int`,
-        })
-        .from(t)
-        .where(and( gte(t.created_at, since24h)))
-        .groupBy(t.provider, t.model)
-    );
-
-    // Recent errors (last 24h) for visibility
-    const recentErrors = await enTenant(tenantCtx, (db) =>
-      db
-        .select({
-          provider: t.provider,
-          model: t.model,
-          status: t.status,
-          error_code: t.error_code,
-          error_message: t.error_message,
-          retry_count: t.retry_count,
-          latency_ms: t.latency_ms,
-          created_at: t.created_at,
-        })
-        .from(t)
-        .where(
-          and(
-            gte(t.created_at, since24h),
-            sql`status != 'success'`
-          )
-        )
-        .orderBy(sql`created_at desc`)
-        .limit(20)
-    );
-
-    // 7-day aggregate (lighter — just totals)
-    const stats7d = await enTenant(tenantCtx, (db) =>
-      db
-        .select({
-          provider: t.provider,
-          total: sql<number>`count(*)::int`,
-          failures: sql<number>`count(*) filter (where status != 'success')::int`,
-          rate_limited: sql<number>`count(*) filter (where status = 'rate_limited')::int`,
-        })
-        .from(t)
-        .where(and( gte(t.created_at, since7d)))
-        .groupBy(t.provider)
-    );
+    /*
+     * Las tres en un solo lote.
+     *
+     * Eran tres `await enTenant` seguidos, y cada uno abre su propio `batch()`
+     * contra Neon con su `set_config` adelante: tres viajes de red para tres
+     * agregados sobre la misma tabla que no dependen entre sí.
+     *
+     * `enTenantVarias` existe documentado para exactamente esto.
+     */
+    const [stats24h, recentErrors, stats7d] = await enTenantVarias<
+      [
+        Array<Record<string, unknown>>,
+        Array<Record<string, unknown>>,
+        Array<Record<string, unknown>>,
+      ]
+    >(tenantCtx, (db) => [
+      // 24 horas, por proveedor y modelo.
+          db
+            .select({
+              provider: t.provider,
+              model: t.model,
+              total: sql<number>`count(*)::int`,
+              success: sql<number>`count(*) filter (where status = 'success')::int`,
+              error: sql<number>`count(*) filter (where status = 'error')::int`,
+              rate_limited: sql<number>`count(*) filter (where status = 'rate_limited')::int`,
+              quota_exceeded: sql<number>`count(*) filter (where status = 'quota_exceeded')::int`,
+              invalid_json: sql<number>`count(*) filter (where status = 'invalid_json')::int`,
+              avg_latency_ms: sql<number>`round(avg(latency_ms) filter (where latency_ms is not null))::int`,
+            })
+            .from(t)
+            .where(and( gte(t.created_at, since24h)))
+            .groupBy(t.provider, t.model),
+      // Los errores recientes, para poder mirarlos.
+          db
+            .select({
+              provider: t.provider,
+              model: t.model,
+              status: t.status,
+              error_code: t.error_code,
+              error_message: t.error_message,
+              retry_count: t.retry_count,
+              latency_ms: t.latency_ms,
+              created_at: t.created_at,
+            })
+            .from(t)
+            .where(
+              and(
+                gte(t.created_at, since24h),
+                sql`status != 'success'`
+              )
+            )
+            .orderBy(sql`created_at desc`)
+            .limit(20),
+      // 7 días, sólo totales.
+          db
+            .select({
+              provider: t.provider,
+              total: sql<number>`count(*)::int`,
+              failures: sql<number>`count(*) filter (where status != 'success')::int`,
+              rate_limited: sql<number>`count(*) filter (where status = 'rate_limited')::int`,
+            })
+            .from(t)
+            .where(and( gte(t.created_at, since7d)))
+            .groupBy(t.provider)
+    ]);
 
     // Current worker config from env
     const geminiConfig = {

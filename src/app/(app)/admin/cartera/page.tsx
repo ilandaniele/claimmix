@@ -15,6 +15,7 @@
  */
 
 import { redirect } from "next/navigation";
+import { formatUsd } from "@/lib/utils";
 
 import { requireOperator } from "@/lib/auth/require-operator";
 import { AppError } from "@/lib/errors";
@@ -22,8 +23,8 @@ import { listTenantSummaries } from "@/server/billing/tenant-summary";
 
 export const dynamic = "force-dynamic";
 
-const money = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+// Uno solo para todo el producto: ver formatUsd en lib/utils.
+const money = (n: number) => formatUsd(n);
 
 const STATUS_STYLES: Record<string, string> = {
   active: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300",

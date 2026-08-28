@@ -13,6 +13,11 @@ import OpenAI, { toFile } from "openai";
 import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db, tables } from "@/lib/db";
+import {
+  approvedExamplesForTenant,
+  buildExpectedOutput,
+  stableHash,
+} from "@/server/training/dataset";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
@@ -42,23 +47,7 @@ function mapOpenAIStatus(status: string): string {
   return "queued";
 }
 
-function stableHash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
-}
 
-function buildExpectedOutput(expectedOutput: Record<string, unknown>): Record<string, unknown> {
-  const agentOutput =
-    expectedOutput.agent_output && typeof expectedOutput.agent_output === "object"
-      ? { ...(expectedOutput.agent_output as Record<string, unknown>) }
-      : { ...expectedOutput };
-  const confirmed = Array.isArray(expectedOutput.confirmed_fields)
-    ? expectedOutput.confirmed_fields
-    : [];
-  if (confirmed.length > 0) {
-    agentOutput.fields = confirmed;
-  }
-  return agentOutput;
-}
 
 function toJsonlLine(example: {
   input_payload: Record<string, unknown>;
@@ -85,38 +74,6 @@ function toJsonlLine(example: {
   });
 }
 
-async function approvedExamplesForTenant(tenantId: string) {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
-  const t = tables.trainingExamples;
-  const rows = await enTenant(tenantCtx, (db) =>
-    db
-      .select({
-        id: t.id,
-        input_payload: t.input_payload,
-        expected_output: t.expected_output,
-        created_at: t.created_at,
-      })
-      .from(t)
-      .where(eq(t.status, "approved"))
-      .orderBy(desc(t.created_at))
-      .limit(500)
-  );
-
-  const seen = new Set<string>();
-  return rows
-    .map((row) => ({
-      ...row,
-      input_payload: (row.input_payload ?? {}) as Record<string, unknown>,
-      expected_output: (row.expected_output ?? {}) as Record<string, unknown>,
-    }))
-    .filter((row) => {
-      const hash = stableHash([row.input_payload, row.expected_output]);
-      if (seen.has(hash)) return false;
-      seen.add(hash);
-      return true;
-    });
-}
 
 function geminiContextEvalResult(input: {
   trainingCount: number;

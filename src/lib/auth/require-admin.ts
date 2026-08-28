@@ -9,56 +9,38 @@
  *
  * Spec: IC5 — Admin role check uses the same predicate as /api/admin/users.
  * Error code mapping: FORBIDDEN_ROLE → 403 per errors.ts.
+ *
+ * ── Por qué esto es una línea y antes eran cuarenta ─────────────────────────
+ *
+ * Era `requireRole(...ADMIN_ROLES)` escrito de nuevo: el mismo
+ * `getSessionContext`, el mismo `firstRow` sobre `users` con las mismas tres
+ * columnas, los mismos `AppError`, la misma forma de retorno. La única
+ * diferencia real era que tipaba `role` como `string` en vez de `UserRole`.
+ *
+ * Eso hacía que la lista de roles con permiso de admin viviera en dos lugares,
+ * y sólo uno se leía como la lista: `ADMIN_ROLES`. Agregar un rol ahí no
+ * alcanzaba a las veintinueve rutas que entran por acá.
  */
 
-import { eq } from "drizzle-orm";
+import { requireRole, ADMIN_ROLES, type RoleContext } from "@/lib/auth/require-role";
 
-import { getSessionContext } from "@/lib/auth/session";
-import { db } from "@/lib/db";
-import { firstRow } from "@/lib/db/helpers";
-import { users } from "@/lib/db/schema";
-import { AppError } from "@/lib/errors";
-
-export interface AdminContext {
-  user: { id: string; email?: string };
-  userRow: { id: string; tenant_id: string; role: string };
-}
+/**
+ * El contexto que devuelve la guarda.
+ *
+ * No trae un handle de base a propósito. Cuando lo traía era el del rol dueño,
+ * y toda ruta que escribiera `const { db } = await requireRole()` quedaba
+ * consultando por afuera de RLS sin que se notara: la consulta anda, devuelve
+ * filas, y las filas son de todos los inquilinos. Para leer o escribir,
+ * `enTenant({ tenantId: userRow.tenant_id }, …)`.
+ */
+export type AdminContext = RoleContext;
 
 /**
  * Validate that the current request has an admin session.
- * No devuelve un handle de base a propósito. Cuando devolvía uno, era el del
- * rol dueño, y toda ruta que escribiera `const { db } = await requireRole()`
- * quedaba consultando por afuera de RLS sin que se notara: la consulta anda,
- * devuelve filas, y las filas son de todos los inquilinos. Para leer o
- * escribir, `enTenant({ tenantId: userRow.tenant_id }, …)`.
  *
  * @throws AppError('MISSING_SESSION') — no authenticated user
  * @throws AppError('FORBIDDEN_ROLE')  — authenticated but not admin/owner
  */
 export async function requireAdmin(): Promise<AdminContext> {
-  const session = await getSessionContext();
-  if (!session?.user) {
-    throw new AppError("MISSING_SESSION");
-  }
-
-  const userRow = firstRow(
-    // sin-inquilino: El arranque de toda petición: de acá sale el inquilino que después
-    // usa `enTenant`. Por definición no puede ir adentro.
-    await db
-      .select({ id: users.id, tenant_id: users.tenant_id, role: users.role })
-      .from(users)
-      .where(eq(users.id, session.user.id))
-      .limit(1),
-  );
-
-  if (!userRow) throw new AppError("MISSING_SESSION");
-  // 'owner' is a superset of 'admin' (agent learning workflow roles).
-  if (userRow.role !== "admin" && userRow.role !== "owner") {
-    throw new AppError("FORBIDDEN_ROLE");
-  }
-
-  return {
-    user: { id: session.user.id, email: session.user.email ?? undefined },
-    userRow,
-  };
+  return requireRole(...ADMIN_ROLES);
 }

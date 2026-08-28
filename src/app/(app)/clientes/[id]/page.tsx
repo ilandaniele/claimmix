@@ -8,12 +8,13 @@
  * IDOR: tenant_id check enforced explicitly in every query.
  */
 
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { eq, and, desc } from "drizzle-orm";
 import { cases, customers, policies, users } from "@/lib/db/schema";
+import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
@@ -90,14 +91,25 @@ export default async function CustomerDetailPage({
   // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
   // No puede pasar por una capa que necesita el dato que ella busca.
   const [userRow] = await db
-    .select({ tenant_id: users.tenant_id })
+    .select({ tenant_id: users.tenant_id, role: users.role })
     .from(users)
     .where(eq(users.id, session.user.id))
     .limit(1);
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   // Este contexto es lo único que le dice de quién son los datos.
-  const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
+  // El chequeo va ANTES de leerle un campo: estaba al revés, así que una
+  // sesión sin perfil reventaba en la línea de arriba en vez de caer acá.
   if (!userRow) notFound();
+
+  /*
+   * Y el mismo rol que exige /api/customers.
+   *
+   * Esta pantalla muestra DNI, correo y teléfono de un cliente y no chequeaba
+   * rol: un analista los veía por acá y recibía 403 pidiéndolos por la API.
+   */
+  if (!(CUSTOMER_PII_ROLES as string[]).includes(userRow.role)) redirect("/bandeja");
+
+  const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
   // Fetch customer (explicit tenant check — wrong tenant → 404)
   const [customer] = await enTenant(tenantCtx, (db) =>

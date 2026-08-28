@@ -12,6 +12,7 @@ import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { eq, and, ilike, desc, count } from "drizzle-orm";
 import { customers, users } from "@/lib/db/schema";
+import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import { redirect } from "next/navigation";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
@@ -57,11 +58,24 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
   // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
   // No puede pasar por una capa que necesita el dato que ella busca.
   const [userRow] = await db
-    .select({ tenant_id: users.tenant_id })
+    .select({ tenant_id: users.tenant_id, role: users.role })
     .from(users)
     .where(eq(users.id, session.user.id))
     .limit(1);
   if (!userRow) redirect("/login");
+
+  /*
+   * Quién puede ver esto: el mismo rol que exige /api/customers.
+   *
+   * Esta pantalla no chequeaba rol. Leía el inquilino y listaba nombre, DNI,
+   * correo y teléfono de todos los clientes — o sea que un analista veía por
+   * acá exactamente los datos que la API que los sirve le niega con un 403.
+   * El enlace además está en la barra lateral sin condición de rol.
+   *
+   * El propio repo lo dice en (app)/layout.tsx: esconder un enlace no es una
+   * guarda. Acá no estaba escondido ni guardado.
+   */
+  if (!(CUSTOMER_PII_ROLES as string[]).includes(userRow.role)) redirect("/bandeja");
 
   const tenantId = userRow.tenant_id;
   // El filtro por inquilino lo pone la base; acá sólo queda la búsqueda.

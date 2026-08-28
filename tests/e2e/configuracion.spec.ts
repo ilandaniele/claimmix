@@ -95,3 +95,46 @@ test.describe("configuración como analista", () => {
     ).toBeVisible();
   });
 });
+
+/**
+ * La pantalla de clientes muestra DNI, correo y teléfono.
+ *
+ * No chequeaba rol: un analista los veía por ahí y recibía 403 pidiendo esos
+ * mismos campos a `/api/customers`. El enlace además está en la barra lateral
+ * sin condición de rol, y el propio repo dice en `(app)/layout.tsx` que esconder
+ * un enlace no es una guarda — acá no estaba ni escondido.
+ *
+ * Se comprueba con un navegador porque la guarda es un `redirect` del servidor:
+ * un test de unidad sobre el módulo no vería la redirección.
+ */
+test.describe("el padrón de clientes", () => {
+  test.skip(!HAY_ANALISTA, "Falta PLAYWRIGHT_ANALYST_EMAIL / PLAYWRIGHT_ANALYST_PASSWORD");
+  test.use({ storageState: SESION_ANALISTA });
+
+  test("un analista no entra a /clientes", async ({ page }) => {
+    await page.goto("/clientes");
+
+    await expect(page).toHaveURL(/\/bandeja/);
+    // Y que no se haya alcanzado a pintar la tabla antes de redirigir.
+    await expect(page.getByRole("columnheader", { name: /dni/i })).not.toBeVisible();
+  });
+
+  test("tampoco al detalle de un cliente", async ({ page }) => {
+    // Un id cualquiera: la guarda tiene que correr antes de buscarlo.
+    await page.goto("/clientes/00000000-0000-4000-8000-000000000000");
+    await expect(page).toHaveURL(/\/bandeja/);
+  });
+});
+
+test.describe("el padrón de clientes, como admin", () => {
+  test.skip(!HAY_ADMIN, "Falta PLAYWRIGHT_ADMIN_EMAIL / PLAYWRIGHT_ADMIN_PASSWORD");
+  test.use({ storageState: SESION_ADMIN });
+
+  test("un admin sí entra", async ({ page }) => {
+    // La otra mitad: una guarda que bloquea a todo el mundo también pasaría el
+    // test de arriba.
+    await page.goto("/clientes");
+    await expect(page).not.toHaveURL(/\/bandeja/);
+    await expect(page).toHaveURL(/\/clientes/);
+  });
+});

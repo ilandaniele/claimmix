@@ -32,6 +32,19 @@ export type UserRole = (typeof ALL_ROLES)[number];
 /** Roles allowed to confirm training examples (spec item 3). */
 export const TRAINING_APPROVER_ROLES: UserRole[] = ["owner", "admin", "specialist"];
 
+/*
+ * Quién puede ver los datos personales de un cliente: nombre, DNI, correo y
+ * teléfono.
+ *
+ * Tiene los mismos tres miembros que TRAINING_APPROVER_ROLES y son constantes
+ * separadas a propósito. Aprobar un ejemplo de entrenamiento y leer el padrón
+ * de clientes cambian por razones distintas: el día que se decida que un
+ * analista puede aprobar ejemplos, eso no debería abrirle el padrón. Unificarlas
+ * porque hoy coinciden es exactamente cómo un cambio de producto en una se
+ * filtra a la otra sin que nadie lo note.
+ */
+export const CUSTOMER_PII_ROLES: UserRole[] = ["owner", "admin", "specialist"];
+
 /** Roles with admin-level configuration access. */
 export const ADMIN_ROLES: UserRole[] = ["owner", "admin"];
 

@@ -167,6 +167,28 @@ describe("GET /api/customers — role enforcement (B2)", () => {
     expect(body.error?.code).not.toBe("FORBIDDEN_ROLE");
   });
 
+  /*
+   * `owner` recibía 403 en su propia aseguradora.
+   *
+   * La lista de roles estaba escrita a mano acá —`["admin","specialist"]`—
+   * mientras el resto del producto documenta a owner como «todo lo que puede
+   * hacer un admin». Nadie lo pegaba porque hoy no existe ningún owner: se
+   * crea sólo por SQL directo. Era un agujero esperando al primero.
+   *
+   * Este test no existía, y por eso el hueco era silencio y no una decisión.
+   */
+  it("returns 200 (not 403) for owner role", async () => {
+    setupSession(USER_ID);
+    setupDbForRole("owner");
+
+    const { GET } = await import("@/app/api/customers/route");
+    const request = makeGETRequest("http://localhost/api/customers");
+    const response = await GET(request as any);
+
+    expect(response.status).not.toBe(403);
+    const body = (await response.json()) as any;
+    expect(body.error?.code).not.toBe("FORBIDDEN_ROLE");
+  });
   it("returns 401 for unauthenticated request (no user)", async () => {
     setupSession(null);
 
@@ -216,6 +238,29 @@ describe("GET /api/policies — role enforcement (B2)", () => {
   it("returns 200 (not 403) for specialist role", async () => {
     setupSession(USER_ID);
     setupDbForRole("specialist");
+
+    const { GET } = await import("@/app/api/policies/route");
+    const request = makeGETRequest("http://localhost/api/policies");
+    const response = await GET(request as any);
+
+    expect(response.status).not.toBe(403);
+    const body = (await response.json()) as any;
+    expect(body.error?.code).not.toBe("FORBIDDEN_ROLE");
+  });
+
+  /*
+   * `owner` recibía 403 en su propia aseguradora.
+   *
+   * La lista de roles estaba escrita a mano acá —`["admin","specialist"]`—
+   * mientras el resto del producto documenta a owner como «todo lo que puede
+   * hacer un admin». Nadie lo pegaba porque hoy no existe ningún owner: se
+   * crea sólo por SQL directo. Era un agujero esperando al primero.
+   *
+   * Este test no existía, y por eso el hueco era silencio y no una decisión.
+   */
+  it("returns 200 (not 403) for owner role", async () => {
+    setupSession(USER_ID);
+    setupDbForRole("owner");
 
     const { GET } = await import("@/app/api/policies/route");
     const request = makeGETRequest("http://localhost/api/policies");

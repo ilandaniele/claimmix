@@ -49,6 +49,7 @@ vi.mock("@/lib/auth/require-role", () => ({
   ALL_ROLES: ["owner", "admin", "specialist", "analyst", "viewer"],
   TRAINING_APPROVER_ROLES: ["owner", "admin", "specialist"],
   ADMIN_ROLES: ["owner", "admin"],
+  CUSTOMER_PII_ROLES: ["owner", "admin", "specialist"],
   CASE_EDITOR_ROLES: ["owner", "admin", "specialist", "analyst"],
 }));
 

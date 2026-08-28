@@ -19,6 +19,7 @@ import { customers, policies, users } from "@/lib/db/schema";
 import { getSessionContext } from "@/lib/auth/session";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import {
   rateLimit,
   RATE_LIMIT_CONFIGS,
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
   );
 
   const role: string = userRow?.role ?? "analyst";
-  if (!userRow || !["admin", "specialist"].includes(role)) {
+  if (!userRow || !(CUSTOMER_PII_ROLES as string[]).includes(role)) {
     return err(
       new AppError(
         "FORBIDDEN_ROLE",

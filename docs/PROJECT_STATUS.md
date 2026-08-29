@@ -812,13 +812,25 @@ en varios casos la corrección cambió qué había que hacer.
   la pantalla entera. Hay tests que fijan las dos cosas —las dos tandas y la
   independencia ante fallas— y el de las tandas no cuenta consultas: cuenta
   cuándo arranca y termina cada una.
-- **El andamiaje de los tests del worker está copiado en cuatro archivos**, más
-  de cien líneas cada uno. Hay un `worker-harness.ts` que ya lo comparte para
-  los nuevos; migrar los viejos es reescribir tests verdes, que es justo cuando
-  se pierde cobertura sin que nadie lo note.
-- **`ip` y `user-agent` en la auditoría de confirmaciones.** Copiarlos del PATCH
-  de `/api/cases/[id]` haría que empiece a guardarse la IP del analista donde
-  hoy va `null`. Es un cambio de dato personal almacenado: se decide aparte.
+- ~~**El andamiaje de los tests del worker está copiado en cuatro archivos.**~~
+  ✅ **HECHO 2026-08-29.** Quedó sobre DOS módulos y no uno, a propósito:
+  `worker-harness.ts` para el estilo `vi.doMock` por test, y `db-simulado.ts`
+  para el de `vi.mock` a nivel de archivo. No se pueden unificar porque
+  `vi.mock` se iza por encima de los imports — eso, y las veinte y pico
+  llamadas a `vi.mock` de cada archivo, queda repetido y está bien que quede.
+  Migré de a uno comparando cobertura, que salió idéntica hasta la centésima.
+  Verificar la migración destapó dos cosas: el camino de error de Gemini era una
+  SEGUNDA copia a mano de `escalateCase` (anularla no rompía nada), y el doble
+  de `GeminiExtractionError` de ese archivo no llevaba `cause`, así que el
+  estado HTTP del proveedor nunca llegaba al registro. Las dos arregladas.
+- ~~**`ip` y `user-agent` en la auditoría de confirmaciones.**~~ ✅ **HECHO
+  2026-08-29.** Ahora se guardan, igual que en el PATCH del caso: un historial
+  donde la mitad de las acciones tiene origen y la otra mitad no sirve poco para
+  reconstruir quién tocó qué. Al hacerlo apareció que la política de privacidad
+  declaraba «acciones, marca de tiempo, ID de usuario» y NO la IP ni el
+  navegador — y `patchCase` ya los guardaba, o sea que el texto venía corto
+  desde antes. Ahora los declara, y aclara que esos registros son sobre el
+  personal de la aseguradora, no sobre quien reporta un siniestro.
 
 Cobertura al cierre: 72.9 sentencias / 63.2 ramas / 74.5 funciones / 73.9
 líneas, arriba de los pisos y arriba de donde arrancó. 2362 unitarios en verde.

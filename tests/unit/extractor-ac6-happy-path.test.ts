@@ -1,21 +1,23 @@
 /**
- * Unit tests for AC6 happy path — high-confidence extraction matches
- * existing customer and policy.
+ * AC6, del lado del worker: que el cliente y la póliza encontrados queden
+ * escritos en el caso.
  *
- * AC6: High-confidence extraction matches existing customer and policy —
- *      sets cases.customer_id, cases.policy_id; status=recibido or
- *      listo_para_core; no data_confirmation_request email sent.
+ * ── Lo que este archivo dejó de tener, y por qué ────────────────────────────
  *
- * Strategy: test orchestratePostExtraction directly with a mocked db
- * that includes customerMatch data. Because customer_id and policy_id
- * are set by runEmailExtractionWorker (not orchestrate), we verify that
- * side by checking the worker's case update call.
+ * Tenía además cuatro tests sobre `orchestratePostExtraction` que no probaban
+ * NADA: el archivo mockea `@/server/confirmations/orchestrate` acá abajo, y
+ * después importaba esa función y la llamaba — o sea, llamaba al mock. Los tres
+ * «no manda nada» pasaban porque una función vacía no manda nada, y el cuarto
+ * afirmaba que el mock había sido llamado con los argumentos que el propio test
+ * le acababa de pasar.
  *
- * For AC6 orchestration (no confirmation email when matched), we verify:
- *   - No data_confirmation_request is dispatched.
- *   - No claim_field_confirmations row is created for matched fields.
- *   - Status transitions to 'recibido' (or 'listo_para_core') — not
- *     'confirmacion_pendiente'.
+ * Cuatro criterios de aceptación en verde sin ejecutar una línea del código que
+ * decían cubrir. Se mudaron a `orchestrate-post-extraction.test.ts`, que es
+ * donde esa función corre de verdad, y ahí afirman lo que tienen que afirmar:
+ * el estado que SÍ queda, y no sólo el que no.
+ *
+ * El mock se queda porque lo que se prueba acá es el worker, y para eso
+ * orquestar de verdad sería ruido.
  */
 
 // vi.mock() calls are hoisted to the top of the file by Vitest.
@@ -278,200 +280,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-// ── Test suite: AC6 happy path (orchestratePostExtraction) ───────────────────
-//
-// orchestratePostExtraction is mocked (vi.mock above). These tests exercise
-// the calling convention + verify no side-effects from the worker path.
-// The real orchestration logic is unit-tested in orchestrate-post-extraction.test.ts.
-
-describe("AC6 — high-confidence extraction: customer + policy matched, no confirmation email", () => {
-  it(
-    "does NOT dispatch data_confirmation_request when customer and policy are matched at high confidence",
-    async () => {
-      // orchestratePostExtraction is mocked — call it directly to verify
-      // no data_confirmation_request template is dispatched through dispatchOutboundEmail.
-      await orchestratePostExtraction(
-        CASE_ID,
-        TENANT_ID,
-        {
-          extractedClaim: {
-            extraction_model: "mock-email-v1",
-            fields: [
-              { field_key: "full_name",     field_value: "Juan Pérez",       confidence: 0.92, source: "ai" as const },
-              { field_key: "email",         field_value: "juan@example.com", confidence: 0.95, source: "ai" as const },
-              { field_key: "policy_number", field_value: "POL-1234",         confidence: 0.90, source: "ai" as const },
-              { field_key: "accident_date", field_value: "2024-03-15",       confidence: 0.90, source: "ai" as const },
-            ],
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            cost_usd: 0,
-            is_claim: true,
-            confidence: 0.92,
-            extracted_fields: {},
-            field_confidences: {},
-            missing_fields: [],
-            fields_pending_confirmation: [],
-            possible_customer_matches: [],
-            possible_policy_matches: [],
-            severity: "medium",
-            requires_specialist: false,
-            not_relevant_reason: undefined,
-            summary: "Test extraction",
-            suggested_reply: "",
-          },
-          senderEmail: SENDER_EMAIL,
-        },
-        [HIGH_CONFIDENCE_MATCH]
-      );
-
-      // No data_confirmation_request must be dispatched (AC6 guarantee).
-      const confirmationEmailCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
-        (call) => call[0].template === "data_confirmation_request"
-      );
-      expect(confirmationEmailCall).toBeUndefined();
-    }
-  );
-
-  it(
-    "does NOT create a claim_field_confirmations row for matched fields (no pending confirmations)",
-    async () => {
-      const insertSpy = vi.fn();
-      vi.mocked(db.insert).mockReturnValue({
-        values: (...args: any[]) => {
-          insertSpy(...args);
-          return { onConflictDoUpdate: vi.fn().mockResolvedValue([]) };
-        },
-      } as any);
-
-      await orchestratePostExtraction(
-        CASE_ID,
-        TENANT_ID,
-        {
-          extractedClaim: {
-            extraction_model: "mock-email-v1",
-            fields: [],
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            cost_usd: 0,
-            is_claim: true,
-            confidence: 0.92,
-            extracted_fields: {},
-            field_confidences: {},
-            missing_fields: [],
-            fields_pending_confirmation: [],
-            possible_customer_matches: [],
-            possible_policy_matches: [],
-            severity: "medium",
-            requires_specialist: false,
-            not_relevant_reason: undefined,
-            summary: "Test extraction",
-            suggested_reply: "",
-          },
-          senderEmail: SENDER_EMAIL,
-        },
-        [HIGH_CONFIDENCE_MATCH]
-      );
-
-      // orchestratePostExtraction is mocked — it does nothing.
-      // Verify db.insert was not called (mocked orchestrate doesn't call it).
-      expect(insertSpy).not.toHaveBeenCalled();
-    }
-  );
-
-  it(
-    "transitions status to listo_para_core (not confirmacion_pendiente) for complete high-confidence match",
-    async () => {
-      const caseUpdateSpy = vi.fn();
-      vi.mocked(db.update).mockReturnValue(makeUpdateChain(caseUpdateSpy) as any);
-
-      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
-        missingRequiredFields: [],
-        fieldsNeedingConfirmation: [],
-        isComplete: true,
-        status: "listo_para_core",
-      });
-
-      await orchestratePostExtraction(
-        CASE_ID,
-        TENANT_ID,
-        {
-          extractedClaim: {
-            extraction_model: "mock-email-v1",
-            fields: [],
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            cost_usd: 0,
-            is_claim: true,
-            confidence: 0.92,
-            extracted_fields: {},
-            field_confidences: {},
-            missing_fields: [],
-            fields_pending_confirmation: [],
-            possible_customer_matches: [],
-            possible_policy_matches: [],
-            severity: "medium",
-            requires_specialist: false,
-            not_relevant_reason: undefined,
-            summary: "Test extraction",
-            suggested_reply: "",
-          },
-          senderEmail: SENDER_EMAIL,
-        },
-        [HIGH_CONFIDENCE_MATCH]
-      );
-
-      // orchestratePostExtraction is mocked — it does not call setStatus.
-      // Verify no confirmacion_pendiente update was issued.
-      const confirmacionPendienteUpdate = caseUpdateSpy.mock.calls.find(
-        (call) => call[0]?.status === "confirmacion_pendiente"
-      );
-      expect(confirmacionPendienteUpdate).toBeUndefined();
-    }
-  );
-
-  it(
-    "still dispatches confirmation_received (AC12) even for high-confidence matched case",
-    async () => {
-      await orchestratePostExtraction(
-        CASE_ID,
-        TENANT_ID,
-        {
-          extractedClaim: {
-            extraction_model: "mock-email-v1",
-            fields: [],
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            cost_usd: 0,
-            is_claim: true,
-            confidence: 0.92,
-            extracted_fields: {},
-            field_confidences: {},
-            missing_fields: [],
-            fields_pending_confirmation: [],
-            possible_customer_matches: [],
-            possible_policy_matches: [],
-            severity: "medium",
-            requires_specialist: false,
-            not_relevant_reason: undefined,
-            summary: "Test extraction",
-            suggested_reply: "",
-          },
-          senderEmail: SENDER_EMAIL,
-        },
-        [HIGH_CONFIDENCE_MATCH]
-      );
-
-      // orchestratePostExtraction is mocked — it was called with the right args.
-      expect(vi.mocked(orchestratePostExtraction)).toHaveBeenCalledWith(
-        CASE_ID,
-        TENANT_ID,
-        expect.objectContaining({ senderEmail: SENDER_EMAIL }),
-        [HIGH_CONFIDENCE_MATCH]
-      );
-    }
-  );
 });
 
 // ── Worker-level AC6 test: customer_id and policy_id are written to the case ──

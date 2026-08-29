@@ -1198,6 +1198,116 @@ describe("orchestratePostExtraction — complete claim", () => {
   });
 });
 
+// ── Test suite: AC6 — cliente y póliza encontrados con confianza alta ────────
+
+/**
+ * Cuando el cliente y la póliza se encontraron con confianza alta, no se le
+ * pregunta nada al asegurado.
+ *
+ * Estos cuatro casos EXISTÍAN, en `extractor-ac6-happy-path.test.ts`, y no
+ * probaban nada: ese archivo mockea `@/server/confirmations/orchestrate` en su
+ * encabezado y después importa y llama a `orchestratePostExtraction` — o sea,
+ * al mock. Los tres «no manda nada» pasaban porque una función vacía no manda
+ * nada, y el cuarto afirmaba que el mock había sido llamado con los argumentos
+ * que el propio test le acababa de pasar.
+ *
+ * Cuatro criterios de aceptación en verde sin ejecutar una línea del código que
+ * decían cubrir. Se mudan acá, que es donde la función corre de verdad.
+ */
+const COINCIDENCIA_ALTA: CustomerMatch = {
+  customerId: "customer-uuid-001",
+  policyId: "policy-uuid-001",
+  matchType: "policy_number",
+  confidence: 0.95,
+  customerName: "Juan Pérez",
+  conflictsWithExtracted: [],
+};
+
+describe("orchestratePostExtraction — AC6: cliente y póliza con confianza alta", () => {
+  beforeEach(() => {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [],
+      isComplete: true,
+      status: "listo_para_core",
+    });
+  });
+
+  it("no le pide que confirme nada", async () => {
+    const claim = extractEmailClaimMock({ fields_pending_confirmation: [] });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [COINCIDENCIA_ALTA]
+    );
+
+    const pedido = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.filter((c) => c[0].template === "data_confirmation_request");
+    expect(pedido).toHaveLength(0);
+  });
+
+  it("no deja filas de confirmación pendientes", async () => {
+    const claim = extractEmailClaimMock({ fields_pending_confirmation: [] });
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [COINCIDENCIA_ALTA]
+    );
+
+    // El espía de insert lo comparten varias escrituras del orquestador, así
+    // que no alcanza con «no se llamó»: se mira que ninguna sea una
+    // confirmación pendiente.
+    const confirmaciones = insertSpy.mock.calls
+      .flatMap((c) => (Array.isArray(c[0]) ? c[0] : [c[0]]))
+      .filter((fila) => fila && typeof fila === "object" && "field_name" in fila);
+    expect(confirmaciones).toHaveLength(0);
+  });
+
+  it("el caso queda listo para el core, no a la espera de una confirmación", async () => {
+    // Afirma el estado que SÍ tiene que quedar. El test viejo sólo decía que no
+    // era `confirmacion_pendiente`, y eso lo cumple cualquier cosa —incluida
+    // una función que no escribe nada—.
+    const claim = extractEmailClaimMock({ fields_pending_confirmation: [] });
+    const { updateSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [COINCIDENCIA_ALTA]
+    );
+
+    const estados = updateSpy.mock.calls
+      .map((c) => (c[0] as { status?: string })?.status)
+      .filter(Boolean);
+    expect(estados).toContain("listo_para_core");
+    expect(estados).not.toContain("confirmacion_pendiente");
+  });
+
+  it("igual le avisa que recibimos el reclamo", async () => {
+    // Que no haya nada que preguntar no significa dejarlo sin respuesta.
+    const claim = extractEmailClaimMock({ fields_pending_confirmation: [] });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [COINCIDENCIA_ALTA]
+    );
+
+    const avisos = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.filter((c) => c[0].template === "confirmation_received");
+    expect(avisos.length).toBeGreaterThan(0);
+  });
+});
+
 // ── Test suite: AC12 — confirmation_received always sent ─────────────────────
 
 describe("orchestratePostExtraction — confirmation_received (AC12)", () => {

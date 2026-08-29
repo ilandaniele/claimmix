@@ -125,8 +125,15 @@ export interface OpcionesDelExtractor {
     confidence: number;
     source: string;
   }>;
-  /** El objeto tipado que el modelo devuelve además de `fields[]`. */
+  /** El objeto tipado que el modelo devuelve además de `fields[]`. Reemplaza. */
   extracted_fields?: Record<string, string>;
+  /**
+   * Se agrega encima del objeto por omisión, en vez de reemplazarlo.
+   *
+   * Es lo que quieren los tests que sólo cambian un dato —«y si el modelo
+   * devuelve claim_type: robo»— sin tener que repetir los otros.
+   */
+  extracted_fields_extra?: Record<string, string | undefined>;
   missing_fields?: string[];
   fields_pending_confirmation?: string[];
   severity?: string;
@@ -144,6 +151,8 @@ export function registrarMocks(opciones: {
   espiaDeUpdate: ReturnType<typeof vi.fn>;
   espiaDeAuditoria?: ReturnType<typeof vi.fn>;
   necesitaEspecialista?: boolean;
+  /** Reemplaza el mock de `isValidTransition`. Por omisión, todo vale. */
+  transicionValida?: boolean;
   extractor?: OpcionesDelExtractor;
 }) {
   const {
@@ -151,6 +160,7 @@ export function registrarMocks(opciones: {
     espiaDeUpdate,
     espiaDeAuditoria = vi.fn().mockResolvedValue(undefined),
     necesitaEspecialista = false,
+    transicionValida = true,
     extractor = {},
   } = opciones;
 
@@ -217,7 +227,7 @@ export function registrarMocks(opciones: {
   }));
 
   vi.doMock("@/core/case/fsm", () => ({
-    isValidTransition: vi.fn().mockReturnValue(true),
+    isValidTransition: vi.fn().mockReturnValue(transicionValida),
   }));
 
   vi.doMock("@/server/ai/mock-extractor", () => ({
@@ -236,6 +246,7 @@ export function registrarMocks(opciones: {
       extracted_fields: extractor.extracted_fields ?? {
         full_name: "Juan Pérez",
         claim_type: "choque",
+        ...(extractor.extracted_fields_extra ?? {}),
       },
       field_confidences: { claim_type: 0.88 },
       missing_fields: extractor.missing_fields ?? [],

@@ -19,208 +19,41 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 
+import { filaDeCaso, registrarMocks } from "./worker-harness";
+
 const CASE_ID   = "claimtype-test-0000-0000-000000000001";
 const TENANT_ID = "claimtype-test-0000-0000-000000000002";
 
 // ── Shared mock helpers ───────────────────────────────────────────────────────
 
-/** Build a minimal mock case row representing a real email case. */
-function makeCaseRow(overrides: Record<string, unknown> = {}) {
-  return {
-    id: CASE_ID,
-    status: "recibido",
-    claim_type: null as string | null,
-    tenant_id: TENANT_ID,
-    channel: "email",
-    email_thread_id: "thread-001",
-    policyholder_name: null,
-    policy_number: null,
-    ...overrides,
-  };
-}
-
-/**
- * Build a mock Drizzle db object that:
- *  - Returns [caseRow] from the first db.select().from(cases).where().limit(1) call
- *  - Returns [{body, subject, from_addr}] from the second db.select().from(rawMessages)...
- *  - Returns [] for all other select calls
- *  - Calls caseUpdateSpy(data) for every db.update().set(data) call
- *  - No-ops for insert/delete
+/*
+ * El andamiaje sale de `worker-harness.ts`, compartido con los otros archivos
+ * de test del worker. Acá estaba escrito entero: la fila del caso, el `db`
+ * simulado y los dieciocho `vi.doMock`, más de cien líneas.
+ *
+ * Este archivo usa el estilo de `vi.doMock` por test con `resetModules`, que es
+ * el que el harness implementa; los tres `extract.email.*` usan `vi.mock` a
+ * nivel de archivo y comparten otro módulo, `db-simulado.ts`. Son dos estilos
+ * distintos a propósito y no se pueden unificar: `vi.mock` se iza.
  */
-function buildMockDb(
-  caseRow: ReturnType<typeof makeCaseRow>,
-  caseUpdateSpy: ReturnType<typeof vi.fn>
-) {
-  let selectCallIdx = 0;
-
-  const mockSelect = vi.fn().mockImplementation(() => {
-    selectCallIdx++;
-    const idx = selectCallIdx;
-
-    const limitFn = vi.fn().mockImplementation(() => {
-      if (idx === 1) return Promise.resolve([caseRow]);
-      return Promise.resolve([]);
-    });
-
-    const orderByFn = vi.fn().mockReturnValue({
-      limit: vi.fn().mockImplementation(() => {
-        if (idx === 2) {
-          return Promise.resolve([{
-            body: "Tuve un accidente.",
-            subject: "Siniestro",
-            from_addr: "claimant@example.com",
-          }]);
-        }
-        return Promise.resolve([]);
-      }),
-    });
-
-    const whereFn = vi.fn().mockReturnValue({
-      limit: limitFn,
-      orderBy: orderByFn,
-    });
-
-    const fromFn = vi.fn().mockReturnValue({ where: whereFn });
-
-    return { from: fromFn };
-  });
-
-  const mockUpdate = vi.fn().mockImplementation(() => ({
-    set: vi.fn().mockImplementation((data: unknown) => {
-      caseUpdateSpy(data);
-      return { where: vi.fn().mockResolvedValue({ rowCount: 1 }) };
-    }),
-  }));
-
-  const mockInsert = vi.fn().mockImplementation(() => ({
-    values: vi.fn().mockImplementation(() => ({
-      onConflictDoNothing: vi.fn().mockResolvedValue({ rowCount: 0 }),
-      returning: vi.fn().mockResolvedValue([]),
-      // Make it directly awaitable (for insert().values() without chaining)
-      then: (resolve: (v: unknown) => unknown) =>
-        Promise.resolve([]).then(resolve),
-    })),
-  }));
-
-  return {
-    select: mockSelect,
-    update: mockUpdate,
-    insert: mockInsert,
-    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({ rowCount: 0 }) }),
-    $count: vi.fn().mockResolvedValue(0),
-  };
+function makeCaseRow(overrides: Record<string, unknown> = {}) {
+  return filaDeCaso(CASE_ID, TENANT_ID, overrides as never);
 }
 
-// ── Common module mocks applied in every test via vi.doMock ───────────────────
-
-/** Register all mocks needed for the email extraction worker to run without error. */
 function registerCommonMocks(
   caseRow: ReturnType<typeof makeCaseRow>,
   caseUpdateSpy: ReturnType<typeof vi.fn>,
   auditLogSpy: ReturnType<typeof vi.fn>,
   claimMockOverrides: Record<string, unknown> = {}
 ) {
-  const mockDb = buildMockDb(caseRow, caseUpdateSpy);
-
-  vi.doMock("@/lib/db", () => ({
-    db: mockDb,
-    tables: {
-      claimMemory: {},
-      tenantAiSettings: {},
+  registrarMocks({
+    fila: caseRow,
+    espiaDeUpdate: caseUpdateSpy,
+    espiaDeAuditoria: auditLogSpy,
+    extractor: {
+      extracted_fields_extra: claimMockOverrides as Record<string, string | undefined>,
     },
-  }));
-
-  // La capa de datos, corriendo contra el mockDb de arriba.
-  //
-  // Las funciones migradas piden enTenant(ctx, (db) => consulta) en vez de
-  // hablar con db directamente. Lo que este test verifica —qué se escribe en el
-  // caso, qué queda en la auditoría— no cambió, así que alcanza con que la capa
-  // les entregue el mismo db simulado.
-  //
-  // Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
-  // eso no se puede simular sin mentir. Se verifica en
-  // tests/unit/data-scope-sin-rol.test.ts y, contra bases de verdad, en
-  // `pnpm capa-datos` y `pnpm tenancy`.
-  vi.doMock("@/data/scope", () => ({
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mockDb)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mockDb)),
-  }));
-
-  // Mock memory load so it doesn't make additional db.select calls
-  vi.doMock("@/server/memory/load", () => ({
-    loadMemoryHints: vi.fn().mockResolvedValue([]),
-  }));
-
-  vi.doMock("@/lib/audit/log", () => ({
-    writeAuditLog: auditLogSpy,
-    AuditEvent: {
-      EXTRACTION_COMPLETE:  "claim.extraction_complete",
-      SPECIALIST_REQUIRED:  "claim.specialist_required",
-      MEMORY_APPLIED:       "claim.memory_applied",
-      AI_BUDGET_EXCEEDED:   "ai.budget_exceeded",
-      AI_EXTRACTED:         "ai.extracted",
-    },
-  }));
-
-  vi.doMock("@/server/ai/budget", () => ({
-    checkBudget:  vi.fn().mockResolvedValue({ exceeded: false }),
-    recordUsage:  vi.fn().mockResolvedValue(undefined),
-  }));
-
-  vi.doMock("@/server/matching/customer-matcher", () => ({
-    findCustomerMatches: vi.fn().mockResolvedValue([]),
-  }));
-
-  vi.doMock("@/server/matching/policy-matcher", () => ({
-    findPolicyMatches: vi.fn().mockResolvedValue([]),
-  }));
-
-  vi.doMock("@/server/confirmations/orchestrate", () => ({
-    orchestratePostExtraction: vi.fn().mockResolvedValue(undefined),
-  }));
-
-  vi.doMock("@/server/ai/severity-classifier", () => ({
-    classifySeverity:    vi.fn().mockReturnValue("medium"),
-    requiresSpecialist:  vi.fn().mockReturnValue(false),
-  }));
-
-  vi.doMock("@/core/case/fsm", () => ({
-    isValidTransition: vi.fn().mockReturnValue(true),
-  }));
-
-  // Mock extractEmailClaimMock to return whatever the test specifies via overrides.
-  vi.doMock("@/server/ai/mock-extractor", () => ({
-    runMockExtractor:      vi.fn(),
-    extractEmailClaimMock: vi.fn().mockReturnValue({
-      extraction_model: "mock-email-v1",
-      fields: [
-        { field_key: "full_name",    field_value: "Juan Pérez", confidence: 0.92, source: "ai" },
-        { field_key: "claim_type",   field_value: "choque",     confidence: 0.88, source: "ai" },
-      ],
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      cost_usd: 0,
-      is_claim: true,
-      confidence: 0.92,
-      extracted_fields: {
-        full_name: "Juan Pérez",
-        claim_type: "choque",
-        ...claimMockOverrides,
-      },
-      field_confidences: { claim_type: 0.88 },
-      missing_fields: [],
-      fields_pending_confirmation: [],
-      possible_customer_matches: [],
-      possible_policy_matches: [],
-      severity: "medium",
-      requires_specialist: false,
-      not_relevant_reason: undefined,
-      summary: "",
-      suggested_reply: "",
-    }),
-  }));
+  });
 }
 
 afterEach(() => {

@@ -156,100 +156,16 @@ vi.mock("@/server/memory/load", () => ({
 // ── DB mock ───────────────────────────────────────────────────────────────────
 
 /** Captured case update payloads */
+/*
+ * El `db` simulado sale de `db-simulado.ts`, compartido con los otros archivos
+ * de test del worker. Acá estaba escrito entero —ciento diez líneas— y era el
+ * mismo que en `extract.email.bugfix` salvo por la fila del caso y por qué se
+ * anotaba de lo que se escribía, que ahora son opciones.
+ *
+ * Los `vi.mock(...)` de arriba se quedan: se izan por encima de los imports, así
+ * que tienen que estar escritos literalmente en cada archivo.
+ */
 let capturedCaseUpdates: Record<string, unknown>[] = [];
-
-function buildDbMock(bodyText = "Test body") {
-  capturedCaseUpdates = [];
-
-  let selectCallIdx = 0;
-
-  const caseRow = {
-    id: "case-sec-001",
-    status: "recibido",
-    claim_type: "choque",
-    tenant_id: "tenant-001",
-    channel: "email",
-    email_thread_id: "thread-sec",
-    policyholder_name: null,
-    policy_number: null,
-  };
-
-  const rawMessageRow = {
-    body: bodyText,
-    subject: "Test",
-    from_addr: "test@example.com",
-  };
-
-  const mockSelect = vi.fn().mockImplementation(() => {
-    selectCallIdx++;
-    const idx = selectCallIdx;
-
-    const limitFn = vi.fn().mockImplementation(() => {
-      if (idx === 1) return Promise.resolve([caseRow]);
-      if (idx === 2) return Promise.resolve([rawMessageRow]);
-      return Promise.resolve([]);
-    });
-
-    const orderByFn = vi.fn().mockReturnValue({
-      limit: vi.fn().mockImplementation(() => {
-        if (idx === 2) return Promise.resolve([rawMessageRow]);
-        return Promise.resolve([]);
-      }),
-    });
-
-    const whereFn = vi.fn().mockReturnValue({
-      limit: limitFn,
-      orderBy: orderByFn,
-    });
-
-    const andWhereFn = vi.fn().mockReturnValue({
-      limit: limitFn,
-      orderBy: orderByFn,
-      where: whereFn,
-    });
-
-    const fromFn = vi.fn().mockReturnValue({ where: andWhereFn });
-
-    return { from: fromFn };
-  });
-
-  const mockUpdate = vi.fn().mockImplementation(() => ({
-    set: vi.fn().mockImplementation((data: Record<string, unknown>) => {
-      capturedCaseUpdates.push(data);
-      // `where()` is both awaitable and chainable: the extraction lease reads
-      // `.returning()` off it to learn whether it won the row. A mock that only
-      // resolved made every run look like it had lost the race and return
-      // early — the worker did nothing and the failure looked like extraction.
-      return {
-        where: vi.fn().mockImplementation(() => {
-          const result: Promise<unknown> & {
-            returning?: () => Promise<unknown[]>;
-          } = Promise.resolve({ rowCount: 1 });
-          result.returning = () => Promise.resolve([{ id: "case-1" }]);
-          return result;
-        }),
-      };
-    }),
-  }));
-
-  const mockInsert = vi.fn().mockImplementation(() => ({
-    values: vi.fn().mockImplementation(() => ({
-      onConflictDoUpdate: vi.fn().mockResolvedValue({ rowCount: 1 }),
-      onConflictDoNothing: vi.fn().mockResolvedValue({ rowCount: 0 }),
-      returning: vi.fn().mockResolvedValue([]),
-      then: (resolve: (v: unknown) => unknown) =>
-        Promise.resolve([]).then(resolve),
-    })),
-  }));
-
-  return {
-    select: mockSelect,
-    insert: mockInsert,
-    update: mockUpdate,
-    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({ rowCount: 0 }) }),
-    $count: vi.fn().mockResolvedValue(0),
-  };
-}
 
 vi.mock("@/lib/db", () => {
   const mockDb = {
@@ -269,17 +185,19 @@ vi.mock("@/lib/db", () => {
 
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { db } from "@/lib/db";
+import { instalarDbSimulado } from "./db-simulado";
 import { scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ExtractedClaimSchema } from "@/lib/schemas/extracted-claim";
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 function setupDbMock(bodyText?: string) {
-  const freshDb = buildDbMock(bodyText);
-  vi.mocked(db).select = freshDb.select as any;
-  vi.mocked(db).insert = freshDb.insert as any;
-  vi.mocked(db).update = freshDb.update as any;
-  vi.mocked(db).delete = freshDb.delete as any;
+  capturedCaseUpdates = [];
+  instalarDbSimulado(db as unknown as Record<string, unknown>, {
+    caso: { id: "case-sec-001", email_thread_id: "thread-sec" },
+    mensaje: bodyText === undefined ? undefined : { body: bodyText },
+    alActualizar: (datos) => capturedCaseUpdates.push(datos),
+  });
 }
 
 // ── SEC-1: Prompt injection — is_claim=true preserved ─────────────────────────

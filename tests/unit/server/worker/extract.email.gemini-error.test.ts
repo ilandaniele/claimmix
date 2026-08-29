@@ -182,72 +182,12 @@ vi.mock("@/server/intake/simulation-throttle", () => ({
 
 // ── DB mock ───────────────────────────────────────────────────────────────────
 
+/*
+ * El `db` simulado sale de `db-simulado.ts`, compartido con los otros archivos
+ * de test del worker. Los `vi.mock(...)` de arriba se quedan: se izan por
+ * encima de los imports y tienen que estar escritos en cada archivo.
+ */
 let capturedCaseUpdates: Array<{ status?: string; updated_at?: string }> = [];
-
-function buildDbMock() {
-  capturedCaseUpdates = [];
-  let selectCallIdx = 0;
-
-  const caseRow = {
-    id: "case-gemini-err",
-    status: "recibido",
-    claim_type: "choque",
-    tenant_id: "tenant-001",
-    channel: "email_sim",
-    email_thread_id: null,
-    policyholder_name: "Ana García",
-    policy_number: "POL-987",
-    created_at: "2024-01-01T00:00:00Z",
-  };
-
-  const rawMessageRow = {
-    body: "Hola, tuve un siniestro hoy en la autopista.",
-    subject: "Reclamo de siniestro",
-    from_addr: "ana.garcia@example.com",
-  };
-
-  // Each select() call captures its own idx at invocation time, not at limit() time.
-  const mockSelect = vi.fn().mockImplementation(() => {
-    selectCallIdx++;
-    const idx = selectCallIdx;
-
-    const limitFn = vi.fn().mockImplementation(() => {
-      if (idx === 1) return Promise.resolve([caseRow]);
-      if (idx === 2) return Promise.resolve([rawMessageRow]);
-      return Promise.resolve([]);
-    });
-
-    const orderByFn = vi.fn().mockReturnValue({
-      limit: vi.fn().mockImplementation(() => {
-        if (idx === 2) return Promise.resolve([rawMessageRow]);
-        return Promise.resolve([]);
-      }),
-    });
-
-    const whereFn = vi.fn().mockReturnValue({ limit: limitFn, orderBy: orderByFn });
-    const andWhereFn = vi.fn().mockReturnValue({ limit: limitFn, orderBy: orderByFn, where: whereFn });
-    const fromFn = vi.fn().mockReturnValue({ where: andWhereFn });
-
-    return { from: fromFn };
-  });
-
-  const mockUpdate = vi.fn().mockImplementation(() => ({
-    set: vi.fn().mockImplementation((data: { status?: string; updated_at?: string }) => {
-      capturedCaseUpdates.push(data);
-      return { where: vi.fn().mockResolvedValue({ rowCount: 1 }) };
-    }),
-  }));
-
-  const mockInsert = vi.fn().mockReturnValue({
-    values: vi.fn().mockReturnValue({
-      onConflictDoUpdate: vi.fn().mockResolvedValue({ rowCount: 1 }),
-      onConflictDoNothing: vi.fn().mockResolvedValue({ rowCount: 0 }),
-      returning: vi.fn().mockResolvedValue([]),
-    }),
-  });
-
-  return { select: mockSelect, insert: mockInsert, update: mockUpdate, delete: vi.fn() };
-}
 
 vi.mock("@/lib/db", () => {
   const mockDb = { select: vi.fn(), insert: vi.fn(), update: vi.fn(), delete: vi.fn(), $count: vi.fn() };
@@ -258,15 +198,28 @@ vi.mock("@/lib/db", () => {
 
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { db } from "@/lib/db";
+import { instalarDbSimulado } from "./db-simulado";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function setupDbMock() {
-  const fresh = buildDbMock();
-  vi.mocked(db).select = fresh.select as ReturnType<typeof buildDbMock>["select"] as typeof db.select;
-  vi.mocked(db).insert = fresh.insert as typeof db.insert;
-  vi.mocked(db).update = fresh.update as typeof db.update;
-  vi.mocked(db).delete = fresh.delete as typeof db.delete;
+  capturedCaseUpdates = [];
+  instalarDbSimulado(db as unknown as Record<string, unknown>, {
+    caso: {
+      id: "case-gemini-err",
+      channel: "email_sim",
+      email_thread_id: null,
+      policyholder_name: "Ana García",
+      policy_number: "POL-987",
+      created_at: "2024-01-01T00:00:00Z",
+    },
+    mensaje: {
+      body: "Hola, tuve un siniestro hoy en la autopista.",
+      subject: "Reclamo de siniestro",
+      from_addr: "ana.garcia@example.com",
+    },
+    alActualizar: (datos) => capturedCaseUpdates.push(datos),
+  });
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

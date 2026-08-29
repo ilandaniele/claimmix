@@ -158,107 +158,17 @@ vi.mock("@/server/memory/load", () => ({
 // ── DB mock ───────────────────────────────────────────────────────────────────
 
 /** Captured insert calls for extracted_fields table */
+/*
+ * El `db` simulado sale de `db-simulado.ts`, compartido con los otros archivos
+ * de test del worker. Acá estaba escrito entero y era el mismo que en
+ * `extract.email.security` salvo por qué se anotaba de lo que se escribía, que
+ * ahora es una opción.
+ *
+ * Los `vi.mock(...)` de arriba se quedan: se izan por encima de los imports.
+ */
 let capturedFieldInserts: Array<Array<{ field_key: string; field_value: string; confidence: string | number }>> = [];
-/** Captured customerMatcher input */
+
 let capturedCustomerMatcherInput: Record<string, string | undefined> = {};
-
-function buildDbMock() {
-  capturedFieldInserts = [];
-  capturedCustomerMatcherInput = {};
-
-  let selectCallIdx = 0;
-
-  const caseRow = {
-    id: "case-001",
-    status: "recibido",
-    claim_type: "choque",
-    tenant_id: "tenant-001",
-    channel: "email",
-    email_thread_id: "thread-001",
-    policyholder_name: null,
-    policy_number: null,
-  };
-
-  const rawMessageRow = {
-    body: "Buenos días. Soy NICOLAS JASPER. DU Nro.92310691. Siniestro 91520998-2.",
-    subject: "Siniestro Zurich",
-    from_addr: "n10jasper@gmail.com",
-  };
-
-  const mockSelect = vi.fn().mockImplementation(() => {
-    selectCallIdx++;
-    const idx = selectCallIdx;
-
-    const limitFn = vi.fn().mockImplementation(() => {
-      if (idx === 1) return Promise.resolve([caseRow]);
-      // idx === 2 is raw_messages
-      if (idx === 2) return Promise.resolve([rawMessageRow]);
-      return Promise.resolve([]);
-    });
-
-    const orderByFn = vi.fn().mockReturnValue({
-      limit: vi.fn().mockImplementation(() => {
-        if (idx === 2) return Promise.resolve([rawMessageRow]);
-        return Promise.resolve([]);
-      }),
-    });
-
-    const whereFn = vi.fn().mockReturnValue({
-      limit: limitFn,
-      orderBy: orderByFn,
-    });
-
-    const andWhereFn = vi.fn().mockReturnValue({
-      limit: limitFn,
-      orderBy: orderByFn,
-      where: whereFn,
-    });
-
-    const fromFn = vi.fn().mockReturnValue({ where: andWhereFn });
-
-    return { from: fromFn };
-  });
-
-  const mockInsert = vi.fn().mockImplementation((table: unknown) => {
-    // Detect if it's an extracted_fields insert by checking the table reference
-    const tableObj = table as { [key: string]: unknown };
-    const tableName = tableObj?._ ? String(tableObj._) : "";
-    const isExtractedFields = tableName.includes("extracted_fields") ||
-      // We'll rely on capturing all inserts and let the test filter by field_key presence
-      true;
-
-    return {
-      values: vi.fn().mockImplementation((rows: unknown) => {
-        const rowArray = Array.isArray(rows) ? rows : [rows];
-        // Detect extracted_fields inserts by checking for field_key property
-        if (rowArray.length > 0 && "field_key" in (rowArray[0] as object)) {
-          capturedFieldInserts.push(rowArray as Array<{ field_key: string; field_value: string; confidence: string | number }>);
-        }
-        return {
-          onConflictDoUpdate: vi.fn().mockResolvedValue({ rowCount: rowArray.length }),
-          onConflictDoNothing: vi.fn().mockResolvedValue({ rowCount: 0 }),
-          returning: vi.fn().mockResolvedValue([]),
-          then: (resolve: (v: unknown) => unknown) =>
-            Promise.resolve([]).then(resolve),
-        };
-      }),
-    };
-  });
-
-  const mockUpdate = vi.fn().mockImplementation(() => ({
-    set: vi.fn().mockImplementation((data: unknown) => ({
-      where: vi.fn().mockResolvedValue({ rowCount: 1 }),
-    })),
-  }));
-
-  return {
-    select: mockSelect,
-    insert: mockInsert,
-    update: mockUpdate,
-    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({ rowCount: 0 }) }),
-    $count: vi.fn().mockResolvedValue(0),
-  };
-}
 
 vi.mock("@/lib/db", () => {
   const mockDb = {
@@ -278,6 +188,7 @@ vi.mock("@/lib/db", () => {
 
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { db } from "@/lib/db";
+import { instalarDbSimulado } from "./db-simulado";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -326,11 +237,25 @@ function makeBugPatternClaim(): ExtractedClaim {
 }
 
 function setupDbMock() {
-  const freshDb = buildDbMock();
-  vi.mocked(db).select = freshDb.select as any;
-  vi.mocked(db).insert = freshDb.insert as any;
-  vi.mocked(db).update = freshDb.update as any;
-  vi.mocked(db).delete = freshDb.delete as any;
+  capturedFieldInserts = [];
+  capturedCustomerMatcherInput = {};
+  instalarDbSimulado(db as unknown as Record<string, unknown>, {
+    mensaje: {
+      body: "Buenos días. Soy NICOLAS JASPER. DU Nro.92310691. Siniestro 91520998-2.",
+      subject: "Siniestro Zurich",
+      from_addr: "n10jasper@gmail.com",
+    },
+    // Sólo interesan los de `extracted_fields`, y se reconocen por la columna:
+    // el mismo espía lo comparten todas las inserciones del worker.
+    alInsertar: (valores) => {
+      const filas = Array.isArray(valores) ? valores : [valores];
+      if (filas.length > 0 && filas[0] && "field_key" in (filas[0] as object)) {
+        capturedFieldInserts.push(
+          filas as Array<{ field_key: string; field_value: string; confidence: string | number }>
+        );
+      }
+    },
+  });
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

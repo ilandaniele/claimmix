@@ -14,21 +14,17 @@
  */
 
 import { notFound, redirect } from "next/navigation";
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import type { TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
+import { users } from "@/lib/db/schema";
 import {
-  claimAttachments,
-  claimFieldConfirmations,
-  users,
-} from "@/lib/db/schema";
-import { getCaseDetail } from "@/server/cases/get";
-import {
-  mensajesEntrantes,
-  ultimoMensajeEntrante,
-} from "@/server/cases/inbound-messages";
+  cargarDetalleDeCaso,
+  ultimoParaReleer,
+} from "@/server/cases/detail-view";
+import type { MensajeEntrante } from "@/server/cases/inbound-messages";
 import { CaseDetailClient } from "./CaseDetailClient";
 import { ExtractedFieldsTable } from "./components/ExtractedFieldsTable";
 import { MissingDocsList } from "./components/MissingDocsList";
@@ -80,15 +76,6 @@ function toPayloadRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
-/** Narrow a free-text confirmation status to the UI union. */
-function toConfirmationStatus(
-  status: string
-): "pending" | "confirmed" | "rejected" | "corrected" {
-  return status === "confirmed" || status === "rejected" || status === "corrected"
-    ? status
-    : "pending";
-}
-
 export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
   const { id } = await params;
   const locale = await getServerLocale();
@@ -128,7 +115,19 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
   // Este contexto es lo único que le dice de quién son los datos.
   const tenantCtx: TenantContext = { tenantId: tenantId };
 
-  const detail = await getCaseDetail(tenantId, id);
+  /*
+   * Todo en dos esperas, no en cinco.
+   *
+   * Antes esta pantalla encadenaba: la fila del caso, después tres consultas
+   * relacionadas, después dos de correo, después el respaldo del parser, y
+   * después el acordeón —que era otro componente de servidor que consultaba
+   * solo—. Cada tanda esperaba a la anterior sin necesitar nada de ella.
+   *
+   * Ahora: la fila del caso, y después todo lo demás junto. Sigue siendo una
+   * consulta por cosa, cada una con su propio `.catch`, así que un fallo del
+   * historial de auditoría no se lleva puestos los campos extraídos.
+   */
+  const detail = await cargarDetalleDeCaso(tenantCtx, id);
 
   if (!detail) {
     notFound();
@@ -137,78 +136,18 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
   // Role gate for the training confirmation button (owner/admin/specialist).
   const canConfirmTraining = ["owner", "admin", "specialist"].includes(me.role);
 
-  const { case: caseRow, extracted_fields, missing_docs, audit_log } = detail;
+  const {
+    case: caseRow,
+    extracted_fields,
+    missing_docs,
+    audit_log,
+    confirmations,
+    attachments,
+    messages,
+  } = detail;
 
-  // Fetch email-specific data in parallel when case is from the email channel
   const isEmailCase =
     caseRow.channel === "email" || caseRow.channel === "email_sim";
-
-  const [confirmationRows, attachmentRows] = await Promise.all([
-    isEmailCase
-      ? enTenant(tenantCtx, (db) =>
-        db
-            .select({
-              id: claimFieldConfirmations.id,
-              field_key: claimFieldConfirmations.field_name,
-              proposed_value: claimFieldConfirmations.suggested_value,
-              conflict_with_value: claimFieldConfirmations.conflict_with_value,
-              confidence: claimFieldConfirmations.confidence,
-              status: claimFieldConfirmations.status,
-              resolved_at: claimFieldConfirmations.confirmed_at,
-            })
-            .from(claimFieldConfirmations)
-            .where(
-              eq(claimFieldConfirmations.case_id, id)
-            )
-            .orderBy(asc(claimFieldConfirmations.created_at))
-      ).catch(() => [])
-      : Promise.resolve([]),
-    isEmailCase
-      ? enTenant(tenantCtx, (db) =>
-        db
-            .select({
-              id: claimAttachments.id,
-              filename: claimAttachments.file_name,
-              content_type: claimAttachments.content_type,
-              size_bytes: claimAttachments.size_bytes,
-              external_url: claimAttachments.external_url,
-              uploaded_at: claimAttachments.created_at,
-            })
-            .from(claimAttachments)
-            .where(
-              eq(claimAttachments.case_id, id)
-            )
-            .orderBy(asc(claimAttachments.created_at))
-      ).catch(() => [])
-      : Promise.resolve([]),
-  ]);
-
-  // Boundary normalization: numeric → number, status → UI union.
-  const confirmations: Array<{
-    id: string;
-    field_key: string;
-    proposed_value: string | null;
-    conflict_with_value: string | null;
-    confidence: number;
-    status: "pending" | "confirmed" | "rejected" | "corrected";
-    resolved_at: string | null;
-  }> = confirmationRows.map((row) => ({
-    ...row,
-    confidence: Number(row.confidence),
-    status: toConfirmationStatus(row.status),
-  }));
-
-  const attachments: Array<{
-    id: string;
-    filename: string;
-    content_type: string;
-    size_bytes: number;
-    external_url: string;
-    uploaded_at: string | null;
-  }> = attachmentRows.map((row) => ({
-    ...row,
-    external_url: row.external_url ?? "",
-  }));
 
   // Boundary normalization: Drizzle numeric `confidence` arrives as string.
   let displayedExtractedFields: ExtractedFieldRow[] = extracted_fields.map(
@@ -223,7 +162,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
     })
   );
   if (isEmailCase && displayedExtractedFields.length === 0) {
-    const fallbackEmail = await ultimoMensajeEntrante(tenantCtx, id);
+    const fallbackEmail = await ultimoParaReleer(tenantCtx, id, detail);
     const fallbackFields = parseEmailClaimFields(fallbackEmail);
     displayedExtractedFields = fallbackFields.map((field, index) => ({
       id: `frontend-fallback-${caseRow.id}-${field.field_key}-${index}`,
@@ -381,7 +320,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
 
           {/* Texto original — collapsible accordion */}
           <PanelSection id="raw-email" titulo={t("case.detail.rawEmail")}>
-            <RawEmailAccordion tenantId={tenantId} caseId={caseRow.id} />
+            <RawEmailAccordion messages={messages} t={t} />
           </PanelSection>
 
           {/* Messages thread — only shown for email channel cases (AC11, AC12).
@@ -551,27 +490,24 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
 }
 
 /**
- * RawEmailAccordion — server-fetches the raw_messages for this case
- * and renders them in a collapsible details element.
+ * El original de lo que escribió el asegurado, plegado.
  *
- * Isolated here so it can be wrapped in <Suspense> later.
+ * Recibe los mensajes por prop en vez de consultarlos.
+ *
+ * Los consultaba él, y eso costaba una espera entera al final del render: como
+ * no hay `<Suspense>` alrededor, un componente de servidor que consulta bloquea
+ * la página igual, sólo que después de todo lo demás. Ahora vienen en la misma
+ * tanda que el resto y esto se limita a pintarlos.
  */
-async function RawEmailAccordion({
-  tenantId,
-  caseId,
+function RawEmailAccordion({
+  messages,
+  t,
 }: {
-  tenantId: string;
-  caseId: string;
+  messages: MensajeEntrante[];
+  // El diccionario baja por prop: los dos son de servidor, no hay frontera que
+  // cruzar, y así el acordeón no vuelve a leer la cookie de idioma.
+  t: ReturnType<typeof getT>;
 }) {
-  const locale = await getServerLocale();
-  const t = getT(locale);
-
-  // Los cinco primeros, en el orden en que llegaron. La cascada
-  // raw_messages → claim_messages vive en un solo lugar.
-  const messages = await mensajesEntrantes({ tenantId }, caseId, {
-    orden: "viejos",
-    tope: 5,
-  });
 
   if (!messages || messages.length === 0) {
     return (

@@ -48,72 +48,116 @@ export interface CaseDetail {
  * @param tenantId - Tenant of the authenticated user (explicit tenant boundary).
  * @param caseId   - UUID of the case to fetch.
  */
+/**
+ * La fila del caso, o null si no existe o es de otra aseguradora.
+ *
+ * El null es el ÚNICO camino a un 404, y por eso también atrapa los errores:
+ * un uuid mal formado tiene que verse igual que un caso ajeno. Contestar
+ * distinto ya permite enumerar los casos de la competencia.
+ */
+export async function fetchCaseRow(
+  ctx: TenantContext,
+  caseId: string
+): Promise<CaseRow | null> {
+  try {
+    return firstRow(
+      await enTenant(ctx, (db) =>
+        db.select().from(cases).where(eq(cases.id, caseId)).limit(1)
+      )
+    );
+  } catch {
+    return null;
+  }
+}
+
+/*
+ * Las tres relacionadas, cada una con SU propio `.catch`.
+ *
+ * Están separadas porque cada una es su propio dominio de falla, y eso es una
+ * decisión, no un accidente: un hipo leyendo el historial de auditoría no puede
+ * llevarse puestos los campos extraídos. Por eso tampoco pueden juntarse en un
+ * `enTenantVarias`, que es UNA transacción — hay tests que lo fijan en
+ * `tests/unit/cases-get.test.ts`.
+ *
+ * Salen como funciones sueltas para que la pantalla de detalle pueda pedirlas
+ * en la misma tanda que las suyas sin volver a escribirlas.
+ */
+
+/** Los campos que el agente extrajo, del más viejo al más nuevo. */
+export async function fetchExtractedFields(
+  ctx: TenantContext,
+  caseId: string
+): Promise<ExtractedFieldRow[]> {
+  try {
+    return (await enTenant(ctx, (db) =>
+      db
+        .select()
+        .from(extractedFields)
+        .where(eq(extractedFields.case_id, caseId))
+        .orderBy(asc(extractedFields.extracted_at))
+    )) as ExtractedFieldRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** La documentación que todavía falta. */
+export async function fetchMissingDocs(
+  ctx: TenantContext,
+  caseId: string
+): Promise<MissingDocRow[]> {
+  try {
+    return (await enTenant(ctx, (db) =>
+      db
+        .select()
+        .from(missingDocs)
+        .where(eq(missingDocs.case_id, caseId))
+        .orderBy(asc(missingDocs.requested_at))
+    )) as MissingDocRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** Las últimas veinte cosas que le pasaron al caso. */
+export async function fetchAuditLog(
+  ctx: TenantContext,
+  caseId: string
+): Promise<AuditLogRow[]> {
+  try {
+    return (await enTenant(ctx, (db) =>
+      db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.target_type, "case"), eq(auditLog.target_id, caseId)))
+        .orderBy(desc(auditLog.created_at))
+        .limit(20)
+    )) as AuditLogRow[];
+  } catch {
+    return [];
+  }
+}
+
 export async function getCaseDetail(
   tenantId: string,
   caseId: string
 ): Promise<CaseDetail | null> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
-  // ── 1. Fetch the case row (explicitly tenant-scoped) ──────────────────────
-  let caseRow: CaseRow | null;
-  try {
-    caseRow = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select()
-          .from(cases)
-          .where(eq(cases.id, caseId))
-          .limit(1)
-      )
-    );
-  } catch {
-    // Any error here (including invalid uuid) → 404 (never 403).
-    return null;
-  }
 
+  const caseRow = await fetchCaseRow(tenantCtx, caseId);
   if (!caseRow) return null;
 
-  // ── 2-4. Fetch related data in parallel (was 3 sequential round-trips) ───
-  // Each related query degrades to an empty array on failure — matching the
-  // previous behavior where related-query errors were silently ignored.
   const [extractedData, missingDocsData, auditData] = await Promise.all([
-    enTenant(tenantCtx, (db) =>
-      db
-        .select()
-        .from(extractedFields)
-        .where(
-          eq(extractedFields.case_id, caseId)
-        )
-        .orderBy(asc(extractedFields.extracted_at))
-    ).catch(() => [] as ExtractedFieldRow[]),
-    enTenant(tenantCtx, (db) =>
-      db
-        .select()
-        .from(missingDocs)
-        .where(
-          eq(missingDocs.case_id, caseId)
-        )
-        .orderBy(asc(missingDocs.requested_at))
-    ).catch(() => [] as MissingDocRow[]),
-    enTenant(tenantCtx, (db) =>
-      db
-        .select()
-        .from(auditLog)
-        .where(
-          and(
-            eq(auditLog.target_type, "case"),
-            eq(auditLog.target_id, caseId)
-          )
-        )
-        .orderBy(desc(auditLog.created_at))
-        .limit(20)
-    ).catch(() => [] as AuditLogRow[]),
+    fetchExtractedFields(tenantCtx, caseId),
+    fetchMissingDocs(tenantCtx, caseId),
+    fetchAuditLog(tenantCtx, caseId),
   ]);
 
   return {
     case: caseRow,
     extracted_fields: extractedData,
     missing_docs: missingDocsData,
-    audit_log: auditData as AuditLogRow[],
+    audit_log: auditData,
   };
 }

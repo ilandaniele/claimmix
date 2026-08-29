@@ -126,6 +126,123 @@ function setupSelectMock(opts: {
   });
 }
 
+/**
+ * Igual que `setupSelectMock`, pero una de las consultas relacionadas revienta.
+ *
+ * `cual` es el número de llamada a `db.select()`: 2 = campos extraídos,
+ * 3 = documentación faltante, 4 = historial.
+ */
+function setupSelectMockConFalla(cual: 2 | 3 | 4, opts: {
+  caseRows: unknown[];
+  extractedRows: unknown[];
+  missingRows: unknown[];
+  auditRows: unknown[];
+}) {
+  const { caseRows, extractedRows, missingRows, auditRows } = opts;
+
+  const cadenaQueRevienta = (): any => {
+    const rechazo = Object.assign(Promise.reject(new Error("se cayó la base")), {
+      limit: vi.fn().mockRejectedValue(new Error("se cayó la base")),
+    });
+    // Se consume el rechazo para que node no lo reporte como no manejado: el
+    // código bajo prueba le pone su propio `.catch`, que es lo que se verifica.
+    void (rechazo as Promise<unknown>).catch(() => {});
+    return {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnValue(rechazo),
+      limit: vi.fn().mockRejectedValue(new Error("se cayó la base")),
+    };
+  };
+
+  const cadenaNormal = (filas: unknown[]): any => {
+    const despues = Object.assign(Promise.resolve(filas), {
+      limit: vi.fn().mockResolvedValue(filas),
+    });
+    return {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnValue(despues),
+      limit: vi.fn().mockResolvedValue(filas),
+    };
+  };
+
+  let n = 0;
+  vi.mocked(db.select).mockImplementation(() => {
+    n++;
+    if (n === cual) return cadenaQueRevienta();
+    if (n === 1) return cadenaNormal(caseRows);
+    if (n === 2) return cadenaNormal(extractedRows);
+    if (n === 3) return cadenaNormal(missingRows);
+    return cadenaNormal(auditRows);
+  });
+}
+
+/**
+ * Cada consulta relacionada degrada por su cuenta.
+ *
+ * Esto NO estaba probado, y es la razón por la que las consultas de esta
+ * pantalla no se pueden juntar en un solo `enTenantVarias`: un lote es UNA
+ * transacción, y un hipo leyendo el historial de auditoría se llevaría puestos
+ * también los campos extraídos y la documentación faltante.
+ *
+ * Mientras estos tests estén en verde, esa propiedad se sostiene. Si alguien
+ * junta las consultas, se ponen rojos y explican por qué.
+ */
+describe("getCaseDetail — las fallas no se contagian", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const TODO_BIEN = {
+    caseRows: [mockCase],
+    extractedRows: mockExtractedFields,
+    missingRows: mockMissingDocs,
+    auditRows: mockAuditEntries,
+  };
+
+  it("si falla el historial, los campos extraídos siguen llegando", async () => {
+    setupSelectMockConFalla(4, TODO_BIEN);
+
+    const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
+
+    expect(res).not.toBeNull();
+    expect(res!.audit_log).toEqual([]);
+    // Y lo demás intacto: es lo que un solo lote se llevaría puesto.
+    expect(res!.extracted_fields).toEqual(mockExtractedFields);
+    expect(res!.missing_docs).toEqual(mockMissingDocs);
+    expect(res!.case).toEqual(mockCase);
+  });
+
+  it("si fallan los campos extraídos, el resto sigue llegando", async () => {
+    setupSelectMockConFalla(2, TODO_BIEN);
+
+    const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
+
+    expect(res!.extracted_fields).toEqual([]);
+    expect(res!.missing_docs).toEqual(mockMissingDocs);
+    expect(res!.audit_log).toEqual(mockAuditEntries);
+  });
+
+  it("si falla la documentación faltante, el resto sigue llegando", async () => {
+    setupSelectMockConFalla(3, TODO_BIEN);
+
+    const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
+
+    expect(res!.missing_docs).toEqual([]);
+    expect(res!.extracted_fields).toEqual(mockExtractedFields);
+    expect(res!.audit_log).toEqual(mockAuditEntries);
+  });
+
+  it("una falla en una relacionada NO convierte el caso en 404", async () => {
+    // El null está reservado para «no existe o no es tuyo». Devolverlo por un
+    // error de lectura le mostraría al analista que el caso no existe.
+    setupSelectMockConFalla(4, TODO_BIEN);
+
+    await expect(getCaseDetail(TENANT_ID, "case-uuid-1")).resolves.not.toBeNull();
+  });
+});
+
 // ── getCaseDetail ─────────────────────────────────────────────────────────────
 
 describe("getCaseDetail", () => {

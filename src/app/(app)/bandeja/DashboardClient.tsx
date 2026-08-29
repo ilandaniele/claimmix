@@ -438,10 +438,10 @@ export function DashboardClient({
   const visibleCases = cases.filter((c) => {
     if (activeStatus && c.status !== activeStatus) return false;
     if (activeType && c.claim_type !== activeType) return false;
-    if (activeChannel && (c as any).channel !== activeChannel) return false;
-    if (activeSeverity && (c as any).severity !== activeSeverity) return false;
-    if (activeIsClaim === "true" && (c as any).is_claim !== true) return false;
-    if (activeIsClaim === "false" && (c as any).is_claim !== false) return false;
+    if (activeChannel && c.channel !== activeChannel) return false;
+    if (activeSeverity && c.severity !== activeSeverity) return false;
+    if (activeIsClaim === "true" && c.is_claim !== true) return false;
+    if (activeIsClaim === "false" && c.is_claim !== false) return false;
     return true;
   });
   const visibleTotal = total;

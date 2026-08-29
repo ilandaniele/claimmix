@@ -124,9 +124,45 @@ export const RATE_LIMIT_CONFIGS = {
  */
 export function resolveProvider(): "postgres" | "memory" | "upstash" {
   const forced = process.env.RATE_LIMIT_PROVIDER?.trim().toLowerCase();
-  if (forced === "upstash" || forced === "memory" || forced === "postgres") return forced;
+  if (forced === "upstash" || forced === "memory" || forced === "postgres") {
+    avisarSiEsMemoriaEnProduccion(forced, "RATE_LIMIT_PROVIDER lo fuerza");
+    return forced;
+  }
   if (process.env.NODE_ENV === "test") return "memory";
-  return process.env.DATABASE_URL ? "postgres" : "memory";
+
+  const elegido = process.env.DATABASE_URL ? "postgres" : "memory";
+  avisarSiEsMemoriaEnProduccion(elegido, "falta DATABASE_URL");
+  return elegido;
+}
+
+/**
+ * Contar en memoria, en producción, es no contar.
+ *
+ * Cada invocación serverless arranca con su propio mapa vacío, así que el sexto
+ * intento de la ventana casi nunca cae en la misma instancia que los cinco
+ * anteriores: el tope del login deja de existir, y nada falla — sigue
+ * respondiendo «permitido» a todo.
+ *
+ * No se corta la aplicación por esto: dejar el producto abajo porque falta una
+ * variable es peor que dejarlo sin tope. Pero deja de ser silencioso, que era
+ * el problema: un límite que no limita y no avisa es la peor de las tres
+ * opciones.
+ */
+function avisarSiEsMemoriaEnProduccion(proveedor: string, motivo: string): void {
+  if (proveedor !== "memory") return;
+  if (process.env.NODE_ENV !== "production") return;
+
+  console.error(
+    JSON.stringify({
+      level: "error",
+      service: "claimmix",
+      msg: "rate_limit.memoria_en_produccion",
+      motivo,
+      detalle:
+        "El límite de tráfico cuenta en memoria: en serverless cada instancia " +
+        "tiene la suya, así que en la práctica no hay tope.",
+    })
+  );
 }
 
 export interface RateLimitResult {

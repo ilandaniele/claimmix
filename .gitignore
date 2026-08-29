@@ -61,8 +61,14 @@ example-email*.txt
 supabase/.temp/
 .git-commit-msg.txt
 
-# Local agent tool state
-.claude/
+# Local agent tool state.
+#
+# `.claude/*` y no `.claude/`: git no puede volver a incluir algo que está
+# adentro de un directorio excluido, así que se excluye el CONTENIDO y se
+# rescatan las guías, que sí son del proyecto — valen para cualquiera que
+# trabaje acá, no sólo para la máquina donde se bajaron.
+.claude/*
+!.claude/skills/
 
 # MCP server config — may carry API tokens (e.g. WhatsApp Cloud API). Keep local.
 .mcp.json

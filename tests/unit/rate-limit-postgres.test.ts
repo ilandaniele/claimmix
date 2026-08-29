@@ -118,11 +118,67 @@ describe("resolveProvider", () => {
     expect(resolveProvider()).toBe("postgres");
   });
 
-  it("sin base cae a memoria, que es mejor que no limitar nada", () => {
+  /*
+   * «Memoria es mejor que no limitar nada» decía este test, y en serverless son
+   * la misma cosa.
+   *
+   * Cada invocación arranca con su propio mapa vacío, así que el sexto intento
+   * de la ventana casi nunca cae en la instancia que vio los cinco anteriores:
+   * el tope del login deja de existir y nada falla. Sigue cayendo a memoria
+   * —tirar la aplicación abajo porque falta una variable es peor— pero ahora lo
+   * grita.
+   */
+  it("sin base cae a memoria, y lo dice", () => {
     process.env.NODE_ENV = "production";
     delete process.env.DATABASE_URL;
     delete process.env.RATE_LIMIT_PROVIDER;
+    const grito = vi.spyOn(console, "error").mockImplementation(() => {});
+
     expect(resolveProvider()).toBe("memory");
+
+    expect(grito).toHaveBeenCalledTimes(1);
+    const linea = JSON.parse(grito.mock.calls[0][0] as string);
+    expect(linea.level).toBe("error");
+    expect(linea.msg).toBe("rate_limit.memoria_en_produccion");
+    // Por qué pasó, no sólo que pasó: es lo que se necesita para arreglarlo.
+    expect(linea.motivo).toMatch(/DATABASE_URL/);
+    grito.mockRestore();
+  });
+
+  it("forzar memoria en producción también avisa", () => {
+    // Es la otra forma de llegar al mismo lugar, y la más fácil de hacer sin
+    // querer: alguien pone la variable para una prueba y queda.
+    process.env.NODE_ENV = "production";
+    process.env.DATABASE_URL = "postgres://…";
+    process.env.RATE_LIMIT_PROVIDER = "memory";
+    const grito = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(resolveProvider()).toBe("memory");
+    expect(grito).toHaveBeenCalledTimes(1);
+    grito.mockRestore();
+  });
+
+  it("con base en producción no molesta a nadie", () => {
+    // La otra mitad: un aviso que salta siempre se aprende a ignorar.
+    process.env.NODE_ENV = "production";
+    process.env.DATABASE_URL = "postgres://…";
+    delete process.env.RATE_LIMIT_PROVIDER;
+    const grito = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(resolveProvider()).toBe("postgres");
+    expect(grito).not.toHaveBeenCalled();
+    grito.mockRestore();
+  });
+
+  it("en desarrollo tampoco: ahí memoria es lo correcto", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.DATABASE_URL;
+    delete process.env.RATE_LIMIT_PROVIDER;
+    const grito = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(resolveProvider()).toBe("memory");
+    expect(grito).not.toHaveBeenCalled();
+    grito.mockRestore();
   });
 
   it("se puede forzar", () => {

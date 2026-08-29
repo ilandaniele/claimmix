@@ -329,7 +329,14 @@ export const whatsappMessenger: AgentMessenger = {
       const res = await sendWhatsAppText(message.to, finalBody);
       await recordOutbound(message, finalBody, res.ok ? "sent" : "failed");
 
-      console.log(
+      // Un envío fallido sale por stderr, no por stdout.
+      //
+      // La línea decía `level: "error"` y se iba igual por `console.log`. Quien
+      // filtre por stream —que es lo que hace cualquier alerta— no lo veía: un
+      // mensaje que no le llegó al asegurado quedaba con la misma prioridad que
+      // uno que sí.
+      const registrar = res.ok ? console.log : console.error;
+      registrar(
         JSON.stringify({
           level: res.ok ? "info" : "error",
           service: "claimmix",

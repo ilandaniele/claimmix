@@ -1,42 +1,96 @@
 /**
- * Email template: data_confirmation_request
+ * Plantilla de correo: data_confirmation_request
  *
- * Sent when a field has medium confidence or conflicts with stored customer data.
- * Shows the extracted value and asks the claimant to confirm or correct it.
+ * Sale cuando un dato tiene confianza media o no coincide con lo que figura del
+ * cliente. Muestra lo que se leyó y pide que lo confirmen o lo corrijan.
  *
- * AC7: Shows proposed value for medium-confidence fields.
- * AC9: Shows conflicting value for conflict cases.
- * AC24: Sensitive values (DNI, policy_number) are masked before display.
+ * AC7: muestra el valor propuesto para los datos de confianza media.
+ * AC9: muestra el valor en conflicto cuando no coincide con el padrón.
+ * AC24: los valores sensibles (DNI, número de póliza) se enmascaran.
  *
- * Subject: "Confirmar datos de reclamo - Caso #{caseId}"
+ * ── Por qué acepta una lista y no un dato ───────────────────────────────────
+ *
+ * Cuando el asegurado tenía tres datos que no coincidían —lo que pasa cuando
+ * escribe un familiar del titular, con su propio nombre, su mail y su DNI— la
+ * rama D del orquestador mandaba TRES correos casi idénticos. Cada uno pedía un
+ * dato y los tres decían lo mismo alrededor.
+ *
+ * Ahora recibe los campos juntos y arma un mensaje. Los campos sueltos siguen
+ * funcionando: son el caso de uno solo.
  */
 
 import { displayFieldValue, labelForField } from "@/lib/labels/claim-fields";
 import { maskDni, maskPolicyNumber } from "@/server/email/render";
 
-export interface DataConfirmationRequestData {
-  caseId: string;
+/** Un dato sobre el que se pregunta. */
+export interface CampoAConfirmar {
   fieldKey: string;
   proposedValue: string;
-  /** If set: the value already on file (conflict scenario). */
+  /** Si viene: el valor que ya figuraba en el padrón (caso de conflicto). */
   conflictWithValue?: string | null;
+}
+
+export interface DataConfirmationRequestData extends CampoAConfirmar {
+  caseId: string;
+  /** Varios datos en un solo mensaje. Si falta, se usa el campo suelto. */
+  fields?: CampoAConfirmar[];
 }
 
 const SENSITIVE_FIELDS = new Set(["dni", "policy_number"]);
 
 /**
- * Mask a sensitive value, and translate an enum value into Spanish.
+ * Enmascara un valor sensible, y traduce un valor de enumeración al castellano.
  *
- * Returns null when the value is not worth showing: `claim_type: other` is the
- * extractor saying it did not recognize the accident, and there is no phrasing
- * of that a claimant can confirm or correct. Translating it to "siniestro"
- * only hid the problem — the email then asked someone to confirm that the type
- * of their siniestro was "siniestro".
+ * Devuelve null cuando el valor no vale la pena mostrarlo: `claim_type: other`
+ * es el extractor diciendo que no reconoció el siniestro, y no hay forma de
+ * escribir eso que una persona pueda confirmar o corregir. Traducirlo a
+ * "siniestro" sólo tapaba el problema — el correo terminaba pidiéndole a
+ * alguien que confirmara que el tipo de su siniestro era "siniestro".
  */
 function maskFieldValue(fieldKey: string, value: string): string | null {
   if (fieldKey === "dni") return maskDni(value);
   if (fieldKey === "policy_number") return maskPolicyNumber(value);
   return displayFieldValue(fieldKey, value);
+}
+
+interface BloqueDeCampo {
+  /** Sin valor que mostrar: en vez de pedir que confirmen un blanco, se pregunta. */
+  abierto: boolean;
+  html: string;
+  text: string;
+}
+
+function armarBloque(campo: CampoAConfirmar): BloqueDeCampo {
+  const field = labelForField(campo.fieldKey);
+  const displayValue = maskFieldValue(campo.fieldKey, campo.proposedValue);
+  const displayConflict = campo.conflictWithValue
+    ? maskFieldValue(campo.fieldKey, campo.conflictWithValue)
+    : null;
+
+  const abierto = !displayValue;
+  const sensible = SENSITIVE_FIELDS.has(campo.fieldKey);
+
+  let contextoHtml: string;
+  let contextoText: string;
+
+  if (abierto) {
+    contextoHtml = `<p>${field.instruction}</p>`;
+    contextoText = field.instruction;
+  } else if (displayConflict) {
+    contextoHtml = `<p>Notamos que el valor que indicaste en tu email (<strong>${displayValue}</strong>) difiere del que tenemos registrado en nuestro sistema (<strong>${displayConflict}</strong>).</p>`;
+    contextoText = `Notamos que el valor que indicaste en tu email (${displayValue}) difiere del que tenemos registrado en nuestro sistema (${displayConflict}).`;
+  } else {
+    const nota = sensible ? " (valor enmascarado por seguridad)" : "";
+    contextoHtml = `<p>Obtuvimos el siguiente dato de tu correo: <strong>${displayValue}</strong>${nota}.</p>`;
+    contextoText = `Obtuvimos el siguiente dato de tu correo: ${displayValue}${nota}.`;
+  }
+
+  return {
+    abierto,
+    html: `<p><strong>Campo:</strong> ${field.label}</p>
+  ${contextoHtml}`,
+    text: [`Campo: ${field.label}`, contextoText].join("\n"),
+  };
 }
 
 export function renderDataConfirmationRequest(
@@ -46,60 +100,68 @@ export function renderDataConfirmationRequest(
   html: string;
   text: string;
 } {
-  const field = labelForField(data.fieldKey);
-  const fieldLabel = field.label;
-  const isSensitive = SENSITIVE_FIELDS.has(data.fieldKey);
-  const displayValue = maskFieldValue(data.fieldKey, data.proposedValue);
-  const displayConflict = data.conflictWithValue
-    ? maskFieldValue(data.fieldKey, data.conflictWithValue)
-    : null;
+  const campos: CampoAConfirmar[] =
+    data.fields && data.fields.length > 0
+      ? data.fields
+      : [
+          {
+            fieldKey: data.fieldKey,
+            proposedValue: data.proposedValue,
+            conflictWithValue: data.conflictWithValue,
+          },
+        ];
 
-  // With no value to show, there is nothing to confirm — so ask the question
-  // outright instead. An agent that could not work something out asks for it;
-  // it does not present a blank and request approval of the blank.
-  const isOpenQuestion = !displayValue;
+  const bloques = campos.map(armarBloque);
+
+  /*
+   * Con que UNO traiga valor, hay algo que confirmar.
+   *
+   * Si todos son preguntas abiertas el mensaje entero es un pedido de datos, y
+   * el «Escribí Confirmo» de abajo no tendría contra qué. Mezclados, gana pedir
+   * confirmación: el que no tiene valor igual se pregunta en su bloque.
+   */
+  const isOpenQuestion = bloques.every((b) => b.abierto);
+  const varios = bloques.length > 1;
 
   const subject = isOpenQuestion
-    ? `Nos falta un dato de tu reclamo - Caso #${data.caseId}`
+    ? `${varios ? "Nos faltan datos" : "Nos falta un dato"} de tu reclamo - Caso #${data.caseId}`
     : `Confirmar datos de reclamo - Caso #${data.caseId}`;
 
-  const heading = isOpenQuestion ? "Nos falta un dato" : "Confirmación de datos requerida";
+  const heading = isOpenQuestion
+    ? varios
+      ? "Nos faltan algunos datos"
+      : "Nos falta un dato"
+    : "Confirmación de datos requerida";
 
-  // Opens by acknowledging receipt: this is now the only email the claimant
-  // gets when something is uncertain, so it has to do the job the separate
-  // confirmation_received used to do.
-  const introHtml = isOpenQuestion
-    ? `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${data.caseId}</strong>, y nos falta un dato para poder avanzar:</p>`
-    : `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${data.caseId}</strong>, y necesitamos que confirmes el siguiente dato:</p>`;
-  const introText = isOpenQuestion
-    ? `Gracias por tu reclamo. Lo registramos como caso #${data.caseId}, y nos falta un dato para poder avanzar:`
-    : `Gracias por tu reclamo. Lo registramos como caso #${data.caseId}, y necesitamos que confirmes el siguiente dato:`;
+  // Abre acusando recibo: es el único correo que le llega al asegurado cuando
+  // hay algo dudoso, así que tiene que hacer el trabajo que hacía el
+  // `confirmation_received` separado.
+  const queSigue = isOpenQuestion
+    ? varios
+      ? "nos faltan algunos datos para poder avanzar:"
+      : "nos falta un dato para poder avanzar:"
+    : varios
+      ? "necesitamos que confirmes los siguientes datos:"
+      : "necesitamos que confirmes el siguiente dato:";
 
-  let contextHtml = "";
-  let contextText = "";
+  const introHtml = `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${data.caseId}</strong>, y ${queSigue}</p>`;
+  const introText = `Gracias por tu reclamo. Lo registramos como caso #${data.caseId}, y ${queSigue}`;
 
-  if (isOpenQuestion) {
-    contextHtml = `<p>${field.instruction}</p>`;
-    contextText = `${field.instruction}\n\n`;
-  } else if (displayConflict) {
-    contextHtml = `<p>Notamos que el valor que indicaste en tu email (<strong>${displayValue}</strong>) difiere del que tenemos registrado en nuestro sistema (<strong>${displayConflict}</strong>).</p>`;
-    contextText = `Notamos que el valor que indicaste en tu email (${displayValue}) difiere del que tenemos registrado en nuestro sistema (${displayConflict}).\n\n`;
-  } else {
-    contextHtml = `<p>Obtuvimos el siguiente dato de tu correo: <strong>${displayValue}</strong>${isSensitive ? " (valor enmascarado por seguridad)" : ""}.</p>`;
-    contextText = `Obtuvimos el siguiente dato de tu correo: ${displayValue}${isSensitive ? " (valor enmascarado por seguridad)" : ""}.\n\n`;
-  }
-
-  // "Escribí Confirmo" only makes sense against a value we showed them.
   const actionHtml = isOpenQuestion
-    ? `<p>Respondé este correo con el dato y seguimos con tu reclamo.</p>`
+    ? `<p>Respondé este correo con ${varios ? "los datos" : "el dato"} y seguimos con tu reclamo.</p>`
     : `<p>Por favor respondé este correo con una de las siguientes opciones:</p>
   <ul>
-    <li>Escribí <strong>"Confirmo"</strong> si el dato es correcto.</li>
-    <li>O bien, escribí el valor correcto directamente en tu respuesta.</li>
+    <li>Escribí <strong>"Confirmo"</strong> si ${varios ? "los datos son correctos" : "el dato es correcto"}.</li>
+    <li>O bien, escribí ${varios ? "los valores correctos" : "el valor correcto"} directamente en tu respuesta.</li>
   </ul>`;
+
   const actionText = isOpenQuestion
-    ? `Respondé este correo con el dato y seguimos con tu reclamo.`
-    : `Por favor respondé este correo con una de las siguientes opciones:\n- Escribí "Confirmo" si el dato es correcto.\n- O bien, escribí el valor correcto directamente en tu respuesta.`;
+    ? `Respondé este correo con ${varios ? "los datos" : "el dato"} y seguimos con tu reclamo.`
+    : [
+        "Por favor respondé este correo con una de las siguientes opciones:",
+        `- Escribí "Confirmo" si ${varios ? "los datos son correctos" : "el dato es correcto"}.`,
+        `- O bien, escribí ${varios ? "los valores correctos" : "el valor correcto"} directamente en tu respuesta.`,
+      ].join("\n");
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -107,15 +169,25 @@ export function renderDataConfirmationRequest(
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #1a56db;">${heading}</h1>
   ${introHtml}
-  <p><strong>Campo:</strong> ${fieldLabel}</p>
-  ${contextHtml}
+  ${bloques.map((b) => b.html).join("\n  ")}
   ${actionHtml}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
   <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente.</p>
 </body>
 </html>`;
 
-  const text = `${heading}\n\n${introText}\n\nCampo: ${fieldLabel}\n${contextText}${actionText}\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente.`;
+  const text = [
+    heading,
+    "",
+    introText,
+    "",
+    bloques.map((b) => b.text).join("\n\n"),
+    "",
+    actionText,
+    "",
+    "---",
+    `Caso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente.`,
+  ].join("\n");
 
   return { subject, html, text };
 }

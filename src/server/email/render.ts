@@ -118,6 +118,16 @@ export function renderTemplate(
         proposedValue: String(data.proposedValue ?? ""),
         conflictWithValue:
           data.conflictWithValue != null ? String(data.conflictWithValue) : null,
+        // Varios datos en un mensaje. Si no viene, la plantilla usa el campo
+        // suelto de arriba, que es el caso de uno solo.
+        fields: Array.isArray(data.fields)
+          ? (data.fields as Array<Record<string, unknown>>).map((c) => ({
+              fieldKey: String(c.fieldKey ?? ""),
+              proposedValue: String(c.proposedValue ?? ""),
+              conflictWithValue:
+                c.conflictWithValue != null ? String(c.conflictWithValue) : null,
+            }))
+          : undefined,
       });
 
     case "specialist_escalation":

@@ -258,33 +258,63 @@ export async function orchestratePostExtraction(
   }
 
   // ── D. Customer conflict → confirmation rows — AC9 ────────────────────────
+  //
+  // Tres campos en conflicto mandaban TRES mails.
+  //
+  // Esto era un bucle anidado —cada match, cada campo— y adentro, por campo:
+  // dos viajes para escribir la fila, uno para el estado, uno a Resend o a
+  // Meta, y uno más de auditoría. Que sean cinco viajes por campo es lo de
+  // menos: el asegurado recibía un correo por cada dato que no coincidía.
+  //
+  // Y `full_name` + `email` + `dni` juntos no es un caso raro: es lo que pasa
+  // cuando escribe un familiar del titular. Tres mails casi idénticos, con tres
+  // «pasamos tu caso a confirmación pendiente» encima.
+  //
+  // Ahora es un pedido: todas las filas en un lote, un estado, un mensaje que
+  // lista los datos que no coinciden, y un evento de auditoría con las claves.
+  // Es la misma forma que ya tenía la rama C acá arriba.
+  const conflictos: Array<{
+    fieldKey: string;
+    proposedValue: string;
+    confidence: number;
+    conflictWithValue: string;
+  }> = [];
+  const clavesEnConflicto = new Set<string>();
+
   for (const match of customerMatches) {
-    if (match.conflictsWithExtracted.length === 0) continue;
-
     for (const conflictField of match.conflictsWithExtracted) {
-      // Get the extracted value for this conflicting field.
-      const extractedEntry = extractedClaim.fields.find((f) => f.field_key === conflictField);
-      const extractedValue = extractedEntry?.field_value ?? "";
-      const confidence = extractedEntry?.confidence ?? 0;
+      // El primero gana: `findCustomerMatches` ordena por confianza
+      // descendente, así que si dos clientes chocan con el mismo campo, el que
+      // manda es el que mejor coincide.
+      if (clavesEnConflicto.has(conflictField)) continue;
+      clavesEnConflicto.add(conflictField);
 
-      // The stored value — which field in the customer record?
-      const storedValue = getStoredFieldValue(match, conflictField);
-
-      // Insert conflict confirmation row (extracted value vs stored customer value).
-      await upsertFieldConfirmation(caseId, tenantId, {
-        field_key: conflictField,
-        proposed_value: extractedValue,
-        confidence,
-        conflict_with_value: storedValue,
+      const extractedEntry = extractedClaim.fields.find(
+        (f) => f.field_key === conflictField
+      );
+      conflictos.push({
+        fieldKey: conflictField,
+        proposedValue: extractedEntry?.field_value ?? "",
+        confidence: extractedEntry?.confidence ?? 0,
+        conflictWithValue: getStoredFieldValue(match, conflictField),
       });
+    }
+  }
 
-      // An escalated case keeps its own status and its own single message.
-      if (isHighSeverity) continue;
+  if (conflictos.length > 0) {
+    await guardarConfirmaciones(caseId, tenantId, conflictos);
 
-      // Set case status to confirmacion_pendiente for conflict.
+    /*
+     * Un caso escalado se queda con su estado y con su único mensaje.
+     *
+     * Las filas se escriben igual —el analista las ve en la pantalla— pero no
+     * se le manda nada al asegurado ni se anota el pedido, porque no se le
+     * pidió nada. Era así antes de este cambio y se mantiene: agregarle ahora
+     * un evento de auditoría que nunca emitió sería inventar historia.
+     */
+    if (!isHighSeverity) {
       await setStatus(caseId, tenantId, "confirmacion_pendiente");
 
-      // Dispatch data_confirmation_request email.
       await messenger.send({
         caseId,
         tenantId,
@@ -293,22 +323,25 @@ export async function orchestratePostExtraction(
         template: "data_confirmation_request",
         data: {
           caseId,
-          fieldKey: conflictField,
-          proposedValue: extractedValue,
-          conflictWithValue: storedValue,
+          fields: conflictos.map((c) => ({
+            fieldKey: c.fieldKey,
+            proposedValue: c.proposedValue,
+            conflictWithValue: c.conflictWithValue,
+          })),
         },
         inReplyToMessageId,
       });
       confirmationEmailDispatched = true;
 
-      // Audit: CONFIRMATION_REQUESTED (field key only — no PII).
       await writeAuditLog({
         tenant_id: tenantId,
         actor_id: null,
         event_type: AuditEvent.CONFIRMATION_REQUESTED,
         target_type: "case",
         target_id: caseId,
-        payload: { field_key: conflictField, reason: "conflict" },
+        // Sólo las claves: el valor es dato de una persona, y el que teníamos
+        // guardado también.
+        payload: { field_keys: conflictos.map((c) => c.fieldKey), reason: "conflict" },
       });
     }
   }
@@ -1163,7 +1196,18 @@ async function setStatus(
 async function guardarConfirmaciones(
   caseId: string,
   tenantId: string,
-  campos: Array<{ fieldKey: string; proposedValue: string; confidence: number }>
+  campos: Array<{
+    fieldKey: string;
+    proposedValue: string;
+    confidence: number;
+    /**
+     * Lo que ya figuraba en el padrón, cuando lo que llegó no coincide.
+     *
+     * Antes iba `null` fijo y por eso la rama D —la de conflictos— no podía
+     * usar esta función y escribía fila por fila.
+     */
+    conflictWithValue?: string | null;
+  }>
 ): Promise<void> {
   const tenantCtx: TenantContext = { tenantId };
   const ahora = new Date().toISOString();
@@ -1199,7 +1243,7 @@ async function guardarConfirmaciones(
             tenant_id: tenantId,
             field_name: c.fieldKey,
             suggested_value: c.proposedValue,
-            conflict_with_value: null,
+            conflict_with_value: c.conflictWithValue ?? null,
             confidence: c.confidence.toFixed(2),
             status: "pending",
             created_at: ahora,
@@ -1222,7 +1266,7 @@ async function guardarConfirmaciones(
           .update(claimFieldConfirmations)
           .set({
             suggested_value: c.proposedValue,
-            conflict_with_value: null,
+            conflict_with_value: c.conflictWithValue ?? null,
             confidence: c.confidence.toFixed(2),
             status: "pending",
             created_at: ahora,
@@ -1232,64 +1276,6 @@ async function guardarConfirmaciones(
     }
   } catch (err) {
     console.error("[orchestrate] guardarConfirmaciones:", errCode(err), "case:", caseId);
-  }
-}
-
-async function upsertFieldConfirmation(
-  caseId: string,
-  tenantId: string,
-  row: {
-    field_key: string;
-    proposed_value: string;
-    confidence: number;
-    conflict_with_value: string | null;
-  }
-): Promise<void> {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
-  try {
-    const existing = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select({ id: claimFieldConfirmations.id })
-          .from(claimFieldConfirmations)
-          .where(
-            and(
-              eq(claimFieldConfirmations.case_id, caseId),
-              eq(claimFieldConfirmations.field_name, row.field_key)
-            )
-          )
-          .limit(1)
-      )
-    );
-
-    const values = {
-      suggested_value: row.proposed_value,
-      conflict_with_value: row.conflict_with_value,
-      confidence: row.confidence.toFixed(2),
-      status: "pending",
-      created_at: new Date().toISOString(),
-    };
-
-    if (existing) {
-      await enTenant(tenantCtx, (db) =>
-        db
-          .update(claimFieldConfirmations)
-          .set(values)
-          .where(eq(claimFieldConfirmations.id, existing.id))
-      );
-    } else {
-      await enTenant(tenantCtx, (db) =>
-        db.insert(claimFieldConfirmations).values({
-          case_id: caseId,
-          tenant_id: tenantId,
-          field_name: row.field_key,
-          ...values,
-        })
-      );
-    }
-  } catch (err) {
-    console.error("[orchestrate] Failed to upsert claim_field_confirmations:", errCode(err));
   }
 }
 

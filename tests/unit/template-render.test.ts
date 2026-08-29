@@ -506,3 +506,89 @@ describe("renderTemplate — acknowledgement vs closing", () => {
     expect(r.html).toContain("case-77");
   });
 });
+
+/**
+ * Un correo con varios datos, en vez de varios correos con uno.
+ *
+ * La rama D del orquestador mandaba un `data_confirmation_request` por cada
+ * dato que no coincidía con el padrón. Con un familiar del titular escribiendo
+ * —nombre, mail y documento distintos— eran tres correos casi idénticos.
+ *
+ * La plantilla ahora recibe la lista. Lo que se comprueba acá es que el mensaje
+ * siga siendo legible: que los tres datos aparezcan, que el enmascarado siga
+ * aplicándose a cada uno, y que las frases estén en plural cuando corresponde.
+ */
+describe("renderTemplate — data_confirmation_request con varios datos", () => {
+  const TRES = {
+    caseId: "case-9",
+    fieldKey: "",
+    proposedValue: "",
+    fields: [
+      { fieldKey: "full_name", proposedValue: "Pedro García", conflictWithValue: "Juan Pérez" },
+      { fieldKey: "email", proposedValue: "pedro@ejemplo.com", conflictWithValue: "juan@ejemplo.com" },
+      { fieldKey: "dni", proposedValue: "30111222", conflictWithValue: "20345678" },
+    ],
+  };
+
+  it("nombra los tres datos en un solo mensaje", () => {
+    const result = renderTemplate("data_confirmation_request", TRES);
+
+    for (const esperado of ["Pedro García", "Juan Pérez", "pedro@ejemplo.com", "juan@ejemplo.com"]) {
+      expect(result.text).toContain(esperado);
+      expect(result.html).toContain(esperado);
+    }
+  });
+
+  it("enmascara el DNI aunque venga en la lista", () => {
+    // El enmascarado se aplicaba por campo cuando el campo era uno. Con lista,
+    // tiene que seguir aplicándose a cada uno.
+    const result = renderTemplate("data_confirmation_request", TRES);
+
+    expect(result.text).not.toContain("30111222");
+    expect(result.text).not.toContain("20345678");
+    expect(result.text).toContain("****1222");
+    expect(result.text).toContain("****5678");
+  });
+
+  it("habla en plural cuando son varios", () => {
+    const result = renderTemplate("data_confirmation_request", TRES);
+
+    expect(result.text).toContain("los siguientes datos");
+    expect(result.text).toContain("los datos son correctos");
+  });
+
+  it("con uno solo sigue hablando en singular", () => {
+    // La otra mitad: si el plural se aplicara siempre, un mensaje con un dato
+    // diría «confirmá los siguientes datos» sobre un dato.
+    const result = renderTemplate("data_confirmation_request", {
+      caseId: "case-10",
+      fieldKey: "full_name",
+      proposedValue: "Pedro García",
+      conflictWithValue: "Juan Pérez",
+    });
+
+    expect(result.text).toContain("el siguiente dato");
+    expect(result.text).toContain("el dato es correcto");
+    expect(result.text).not.toContain("los siguientes datos");
+  });
+
+  it("un campo sin valor se pregunta, y los que tienen valor se confirman", () => {
+    // Mezcla: no puede quedar un mensaje que pida «escribí Confirmo» sobre un
+    // blanco, ni uno que se olvide de preguntar por lo que falta.
+    const result = renderTemplate("data_confirmation_request", {
+      caseId: "case-11",
+      fieldKey: "",
+      proposedValue: "",
+      fields: [
+        { fieldKey: "full_name", proposedValue: "Pedro García", conflictWithValue: "Juan Pérez" },
+        { fieldKey: "claim_type", proposedValue: "other" },
+      ],
+    });
+
+    expect(result.text).toContain("Pedro García");
+    // El que no tiene valor mostrable aparece igual, como pregunta.
+    expect(result.text).toContain("Tipo de siniestro");
+    // Y sigue habiendo algo que confirmar, así que el asunto es el de confirmar.
+    expect(result.subject).toContain("Confirmar datos");
+  });
+});

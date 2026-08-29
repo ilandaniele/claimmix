@@ -212,6 +212,59 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).toContain("Pedro García");
     expect(body).toContain("Juan Pérez");
   });
+
+  /*
+   * Tres datos que no coinciden son un mensaje, no tres.
+   *
+   * Por WhatsApp era peor que por mail: tres notificaciones seguidas en el
+   * teléfono de la persona, cada una diciendo casi lo mismo.
+   */
+  it("lista los tres datos en un solo mensaje", async () => {
+    await send("data_confirmation_request", {
+      caseId: CASE,
+      fields: [
+        { fieldKey: "full_name", proposedValue: "Pedro García", conflictWithValue: "Juan Pérez" },
+        { fieldKey: "email", proposedValue: "pedro@ejemplo.com", conflictWithValue: "juan@ejemplo.com" },
+      ],
+    });
+
+    const body = sentBody();
+    expect(body).toContain("Pedro García");
+    expect(body).toContain("Juan Pérez");
+    expect(body).toContain("pedro@ejemplo.com");
+    expect(body).toContain("juan@ejemplo.com");
+    // En plural, porque son varios.
+    expect(body).toMatch(/datos que no coinciden/i);
+    expect(body).toMatch(/cuáles son los correctos/i);
+  });
+
+  it("con uno solo sigue hablando en singular", async () => {
+    await send("data_confirmation_request", {
+      caseId: CASE,
+      fields: [
+        { fieldKey: "full_name", proposedValue: "Pedro García", conflictWithValue: "Juan Pérez" },
+      ],
+    });
+
+    const body = sentBody();
+    expect(body).toMatch(/un dato que no coincide/i);
+    expect(body).toMatch(/cuál es el correcto/i);
+  });
+
+  it("sin valores que mostrar, pide los datos por su nombre", async () => {
+    await send("data_confirmation_request", {
+      caseId: CASE,
+      fields: [
+        { fieldKey: "full_name", proposedValue: "" },
+        { fieldKey: "policy_number", proposedValue: "" },
+      ],
+    });
+
+    const body = sentBody();
+    // No puede quedar un mensaje que muestre comillas vacías.
+    expect(body).not.toContain('""');
+    expect(body).toMatch(/confirmes estos datos/i);
+  });
 });
 
 /**

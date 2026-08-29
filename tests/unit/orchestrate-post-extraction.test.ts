@@ -821,13 +821,22 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
     );
 
     const conflictEmailCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
-      (call) =>
-        call[0].template === "data_confirmation_request" &&
-        call[0].data?.fieldKey === "full_name"
+      (call) => call[0].template === "data_confirmation_request"
     );
     expect(conflictEmailCall).toBeDefined();
-    expect(conflictEmailCall?.[0].data?.conflictWithValue).toBe("Juan Pérez");
-    expect(conflictEmailCall?.[0].data?.proposedValue).toBe("Pedro García");
+
+    const campos = conflictEmailCall?.[0].data?.fields as Array<{
+      fieldKey: string;
+      proposedValue: string;
+      conflictWithValue: string;
+    }>;
+    expect(campos).toEqual([
+      {
+        fieldKey: "full_name",
+        proposedValue: "Pedro García",
+        conflictWithValue: "Juan Pérez",
+      },
+    ]);
   });
 
   it("logs CONFIRMATION_REQUESTED for conflict with reason=conflict in payload", async () => {
@@ -859,7 +868,187 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
         call[0].payload?.reason === "conflict"
     );
     expect(conflictAudit).toBeDefined();
-    expect(conflictAudit?.[0].payload?.field_key).toBe("full_name");
+    expect(conflictAudit?.[0].payload?.field_keys).toEqual(["full_name"]);
+  });
+
+  /*
+   * Tres datos que no coinciden eran TRES mails.
+   *
+   * `full_name` + `email` + `dni` juntos no es un caso raro: es lo que pasa
+   * cuando escribe un familiar del titular. La rama D recorría cada match y
+   * cada campo, y adentro mandaba un mensaje, ponía el estado y escribía
+   * auditoría. El asegurado recibía tres correos casi idénticos.
+   *
+   * Estos tests no existían: los cuatro de AC9 usaban `.find(...)` sobre los
+   * espías, así que pasaban igual con uno o con nueve envíos.
+   */
+  it("tres datos en conflicto son UN mensaje, no tres", async () => {
+    const claim = extractEmailClaimMock({
+      fields: [
+        { field_key: "full_name", field_value: "Pedro García", confidence: 0.92, source: "ai" as const },
+        { field_key: "email", field_value: "pedro@ejemplo.com", confidence: 0.9, source: "ai" as const },
+        { field_key: "dni", field_value: "30111222", confidence: 0.88, source: "ai" as const },
+      ],
+    });
+
+    const conflictingMatch: CustomerMatch = {
+      customerId: "cust-004",
+      matchType: "email",
+      confidence: 0.75,
+      customerName: "Juan Pérez",
+      conflictsWithExtracted: ["full_name", "email", "dni"],
+    };
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [conflictingMatch]
+    );
+
+    // Se cuentan los de ESTE tipo, no todos los mails: el orquestador manda
+    // otros por otras ramas y un total no diría nada.
+    const confirmaciones = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.filter((c) => c[0].template === "data_confirmation_request");
+    expect(confirmaciones).toHaveLength(1);
+
+    // Y el único mensaje pregunta por los tres.
+    const campos = confirmaciones[0][0].data?.fields as Array<{ fieldKey: string }>;
+    expect(campos.map((c) => c.fieldKey)).toEqual(["full_name", "email", "dni"]);
+  });
+
+  it("tres conflictos son un evento de auditoría con las tres claves", async () => {
+    const claim = extractEmailClaimMock({
+      fields: [
+        { field_key: "full_name", field_value: "Pedro García", confidence: 0.92, source: "ai" as const },
+        { field_key: "email", field_value: "pedro@ejemplo.com", confidence: 0.9, source: "ai" as const },
+        { field_key: "dni", field_value: "30111222", confidence: 0.88, source: "ai" as const },
+      ],
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [
+        {
+          customerId: "cust-005",
+          matchType: "email",
+          confidence: 0.75,
+          customerName: "Juan Pérez",
+          conflictsWithExtracted: ["full_name", "email", "dni"],
+        },
+      ]
+    );
+
+    const deConflicto = vi
+      .mocked(writeAuditLog)
+      .mock.calls.filter((c) => c[0].payload?.reason === "conflict");
+    expect(deConflicto).toHaveLength(1);
+    expect(deConflicto[0][0].payload?.field_keys).toEqual([
+      "full_name",
+      "email",
+      "dni",
+    ]);
+  });
+
+  it("dos clientes que chocan con el mismo dato preguntan una sola vez", async () => {
+    // `findCustomerMatches` ordena por confianza descendente, así que gana el
+    // que mejor coincide. Sin esto, el mismo campo entraba dos veces a la lista
+    // y el asegurado leía la misma pregunta repetida.
+    const claim = extractEmailClaimMock({
+      fields: [
+        { field_key: "full_name", field_value: "Pedro García", confidence: 0.92, source: "ai" as const },
+      ],
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [
+        {
+          customerId: "cust-006",
+          matchType: "email",
+          confidence: 0.9,
+          customerName: "Juan Pérez",
+          conflictsWithExtracted: ["full_name"],
+        },
+        {
+          customerId: "cust-007",
+          matchType: "dni",
+          confidence: 0.6,
+          customerName: "Otro Titular",
+          conflictsWithExtracted: ["full_name"],
+        },
+      ]
+    );
+
+    const confirmaciones = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.filter((c) => c[0].template === "data_confirmation_request");
+    expect(confirmaciones).toHaveLength(1);
+
+    const campos = confirmaciones[0][0].data?.fields as Array<{
+      fieldKey: string;
+      conflictWithValue: string;
+    }>;
+    expect(campos).toHaveLength(1);
+    // El de mayor confianza es el que manda.
+    expect(campos[0].conflictWithValue).toBe("Juan Pérez");
+  });
+
+  /*
+   * Un caso escalado no le escribe al asegurado, ni siquiera por un conflicto.
+   *
+   * Ya recibió su único mensaje —el de escalamiento— y el analista se hace
+   * cargo desde ahí. Las filas SÍ se escriben, porque el analista las tiene que
+   * ver en la pantalla; lo que no sale es el mensaje ni el evento de
+   * «le pedimos que confirme», porque no se le pidió nada.
+   *
+   * Este test no existía, y sin él la reescritura de la rama D podía empezar a
+   * mandarle mensajes a gente con un siniestro grave sin que nada lo notara.
+   */
+  it("un caso escalado con conflicto no le manda nada al asegurado", async () => {
+    const claim = extractEmailClaimMock({
+      severity: "critical",
+      requires_specialist: true,
+      fields: [
+        { field_key: "full_name", field_value: "Pedro García", confidence: 0.92, source: "ai" as const },
+      ],
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [
+        {
+          customerId: "cust-008",
+          matchType: "email",
+          confidence: 0.9,
+          customerName: "Juan Pérez",
+          conflictsWithExtracted: ["full_name"],
+        },
+      ]
+    );
+
+    const confirmaciones = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.filter((c) => c[0].template === "data_confirmation_request");
+    expect(confirmaciones).toHaveLength(0);
+
+    const deConflicto = vi
+      .mocked(writeAuditLog)
+      .mock.calls.filter((c) => c[0].payload?.reason === "conflict");
+    expect(deConflicto).toHaveLength(0);
+
+    // Y la otra mitad: sí recibió el de escalamiento.
+    const escalamiento = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.filter((c) => c[0].template === "specialist_escalation");
+    expect(escalamiento).toHaveLength(1);
   });
 });
 

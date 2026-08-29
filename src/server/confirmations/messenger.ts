@@ -132,22 +132,64 @@ function renderAsk(data: Record<string, unknown>): string {
   return `Recibimos tu denuncia y ya quedó registrada.\n\n${blocks.join("\n\n")}\n\n${how}`;
 }
 
-/** The conflict case: what they told us differs from what we have on file. */
+/**
+ * El caso de conflicto: lo que nos dijeron no coincide con lo que tenemos.
+ *
+ * Acepta varios datos porque le llegan varios: cuando escribe un familiar del
+ * titular no coincide el nombre, ni el mail, ni el documento. Antes salía un
+ * mensaje de WhatsApp por cada uno.
+ */
 function renderConflict(data: Record<string, unknown>): string {
-  const fieldKey = String(data.fieldKey ?? "");
-  const label = labelForField(fieldKey).label;
-  const proposed = String(data.proposedValue ?? "").trim();
-  const stored = String(data.conflictWithValue ?? "").trim();
+  const campos = camposDeConflicto(data);
 
-  if (proposed && stored) {
-    return (
-      `Recibimos tu denuncia. Hay un dato que no coincide con lo que tenemos registrado.\n\n` +
-      `${label}: vos nos decís "${proposed}" y en nuestro sistema figura "${stored}".\n\n` +
-      `¿Cuál es el correcto? Respondé por acá y seguimos.`
-    );
+  const conValor = campos.filter((c) => c.proposed && c.stored);
+  if (conValor.length === 0) {
+    const etiquetas = campos.map((c) => labelForField(c.fieldKey).label);
+    return etiquetas.length > 0
+      ? `Recibimos tu denuncia. Necesitamos que nos confirmes ${etiquetas.length > 1 ? "estos datos" : "un dato"}: ${listar(etiquetas)}. Respondé por acá y seguimos.`
+      : `Recibimos tu denuncia. Necesitamos que nos confirmes un dato. Respondé por acá y seguimos.`;
   }
 
-  return `Recibimos tu denuncia. Necesitamos que nos confirmes un dato: ${label}. Respondé por acá y seguimos.`;
+  const lineas = conValor.map((c) => {
+    const label = labelForField(c.fieldKey).label;
+    return `${label}: vos nos decís "${c.proposed}" y en nuestro sistema figura "${c.stored}".`;
+  });
+
+  const encabezado =
+    lineas.length > 1
+      ? "Recibimos tu denuncia. Hay algunos datos que no coinciden con lo que tenemos registrado."
+      : "Recibimos tu denuncia. Hay un dato que no coincide con lo que tenemos registrado.";
+
+  const cierre =
+    lineas.length > 1
+      ? "¿Cuáles son los correctos? Respondé por acá y seguimos."
+      : "¿Cuál es el correcto? Respondé por acá y seguimos.";
+
+  return [encabezado, lineas.join("\n"), cierre].join("\n\n");
+}
+
+/** Los campos del mensaje, venga la lista nueva o un campo suelto. */
+function camposDeConflicto(
+  data: Record<string, unknown>
+): Array<{ fieldKey: string; proposed: string; stored: string }> {
+  const lista = Array.isArray(data.fields) ? data.fields : null;
+  const crudos = lista?.length
+    ? (lista as Array<Record<string, unknown>>)
+    : [data];
+
+  return crudos
+    .map((c) => ({
+      fieldKey: String(c.fieldKey ?? ""),
+      proposed: String(c.proposedValue ?? "").trim(),
+      stored: String(c.conflictWithValue ?? "").trim(),
+    }))
+    .filter((c) => c.fieldKey);
+}
+
+/** «a, b y c» — que se lea como lo escribiría una persona. */
+function listar(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
 }
 
 /** Nothing left to ask: an acknowledgement, or a closing if we already spoke. */

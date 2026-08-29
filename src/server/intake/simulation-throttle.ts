@@ -25,7 +25,7 @@ function numberEnv(name: string, fallback: number, max: number): number {
   return Math.min(Math.floor(raw), max);
 }
 
-export function getSimulateWorkerDelayStepMs(): number {
+function getSimulateWorkerDelayStepMs(): number {
   return numberEnv(
     "SIMULATE_WORKER_DELAY_MS",
     DEFAULT_SIMULATE_WORKER_DELAY_MS,
@@ -33,7 +33,7 @@ export function getSimulateWorkerDelayStepMs(): number {
   );
 }
 
-export function getSimulateWorkerMaxDelayMs(): number {
+function getSimulateWorkerMaxDelayMs(): number {
   return numberEnv(
     "SIMULATE_WORKER_MAX_DELAY_MS",
     DEFAULT_SIMULATE_WORKER_MAX_DELAY_MS,
@@ -41,7 +41,7 @@ export function getSimulateWorkerMaxDelayMs(): number {
   );
 }
 
-export function getSimulateWorkerTurnPollMs(): number {
+function getSimulateWorkerTurnPollMs(): number {
   return numberEnv(
     "SIMULATE_WORKER_TURN_POLL_MS",
     DEFAULT_SIMULATE_WORKER_TURN_POLL_MS,
@@ -49,7 +49,7 @@ export function getSimulateWorkerTurnPollMs(): number {
   );
 }
 
-export function getSimulateWorkerTurnMaxWaitMs(): number {
+function getSimulateWorkerTurnMaxWaitMs(): number {
   return numberEnv(
     "SIMULATE_WORKER_TURN_MAX_WAIT_MS",
     DEFAULT_SIMULATE_WORKER_TURN_MAX_WAIT_MS,
@@ -57,7 +57,7 @@ export function getSimulateWorkerTurnMaxWaitMs(): number {
   );
 }
 
-export function getSimulateWorkerMinGapMs(): number {
+function getSimulateWorkerMinGapMs(): number {
   return numberEnv(
     "SIMULATE_WORKER_MIN_GAP_MS",
     DEFAULT_SIMULATE_WORKER_MIN_GAP_MS,
@@ -65,7 +65,7 @@ export function getSimulateWorkerMinGapMs(): number {
   );
 }
 
-export function getSimulateWorkerStaleAfterMs(): number {
+function getSimulateWorkerStaleAfterMs(): number {
   return numberEnv(
     "SIMULATE_WORKER_STALE_AFTER_MS",
     DEFAULT_SIMULATE_WORKER_STALE_AFTER_MS,
@@ -73,6 +73,14 @@ export function getSimulateWorkerStaleAfterMs(): number {
   );
 }
 
+/*
+ * Los lectores de configuración de arriba dejaron de ser públicos.
+ *
+ * Los siete se exportaban y ninguno se usaba fuera de este archivo. Un export
+ * es una promesa —«esto lo llama alguien más, cuidado al cambiarlo»— y siete
+ * promesas que nadie cobra hacen que el módulo parezca tener una superficie
+ * que no tiene.
+ */
 export function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -208,7 +216,7 @@ function getEmailWorkerMaxConcurrency(): number {
  * Count real-email cases in 'recibido' that were created before this one
  * and are still being processed. These are "blockers" — they hold a Gemini slot.
  */
-export async function getEarlierPendingEmailCount(input: {
+async function getEarlierPendingEmailCount(input: {
   tenantId: string;
   caseId: string;
   caseCreatedAt?: string | null;

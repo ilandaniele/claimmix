@@ -54,8 +54,11 @@ export function statusLabels(locale: Locale = "es-AR"): Record<CaseStatus, strin
   ) as Record<CaseStatus, string>;
 }
 
-export function claimTypeLabels(locale: Locale = "es-AR"): Record<ClaimType, string> {
-  return Object.fromEntries(
-    claimTypeOptions(locale).map((o) => [o.value, o.label])
-  ) as Record<ClaimType, string>;
-}
+/*
+ * Acá vivía `claimTypeLabels`, el gemelo de `statusLabels`.
+ *
+ * Lo escribí por simetría al armar este módulo y no lo llamó nunca nadie. Un
+ * export es una promesa —«esto lo usa alguien, cuidado al cambiarlo»— y una
+ * promesa que nadie cobra sólo hace parecer que el módulo tiene una superficie
+ * que no tiene. Si mañana hace falta, son cuatro líneas.
+ */

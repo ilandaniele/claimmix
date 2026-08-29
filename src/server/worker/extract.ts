@@ -1190,27 +1190,14 @@ export async function runEmailExtractionWorker(
       const errStatus = typeof cause?.status === "number" ? cause.status : null;
       const errCode = typeof cause?.code === "string" ? cause.code : null;
       try {
-        await enTenant(tenantCtx, (db) =>
-          db
-            .update(cases)
-            .set({ status: "escalado", updated_at: new Date().toISOString() })
-            .where(eq(cases.id, caseId))
+        await escalateCase(
+          caseId,
+          tenantCtx,
+          userId,
+          "provider_error",
+          errCode ?? "gemini_extraction_failed",
+          { error_status: errStatus, error_name: errName }
         );
-
-        await writeAuditLog({
-          tenant_id: tenantId,
-          actor_id: userId,
-          event_type: AuditEvent.AI_EXTRACTED,
-          target_type: "case",
-          target_id: caseId,
-          payload: {
-            new_status: "escalado",
-            reason: "provider_error",
-            error_code: errCode ?? "gemini_extraction_failed",
-            error_status: errStatus,
-            error_name: errName,
-          },
-        });
 
         await logAgentRunError({
           tenantId,
@@ -1439,12 +1426,26 @@ async function updateCaseStatus(
   }
 }
 
+/**
+ * Deja el caso en `escalado` y lo anota.
+ *
+ * @param extra lo que un camino concreto quiera sumarle al registro. Existe por
+ *   el fallo de proveedor, que guarda además el estado HTTP y el nombre del
+ *   error de Gemini: sin esto, ese camino escribía el estado y la auditoría a
+ *   mano, y era la SEGUNDA copia de esta función —la primera, en el bloque de
+ *   `parse_failed`, ya se había unificado—.
+ *
+ *   Que estuviera duplicada tenía un costo medible: dos tests que afirman que
+ *   el caso queda en `escalado` seguían en verde con esta función anulada,
+ *   porque el camino que ejercitan no la usaba.
+ */
 async function escalateCase(
   caseId: string,
   tenantCtx: TenantContext,
   userId: string | null,
   auditReason: string,
-  errorCode: string
+  errorCode: string,
+  extra: Record<string, unknown> = {}
 ): Promise<void> {
   await updateCaseStatus(caseId, tenantCtx, "escalado", null);
   await writeAuditLog({
@@ -1457,6 +1458,7 @@ async function escalateCase(
       new_status: "escalado",
       reason: auditReason,
       error_code: errorCode,
+      ...extra,
     },
   });
 }

@@ -23,8 +23,17 @@ const {
   mockFindCustomerMatches,
   mockFindPolicyMatches,
 } = vi.hoisted(() => {
+  /*
+   * El doble tiene que llevar `cause`, como la clase de verdad.
+   *
+   * Sin eso, el `error_status` y el `error_code` que el worker saca del `cause`
+   * salían siempre null, y el registro de un caso escalado por proveedor no
+   * decía si había sido un 429 de cupo o un 500. El doble aceptaba un mensaje y
+   * nada más, así que ese camino no se ejercitaba: la firma de la clase real es
+   * `(message, cause?)`.
+   */
   const GeminiErrClass = class GeminiExtractionError extends Error {
-    constructor(msg: string) {
+    constructor(msg: string, public readonly cause?: unknown) {
       super(msg);
       this.name = "GeminiExtractionError";
     }
@@ -237,7 +246,10 @@ describe("GEMINI-ERR: logAgentRunError is called when GeminiExtractionError is t
 
     // Simulate a Gemini 429 failure
     mockExtractEmailClaimGemini.mockRejectedValue(
-      new GeminiExtractionError("429 RESOURCE_EXHAUSTED: quota exceeded")
+      new GeminiExtractionError("429 RESOURCE_EXHAUSTED: quota exceeded", {
+        status: 429,
+        code: "RESOURCE_EXHAUSTED",
+      })
     );
   });
 
@@ -290,6 +302,31 @@ describe("GEMINI-ERR: logAgentRunError is called when GeminiExtractionError is t
 
     const escaladoUpdate = capturedCaseUpdates.find((u) => u.status === "escalado");
     expect(escaladoUpdate).toBeDefined();
+  });
+
+  /*
+   * Qué dijo el proveedor queda en el registro.
+   *
+   * Es lo único que distingue «Gemini devolvió 429 por cupo» de «Gemini devolvió
+   * 500», y es lo que se mira cuando aparecen veinte casos escalados de golpe.
+   * No lo afirmaba nadie: escribirlo o no escribirlo daba lo mismo para la
+   * suite, justo cuando este bloque se unificó con `escalateCase`.
+   */
+  it("el registro guarda el estado y el nombre del error del proveedor", async () => {
+    const { writeAuditLog } = await import("@/lib/audit/log");
+
+    await runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001");
+
+    const escalado = vi
+      .mocked(writeAuditLog)
+      .mock.calls.map((c) => c[0])
+      .find((e) => (e.payload as { new_status?: string })?.new_status === "escalado");
+
+    expect(escalado).toBeDefined();
+    const payload = escalado!.payload as Record<string, unknown>;
+    expect(payload.reason).toBe("provider_error");
+    expect(payload.error_status).toBe(429);
+    expect(payload.error_name).toBeDefined();
   });
 
   it("does not throw — worker is fire-and-forget", async () => {

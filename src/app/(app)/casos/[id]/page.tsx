@@ -35,6 +35,7 @@ import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
 import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
 import { FieldConfirmationsPanel } from "./_components/FieldConfirmationsPanel";
 import { AgentRunPanel } from "./_components/AgentRunPanel";
+import { PanelSection } from "./_components/PanelSection";
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
@@ -332,16 +333,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
         {/* Left column — 2/3 width */}
         <div className="lg:col-span-2 flex flex-col gap-6">
           {/* Datos del asegurado */}
-          <section
-            aria-labelledby="insured-data-heading"
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <h2
-              id="insured-data-heading"
-              className="text-sm font-semibold text-slate-900 mb-4"
-            >
-              {t("case.detail.insuredData")}
-            </h2>
+          <PanelSection id="insured-data" titulo={t("case.detail.insuredData")}>
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
               <div>
                 <dt className="text-slate-500">{t("case.detail.policyholderName")}</dt>
@@ -370,52 +362,25 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                 </dd>
               </div>
             </dl>
-          </section>
+          </PanelSection>
 
           {/* Campos extraídos */}
-          <section
-            aria-labelledby="extracted-fields-heading"
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <h2
-              id="extracted-fields-heading"
-              className="text-sm font-semibold text-slate-900 mb-4"
-            >
-              {t("case.detail.extractedFields")}
-            </h2>
+          <PanelSection id="extracted-fields" titulo={t("case.detail.extractedFields")}>
             <ExtractedFieldsTable fields={displayedExtractedFields} />
-          </section>
+          </PanelSection>
 
           {/* Análisis del agente — live preview (extracted JSON, trainability, download) */}
-          <section
-            aria-labelledby="agent-run-heading"
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <h2
-              id="agent-run-heading"
-              className="text-sm font-semibold text-slate-900 mb-4"
-            >
-              {t("case.detail.agentAnalysis")}
-            </h2>
+          <PanelSection id="agent-run" titulo={t("case.detail.agentAnalysis")}>
             <AgentRunPanel
               caseId={caseRow.id}
               canConfirmTraining={canConfirmTraining}
             />
-          </section>
+          </PanelSection>
 
           {/* Texto original — collapsible accordion */}
-          <section
-            aria-labelledby="raw-email-heading"
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <h2
-              id="raw-email-heading"
-              className="text-sm font-semibold text-slate-900 mb-4"
-            >
-              {t("case.detail.rawEmail")}
-            </h2>
+          <PanelSection id="raw-email" titulo={t("case.detail.rawEmail")}>
             <RawEmailAccordion tenantId={tenantId} caseId={caseRow.id} />
-          </section>
+          </PanelSection>
 
           {/* Messages thread — only shown for email channel cases (AC11, AC12).
               El marco y el titulo los pone el componente: solo el sabe si hay
@@ -426,16 +391,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
           {isEmailCase && (
             <>
               {/* Section A: Parsed email data */}
-              <section
-                aria-labelledby="parsed-email-heading"
-                className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-              >
-                <h2
-                  id="parsed-email-heading"
-                  className="text-sm font-semibold text-slate-900 mb-4"
-                >
-                  {t("case.detail.parsedEmail")}
-                </h2>
+              <PanelSection id="parsed-email" titulo={t("case.detail.parsedEmail")}>
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
                   <div>
                     <dt className="text-slate-500">{t("case.detail.isClaim")}</dt>
@@ -495,33 +451,22 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                     </div>
                   )}
                 </dl>
-              </section>
+              </PanelSection>
 
               {/* Análisis de fraude — solo cuando hay indicadores */}
               {caseRow.fraud_risk_level && caseRow.fraud_risk_level !== "none" && (
-                <section
-                  aria-labelledby="fraud-analysis-heading"
-                  className={`rounded-xl border p-5 shadow-sm ${
+                <PanelSection
+                  id="fraud-analysis"
+                  tono={
                     caseRow.fraud_risk_level === "high"
-                      ? "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30"
+                      ? "peligro"
                       : caseRow.fraud_risk_level === "medium"
-                      ? "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30"
-                      : "border-yellow-100 bg-yellow-50 dark:border-yellow-900 dark:bg-yellow-950/20"
-                  }`}
+                        ? "precaucion"
+                        : "atencion"
+                  }
+                  titulo="Alertas de fraude"
+                  accesorio={<FraudRiskBadge level={caseRow.fraud_risk_level} />}
                 >
-                  <div className="flex items-center gap-3 mb-3">
-                    <h2
-                      id="fraud-analysis-heading"
-                      className={`text-sm font-semibold ${
-                        caseRow.fraud_risk_level === "high"
-                          ? "text-red-900 dark:text-red-100"
-                          : "text-amber-900 dark:text-amber-100"
-                      }`}
-                    >
-                      Alertas de fraude
-                    </h2>
-                    <FraudRiskBadge level={caseRow.fraud_risk_level} />
-                  </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
                     Análisis automático — solo orientativo. La decisión final la toma el ajustador.
                   </p>
@@ -545,57 +490,34 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                   ) : (
                     <p className="text-sm text-slate-500">Sin detalles adicionales.</p>
                   )}
-                </section>
+                </PanelSection>
               )}
 
               {/* Section B: Field confirmations panel (AC21) */}
-              <section
-                aria-labelledby="field-confirmations-heading"
-                className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-              >
-                <h2
-                  id="field-confirmations-heading"
-                  className="text-sm font-semibold text-slate-900 mb-4"
-                >
+              <PanelSection id="field-confirmations" titulo={
+                <>
                   {t("case.detail.fieldConfirmations")}
                   {confirmations.filter((c) => c.status === "pending").length > 0 && (
                     <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
                       {confirmations.filter((c) => c.status === "pending").length} {t("case.detail.pendingCount")}
                     </span>
                   )}
-                </h2>
+                </>
+              }>
                 <FieldConfirmationsPanel
                   caseId={caseRow.id}
                   initialConfirmations={confirmations}
                 />
-              </section>
+              </PanelSection>
 
               {/* Section C: Attachments panel (AC23) */}
-              <section
-                aria-labelledby="attachments-heading"
-                className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-              >
-                <h2
-                  id="attachments-heading"
-                  className="text-sm font-semibold text-slate-900 mb-4"
-                >
-                  {t("case.detail.attachments")}
-                </h2>
+              <PanelSection id="attachments" titulo={t("case.detail.attachments")}>
                 <AttachmentsPanel attachments={attachments} />
-              </section>
+              </PanelSection>
 
               {/* Section D: Core sync action (AC17) */}
               {caseRow.status === "listo_para_core" && (
-                <section
-                  aria-labelledby="core-sync-heading"
-                  className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm"
-                >
-                  <h2
-                    id="core-sync-heading"
-                    className="text-sm font-semibold text-emerald-900 mb-4"
-                  >
-                    {t("case.detail.coreSyncAction")}
-                  </h2>
+                <PanelSection id="core-sync" tono="exito" titulo={t("case.detail.coreSyncAction")}>
                   <p className="text-sm text-emerald-700 mb-4">
                     {t("case.detail.coreReadyDescription")}
                   </p>
@@ -603,7 +525,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                     caseId={caseRow.id}
                     currentStatus={caseRow.status}
                   />
-                </section>
+                </PanelSection>
               )}
             </>
           )}
@@ -612,32 +534,14 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
         {/* Right column — 1/3 width */}
         <div className="flex flex-col gap-6">
           {/* Documentación faltante */}
-          <section
-            aria-labelledby="missing-docs-heading"
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <h2
-              id="missing-docs-heading"
-              className="text-sm font-semibold text-slate-900 mb-4"
-            >
-              {t("case.detail.missingDocs")}
-            </h2>
+          <PanelSection id="missing-docs" titulo={t("case.detail.missingDocs")}>
             <MissingDocsList docs={missing_docs} />
-          </section>
+          </PanelSection>
 
           {/* Historial */}
-          <section
-            aria-labelledby="audit-log-heading"
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <h2
-              id="audit-log-heading"
-              className="text-sm font-semibold text-slate-900 mb-4"
-            >
-              {t("case.detail.auditLog")}
-            </h2>
+          <PanelSection id="audit-log" titulo={t("case.detail.auditLog")}>
             <AuditTimeline events={audit_log} />
-          </section>
+          </PanelSection>
         </div>
       </div>
     </div>

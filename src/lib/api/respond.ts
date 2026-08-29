@@ -50,7 +50,15 @@ export function noContent(): NextResponse {
  */
 export function err(
   error: AppError | ErrorCode | unknown,
-  details?: unknown
+  details?: unknown,
+  /**
+   * Encabezados extra. Existe por `Retry-After`.
+   *
+   * Sin esto, toda ruta que quisiera decirle a quien llama cuántos segundos
+   * esperar tenía que armar el `Response` a mano —código, mensaje y forma del
+   * cuerpo copiados— y ahí es donde se desincronizan del resto.
+   */
+  headers?: Record<string, string>
 ): NextResponse {
   if (error instanceof AppError) {
     return NextResponse.json(
@@ -61,7 +69,7 @@ export function err(
           ...(error.details !== undefined ? { details: error.details } : {}),
         },
       },
-      { status: error.status }
+      { status: error.status, ...(headers ? { headers } : {}) }
     );
   }
 

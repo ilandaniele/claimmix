@@ -162,12 +162,23 @@ function setupDbMocks() {
     }),
   });
 
-  // db.insert() chain for cases returns new case id
+  // db.insert() chain for cases returns new case id.
+  // `valoresInsertados` guarda todo lo que se escribe, para poder mirar la fila
+  // de raw_messages —de ahí sale el remitente que después viaja hasta el `to:`.
+  valoresInsertados.length = 0;
   mockDbInsert.mockReturnValue({
-    values: vi.fn().mockReturnValue({
-      returning: vi.fn().mockResolvedValue([{ id: "case-uuid-001" }]),
+    values: vi.fn().mockImplementation((v: unknown) => {
+      valoresInsertados.push(v as Record<string, unknown>);
+      return { returning: vi.fn().mockResolvedValue([{ id: "case-uuid-001" }]) };
     }),
   });
+}
+
+const valoresInsertados: Array<Record<string, unknown>> = [];
+
+/** La fila de raw_messages que escribió el simulador. */
+function mensajeCrudoInsertado(): Record<string, unknown> | undefined {
+  return valoresInsertados.find((v) => v && "from_addr" in v);
 }
 
 function setupAuthMocks() {
@@ -312,17 +323,109 @@ describe("POST /api/intake/simulate", () => {
 
   // ── LLM10: Budget guard (fail-closed: 429) ──────────────────────────────────
 
-  it("returns 429 when monthly budget exceeded (LLM10: fail-closed)", async () => {
-    mockCheckBudget.mockResolvedValue({
-      exceeded: true,
-      reason: "Presupuesto mensual de IA agotado ($200.00 / $200).",
-    });
-    const req = makeRequest({ scenario_id: "choque-01" });
-    const res = await POST(req);
+  /*
+   * El mensaje decía «para este mes» pase lo que pase.
+   *
+   * `checkBudget` mira tres topes y sólo UNO es mensual; los otros dos son
+   * diarios, por inquilino y por usuario. O sea que dos de cada tres veces le
+   * decía a alguien que esperara al mes siguiente cuando al día siguiente podía
+   * seguir. Este test afirmaba ese texto fijo, así que la mentira estaba
+   * custodiada.
+   */
+  it.each([
+    ["mensual", "Presupuesto mensual de IA agotado ($200.00 / $200)."],
+    ["diario por inquilino", "Presupuesto diario de tokens agotado para el tenant (100.000 / 100.000)."],
+    ["diario por usuario", "Presupuesto diario de tokens agotado para el usuario (20.000 / 20.000)."],
+  ])("429 con el motivo real cuando se agota el cupo %s", async (_c, reason) => {
+    setupAuthMocks();
+    mockCheckBudget.mockResolvedValue({ exceeded: true, reason });
+
+    const res = await POST(makeRequest({ scenario_id: "choque-01" }));
+
     expect(res.status).toBe(429);
     const body = await res.json();
     expect(body.error.code).toBe("AI_BUDGET_EXCEEDED");
-    expect(body.error.message).toBe("Presupuesto de IA agotado para este mes.");
+    // El mensaje dice cuál se agotó, no una suposición.
+    expect(body.error.message).toBe(reason);
+    expect(body.error.details.reason).toBe(reason);
+  });
+
+  it("un cupo diario no le dice a nadie que espere al mes que viene", async () => {
+    setupAuthMocks();
+    mockCheckBudget.mockResolvedValue({
+      exceeded: true,
+      reason: "Presupuesto diario de tokens agotado para el usuario (20.000 / 20.000).",
+    });
+
+    const res = await POST(makeRequest({ scenario_id: "choque-01" }));
+    const body = await res.json();
+
+    expect(body.error.message).not.toMatch(/mes/i);
+    expect(body.error.message).toMatch(/diario/i);
+  });
+
+  /*
+   * El remitente de un ensayo es lo único que impide que le llegue un mail a
+   * una persona, y funcionaba por casualidad.
+   *
+   * El envío se corta en `dispatch.ts`, que mira `isReservedTestAddress(to)` —la
+   * DIRECCIÓN, no el canal—. Ese `to` sale del `from_addr` que guarda el
+   * simulador: raw_messages → `senderEmail` en el worker → `to:` en el
+   * orquestador.
+   *
+   * En modo escenario había nombre y salía `nombre@example.com`, que la guarda
+   * reconoce. En modo texto libre no había nombre y quedaba `null`, que termina
+   * como `to: ""` — e `isReservedTestAddress("")` devuelve FALSE. No lo frenaba
+   * la guarda: lo frenaba que Gmail no puede mandar a una dirección vacía.
+   *
+   * Y ojo con «pero el canal es email_sim»: `dispatch.ts` no mira el canal, y
+   * `messengerFor` devuelve el mensajero simulado sólo para `whatsapp_sim`.
+   */
+  describe("el remitente que guarda un ensayo", () => {
+    it("con escenario, es una dirección reservada", async () => {
+      await POST(makeRequest({ scenario_id: "choque-01" }));
+
+      const crudo = mensajeCrudoInsertado();
+      expect(crudo).toBeDefined();
+      expect(String(crudo!.from_addr)).toMatch(/@example\.com$/);
+    });
+
+    it("con texto libre TAMBIÉN, y antes quedaba nulo", async () => {
+      await POST(
+        makeRequest({ raw_text: "Buenas, choqué ayer en Corrientes y Callao.", case_type: "choque" })
+      );
+
+      const crudo = mensajeCrudoInsertado();
+      expect(crudo).toBeDefined();
+      // Lo que importa: no es nulo, y la guarda de envío lo va a reconocer.
+      expect(crudo!.from_addr).not.toBeNull();
+      expect(String(crudo!.from_addr)).toMatch(/@example\.com$/);
+    });
+
+    it("la dirección que guarda la reconoce la guarda de envío", async () => {
+      // La afirmación de arriba mira una expresión regular escrita en el test.
+      // Ésta la pasa por la función que de verdad decide, que es la que corre
+      // en producción.
+      const { isReservedTestAddress } = await import("@/lib/email/reserved");
+
+      await POST(makeRequest({ raw_text: "Choque en Corrientes y Callao.", case_type: "choque" }));
+
+      const crudo = mensajeCrudoInsertado();
+      expect(isReservedTestAddress(String(crudo!.from_addr))).toBe(true);
+    });
+
+    it("un nombre con acentos o símbolos no rompe la dirección", async () => {
+      // Un `from_addr` inválido vuelve al problema anterior: la guarda no lo
+      // reconoce y lo que frena el envío es el error del proveedor.
+      const { isReservedTestAddress } = await import("@/lib/email/reserved");
+
+      await POST(
+        makeRequest({ raw_text: "Soy María José O'Higgins-Ñandú y choqué.", case_type: "choque" })
+      );
+
+      const crudo = mensajeCrudoInsertado();
+      expect(isReservedTestAddress(String(crudo!.from_addr))).toBe(true);
+    });
   });
 
   // ── Rate limit ────────────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ import { getScenarioById } from "@/server/intake/scenarios";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
+import { remitenteDeEnsayo } from "@/server/intake/remitente-de-ensayo";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -36,7 +37,6 @@ import {
   getClientIp,
 } from "@/lib/rate-limit/index";
 import type { ClaimType } from "@/lib/schemas/cases";
-import { waitForSimulationTurn } from "@/server/intake/simulation-throttle";
 import { enTenant } from "@/data/scope";
 import { start } from "workflow/api";
 import { procesarCasoSimulado } from "@/workflows/intake-simulado";
@@ -81,21 +81,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   const rlResult = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.INTAKE_SIMULATE);
 
   if (!rlResult.allowed) {
-    return new Response(
-      JSON.stringify({
-        error: {
-          code: "RATE_LIMITED",
-          message: "Demasiadas solicitudes. Esperá un momento.",
-        },
-      }),
-      {
-        status: 429,
-        headers: {
-          "Content-Type": "application/json",
-          "Retry-After": String(rlResult.retryAfterSeconds),
-        },
-      }
-    );
+    // El `Retry-After` es la razón por la que esto se armaba a mano: `err()`
+    // no sabía poner encabezados. Ahora sí, y el cuerpo lo arma el mismo lugar
+    // que el del resto del producto.
+    return err(new AppError("RATE_LIMITED"), undefined, {
+      "Retry-After": String(rlResult.retryAfterSeconds),
+    });
   }
 
   // ── 3. Validate body ─────────────────────────────────────────────────────────
@@ -157,15 +148,21 @@ export async function POST(request: NextRequest): Promise<Response> {
       ip,
       ua: request.headers.get("user-agent") ?? undefined,
     });
-    return new Response(
-      JSON.stringify({
-        error: {
-          code: "AI_BUDGET_EXCEEDED",
-          message: "Presupuesto de IA agotado para este mes.",
-          details: { reason: budgetResult.reason },
-        },
-      }),
-      { status: 429, headers: { "Content-Type": "application/json" } }
+    /*
+     * El mensaje sale del motivo, y no de una suposición.
+     *
+     * Decía «Presupuesto de IA agotado para este mes» pase lo que pase, pero de
+     * los tres topes que mira `checkBudget` sólo uno es mensual: los otros dos
+     * son diarios, por inquilino y por usuario. O sea que dos de cada tres
+     * veces le decía a alguien que esperara al mes siguiente cuando en realidad
+     * al día siguiente podía seguir.
+     *
+     * `reason` ya viene armado con cuál se agotó y cuánto: se usa ése.
+     */
+    return err(
+      new AppError("AI_BUDGET_EXCEEDED", budgetResult.reason, {
+        reason: budgetResult.reason,
+      })
     );
   }
 
@@ -217,9 +214,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         case_id: caseId,
         tenant_id: userRow.tenant_id,
         channel: "email_sim",
-        from_addr: policyholderName
-          ? `${policyholderName.toLowerCase().replace(/\s+/g, ".")}@example.com`
-          : null,
+        from_addr: remitenteDeEnsayo(policyholderName),
         subject: `[email_sim] Siniestro - ${claimType} - ${input.scenario_id ?? "custom"}`,
         body: rawText,
       })

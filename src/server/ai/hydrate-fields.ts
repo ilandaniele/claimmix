@@ -15,25 +15,20 @@
  */
 
 import "server-only";
+import { CLAIM_FIELD_KEYS } from "@/lib/schemas/extracted-claim";
 import type { ExtractedClaim, ExtractedField, ClaimFields } from "@/lib/schemas/extracted-claim";
 
 /**
- * The set of ClaimFields keys that hydration mirrors into fields[].
- * Must stay in sync with ClaimFieldsSchema.
+ * Las claves que la hidratación espeja hacia `fields[]`.
+ *
+ * Salen del esquema. Antes era una lista escrita a mano acá con el comentario
+ * «must stay in sync with ClaimFieldsSchema», que es el comentario que se pone
+ * cuando algo no puede estar sincronizado solo — y no lo estaba: el worker
+ * tenía una tercera copia en forma de escalera de `if`.
  */
-const HYDRATED_KEYS = [
-  "full_name",
-  "email",
-  "phone",
-  "dni",
-  "policy_number",
-  "accident_date",
-  "accident_location",
-  "accident_description",
-  "claim_type",
-] as const;
+const HYDRATED_KEYS = CLAIM_FIELD_KEYS;
 
-type HydratedKey = (typeof HYDRATED_KEYS)[number];
+type HydratedKey = keyof ClaimFields;
 
 /**
  * Ensure every populated key in extracted_fields also appears in fields[].

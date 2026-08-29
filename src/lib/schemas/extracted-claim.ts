@@ -61,6 +61,22 @@ export const ClaimFieldsSchema = z.object({
 export type ClaimFields = z.infer<typeof ClaimFieldsSchema>;
 
 /**
+ * Las nueve claves, derivadas del esquema y no escritas a mano.
+ *
+ * Estaban copiadas en dos lugares más: `HYDRATED_KEYS` en
+ * `server/ai/hydrate-fields.ts` y una escalera de nueve `if` en el worker, para
+ * armar lo que se le pasa al buscador de clientes. Agregar un campo al esquema
+ * obligaba a acordarse de los tres; el que quedara sin tocar simplemente no
+ * veía el campo nuevo, sin ningún error.
+ *
+ * `z.object` conserva el orden de declaración, así que esto también fija el
+ * orden, que es el del esquema.
+ */
+export const CLAIM_FIELD_KEYS = Object.keys(ClaimFieldsSchema.shape) as Array<
+  keyof ClaimFields
+>;
+
+/**
  * A possible customer match returned by the AI extractor.
  * The actual match is confirmed server-side by the customer-matcher module.
  * This is an advisory hint, not authoritative.

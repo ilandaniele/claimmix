@@ -125,6 +125,8 @@ export interface OpcionesDelExtractor {
     confidence: number;
     source: string;
   }>;
+  /** El objeto tipado que el modelo devuelve además de `fields[]`. */
+  extracted_fields?: Record<string, string>;
   missing_fields?: string[];
   fields_pending_confirmation?: string[];
   severity?: string;
@@ -194,8 +196,11 @@ export function registrarMocks(opciones: {
     recordUsage: vi.fn().mockResolvedValue(undefined),
   }));
 
+  // Se devuelve el espía para poder mirar con qué datos se buscó al cliente:
+  // es la salida observable del solapamiento de `extracted_fields`.
+  const espiaDeBusqueda = vi.fn().mockResolvedValue([]);
   vi.doMock("@/server/matching/customer-matcher", () => ({
-    findCustomerMatches: vi.fn().mockResolvedValue([]),
+    findCustomerMatches: espiaDeBusqueda,
   }));
 
   vi.doMock("@/server/matching/policy-matcher", () => ({
@@ -228,7 +233,10 @@ export function registrarMocks(opciones: {
       cost_usd: 0,
       is_claim: true,
       confidence: 0.92,
-      extracted_fields: { full_name: "Juan Pérez", claim_type: "choque" },
+      extracted_fields: extractor.extracted_fields ?? {
+        full_name: "Juan Pérez",
+        claim_type: "choque",
+      },
       field_confidences: { claim_type: 0.88 },
       missing_fields: extractor.missing_fields ?? [],
       fields_pending_confirmation: extractor.fields_pending_confirmation ?? [],
@@ -242,7 +250,7 @@ export function registrarMocks(opciones: {
     }),
   }));
 
-  return { mockDb, espiaDeAuditoria };
+  return { mockDb, espiaDeAuditoria, espiaDeBusqueda };
 }
 
 /** El `status` que quedó escrito en el caso, de todo lo que se haya escrito. */

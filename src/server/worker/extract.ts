@@ -60,6 +60,7 @@ import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/core/case/fsm";
 import { estadoTrasExtraer } from "@/core/case/status-after-extraction";
+import { CLAIM_FIELD_KEYS } from "@/lib/schemas/extracted-claim";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
@@ -925,15 +926,20 @@ export async function runEmailExtractionWorker(
     );
     if (extractedClaim.extracted_fields) {
       const ef = extractedClaim.extracted_fields;
-      if (ef.full_name)            extractedClaimFields.full_name = ef.full_name;
-      if (ef.email)                extractedClaimFields.email = ef.email;
-      if (ef.phone)                extractedClaimFields.phone = ef.phone;
-      if (ef.dni)                  extractedClaimFields.dni = ef.dni;
-      if (ef.policy_number)        extractedClaimFields.policy_number = ef.policy_number;
-      if (ef.accident_date)        extractedClaimFields.accident_date = ef.accident_date;
-      if (ef.accident_location)    extractedClaimFields.accident_location = ef.accident_location;
-      if (ef.accident_description) extractedClaimFields.accident_description = ef.accident_description;
-      if (ef.claim_type)           extractedClaimFields.claim_type = ef.claim_type;
+      /*
+       * El `if` NO es de estilo: sólo pisa si el modelo trajo algo.
+       *
+       * A esta altura `fields[]` ya tiene lo que salió de la hidratación y del
+       * parser de respaldo. Un `""` del modelo —que los manda— borraría un
+       * valor que sí encontramos en el texto, y el buscador de clientes se
+       * quedaría sin la clave por la que iba a encontrar a la persona.
+       *
+       * Un `Object.assign` o un spread liso harían eso.
+       */
+      for (const clave of CLAIM_FIELD_KEYS) {
+        const valor = ef[clave];
+        if (valor) extractedClaimFields[clave] = valor;
+      }
     }
     const customerMatches = await findCustomerMatches(
       tenantId,

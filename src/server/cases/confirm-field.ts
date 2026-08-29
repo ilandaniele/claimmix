@@ -69,12 +69,21 @@ function dbErrCode(e: unknown): string {
  *   Nunca 403: un 403 confirmaría que el caso existe, y eso solo ya permite
  *   enumerar los casos de la competencia.
  * @throws AppError('INTERNAL_ERROR') si falla la lectura de confirmaciones.
+ *
+ * @param ip de quien resolvió, para el registro de auditoría. Es dato personal
+ *   de un empleado de la aseguradora, y va porque el resto de las acciones
+ *   sobre un caso ya lo guardan —`patchCase` lo hace— y un registro donde la
+ *   mitad de las acciones tiene origen y la otra mitad no sirve poco para lo
+ *   que existe: reconstruir quién tocó qué. `null` cuando no se pudo determinar.
+ * @param ua el navegador, por lo mismo.
  */
 export async function resolveFieldConfirmation(
   ctx: TenantContext,
   caseId: string,
   input: ConfirmField,
-  actorId: string
+  actorId: string,
+  ip: string | null = null,
+  ua: string | null = null
 ): Promise<FieldConfirmationResult> {
   const { field_key: fieldKey, value: confirmedValue, action } = input;
 
@@ -170,7 +179,9 @@ export async function resolveFieldConfirmation(
   const now = new Date().toISOString();
 
   if (action === "reject") {
-    return rechazar({ ctx, caseId, fieldKey, confirmationRow, actorId, now, tenantId, currentStatus });
+    return rechazar({
+      ctx, caseId, fieldKey, confirmationRow, actorId, now, tenantId, currentStatus, ip, ua,
+    });
   }
 
   return confirmar({
@@ -185,6 +196,8 @@ export async function resolveFieldConfirmation(
     now,
     tenantId,
     currentStatus,
+    ip,
+    ua,
   });
 }
 
@@ -197,6 +210,8 @@ interface ContextoAccion {
   now: string;
   tenantId: string;
   currentStatus: CaseStatus;
+  ip: string | null;
+  ua: string | null;
 }
 
 /**
@@ -211,7 +226,7 @@ interface ContextoAccion {
 async function confirmar(
   a: ContextoAccion & { confirmedValue: string; action: "confirm" | "correct" }
 ): Promise<FieldConfirmationResult> {
-  const { ctx, caseId, fieldKey, confirmedValue, action, confirmationRow, actorId, now, tenantId, currentStatus } = a;
+  const { ctx, caseId, fieldKey, confirmedValue, action, confirmationRow, actorId, now, tenantId, currentStatus, ip, ua } = a;
 
   if (confirmationRow) {
     try {
@@ -305,9 +320,11 @@ async function confirmar(
       new_value: confirmedValue,
       memory_updated: String(memoryUpdated),
     }),
+    ip,
+    ua,
   });
 
-  const newStatus = await reEvaluateStatus(ctx, caseId, currentStatus, actorId);
+  const newStatus = await reEvaluateStatus(ctx, caseId, currentStatus, actorId, ip, ua);
 
   return {
     case_id: caseId,
@@ -325,7 +342,7 @@ async function confirmar(
  * agrega información, así que no puede completar nada.
  */
 async function rechazar(a: ContextoAccion): Promise<FieldConfirmationResult> {
-  const { ctx, caseId, fieldKey, confirmationRow, actorId, now, tenantId, currentStatus } = a;
+  const { ctx, caseId, fieldKey, confirmationRow, actorId, now, tenantId, currentStatus, ip, ua } = a;
 
   if (confirmationRow) {
     try {
@@ -352,6 +369,8 @@ async function rechazar(a: ContextoAccion): Promise<FieldConfirmationResult> {
       action: "rejected",
       proposed_value: confirmationRow?.proposed_value ?? "",
     }),
+    ip,
+    ua,
   });
 
   return {
@@ -404,7 +423,9 @@ async function reEvaluateStatus(
   ctx: TenantContext,
   caseId: string,
   currentStatus: CaseStatus,
-  actorId: string
+  actorId: string,
+  ip: string | null,
+  ua: string | null
 ): Promise<string> {
   try {
     const fields = await enTenant(ctx, (db) =>
@@ -453,6 +474,8 @@ async function reEvaluateStatus(
       target_type: "case",
       target_id: caseId,
       payload: { from: currentStatus, to: newStatus, trigger: "field_confirmation" },
+      ip,
+      ua,
     });
 
     return newStatus;

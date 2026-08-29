@@ -53,8 +53,12 @@ export default function PrivacyPage() {
                 contraseña de Google.
               </li>
               <li>
-                <strong>Datos de uso:</strong> registros de auditoría internos (acciones realizadas,
-                marca de tiempo, ID de usuario) para trazabilidad operativa.
+                <strong>Datos de uso:</strong> registros de auditoría internos (acciones
+                realizadas, marca de tiempo, ID del usuario de la aseguradora que
+                las realizó, y la dirección IP y el navegador desde los que se
+                hicieron) para trazabilidad operativa. Estos registros son sobre
+                los usuarios del sistema —el personal de la aseguradora—, no
+                sobre las personas que reportan un siniestro.
               </li>
             </ul>
           </section>

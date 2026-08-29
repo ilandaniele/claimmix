@@ -20,7 +20,12 @@ import { z } from "zod";
 import { ok, err } from "@/lib/api/respond";
 import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { AppError } from "@/lib/errors";
-import { rateLimit, RATE_LIMIT_CONFIGS, buildUserKey } from "@/lib/rate-limit/index";
+import {
+  rateLimit,
+  RATE_LIMIT_CONFIGS,
+  buildUserKey,
+  getClientIp,
+} from "@/lib/rate-limit/index";
 import { ConfirmFieldSchema } from "@/lib/schemas/cases";
 import { resolveFieldConfirmation } from "@/server/cases/confirm-field";
 
@@ -47,6 +52,7 @@ export async function PATCH(
   }
 
   // ── 2. Límite de tráfico ──────────────────────────────────────────────────
+  const ip = getClientIp(request);
   const rl = await rateLimit(
     buildUserKey(userRow.id, "confirm-field"),
     RATE_LIMIT_CONFIGS.CONFIRM_FIELD
@@ -91,7 +97,13 @@ export async function PATCH(
         { tenantId: userRow.tenant_id },
         parsedParams.data.id,
         parsed.data,
-        userRow.id
+        userRow.id,
+        // De dónde vino la acción, igual que en el PATCH del caso. Es dato
+        // personal de un empleado y va al registro a propósito: un historial
+        // donde la mitad de las acciones tiene origen y la otra mitad no, no
+        // sirve para lo que existe.
+        ip,
+        request.headers.get("user-agent")
       )
     );
   } catch (error) {

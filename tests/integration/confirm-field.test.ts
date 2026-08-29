@@ -667,3 +667,110 @@ describe("PATCH /api/cases/:id/confirm-field — el recálculo de estado falla",
     expect(db.insert).toHaveBeenCalled();
   });
 });
+
+/**
+ * De dónde vino la acción queda en el registro.
+ *
+ * Hasta acá `FIELD_CONFIRMED` y `CASE_STATUS_CHANGED` guardaban `ip: null` y
+ * `ua: null`, mientras el PATCH del caso —al lado, sobre el mismo caso— sí los
+ * guardaba. Un historial donde la mitad de las acciones tiene origen y la otra
+ * mitad no sirve poco para lo único que existe: reconstruir quién tocó qué.
+ *
+ * Es dato personal de un empleado de la aseguradora y se guarda a propósito. La
+ * política de privacidad ahora lo declara.
+ */
+describe("PATCH /api/cases/:id/confirm-field — de dónde vino la acción", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.update).mockReset();
+    vi.mocked(db.insert).mockReset();
+    vi.mocked(updateMemoryFromConfirmation).mockResolvedValue(undefined);
+    vi.mocked(writeAuditLog).mockResolvedValue(undefined);
+    vi.mocked(rateLimit).mockResolvedValue({
+      allowed: true,
+      remaining: 29,
+      resetAt: 0,
+      retryAfterSeconds: 0,
+    } as never);
+  });
+
+  function pedirCon(headers: Record<string, string>, body: unknown) {
+    return new Request(`http://localhost/api/cases/${CASE_ID}/confirm-field`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    }) as never;
+  }
+
+  it("confirmar deja la IP y el navegador en la auditoría", async () => {
+    setupAuth();
+    setupDbForConfirm();
+
+    await PATCH(
+      pedirCon(
+        { "x-forwarded-for": "203.0.113.7", "user-agent": "Firefox/141.0" },
+        { field_key: "full_name", value: "Juan Pérez", action: "confirm" }
+      ),
+      makeContext()
+    );
+
+    const entrada = vi.mocked(writeAuditLog).mock.calls[0][0];
+    expect(entrada.ip).toBe("203.0.113.7");
+    expect(entrada.ua).toBe("Firefox/141.0");
+  });
+
+  it("rechazar también", async () => {
+    // La otra rama: es la que no escribe en ninguna otra tabla, así que si el
+    // dato no llega hasta acá el registro queda a medias justo donde más
+    // importa —una confirmación rechazada no deja otro rastro—.
+    setupAuth();
+    setupDbForReject();
+
+    await PATCH(
+      pedirCon(
+        { "x-forwarded-for": "203.0.113.9", "user-agent": "Safari/18" },
+        { field_key: "full_name", value: null, action: "reject" }
+      ),
+      makeContext()
+    );
+
+    const entrada = vi.mocked(writeAuditLog).mock.calls[0][0];
+    expect(entrada.ip).toBe("203.0.113.9");
+    expect(entrada.ua).toBe("Safari/18");
+  });
+
+  it("el cambio de estado que dispara la confirmación lo guarda igual", async () => {
+    setupAuth();
+    setupDbForConfirm();
+
+    await PATCH(
+      pedirCon(
+        { "x-forwarded-for": "203.0.113.11", "user-agent": "Chrome/140" },
+        { field_key: "full_name", value: "Juan Pérez", action: "confirm" }
+      ),
+      makeContext()
+    );
+
+    const cambioDeEstado = vi
+      .mocked(writeAuditLog)
+      .mock.calls.map((c) => c[0])
+      .find((e) => e.event_type === "case.status_changed");
+    expect(cambioDeEstado).toBeDefined();
+    expect(cambioDeEstado!.ip).toBe("203.0.113.11");
+  });
+
+  it("sin cabecera de origen queda null, no una cadena vacía", async () => {
+    // `null` dice «no se pudo determinar»; `""` parece un valor.
+    setupAuth();
+    setupDbForConfirm();
+
+    await PATCH(
+      pedirCon({}, { field_key: "full_name", value: "Juan Pérez", action: "confirm" }),
+      makeContext()
+    );
+
+    const entrada = vi.mocked(writeAuditLog).mock.calls[0][0];
+    expect(entrada.ua).toBeNull();
+  });
+});

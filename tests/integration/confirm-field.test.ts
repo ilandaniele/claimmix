@@ -89,6 +89,7 @@ vi.mock("@/lib/rate-limit/index", async () => {
 
 import { db } from "@/lib/db";
 import { requireRole } from "@/lib/auth/require-role";
+import { rateLimit } from "@/lib/rate-limit/index";
 import { updateMemoryFromConfirmation } from "@/server/memory/update";
 import { writeAuditLog } from "@/lib/audit/log";
 import { PATCH } from "@/app/api/cases/[id]/confirm-field/route";
@@ -426,5 +427,166 @@ describe("PATCH /api/cases/:id/confirm-field", () => {
     const body = await response.json();
     expect(response.status).toBe(200);
     expect(body.field_key).toBe("policy_number");
+  });
+});
+
+/**
+ * Confirmar un campo sin valor: escribía y después contestaba que había fallado.
+ *
+ * `value` es `string | null` en el esquema, `suggested_value` es nulable, y la
+ * pantalla manda `proposed_value` tal cual —lo muestra como «—» cuando es nulo
+ * y ofrecía igual el botón de confirmar—. El camino era: se marcaba la fila
+ * como `confirmed`, después el `if` que escribe en `extracted_fields` daba
+ * falso, y como el `return ok(...)` vive adentro de ese `if`, la petición se
+ * caía hasta el `return err(...)` del final.
+ *
+ * El analista veía «Error al procesar la confirmación. Intentá de nuevo»,
+ * reintentaba, y la segunda vez la fila ya no estaba pendiente — con el
+ * registro ya confirmado del otro lado.
+ *
+ * Por eso estos tests afirman DOS cosas y no una: el código de estado Y que no
+ * se haya escrito nada. Un test que sólo mirara el 400 pasaba también antes del
+ * arreglo, que es justamente cuando el bug existía.
+ */
+describe("PATCH /api/cases/:id/confirm-field — sin valor que confirmar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.update).mockReset();
+    vi.mocked(db.insert).mockReset();
+    vi.mocked(updateMemoryFromConfirmation).mockResolvedValue(undefined);
+    vi.mocked(writeAuditLog).mockResolvedValue(undefined);
+  });
+
+  it.each(["confirm", "correct"] as const)(
+    "%s con value null devuelve 400 y no escribe nada",
+    async (action) => {
+      setupAuth();
+      setupDbForConfirm({ confirmationRow: { id: "conf-1", proposed_value: null, conflict_with_value: null, status: "pending" } });
+
+      const response = await PATCH(
+        makeRequest({ field_key: "full_name", value: null, action }),
+        makeContext()
+      );
+
+      /*
+       * Primero lo que importa, y no es el código de estado.
+       *
+       * Antes del arreglo esto YA devolvía 400 —se caía hasta el `return err`
+       * del final—, así que un test que sólo mirara el status pasaba en verde
+       * justo mientras el bug existía. Lo que distingue el antes del después es
+       * que la fila quede sin tocar.
+       */
+      expect(db.update).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+      expect(writeAuditLog).not.toHaveBeenCalled();
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe("VALIDATION_FAILED");
+      // El mensaje decía «Acción no reconocida» sobre una acción que había
+      // reconocido perfectamente. Ahora dice qué hacer.
+      expect(body.error.message).toMatch(/rechaz/i);
+    }
+  );
+
+  it("rechazar sí funciona sin valor, que es la salida para un campo vacío", async () => {
+    setupAuth();
+    setupDbForReject({ confirmationRow: { id: "conf-1", proposed_value: null, conflict_with_value: null, status: "pending" } });
+
+    const response = await PATCH(
+      makeRequest({ field_key: "full_name", value: null, action: "reject" }),
+      makeContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.update).toHaveBeenCalled();
+  });
+
+  it("confirmar CON valor sigue escribiendo, que es la otra mitad", async () => {
+    // Una guarda que corta todo también pasaría los tests de arriba.
+    setupAuth();
+    setupDbForConfirm();
+
+    const response = await PATCH(
+      makeRequest({ field_key: "full_name", value: "Juan Pérez", action: "confirm" }),
+      makeContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.update).toHaveBeenCalled();
+    expect(db.insert).toHaveBeenCalled();
+  });
+});
+
+/**
+ * El borde de la ruta: quién entra y cuánto puede pedir.
+ *
+ * No había ni un test que ejerciera la guarda de `viewer` ni el límite de
+ * tráfico de esta ruta. La suite estaba verde igual, así que reordenar el borde
+ * —o borrar la guarda— no rompía nada.
+ */
+describe("PATCH /api/cases/:id/confirm-field — el borde", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.update).mockReset();
+    vi.mocked(db.insert).mockReset();
+    vi.mocked(rateLimit).mockResolvedValue({
+      allowed: true,
+      remaining: 29,
+      resetAt: 0,
+      retryAfterSeconds: 0,
+    } as never);
+  });
+
+  it("un viewer recibe 403 y no llega a tocar la base", async () => {
+    setupAuth("viewer");
+    setupDbForConfirm();
+
+    const response = await PATCH(
+      makeRequest({ field_key: "full_name", value: "Juan Pérez", action: "confirm" }),
+      makeContext()
+    );
+
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body.error.code).toBe("FORBIDDEN_ROLE");
+    expect(db.update).not.toHaveBeenCalled();
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it("un viewer con el cuerpo mal formado recibe 403, no 400", async () => {
+    // El orden importa: si la validación se adelantara a la guarda, un viewer
+    // se enteraría de qué campos espera una ruta que no puede usar.
+    setupAuth("viewer");
+    setupDbForConfirm();
+
+    const response = await PATCH(
+      makeRequest({ field_key: "", action: "inventada" }),
+      makeContext()
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("pasado el cupo, 429 y tampoco escribe", async () => {
+    setupAuth();
+    setupDbForConfirm();
+    vi.mocked(rateLimit).mockResolvedValue({
+      allowed: false,
+      remaining: 0,
+      resetAt: 0,
+      retryAfterSeconds: 42,
+    } as never);
+
+    const response = await PATCH(
+      makeRequest({ field_key: "full_name", value: "Juan Pérez", action: "confirm" }),
+      makeContext()
+    );
+
+    expect(response.status).toBe(429);
+    expect(db.update).not.toHaveBeenCalled();
+    expect(db.insert).not.toHaveBeenCalled();
   });
 });

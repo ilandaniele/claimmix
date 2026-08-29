@@ -121,6 +121,35 @@ export async function PATCH(
 
   const { field_key: fieldKey, value: confirmedValue, action } = parsed.data;
 
+  /*
+   * Confirmar algo que no tiene valor no es una acción posible, y hasta acá se
+   * resolvía tarde y mal.
+   *
+   * `value` es `string | null` en el esquema, la columna `suggested_value` es
+   * nulable, y la pantalla manda `proposed_value` tal cual —de hecho lo muestra
+   * como «—» cuando es nulo y ofrece igual el botón de confirmar—. Con eso, el
+   * camino era: se marcaba la fila de `claim_field_confirmations` como
+   * `confirmed` (paso 7a), después el `if` del 7b resultaba falso, y como el
+   * `return ok(...)` vive ADENTRO de ese `if`, la petición se caía hasta el
+   * `return err(...)` del final.
+   *
+   * O sea: escribía en la base y contestaba que había fallado. El analista veía
+   * «Error al procesar la confirmación. Intentá de nuevo», reintentaba, y la
+   * segunda vez la fila ya no estaba pendiente, así que fallaba otra vez — con
+   * el registro ya confirmado del otro lado.
+   *
+   * Se corta acá, antes de escribir nada. Si no hay valor propuesto, lo que
+   * corresponde es rechazar, que sí funciona con `value: null`.
+   */
+  if ((action === "confirm" || action === "correct") && confirmedValue == null) {
+    return err(
+      new AppError(
+        "VALIDATION_FAILED",
+        "No hay un valor para confirmar. Si el campo quedó vacío, corresponde rechazarlo."
+      )
+    );
+  }
+
   // ── 5. Fetch case (explicit tenant filter — wrong tenant returns null → 404) ─
   let caseRow: { id: string; status: string; tenant_id: string } | null;
   try {
@@ -357,7 +386,14 @@ export async function PATCH(
     });
   }
 
-  // Fallback (should not reach here due to Zod validation of action).
+  /*
+   * Inalcanzable: Zod ya validó que `action` es una de las tres, y las tres
+   * tienen su `return`. Queda por si mañana se agrega una cuarta y alguien se
+   * olvida de esta función — y por eso el mensaje dice lo que pasó de verdad.
+   *
+   * Antes acá caía también «confirmar sin valor», y contestaba «Acción no
+   * reconocida» sobre una acción que había reconocido perfectamente.
+   */
   return err(new AppError("VALIDATION_FAILED", "Acción no reconocida."));
 }
 

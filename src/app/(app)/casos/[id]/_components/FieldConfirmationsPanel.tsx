@@ -162,6 +162,15 @@ export function FieldConfirmationsPanel({
         <div className="space-y-3">
           {pending.map((conf) => {
             const isLoading = loadingIds.has(conf.id);
+            /*
+             * Sin valor propuesto no hay nada que confirmar.
+             *
+             * El botón se ofrecía igual y mandaba `value: null`, que el
+             * servidor rechaza. Lo único que se puede hacer con un campo que el
+             * agente no logró leer es rechazarlo, así que se ofrece eso.
+             */
+            const sinValor =
+              conf.proposed_value === null || conf.proposed_value === "";
             return (
               <div
                 key={conf.id}
@@ -197,7 +206,12 @@ export function FieldConfirmationsPanel({
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button
                       type="button"
-                      disabled={isLoading}
+                      disabled={isLoading || sinValor}
+                      title={
+                        sinValor
+                          ? "El agente no propuso ningún valor para este campo"
+                          : undefined
+                      }
                       onClick={() => handleAction(conf, "confirm")}
                       className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >

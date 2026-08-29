@@ -59,6 +59,7 @@ import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-class
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/core/case/fsm";
+import { estadoTrasExtraer } from "@/core/case/status-after-extraction";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
@@ -956,20 +957,18 @@ export async function runEmailExtractionWorker(
       resolvedPolicyId = policyMatches[0]?.policyId;
     }
 
-    // ── k) Determine final case status ────────────────────────────────────────
-    let newStatus: string;
-
-    if (needsSpecialist) {
-      // AC11: High/critical severity → specialist escalation.
-      newStatus = "requiere_especialista";
-    } else if (missingFieldKeys.length > 0) {
-      newStatus = "info_faltante";
-    } else if ((extractedClaim.fields_pending_confirmation ?? []).length > 0) {
-      newStatus = "confirmacion_pendiente";
-    } else {
-      // All fields present at high confidence — ready for review.
-      newStatus = "listo";
-    }
+    // ── k) En qué estado queda el caso tras leer el mensaje ───────────────────
+    //
+    // La decisión vive en `@/core/case/status-after-extraction`: son cuatro
+    // ramas puras que acá adentro no se podían probar sin montar medio worker.
+    // Y ojo: para los cuatro canales que este worker atiende, más abajo viene
+    // `orchestratePostExtraction`, que vuelve a decidir con más información y
+    // muchas veces pisa esto. Es un intermedio, no la última palabra.
+    let newStatus: string = estadoTrasExtraer({
+      necesitaEspecialista: needsSpecialist,
+      camposFaltantes: missingFieldKeys.length,
+      camposPorConfirmar: (extractedClaim.fields_pending_confirmation ?? []).length,
+    });
 
     // FSM safety check (LLM08).
     // The recibido status is the starting point for email cases — no transition needed

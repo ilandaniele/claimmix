@@ -1,96 +1,56 @@
 /**
- * GET /api/customers — list customers for the authenticated user's tenant.
+ * GET /api/customers — el padrón de clientes de la aseguradora de la sesión.
  *
- * AC18: Supports filters: search (full_name ILIKE), dni, email.
- * Tenant isolation is enforced with an explicit tenant_id filter (RLS is gone).
+ * Filtros: search (por nombre), dni, email. Paginado.
  *
- * Auth: yes (any authenticated user)
- * Rate limit: CASES_API config (100/min — shared with cases list)
+ * Auth: rol con acceso a datos personales (owner / admin / especialista). Un
+ * analista NO entra: acá salen DNI, correo y teléfono.
+ * Límite: CASES_API (100/min, compartido con el listado de casos).
  *
- * Response 200: { data: Customer[], meta: { total, page, per_page, pages } }
+ * Respuesta 200: { data: Customer[], meta: { total, page, per_page, pages } }
+ *
+ * Lo que consulta vive en `@/server/customers/list`. Este archivo es el borde
+ * HTTP y nada más: quién entra, cuánto puede pedir, y qué forma tiene lo que
+ * sale.
  */
 
 import { type NextRequest } from "next/server";
-import { and, desc, eq, type SQL } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { countRows, firstRow, ilikeAny } from "@/lib/db/helpers";
-import { customers, users } from "@/lib/db/schema";
-import { getSessionContext } from "@/lib/auth/session";
+
 import { ok, err } from "@/lib/api/respond";
+import { requireRole, CUSTOMER_PII_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { AppError } from "@/lib/errors";
-import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
-import {
-  rateLimit,
-  RATE_LIMIT_CONFIGS,
-  buildUserKey,
-} from "@/lib/rate-limit/index";
-import { z } from "zod";
-import { enTenant } from "@/data/scope";
-
-// ── Query schema ──────────────────────────────────────────────────────────────
-
-const CustomerQuerySchema = z.object({
-  search: z.string().max(200).optional(),
-  dni: z.string().max(20).optional(),
-  email: z.string().email().optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  per_page: z.coerce.number().int().min(1).max(100).default(25),
-});
-
-// ── GET /api/customers ────────────────────────────────────────────────────────
+import { rateLimit, RATE_LIMIT_CONFIGS, buildUserKey } from "@/lib/rate-limit/index";
+import { CustomerQuerySchema, listCustomers } from "@/server/customers/list";
 
 export async function GET(request: NextRequest) {
-  // ── 1. Auth ───────────────────────────────────────────────────────────────
-  const session = await getSessionContext();
-  const user = session?.user;
-
-  if (!user) {
-    return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
+  // ── 1. Sesión y rol ───────────────────────────────────────────────────────
+  let ctx: RoleContext;
+  try {
+    ctx = await requireRole(...CUSTOMER_PII_ROLES);
+  } catch (e) {
+    return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));
   }
+  const { user, userRow } = ctx;
 
-  // ── 1b. Role check — admin or specialist only (API5) ─────────────────────
-  // Customer data contains PII (DNI, email, phone). Only privileged roles may
-  // enumerate this endpoint. Analysts may not access it.
-  const userRow = firstRow(
-    // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
-    // No puede pasar por una capa que necesita el dato que ella busca.
-    await db
-      .select({ role: users.role, tenant_id: users.tenant_id })
-      .from(users)
-      .where(eq(users.id, user.id))
-      .limit(1)
+  // ── 2. Límite de tráfico ──────────────────────────────────────────────────
+  const rl = await rateLimit(
+    buildUserKey(user.id, "customers-list"),
+    RATE_LIMIT_CONFIGS.CASES_API
   );
-
-  const role: string = userRow?.role ?? "analyst";
-  if (!userRow || !(CUSTOMER_PII_ROLES as string[]).includes(role)) {
-    return err(
-      new AppError(
-        "FORBIDDEN_ROLE",
-        "Solo administradores o especialistas pueden listar clientes."
-      )
-    );
-  }
-
-  const tenantId = userRow.tenant_id;
-
-  // ── 2. Rate limit ─────────────────────────────────────────────────────────
-  const rlKey = buildUserKey(user.id, "customers-list");
-  const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CASES_API);
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes. Esperá un momento."));
   }
 
-  // ── 3. Parse query params ─────────────────────────────────────────────────
+  // ── 3. Parámetros ─────────────────────────────────────────────────────────
   const searchParams = request.nextUrl.searchParams;
-  const rawQuery = {
+  const parsed = CustomerQuerySchema.safeParse({
     search: searchParams.get("search") ?? undefined,
     dni: searchParams.get("dni") ?? undefined,
     email: searchParams.get("email") ?? undefined,
     page: searchParams.get("page") ?? undefined,
     per_page: searchParams.get("per_page") ?? undefined,
-  };
+  });
 
-  const parsed = CustomerQuerySchema.safeParse(rawQuery);
   if (!parsed.success) {
     return err(
       new AppError(
@@ -101,56 +61,9 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { search, dni, email, page, per_page } = parsed.data;
-
-  // ── 4. Query (explicitly tenant-scoped) ───────────────────────────────────
+  // ── 4. Datos ──────────────────────────────────────────────────────────────
   try {
-    const conditions: SQL[] = [eq(customers.tenant_id, tenantId)];
-    if (search) {
-      const searchCond = ilikeAny([customers.full_name], search);
-      if (searchCond) conditions.push(searchCond);
-    }
-    if (dni) conditions.push(eq(customers.dni, dni));
-    if (email) conditions.push(eq(customers.email, email));
-
-    const where = and(...conditions);
-
-    // Count query
-    //
-    // Por `countRows` y no por `db.$count` adentro de `enTenant`: eso ultimo no
-    // devuelve una consulta sino un objeto que se puede esperar, y la capa manda
-    // todo por `batch()`, que necesita armarla. Reventaba con
-    // "query._prepare is not a function" en cada listado.
-    const total = await countRows({ tenantId }, customers, where);
-
-    // Data query
-    const from = (page - 1) * per_page;
-    const data = await enTenant({ tenantId }, (db) =>
-      db
-        .select({
-          id: customers.id,
-          full_name: customers.full_name,
-          dni: customers.dni,
-          email: customers.email,
-          phone: customers.phone,
-          created_at: customers.created_at,
-        })
-        .from(customers)
-        .where(where)
-        .orderBy(desc(customers.created_at))
-        .limit(per_page)
-        .offset(from)
-    );
-
-    return ok({
-      data,
-      meta: {
-        total,
-        page,
-        per_page,
-        pages: Math.ceil(total / per_page),
-      },
-    });
+    return ok(await listCustomers({ tenantId: userRow.tenant_id }, parsed.data));
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
     console.error("[GET /api/customers] unhandled error:", errName);

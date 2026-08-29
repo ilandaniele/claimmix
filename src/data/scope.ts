@@ -56,7 +56,7 @@ export type TenantContext = {
   readonly tenantId: string;
 };
 
-type ClienteDatos = ReturnType<typeof crearCliente>;
+export type ClienteDatos = ReturnType<typeof crearCliente>;
 
 function crearCliente(connectionString: string) {
   return drizzle(neon(connectionString), { schema });

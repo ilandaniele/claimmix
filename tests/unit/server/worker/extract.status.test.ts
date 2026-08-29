@@ -18,6 +18,22 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 
 import { filaDeCaso, registrarMocks, statusEscrito } from "./worker-harness";
 
+/*
+ * Más tiempo del que da vitest por omisión, y no es por lentitud del código.
+ *
+ * Cada caso hace `vi.resetModules()` y vuelve a importar
+ * `@/server/worker/extract`, que arrastra el grafo entero del worker. En una
+ * máquina ociosa eso son ~1,2 s; con la CI corriendo otras cosas en paralelo
+ * pasa los 5 s de omisión y el test falla por reloj sin que nada esté roto.
+ *
+ * Reproducido a propósito: con dos corridas de la suite compitiendo, el primer
+ * caso de este archivo tira «Test timed out in 5000ms». Subir el tope acá y no
+ * globalmente deja que un cuelgue de verdad en cualquier otro lado siga
+ * saltando rápido.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
+
 const CASE_ID = "status-test-0000-0000-000000000001";
 const TENANT_ID = "status-test-0000-0000-000000000002";
 

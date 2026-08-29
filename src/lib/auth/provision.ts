@@ -3,7 +3,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { authUsers, users } from "@/lib/db/schema";
+import { users } from "@/lib/db/schema";
 import { enTenant } from "@/data/scope";
 
 interface NewAuthUser {
@@ -15,9 +15,11 @@ interface NewAuthUser {
 
 /**
  * Emails that are provisioned as admins on first sign-in (comma-separated in
- * ADMIN_EMAILS). Case-insensitive. Applies to both the app profile role
- * (users.role — what requireAdmin checks) and the Better Auth role
- * ("user".role — what the better-auth admin plugin checks).
+ * ADMIN_EMAILS). Case-insensitive.
+ *
+ * Aplica a `users.role`, que es el rol de la aplicación y el único que hay.
+ * Antes se escribía además el rol paralelo de Better Auth para que el plugin
+ * admin coincidiera; ese plugin ya no se monta.
  *
  * SECURITY: requires a VERIFIED email. email/password signup runs with
  * requireEmailVerification=false, so `user.email` on that path is attacker-
@@ -159,14 +161,17 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
     })
   );
 
-  if (isAdmin) {
-    // Keep the Better Auth role in sync so the admin plugin agrees with
-    // requireAdmin. Best-effort: profile row above is the source of truth.
-    try {
-      // sin-inquilino: `auth_users` es la tabla de Better Auth, sin columna de inquilino.
-      await db.update(authUsers).set({ role: "admin" }).where(eq(authUsers.id, user.id));
-    } catch {
-      // non-fatal — admin plugin role can be aligned manually
-    }
-  }
+  /*
+   * Acá se escribía además `authUsers.role = "admin"`, para que el plugin admin
+   * de Better Auth coincidiera con `requireAdmin`.
+   *
+   * Ese plugin ya no se monta —montaba quince endpoints que cruzan
+   * aseguradoras, incluido `impersonate-user`; ver `src/lib/auth/index.ts`— así
+   * que la columna no la lee nadie. Seguir escribiéndola dejaría en la base un
+   * segundo modelo de rol sin dueño, que es exactamente la trampa que se sacó:
+   * el día que alguien vuelva a montar el plugin, esas filas ya estarían
+   * marcadas.
+   *
+   * El rol de la aplicación es `users.role`, la fila que se acaba de insertar.
+   */
 }

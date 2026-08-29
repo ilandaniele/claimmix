@@ -1,8 +1,9 @@
 "use client";
 
-import { adminClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 
-export const authClient = createAuthClient({
-  plugins: [adminClient()],
-});
+/*
+ * Sin `adminClient()`: sólo agregaba los tipos de `/api/auth/admin/*`, que el
+ * servidor ya no monta a propósito. Ver `src/lib/auth/index.ts`.
+ */
+export const authClient = createAuthClient();

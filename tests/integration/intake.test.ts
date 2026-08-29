@@ -152,6 +152,24 @@ const MOCK_USER_ROW = {
   created_at: new Date().toISOString(),
 };
 
+/** Cambia el rol con el que responde la consulta de perfil. */
+function setupDbMocksConRol(role: string) {
+  mockDbSelect.mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue([{ ...MOCK_USER_ROW, role }]),
+      }),
+    }),
+  });
+  valoresInsertados.length = 0;
+  mockDbInsert.mockReturnValue({
+    values: vi.fn().mockImplementation((v: unknown) => {
+      valoresInsertados.push(v as Record<string, unknown>);
+      return { returning: vi.fn().mockResolvedValue([{ id: "case-uuid-001" }]) };
+    }),
+  });
+}
+
 function setupDbMocks() {
   // db.select() chain returns user row
   mockDbSelect.mockReturnValue({
@@ -426,6 +444,47 @@ describe("POST /api/intake/simulate", () => {
       const crudo = mensajeCrudoInsertado();
       expect(isReservedTestAddress(String(crudo!.from_addr))).toBe(true);
     });
+  });
+
+  /*
+   * Un viewer no crea casos.
+   *
+   * El encabezado del handler decía «Auth: required (analyst or admin role)» y
+   * la guarda de rol no existía: se comprobaba que hubiera sesión y que
+   * existiera la fila de perfil, y nunca se miraba `role`.
+   *
+   * O sea que el rol de SÓLO LECTURA creaba un caso real en la base de su
+   * aseguradora, disparaba la extracción con el proveedor de IA —costo real— y
+   * sumaba al contador de casos facturables. Era la única puerta de escritura
+   * que le quedaba abierta: todas las hermanas que tocan un caso lo bloquean.
+   */
+  describe("quién puede simular", () => {
+    it("un viewer recibe 403 y no crea nada", async () => {
+      mockGetSession.mockResolvedValue({ user: MOCK_USER });
+      setupDbMocksConRol("viewer");
+
+      const res = await POST(makeRequest({ scenario_id: "choque-01" }));
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("FORBIDDEN_ROLE");
+      // La otra mitad: que corte ANTES de escribir el caso.
+      expect(mensajeCrudoInsertado()).toBeUndefined();
+    });
+
+    it.each(["owner", "admin", "specialist", "analyst"])(
+      "un %s sí simula",
+      async (role) => {
+        // Una guarda que bloquea a todo el mundo también pasaría el test de
+        // arriba.
+        mockGetSession.mockResolvedValue({ user: MOCK_USER });
+        setupDbMocksConRol(role);
+
+        const res = await POST(makeRequest({ scenario_id: "choque-01" }));
+
+        expect(res.status).not.toBe(403);
+      }
+    );
   });
 
   // ── Rate limit ────────────────────────────────────────────────────────────────

@@ -3,7 +3,6 @@ import "server-only";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
-import { admin } from "better-auth/plugins";
 
 import { db } from "@/lib/db";
 import { accounts, authUsers, sessions, verifications } from "@/lib/db/schema";
@@ -81,30 +80,16 @@ export const auth = betterAuth({
      * hecho por un admin, y son cosas distintas cuando alguien pregunta qué
      * pasó con una cuenta.
      */
+    /*
+     * Cierra todas las sesiones abiertas y deja asentado el cambio.
+     *
+     * Vive en su propio módulo para poder probarlo: lo que hace —echar al que
+     * hubiera entrado, anotar cuántas sesiones cerró, no romperse si algo de
+     * eso falla— es exactamente lo que hay que poder ejercer.
+     */
     onPasswordReset: async ({ user }) => {
-      const { writeAuditLog, AuditEvent } = await import("@/lib/audit/log");
-      const { db } = await import("@/lib/db");
-      const { users } = await import("@/lib/db/schema");
-      const { eq } = await import("drizzle-orm");
-      try {
-        // sin-inquilino: se AVERIGUA de quién es la cuenta, igual que en el login.
-        const [perfil] = await db
-          .select({ tenant_id: users.tenant_id })
-          .from(users)
-          .where(eq(users.id, user.id))
-          .limit(1);
-        if (!perfil) return;
-        await writeAuditLog({
-          tenant_id: perfil.tenant_id,
-          actor_id: user.id,
-          event_type: AuditEvent.PASSWORD_RESET_COMPLETED,
-          target_type: "user",
-          target_id: user.id,
-          payload: {},
-        });
-      } catch {
-        // Que no se pueda anotar no puede impedirle a alguien volver a entrar.
-      }
+      const { onPasswordReset } = await import("@/lib/auth/on-password-reset");
+      await onPasswordReset(user);
     },
   },
   socialProviders:
@@ -142,8 +127,35 @@ export const auth = betterAuth({
       },
     },
   },
-  // nextCookies must stay last so Set-Cookie works from Server Actions.
-  plugins: [admin({ adminRoles: ["admin"] }), nextCookies()],
+  /*
+   * Sin el plugin `admin` de Better Auth, y esto es una decisión de seguridad.
+   *
+   * Montaba quince endpoints bajo `/api/auth/admin/*` —list-users, get-user,
+   * set-role, ban-user, remove-user, set-user-password, revoke-user-sessions
+   * y, sobre todo, impersonate-user— servidos por el catch-all de
+   * `/api/auth/[...all]`. NINGUNO conoce el concepto de inquilino: `list-users`
+   * devuelve el padrón de TODAS las aseguradoras, e `impersonate-user` emite
+   * una sesión válida a nombre de cualquier usuario de cualquiera de ellas,
+   * salteándose entera la capa `enTenant`/RLS que es la única pared del
+   * producto.
+   *
+   * Y decidía el permiso contra `user.role` de la tabla de Better Auth, que es
+   * OTRA columna distinta de `users.role`, la que usa toda la aplicación. Dos
+   * modelos de rol en paralelo que nadie mantiene sincronizados: el día que
+   * alguien los "alinee" para que dejen de discrepar, cada admin de aseguradora
+   * pasa a ser admin global.
+   *
+   * La aplicación no llamaba a ninguno. La gestión de usuarios vive en
+   * `/api/admin/users`, que sí está acotada al inquilino y audita lo que hace.
+   * Quince puertas que no abría nadie y por las que se salía del edificio.
+   *
+   * Si algún día hace falta banear o suplantar, va por una ruta propia bajo
+   * `/api/admin/`, con el inquilino en la mano y su fila de auditoría.
+   *
+   * `nextCookies` va último para que `Set-Cookie` funcione desde los Server
+   * Actions.
+   */
+  plugins: [nextCookies()],
 });
 
 export type Auth = typeof auth;

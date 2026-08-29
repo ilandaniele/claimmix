@@ -403,6 +403,77 @@ const ADMIN_READ_ALLOWED = new Map<string, string>([
 
 const MUTATING = ["POST", "PATCH", "PUT", "DELETE"];
 
+/**
+ * Que el subárbol admin de Better Auth siga sin existir.
+ *
+ * `/api/auth/[...all]` está en la lista de rutas públicas a propósito —el login
+ * no puede pedir sesión para dar una— y por eso el barrido de superficie no
+ * mira lo que hay ADENTRO de ese catch-all.
+ *
+ * Ahí vivían quince endpoints del plugin admin de Better Auth: list-users,
+ * set-role, ban-user, remove-user, revoke-user-sessions y, sobre todo,
+ * impersonate-user. Ninguno conocía el concepto de inquilino: devolvían y
+ * tocaban usuarios de TODAS las aseguradoras, salteándose la capa que es la
+ * única pared del producto.
+ *
+ * El plugin se sacó. Esta sonda existe para que no vuelva sin que nadie se dé
+ * cuenta: alcanza con que alguien agregue `admin()` a la lista de plugins —una
+ * línea, que parece inofensiva— para reabrir las quince puertas.
+ *
+ * ── Por qué se exige 404 y no «cualquier error» ────────────────────────────
+ *
+ * La primera versión de esta sonda aceptaba cualquier status >= 400, y pasaba
+ * con el plugin PUESTO: sin credenciales, un endpoint montado contesta 401 y
+ * uno inexistente contesta 404, y los dos son >= 400. Un verde que no
+ * distingue las dos cosas es peor que no tener la sonda.
+ *
+ * Medido contra el deploy que todavía tenía el plugin: `impersonate-user` y
+ * `set-role` contestaban **400** —o sea que existían y estaban parseando el
+ * cuerpo que les mandé— y una ruta inventada contestaba 404. Ésa es la
+ * diferencia que hay que mirar.
+ */
+async function attackBetterAuthAdmin(): Promise<void> {
+  console.log("\nEl subárbol admin de Better Auth:\n");
+
+  const puertas: Array<[string, "GET" | "POST", string]> = [
+    ["/api/auth/admin/impersonate-user", "POST", "una sesión a nombre de cualquier usuario de cualquier aseguradora"],
+    ["/api/auth/admin/set-role", "POST", "cambiarle el rol a cualquiera"],
+    ["/api/auth/admin/ban-user", "POST", "dejar afuera a cualquiera"],
+    ["/api/auth/admin/remove-user", "POST", "borrar a cualquiera"],
+    ["/api/auth/admin/list-users", "GET", "el padrón de usuarios de TODAS las aseguradoras"],
+  ];
+
+  // La prueba de control: si una ruta inventada NO diera 404, el 404 de las de
+  // arriba no probaría nada.
+  const control = await head(`${BASE}/api/auth/admin/ruta-que-no-existe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  probe(
+    "una ruta inventada del catch-all da 404",
+    control.status === 404,
+    "sin esto, el 404 de las de abajo no significaría nada",
+    `respondió ${control.status}`
+  );
+
+  for (const [ruta, metodo, premio] of puertas) {
+    const res = await head(`${BASE}${ruta}`, {
+      method: metodo,
+      headers: { "Content-Type": "application/json" },
+      ...(metodo === "POST" ? { body: JSON.stringify({}) } : {}),
+    });
+    probe(
+      `${ruta} no existe`,
+      res.status === 404,
+      premio,
+      res.status === 400
+        ? "respondió 400: el endpoint EXISTE y parseó el cuerpo"
+        : `respondió ${res.status}`
+    );
+  }
+}
+
 function auditAdminGuards(): void {
   console.log("\nLos candados de /api/admin, leídos del código:\n");
 
@@ -921,6 +992,7 @@ async function attackAgent(): Promise<void> {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 await attackSurface();
+await attackBetterAuthAdmin();
 auditAdminGuards();
 await attackTenantWall();
 if (doAgent) {

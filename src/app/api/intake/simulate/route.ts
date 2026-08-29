@@ -8,7 +8,7 @@
  * AC17: LLM prompt injection contained via XML sentinels in prompt.ts.
  *
  * Rate limit: 30/min per user (INTAKE_SIMULATE config).
- * Auth: required (analyst or admin role).
+ * Auth: cualquier rol que pueda tocar un caso — o sea, todos menos `viewer`.
  *
  * Body modes:
  *   { scenario_id: "choque-01" }          → use pre-seeded scenario
@@ -16,11 +16,14 @@
  */
 
 import { type NextRequest, after } from "next/server";
-import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
-import { cases, rawMessages, users } from "@/lib/db/schema";
-import { getSessionContext } from "@/lib/auth/session";
+import { cases, rawMessages } from "@/lib/db/schema";
+import {
+  requireRole,
+  CASE_EDITOR_ROLES,
+  type RoleContext,
+} from "@/lib/auth/require-role";
 import { SimulateIntakeSchema } from "@/lib/schemas/intake";
 import { getScenarioById } from "@/server/intake/scenarios";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
@@ -58,22 +61,29 @@ function scheduleAfterResponse(task: () => Promise<void>): void {
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
-  // ── 1. Auth ─────────────────────────────────────────────────────────────────
-  const session = await getSessionContext();
-  const user = session?.user;
-
-  if (!user) {
-    return err(new AppError("MISSING_SESSION"));
+  /*
+   * ── 1. Sesión y rol ───────────────────────────────────────────────────────
+   *
+   * El encabezado de este archivo decía «Auth: required (analyst or admin
+   * role)» y la guarda de rol no existía: se comprobaba que hubiera sesión y
+   * que existiera la fila de perfil, y nunca se miraba `role`.
+   *
+   * O sea que un `viewer` —el rol de sólo lectura— creaba un caso REAL en la
+   * base de su aseguradora, disparaba la extracción con el proveedor de IA
+   * (costo real) y sumaba al contador de casos facturables. Era la única puerta
+   * de escritura abierta al rol de sólo lectura: todas las hermanas que tocan
+   * un caso lo bloquean explícitamente.
+   *
+   * Lo peor era que estaba documentado. Quien revisara el archivo leía que la
+   * guarda estaba.
+   */
+  let ctx: RoleContext;
+  try {
+    ctx = await requireRole(...CASE_EDITOR_ROLES);
+  } catch (e) {
+    return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));
   }
-
-  const userRow = firstRow(
-    // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
-    // No puede pasar por una capa que necesita el dato que ella busca.
-    await db.select().from(users).where(eq(users.id, user.id)).limit(1)
-  );
-  if (!userRow) {
-    return err(new AppError("MISSING_SESSION"));
-  }
+  const { userRow } = ctx;
 
   // ── 2. Rate limit ────────────────────────────────────────────────────────────
   const ip = getClientIp(request);

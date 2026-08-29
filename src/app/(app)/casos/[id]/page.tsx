@@ -14,7 +14,7 @@
  */
 
 import { notFound, redirect } from "next/navigation";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
@@ -22,11 +22,13 @@ import { firstRow } from "@/lib/db/helpers";
 import {
   claimAttachments,
   claimFieldConfirmations,
-  claimMessages,
-  rawMessages,
   users,
 } from "@/lib/db/schema";
 import { getCaseDetail } from "@/server/cases/get";
+import {
+  mensajesEntrantes,
+  ultimoMensajeEntrante,
+} from "@/server/cases/inbound-messages";
 import { CaseDetailClient } from "./CaseDetailClient";
 import { ExtractedFieldsTable } from "./components/ExtractedFieldsTable";
 import { MissingDocsList } from "./components/MissingDocsList";
@@ -221,7 +223,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
     })
   );
   if (isEmailCase && displayedExtractedFields.length === 0) {
-    const fallbackEmail = await getLatestEmailText(tenantId, id);
+    const fallbackEmail = await ultimoMensajeEntrante(tenantCtx, id);
     const fallbackFields = parseEmailClaimFields(fallbackEmail);
     displayedExtractedFields = fallbackFields.map((field, index) => ({
       id: `frontend-fallback-${caseRow.id}-${field.field_key}-${index}`,
@@ -564,32 +566,12 @@ async function RawEmailAccordion({
   const locale = await getServerLocale();
   const t = getT(locale);
 
-  let messages: { body: string; subject: string | null; received_at: string }[] =
-    await enTenant({ tenantId }, (db) =>
-      db
-        .select({ body: rawMessages.body, subject: rawMessages.subject, received_at: rawMessages.received_at })
-        .from(rawMessages)
-        .where(eq(rawMessages.case_id, caseId))
-        .orderBy(asc(rawMessages.received_at))
-        .limit(5)
-    );
-
-  if (messages.length === 0) {
-    const fallback = await enTenant({ tenantId }, (db) =>
-      db
-        .select({ body_text: claimMessages.body_text, subject: claimMessages.subject, received_at: claimMessages.received_at })
-        .from(claimMessages)
-        .where(and(eq(claimMessages.case_id, caseId), eq(claimMessages.direction, "inbound")))
-        .orderBy(asc(claimMessages.received_at))
-        .limit(5)
-    );
-
-    messages = fallback.map((msg) => ({
-      body: msg.body_text ?? "",
-      subject: msg.subject,
-      received_at: msg.received_at,
-    }));
-  }
+  // Los cinco primeros, en el orden en que llegaron. La cascada
+  // raw_messages → claim_messages vive en un solo lugar.
+  const messages = await mensajesEntrantes({ tenantId }, caseId, {
+    orden: "viejos",
+    tope: 5,
+  });
 
   if (!messages || messages.length === 0) {
     return (
@@ -669,41 +651,4 @@ function InjurySeverityBadge({ severity }: { severity: string }) {
       {labels[severity] ?? severity}
     </span>
   );
-}
-
-async function getLatestEmailText(
-  tenantId: string,
-  caseId: string
-): Promise<{ subject: string; body: string; senderEmail: string }> {
-  const rawMsg = await enTenant({ tenantId }, (db) =>
-    db
-      .select({ body: rawMessages.body, subject: rawMessages.subject, from_addr: rawMessages.from_addr })
-      .from(rawMessages)
-      .where(eq(rawMessages.case_id, caseId))
-      .orderBy(desc(rawMessages.received_at))
-      .limit(1)
-  ).then((rows) => rows[0] ?? null);
-
-  if (rawMsg) {
-    return {
-      subject: rawMsg.subject ?? "",
-      body: rawMsg.body ?? "",
-      senderEmail: rawMsg.from_addr ?? "",
-    };
-  }
-
-  const claimMsg = await enTenant({ tenantId }, (db) =>
-    db
-      .select({ body_text: claimMessages.body_text, subject: claimMessages.subject, from_addr: claimMessages.from_addr })
-      .from(claimMessages)
-      .where(and(eq(claimMessages.case_id, caseId), eq(claimMessages.direction, "inbound")))
-      .orderBy(desc(claimMessages.received_at))
-      .limit(1)
-  ).then((rows) => rows[0] ?? null);
-
-  return {
-    subject: claimMsg?.subject ?? "",
-    body: claimMsg?.body_text ?? "",
-    senderEmail: claimMsg?.from_addr ?? "",
-  };
 }

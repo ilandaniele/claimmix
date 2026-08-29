@@ -1,70 +1,38 @@
 /**
- * PATCH /api/cases/:id/confirm-field — confirm, correct, or reject an extracted field.
+ * PATCH /api/cases/:id/confirm-field — un analista resuelve un campo extraído.
  *
- * AC14: Memory is ONLY updated after explicit human confirmation via this endpoint.
- * AC16: FSM transition is re-evaluated after each confirmation.
- * AC21: Every confirmation writes audit_log FIELD_CONFIRMED with redacted values.
+ * Auth: cualquier rol con sesión, salvo `viewer`, que es de sólo lectura.
+ * Límite: CONFIRM_FIELD (30/min por usuario).
  *
- * Auth: Better Auth session. RLS is gone — every query filters explicitly by
- * the caller's tenant_id (IDOR-safe 404 for wrong-tenant cases → AC19).
- * Rate limit: CONFIRM_FIELD config (30/min per user).
+ * Cuerpo: { field_key, value, action: 'confirm' | 'correct' | 'reject' }
+ * 200: { case_id, field_key, new_status, claim_memory_updated }
+ * 404: el caso no existe o es de otra aseguradora. Nunca 403: un 403
+ *      confirmaría que existe, y eso solo permite enumerar casos ajenos.
  *
- * Request body: { field_key, value, action: 'confirm' | 'correct' | 'reject' }
- * Response 200: { case_id, field_key, new_status, claim_memory_updated }
- * Response 400: invalid FSM transition or field already confirmed
- * Response 404: case not found or wrong tenant (IDOR defense)
+ * Lo que hace vive en `@/server/cases/confirm-field`. Acá quedan las cuatro
+ * cosas del borde: quién entra, cuánto puede pedir, qué mandó, y traducir un
+ * `AppError` a una respuesta HTTP.
  */
 
 import { type NextRequest } from "next/server";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
-import { db } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
-import { firstRow } from "@/lib/db/helpers";
-import {
-  cases,
-  claimFieldConfirmations,
-  extractedFields,
-  missingDocs,
-  rawMessages,
-} from "@/lib/db/schema";
-import { ConfirmFieldSchema } from "@/lib/schemas/cases";
-import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
-import { updateMemoryFromConfirmation } from "@/server/memory/update";
-import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import { redactObject } from "@/lib/audit/redact";
-import { ok, err } from "@/lib/api/respond";
-import { AppError } from "@/lib/errors";
-import {
-  rateLimit,
-  RATE_LIMIT_CONFIGS,
-  buildUserKey,
-} from "@/lib/rate-limit/index";
-import { isValidTransition } from "@/core/case/fsm";
-import type { CaseStatus } from "@/lib/schemas/cases";
 import { z } from "zod";
 
-// ── Params schema ─────────────────────────────────────────────────────────────
+import { ok, err } from "@/lib/api/respond";
+import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { AppError } from "@/lib/errors";
+import { rateLimit, RATE_LIMIT_CONFIGS, buildUserKey } from "@/lib/rate-limit/index";
+import { ConfirmFieldSchema } from "@/lib/schemas/cases";
+import { resolveFieldConfirmation } from "@/server/cases/confirm-field";
 
 const ParamsSchema = z.object({
   id: z.string().uuid("ID de caso inválido."),
 });
 
-/** Extract a loggable error code from a thrown DB error (PII-safe). */
-function dbErrCode(e: unknown): string {
-  return (
-    (e as { code?: string })?.code ??
-    (e instanceof Error ? e.name : "UnknownError")
-  );
-}
-
-// ── PATCH /api/cases/:id/confirm-field ───────────────────────────────────────
-
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  // ── 1. Auth — Better Auth session + public.users row ──────────────────────
+  // ── 1. Sesión y rol ───────────────────────────────────────────────────────
   let ctx: RoleContext;
   try {
     ctx = await requireRole(...ALL_ROLES);
@@ -73,32 +41,29 @@ export async function PATCH(
   }
   const { userRow } = ctx;
 
-  // El contexto de inquilino, apenas se sabe de quién es la sesión. Se arma acá
-  // y no en cada consulta: las de abajo ya no llevan filtro por inquilino, así
-  // que este objeto es lo único que le dice a la base de quién son los datos.
-  const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
-
-  // Viewers are read-only: they can inspect claims but never mutate them.
+  // Un viewer mira siniestros; no los toca.
   if (userRow.role === "viewer") {
     return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
   }
 
-  // ── 2. Rate limit — 30/min per user ──────────────────────────────────────
-  const rlKey = buildUserKey(userRow.id, "confirm-field");
-  const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CONFIRM_FIELD);
+  // ── 2. Límite de tráfico ──────────────────────────────────────────────────
+  const rl = await rateLimit(
+    buildUserKey(userRow.id, "confirm-field"),
+    RATE_LIMIT_CONFIGS.CONFIRM_FIELD
+  );
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes. Esperá un momento."));
   }
 
-  // ── 3. Validate route params ──────────────────────────────────────────────
-  const rawParams = await context.params;
-  const parsedParams = ParamsSchema.safeParse(rawParams);
+  // ── 3. La ruta ────────────────────────────────────────────────────────────
+  // Un id mal formado es 404 y no 400: contestar distinto según la forma del id
+  // ya es una diferencia observable desde afuera.
+  const parsedParams = ParamsSchema.safeParse(await context.params);
   if (!parsedParams.success) {
     return err(new AppError("NOT_FOUND", "El caso no existe."));
   }
-  const { id: caseId } = parsedParams.data;
 
-  // ── 4. Validate request body ──────────────────────────────────────────────
+  // ── 4. El cuerpo ──────────────────────────────────────────────────────────
   let body: unknown;
   try {
     body = await request.json();
@@ -119,397 +84,22 @@ export async function PATCH(
     );
   }
 
-  const { field_key: fieldKey, value: confirmedValue, action } = parsed.data;
-
-  /*
-   * Confirmar algo que no tiene valor no es una acción posible, y hasta acá se
-   * resolvía tarde y mal.
-   *
-   * `value` es `string | null` en el esquema, la columna `suggested_value` es
-   * nulable, y la pantalla manda `proposed_value` tal cual —de hecho lo muestra
-   * como «—» cuando es nulo y ofrece igual el botón de confirmar—. Con eso, el
-   * camino era: se marcaba la fila de `claim_field_confirmations` como
-   * `confirmed` (paso 7a), después el `if` del 7b resultaba falso, y como el
-   * `return ok(...)` vive ADENTRO de ese `if`, la petición se caía hasta el
-   * `return err(...)` del final.
-   *
-   * O sea: escribía en la base y contestaba que había fallado. El analista veía
-   * «Error al procesar la confirmación. Intentá de nuevo», reintentaba, y la
-   * segunda vez la fila ya no estaba pendiente, así que fallaba otra vez — con
-   * el registro ya confirmado del otro lado.
-   *
-   * Se corta acá, antes de escribir nada. Si no hay valor propuesto, lo que
-   * corresponde es rechazar, que sí funciona con `value: null`.
-   */
-  if ((action === "confirm" || action === "correct") && confirmedValue == null) {
-    return err(
-      new AppError(
-        "VALIDATION_FAILED",
-        "No hay un valor para confirmar. Si el campo quedó vacío, corresponde rechazarlo."
-      )
-    );
-  }
-
-  // ── 5. Fetch case (explicit tenant filter — wrong tenant returns null → 404) ─
-  let caseRow: { id: string; status: string; tenant_id: string } | null;
+  // ── 5. Lo que de verdad hace ──────────────────────────────────────────────
   try {
-    caseRow = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select({
-            id: cases.id,
-            status: cases.status,
-            tenant_id: cases.tenant_id,
-          })
-          .from(cases)
-          .where(eq(cases.id, caseId))
-          .limit(1)
-      )
-    );
-  } catch {
-    caseRow = null;
-  }
-
-  if (!caseRow) {
-    // AC19: Always 404, never 403 — no tenant enumeration.
-    return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
-  }
-
-  const currentStatus = caseRow.status as CaseStatus;
-  const tenantId = caseRow.tenant_id;
-
-  // ── 6. Find pending claim_field_confirmations row ─────────────────────────
-  // Neon column names are field_name / suggested_value — aliased to preserve
-  // the previous field_key / proposed_value shape.
-  let confirmationRow: {
-    id: string;
-    proposed_value: string | null;
-    conflict_with_value: string | null;
-    status: string;
-  } | null;
-  try {
-    confirmationRow = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select({
-            id: claimFieldConfirmations.id,
-            proposed_value: claimFieldConfirmations.suggested_value,
-            conflict_with_value: claimFieldConfirmations.conflict_with_value,
-            status: claimFieldConfirmations.status,
-          })
-          .from(claimFieldConfirmations)
-          .where(
-            and(
-              eq(claimFieldConfirmations.case_id, caseId),
-              eq(claimFieldConfirmations.field_name, fieldKey),
-              eq(claimFieldConfirmations.status, "pending")
-            )
-          )
-          .limit(1)
-      )
-    );
-  } catch (e) {
-    console.error("[confirm-field] claim_field_confirmations fetch error:", dbErrCode(e));
-    return err(new AppError("INTERNAL_ERROR"));
-  }
-
-  // Allow confirm even if no pending confirmation row exists (direct field update).
-  // The confirmation row is optional — analysts can also confirm fields that
-  // were extracted with high confidence but need an explicit human stamp.
-
-  const now = new Date().toISOString();
-
-  // ── 7. Handle action ──────────────────────────────────────────────────────
-
-  if (action === "confirm" || action === "correct") {
-    // ── 7a. Update claim_field_confirmations status ────────────────────────
-    if (confirmationRow) {
-      try {
-        await enTenant(tenantCtx, (db) =>
-          db
-            .update(claimFieldConfirmations)
-            .set({
-              status: action === "confirm" ? "confirmed" : "corrected",
-              confirmed_by: userRow.id,
-              confirmed_at: now,
-            })
-            .where(
-              eq(claimFieldConfirmations.id, confirmationRow.id)
-            )
-        );
-      } catch (e) {
-        console.error("[confirm-field] confirmation update error:", dbErrCode(e));
-      }
-    }
-
-    // ── 7b. Upsert extracted_fields with confirmed value ───────────────────
-    if (confirmedValue !== null && confirmedValue !== undefined) {
-      try {
-        await enTenant(tenantCtx, (db) =>
-          db
-            .insert(extractedFields)
-            .values({
-              case_id: caseId,
-              tenant_id: tenantId,
-              field_key: fieldKey,
-              field_value: confirmedValue,
-              confidence: "1.00", // Human-confirmed fields have 100% confidence.
-            })
-            .onConflictDoUpdate({
-              target: [extractedFields.case_id, extractedFields.field_key],
-              set: {
-                field_value: sql`excluded.field_value`,
-                confidence: sql`excluded.confidence`,
-              },
-            })
-        );
-      } catch (e) {
-        console.error("[confirm-field] extracted_fields upsert error:", dbErrCode(e));
-      }
-
-      // ── 7c. Satisfy missing_docs if this field was missing ────────────────
-      try {
-        await enTenant(tenantCtx, (db) =>
-          db
-            .update(missingDocs)
-            .set({ satisfied_at: now })
-            .where(
-              and(
-                eq(missingDocs.case_id, caseId),
-                eq(missingDocs.doc_key, fieldKey),
-                isNull(missingDocs.satisfied_at)
-              )
-            )
-        );
-      } catch (e) {
-        console.error("[confirm-field] missing_docs update error:", dbErrCode(e));
-      }
-
-      // ── 7d. Update claim_memory — AC14 ────────────────────────────────────
-      // Get sender email from raw_messages for this case.
-      const senderEmail = await getSenderEmail(caseId, tenantId);
-
-      let memoryUpdated = false;
-      if (senderEmail) {
-        const oldValue = confirmationRow?.proposed_value ?? undefined;
-        await updateMemoryFromConfirmation(
-          tenantId,
-          fieldKey,
-          confirmedValue,
-          senderEmail,
-          caseId,
-          userRow.id,
-          oldValue
-        );
-        memoryUpdated = true;
-      }
-
-      // ── 7e. Audit log FIELD_CONFIRMED (AC21) ─────────────────────────────
-      const redactedPayload = redactObject({
-        case_id: caseId,
-        field_key: fieldKey,
-        action,
-        old_value: confirmationRow?.proposed_value ?? "",
-        new_value: confirmedValue,
-        memory_updated: String(memoryUpdated),
-      });
-
-      await writeAuditLog({
-        tenant_id: tenantId,
-        actor_id: userRow.id,
-        event_type: AuditEvent.FIELD_CONFIRMED,
-        target_type: "case",
-        target_id: caseId,
-        payload: redactedPayload,
-      });
-
-      // ── 7f. Re-run gap analysis → possible status transition ───────────────
-      const newStatus = await reEvaluateStatus(
-        caseId,
-        currentStatus,
-        tenantId,
+    return ok(
+      await resolveFieldConfirmation(
+        { tenantId: userRow.tenant_id },
+        parsedParams.data.id,
+        parsed.data,
         userRow.id
-      );
-
-      return ok({
-        case_id: caseId,
-        field_key: fieldKey,
-        new_status: newStatus,
-        claim_memory_updated: memoryUpdated,
-      });
-    }
-  }
-
-  if (action === "reject") {
-    // ── 7g. Reject: mark confirmation as rejected ─────────────────────────
-    if (confirmationRow) {
-      try {
-        await enTenant(tenantCtx, (db) =>
-          db
-            .update(claimFieldConfirmations)
-            .set({
-              status: "rejected",
-              confirmed_by: userRow.id,
-              confirmed_at: now,
-            })
-            .where(
-              eq(claimFieldConfirmations.id, confirmationRow.id)
-            )
-        );
-      } catch (e) {
-        console.error("[confirm-field] reject update error:", dbErrCode(e));
-      }
-    }
-
-    // Audit log for rejection.
-    const redactedPayload = redactObject({
-      case_id: caseId,
-      field_key: fieldKey,
-      action: "rejected",
-      proposed_value: confirmationRow?.proposed_value ?? "",
-    });
-
-    await writeAuditLog({
-      tenant_id: tenantId,
-      actor_id: userRow.id,
-      event_type: AuditEvent.FIELD_CONFIRMED,
-      target_type: "case",
-      target_id: caseId,
-      payload: redactedPayload,
-    });
-
-    return ok({
-      case_id: caseId,
-      field_key: fieldKey,
-      new_status: currentStatus,
-      claim_memory_updated: false,
-    });
-  }
-
-  /*
-   * Inalcanzable: Zod ya validó que `action` es una de las tres, y las tres
-   * tienen su `return`. Queda por si mañana se agrega una cuarta y alguien se
-   * olvida de esta función — y por eso el mensaje dice lo que pasó de verdad.
-   *
-   * Antes acá caía también «confirmar sin valor», y contestaba «Acción no
-   * reconocida» sobre una acción que había reconocido perfectamente.
-   */
-  return err(new AppError("VALIDATION_FAILED", "Acción no reconocida."));
-}
-
-// ── Private helpers ───────────────────────────────────────────────────────────
-
-/**
- * Get the sender email from raw_messages for a case (tenant-scoped).
- * Returns null if not found (graceful degradation — memory update is skipped).
- */
-async function getSenderEmail(
-  caseId: string,
-  tenantId: string
-): Promise<string | null> {
-  const tenantCtx: TenantContext = { tenantId };
-  try {
-    const row = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select({ from_addr: rawMessages.from_addr })
-          .from(rawMessages)
-          .where(
-            eq(rawMessages.case_id, caseId)
-          )
-          .orderBy(asc(rawMessages.received_at))
-          .limit(1)
       )
     );
-
-    return row?.from_addr ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Re-run gap analysis after a confirmation and update the case status if needed.
- *
- * AC16: After each confirmation, the case may transition to:
- *   - 'listo_para_core' if all confirmations resolved and no missing docs
- *   - 'info_faltante' if required docs still missing
- *   - 'recibido' if partially complete but no longer pending confirmation
- *
- * Returns the new case status.
- */
-async function reEvaluateStatus(
-  caseId: string,
-  currentStatus: CaseStatus,
-  tenantId: string,
-  actorId: string
-): Promise<string> {
-  const tenantCtx: TenantContext = { tenantId };
-  try {
-    // Fetch current extracted fields for gap analysis.
-    const fields = await enTenant(tenantCtx, (db) =>
-      db
-        .select({
-          field_key: extractedFields.field_key,
-          field_value: extractedFields.field_value,
-          confidence: extractedFields.confidence,
-        })
-        .from(extractedFields)
-        .where(
-          eq(extractedFields.case_id, caseId)
-        )
+  } catch (error) {
+    if (error instanceof AppError) return err(error);
+    console.error(
+      "[PATCH /api/cases/:id/confirm-field] error:",
+      error instanceof Error ? error.name : "UnknownError"
     );
-
-    // numeric → string under Drizzle; convert. The Neon schema has no `source`
-    // column — default to "ai" (matches the previous `?? "ai"` fallback).
-    const currentFields = fields.map((f) => ({
-      field_key: f.field_key,
-      field_value: f.field_value,
-      confidence: Number(f.confidence),
-      source: "ai" as const,
-    }));
-
-    const gapResult = await analyzeEmailClaimGaps(caseId, currentFields, tenantId);
-
-    const newStatus = gapResult.status as CaseStatus;
-
-    // Only transition if FSM allows it.
-    if (newStatus !== currentStatus && isValidTransition(currentStatus, newStatus)) {
-      try {
-        await enTenant(tenantCtx, (db) =>
-          db
-            .update(cases)
-            .set({
-              status: newStatus,
-              updated_at: new Date().toISOString(),
-            })
-            .where(eq(cases.id, caseId))
-        );
-      } catch (e) {
-        console.error("[confirm-field] status update error:", dbErrCode(e));
-        return currentStatus;
-      }
-
-      await writeAuditLog({
-        tenant_id: tenantId,
-        actor_id: actorId,
-        event_type: AuditEvent.CASE_STATUS_CHANGED,
-        target_type: "case",
-        target_id: caseId,
-        payload: {
-          from: currentStatus,
-          to: newStatus,
-          trigger: "field_confirmation",
-        },
-      });
-
-      return newStatus;
-    }
-
-    return currentStatus;
-  } catch (e) {
-    const errName = e instanceof Error ? e.name : "UnknownError";
-    console.error("[confirm-field] reEvaluateStatus error:", errName);
-    return currentStatus;
+    return err(new AppError("INTERNAL_ERROR"));
   }
 }

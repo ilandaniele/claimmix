@@ -93,6 +93,7 @@ import { rateLimit } from "@/lib/rate-limit/index";
 import { updateMemoryFromConfirmation } from "@/server/memory/update";
 import { writeAuditLog } from "@/lib/audit/log";
 import { PATCH } from "@/app/api/cases/[id]/confirm-field/route";
+import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -588,5 +589,81 @@ describe("PATCH /api/cases/:id/confirm-field — el borde", () => {
     expect(response.status).toBe(429);
     expect(db.update).not.toHaveBeenCalled();
     expect(db.insert).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Que no se pueda recalcular el estado no deshace la confirmación.
+ *
+ * La confirmación ya se escribió cuando se llega a recalcular. Si el análisis
+ * de brechas o el UPDATE del estado fallan, lo que corresponde es devolver el
+ * estado que había y seguir: el analista hizo su trabajo y no tiene por qué
+ * volver a hacerlo porque falló un paso posterior.
+ *
+ * Estas dos ramas no las tocaba ningún test.
+ */
+describe("PATCH /api/cases/:id/confirm-field — el recálculo de estado falla", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.update).mockReset();
+    vi.mocked(db.insert).mockReset();
+    vi.mocked(updateMemoryFromConfirmation).mockResolvedValue(undefined);
+    vi.mocked(writeAuditLog).mockResolvedValue(undefined);
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [],
+      isComplete: true,
+      status: "listo_para_core",
+    } as never);
+    vi.mocked(rateLimit).mockResolvedValue({
+      allowed: true,
+      remaining: 29,
+      resetAt: 0,
+      retryAfterSeconds: 0,
+    } as never);
+  });
+
+  it("si revienta el análisis de brechas, responde 200 con el estado de antes", async () => {
+    setupAuth();
+    setupDbForConfirm({ caseRow: { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID } });
+    vi.mocked(analyzeEmailClaimGaps).mockRejectedValue(new Error("gap analyzer caído"));
+
+    const response = await PATCH(
+      makeRequest({ field_key: "full_name", value: "Juan Pérez", action: "confirm" }),
+      makeContext()
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.new_status).toBe("confirmacion_pendiente");
+    // Y la confirmación quedó escrita igual, que es el punto.
+    expect(db.insert).toHaveBeenCalled();
+  });
+
+  it("si revienta el UPDATE del estado, tampoco se pierde la confirmación", async () => {
+    setupAuth();
+    setupDbForConfirm({ caseRow: { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID } });
+
+    // Los tres primeros UPDATE andan; el cuarto —el del estado— falla.
+    let n = 0;
+    vi.mocked(db.update).mockImplementation((() => {
+      n += 1;
+      if (n < 3) return updateChain();
+      return {
+        set: vi.fn().mockReturnThis(),
+        where: vi.fn().mockRejectedValue(new Error("deadlock")),
+      };
+    }) as never);
+
+    const response = await PATCH(
+      makeRequest({ field_key: "full_name", value: "Juan Pérez", action: "confirm" }),
+      makeContext()
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.new_status).toBe("confirmacion_pendiente");
+    expect(db.insert).toHaveBeenCalled();
   });
 });

@@ -34,6 +34,42 @@ export interface RenderedEmail {
   text: string;
 }
 
+/**
+ * Escapa un valor para meterlo adentro de HTML.
+ *
+ * ── Por qué hace falta, y qué se podía hacer sin esto ───────────────────────
+ *
+ * Todo lo que estas plantillas interpolan viene, directa o indirectamente, de
+ * un correo que escribió un desconocido: el nombre del asegurado, el lugar del
+ * siniestro, la patente, y hasta el NOMBRE de un campo —el modelo puede
+ * inventar una clave, y `humanizeKey` la muestra tal cual—.
+ *
+ * Un nombre como `Juan <a href="https://evil.tld">Cobrá tu indemnización acá</a>`
+ * salía entero adentro de un `<strong>`. Y el destinatario lo elige el mismo
+ * atacante: el mail sale a la dirección del `From` del correo entrante, que
+ * nadie verifica. O sea que alcanza con escribirle al buzón de ingreso poniendo
+ * en el From la casilla de la víctima, y la aseguradora le manda —desde su
+ * propio dominio, firmado con su DKIM— el enlace que el atacante eligió.
+ *
+ * Eso es phishing con la reputación de la aseguradora. En los clientes de
+ * correo que todavía ejecutan script además es XSS; en los demás es inyección
+ * de HTML, que para este producto es igual de grave.
+ *
+ * ── Sólo para el HTML ───────────────────────────────────────────────────────
+ *
+ * La versión `text` de cada plantilla NO se escapa, y no es un olvido: ahí
+ * `&amp;` se leería literal. Un correo en texto plano no interpreta marcado, así
+ * que no hay nada de qué escaparse.
+ */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // ── PII masking (AC24) ────────────────────────────────────────────────────────
 
 /**

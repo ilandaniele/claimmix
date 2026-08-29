@@ -1,4 +1,5 @@
-/**
+
+import { escapeHtml } from "@/server/email/render";/**
  * Email template: information_received
  *
  * El mensaje corto que va cuando la persona contó algo nuevo y lo que falta
@@ -40,9 +41,9 @@ export function renderInformationReceived(data: InformationReceivedData): {
   const notedPhrase = data.noted ? ` de ${data.noted}` : " de lo que nos contaste";
 
   const html = `
-    <p>Gracias, tomamos nota${notedPhrase}.</p>
+    <p>Gracias, tomamos nota${escapeHtml(notedPhrase)}.</p>
     <p>Seguimos a la espera de lo que te pedimos antes para poder avanzar con tu reclamo.</p>
-    <p>Caso #${data.caseId}</p>
+    <p>Caso #${escapeHtml(data.caseId)}</p>
   `.trim();
 
   const text = [

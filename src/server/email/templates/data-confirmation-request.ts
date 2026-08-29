@@ -20,7 +20,7 @@
  */
 
 import { displayFieldValue, labelForField } from "@/lib/labels/claim-fields";
-import { maskDni, maskPolicyNumber } from "@/server/email/render";
+import { escapeHtml, maskDni, maskPolicyNumber } from "@/server/email/render";
 
 /** Un dato sobre el que se pregunta. */
 export interface CampoAConfirmar {
@@ -73,21 +73,29 @@ function armarBloque(campo: CampoAConfirmar): BloqueDeCampo {
   let contextoHtml: string;
   let contextoText: string;
 
+  /*
+   * Todo lo que se mete en el HTML se escapa: viene de un correo que escribió
+   * un desconocido. Hasta la ETIQUETA del campo, porque el modelo puede
+   * inventar una clave y `humanizeKey` la muestra tal cual.
+   *
+   * Las versiones `text` van sin escapar a propósito: un correo en texto plano
+   * no interpreta marcado, y ahí `&amp;` se leería literal.
+   */
   if (abierto) {
-    contextoHtml = `<p>${field.instruction}</p>`;
+    contextoHtml = `<p>${escapeHtml(field.instruction)}</p>`;
     contextoText = field.instruction;
   } else if (displayConflict) {
-    contextoHtml = `<p>Notamos que el valor que indicaste en tu email (<strong>${displayValue}</strong>) difiere del que tenemos registrado en nuestro sistema (<strong>${displayConflict}</strong>).</p>`;
+    contextoHtml = `<p>Notamos que el valor que indicaste en tu email (<strong>${escapeHtml(displayValue)}</strong>) difiere del que tenemos registrado en nuestro sistema (<strong>${escapeHtml(displayConflict)}</strong>).</p>`;
     contextoText = `Notamos que el valor que indicaste en tu email (${displayValue}) difiere del que tenemos registrado en nuestro sistema (${displayConflict}).`;
   } else {
     const nota = sensible ? " (valor enmascarado por seguridad)" : "";
-    contextoHtml = `<p>Obtuvimos el siguiente dato de tu correo: <strong>${displayValue}</strong>${nota}.</p>`;
+    contextoHtml = `<p>Obtuvimos el siguiente dato de tu correo: <strong>${escapeHtml(displayValue)}</strong>${nota}.</p>`;
     contextoText = `Obtuvimos el siguiente dato de tu correo: ${displayValue}${nota}.`;
   }
 
   return {
     abierto,
-    html: `<p><strong>Campo:</strong> ${field.label}</p>
+    html: `<p><strong>Campo:</strong> ${escapeHtml(field.label)}</p>
   ${contextoHtml}`,
     text: [`Campo: ${field.label}`, contextoText].join("\n"),
   };
@@ -144,7 +152,7 @@ export function renderDataConfirmationRequest(
       ? "necesitamos que confirmes los siguientes datos:"
       : "necesitamos que confirmes el siguiente dato:";
 
-  const introHtml = `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${data.caseId}</strong>, y ${queSigue}</p>`;
+  const introHtml = `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${escapeHtml(data.caseId)}</strong>, y ${queSigue}</p>`;
   const introText = `Gracias por tu reclamo. Lo registramos como caso #${data.caseId}, y ${queSigue}`;
 
   const actionHtml = isOpenQuestion
@@ -165,14 +173,14 @@ export function renderDataConfirmationRequest(
 
   const html = `<!DOCTYPE html>
 <html lang="es">
-<head><meta charset="UTF-8"><title>${subject}</title></head>
+<head><meta charset="UTF-8"><title>${escapeHtml(subject)}</title></head>
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
-  <h1 style="font-size: 20px; color: #1a56db;">${heading}</h1>
+  <h1 style="font-size: 20px; color: #1a56db;">${escapeHtml(heading)}</h1>
   ${introHtml}
   ${bloques.map((b) => b.html).join("\n  ")}
   ${actionHtml}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
-  <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente.</p>
+  <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${escapeHtml(data.caseId)}. Este mensaje fue generado automáticamente.</p>
 </body>
 </html>`;
 

@@ -11,6 +11,7 @@
  */
 
 import { displayFieldValue, labelForField } from "@/lib/labels/claim-fields";
+import { escapeHtml } from "@/server/email/render";
 
 export interface MissingInformationRequestData {
   caseId: string;
@@ -68,7 +69,7 @@ export function renderMissingInformationRequest(
   const fieldItemsHtml = data.missingFields
     .map((fieldKey) => {
       const { label, ask } = askFor(fieldKey);
-      return `<li><strong>${label}:</strong> ${ask}</li>`;
+      return `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(ask)}</li>`;
     })
     .join("\n");
 
@@ -81,16 +82,16 @@ export function renderMissingInformationRequest(
 
   const html = `<!DOCTYPE html>
 <html lang="es">
-<head><meta charset="UTF-8"><title>${subject}</title></head>
+<head><meta charset="UTF-8"><title>${escapeHtml(subject)}</title></head>
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #1a56db;">Información adicional requerida</h1>
-  <p>Gracias por tu reclamo. Para poder continuar con el procesamiento del <strong>caso #${data.caseId}</strong>, necesitamos que nos proporciones la siguiente información:</p>
+  <p>Gracias por tu reclamo. Para poder continuar con el procesamiento del <strong>caso #${escapeHtml(data.caseId)}</strong>, necesitamos que nos proporciones la siguiente información:</p>
   <ul style="line-height: 1.8;">
     ${fieldItemsHtml}
   </ul>
   <p>Por favor respondé este correo con los datos solicitados. Una vez que los recibamos, continuaremos con el análisis de tu reclamo.</p>
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
-  <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente.</p>
+  <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${escapeHtml(data.caseId)}. Este mensaje fue generado automáticamente.</p>
 </body>
 </html>`;
 

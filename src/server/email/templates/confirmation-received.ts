@@ -15,7 +15,7 @@
  */
 
 import { labelForClaimType } from "@/lib/labels/claim-fields";
-import { maskPolicyNumber } from "@/server/email/render";
+import { escapeHtml, maskPolicyNumber } from "@/server/email/render";
 
 export interface ConfirmationReceivedData {
   caseId: string;
@@ -40,7 +40,7 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
   // No type, no phrase. "tu reclamo de siniestro" is a sentence that spends
   // words to say nothing; "Registramos exitosamente tu reclamo." is complete.
   const claimLabel = labelForClaimType(data.claimType);
-  const claimPhraseHtml = claimLabel ? ` de <strong>${claimLabel}</strong>` : "";
+  const claimPhraseHtml = claimLabel ? ` de <strong>${escapeHtml(claimLabel)}</strong>` : "";
   const claimPhraseText = claimLabel ? ` de ${claimLabel}` : "";
 
   // maskPolicyNumber only keeps digits it can safely show, so a number like
@@ -51,7 +51,7 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
   const maskedPolicy = masked && /\d/.test(masked) ? masked : null;
 
   const policyLine = maskedPolicy
-    ? `<p>Póliza asociada: <strong>${maskedPolicy}</strong></p>`
+    ? `<p>Póliza asociada: <strong>${escapeHtml(maskedPolicy)}</strong></p>`
     : "";
   const policyLineText = maskedPolicy ? `Póliza asociada: ${maskedPolicy}\n` : "";
 
@@ -72,11 +72,11 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
 
   const html = `<!DOCTYPE html>
 <html lang="es">
-<head><meta charset="UTF-8"><title>${subject}</title></head>
+<head><meta charset="UTF-8"><title>${escapeHtml(subject)}</title></head>
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #1a56db;">${heading}</h1>
   <p>${openingHtml}</p>
-  <p>Tu número de caso es: <strong>#${data.caseId}</strong></p>
+  <p>Tu número de caso es: <strong>#${escapeHtml(data.caseId)}</strong></p>
   ${policyLine}
   <p>${nextStep}</p>
   <p>${closing}</p>

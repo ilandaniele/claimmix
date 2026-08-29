@@ -1,4 +1,5 @@
-/**
+
+import { escapeHtml } from "@/server/email/render";/**
  * Email template: specialist_escalation
  *
  * Sent when a case is escalated to a specialist due to high or critical severity.
@@ -33,15 +34,15 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
 
   const html = `<!DOCTYPE html>
 <html lang="es">
-<head><meta charset="UTF-8"><title>${subject}</title></head>
+<head><meta charset="UTF-8"><title>${escapeHtml(subject)}</title></head>
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #b91c1c;">Tu reclamo fue asignado a un especialista</h1>
   <p>${urgencyMsg}</p>
-  <p>Tu <strong>caso #${data.caseId}</strong> fue escalado a uno de nuestros especialistas, quien se comunicará con vos en un plazo máximo de <strong>24 horas hábiles</strong>.</p>
+  <p>Tu <strong>caso #${escapeHtml(data.caseId)}</strong> fue escalado a uno de nuestros especialistas, quien se comunicará con vos en un plazo máximo de <strong>24 horas hábiles</strong>.</p>
   <p>No es necesario que tomes ninguna acción adicional por el momento. Un especialista revisará en detalle tu situación y te contactará para coordinar los próximos pasos.</p>
   <p>Si tenés información adicional relevante, podés responder a este correo y será incorporada a tu caso.</p>
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
-  <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.</p>
+  <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${escapeHtml(data.caseId)}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.</p>
 </body>
 </html>`;
 

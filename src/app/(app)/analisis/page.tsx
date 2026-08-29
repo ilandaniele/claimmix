@@ -56,10 +56,20 @@ async function fetchAnalisis(): Promise<AnalisisData | null> {
       .from(users)
       .where(eq(users.id, session.user.id))
       .limit(1);
+    /*
+     * La comprobación va ANTES de leer la fila, no después.
+     *
+     * Estaba al revés: se armaba el contexto con `userRow.tenant_id` y recién
+     * en la línea siguiente se preguntaba si `userRow` existía. Con una sesión
+     * válida cuyo perfil ya no está —un usuario borrado, o una fila que nunca
+     * se creó— eso revienta con un TypeError antes de llegar al `return null`,
+     * así que la guarda no cerraba: cerraba el runtime.
+     */
+    if (!userRow) return null;
+
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
-    if (!userRow) return null;
 
     const now = new Date();
     const day7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();

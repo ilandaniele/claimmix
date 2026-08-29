@@ -21,13 +21,14 @@
  * AC13: Per-message errors are caught inside pollGmail; watermark only advances
  *       past successfully processed messages. Returns 200 with errors count.
  *
- * Security: CRON_SECRET compared with crypto.timingSafeEqual to prevent
- * timing oracle attacks (constant-time comparison).
+ * Seguridad: el Bearer CRON_SECRET se compara en tiempo constante, y esa
+ * comparación vive en `isInternalRequest` — una sola vez para todo el
+ * producto. Acá quedaba además un `import { timingSafeEqual }` sin usar,
+ * que es la clase de resto que invita a volver a escribirla a mano.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { isInternalRequest } from "@/lib/security/internal-auth";
-import { timingSafeEqual } from "crypto";
 import { pollAllGmailAccounts } from "@/server/email/gmail/gmail-poller";
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
 import { setupGmailWatch } from "@/server/email/gmail/watch";

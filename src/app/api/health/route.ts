@@ -24,7 +24,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { isInternalRequest } from "@/lib/security/internal-auth";
-import { timingSafeEqual } from "crypto";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 
 import { db, tables } from "@/lib/db";

@@ -25,6 +25,8 @@
  * que el worker de IA no puede fijar estados terminales; declarar el retorno
  * ancho lo habilitaría por tipos a cerrar un caso.
  */
+import type { CaseStatus } from "@/lib/schemas/cases";
+
 export type EstadoTrasExtraer =
   | "requiere_especialista"
   | "info_faltante"
@@ -61,4 +63,31 @@ export function estadoTrasExtraer(señales: SeñalesDeExtraccion): EstadoTrasExt
   if (señales.camposFaltantes > 0) return "info_faltante";
   if (señales.camposPorConfirmar > 0) return "confirmacion_pendiente";
   return "listo";
+}
+
+/**
+ * ¿Se puede mover el caso a ese estado, o hay que dejarlo donde está?
+ *
+ * Es la otra mitad pura del mismo bloque, y también vivía en línea adentro del
+ * worker. La decisión de arriba dice a dónde QUERRÍA ir el caso; ésta dice si
+ * la máquina de estados lo permite.
+ *
+ * Los dos estados de arranque —`recibido` y `procesando`— pasan siempre y no
+ * por comodidad: `recibido` es donde nace un caso de correo, y `procesando` es
+ * donde lo deja el worker mientras trabaja. Ninguno de los dos figura en
+ * `FSM_TRANSITIONS` con salidas hacia todos los estados que la extracción puede
+ * proponer, así que sin esta excepción el worker no podría mover nunca un caso
+ * recién llegado — que es lo único que hace.
+ *
+ * Y un caso que ya está en el estado que se propone tampoco necesita permiso:
+ * no hay transición que validar.
+ */
+export function sePuedeTransicionar(
+  desde: string,
+  hacia: string,
+  permite: (a: CaseStatus, b: CaseStatus) => boolean
+): boolean {
+  if (desde === hacia) return true;
+  if (desde === "recibido" || desde === "procesando") return true;
+  return permite(desde as CaseStatus, hacia as CaseStatus);
 }

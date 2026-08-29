@@ -34,6 +34,10 @@ import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
 import { FieldConfirmationsPanel } from "./_components/FieldConfirmationsPanel";
 import { AgentRunPanel } from "./_components/AgentRunPanel";
 import { PanelSection } from "./_components/PanelSection";
+import {
+  FraudRiskBadge,
+  InjurySeverityBadge,
+} from "./_components/RiskBadges";
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
@@ -553,38 +557,5 @@ function RawEmailAccordion({
         )
       )}
     </div>
-  );
-}
-
-function FraudRiskBadge({ level }: { level: string }) {
-  const styles: Record<string, string> = {
-    high:   "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-100",
-    medium: "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-100",
-    low:    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/60 dark:text-yellow-100",
-  };
-  const labels: Record<string, string> = {
-    high: "Riesgo alto", medium: "Riesgo medio", low: "Riesgo bajo",
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[level] ?? styles.low}`}>
-      {labels[level] ?? level}
-    </span>
-  );
-}
-
-function InjurySeverityBadge({ severity }: { severity: string }) {
-  const styles: Record<string, string> = {
-    fatal:  "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-100",
-    severe: "bg-orange-100 text-orange-800 dark:bg-orange-900/60 dark:text-orange-100",
-    minor:  "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-100",
-    none:   "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
-  };
-  const labels: Record<string, string> = {
-    fatal: "Fatal", severe: "Graves", minor: "Leves", none: "Sin lesiones",
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[severity] ?? styles.none}`}>
-      {labels[severity] ?? severity}
-    </span>
   );
 }

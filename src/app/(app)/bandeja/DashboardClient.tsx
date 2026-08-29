@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { FilterTabs } from "./components/FilterTabs";
+import { usePaginacion } from "./components/useFilterParam";
 import { TypeFilterChips } from "./components/TypeFilterChips";
 import {
   ChannelFilterChips,
@@ -242,7 +243,6 @@ export function DashboardClient({
   allStatusCounts,
 }: DashboardClientProps) {
   const t = useT();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const activeStatus = (searchParams.get("status") as CaseStatus) || undefined;
   const activeType = (searchParams.get("type") as ClaimType) || undefined;
@@ -446,20 +446,10 @@ export function DashboardClient({
   });
   const visibleTotal = total;
 
-  function handlePageChange(newPage: number) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("page", String(newPage));
-    router.push(`/bandeja?${params.toString()}`);
-  }
-
-  function handlePerPageChange(newPerPage: number) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("per_page", String(newPerPage));
-    // Row 1 of the new page size is always on page 1 — staying on the old page
-    // number can land past the end of the shorter list.
-    params.set("page", "1");
-    router.push(`/bandeja?${params.toString()}`);
-  }
+  // Paginar sale del mismo módulo que filtrar, y ahí está escrito por qué son
+  // dos funciones y no una: filtrar borra `page`, paginar lo pone.
+  const { irAPagina: handlePageChange, cambiarTamanoDePagina: handlePerPageChange } =
+    usePaginacion();
 
   const tabCounts = statusCountsBase;
 

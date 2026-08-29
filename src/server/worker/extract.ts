@@ -59,7 +59,10 @@ import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-class
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/core/case/fsm";
-import { estadoTrasExtraer } from "@/core/case/status-after-extraction";
+import {
+  estadoTrasExtraer,
+  sePuedeTransicionar,
+} from "@/core/case/status-after-extraction";
 import { CLAIM_FIELD_KEYS } from "@/lib/schemas/extracted-claim";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
@@ -976,16 +979,11 @@ export async function runEmailExtractionWorker(
       camposPorConfirmar: (extractedClaim.fields_pending_confirmation ?? []).length,
     });
 
-    // FSM safety check (LLM08).
-    // The recibido status is the starting point for email cases — no transition needed
-    // if we're moving from recibido to another status.
-    // For cases coming from info_faltante (thread reply), validate the transition.
+    // La guarda de la máquina de estados (LLM08), también pura y también en
+    // `@/core/case/status-after-extraction`.
     const currentStatus = caseRow.status as string;
-    const isValidNewStatus = currentStatus === "recibido" ||
-      currentStatus === "procesando" ||
-      isValidTransition(currentStatus as any, newStatus as any);
 
-    if (!isValidNewStatus && currentStatus !== newStatus) {
+    if (!sePuedeTransicionar(currentStatus, newStatus, isValidTransition)) {
       console.warn(
         JSON.stringify({
           level: "warn",

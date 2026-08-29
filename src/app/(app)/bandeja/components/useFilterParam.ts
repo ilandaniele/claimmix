@@ -34,3 +34,47 @@ export function useFilterParam(): (clave: string, valor: string | null) => void 
     [router, pathname, searchParams]
   );
 }
+
+/**
+ * Moverse por las páginas, que NO es lo mismo que filtrar.
+ *
+ * Comparte con `useFilterParam` el mismo bloque de clonar los parámetros y
+ * empujar la ruta, y por eso vive acá al lado. Lo que cambia es justo lo que
+ * hace falta que se note: filtrar borra `page` porque el conjunto es otro;
+ * paginar lo pone.
+ *
+ * Estaban escritos a mano en `DashboardClient`, que eran las dos últimas copias
+ * de este bloque en la bandeja.
+ */
+export function usePaginacion(): {
+  irAPagina: (pagina: number) => void;
+  cambiarTamanoDePagina: (porPagina: number) => void;
+} {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const irAPagina = useCallback(
+    (pagina: number) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("page", String(pagina));
+      router.push(`${pathname}?${params.toString()}`);
+    },
+    [router, pathname, searchParams]
+  );
+
+  const cambiarTamanoDePagina = useCallback(
+    (porPagina: number) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("per_page", String(porPagina));
+      // La fila 1 del tamaño nuevo está siempre en la página 1: quedarse en el
+      // número de página viejo puede caer más allá del final de una lista más
+      // corta.
+      params.set("page", "1");
+      router.push(`${pathname}?${params.toString()}`);
+    },
+    [router, pathname, searchParams]
+  );
+
+  return { irAPagina, cambiarTamanoDePagina };
+}

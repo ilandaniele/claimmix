@@ -29,7 +29,7 @@ import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
-const TOPE_FILTROS = 14;
+const TOPE_FILTROS = 10;
 
 function archivos(dir, ext = [".ts", ".tsx"]) {
   if (!existsSync(dir)) return [];

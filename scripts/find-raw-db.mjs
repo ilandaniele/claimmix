@@ -17,14 +17,21 @@ import { execSync } from "node:child_process";
 
 const SALTO = String.fromCharCode(10);
 
-/** Los tramos `enTenant(…)` de un archivo, como pares [inicio, fin). */
+/**
+ * Los tramos de la capa de datos de un archivo, como pares [inicio, fin).
+ *
+ * `paginarEnTenant` cuenta igual que `enTenant`: es un envoltorio que arma las
+ * dos consultas de una página y las manda por `enTenantVarias`. Sin nombrarlo
+ * acá, cada listado paginado salía reportado como consulta cruda, que es
+ * exactamente al revés de lo que es.
+ */
 function tramosDeLaCapa(s) {
   const tramos = [];
   // El `(?:<[^(]*>)?` es por `enTenantVarias<[A, B]>(…)`: cuando la llamada
   // lleva un argumento de tipo, el paréntesis no viene pegado al nombre, y sin
   // esto el tramo entero quedaba sin reconocer y sus consultas salían como
   // crudas cuando no lo son.
-  const re = /\benTenant(?:Varias)?\s*(?:<[^(]*>)?\s*\(/g;
+  const re = /\b(?:paginarEnTenant|enTenant(?:Varias)?)\s*(?:<[^(]*>)?\s*\(/g;
   let m;
   while ((m = re.exec(s))) {
     let i = s.indexOf("(", m.index);
@@ -44,8 +51,13 @@ function tramosDeLaCapa(s) {
   return tramos;
 }
 
+// `--others --exclude-standard` suma los archivos nuevos que todavía no
+// entraron al índice. Sin eso, un módulo recién escrito era invisible para esta
+// comprobación hasta después del commit — o sea, justo en el momento en que
+// servía. Pasó: dos listados nuevos pasaron el chequeo en verde y aparecieron
+// como rotos recién en el commit siguiente.
 const archivos = execSync(
-  'git ls-files "src/**/*.ts" "src/**/*.tsx"',
+  'git ls-files --cached --others --exclude-standard "src/**/*.ts" "src/**/*.tsx"',
   { encoding: "utf8" }
 )
   .split("\n")

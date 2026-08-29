@@ -801,11 +801,17 @@ en varios casos la corrección cambió qué había que hacer.
 
 **Lo que quedó anotado y NO se hizo, a propósito:**
 
-- **Las once consultas por render del detalle de caso.** Juntarlas en un solo
-  `enTenantVarias` cambia el comportamiento ante fallas: hoy hay cinco dominios
-  independientes y un lote es una transacción. Un hipo leyendo la auditoría
-  vaciaría la pantalla entera. Es un problema real, pero la respuesta no es una
-  transacción que falle entera.
+- ~~**Las once consultas por render del detalle de caso.**~~ ✅ **HECHO
+  2026-08-29**, pero NO como pedía el hallazgo. Lo que se paga no es la cantidad
+  de consultas sino la de esperas encadenadas, y eran cinco: la fila del caso,
+  tres relacionadas, dos de correo, el respaldo del parser, y el acordeón —que
+  era otro componente de servidor que consultaba solo—. Ahora son DOS: la fila
+  del caso, y después todo junto. Sigue siendo una consulta por cosa, cada una
+  con su `.catch`, así que los cinco dominios de falla se mantienen: juntarlas
+  en un `enTenantVarias` habría hecho que un hipo leyendo la auditoría vaciara
+  la pantalla entera. Hay tests que fijan las dos cosas —las dos tandas y la
+  independencia ante fallas— y el de las tandas no cuenta consultas: cuenta
+  cuándo arranca y termina cada una.
 - **El andamiaje de los tests del worker está copiado en cuatro archivos**, más
   de cien líneas cada uno. Hay un `worker-harness.ts` que ya lo comparte para
   los nuevos; migrar los viejos es reescribir tests verdes, que es justo cuando

@@ -743,6 +743,80 @@ compartieron cupo— Vercel la sobrescribe en el borde. No es una vulnerabilidad
 es una garantía de la plataforma de la que dependen todos los topes, y ahora
 está escrita en el código.
 
+### 🔍 Auditoría del código contra las buenas prácticas (2026-08-28/29)
+
+Barrido del código entero contra el documento de estándares: DRY, KISS, una
+responsabilidad por archivo, capas claras, nada de N+1. De los hallazgos que se
+sostuvieron contra el código real, se implementaron todos. Cada plan pasó antes
+por un pase adversarial que lo refutó; los siete volvieron con correcciones, y
+en varios casos la corrección cambió qué había que hacer.
+
+**Bugs vivos que aparecieron en el camino** (no eran el objetivo del barrido):
+
+- **Confirmar un campo sin valor escribía y después contestaba 400.** La fila de
+  `claim_field_confirmations` quedaba marcada como confirmada y el analista veía
+  «Error al procesar la confirmación». Reintentaba y fallaba de nuevo, porque la
+  fila ya no estaba pendiente. Sin salida. Arreglado en los dos extremos: el
+  servidor corta antes de escribir, y la pantalla no ofrece confirmar lo que no
+  tiene valor.
+- **Tres datos en conflicto mandaban tres mails al asegurado.** Es lo que pasa
+  cuando escribe un familiar del titular —nombre, mail y documento distintos—.
+  Ahora es un mensaje que los lista.
+- **Un typo en el canal del chequeo de entrega mandaba un mail.** El canal se
+  resolvía con `channel === "whatsapp" ? … : "email"`, así que «whatsap» mandaba
+  un correo. Ahora se valida contra la lista.
+- **El mensaje de presupuesto agotado decía «para este mes» siempre**, pero dos
+  de los tres topes son diarios.
+
+**Lo que dependía de la suerte:**
+
+- Que un ensayo no le escriba a una persona real NO lo garantizaba el canal
+  `email_sim` —`dispatch.ts` no mira el canal—: lo garantizaba que el `from_addr`
+  fuera `@example.com`. En modo texto libre quedaba `null`, y lo único que
+  frenaba el envío era que Gmail no puede mandar a una dirección vacía. Ahora es
+  siempre una dirección reservada y válida.
+- `POST /api/health/delivery` —que manda mensajes de verdad— no tenía ni un
+  test, y su registro de auditoría no anotaba a quién. Ahora tiene 26 y anota el
+  destinatario enmascarado.
+
+**Tests que estaban en verde sin probar nada:**
+
+- Cuatro criterios de aceptación probaban una función vacía: el archivo mockeaba
+  el módulo bajo prueba y después lo llamaba. Uno de ellos afirmaba que el mock
+  había sido llamado con los argumentos que el propio test le pasó.
+- Las cuatro ramas que eligen el estado de un caso no las cubría nadie: invertir
+  dos `if` dejaba los 2300 tests en verde.
+- Ninguna de las cuatro pruebas de conflicto contaba envíos, así que ni el N+1
+  ni los N mails estaban cubiertos.
+
+**Duplicación real que se fue:**
+
+- La lista de los nueve datos del siniestro estaba escrita tres veces (esquema,
+  hidratación, y una escalera de `if` en el worker). Ahora sale del esquema.
+- Clientes y pólizas eran el mismo controlador escrito dos veces.
+- Los dos módulos de fine-tuning elegían el conjunto de entrenamiento por
+  separado.
+- La misma consulta de mensajes estaba escrita dos veces en la misma pantalla.
+- Once paneles del detalle de caso escribían a mano su `aria-labelledby`.
+
+**Lo que quedó anotado y NO se hizo, a propósito:**
+
+- **Las once consultas por render del detalle de caso.** Juntarlas en un solo
+  `enTenantVarias` cambia el comportamiento ante fallas: hoy hay cinco dominios
+  independientes y un lote es una transacción. Un hipo leyendo la auditoría
+  vaciaría la pantalla entera. Es un problema real, pero la respuesta no es una
+  transacción que falle entera.
+- **El andamiaje de los tests del worker está copiado en cuatro archivos**, más
+  de cien líneas cada uno. Hay un `worker-harness.ts` que ya lo comparte para
+  los nuevos; migrar los viejos es reescribir tests verdes, que es justo cuando
+  se pierde cobertura sin que nadie lo note.
+- **`ip` y `user-agent` en la auditoría de confirmaciones.** Copiarlos del PATCH
+  de `/api/cases/[id]` haría que empiece a guardarse la IP del analista donde
+  hoy va `null`. Es un cambio de dato personal almacenado: se decide aparte.
+
+Cobertura al cierre: 72.9 sentencias / 63.2 ramas / 74.5 funciones / 73.9
+líneas, arriba de los pisos y arriba de donde arrancó. 2362 unitarios en verde.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

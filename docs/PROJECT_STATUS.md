@@ -917,6 +917,29 @@ de Better Auth— se escribió dos veces: la primera aceptaba «cualquier error�
 pasaba CON el agujero puesto, porque un endpoint montado da 401 y uno inexistente
 da 404, y los dos son >= 400. Ahora exige 404 y trae su propia prueba de control.
 
+**Y un e2e que se saltaba solo.** Al cerrar la CSP, CI se puso en rojo con un
+test que decía comprobar que `/api` traía la cabecera del proxy:
+
+```ts
+if (csp) { expect(csp).toContain("script-src"); }
+```
+
+La API no traía ninguna CSP, así que la condición era falsa y el test pasaba en
+verde sin afirmar nada — se leía como cobertura de una cabecera de seguridad y no
+comprobaba que existiera. Falló recién cuando la cabecera empezó a existir. La
+premisa además era falsa: el proxy no corre para `/api`, su matcher la excluye a
+propósito. Reescrito sin `if`, y con uno nuevo que afirma lo que se acaba de
+ganar: la CSP de una página lleva nonce y no tiene `unsafe-inline` ni
+`unsafe-eval`.
+
+Después CI se cayó una vez más con `Timed out waiting 120000ms from
+config.webServer` y ninguna línea más: Playwright ignora el stdout del servidor,
+así que no se distinguía una compilación en frío de un proceso muerto. Re-correr
+pasó en verde —era lo primero—, pero eso se supo re-corriendo y no leyendo. Ahora
+`stdout`/`stderr` van a `pipe` y el tope en CI es 240 s, donde no hay caché de
+Turbopack. Un servidor roto de verdad sigue fallando, sólo que más tarde y
+diciendo por qué.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

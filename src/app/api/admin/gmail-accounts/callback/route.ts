@@ -5,26 +5,17 @@ import { tables } from "@/lib/db";
 import { encryptRefreshToken } from "@/server/email/gmail/accounts";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
 import { enTenant } from "@/data/scope";
-
-type StatePayload = {
-  tenantId?: string;
-  userId?: string;
-};
-
-function decodeState(state: string | null): StatePayload {
-  if (!state) return {};
-  try {
-    return JSON.parse(Buffer.from(state, "base64url").toString("utf8")) as StatePayload;
-  } catch {
-    return {};
-  }
-}
+import {
+  COOKIE_ESTADO_OAUTH,
+  decodificarEstado,
+  estadoEsValido,
+} from "@/lib/auth/oauth-state";
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const origin = requestUrl.origin;
   const code = requestUrl.searchParams.get("code");
-  const state = decodeState(requestUrl.searchParams.get("state"));
+  const state = decodificarEstado(requestUrl.searchParams.get("state"));
 
   if (!code) {
     return NextResponse.redirect(new URL("/configuracion?gmail=missing_code", origin));
@@ -32,8 +23,24 @@ export async function GET(request: NextRequest) {
 
   try {
     const { user, userRow } = await requireRole(...ADMIN_ROLES);
-    if (state.tenantId !== userRow.tenant_id || state.userId !== user.id) {
-      return NextResponse.redirect(new URL("/configuracion?gmail=invalid_state", origin));
+    /*
+     * El `state` tiene que traer el nonce que dejamos en la cookie.
+     *
+     * Comparar sólo inquilino y usuario alcanzaba para que nadie enganchara una
+     * casilla a la aseguradora de otro, pero no para el CSRF clásico de OAuth:
+     * un admin conoce el `userId` de sus colegas —lo ve en el padrón— y podía
+     * armarles un `state` válido. El nonce lo pone el servidor y viaja también
+     * en una cookie `HttpOnly` que el atacante no puede escribir.
+     */
+    const esperado = request.cookies.get(COOKIE_ESTADO_OAUTH)?.value;
+    if (!estadoEsValido(state, { tenantId: userRow.tenant_id, userId: user.id }, esperado)) {
+      const rechazo = NextResponse.redirect(
+        new URL("/configuracion?gmail=invalid_state", origin)
+      );
+      // Se quema igual: un nonce que no sirvió no puede quedar dando vueltas
+      // para un segundo intento.
+      rechazo.cookies.delete(COOKIE_ESTADO_OAUTH);
+      return rechazo;
     }
 
     const clientId = process.env.GMAIL_CLIENT_ID;
@@ -126,7 +133,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.redirect(new URL("/configuracion?gmail=connected", origin));
+    // Un `state` sirve una sola vez: la cookie se quema al terminar bien, igual
+    // que al rechazar.
+    const listo = NextResponse.redirect(new URL("/configuracion?gmail=connected", origin));
+    listo.cookies.delete(COOKIE_ESTADO_OAUTH);
+    return listo;
   } catch (err) {
     const name = err instanceof Error ? err.name : "UnknownError";
     console.error("[gmail-accounts callback] error:", name);

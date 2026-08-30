@@ -89,14 +89,39 @@ const TOPIC = "projects/claimmix-506321/topics/gmail-push";
 const REFRESH = "refresh-token-nuevo";
 const EMAIL = "casilla@example.com";
 
-function makeRequest(): NextRequest {
+const NONCE = "nonce-de-prueba-que-viaja-por-los-dos-caminos";
+
+/**
+ * La vuelta de Google, tal como llega en el caso normal.
+ *
+ * El nonce va por DOS caminos: adentro del `state` —que va y vuelve por
+ * Google— y en la cookie que dejó `/connect`. Los dos tienen que estar, y
+ * coincidir.
+ *
+ * `opciones.sinCookie` arma el ataque: un `state` perfecto, con el inquilino y
+ * el usuario correctos, y sin la cookie. Es lo que puede fabricar alguien que
+ * conoce el `userId` de un colega pero no puede escribirle una cookie al
+ * navegador.
+ */
+function makeRequest(
+  opciones: { sinCookie?: boolean; nonceEnState?: string } = {}
+): NextRequest {
   const state = Buffer.from(
-    JSON.stringify({ tenantId: TENANT, userId: USER }),
+    JSON.stringify({
+      tenantId: TENANT,
+      userId: USER,
+      nonce: opciones.nonceEnState ?? NONCE,
+    }),
     "utf8"
   ).toString("base64url");
-  return new NextRequest(
+
+  const req = new NextRequest(
     `http://localhost/api/admin/gmail-accounts/callback?code=abc123&state=${state}`
   );
+  if (!opciones.sinCookie) {
+    req.cookies.set("gmail_oauth_state", NONCE);
+  }
+  return req;
 }
 
 const destino = (res: Response) =>
@@ -191,6 +216,45 @@ describe("GET /api/admin/gmail-accounts/callback", () => {
 
     expect(destino(res)).toBe("missing_refresh_token");
     expect(mockSetupGmailWatch).not.toHaveBeenCalled();
+  });
+
+  /*
+   * El CSRF clásico de OAuth.
+   *
+   * Un admin ve el padrón de su aseguradora, así que conoce el `userId` de sus
+   * colegas: podía armarles un `state` válido, conseguir un `code` de su propia
+   * casilla, y lograr que el colega abriera esta URL. La casilla del atacante
+   * quedaba enganchada a la aseguradora y todos los siniestros pasaban por ahí.
+   *
+   * Comparar inquilino y usuario no lo frenaba: el atacante los sabe. Lo que lo
+   * frena es el nonce, porque viaja también en una cookie que no puede escribir.
+   */
+  it("rechaza un state perfecto que no trae la cookie", async () => {
+    const res = await GET(makeRequest({ sinCookie: true }));
+
+    expect(destino(res)).toBe("invalid_state");
+  });
+
+  it("rechaza un nonce que no es el de la cookie", async () => {
+    const res = await GET(makeRequest({ nonceEnState: "otro-nonce-cualquiera" }));
+
+    expect(destino(res)).toBe("invalid_state");
+  });
+
+  it("rechaza un state del formato viejo, sin nonce", async () => {
+    // Si el formato sin nonce siguiera pasando, el arreglo no serviría de nada.
+    const viejo = Buffer.from(
+      JSON.stringify({ tenantId: TENANT, userId: USER }),
+      "utf8"
+    ).toString("base64url");
+    const req = new NextRequest(
+      `http://localhost/api/admin/gmail-accounts/callback?code=abc123&state=${viejo}`
+    );
+    req.cookies.set("gmail_oauth_state", NONCE);
+
+    const res = await GET(req);
+
+    expect(destino(res)).toBe("invalid_state");
   });
 
   it("rechaza un state de otro tenant", async () => {

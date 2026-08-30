@@ -835,6 +835,74 @@ en varios casos la corrección cambió qué había que hacer.
 Cobertura al cierre: 72.9 sentencias / 63.2 ramas / 74.5 funciones / 73.9
 líneas, arriba de los pisos y arriba de donde arrancó. 2362 unitarios en verde.
 
+### 🔐 VibeSec sobre todo el repo (2026-08-29/30)
+
+Se pasó [VibeSec-Skill](https://github.com/BehiSecc/VibeSec-Skill) entera sobre
+el código, sección por sección, con un pase adversarial que refutó cada hallazgo
+antes de darlo por bueno. La guía queda versionada en `.claude/skills/vibesec/`
+con una nota de qué asume y qué hace distinto este repo — que es la fuente
+número uno de falsos positivos al leerla acá.
+
+**Lo más grave, y no lo encontró el pentest propio:**
+
+- **Quince endpoints que cruzaban aseguradoras.** El plugin `admin` de Better
+  Auth publicaba `/api/auth/admin/*`: `list-users` devolvía el padrón de TODAS,
+  e `impersonate-user` emitía una sesión a nombre de cualquier usuario de
+  cualquiera, salteándose entera la capa RLS. Decidía el permiso contra
+  `authUsers.role`, una columna paralela a la que usa el producto y que nadie
+  sincronizaba: el día que alguien las «alineara», cada admin de aseguradora
+  pasaba a ser admin global. La aplicación no llamaba a ninguno. Se sacó.
+- **Un asegurado podía hacer que la aseguradora le mandara phishing a quien él
+  eligiera.** Las cinco plantillas de correo interpolaban sin escapar todo lo
+  que viene de afuera. Y el destinatario lo elegía el atacante: el mail sale a
+  la dirección del `From` entrante, que nadie verifica. Ahora se escapa el HTML
+  (el texto plano NO, y hay un test que lo fija en los dos sentidos).
+- **Un admin podía enganchar SU casilla de Gmail a la aseguradora de un
+  colega.** Al `state` de OAuth le faltaba un nonce; un admin conoce el `userId`
+  de sus colegas porque ve el padrón. Ahora el nonce viaja por dos caminos y la
+  cookie se quema al usarse.
+- **`/api/intake/simulate` no tenía guarda de rol**, y el encabezado del archivo
+  decía que sí. Un `viewer` creaba casos reales y gastaba IA.
+
+**Fallos abiertos, que es el patrón que más se repitió:**
+
+- El limitador de tráfico se degradaba a memoria en silencio si faltaba
+  `DATABASE_URL`. En serverless eso es no tener tope.
+- El webhook de Gmail no verificaba NADA si faltaba `PUBSUB_AUDIENCE`.
+- La deduplicación de adjuntos corría antes de validar el tipo, así que
+  reenviar los mismos bytes con otro `Content-Type` salteaba la lista blanca.
+  Y `image/*` dejaba pasar SVG, que es XML con script adentro.
+
+**Sesiones que no se cerraban cuando alguien las cerraba:**
+
+- Restablecer la contraseña no cerraba las sesiones abiertas — que es el motivo
+  por el que alguien la restablece.
+- Cambiarla pedía explícitamente `revokeOtherSessions: false`.
+- Y el caché de sesión en cookie duraba 5 minutos, o sea el techo de cuánto
+  sobrevive una sesión ya revocada. Bajó a 60 segundos, y la pantalla lo dice.
+
+**De más al navegador:** el historial del caso viajaba entero, con la IP y el
+navegador de cada analista; el error crudo de Gemini volvía al cliente; y la
+versión de Node y la región se le mostraban a cualquiera.
+
+**Lo que se miró y se dejó como está, con motivo:**
+
+- El alta distingue si una dirección ya tiene cuenta. Es enumeración, sí, pero
+  el alta ya está acotada por lista blanca y «ya tenés cuenta, iniciá sesión» es
+  mejor para una herramienta interna que un mensaje genérico.
+- `style-src 'unsafe-inline'`: lo permite el ejemplo del propio manual y sacarlo
+  rompe los estilos en línea de Next.
+- La CSP no llega a `/api`, y ahí no protege nada: `nosniff`, `X-Frame-Options`,
+  HSTS y `Referrer-Policy` sí llegan, y en una respuesta JSON no hay nada que
+  ejecutar.
+- El token de recuperación viaja en la query string. Es como funciona un enlace
+  por correo; la alternativa lo rompe.
+
+`pnpm pentest` pasó de 30 a 36 intentos, y la sonda nueva —la del subárbol admin
+de Better Auth— se escribió dos veces: la primera aceptaba «cualquier error» y
+pasaba CON el agujero puesto, porque un endpoint montado da 401 y uno inexistente
+da 404, y los dos son >= 400. Ahora exige 404 y trae su propia prueba de control.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

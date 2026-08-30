@@ -885,18 +885,32 @@ número uno de falsos positivos al leerla acá.
 navegador de cada analista; el error crudo de Gemini volvía al cliente; y la
 versión de Node y la región se le mostraban a cualquiera.
 
-**Lo que se miró y se dejó como está, con motivo:**
+**Los cuatro que primero dejé con motivo, y después se hicieron igual.** Tres de
+esos motivos resultaron menos ciertos de lo que pensé, y vale más eso que la
+lista:
 
-- El alta distingue si una dirección ya tiene cuenta. Es enumeración, sí, pero
-  el alta ya está acotada por lista blanca y «ya tenés cuenta, iniciá sesión» es
-  mejor para una herramienta interna que un mensaje genérico.
-- `style-src 'unsafe-inline'`: lo permite el ejemplo del propio manual y sacarlo
-  rompe los estilos en línea de Next.
-- La CSP no llega a `/api`, y ahí no protege nada: `nosniff`, `X-Frame-Options`,
-  HSTS y `Referrer-Policy` sí llegan, y en una respuesta JSON no hay nada que
-  ejecutar.
-- El token de recuperación viaja en la query string. Es como funciona un enlace
-  por correo; la alternativa lo rompe.
+- ~~`style-src 'unsafe-inline'`~~ ✅ **fuera.** El encabezado del propio archivo
+  decía que Tailwind v4 genera estilos en línea en tiempo de ejecución y que por
+  eso hacía falta. Probado en un navegador contra un build de producción: es
+  falso. Lo que producía atributos `style` eran siete `style={{ width }}`
+  NUESTROS, en las barras de progreso; Tailwind emite una hoja, que `'self'` ya
+  cubre. Las barras pasaron a una clase redondeada al 5% (`ancho-de-barra.ts`,
+  21 clases literales porque Tailwind sólo compila las que ve escritas). Cero
+  violaciones en producción; las 17 que salen en desarrollo son del overlay de
+  Next. El nonce NO cubre atributos `style`, sólo bloques `<style>` — medido.
+- ~~La CSP no llega a `/api`~~ ✅ **ahora tiene la suya, más cerrada:**
+  `default-src 'none'`. Sin `sandbox`, que habría roto la descarga del CSV.
+- ~~El token de recuperación en la query string~~ ✅ **sale de la URL apenas la
+  página lo lee.** Llega ahí porque así funciona un enlace por correo; eso no
+  obliga a que se quede. Costo aceptado: recargar pierde el enlace.
+- ~~El alta distingue si una dirección ya tiene cuenta~~ ✅ **los dos caminos
+  terminan igual.** Lo que NO arregla, escrito en el código: un alta nueva sí
+  deja sesión y cae en /bandeja, pero eso ya no es una sonda pasiva.
+
+`pnpm pentest` quedó en 40 intentos. Tres sondas nuevas cuidan esto: `script-src`
+y `style-src` sin `unsafe-inline`, sin `unsafe-eval`, y que la API traiga su CSP.
+La primera importa porque la que ya había sólo miraba que `script-src` tuviera
+un nonce — y un `'nonce-…' 'unsafe-inline'` la pasaba.
 
 `pnpm pentest` pasó de 30 a 36 intentos, y la sonda nueva —la del subárbol admin
 de Better Auth— se escribió dos veces: la primera aceptaba «cualquier error» y

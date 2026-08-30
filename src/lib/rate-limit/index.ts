@@ -218,6 +218,27 @@ export function buildSignInKey(ip: string, email: string): string {
 }
 
 /**
+ * El techo por IP sola de los caminos de autenticación.
+ *
+ * Es el segundo tope, y frena un ataque distinto del de `buildSignInKey`. Ese
+ * es por (IP, dirección): corta a quien prueba contraseñas contra UNA cuenta.
+ * Pero con sólo ése, alguien con una lista de diez mil direcciones tiene cinco
+ * intentos en cada una y ninguno en total — cincuenta mil pruebas desde una
+ * sola IP sin tocar el techo. Es el ataque más común contra un login: no
+ * adivinar la contraseña de una persona, sino probar una contraseña conocida
+ * contra mucha gente.
+ *
+ * Vive acá y no escrito a mano en cada llamador porque la clave TIENE que ser
+ * la misma en todos: dos formas de escribir `auth:ip:…` son dos cupos
+ * distintos, y el que atacan es el que tenga el número más alto. La ruta HTTP
+ * lo aplicaba y los Server Actions del login y de la recuperación no, así que
+ * el camino que usa el formulario de la pantalla era el que no tenía techo.
+ */
+export function topePorIp(ip: string): Promise<RateLimitResult> {
+  return rateLimit(`auth:ip:${ip}`, RATE_LIMIT_CONFIGS.AUTH_POR_IP);
+}
+
+/**
  * Build a rate-limit key for authenticated user endpoints.
  */
 export function buildUserKey(userId: string, endpoint: string): string {
@@ -232,6 +253,18 @@ export function buildUserKey(userId: string, endpoint: string): string {
  * On non-Vercel hosts, strip user-supplied x-forwarded-for at the load balancer.
  */
 export function getClientIp(request: Request): string {
+  return clientIpFromHeaders(request.headers);
+}
+
+/**
+ * La misma decisión, pero desde unos `Headers` sueltos.
+ *
+ * Existe por los Server Actions: ahí no hay `Request`, hay `await headers()`.
+ * Sin esto, cada uno resolvía la IP a mano —`x-forwarded-for` partido por
+ * coma— y se perdía la preferencia por `x-vercel-forwarded-for`, que es la
+ * única cabecera que no puede escribir quien llama.
+ */
+export function clientIpFromHeaders(headers: Headers): string {
   /*
    * Esto toma el valor de más a la IZQUIERDA de `X-Forwarded-For`, que en el
    * caso general lo escribe quien llama y no vale nada. Acá sirve por una razón
@@ -252,12 +285,12 @@ export function getClientIp(request: Request): string {
    * Por eso `x-vercel-forwarded-for` va primero cuando está: la pone Vercel y
    * sólo Vercel, así que no depende de que nadie más se comporte.
    */
-  const deVercel = request.headers.get("x-vercel-forwarded-for");
+  const deVercel = headers.get("x-vercel-forwarded-for");
   if (deVercel) return deVercel.split(",")[0].trim();
 
-  const xff = request.headers.get("x-forwarded-for");
+  const xff = headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
-  const xReal = request.headers.get("x-real-ip");
+  const xReal = headers.get("x-real-ip");
   if (xReal) return xReal.trim();
   return "anonymous";
 }

@@ -21,7 +21,12 @@ import { headers } from "next/headers";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
-import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import {
+  RATE_LIMIT_CONFIGS,
+  clientIpFromHeaders,
+  rateLimit,
+  topePorIp,
+} from "@/lib/rate-limit/index";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 const Schema = z.object({
@@ -51,11 +56,19 @@ export async function pedirEnlace(
   const email = parsed.data.email.trim().toLowerCase();
 
   const headerStore = await headers();
-  const xff = headerStore.get("x-forwarded-for");
-  const ip = xff ? xff.split(",")[0].trim() : "anonymous";
+  const ip = clientIpFromHeaders(headerStore);
 
+  /*
+   * Igual que el login: dos topes, y el segundo cubre otro ataque.
+   *
+   * `reset:ip:email` corta a quien pide una y otra vez el enlace de UNA cuenta
+   * —que es hostigamiento contra esa persona—. El de IP sola corta a quien
+   * recorre una lista pidiendo un enlace por dirección, que además de ser
+   * ruidoso sirve para averiguar qué direcciones existen midiendo el tiempo.
+   */
   const rl = await rateLimit(`reset:${ip}:${email}`, RATE_LIMIT_CONFIGS.AUTH_RESET);
-  if (!rl.allowed) {
+  const porIp = await topePorIp(ip);
+  if (!rl.allowed || !porIp.allowed) {
     await writeAuditLog({
       tenant_id: "00000000-0000-0000-0000-000000000000",
       actor_id: null,

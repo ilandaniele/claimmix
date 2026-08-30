@@ -23,7 +23,11 @@ import { redirect } from "next/navigation";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { auth } from "@/lib/auth";
 import { resolveDefaultTenantId } from "@/lib/auth/provision";
-import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import {
+  RATE_LIMIT_CONFIGS,
+  clientIpFromHeaders,
+  rateLimit,
+} from "@/lib/rate-limit/index";
 import { SignUpSchema } from "@/lib/schemas/auth";
 
 type SignUpState = {
@@ -52,8 +56,9 @@ export async function signUp(
 
   // ── 2. Rate limiting (per IP) ──────────────────────────────────────────────
   const headerStore = await headers();
-  const xff = headerStore.get("x-forwarded-for");
-  const ip = xff ? xff.split(",")[0].trim() : "anonymous";
+  // La misma resolución que la ruta HTTP: prefiere `x-vercel-forwarded-for`,
+  // que es la única cabecera que no puede escribir quien llama.
+  const ip = clientIpFromHeaders(headerStore);
   const ua = headerStore.get("user-agent") ?? null;
 
   const rl = await rateLimit(`signup:${ip}`, RATE_LIMIT_CONFIGS.AUTH_SIGN_UP);

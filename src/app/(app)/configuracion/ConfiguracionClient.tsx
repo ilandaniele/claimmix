@@ -34,10 +34,23 @@ export function ConfiguracionClient() {
     setState("loading");
 
     try {
+      /*
+       * Cambiar la contraseña cierra las otras sesiones.
+       *
+       * Decía `false`, y eso es pedirle explícitamente a Better Auth que las
+       * deje abiertas. Alguien que cambia la contraseña porque sospecha que le
+       * entraron dejaba viva la sesión del que entró —hasta treinta días, que
+       * es lo que duran—: el gesto no hacía lo que la persona cree que hace.
+       *
+       * `true` cierra las demás y conserva ésta, así que quien lo hace no se
+       * queda afuera de la pantalla donde está parado.
+       *
+       * El mismo criterio en `onPasswordReset`, para el camino de recuperación.
+       */
       const { error } = await authClient.changePassword({
         currentPassword,
         newPassword,
-        revokeOtherSessions: false,
+        revokeOtherSessions: true,
       });
 
       if (error) {
@@ -124,7 +137,8 @@ export function ConfiguracionClient() {
           aria-live="polite"
           className="rounded-md bg-green-50 px-3 py-2 text-xs text-green-700"
         >
-          Contraseña actualizada correctamente.
+          Contraseña actualizada. Se cerraron las sesiones abiertas en otros
+          dispositivos; en éste seguís conectado.
         </div>
       )}
 

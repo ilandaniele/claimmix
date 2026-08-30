@@ -27,9 +27,11 @@ import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import {
-  rateLimit,
   RATE_LIMIT_CONFIGS,
   buildSignInKey,
+  clientIpFromHeaders,
+  rateLimit,
+  topePorIp,
 } from "@/lib/rate-limit/index";
 import { SignInSchema } from "@/lib/schemas/auth";
 
@@ -62,14 +64,27 @@ export async function signIn(
 
   // ── 2. Rate limiting ───────────────────────────────────────────────────────
   const headerStore = await headers();
-  const xff = headerStore.get("x-forwarded-for");
-  const ip = xff ? xff.split(",")[0].trim() : "anonymous";
+  // La misma resolución que usa la ruta HTTP, con la preferencia por
+  // `x-vercel-forwarded-for` que es la única cabecera que no escribe quien llama.
+  const ip = clientIpFromHeaders(headerStore);
   const ua = headerStore.get("user-agent") ?? null;
 
-  const rateLimitKey = buildSignInKey(ip, email);
-  const rl = await rateLimit(rateLimitKey, RATE_LIMIT_CONFIGS.AUTH_SIGN_IN);
+  /*
+   * DOS topes, y el segundo cubre otro ataque.
+   *
+   * El de (IP, dirección) corta a quien prueba contraseñas contra UNA cuenta.
+   * El de IP sola corta a quien recorre una lista de direcciones probando una
+   * contraseña conocida en cada una: con sólo el primero, diez mil direcciones
+   * son cincuenta mil intentos desde la misma IP sin tocar el techo.
+   *
+   * La ruta HTTP ya los aplicaba los dos; este Server Action —el que usa el
+   * formulario de la pantalla— aplicaba sólo el primero. O sea que el camino
+   * real de la gente era el que no tenía techo.
+   */
+  const rl = await rateLimit(buildSignInKey(ip, email), RATE_LIMIT_CONFIGS.AUTH_SIGN_IN);
+  const porIp = await topePorIp(ip);
 
-  if (!rl.allowed) {
+  if (!rl.allowed || !porIp.allowed) {
     await writeAuditLog({
       tenant_id: "00000000-0000-0000-0000-000000000000",
       actor_id: null,
@@ -83,8 +98,9 @@ export async function signIn(
       ua,
     });
 
+    const cual = !porIp.allowed ? porIp : rl;
     return {
-      error: `Demasiados intentos. Intente en ${rl.retryAfterSeconds} segundos.`,
+      error: `Demasiados intentos. Intente en ${cual.retryAfterSeconds} segundos.`,
     };
   }
 

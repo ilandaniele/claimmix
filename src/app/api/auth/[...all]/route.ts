@@ -26,7 +26,12 @@ import { toNextJsHandler } from "better-auth/next-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { auth } from "@/lib/auth";
-import { rateLimit, getClientIp, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import {
+  RATE_LIMIT_CONFIGS,
+  getClientIp,
+  rateLimit,
+  topePorIp,
+} from "@/lib/rate-limit/index";
 
 const handler = toNextJsHandler(auth);
 
@@ -88,7 +93,9 @@ export async function POST(req: NextRequest) {
      * El de abajo es por IP sola, con un número más alto: una oficina entera
      * detrás de un NAT tiene que poder entrar, y el que recorre una lista no.
      */
-    const porIp = await rateLimit(`auth:ip:${ip}`, RATE_LIMIT_CONFIGS.AUTH_POR_IP);
+    // La clave la arma `topePorIp`, compartida con los Server Actions: dos
+    // formas de escribir `auth:ip:…` serían dos cupos distintos.
+    const porIp = await topePorIp(ip);
 
     const permitido = await rateLimit(clave, config);
     if (!permitido.allowed || !porIp.allowed) {

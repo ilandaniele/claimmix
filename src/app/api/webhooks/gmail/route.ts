@@ -9,7 +9,8 @@
  * - When PUBSUB_AUDIENCE is set: verify Google-issued OIDC token via
  *   OAuth2Client.verifyIdToken(). Only Google's Pub/Sub push service produces
  *   valid tokens for our specific audience URL.
- * - When PUBSUB_AUDIENCE is unset (local dev): skip OIDC verification; log a
+ * - When PUBSUB_AUDIENCE is unset FUERA de producción (dev local): skip OIDC
+ *   verification; log a
  *   single startup warning per process. NEVER use this mode in production.
  *
  * AC4: PUBSUB_AUDIENCE unset → skip verify, call pollGmail, return 200 { ok: true }
@@ -84,6 +85,43 @@ interface GmailPushPayload {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const audience = process.env.PUBSUB_AUDIENCE;
+
+  /*
+   * Sin `PUBSUB_AUDIENCE`, en producción esto no atiende.
+   *
+   * Antes se saltaba la verificación entera y avisaba una vez por consola. O
+   * sea que «producción mal configurada» —el estado exacto contra el que esta
+   * guarda existe— degradaba a NO PEDIR NADA: cualquiera podía POSTear acá y
+   * disparar una lectura de la casilla de la aseguradora, todas las veces que
+   * quisiera.
+   *
+   * Un aviso por consola que además sale UNA sola vez por instancia no es una
+   * defensa; es una nota que nadie lee.
+   *
+   * Fuera de producción se sigue salteando, que es lo que hace posible probar
+   * el flujo localmente sin montar Pub/Sub.
+   */
+  if (!audience && process.env.NODE_ENV === "production") {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "webhooks.gmail.sin_audiencia_en_produccion",
+        detalle:
+          "PUBSUB_AUDIENCE no está configurada: el webhook rechaza todo en vez " +
+          "de aceptar sin verificar.",
+      })
+    );
+    return NextResponse.json(
+      {
+        error: {
+          code: "MISSING_TOKEN",
+          message: "Authorization header with Bearer token is required.",
+        },
+      },
+      { status: 401 }
+    );
+  }
 
   // ── OIDC verification (when PUBSUB_AUDIENCE is configured) ──────────────────
   if (audience) {

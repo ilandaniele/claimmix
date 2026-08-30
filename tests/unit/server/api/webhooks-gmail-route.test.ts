@@ -152,6 +152,59 @@ describe("POST /api/webhooks/gmail", () => {
     });
   });
 
+  /*
+   * Sin la variable, en PRODUCCIÓN no se atiende.
+   *
+   * Antes se salteaba la verificación entera y avisaba una vez por consola. O
+   * sea que «producción mal configurada» —el estado exacto contra el que esta
+   * guarda existe— degradaba a no pedir nada: cualquiera podía POSTear acá y
+   * disparar una lectura de la casilla de la aseguradora, todas las veces que
+   * quisiera.
+   *
+   * Fuera de producción se sigue salteando, que es lo que permite probar el
+   * flujo localmente sin montar Pub/Sub. Los dos casos están abajo, porque el
+   * segundo sin el primero sería una guarda que rompe el desarrollo.
+   */
+  describe("sin PUBSUB_AUDIENCE, según el entorno", () => {
+    it("en producción rechaza y NO lee la casilla", async () => {
+      const anterior = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      delete process.env.PUBSUB_AUDIENCE;
+      const grito = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const { POST } = await import("@/app/api/webhooks/gmail/route");
+      const res = await POST(buildRequest(buildEnvelope()));
+
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error.code).toBe("MISSING_TOKEN");
+      // Lo que de verdad importa: no llegó a disparar la lectura.
+      expect(mockPollGmail).not.toHaveBeenCalled();
+      // Y quedó dicho por qué, para que se pueda arreglar.
+      const linea = JSON.parse(grito.mock.calls[0][0] as string);
+      expect(linea.msg).toBe("webhooks.gmail.sin_audiencia_en_produccion");
+
+      grito.mockRestore();
+      process.env.NODE_ENV = anterior;
+    });
+
+    it("fuera de producción sigue salteando, para poder probar local", async () => {
+      // La otra mitad: una guarda que rechaza siempre también pasaría el test
+      // de arriba, y dejaría el desarrollo sin forma de ejercer este flujo.
+      const anterior = process.env.NODE_ENV;
+      process.env.NODE_ENV = "development";
+      delete process.env.PUBSUB_AUDIENCE;
+
+      const { POST } = await import("@/app/api/webhooks/gmail/route");
+      const res = await POST(buildRequest(buildEnvelope()));
+
+      expect(res.status).toBe(200);
+      expect(mockPollGmail).toHaveBeenCalled();
+
+      process.env.NODE_ENV = anterior;
+    });
+  });
+
   // ── AC5: PUBSUB_AUDIENCE set + no auth header → 401 MISSING_TOKEN ─────────────
 
   describe("AC5: PUBSUB_AUDIENCE set, no Authorization header", () => {

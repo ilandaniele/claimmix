@@ -42,7 +42,25 @@ export default defineConfig({
     command: "pnpm dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+
+    /*
+     * En CI arranca en frío: sin caché de Turbopack, `next dev` compila la
+     * primera ruta recién cuando Playwright la pide. Con 120 s un runner cargado
+     * llegaba justo y a veces no llegaba — un run entero perdido sin ninguna
+     * falla real.
+     */
+    timeout: process.env.CI ? 240_000 : 120_000,
+
+    /*
+     * La salida del servidor, a la vista.
+     *
+     * Playwright ignora su stdout por omisión, así que cuando el servidor no
+     * levanta el error es «Timed out waiting 120000ms» y nada más: no se
+     * distingue una compilación lenta de un proceso que murió al arrancar.
+     * Pasó, y hubo que adivinar. Con esto, el log dice cuál de las dos fue.
+     */
+    stdout: "pipe",
+    stderr: "pipe",
     env: {
       MOCK_AI: "true",
 

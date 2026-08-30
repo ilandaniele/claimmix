@@ -92,9 +92,31 @@ export async function POST(request: NextRequest): Promise<Response> {
       user.id
     );
   } catch (e) {
-    const message =
-      e instanceof Error ? e.message : "Error al contactar Gemini.";
-    return err(new AppError("INTERNAL_ERROR", message));
+    /*
+     * El error del proveedor va al log, no a quien llamó.
+     *
+     * Devolvía `e.message` tal cual. Un mensaje de Gemini trae el modelo, la
+     * versión de la API, a veces el proyecto de GCP y el motivo exacto del
+     * rechazo —cuota, clave inválida, región—. Ahí afuera eso es un mapa de la
+     * infraestructura, y esta ruta la alcanza cualquiera con una sesión de
+     * demo.
+     *
+     * Quien llama no puede hacer nada con esa diferencia: en todos los casos lo
+     * que corresponde es reintentar o avisar. El detalle queda del lado de
+     * adentro, que es donde alguien puede actuar sobre él.
+     */
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "demo.analyze.extractor_error",
+        error_name: e instanceof Error ? e.name : "UnknownError",
+        // El mensaje entero al log —acá adentro sí sirve— y recortado, que los
+        // de los proveedores a veces traen la petición completa.
+        detail: e instanceof Error ? e.message.slice(0, 300) : undefined,
+      })
+    );
+    return err(new AppError("INTERNAL_ERROR"));
   }
 
   return ok(result);

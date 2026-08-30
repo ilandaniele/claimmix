@@ -4,21 +4,25 @@ import { formatDate } from "@/lib/utils";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { esAR, type TranslationKey } from "@/lib/i18n";
 
-interface AuditLogRow {
+/*
+ * Sólo lo que esta línea de tiempo pinta.
+ *
+ * Antes declaraba la fila entera de `audit_log` —con `ip`, `ua`, `actor_id` y
+ * el payload completo— y el servidor se la mandaba entera al navegador. La
+ * pantalla muestra el tipo, la fecha y, si lo hay, el motivo.
+ *
+ * Que el tipo pida menos es lo que hace que el servidor pueda mandar menos: si
+ * acá siguiera pidiendo `ip`, la consulta tendría que seguir trayéndola.
+ */
+interface AuditLogEntry {
   id: number;
-  tenant_id: string;
-  actor_id: string | null;
   event_type: string;
-  target_type: string | null;
-  target_id: string | null;
-  payload: Record<string, unknown>;
-  ip: string | null;
-  ua: string | null;
   created_at: string;
+  reason: string | null;
 }
 
 interface AuditTimelineProps {
-  events: AuditLogRow[];
+  events: AuditLogEntry[];
 }
 
 function eventLabel(
@@ -75,12 +79,10 @@ export function AuditTimeline({ events }: AuditTimelineProps) {
             >
               {formatDate(event.created_at)}
             </time>
-            {event.payload?.reason != null && (
+            {event.reason != null && (
               <p className="text-xs text-slate-500 mt-0.5">
                 {t("case.detail.auditReason")}:{" "}
-                <span className="font-medium">
-                  {String(event.payload.reason as string | number | boolean)}
-                </span>
+                <span className="font-medium">{event.reason}</span>
               </p>
             )}
           </div>

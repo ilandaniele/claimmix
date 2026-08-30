@@ -138,7 +138,8 @@ export function ConfiguracionClient() {
           className="rounded-md bg-green-50 px-3 py-2 text-xs text-green-700"
         >
           Contraseña actualizada. Se cerraron las sesiones abiertas en otros
-          dispositivos; en éste seguís conectado.
+          dispositivos —puede tardar hasta un minuto en hacerse efectivo— y en
+          éste seguís conectado.
         </div>
       )}
 

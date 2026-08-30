@@ -27,11 +27,25 @@ import type {
   MissingDocRow,
 } from "@/lib/db/types";
 
+/**
+ * Un evento del historial, tal como lo necesita quien lo muestra.
+ *
+ * NO es `AuditLogRow`: esa es la fila entera de la base, con `ip`, `ua`,
+ * `actor_id` y el payload completo. Lo que sale de acá va al navegador.
+ */
+export interface AuditLogEntry {
+  id: number;
+  event_type: string;
+  created_at: string;
+  /** El motivo, cuando el evento trae uno. Es lo único del payload que se muestra. */
+  reason: string | null;
+}
+
 export interface CaseDetail {
   case: CaseRow;
   extracted_fields: ExtractedFieldRow[];
   missing_docs: MissingDocRow[];
-  audit_log: AuditLogRow[];
+  audit_log: AuditLogEntry[];
 }
 
 /**
@@ -119,20 +133,55 @@ export async function fetchMissingDocs(
   }
 }
 
-/** Las últimas veinte cosas que le pasaron al caso. */
+/**
+ * Las últimas veinte cosas que le pasaron al caso.
+ *
+ * Cuatro columnas, no la fila entera.
+ *
+ * Era un `select()` pelado, así que al navegador le llegaba también `ip` y `ua`
+ * —de qué computadora y con qué navegador trabajó cada analista— y el `payload`
+ * completo de cada evento. La pantalla muestra el tipo, la fecha y, si lo hay,
+ * el motivo. Nada más.
+ *
+ * Esto se volvió concreto el día que las confirmaciones de campo empezaron a
+ * guardar la IP del analista: hasta entonces la columna venía casi siempre en
+ * null y el exceso no se notaba.
+ */
 export async function fetchAuditLog(
   ctx: TenantContext,
   caseId: string
-): Promise<AuditLogRow[]> {
+): Promise<AuditLogEntry[]> {
   try {
-    return (await enTenant(ctx, (db) =>
+    const filas = await enTenant(ctx, (db) =>
       db
-        .select()
+        .select({
+          id: auditLog.id,
+          event_type: auditLog.event_type,
+          created_at: auditLog.created_at,
+          payload: auditLog.payload,
+        })
         .from(auditLog)
         .where(and(eq(auditLog.target_type, "case"), eq(auditLog.target_id, caseId)))
         .orderBy(desc(auditLog.created_at))
         .limit(20)
-    )) as AuditLogRow[];
+    );
+
+    return filas.map((f) => ({
+      id: f.id,
+      event_type: f.event_type,
+      created_at: f.created_at,
+      /*
+       * Del payload sale sólo `reason`, que es lo único que la pantalla pinta.
+       *
+       * El resto llevaba claves de campo, valores viejos y nuevos, y el motivo
+       * técnico de un escalado. Nada de eso se muestra, y parte es dato de la
+       * persona que hizo la denuncia.
+       */
+      reason:
+        f.payload && typeof f.payload === "object" && "reason" in f.payload
+          ? String((f.payload as Record<string, unknown>).reason)
+          : null,
+    }));
   } catch {
     return [];
   }

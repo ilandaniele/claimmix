@@ -36,12 +36,13 @@ import { asc, eq } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments, claimFieldConfirmations } from "@/lib/db/schema";
-import type { AuditLogRow, CaseRow, ExtractedFieldRow, MissingDocRow } from "@/lib/db/types";
+import type { CaseRow, ExtractedFieldRow, MissingDocRow } from "@/lib/db/types";
 import {
   fetchAuditLog,
   fetchCaseRow,
   fetchExtractedFields,
   fetchMissingDocs,
+  type AuditLogEntry,
 } from "@/server/cases/get";
 import {
   mensajesEntrantes,
@@ -75,7 +76,7 @@ export interface DetalleDeCaso {
   case: CaseRow;
   extracted_fields: ExtractedFieldRow[];
   missing_docs: MissingDocRow[];
-  audit_log: AuditLogRow[];
+  audit_log: AuditLogEntry[];
   confirmations: ConfirmacionEnPantalla[];
   attachments: AdjuntoEnPantalla[];
   /** Los primeros mensajes del asegurado, para el acordeón del original. */

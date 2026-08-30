@@ -60,9 +60,48 @@ const mockMissingDocs = [
   { id: "md-1", case_id: "case-uuid-1", doc_key: "foto_oblea_vtv" },
 ];
 
+/*
+ * Las filas traen `ip`, `ua` y un payload completo a propósito: es lo que la
+ * base guarda de verdad, y lo que se comprueba abajo es que NADA de eso salga
+ * hacia el navegador.
+ */
 const mockAuditEntries = [
-  { id: 1, event_type: "case.status_changed", created_at: "2024-01-15T10:00:00Z" },
-  { id: 2, event_type: "case.closed", created_at: "2024-01-16T12:00:00Z" },
+  {
+    id: 1,
+    event_type: "case.status_changed",
+    created_at: "2024-01-15T10:00:00Z",
+    payload: { reason: "field_confirmation", from: "recibido", to: "listo" },
+    ip: "203.0.113.7",
+    ua: "Chrome/140",
+    actor_id: "user-001",
+    tenant_id: TENANT_ID,
+  },
+  {
+    id: 2,
+    event_type: "case.closed",
+    created_at: "2024-01-16T12:00:00Z",
+    payload: {},
+    ip: "203.0.113.9",
+    ua: "Firefox/141",
+    actor_id: "user-002",
+    tenant_id: TENANT_ID,
+  },
+];
+
+/** Lo que la pantalla necesita, que es lo único que tiene que salir. */
+const AUDITORIA_ESPERADA = [
+  {
+    id: 1,
+    event_type: "case.status_changed",
+    created_at: "2024-01-15T10:00:00Z",
+    reason: "field_confirmation",
+  },
+  {
+    id: 2,
+    event_type: "case.closed",
+    created_at: "2024-01-16T12:00:00Z",
+    reason: null,
+  },
 ];
 
 // ── Helper: configure db.select mock chain ────────────────────────────────────
@@ -189,6 +228,69 @@ function setupSelectMockConFalla(cual: 2 | 3 | 4, opts: {
  * Mientras estos tests estén en verde, esa propiedad se sostiene. Si alguien
  * junta las consultas, se ponen rojos y explican por qué.
  */
+/**
+ * Al navegador va lo que la pantalla muestra, y nada más.
+ *
+ * La consulta era un `select()` pelado, así que la línea de tiempo del caso
+ * recibía también `ip` y `ua` —de qué computadora y con qué navegador trabajó
+ * cada analista— y el payload completo de cada evento, con claves de campo y
+ * valores viejos y nuevos.
+ *
+ * Se volvió concreto el día que las confirmaciones de campo empezaron a guardar
+ * la IP del analista: hasta entonces la columna venía casi siempre en null y el
+ * exceso no se notaba.
+ */
+describe("getCaseDetail — el historial no lleva de más", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("no manda la IP ni el navegador de quien hizo cada cosa", async () => {
+    setupSelectMock({
+      caseRows: [mockCase],
+      extractedRows: [],
+      missingRows: [],
+      auditRows: mockAuditEntries,
+    });
+
+    const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
+    const serializado = JSON.stringify(res!.audit_log);
+
+    expect(serializado).not.toContain("203.0.113.7");
+    expect(serializado).not.toContain("Chrome/140");
+    expect(serializado).not.toContain("user-001");
+  });
+
+  it("del payload sale sólo el motivo, que es lo que se pinta", async () => {
+    setupSelectMock({
+      caseRows: [mockCase],
+      extractedRows: [],
+      missingRows: [],
+      auditRows: mockAuditEntries,
+    });
+
+    const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
+
+    expect(res!.audit_log[0].reason).toBe("field_confirmation");
+    // El resto del payload no viaja: `from` y `to` no los muestra nadie.
+    expect(JSON.stringify(res!.audit_log)).not.toContain("recibido");
+  });
+
+  it("un evento sin motivo llega con null, no con undefined", async () => {
+    // Va a un `!= null` en el componente: un undefined funcionaría, pero el
+    // tipo dice `string | null` y conviene que la forma sea la que dice.
+    setupSelectMock({
+      caseRows: [mockCase],
+      extractedRows: [],
+      missingRows: [],
+      auditRows: mockAuditEntries,
+    });
+
+    const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
+    expect(res!.audit_log[1].reason).toBeNull();
+  });
+});
+
 describe("getCaseDetail — las fallas no se contagian", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -221,7 +323,7 @@ describe("getCaseDetail — las fallas no se contagian", () => {
 
     expect(res!.extracted_fields).toEqual([]);
     expect(res!.missing_docs).toEqual(mockMissingDocs);
-    expect(res!.audit_log).toEqual(mockAuditEntries);
+    expect(res!.audit_log).toEqual(AUDITORIA_ESPERADA);
   });
 
   it("si falla la documentación faltante, el resto sigue llegando", async () => {
@@ -231,7 +333,7 @@ describe("getCaseDetail — las fallas no se contagian", () => {
 
     expect(res!.missing_docs).toEqual([]);
     expect(res!.extracted_fields).toEqual(mockExtractedFields);
-    expect(res!.audit_log).toEqual(mockAuditEntries);
+    expect(res!.audit_log).toEqual(AUDITORIA_ESPERADA);
   });
 
   it("una falla en una relacionada NO convierte el caso en 404", async () => {

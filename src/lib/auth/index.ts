@@ -115,8 +115,27 @@ export const auth = betterAuth({
     },
   },
   session: {
-    // Signed cookie cache: avoids a Neon round-trip on every getSession call.
-    cookieCache: { enabled: true, maxAge: 300 },
+    /*
+     * Caché de sesión en cookie firmada: evita un viaje a Neon en cada
+     * `getSession`. El número es el techo de cuánto sobrevive una sesión que ya
+     * se revocó, así que no es una preferencia de rendimiento.
+     *
+     * Estaba en 300 segundos. Desde que cambiar o restablecer la contraseña
+     * cierra las otras sesiones —que es el gesto con el que alguien echa a
+     * quien le entró— esos cinco minutos son cinco minutos en los que el
+     * intruso sigue adentro después de que lo echaron.
+     *
+     * Sesenta segundos conservan casi todo el ahorro: una persona trabajando
+     * hace muchos pedidos por minuto, así que el viaje a la base se sigue
+     * pagando una vez por minuto y no una por pedido. Y acota la ventana a algo
+     * que se le puede decir a la persona en la pantalla, que es lo que dice el
+     * mensaje de Configuración.
+     *
+     * Bajarlo a cero sería lo más seguro y significa un viaje a Neon por
+     * pedido, en todas las pantallas. Si alguna vez hace falta esa garantía, el
+     * camino no es este número: es invalidar el caché al revocar.
+     */
+    cookieCache: { enabled: true, maxAge: 60 },
   },
   databaseHooks: {
     user: {

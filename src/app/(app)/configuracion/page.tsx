@@ -24,6 +24,7 @@ import { getUserGeminiKey } from "@/server/ai/provider";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import packageJson from "../../../../package.json";
+import { ADMIN_ROLES } from "@/lib/auth/require-role";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,8 @@ export default async function ConfiguracionPage() {
 
   const fullName: string = userRow?.full_name ?? session.user.email ?? "Analista";
   const role: string = userRow?.role ?? "analyst";
+  // Quién ve los detalles de infraestructura de más abajo.
+  const esAdmin = (ADMIN_ROLES as string[]).includes(role);
   const email: string = session.user.email ?? "—";
   const isAdmin = role === "admin" || role === "owner";
 
@@ -204,14 +207,32 @@ export default async function ConfiguracionPage() {
                 v{appVersion}
               </span>
             </Field>
-            <Field label="Versión de Node.js">
-              <span className="font-mono text-xs text-slate-700">
-                {nodeVersion}
-              </span>
-            </Field>
-            <Field label="Región de despliegue">
-              <span className="font-mono text-xs text-slate-700">{region}</span>
-            </Field>
+            {/*
+              * La versión de Node y la región, sólo para quien administra.
+              *
+              * A un analista no le sirven para nada, y a alguien de afuera que
+              * consiguió una sesión le sirven bastante: la versión exacta del
+              * runtime dice qué vulnerabilidades conocidas aplican, y la región
+              * dice dónde está lo que hay que atacar. Es la sección
+              * «Infrastructure Details» del manual, y la regla es la misma que
+              * el resto del producto ya sigue: mostrar lo que la persona
+              * necesita para su trabajo.
+              *
+              * La versión de la app queda para todos: sirve para reportar un
+              * problema y no dice nada del servidor.
+              */}
+            {esAdmin && (
+              <>
+                <Field label="Versión de Node.js">
+                  <span className="font-mono text-xs text-slate-700">
+                    {nodeVersion}
+                  </span>
+                </Field>
+                <Field label="Región de despliegue">
+                  <span className="font-mono text-xs text-slate-700">{region}</span>
+                </Field>
+              </>
+            )}
           </div>
         </Section>
       </div>

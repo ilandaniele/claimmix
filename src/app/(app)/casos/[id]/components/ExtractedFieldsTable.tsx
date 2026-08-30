@@ -2,6 +2,7 @@
 
 import { useT } from "@/lib/i18n/LocaleContext";
 import { esAR, type TranslationKey } from "@/lib/i18n";
+import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 interface ExtractedField {
   id: string;
   case_id: string;
@@ -66,9 +67,8 @@ function MiniConfidenceBar({ value }: MiniBarProps) {
         aria-hidden="true"
       >
         <div
-          className={`h-full rounded-full ${fillColor} transition-all`}
-          style={{ width: `${pct}%` }}
-        />
+          className={`h-full rounded-full ${fillColor} transition-all ${anchoDeBarra(pct)}`}
+                  />
       </div>
       <span className={`text-xs tabular-nums font-medium ${textColor}`}>
         {pct}%

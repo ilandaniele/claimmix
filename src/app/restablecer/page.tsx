@@ -39,7 +39,7 @@ export default async function RestablecerPage({
               <p role="alert" className="text-sm text-zinc-700">
                 {error
                   ? "Ese enlace ya no sirve: pudo haber vencido o haberse usado."
-                  : "Entrá desde el enlace que te llegó por correo."}
+                  : "Entrá desde el enlace que te llegó por correo. Si recargaste esta página, pedí uno nuevo."}
               </p>
               <Link
                 href="/recuperar"

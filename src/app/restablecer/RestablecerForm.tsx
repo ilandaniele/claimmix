@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import Link from "next/link";
 
 import { restablecer, type EstadoRestablecer } from "./actions";
@@ -12,6 +12,32 @@ export function RestablecerForm({ token }: { token: string }) {
     restablecer,
     inicial
   );
+
+  /*
+   * El token sale de la URL apenas se lee.
+   *
+   * Llega como `?token=…` porque así funciona un enlace por correo, y eso no se
+   * puede cambiar. Lo que sí se puede es que no se quede ahí: mientras está en
+   * la barra de direcciones queda en el historial del navegador, en el
+   * `Referer` de cualquier pedido que salga de esta página, y a la vista de
+   * quien mire la pantalla. Un token de recuperación es la credencial mientras
+   * dura.
+   *
+   * El valor ya está en `token`, así que el formulario sigue funcionando: lo
+   * único que se pierde es la copia de la URL.
+   *
+   * El costo, dicho: si alguien recarga la página después de esto, el token ya
+   * no está y tiene que pedir otro enlace. Se decidió pagarlo en vez de
+   * guardarlo en `sessionStorage`, que sería sumar un lugar más donde vive una
+   * credencial para ahorrar un caso poco frecuente.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("token")) return;
+    url.searchParams.delete("token");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, []);
 
   if (state.listo) {
     return (

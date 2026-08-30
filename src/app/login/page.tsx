@@ -12,7 +12,13 @@ export const metadata = {
   title: "Iniciar sesión — ClaimMix",
 };
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ aviso?: string }>;
+}) {
+  const { aviso } = await searchParams;
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-zinc-50 px-4">
       <div className="w-full max-w-sm">
@@ -31,6 +37,25 @@ export default function LoginPage() {
           <h2 className="mb-6 text-lg font-medium text-zinc-800">
             Iniciar sesión
           </h2>
+
+          {/*
+            El aviso que deja el alta.
+            
+            Dice lo mismo para una cuenta recién creada que para una dirección
+            que ya tenía una. Es a propósito: si el alta contestara distinto en
+            cada caso, alcanzaría con probar direcciones para averiguar quién
+            trabaja acá.
+          */}
+          {aviso === "usa_tu_cuenta" && (
+            <p
+              role="status"
+              className="mb-4 rounded-md bg-zinc-50 px-3 py-2 text-sm text-zinc-600"
+            >
+              Si la dirección es válida, ya podés entrar con tu contraseña. Si no
+              la recordás, pedí un enlace abajo.
+            </p>
+          )}
+
           <SignInForm />
         </div>
 

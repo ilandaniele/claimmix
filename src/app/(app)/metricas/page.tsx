@@ -25,6 +25,7 @@ import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
+import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 
 /*
  * Los números salen de `getTenantKpis`, que también usa /api/metricas.
@@ -346,9 +347,8 @@ export default async function MetricasPage() {
                         </div>
                         <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
                           <div
-                            className={`h-full rounded-full transition-all ${STATUS_COLORS[key] ?? "bg-slate-400"}`}
-                            style={{ width: `${pct}%` }}
-                            aria-valuenow={pct}
+                            className={`h-full rounded-full transition-all ${STATUS_COLORS[key] ?? "bg-slate-400"} ${anchoDeBarra(pct)}`}
+                                                        aria-valuenow={pct}
                             aria-valuemin={0}
                             aria-valuemax={100}
                             role="progressbar"
@@ -387,9 +387,8 @@ export default async function MetricasPage() {
                         </div>
                         <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
                           <div
-                            className={`h-full rounded-full transition-all ${TYPE_COLORS[key] ?? "bg-slate-400"}`}
-                            style={{ width: `${pct}%` }}
-                            aria-valuenow={pct}
+                            className={`h-full rounded-full transition-all ${TYPE_COLORS[key] ?? "bg-slate-400"} ${anchoDeBarra(pct)}`}
+                                                        aria-valuenow={pct}
                             aria-valuemin={0}
                             aria-valuemax={100}
                             role="progressbar"

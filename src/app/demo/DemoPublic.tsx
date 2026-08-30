@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
+import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 
 // ── Example emails ────────────────────────────────────────────────────────────
 
@@ -132,7 +133,9 @@ function ConfidenceBar({ value }: { value: number }) {
   return (
     <div className="flex items-center gap-3">
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-        <div className={`h-full rounded-full transition-all duration-700 ${color}`} style={{ width: `${p}%` }} />
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${color} ${anchoDeBarra(p)}`}
+        />
       </div>
       <span className="w-8 text-right text-xs font-semibold text-slate-600">{p}%</span>
     </div>

@@ -14,6 +14,7 @@
 
 import { useState, useCallback } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
+import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 
 interface Confirmation {
   id: string;
@@ -53,9 +54,8 @@ function ConfidenceIndicator({ value }: { value: number }) {
     >
       <div className="h-1.5 w-16 rounded-full bg-slate-100 overflow-hidden">
         <div
-          className={`h-full rounded-full ${color}`}
-          style={{ width: `${pct}%` }}
-        />
+          className={`h-full rounded-full ${color} ${anchoDeBarra(pct)}`}
+                  />
       </div>
       <span className="text-xs text-slate-500">{pct}%</span>
     </div>

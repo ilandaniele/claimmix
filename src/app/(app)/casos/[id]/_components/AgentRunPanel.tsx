@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 
 // ── Types (mirror /api/cases/:id/agent-run response) ──────────────────────────
 
@@ -90,7 +91,7 @@ function ConfidenceMiniBar({ value }: { value: number }) {
   return (
     <div className="flex items-center gap-2">
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-200">
-        <div className={`h-full ${color}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full ${color} ${anchoDeBarra(pct)}`} />
       </div>
       <span className="text-xs tabular-nums text-slate-500">{pct}%</span>
     </div>

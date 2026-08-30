@@ -28,8 +28,17 @@ export function generateNonce(): string {
  *   No 'unsafe-inline', no 'unsafe-eval'.
  *
  * style-src:
- *   'self' 'unsafe-inline' – Tailwind v4 generates inline styles at runtime;
- *   style nonces are not supported by Tailwind v4's PostCSS model.
+ *   'self' 'nonce-{n}'. Sin 'unsafe-inline'.
+ *
+ *   Acá decía que Tailwind v4 genera estilos en línea en tiempo de ejecución y
+ *   que por eso hacía falta 'unsafe-inline'. Se comprobó en un navegador contra
+ *   un build de producción y no es así: Tailwind emite una hoja de estilos, que
+ *   'self' ya cubre. Lo que sí producía atributos `style` eran siete
+ *   `style={{ width }}` nuestros, en las barras de progreso, y ésos pasaron a
+ *   una clase — ver `src/lib/ui/ancho-de-barra.ts`.
+ *
+ *   Con el cambio hecho: cero violaciones en producción. En desarrollo salen
+ *   diecisiete y son del overlay de Next, no del producto.
  */
 /**
  * Where the browser may send error reports.
@@ -57,7 +66,25 @@ export function buildCsp(nonce: string): string {
   const directives: string[] = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
-    "style-src 'self' 'unsafe-inline'",
+    /*
+     * Sin 'unsafe-inline', y eso costó sacar siete `style={{ width }}`.
+     *
+     * Con esa directiva puesta, cualquier punto de inyección de HTML permite
+     * meter CSS: exfiltrar datos con selectores de atributo más
+     * `background-image`, tapar botones, dibujar encima de lo que la persona
+     * cree que está apretando. Con `script-src` ya cerrado, el CSS inyectado
+     * era la palanca que quedaba.
+     *
+     * El nonce NO cubre los atributos `style` del marcado, sólo los bloques
+     * `<style>`. Comprobado en el navegador: con esta directiva, un
+     * `style="width: 42px"` queda en el DOM y no se aplica. Por eso las barras
+     * de progreso pasaron a una clase de Tailwind — ver
+     * `src/lib/ui/ancho-de-barra.ts`.
+     *
+     * Verificado contra un build de producción: cero violaciones. En desarrollo
+     * salen diecisiete, y son del overlay de Next, no del producto.
+     */
+    `style-src 'self' 'nonce-${nonce}'`,
     `connect-src 'self'${sentryOrigin()}`,
     "img-src 'self' data: https:",
     "font-src 'self' data:",

@@ -91,7 +91,28 @@ export async function signUp(
     if (e instanceof APIError) {
       const code = e.body?.code;
       if (code === "USER_ALREADY_EXISTS" || /already/i.test(e.body?.message ?? "")) {
-        return { error: "Ya existe una cuenta con ese correo. Iniciá sesión." };
+        /*
+         * Que ya exista una cuenta NO se dice.
+         *
+         * Decía «Ya existe una cuenta con ese correo», y con eso alcanzaba para
+         * averiguar quién trabaja en la aseguradora: se prueban direcciones y
+         * se lee la respuesta. Es la enumeración de usuarios del manual, y en
+         * un producto B2B lo que revela es el padrón de empleados.
+         *
+         * Ahora va al mismo lugar y con el mismo aviso que un alta que se creó
+         * pero no dejó sesión abierta. Las dos terminan en «entrá con tu
+         * contraseña».
+         *
+         * Lo que esto NO arregla, y conviene que esté escrito: un alta NUEVA de
+         * una dirección permitida sí deja sesión y cae en /bandeja, así que
+         * llegar ahí revela que la dirección no existía. La diferencia es que
+         * eso ya no es una sonda pasiva —hay que crear la cuenta de verdad, que
+         * queda en auditoría— y el tope de tres altas por minuto por IP lo
+         * vuelve impracticable a escala. Sacarlo del todo pide rediseñar el
+         * alta para que verifique el correo antes de crear nada, que es otro
+         * trabajo.
+         */
+        redirect("/login?aviso=usa_tu_cuenta");
       }
       console.error("[registro] auth.api.signUpEmail:", code ?? e.message);
     } else {
@@ -116,8 +137,10 @@ export async function signUp(
 
   // ── 5. Redirect (session cookie already set by signUpEmail) ───────────────
   if (!signedIn) {
-    // Account exists but auto-login did not happen — send them to the login form.
-    redirect("/login");
+    // La cuenta quedó creada pero sin sesión: al login, con el MISMO aviso que
+    // recibe alguien cuya dirección ya tenía cuenta. Que los dos caminos
+    // terminen igual es lo que impide usar el alta para enumerar.
+    redirect("/login?aviso=usa_tu_cuenta");
   }
 
   redirect("/bandeja");

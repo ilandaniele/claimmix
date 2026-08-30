@@ -15,6 +15,7 @@ import { statusOptions, claimTypeOptions } from "@/lib/labels/case-catalog";
 import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
+import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 
 // ── Status and type labels ─────────────────────────────────────────────────────
 
@@ -168,9 +169,8 @@ function DistributionRow({
       <div className="flex-1">
         <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
           <div
-            className={`h-full rounded-full ${colorClass}`}
-            style={{ width: `${pct}%` }}
-            role="progressbar"
+            className={`h-full rounded-full ${colorClass} ${anchoDeBarra(pct)}`}
+                        role="progressbar"
             aria-valuenow={pct}
             aria-valuemin={0}
             aria-valuemax={100}

@@ -321,6 +321,52 @@ async function attackSurface(): Promise<void> {
     probe(`cabecera ${name}`, shape.test(value), `según cuál falte: XSS, clickjacking o degradar a HTTP`);
   }
 
+  /*
+   * Ni `script-src` ni `style-src` pueden traer `unsafe-inline`.
+   *
+   * Se comprueba aparte porque la sonda de arriba sólo mira que `script-src`
+   * tenga un nonce, y un `script-src 'self' 'nonce-…' 'unsafe-inline'` la
+   * pasaría — con el `unsafe-inline` anulando el nonce en los navegadores que
+   * no entienden nonces, y sobre todo mintiéndole a quien lea el resultado.
+   *
+   * `style-src` estuvo con `unsafe-inline` hasta que se sacaron los siete
+   * `style={{ width }}` de las barras de progreso. Con esa directiva puesta,
+   * cualquier punto de inyección de HTML permite meter CSS: exfiltrar datos con
+   * selectores de atributo, tapar botones, dibujar encima de lo que la persona
+   * cree que aprieta. Volver a ponerla es una línea, y sin esta sonda nadie se
+   * enteraría.
+   */
+  const csp = home.headers.get("content-security-policy") ?? "";
+  for (const directiva of ["script-src", "style-src"]) {
+    const tramo = csp.split(";").map((d) => d.trim()).find((d) => d.startsWith(directiva)) ?? "";
+    probe(
+      `${directiva} sin 'unsafe-inline'`,
+      tramo.length > 0 && !tramo.includes("unsafe-inline"),
+      directiva === "script-src"
+        ? "ejecutar javascript inyectado"
+        : "inyectar CSS: exfiltrar datos con selectores, tapar botones, dibujar encima",
+      tramo ? `es: ${tramo}` : "no está la directiva"
+    );
+  }
+
+  probe(
+    "la CSP no permite 'unsafe-eval'",
+    !csp.includes("unsafe-eval"),
+    "ejecutar código armado en tiempo de ejecución",
+    csp.includes("unsafe-eval") ? "está" : ""
+  );
+
+  // Y que la API traiga la suya, que es más cerrada porque ahí no hay nada
+  // legítimo que cargar.
+  const api = await head(`${BASE}/api/admin/health`);
+  const cspApi = api.headers.get("content-security-policy") ?? "";
+  probe(
+    "la API trae su propia CSP",
+    cspApi.includes("default-src 'none'"),
+    "una respuesta de la API que el navegador interprete como documento",
+    cspApi ? `es: ${cspApi.slice(0, 60)}…` : "no trae"
+  );
+
   const cors = await head(`${BASE}/api/cases`, { headers: { Origin: "https://evil.example" } });
   probe(
     "no hay CORS para un origen ajeno",

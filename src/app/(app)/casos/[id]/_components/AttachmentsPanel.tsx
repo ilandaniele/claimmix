@@ -32,6 +32,24 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * ¿Se puede poner esto en un `href`?
+ *
+ * Sólo `http` y `https`. Cualquier otro esquema —`javascript:`, `data:`,
+ * `vbscript:`— es una forma de ejecutar algo, no de ir a algún lado.
+ */
+function esEnlaceSeguro(url: string | null | undefined): boolean {
+  if (!url) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    // Una URL relativa no parsea sin base, y tampoco es un destino que este
+    // panel deba abrir: los adjuntos viven afuera.
+    return false;
+  }
+}
+
 /** Map content_type to display label */
 function contentTypeBadge(contentType: string): {
   label: string;
@@ -92,16 +110,31 @@ export function AttachmentsPanel({ attachments }: AttachmentsPanelProps) {
                 </span>
               </div>
 
-              {/* Download link — opens in new tab, no URL logging (AC23) */}
-              <a
-                href={attachment.external_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-shrink-0 rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-                aria-label={`Abrir ${attachment.filename} en nueva pestaña`}
-              >
-                {t("case.detail.openAttachment")}
-              </a>
+              {/*
+                * El enlace, sólo si hay adónde ir y el destino es http(s).
+                *
+                * Dos cosas distintas, las dos reales:
+                *
+                * · Hoy nadie escribe `external_url` —la columna existe y ningún
+                *   código la llena—, así que esto se pintaba con `href=""` y el
+                *   botón recargaba la página. Ofrecer una acción que no hace
+                *   nada es peor que no ofrecerla.
+                * · Y el día que algo la llene, el esquema tiene que estar
+                *   comprobado. Un `javascript:` en un `href` es XSS, y React no
+                *   lo bloquea: avisa por consola y lo pinta igual. El valor
+                *   vendría de un adjunto de correo, o sea de afuera.
+                */}
+              {esEnlaceSeguro(attachment.external_url) && (
+                <a
+                  href={attachment.external_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-shrink-0 rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                  aria-label={`Abrir ${attachment.filename} en nueva pestaña`}
+                >
+                  {t("case.detail.openAttachment")}
+                </a>
+              )}
             </div>
           );
         })}

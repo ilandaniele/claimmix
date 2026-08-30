@@ -37,6 +37,29 @@ export const CONTENT_TYPE_ALLOWLIST: ReadonlySet<string> = new Set([
   "message/rfc822",
 ]);
 
+/**
+ * Lo que NO entra, aunque la lista blanca lo deje pasar por un glob.
+ *
+ * `image/*` está para las fotos del siniestro, y un SVG cae ahí adentro sin
+ * ser una foto: es XML, y el XML puede traer `<script>` y `onload`. Abierto en
+ * una pestaña desde nuestro dominio, eso es XSS almacenado con la sesión del
+ * analista.
+ *
+ * Hoy el riesgo está acotado porque los adjuntos no se sirven desde la
+ * aplicación —`external_url` no lo escribe nadie—, pero eso es una propiedad
+ * de hoy, no una defensa. La defensa es no aceptarlos: nadie denuncia un choque
+ * mandando un SVG.
+ *
+ * Se comprueba ANTES que la lista blanca, así que un glob nuevo tampoco los
+ * puede volver a colar.
+ */
+export const CONTENT_TYPE_DENYLIST: ReadonlySet<string> = new Set([
+  "image/svg+xml",
+  "image/svg",
+  // XML a secas por lo mismo: entidades externas y hojas de estilo remotas.
+  "image/xml",
+]);
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type ValidateResult =
@@ -56,6 +79,9 @@ export type ValidateResult =
 function matchesAllowlist(contentType: string): boolean {
   // Normalise: lowercase, strip parameters (e.g. "; charset=utf-8").
   const normalised = contentType.toLowerCase().split(";")[0].trim();
+
+  // La lista negra manda: está para los que un glob de la blanca dejaría pasar.
+  if (CONTENT_TYPE_DENYLIST.has(normalised)) return false;
 
   for (const pattern of CONTENT_TYPE_ALLOWLIST) {
     if (pattern === normalised) {

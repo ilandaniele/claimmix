@@ -157,6 +157,27 @@ export async function rehostAttachments(
       continue;
     }
 
+    /*
+     * ── Validar ANTES de deduplicar ────────────────────────────────────────
+     *
+     * Estaba al revés, y el orden era el agujero: se calculaba el hash, se
+     * buscaba una copia ya guardada, y si la había se devolvía `stored: true`
+     * SIN pasar por la lista blanca de tipos.
+     *
+     * Con eso, alguien mandaba primero un PDF —que pasa— y después los MISMOS
+     * bytes declarando `application/x-msdownload`. El hash coincide, la
+     * deduplicación contesta que sí, y la fila queda escrita con el tipo que
+     * eligió el remitente sobre un archivo que la lista blanca nunca vio.
+     *
+     * La deduplicación es una optimización; la lista blanca es una regla. Una
+     * optimización no puede saltearse una regla.
+     */
+    const validation = validateAttachment(attachment.ContentType, data.length);
+    if (!validation.ok) {
+      results.push({ stored: false, reason: validation.reason });
+      continue;
+    }
+
     // ── Compute content hash ───────────────────────────────────────────────────
     const contentHash = computeContentHash(data);
 
@@ -165,13 +186,6 @@ export async function rehostAttachments(
     if (existingPath !== null) {
       // File already uploaded for this case — reuse the existing storage path.
       results.push({ stored: true, storagePath: existingPath, contentHash });
-      continue;
-    }
-
-    // ── Validate content-type and size ─────────────────────────────────────────
-    const validation = validateAttachment(attachment.ContentType, data.length);
-    if (!validation.ok) {
-      results.push({ stored: false, reason: validation.reason });
       continue;
     }
 
@@ -250,6 +264,16 @@ export async function rehostAndRecordAttachments(
           tenant_id: tenantId,
           claim_message_id: messageId,
           file_name: attachment.Name,
+          /*
+           * El tipo que DECLARÓ el remitente, y se guarda como eso.
+           *
+           * Para un adjunto guardado ya pasó la lista blanca. Para uno
+           * rechazado queda escrito junto a `rejected_reason`, y ahí vale:
+           * saber que alguien insiste con `.exe` es justamente lo que se mira
+           * después. Lo que no puede pasar es que nadie lo trate como
+           * autoritativo — la pantalla lo usa sólo para elegir una etiqueta, y
+           * el archivo rechazado no tiene `storage_path`, así que no se sirve.
+           */
           content_type: attachment.ContentType,
           size_bytes: attachment.ContentLength,
           storage_path: result.stored ? result.storagePath : null,

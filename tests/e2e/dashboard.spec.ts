@@ -131,15 +131,45 @@ test.describe("Bandeja — security headers", () => {
     }
   });
 
-  test("health endpoint has CSP header from proxy.ts", async ({ page }) => {
+  /*
+   * La API tiene su propia CSP, y es más cerrada que la de las páginas.
+   *
+   * Este test decía «viene de proxy.ts» y estaba envuelto en un `if (csp)`, así
+   * que cuando la API NO traía ninguna CSP —que era el caso— pasaba en verde
+   * sin afirmar nada. Un test que se saltea solo cuando falta lo que dice
+   * comprobar es peor que no tenerlo: se lee como cobertura.
+   *
+   * El proxy no corre para `/api` a propósito: su matcher la excluye porque
+   * cada handler se defiende solo. La CSP de la API la pone `next.config.ts`, y
+   * es `default-src 'none'` — en una respuesta JSON no hay nada legítimo que
+   * cargar, así que no hace falta ni `script-src` ni un nonce.
+   */
+  test("la API trae su propia CSP, cerrada", async ({ page }) => {
     const res = await page.request.get("/api/admin/health");
     const csp = res.headers()["content-security-policy"];
-    // CSP is set by proxy.ts on all responses including API routes
-    // This may or may not be present depending on the middleware execution
-    // (next.config.ts headers don't include CSP — only proxy.ts does)
-    if (csp) {
-      expect(csp).toContain("script-src");
-      expect(csp).toContain("default-src");
-    }
+
+    // Sin `if`: que falte es exactamente lo que hay que detectar.
+    expect(csp, "la API tiene que traer CSP").toBeTruthy();
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    // Y NO la de las páginas: un nonce acá sería copiar un problema que la API
+    // no tiene.
+    expect(csp).not.toContain("unsafe-inline");
+  });
+
+  test("la CSP de una página no permite estilos ni scripts en línea", async ({ page }) => {
+    const res = await page.request.get("/login");
+    const csp = res.headers()["content-security-policy"] ?? "";
+
+    expect(csp).toContain("script-src");
+    expect(csp).toContain("nonce-");
+    /*
+     * `style-src 'unsafe-inline'` estuvo hasta que se sacaron los siete
+     * `style={{ width }}` de las barras de progreso. Con esa directiva puesta,
+     * cualquier inyección de HTML permite meter CSS: exfiltrar datos con
+     * selectores de atributo, tapar botones, dibujar encima.
+     */
+    expect(csp).not.toContain("unsafe-inline");
+    expect(csp).not.toContain("unsafe-eval");
   });
 });

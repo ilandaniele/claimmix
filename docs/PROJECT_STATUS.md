@@ -940,6 +940,26 @@ pasó en verde —era lo primero—, pero eso se supo re-corriendo y no leyendo.
 Turbopack. Un servidor roto de verdad sigue fallando, sólo que más tarde y
 diciendo por qué.
 
+**Y un tercero, el más interesante: un test que medía el reloj.** `AC3` del login
+—«el sexto intento en diez segundos da 429»— se puso en rojo después de once
+corridas verdes con el mismo código. La ventana del limitador es fija y alineada
+al reloj (`floor(now / 10s) * 10s`), que es lo que hace que todas las instancias
+cuenten juntas, y el costo está escrito en `postgres.ts`: en el borde entre dos
+ventanas pasan hasta el doble de intentos. El test caía justo ahí.
+
+Reproducido contra el ensayo con la misma función que usa el login:
+
+| ráfaga de 5 + 1 | sexto permitido |
+|---|---|
+| arrancando 250 ms antes del borde | **true** ← la falla |
+| arrancando alineada | false |
+
+Una de cada cuatro corridas, que es del orden de lo que se vio en CI. El
+limitador hace lo que dice; el test afirmaba una garantía que nunca prometió, así
+que se arregló el test. De paso se fue un `beforeEach` con `clearAllRateLimits()`
+que no reiniciaba nada: limpiaba el mapa en memoria del proceso de los tests, no
+el del servidor, y el servidor ni cuenta en memoria — cuenta en Postgres.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

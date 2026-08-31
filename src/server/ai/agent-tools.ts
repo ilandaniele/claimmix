@@ -29,6 +29,16 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { customers, insuredAssets, policies } from "@/lib/db/schema";
+/*
+ * La misma normalización que usan los buscadores, y no una copia.
+ *
+ * Acá vivían dos copias —`normalizeDni` y `normalizePolicyNumber`— con el
+ * comentario correcto («la gente escribe 30.145.882, 30145882 y DNI 30 145
+ * 882») al lado de una herramienta que sí normalizaba. Los buscadores, que son
+ * los que deciden si el caso queda asociado a un cliente, comparaban en crudo.
+ * Dos caminos a la misma tabla, uno tolerante y el otro no.
+ */
+import { normalizarDni, normalizarNumeroPoliza } from "@/core/matching/normalizar";
 
 export interface ToolContext {
   tenantId: string;
@@ -44,10 +54,6 @@ export interface AgentTool {
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
 }
 
-/** Digits only: people write 30.145.882, 30145882, and "DNI 30 145 882". */
-function normalizeDni(raw: string): string {
-  return raw.replace(/\D/g, "");
-}
 
 function str(args: Record<string, unknown>, key: string): string | null {
   const value = args[key];
@@ -56,10 +62,6 @@ function str(args: Record<string, unknown>, key: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/** Policy numbers are typed by people: spacing and case vary, the rest does not. */
-function normalizePolicyNumber(raw: string): string {
-  return raw.replace(/\s+/g, "").toUpperCase();
-}
 
 /**
  * Does this insurer have a book of business loaded at all?
@@ -115,7 +117,7 @@ const verificarPoliza: AgentTool = {
     const raw = str(args, "numero_poliza");
     if (!raw) return { error: "falta numero_poliza" };
 
-    const number = normalizePolicyNumber(raw);
+    const number = normalizarNumeroPoliza(raw);
 
     const rows = await enTenant(tenantCtx, (db) =>
       db
@@ -154,7 +156,7 @@ const verificarPoliza: AgentTool = {
     const givenDni = str(args, "dni");
     const dniMatches =
       givenDni && policy.holderDni
-        ? normalizeDni(givenDni) === normalizeDni(policy.holderDni)
+        ? normalizarDni(givenDni) === normalizarDni(policy.holderDni)
         : null;
 
     // The insured vehicle is only described to someone who proved they are the
@@ -217,7 +219,7 @@ const polizasPorDni: AgentTool = {
     const given = str(args, "dni");
     if (!given) return { error: "falta dni" };
 
-    const dni = normalizeDni(given);
+    const dni = normalizarDni(given);
     if (!dni) return { error: "el DNI no tiene un formato reconocible" };
 
     const rows = await enTenant(tenantCtx, (db) =>

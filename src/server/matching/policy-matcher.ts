@@ -9,9 +9,10 @@
  */
 
 import "server-only";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
+import { normalizarNumeroPoliza } from "@/core/matching/normalizar";
 
 /** A single policy match result. */
 export interface PolicyMatch {
@@ -112,7 +113,17 @@ async function matchByPolicyNumber(
         })
         .from(p)
         .leftJoin(c, eq(p.customer_id, c.id))
-        .where(eq(p.policy_number, policyNumber))
+        /*
+         * Los dos lados sin espacios y en mayúsculas.
+         *
+         * `verificar_poliza` —la herramienta del agente— ya comparaba así desde
+         * el día uno; este buscador comparaba en crudo. Dos caminos hacia la
+         * misma tabla, uno tolerante y el otro no, y el que decide si el caso
+         * queda asociado a un contrato era el estricto.
+         */
+        .where(
+          sql`upper(replace(${p.policy_number}, ' ', '')) = ${normalizarNumeroPoliza(policyNumber)}`
+        )
         .limit(5)
     );
   } catch (e) {

@@ -66,6 +66,7 @@ import {
 import { CLAIM_FIELD_KEYS } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { polizaParaCompletar } from "@/core/case/poliza-encontrada";
+import { canonizarCampos } from "@/core/case/campos-canonicos";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
@@ -926,26 +927,27 @@ export async function runEmailExtractionWorker(
     // ── i) Customer matching — AC6, AC22 ─────────────────────────────────────
     // Build from fields array first (always present), then overlay with
     // extracted_fields typed object (may be absent if OpenAI omitted it).
-    const extractedClaimFields: Record<string, string | undefined> = Object.fromEntries(
-      extractedClaim.fields.map((f) => [f.field_key, f.field_value])
+    /*
+     * Con los sinónimos resueltos, o el buscador no encuentra a nadie.
+     *
+     * El extractor manda a veces `dni` y a veces `dni_asegurado` para el mismo
+     * dato, y el buscador de clientes lee sólo las claves canónicas. Cuando el
+     * modelo elegía el nombre en castellano la búsqueda daba cero y no fallaba
+     * nada: la persona había dado su DNI y le pedíamos de nuevo lo que acababa
+     * de dar.
+     *
+     * Se vio en el post-deploy, no en la suite: el mismo escenario que en local
+     * encontraba la póliza, en CI registraba `match_count: 0`. No era el
+     * ambiente — era qué nombre le puso el modelo al campo ese día.
+     *
+     * Las reglas (el alias no pisa a la canónica; `extracted_fields` va último
+     * y sólo con valor) están en `@/core/case/campos-canonicos`, con sus tests.
+     */
+    const extractedClaimFields = canonizarCampos(
+      extractedClaim.fields,
+      extractedClaim.extracted_fields,
+      CLAIM_FIELD_KEYS
     );
-    if (extractedClaim.extracted_fields) {
-      const ef = extractedClaim.extracted_fields;
-      /*
-       * El `if` NO es de estilo: sólo pisa si el modelo trajo algo.
-       *
-       * A esta altura `fields[]` ya tiene lo que salió de la hidratación y del
-       * parser de respaldo. Un `""` del modelo —que los manda— borraría un
-       * valor que sí encontramos en el texto, y el buscador de clientes se
-       * quedaría sin la clave por la que iba a encontrar a la persona.
-       *
-       * Un `Object.assign` o un spread liso harían eso.
-       */
-      for (const clave of CLAIM_FIELD_KEYS) {
-        const valor = ef[clave];
-        if (valor) extractedClaimFields[clave] = valor;
-      }
-    }
     const customerMatches = await findCustomerMatches(
       tenantId,
       extractedClaimFields

@@ -18,9 +18,18 @@
  */
 
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
+import {
+  normalizarDni,
+  normalizarEmail,
+  normalizarNumeroPoliza,
+  normalizarTelefono,
+  sirveParaBuscar,
+  MINIMO_DNI,
+  MINIMO_TELEFONO,
+} from "@/core/matching/normalizar";
 import type { ClaimFields } from "@/lib/schemas/extracted-claim";
 
 /** A single customer match result. */
@@ -121,6 +130,23 @@ export async function findCustomerMatches(
       tenant_id: tenantId,
       match_count: matches.length,
       match_types: matches.map((m) => m.matchType),
+      /*
+       * Con qué claves se pudo buscar. Los NOMBRES, nunca los valores.
+       *
+       * Un `match_count: 0` tiene dos causas que se ven igual en el log: la
+       * persona no está en el padrón, o no teníamos por dónde buscarla. Son
+       * problemas distintos —uno es normal, el otro es un dato que llegó y se
+       * perdió por el camino— y distinguirlos costó leer el código del
+       * extractor y adivinar.
+       *
+       * Pasó: el buscador daba cero en CI y uno en local para el mismo
+       * escenario, y no había forma de saber si le faltaba el DNI o si el DNI
+       * no figuraba. Un DNI, un teléfono o un número de póliza no van a un log;
+       * la lista de qué campos había, sí.
+       */
+      claves_disponibles: (["policy_number", "dni", "email", "phone"] as const).filter(
+        (k) => fields[k] && fields[k]!.trim() !== ""
+      ),
     })
   );
 
@@ -159,7 +185,11 @@ async function matchByPolicyNumber(
         })
         .from(p)
         .leftJoin(c, eq(p.customer_id, c.id))
-        .where(eq(p.policy_number, policyNumber))
+        // Sin espacios y en mayúsculas de los dos lados: los números de póliza
+        // los tipea una persona, y `pol 8812-r` es el mismo contrato.
+        .where(
+          sql`upper(replace(${p.policy_number}, ' ', '')) = ${normalizarNumeroPoliza(policyNumber)}`
+        )
         .limit(5)
     );
   } catch (e) {
@@ -190,13 +220,29 @@ async function matchByDni(
   const tenantCtx: TenantContext = { tenantId };
   const c = tables.customers;
 
+  /*
+   * Los dos lados normalizados, o no se encuentra a nadie.
+   *
+   * Decía `eq(c.dni, dni)`: igualdad exacta contra una columna que guarda los
+   * dígitos pelados. Una persona que escribe `27.654.321` —como se escribe un
+   * DNI acá— no aparecía en nuestro propio padrón.
+   *
+   * La guarda del mínimo no es defensiva de más: un `"—"` o un `"s/d"` se
+   * normalizan a la cadena vacía, y buscar por vacío contra una columna
+   * normalizada devuelve a toda persona con el documento vacío. En vez de no
+   * encontrar a nadie encontraríamos a cualquiera, con la confianza de una
+   * coincidencia por documento.
+   */
+  const buscado = normalizarDni(dni);
+  if (!sirveParaBuscar(buscado, MINIMO_DNI)) return [];
+
   let data: Array<{ id: string; full_name: string; email: string | null; dni: string | null }>;
   try {
     data = await enTenant(tenantCtx, (db) =>
       db
         .select({ id: c.id, full_name: c.full_name, email: c.email, dni: c.dni })
         .from(c)
-        .where(eq(c.dni, dni))
+        .where(sql`regexp_replace(coalesce(${c.dni}, ''), '[^0-9]', '', 'g') = ${buscado}`)
         .limit(5)
     );
   } catch (e) {
@@ -232,7 +278,9 @@ async function matchByEmail(
       db
         .select({ id: c.id, full_name: c.full_name, email: c.email, dni: c.dni })
         .from(c)
-        .where(and( eq(c.email, email.toLowerCase())))
+        // `lower()` de los dos lados: el de entrada ya venía en minúsculas, la
+        // columna no. Una dirección guardada como `Cecilia@…` no aparecía.
+        .where(sql`lower(${c.email}) = ${normalizarEmail(email)}`)
         .limit(5)
     );
   } catch (e) {
@@ -260,8 +308,15 @@ async function matchByPhone(
 ): Promise<CustomerMatch[]> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
-  // Normalize phone: strip spaces, dashes, parentheses for matching.
-  const normalized = phone.replace(/[\s\-().+]/g, "");
+  /*
+   * El normalizado se calculaba y se TIRABA.
+   *
+   * Abajo decía `void normalized; // not in SQL (match exact stored value)`, y
+   * la comparación iba contra el crudo. O sea: se sabía cómo había que
+   * comparar, se hacía la cuenta, y después se comparaba de la otra forma.
+   */
+  const buscado = normalizarTelefono(phone);
+  if (!sirveParaBuscar(buscado, MINIMO_TELEFONO)) return [];
 
   const cc = tables.customerContacts;
   const c = tables.customers;
@@ -287,7 +342,7 @@ async function matchByPhone(
         .where(
           and(
             eq(cc.contact_type, "phone"),
-            eq(cc.value, phone)
+            sql`regexp_replace(coalesce(${cc.value}, ''), '[^0-9]', '', 'g') = ${buscado}`
           )
         )
         .limit(5)
@@ -297,7 +352,6 @@ async function matchByPhone(
     return [];
   }
 
-  void normalized; // used for logging only; not in SQL (match exact stored value)
 
   return data.map((row) => {
     const customer = row.customer;

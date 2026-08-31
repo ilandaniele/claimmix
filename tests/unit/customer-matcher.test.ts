@@ -44,6 +44,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import type { ClaimFields } from "@/lib/schemas/extracted-claim";
 import { db } from "@/lib/db";
@@ -324,5 +325,184 @@ describe("findCustomerMatches — DB error handling", () => {
     // Should not throw — returns empty array
     const matches = await findCustomerMatches(TENANT_ID, fields);
     expect(Array.isArray(matches)).toBe(true);
+  });
+});
+
+// ── El log dice con qué se pudo buscar, y nunca con qué valores ──────────────
+
+describe("el log de customer_matcher", () => {
+  /*
+   * Un `match_count: 0` tiene dos causas que en el log se veían igual: la
+   * persona no está en el padrón, o no teníamos por dónde buscarla. Son
+   * problemas distintos y distinguirlos costó leer el código del extractor.
+   */
+  it("nombra las claves disponibles cuando no encuentra a nadie", async () => {
+    vi.mocked(db.select).mockReturnValue(makeSelectChain([]) as any);
+    const dichos: string[] = [];
+    const espia = vi.spyOn(console, "info").mockImplementation((...a) => {
+      dichos.push(a.map(String).join(" "));
+    });
+
+    await findCustomerMatches(TENANT_ID, { dni: "12345678", phone: "+5492915550000" });
+
+    espia.mockRestore();
+    const linea = dichos.find((d) => d.includes("customer_matcher.matches_found"))!;
+    const log = JSON.parse(linea);
+
+    expect(log.match_count).toBe(0);
+    expect(log.claves_disponibles).toEqual(["dni", "phone"]);
+  });
+
+  it("NUNCA pone los valores en el log", async () => {
+    // Un DNI y un teléfono no van a un log. La lista de qué campos había, sí.
+    vi.mocked(db.select).mockReturnValue(makeSelectChain([]) as any);
+    const dichos: string[] = [];
+    const espia = vi.spyOn(console, "info").mockImplementation((...a) => {
+      dichos.push(a.map(String).join(" "));
+    });
+
+    await findCustomerMatches(TENANT_ID, {
+      dni: "12345678",
+      phone: "+5492915550000",
+      email: "cecilia@example.com",
+    });
+
+    espia.mockRestore();
+    const todo = dichos.join("\n");
+    expect(todo).not.toContain("12345678");
+    expect(todo).not.toContain("5492915550000");
+    expect(todo).not.toContain("cecilia@example.com");
+  });
+
+  it("con el diccionario vacío la lista viene vacía, no con claves inventadas", async () => {
+    const dichos: string[] = [];
+    const espia = vi.spyOn(console, "info").mockImplementation((...a) => {
+      dichos.push(a.map(String).join(" "));
+    });
+
+    await findCustomerMatches(TENANT_ID, {});
+
+    espia.mockRestore();
+    const log = JSON.parse(dichos.find((d) => d.includes("matches_found"))!);
+    expect(log.claves_disponibles).toEqual([]);
+  });
+});
+
+// ── Cómo escribe la gente, contra cómo lo guarda la base ─────────────────────
+
+/**
+ * Los parámetros con los que se consultó de verdad.
+ *
+ * Los buscadores pasaron de `eq(columna, valor)` a una expresión con
+ * `regexp_replace`, así que el valor ya no es el argumento crudo: es el
+ * normalizado. Se compila el `sql` con el mismo dialecto que usa la aplicación
+ * en vez de hurgar los `queryChunks` a mano — mi primera versión leyó los
+ * trozos de texto del SQL y afirmó sobre ellos, que no es lo que viaja.
+ *
+ * De paso queda visible que Drizzle PARAMETRIZA: el SQL sale con `$1` y el
+ * valor va aparte, así que interpolar un dato de una persona acá no es una
+ * inyección. Está comprobado abajo, no supuesto.
+ */
+function parametrosDeLaConsulta(chain: any): string[] {
+  const arg = chain.where.mock.calls[0]?.[0];
+  if (!arg) return [];
+  return new PgDialect().sqlToQuery(arg).params.map(String);
+}
+
+/** El SQL compilado, para poder afirmar que el valor NO está pegado adentro. */
+function sqlDeLaConsulta(chain: any): string {
+  const arg = chain.where.mock.calls[0]?.[0];
+  return arg ? new PgDialect().sqlToQuery(arg).sql : "";
+}
+
+describe("los buscadores normalizan los dos lados", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("un DNI con puntos busca por los dígitos", async () => {
+    /*
+     * Ésta es la falla que descubrió el ensayo: la base guarda `27654321` y la
+     * persona escribe `27.654.321`, como se escribe un DNI acá. Con la igualdad
+     * exacta que había antes, no aparecía en nuestro propio padrón.
+     */
+    const chain = makeSelectChain([]);
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    await findCustomerMatches(TENANT_ID, { dni: "27.654.321" });
+
+    expect(parametrosDeLaConsulta(chain)).toContain("27654321");
+  });
+
+  it("un número de póliza con espacios y en minúscula también", async () => {
+    const chain = makeSelectChain([]);
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    await findCustomerMatches(TENANT_ID, { policy_number: "pol 8812-r" });
+
+    expect(parametrosDeLaConsulta(chain)).toContain("POL8812-R");
+  });
+
+  it("un teléfono con prefijo y guiones busca por los dígitos", async () => {
+    // Antes se calculaba el normalizado y se tiraba: `void normalized`.
+    const chain = makeSelectChain([]);
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    await findCustomerMatches(TENANT_ID, { phone: "+54 9 291 555-0000" });
+
+    expect(parametrosDeLaConsulta(chain)).toContain("5492915550000");
+  });
+
+  it("una dirección en mayúsculas busca en minúsculas", async () => {
+    const chain = makeSelectChain([]);
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    await findCustomerMatches(TENANT_ID, { email: "  Cecilia@Example.COM " });
+
+    expect(parametrosDeLaConsulta(chain)).toContain("cecilia@example.com");
+  });
+
+  it("el valor viaja como parámetro, no pegado al SQL", async () => {
+    /*
+     * Interpolar un dato que escribió una persona adentro de un `sql` se parece
+     * a una inyección. No lo es —Drizzle lo saca a `$1`— y esto lo afirma en vez
+     * de dejarlo a la confianza, porque el día que deje de ser cierto hay que
+     * enterarse acá y no en producción.
+     */
+    const chain = makeSelectChain([]);
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    await findCustomerMatches(TENANT_ID, { policy_number: "X' OR '1'='1" });
+
+    expect(sqlDeLaConsulta(chain)).toContain("$1");
+    expect(sqlDeLaConsulta(chain)).not.toContain("OR '1'='1");
+    expect(parametrosDeLaConsulta(chain)).toContain("X'OR'1'='1");
+  });
+
+  it("un DNI que no son dígitos NO consulta, y no encuentra a cualquiera", async () => {
+    /*
+     * La mitad peligrosa de normalizar. Un `"s/d"` se convierte en la cadena
+     * vacía, y buscar por vacío contra una columna normalizada devuelve a TODA
+     * persona con el documento vacío — con la confianza alta de una
+     * coincidencia por documento. Encontrar a cualquiera es peor que no
+     * encontrar a nadie.
+     */
+    const chain = makeSelectChain([{ id: "x", full_name: "Quien Sea", email: null, dni: null }]);
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    const matches = await findCustomerMatches(TENANT_ID, { dni: "s/d" });
+
+    expect(matches).toEqual([]);
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
+  it("un teléfono demasiado corto tampoco consulta", async () => {
+    const chain = makeSelectChain([{ customer_id: "x", customer: null }]);
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    const matches = await findCustomerMatches(TENANT_ID, { phone: "123" });
+
+    expect(matches).toEqual([]);
+    expect(db.select).not.toHaveBeenCalled();
   });
 });

@@ -1117,6 +1117,32 @@ Efecto de punta a punta: `busca-la-poliza` registra `match_count: 1`, y
 `choque-completo` pasó de `confirmacion_pendiente` a `listo_para_core`, que es a
 lo que llega un caso cuando sí se asocia al cliente.
 
+**Cuánta gente quedó afectada: ninguna, todavía.** Medido en la base de
+producción después de arreglarlo, que es la parte que ningún análisis del código
+podía contestar:
+
+| | |
+|---|---|
+| clientes cargados | **0** |
+| pólizas cargadas | **0** |
+| casos | 481 |
+| casos con DNI extraído | 154 |
+| …de los cuales escritos **con puntos** | **59 (38,3 %)** |
+
+O sea: ninguna aseguradora cargó todavía su padrón, así que no había con qué
+coincidir y nadie sufrió el defecto. Pero de las 154 personas que dieron su DNI,
+59 lo escribieron `NN.NNN.NNN` — **dos de cada cinco**. El día que se cargue el
+primer padrón, el defecto habría fallado en silencio con esas dos de cada cinco,
+sin una sola excepción ni una línea de log.
+
+El número de póliza, en cambio, vino normalizado en el 100 % de los 94 casos que
+lo traen: ese camino estaba igual de mal escrito y mucho menos expuesto.
+
+Vale la aclaración porque el mensaje del commit se lee como si hubiera pasado. No
+pasó: el arreglo es preventivo, y lo que lo hace urgente no es el daño hecho sino
+que el daño empezaría el día que el producto empiece a servir para algo, y sería
+invisible.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

@@ -10,7 +10,7 @@
 import { Suspense } from "react";
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { eq, and, ilike, desc, count } from "drizzle-orm";
+import { eq, and, ilike, desc, count, or, sql } from "drizzle-orm";
 import { customers, users } from "@/lib/db/schema";
 import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import { redirect } from "next/navigation";
@@ -19,6 +19,7 @@ import { getServerLocale } from "@/lib/i18n/locale";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { enTenant } from "@/data/scope";
+import { interpretarBusqueda } from "@/core/matching/busqueda-libre";
 
 interface Customer {
   id: string;
@@ -78,9 +79,29 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
   if (!(CUSTOMER_PII_ROLES as string[]).includes(userRow.role)) redirect("/bandeja");
 
   const tenantId = userRow.tenant_id;
-  // El filtro por inquilino lo pone la base; acá sólo queda la búsqueda.
-  const whereClause = search
-    ? ilike(customers.full_name, `%${search}%`)
+  /*
+   * El filtro por inquilino lo pone la base; acá sólo queda la búsqueda.
+   *
+   * Buscaba SÓLO por nombre, con la caja diciendo «Buscar por nombre, DNI o
+   * email...». Un especialista que escribía el DNI del asegurado —el dato que
+   * tiene a mano cuando lo llama por teléfono— recibía «no hay clientes», que es
+   * indistinguible de «esa persona no está en el padrón». La pantalla no
+   * fallaba: mentía.
+   *
+   * El DNI se compara con los dígitos pelados de los dos lados, como en el
+   * buscador de casos: el padrón guarda `27654321` y la persona escribe
+   * `27.654.321`.
+   */
+  const termino = search ? interpretarBusqueda(search) : null;
+  const whereClause = termino
+    ? or(
+        ilike(customers.full_name, `%${termino.nombre}%`),
+        ilike(customers.email, `%${termino.nombre}%`),
+        ...(termino.dni
+          ? [sql`regexp_replace(coalesce(${customers.dni}, ''), '[^0-9]', '', 'g') = ${termino.dni}`]
+          : []),
+        ...(termino.email ? [sql`lower(${customers.email}) = ${termino.email}`] : [])
+      )
     : undefined;
 
   const [[{ total }], customersData] = await Promise.all([

@@ -13,7 +13,11 @@
 
 import "server-only";
 
-import { and, count, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import {
+  ESTADOS_COMPLETADO_SIN_PERSONA,
+  ESTADOS_ESCALADO,
+} from "@/core/case/fsm";
 
 import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
@@ -112,7 +116,11 @@ export async function getTenantKpis(
         db
           .select({
             total: sql<number>`count(*)::int`,
-            listo: sql<number>`count(*) filter (where ${cases.status} = 'listo')::int`,
+            // Los DOS vocabularios: el canal real termina en `listo_para_core`,
+            // no en `listo`. Ver `ESTADOS_COMPLETADO_SIN_PERSONA`.
+            listo: sql<number>`count(*) filter (where ${inArray(cases.status, [
+              ...ESTADOS_COMPLETADO_SIN_PERSONA,
+            ])})::int`,
             cerrados: sql<number>`count(*) filter (where ${cases.status} = 'cerrado' and ${cases.closed_at} is not null)::int`,
             minutos: sql<number>`coalesce(sum(extract(epoch from (${cases.closed_at} - ${cases.created_at})) / 60) filter (where ${cases.status} = 'cerrado' and ${cases.closed_at} is not null), 0)::float8`,
           })
@@ -143,7 +151,8 @@ export async function getTenantKpis(
           .select({ n: count() })
           .from(cases)
           .where(and(
-            eq(cases.status, "escalado"),
+            // Idem: el canal real escribe `requiere_especialista`.
+            inArray(cases.status, [...ESTADOS_ESCALADO]),
             gte(cases.created_at, monthStart),
             lt(cases.created_at, monthEnd),
           ))

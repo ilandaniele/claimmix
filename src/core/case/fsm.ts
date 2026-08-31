@@ -189,6 +189,41 @@ export function isTerminalStatus(status: CaseStatus): boolean {
 export const EMAIL_INITIAL_STATUS: CaseStatus = "recibido";
 
 /**
+ * Los estados que significan «el agente lo completó sin que interviniera nadie».
+ *
+ * Existe porque las métricas contaban `status = 'listo'` a secas, y en el
+ * producto real NINGÚN caso llega a `listo`: ese es el vocabulario viejo, el que
+ * usa el flujo simulado. El intake por correo y por WhatsApp termina en
+ * `listo_para_core`. Con 28 casos completados en la base, la pantalla de
+ * métricas mostraba «Tasa de completitud automática: 0%» — un producto que
+ * funciona, mostrándose roto a quien lo está evaluando.
+ *
+ * Los dos vocabularios juntos a propósito: las filas viejas siguen contando.
+ *
+ * `enviado_a_core` cuenta: un caso que se completó solo y ADEMÁS ya se exportó
+ * sigue siendo un caso que se completó solo. Sin él, el número bajaría a medida
+ * que los casos avanzan, que es otra forma del mismo error.
+ *
+ * `cerrado` NO cuenta: ahí adentro están también los que se cierran por
+ * abandono, que es lo contrario de completarse solo.
+ */
+export const ESTADOS_COMPLETADO_SIN_PERSONA: ReadonlySet<CaseStatus> =
+  new Set<CaseStatus>(["listo", "listo_para_core", "enviado_a_core"]);
+
+/**
+ * Los estados que significan «esto lo tiene que mirar una persona».
+ *
+ * Mismo problema que arriba: se contaba `escalado`, que el canal real nunca
+ * escribe. Son 43 en `requiere_especialista` y la pantalla decía 0.
+ *
+ * Cuenta el estado ACTUAL, así que un caso escalado y después cerrado deja de
+ * sumar. Es una propiedad de contar por estado y no un descuido; para «cuántos
+ * se escalaron alguna vez» haría falta mirar la auditoría.
+ */
+export const ESTADOS_ESCALADO: ReadonlySet<CaseStatus> =
+  new Set<CaseStatus>(["escalado", "requiere_especialista"]);
+
+/**
  * Statuses that the AI worker is allowed to set directly.
  * Enforces LLM08: AI cannot set terminal states or core-sync states.
  */

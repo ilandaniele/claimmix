@@ -1143,6 +1143,67 @@ pasó: el arreglo es preventivo, y lo que lo hace urgente no es el daño hecho s
 que el daño empezaría el día que el producto empiece a servir para algo, y sería
 invisible.
 
+### 🕳️ Barrido de defectos silenciosos (2026-08-31)
+
+Sesenta y un agentes sobre `src/` y `scripts/`, con ocho lentes distintos y dos
+escépticos por hallazgo (uno que intenta refutar leyendo el código, otro que
+pregunta si le pasa algo malo a alguien). **31 crudos → 26 únicos → 18
+confirmados**, más 2 de un crítico de cobertura.
+
+Buscaba una familia concreta: código que parece funcionar, no funciona, y **no
+falla cuando no funciona**.
+
+#### Arreglados
+
+| qué pasaba | dónde |
+|---|---|
+| **El agente podía dar por recibido un parte policial que nadie mandó.** Encontrado en los DATOS, no leyendo código. | `orchestrate.ts` |
+| **«Hay un herido» iba a un especialista; «hay tres heridos», a nadie.** La capa de patrones no veía el plural. | `severity-classifier.ts` |
+| **Un aviso al especialista que falló contaba como aviso**, y la guarda de idempotencia impedía reintentar para siempre. | `specialist-alert.ts` |
+| **La pantalla decía «completitud automática: 0%»** con 28 casos completados: contaba estados que el canal real no escribe. | `kpis.ts` |
+| **Con más de 50 mensajes acumulados el resto se perdía**, con `errors: 0`: la marca de agua saltaba al presente sin leer la cola. | `gmail-poller.ts` |
+
+#### Pendientes, confirmados por dos escépticos
+
+Ordenados por daño. Ninguno tocado todavía.
+
+- **alta** — `validate` sólo cuenta CUÁNTAS consultas hizo el agente, no que el
+  valor haya salido de alguna: puede inventar un número de póliza después de una
+  búsqueda que no encontró nada. (Se cerró la mitad de los DOCUMENTOS; los datos
+  siguen abiertos.) `deliberate.ts:442`
+- **alta** — Un mensaje que llega a mitad de corrida se descarta contra el estado
+  que esa misma corrida acaba de escribir. `extract.ts:1273`
+- **alta** — `unmatchedAttachments` no filtra los que ya coincidieron: cada
+  mensaje nuevo vuelve a ofrecerle al modelo las fotos viejas para tapar
+  documentos que faltan. `documents.ts:221`
+- **alta** — El tope mensual de gasto de IA dice ser del proyecto y cuenta un solo
+  inquilino: la base se lo acota con RLS. `budget.ts:236`
+- **alta** — El valor del padrón se busca, se compara y se tira: el mail de
+  conflicto sale con el campo vacío. `orchestrate.ts:1550`
+- **alta** — `getSenderEmail` lee `raw_messages`, que en el canal de correo real
+  puede estar vacío. `confirm-field.ts:399`
+- **alta** — Por mail, `answer_and_ask` sale sin la respuesta y repitiendo el
+  pedido anterior palabra por palabra. `render.ts:139`
+- **media** — El DNI entra crudo al `audit_log` y a stdout: `redactObject` existe
+  y falta justo en el payload que lleva el documento. `orchestrate.ts:410`
+- **media** — La vigencia de la póliza se compara contra el día UTC: entre las 21
+  y las 24 una póliza que vence hoy figura vencida. `agent-tools.ts:366`
+- **media** — El buscador de `/clientes` promete nombre, DNI y correo, y sólo
+  busca por nombre. `clientes/page.tsx:83`
+- **media** — `normalizarNumeroPoliza` no saca los guiones, y el comentario del
+  módulo afirma que sí: `POL8812R` no encuentra a `POL-8812-R`. (Comentario mío,
+  de hoy.) `normalizar.ts:29`
+- **media** — El cupo diario por usuario no se puede alcanzar: nadie escribe
+  `ai_usage.user_id`. `budget.ts:308`
+- **media** — El tope de 200 de `close-abandoned` se aplica DESPUÉS del UPDATE:
+  cierra todos y audita 200. `close-abandoned.ts:90`
+- **media** — El reintento del worker no mira si el POST contestó 200, y la
+  bandera que lo haría reintentar ya se borró. `extract.ts:508`
+- **media** — El conflicto se detecta con la clave canónica y el valor se busca
+  con la cruda: queda vacío. `orchestrate.ts:292`
+- **baja** — La cartera recalcula meses ya cerrados y contradice la factura
+  congelada. `tenant-summary.ts:80`
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

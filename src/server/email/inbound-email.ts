@@ -25,6 +25,7 @@ import { threadLookup } from "@/server/email/thread-lookup";
 import { classifyInboundEmailForIntake } from "@/server/email/relevance-prefilter";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { enTenant } from "@/data/scope";
+import { reabrirSiEraNoRelevante } from "@/server/cases/reabrir-no-relevante";
 
 export interface InboundEmail {
   tenantId: string;
@@ -139,6 +140,20 @@ export async function ingestInboundEmail(
 
   const claimMessageId = await insertInboundMessage(caseId, email);
   if (!claimMessageId) throw new Error("claim_message_insert_failed");
+
+  /*
+   * Si el caso estaba dado por «no es una denuncia», vuelve al flujo.
+   *
+   * Alguien escribe «hola», queda clasificado como no-denuncia, y después manda
+   * la denuncia de verdad: sin esto ese mensaje se guardaba y no lo leía nadie,
+   * porque el worker no arranca desde `no_relevante`.
+   *
+   * Va acá y no en el worker a propósito: el disparador tiene que ser que una
+   * PERSONA mandó un mensaje, no que algo despachó una extracción.
+   */
+  if (existingCaseId) {
+    await reabrirSiEraNoRelevante(caseId, tenantId);
+  }
 
   await writeAuditLog({
     tenant_id: tenantId,

@@ -66,8 +66,26 @@ describe("isTerminalStatus", () => {
     expect(isTerminalStatus("cerrado")).toBe(true);
   });
 
-  it("no_relevante is terminal", () => {
-    expect(isTerminalStatus("no_relevante")).toBe(true);
+  /*
+   * `no_relevante` dejó de ser terminal del todo, y tiene UNA salida.
+   *
+   * Alguien escribía «hola», el clasificador lo daba por no-denuncia, y cuando
+   * después mandaba la denuncia de verdad ese mensaje se guardaba y no lo leía
+   * nadie: el worker no arranca desde un estado terminal. Es el balde más grande
+   * de la base — 329 casos.
+   *
+   * La arista es `no_relevante → recibido` y NADA más, y la toma el camino de
+   * ingreso cuando llega un mensaje. LLM08 sigue en pie: el modelo no puede
+   * tomarla, igual que no puede ENTRAR a este estado por su cuenta.
+   *
+   * Ojo con lo que esto NO significa: «no terminal» no es «lo reabre cualquiera».
+   * Para eso está `ESTADOS_QUE_NO_SE_REABREN_A_MANO`, que existe porque al abrir
+   * la arista la guarda de permisos de `/re-analyze` —que preguntaba «¿es
+   * terminal?»— se evaporó sola. Lo cazó un test que ya estaba.
+   */
+  it("no_relevante ya no es terminal: tiene una salida, y una sola", () => {
+    expect(isTerminalStatus("no_relevante")).toBe(false);
+    expect(getAllowedTransitions("no_relevante")).toEqual(["recibido"]);
   });
 
   it("non-terminal statuses return false", () => {
@@ -132,7 +150,6 @@ describe("isValidTransition — valid email-intake transitions", () => {
 describe("isValidTransition — invalid email-intake transitions", () => {
   const invalidCases: [CaseStatus, CaseStatus][] = [
     // Terminal states — no outgoing transitions
-    ["no_relevante", "recibido"],
     ["no_relevante", "info_faltante"],
     ["no_relevante", "cerrado"],
     // Skip-state violations
@@ -213,8 +230,8 @@ describe("getAllowedTransitions — email-intake statuses", () => {
     expect(allowed).toContain("listo_para_core");
   });
 
-  it("no_relevante has no allowed transitions (terminal)", () => {
-    expect(getAllowedTransitions("no_relevante")).toHaveLength(0);
+  it("no_relevante sólo puede volver al principio del flujo", () => {
+    expect(getAllowedTransitions("no_relevante")).toEqual(["recibido"]);
   });
 });
 
@@ -227,9 +244,23 @@ describe("validateTransition — error messages for email statuses", () => {
     expect(validateTransition("error_core", "listo_para_core")).toBeNull();
   });
 
-  it("returns terminal message for no_relevante → anything", () => {
-    const result = validateTransition("no_relevante", "recibido");
+  it("desde no_relevante, el error nombra la única salida que hay", () => {
+    /*
+     * Antes decía «el estado es terminal» porque no había ninguna salida. Ahora
+     * hay una —`recibido`, la que toma el camino de ingreso cuando llega un
+     * mensaje— así que el mensaje útil es el que dice cuál es.
+     *
+     * Se comprueba contra `cerrado` y no contra `recibido`, que ahora es válida.
+     */
+    const result = validateTransition("no_relevante", "cerrado");
     expect(result).not.toBeNull();
+    expect(result).toContain("recibido");
+    expect(result).not.toContain("terminal");
+  });
+
+  it("y los que SÍ son terminales siguen diciendo «terminal»", () => {
+    // El control: el mensaje de terminal no se perdió, cambió de dueño.
+    const result = validateTransition("cerrado", "recibido");
     expect(result).toContain("terminal");
   });
 
@@ -313,8 +344,10 @@ describe("Full happy-path: email claim walk", () => {
     expect(isTerminalStatus("cerrado")).toBe(true);
   });
 
-  it("not-relevant path: recibido → no_relevante", () => {
+  it("not-relevant path: recibido → no_relevante, y la vuelta si escriben de nuevo", () => {
     expect(isValidTransition("recibido", "no_relevante")).toBe(true);
-    expect(isTerminalStatus("no_relevante")).toBe(true);
+    // La vuelta existe y es la única: un mensaje nuevo devuelve el caso al flujo.
+    expect(isValidTransition("no_relevante", "recibido")).toBe(true);
+    expect(isValidTransition("no_relevante", "cerrado")).toBe(false);
   });
 });

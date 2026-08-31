@@ -22,7 +22,7 @@ import { cases } from "@/lib/db/schema";
 import { CaseStatusSchema } from "@/lib/schemas/cases";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
-import { isTerminalStatus } from "@/core/case/fsm";
+import { ESTADOS_QUE_NO_SE_REABREN_A_MANO } from "@/core/case/fsm";
 import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -100,7 +100,16 @@ export async function POST(
 
   if (!caseRow) return err(new AppError("NOT_FOUND"));
   const statusParsed = CaseStatusSchema.safeParse(caseRow.status);
-  if (statusParsed.success && isTerminalStatus(statusParsed.data)) {
+  /*
+   * `ESTADOS_QUE_NO_SE_REABREN_A_MANO` y no `isTerminalStatus`.
+   *
+   * Esta guarda expresa una regla de PERMISOS —un analista común no reabre un
+   * caso cerrado— y se apoyaba en la pregunta estructural «¿es terminal?». El
+   * día que `no_relevante` dejó de ser terminal del todo (tiene una salida: la
+   * que toma el camino de ingreso cuando llega un mensaje), la guarda se
+   * evaporó sola y cualquier analista pasó a poder re-analizarlo.
+   */
+  if (statusParsed.success && ESTADOS_QUE_NO_SE_REABREN_A_MANO.has(statusParsed.data)) {
     // Admins can re-analyze cases stuck in no_relevante due to provider errors.
     // Regular analysts cannot re-open terminal cases.
     const isAdmin = userRow.role === "admin";

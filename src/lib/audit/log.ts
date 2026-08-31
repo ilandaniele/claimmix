@@ -180,6 +180,16 @@ export const AuditEvent = {
   MESSAGE_NOT_READ: "claim.message_not_read",
 
   /**
+   * CASE_REOPENED: un caso que estaba dado por no-relevante volvió al flujo
+   * porque llegó un mensaje nuevo. Payload: { desde, motivo }.
+   *
+   * Queda asentado porque es la única transición que sale de un estado que la
+   * máquina trata como final, y porque desde afuera un caso reabierto se ve
+   * igual que uno que nunca se cerró.
+   */
+  CASE_REOPENED: "claim.case_reopened",
+
+  /**
    * SPECIALIST_REQUIRED: case escalated to specialist due to high severity.
    * Payload: { case_id, severity }.
    * AC11.

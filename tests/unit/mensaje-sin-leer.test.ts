@@ -1,20 +1,26 @@
 /**
  * Un mensaje que llega a un caso del que el worker no vuelve a arrancar.
  *
- * `no_relevante` y `listo_para_core` son terminales en la máquina de estados, y
- * el worker de correo tiene una lista corta de estados desde los que puede
+ * El worker de correo tiene una lista corta de estados desde los que puede
  * empezar. Cuando llega un mensaje a un caso que quedó afuera de esa lista, el
- * mensaje se guarda y NO se lee.
+ * mensaje se guarda y NO se lee, y la única huella era un `level: "info"`
+ * suelto, igual a cualquier otra línea del log.
  *
- * El caso que importa: alguien escribe «hola», el clasificador dice que no es
- * una denuncia y el caso queda en `no_relevante`; después escribe la denuncia de
- * verdad, y eso no lo lee nadie.
+ * ── Qué cubre esto HOY ───────────────────────────────────────────────────────
  *
- * Abrir la máquina de estados es una decisión de producto —`no_relevante` es
- * terminal A PROPÓSITO, documentado bajo LLM08: la IA no saca un caso de un
- * estado terminal— y no se toma en un arreglo. Lo que sí se puede arreglar es
- * que el descarte deje de ser invisible: era un `level: "info"` suelto, igual a
- * cualquier otra línea del log.
+ * El caso de `no_relevante` —alguien escribe «hola», queda clasificado como
+ * no-denuncia, y después manda la denuncia de verdad— ya NO llega acá por
+ * correo: `reabrirSiEraNoRelevante` devuelve el caso a `recibido` en el camino
+ * de ingreso, antes de despachar. Ver `tests/unit/reabrir-no-relevante.test.ts`.
+ *
+ * Lo que sigue cayendo acá son los otros estados no reanudables —
+ * `listo_para_core`, `enviado_a_core`, `cerrado`, `requiere_especialista`— y el
+ * `no_relevante` que llegue por un camino que no sea el ingreso de correo (un
+ * re-análisis a mano de un admin, un re-despacho). Para esos el mensaje sigue
+ * sin leerse, y eso es deliberado: una persona es dueña de esos casos.
+ *
+ * Lo que NO es deliberado es que no se note. Ahora queda en `warn` y en la
+ * AUDITORÍA del caso, que es donde una persona lo puede ver.
  *
  * Medido antes de escribir esto: en la base no hay todavía ningún caso con un
  * mensaje posterior a la última vez que se lo tocó. Es preventivo.

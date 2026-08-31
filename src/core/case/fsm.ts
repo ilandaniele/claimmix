@@ -16,10 +16,12 @@
  *   listo_para_core      → enviado_a_core | error_core
  *   enviado_a_core       → cerrado
  *   error_core           → listo_para_core                            (retry)
- *   no_relevante         → (terminal — non-claim email)
+ *   no_relevante         → recibido                              (llegó un mensaje nuevo)
  *
  * LLM08 containment:
  *   - AI worker CANNOT directly set terminal states ('cerrado', 'enviado_a_core', 'no_relevante').
+ *   - Ni sacar un caso de 'no_relevante': la única arista que sale de ahí la
+ *     toma el camino de ingreso cuando llega un mensaje, no el modelo.
  *   - AI worker sets 'recibido', 'info_faltante', 'requiere_especialista' only.
  *   - 'enviado_a_core' and 'cerrado' require explicit human POST/PATCH actions.
  *   - 'no_relevante' is set by the is_claim=false classifier path, not the AI directly.
@@ -128,11 +130,25 @@ export const FSM_TRANSITIONS: Readonly<Record<CaseStatus, readonly CaseStatus[]>
 
   /**
    * no_relevante: email classified as not an insurance claim (is_claim=false).
-   * Terminal state — no follow-up email sent, no further transitions.
    *
-   * LLM08: The controlled server-side path (not the LLM output directly) sets this.
+   * Casi terminal: la ÚNICA salida es volver al principio del flujo cuando llega
+   * un mensaje nuevo.
+   *
+   * Era terminal del todo, y eso significaba que alguien podía escribir «hola»,
+   * quedar clasificado como no-denuncia, y mandar después la denuncia de verdad
+   * sin que nadie la leyera: el worker no arranca desde acá, así que el mensaje
+   * entraba, se guardaba, y se perdía adentro. En un producto de intake es la
+   * peor forma de fallar. Y es el balde más grande de la base — 329 casos.
+   *
+   * LLM08 sigue en pie: esta arista NO la puede tomar el modelo. La toma
+   * `reabrirSiEraNoRelevante`, en el camino de ingreso, disparada por el hecho
+   * de que una persona mandó un mensaje. Es la simétrica de cómo se ENTRA a este
+   * estado: por un camino controlado del servidor, no por la salida del LLM.
+   *
+   * Vuelve a `recibido` y no a otra cosa: es el principio del flujo normal, y si
+   * el mensaje nuevo tampoco es una denuncia la extracción lo devuelve acá.
    */
-  no_relevante: [], // terminal
+  no_relevante: ["recibido"],
 } as const;
 
 /**
@@ -181,6 +197,31 @@ export function validateTransition(
 export function isTerminalStatus(status: CaseStatus): boolean {
   return FSM_TRANSITIONS[status].length === 0;
 }
+
+/**
+ * Estados que una persona NO reabre a mano desde el panel.
+ *
+ * No es lo mismo que `isTerminalStatus`, y separarlos costó una regresión: la
+ * ruta de re-análisis preguntaba «¿es terminal?» para expresar una regla de
+ * PERMISOS —«un analista común no reabre un caso cerrado»—. Cuando
+ * `no_relevante` dejó de ser terminal del todo, la guarda se evaporó y cualquier
+ * analista pasó a poder re-analizarlo. Lo cazó un test que ya existía.
+ *
+ * Son dos preguntas distintas:
+ *   · `isTerminalStatus` — ¿la máquina de estados deja salir de acá?
+ *   · esto             — ¿deja que lo saque una persona desde la pantalla?
+ *
+ * `no_relevante` tiene UNA salida, y la toma el camino de ingreso cuando llega
+ * un mensaje. Que exista esa arista no habilita a un analista a usarla con un
+ * clic; para eso está el caso especial de admin que la ruta ya tenía escrito.
+ */
+export const ESTADOS_QUE_NO_SE_REABREN_A_MANO: ReadonlySet<CaseStatus> =
+  new Set<CaseStatus>([
+    ...(Object.keys(FSM_TRANSITIONS) as CaseStatus[]).filter((s) =>
+      isTerminalStatus(s)
+    ),
+    "no_relevante",
+  ]);
 
 /**
  * Email-intake specific: returns the initial status for a new email case.

@@ -502,17 +502,71 @@ async function releaseExtractionLease(
   }
 }
 
-/** Re-run the worker over HTTP for a message that landed mid-run. */
-async function redispatchExtraction(caseId: string, tenantId: string): Promise<void> {
+/**
+ * Re-run the worker over HTTP for a message that landed mid-run.
+ *
+ * ── Mirar si llegó, y si no, dejar la marca puesta ──────────────────────────
+ *
+ * Hacía el `fetch` y no miraba la respuesta. Y para cuando corre, la bandera
+ * `extraction_pending` YA se limpió: `releaseExtractionLease` la lee y la borra
+ * en la misma transacción. O sea que un POST que no llega deja el mensaje sin
+ * leer y sin nada que lo recuerde.
+ *
+ * No hace falta que se caiga la red. Un despliegue sin `NEXT_PUBLIC_APP_URL`
+ * cae a `https://${VERCEL_URL}`, que está detrás de Deployment Protection y
+ * contesta una pantalla de SSO con 401: un `fetch` perfectamente exitoso que no
+ * llegó a ningún handler. Sin mirar el código, eso es indistinguible de haber
+ * funcionado.
+ *
+ * Ahora, si no contestó 200, la marca vuelve a ponerse. La recupera la próxima
+ * corrida del worker sobre ese caso —el siguiente mensaje de esa persona— que
+ * es el camino que ya existe. No lo cura solo, pero deja de perderse.
+ */
+async function redispatchExtraction(
+  caseId: string,
+  tenantId: string,
+  tenantCtx: TenantContext
+): Promise<void> {
+  let llegó = false;
+  let detalle = "";
+
   try {
-    await fetch(`${getWorkerBaseUrl()}/api/worker/extract`, {
+    const res = await fetch(`${getWorkerBaseUrl()}/api/worker/extract`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...internalAuthHeaders() },
       body: JSON.stringify({ caseId, tenantId }),
     });
+    llegó = res.ok;
+    if (!res.ok) detalle = `http_${res.status}`;
   } catch (err) {
-    const name = err instanceof Error ? err.name : "UnknownError";
-    console.error("[email-worker] redispatch error:", name, "case:", caseId);
+    detalle = err instanceof Error ? err.name : "UnknownError";
+  }
+
+  if (llegó) return;
+
+  console.error(
+    JSON.stringify({
+      level: "error",
+      service: "claimmix",
+      msg: "email_worker.redespacho_no_llego",
+      case_id: caseId,
+      detalle,
+      nota:
+        "El mensaje que llegó a mitad de corrida no se leyó. Se vuelve a marcar " +
+        "el caso como pendiente para que lo tome la próxima corrida.",
+    })
+  );
+
+  try {
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(cases)
+        .set({ extraction_pending: true })
+        .where(eq(cases.id, caseId))
+    );
+  } catch (err) {
+    // Si ni esto se puede escribir, queda el log de arriba y nada más.
+    console.error("[email-worker] no se pudo remarcar pendiente:", dbErrCode(err));
   }
 }
 
@@ -1298,7 +1352,7 @@ export async function runEmailExtractionWorker(
             case_id: caseId,
           })
         );
-        await redispatchExtraction(caseId, tenantId);
+        await redispatchExtraction(caseId, tenantId, tenantCtx);
       }
     }
   }

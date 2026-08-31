@@ -17,7 +17,7 @@
  */
 
 import "server-only";
-import { and, gte, lt, ne, sql } from "drizzle-orm";
+import { and, eq, gte, lt, ne, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
 import { resolveBillingPeriod } from "@/lib/billing/period";
@@ -110,9 +110,38 @@ export async function listTenantSummaries(month?: string | null): Promise<{
   const casesByTenant = new Map(caseRows.map((r) => [r.tenant_id, r]));
   const costByTenant = new Map(usageRows.map((r) => [r.tenant_id, Number(r.cost_usd)]));
 
+  /*
+   * Las facturas ya emitidas de ese mes, que MANDAN sobre el recálculo.
+   *
+   * Esta pantalla recalculaba siempre desde `cases` en vivo. Para un mes ya
+   * cerrado eso contradice la factura que la aseguradora tiene en la mano: se
+   * congela el 1° del mes siguiente con `getStatement`, y desde entonces basta
+   * que alguien corrija un caso —marcarlo como no-denuncia, cerrarlo mal,
+   * borrarlo— para que la cartera muestre otro número.
+   *
+   * Y no avisa cuál es cuál: son dos pantallas del mismo producto diciendo dos
+   * totales distintos del mismo mes, las dos con cara de ser la respuesta.
+   *
+   * La regla ya estaba decidida y escrita en `statement.ts`: una factura por mes
+   * y, una vez congelada, se lee y no se recalcula. Acá se respeta.
+   *
+   * sin-inquilino: mismo reporte de dueño que las consultas de arriba.
+   */
+  const congeladas = await db
+    .select({
+      tenant_id: tables.billingInvoices.tenant_id,
+      total_usd: tables.billingInvoices.total_usd,
+      billable_claims: tables.billingInvoices.billable_claims,
+    })
+    .from(tables.billingInvoices)
+    .where(eq(tables.billingInvoices.month, range.month));
+
+  const facturaPorInquilino = new Map(congeladas.map((f) => [f.tenant_id, f]));
+
   const tenants = tenantRows.map((t): TenantSummary => {
     const counts = casesByTenant.get(t.id);
     const cost = costByTenant.get(t.id) ?? 0;
+    const facturada = facturaPorInquilino.get(t.id);
     const fallback = isPlan(t.plan) ? PLAN_CATALOG[t.plan] : PLAN_CATALOG.piloto;
 
     // Los términos guardados del tenant mandan sobre el catálogo: un contrato
@@ -137,11 +166,20 @@ export async function listTenantSummaries(month?: string | null): Promise<{
       monthly_fee_usd: invoice.monthly_fee_usd,
       included_claims: invoice.included_claims,
       overage_price_usd: invoice.overage_price_usd,
-      billable_claims: counts?.billable ?? 0,
+      // Si el mes ya se facturó, lo que vale es lo que dice la factura.
+      billable_claims: facturada
+        ? Number(facturada.billable_claims)
+        : counts?.billable ?? 0,
       total_cases: counts?.total ?? 0,
-      invoice_total_usd: invoice.total_usd,
+      invoice_total_usd: facturada
+        ? Number(facturada.total_usd)
+        : invoice.total_usd,
       ai_cost_usd: Math.round(cost * 10000) / 10000,
-      margin_pct: computeMargin(invoice.total_usd, cost).margin_pct,
+      // El margen, contra el total que de verdad se cobró.
+      margin_pct: computeMargin(
+        facturada ? Number(facturada.total_usd) : invoice.total_usd,
+        cost
+      ).margin_pct,
     };
   });
 

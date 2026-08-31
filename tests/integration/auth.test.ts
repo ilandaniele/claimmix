@@ -19,8 +19,7 @@
  * They will be skipped if TEST_BASE_URL is not set (local CI without server).
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { clearAllRateLimits } from "@/lib/rate-limit/memory";
+import { describe, it, expect } from "vitest";
 
 const BASE_URL = process.env.TEST_BASE_URL ?? "http://localhost:3000";
 const TEST_EMAIL = process.env.INTEGRATION_TEST_EMAIL ?? "lucia@seguros-del-sur.com.ar";
@@ -29,11 +28,19 @@ const TEST_PASSWORD = process.env.INTEGRATION_TEST_PASSWORD ?? "Analyst123!";
 // Skip all tests if no server is available.
 const shouldSkip = !process.env.TEST_BASE_URL && !process.env.INTEGRATION_ENABLED;
 
+/*
+ * No hay `beforeEach` que reinicie el limitador, y no es un olvido.
+ *
+ * Había uno que llamaba a `clearAllRateLimits()` y no servía para nada, por dos
+ * razones a la vez: limpia el mapa en memoria de ESTE proceso —el del corredor
+ * de tests— y no el del servidor que atiende los pedidos; y el servidor ni
+ * siquiera cuenta en memoria, cuenta en Postgres, porque tiene `DATABASE_URL`.
+ * Se leía como higiene entre tests y era una línea muerta.
+ *
+ * Lo que sí funciona es no compartir cupo: cada prueba que toca el techo usa una
+ * clave propia. Ver AC3.
+ */
 describe.skipIf(shouldSkip)("POST /api/auth/sign-in", () => {
-  beforeEach(() => {
-    // Reset in-memory rate limit state between tests.
-    clearAllRateLimits();
-  });
 
   it("AC1: returns 200 with user data on valid credentials", async () => {
     const res = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
@@ -117,6 +124,15 @@ describe.skipIf(shouldSkip)("POST /api/auth/sign-in", () => {
   });
 
   it("AC3: returns 429 with Retry-After after 5 failed attempts", async () => {
+    /*
+     * Una dirección distinta en cada corrida, para estrenar contador.
+     *
+     * La clave del cupo es (IP, dirección). Con una dirección fija, los intentos
+     * de una corrida anterior podían seguir contados en la ventana en curso y
+     * el techo llegaba antes de lo que este test cree.
+     */
+    const direccion = `ratelimit-${Date.now()}@example.com`;
+
     const intento = () =>
       fetch(`${BASE_URL}/api/auth/sign-in/email`, {
         method: "POST",
@@ -130,10 +146,29 @@ describe.skipIf(shouldSkip)("POST /api/auth/sign-in", () => {
           "X-Forwarded-For": "10.0.0.1",
         },
         body: JSON.stringify({
-          email: "ratelimit-test@example.com",
+          email: direccion,
           password: "badpassword",
         }),
       });
+
+    /*
+     * Esperar a que la ventana en curso tenga lugar para los seis.
+     *
+     * La ventana es FIJA y alineada al reloj: `floor(now / 10s) * 10s`, igual en
+     * todas las instancias, que es lo que las hace contar juntas. El costo está
+     * escrito en `postgres.ts` — en el borde entre dos ventanas pasan hasta el
+     * doble de intentos — y este test caía justo ahí: cinco pedidos en la
+     * ventana N, el sexto en la N+1 estrenando contador, y 401 en vez de 429.
+     * Fallaba una de cada tantas corridas y parecía intermitencia del runner.
+     *
+     * Así que no se cambia el limitador para que el test pase: se le da al test
+     * la ventana entera que la afirmación necesita.
+     */
+    const VENTANA = 10_000;
+    const faltaParaElBorde = VENTANA - (Date.now() % VENTANA);
+    if (faltaParaElBorde < 4_000) {
+      await new Promise((r) => setTimeout(r, faltaParaElBorde + 100));
+    }
 
     /*
      * Los cinco salen JUNTOS, no uno tras otro.

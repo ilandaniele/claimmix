@@ -145,6 +145,18 @@ export function renderTemplate(
           data.knownValues && typeof data.knownValues === "object"
             ? (data.knownValues as Record<string, string>)
             : undefined,
+        /*
+         * Los tres que el orquestador ya mandaba y este `case` no pasaba.
+         *
+         * `question` es el que más pesa: la persona escribía «¿cuánto tarda
+         * esto? lo necesito para trabajar» y recibía la misma lista de datos
+         * faltantes que la vuelta anterior, palabra por palabra, sin una línea
+         * sobre lo que preguntó. La pregunta llegaba hasta acá y se caía en el
+         * borde entre `data` y el armador.
+         */
+        question: data.question != null ? String(data.question) : null,
+        isFollowUp: data.isFollowUp === true,
+        claimantName: data.claimantName != null ? String(data.claimantName) : null,
       });
 
     case "data_confirmation_request":

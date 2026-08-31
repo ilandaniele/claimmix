@@ -27,7 +27,7 @@
 
 import "server-only";
 
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { isValidTransition } from "@/core/case/fsm";
 import { enTenant, type TenantContext } from "@/data/scope";
@@ -39,12 +39,12 @@ import {
   claimFieldConfirmations,
   extractedFields,
   missingDocs,
-  rawMessages,
 } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import type { CaseStatus, ConfirmField } from "@/lib/schemas/cases";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { updateMemoryFromConfirmation } from "@/server/memory/update";
+import { mensajesEntrantes } from "@/server/cases/inbound-messages";
 
 export interface FieldConfirmationResult {
   case_id: string;
@@ -392,21 +392,23 @@ async function getSenderEmail(
   ctx: TenantContext,
   caseId: string
 ): Promise<string | null> {
-  try {
-    const row = firstRow(
-      await enTenant(ctx, (db) =>
-        db
-          .select({ from_addr: rawMessages.from_addr })
-          .from(rawMessages)
-          .where(eq(rawMessages.case_id, caseId))
-          .orderBy(asc(rawMessages.received_at))
-          .limit(1)
-      )
-    );
-    return row?.from_addr ?? null;
-  } catch {
-    return null;
-  }
+  /*
+   * Se lee por `mensajesEntrantes`, que mira `raw_messages` Y `claim_messages`.
+   *
+   * Miraba sólo `raw_messages`, y en el canal de correo REAL esa tabla puede no
+   * tener ni una fila: el poller de Gmail guarda en `claim_messages`. O sea que
+   * la memoria del cliente se escribía con una clave —el remitente— que en
+   * producción venía siempre en null, así que no se escribía nunca. Un producto
+   * que dice aprender de cada confirmación y no aprendía de ninguna, sin fallar.
+   *
+   * `mensajesEntrantes` ya resuelve la cascada y está probado; acá se reusa en
+   * vez de duplicar la consulta, que es como se llegó a tener dos.
+   */
+  const [primero] = await mensajesEntrantes(ctx, caseId, {
+    orden: "viejos",
+    tope: 1,
+  });
+  return primero?.from_addr || null;
 }
 
 /**

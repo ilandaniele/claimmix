@@ -20,6 +20,7 @@ import "server-only";
 
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
+import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 
 export type ReplyIntent =
   | "ask" // we need things from them
@@ -315,8 +316,7 @@ export async function composeReply(input: ComposeReplyInput): Promise<string> {
  */
 function withUnansweredQuestion(input: ComposeReplyInput): string {
   if (!input.question) return input.fallback;
-  const honest =
-    "Sobre lo que preguntás: todavía no podemos darte una respuesta, porque " +
-    "nadie revisó tu caso aún. En cuanto un analista lo mire te avisamos por acá.";
-  return `${input.fallback}\n\n${honest}`;
+  // La misma frase que usa el correo. Vivía sólo acá, y el mail —que no pasa
+  // por este redactor— no tenía ninguna: la pregunta se perdía entera.
+  return `${input.fallback}\n\n${RESPUESTA_PENDIENTE}`;
 }

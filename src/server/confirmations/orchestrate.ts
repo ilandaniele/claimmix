@@ -1646,15 +1646,29 @@ function getStoredFieldValue(
   match: CustomerMatch,
   fieldKey: string
 ): string {
-  // The CustomerMatch interface does not directly expose the stored field values.
-  // We use the customerName for full_name conflicts (the most common case).
-  // For other fields, we return an empty string — the conflict is flagged but
-  // the exact stored value is not available from this interface.
-  if (fieldKey === "full_name") {
-    return match.customerName;
-  }
-  // For email, dni, phone — the stored value is in the DB but not passed through
-  // the match interface. For now, we flag the conflict without the stored value.
-  // The analyst can see the stored value in the admin dashboard (W5/W6).
+  /*
+   * Devolvía `""` para todo lo que no fuera el nombre, y lo decía: «el valor
+   * está en la base pero no llega por esta interfaz».
+   *
+   * El efecto era un mail que el asegurado no podía usar. Le llega «Campo: DNI
+   * del titular. Obtuvimos el siguiente dato:» y nada después, así que no sabe
+   * qué figura mal ni qué tiene que corregir. El caso queda en
+   * `confirmacion_pendiente` esperando una respuesta que nadie puede dar.
+   *
+   * Y el valor estaba a mano: el buscador acababa de compararlo para DETECTAR
+   * el conflicto. Ahora viaja en el match.
+   *
+   * Sin enmascarar a propósito: el analista lo ve entero en la pantalla, y el
+   * enmascarado ocurre al renderizar el mail (`maskFieldValue` en
+   * `data-confirmation-request`), que es donde corresponde — quien escribió
+   * puede no ser el titular.
+   */
+  const guardado = match.storedValues?.[canonicalFieldKey(fieldKey)];
+  if (guardado) return guardado;
+
+  // El nombre sigue teniendo su atajo: `customerName` está en la interfaz desde
+  // siempre y algunos buscadores lo llenan sin pasar por la fila completa.
+  if (canonicalFieldKey(fieldKey) === "full_name") return match.customerName;
+
   return "";
 }

@@ -2935,3 +2935,136 @@ describe("orchestratePostExtraction — el conflicto y el nombre del campo", () 
     expect(filas.find((f) => f?.field_name === "dni")?.suggested_value).toBe("30.111.222");
   });
 });
+
+/**
+ * El mail de conflicto llevaba el campo vacío.
+ *
+ * `getStoredFieldValue` devolvía `""` para todo lo que no fuera el nombre, y lo
+ * decía en un comentario: «el valor está en la base pero no llega por esta
+ * interfaz». El asegurado recibía «Campo: DNI del titular. Obtuvimos el
+ * siguiente dato:» y nada después — no tenía forma de saber qué figura mal ni
+ * qué corregir, y el caso quedaba en `confirmacion_pendiente` esperando una
+ * respuesta que nadie podía dar.
+ *
+ * El valor estaba a mano: el buscador acababa de compararlo para DETECTAR el
+ * conflicto.
+ */
+describe("orchestratePostExtraction — el valor del padrón llega al pedido", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const DNI_DEL_PADRON = "27654321";
+
+  const enConflicto: CustomerMatch = {
+    customerId: "cust-padron",
+    matchType: "email",
+    confidence: 0.75,
+    customerName: "Juan Pérez",
+    conflictsWithExtracted: ["dni"],
+    storedValues: { full_name: "Juan Pérez", dni: DNI_DEL_PADRON },
+  };
+
+  function conDniDistinto() {
+    return extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "dni"),
+        { field_key: "dni", field_value: "30.111.222", confidence: 0.93, source: "ai" as const },
+      ],
+    });
+  }
+
+  function elAnalizadorPideConfirmar() {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        { fieldName: "dni", suggestedValue: "30.111.222", conflictValue: DNI_DEL_PADRON, reason: "conflict" },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+  }
+
+  it("el DNI que figura en el padrón se guarda en la confirmación", async () => {
+    elAnalizadorPideConfirmar();
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: conDniDistinto(), senderEmail: SENDER_EMAIL },
+      [enConflicto]
+    );
+
+    const filas = insertSpy.mock.calls.flatMap((c) =>
+      Array.isArray(c[0]) ? c[0] : [c[0]]
+    ) as Array<{ field_name?: string; conflict_with_value?: string | null }>;
+
+    const fila = filas.find((f) => f?.field_name === "dni");
+    expect(fila).toBeDefined();
+    // Lo que se rompía: quedaba en null y el mail salía sin nada que corregir.
+    expect(fila?.conflict_with_value).toBe(DNI_DEL_PADRON);
+  });
+
+  it("sin valor guardado sigue quedando vacío, no inventa nada", async () => {
+    /*
+     * El control. El arreglo tiene que llevar lo que HAY, no rellenar con lo
+     * primero que encuentre: un match sin ese campo en el padrón —porque la
+     * columna está en null— no puede terminar mostrándole a la persona el
+     * nombre del titular donde dice «DNI».
+     */
+    elAnalizadorPideConfirmar();
+    const sinDniGuardado: CustomerMatch = { ...enConflicto, storedValues: { full_name: "Juan Pérez" } };
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: conDniDistinto(), senderEmail: SENDER_EMAIL },
+      [sinDniGuardado]
+    );
+
+    const filas = insertSpy.mock.calls.flatMap((c) =>
+      Array.isArray(c[0]) ? c[0] : [c[0]]
+    ) as Array<{ field_name?: string; conflict_with_value?: string | null }>;
+
+    const fila = filas.find((f) => f?.field_name === "dni");
+    expect(fila?.conflict_with_value ?? "").toBe("");
+  });
+
+  it("y el nombre, que ya andaba, sigue andando", async () => {
+    // La otra mitad del control: `full_name` tenía su atajo por `customerName`
+    // y no se puede perder al agregar el camino nuevo.
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        { fieldName: "full_name", suggestedValue: "Pedro García", conflictValue: "Juan Pérez", reason: "conflict" },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+    const porNombre: CustomerMatch = { ...enConflicto, conflictsWithExtracted: ["full_name"] };
+    const claim = extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "full_name"),
+        { field_key: "full_name", field_value: "Pedro García", confidence: 0.92, source: "ai" as const },
+      ],
+    });
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [porNombre]
+    );
+
+    const filas = insertSpy.mock.calls.flatMap((c) =>
+      Array.isArray(c[0]) ? c[0] : [c[0]]
+    ) as Array<{ field_name?: string; conflict_with_value?: string | null }>;
+
+    expect(filas.find((f) => f?.field_name === "full_name")?.conflict_with_value).toBe(
+      "Juan Pérez"
+    );
+  });
+});

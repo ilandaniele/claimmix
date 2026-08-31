@@ -49,6 +49,21 @@ export interface CustomerMatch {
    * For example: email in email differs from customers.email.
    */
   conflictsWithExtracted: string[];
+  /**
+   * Lo que dice el padrón para esos campos, por clave canónica.
+   *
+   * Faltaba, y por eso el mail de conflicto salía vacío: `getStoredFieldValue`
+   * sólo sabía devolver el nombre —lo único que esta interfaz exponía— y para
+   * DNI, correo y teléfono devolvía `""`. El asegurado recibía «Obtuvimos el
+   * siguiente dato:» y nada después, así que no tenía forma de saber qué había
+   * que corregir. El valor estaba a la vista en el buscador, que acaba de
+   * compararlo para DETECTAR el conflicto, y se tiraba.
+   *
+   * Va sin enmascarar: el analista lo ve entero en la pantalla, y el
+   * enmascarado ocurre al renderizar el mail (`maskFieldValue`), que es donde
+   * corresponde — quien escribió puede no ser el titular.
+   */
+  storedValues: Record<string, string>;
 }
 
 /** Confidence scores by match type. */
@@ -214,6 +229,7 @@ async function matchByPolicyNumber(
       confidence: MATCH_CONFIDENCE.policy_number,
       customerName: customer?.full_name ?? "",
       conflictsWithExtracted: conflicts,
+      storedValues: valoresGuardados(customer),
     };
   });
 }
@@ -266,6 +282,7 @@ async function matchByDni(
       confidence: MATCH_CONFIDENCE.dni,
       customerName: customer.full_name ?? "",
       conflictsWithExtracted: conflicts,
+      storedValues: valoresGuardados(customer),
     };
   });
 }
@@ -304,6 +321,7 @@ async function matchByEmail(
       confidence: MATCH_CONFIDENCE.email,
       customerName: customer.full_name ?? "",
       conflictsWithExtracted: conflicts,
+      storedValues: valoresGuardados(customer),
     };
   });
 }
@@ -370,6 +388,7 @@ async function matchByPhone(
       confidence: MATCH_CONFIDENCE.phone,
       customerName: customer?.full_name ?? "",
       conflictsWithExtracted: conflicts,
+      storedValues: valoresGuardados(customer),
     };
   });
 }
@@ -382,6 +401,23 @@ async function matchByPhone(
  *
  * Returns field keys that conflict (e.g. ["full_name"] when names differ).
  */
+/**
+ * Lo que el padrón dice de esta persona, por clave canónica.
+ *
+ * Se arma junto con `detectConflicts` y de la misma fila: si se detectó un
+ * conflicto sobre un campo es porque el valor guardado estaba a mano.
+ */
+function valoresGuardados(
+  customer: { full_name?: string | null; email?: string | null; dni?: string | null } | null
+): Record<string, string> {
+  if (!customer) return {};
+  const valores: Record<string, string> = {};
+  if (customer.full_name) valores.full_name = customer.full_name;
+  if (customer.email) valores.email = customer.email;
+  if (customer.dni) valores.dni = customer.dni;
+  return valores;
+}
+
 function detectConflicts(
   extracted: Partial<ClaimFields>,
   customer: { full_name?: string | null; email?: string | null; dni?: string | null } | null

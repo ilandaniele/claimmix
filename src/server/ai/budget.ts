@@ -233,21 +233,38 @@ export async function checkBudget(
 
   let monthlyCostUsd = 0;
   try {
-    const [monthly] = await enTenant(tenantCtx, (db) =>
-      db
-        .select({
-          total: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8`,
-        })
-        .from(tables.aiUsage)
-        .where(
-          demoTenantId
-            ? and(
-                gte(tables.aiUsage.created_at, monthStart.toISOString()),
-                ne(tables.aiUsage.tenant_id, demoTenantId)
-              )
-            : gte(tables.aiUsage.created_at, monthStart.toISOString())
-        )
-    );
+    /*
+     * El tope mensual es del PROYECTO, no de cada aseguradora.
+     *
+     * Esta consulta corría dentro de `enTenant`, o sea acotada por RLS al
+     * inquilino que estaba pidiendo. Con eso, el tope de US$200 pasaba a ser
+     * US$200 POR aseguradora: con cuatro inquilinos activos gastando 199 cada
+     * uno, el gasto real es 796, ninguno de los cuatro se pasa de su propia
+     * cuenta, y los cuatro siguen extrayendo. El techo declarado es 200 y la
+     * tarjeta paga 796.
+     *
+     * El `ne(tenant_id, demoTenantId)` de abajo lo delata: descontar la demo
+     * sólo tiene sentido si la suma cruza inquilinos. Acotada por RLS, esa
+     * cláusula no podía hacer nada — descuenta filas que la consulta no veía.
+     *
+     * `/api/health` ya suma así, sin `enTenant`, y por eso el número que muestra
+     * y el que gobierna el corte no eran el mismo.
+     */
+    // sin-inquilino: el tope de gasto es del proyecto entero, así que la suma
+    // tiene que cruzar inquilinos. Ver el bloque de arriba.
+    const [monthly] = await db
+      .select({
+        total: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8`,
+      })
+      .from(tables.aiUsage)
+      .where(
+        demoTenantId
+          ? and(
+              gte(tables.aiUsage.created_at, monthStart.toISOString()),
+              ne(tables.aiUsage.tenant_id, demoTenantId)
+            )
+          : gte(tables.aiUsage.created_at, monthStart.toISOString())
+      );
     monthlyCostUsd = monthly?.total ?? 0;
   } catch (e) {
     // Fail open on DB error (don't block users due to budget check failure).

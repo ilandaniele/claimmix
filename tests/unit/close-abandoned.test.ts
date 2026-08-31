@@ -9,9 +9,24 @@
  * board.
  */
 
-vi.mock("@/lib/db", () => ({
-  db: { update: vi.fn() },
-}));
+/*
+ * `select` además de `update`: el tope de la corrida vive DENTRO del UPDATE
+ * ahora, como `where id in (select … limit 200)`, así que el armador toca las
+ * dos cosas.
+ *
+ * Estaba sólo `update`, y el cambio dejó el test en rojo con «expected 0 to be
+ * 1» — el mock devolvía undefined donde iba la subconsulta. Es andamio, no
+ * producto: la subconsulta no se ejecuta sola, se compila adentro del UPDATE.
+ */
+vi.mock("@/lib/db", () => {
+  const subconsulta: Record<string, unknown> = {};
+  Object.assign(subconsulta, {
+    from: () => subconsulta,
+    where: () => subconsulta,
+    limit: () => subconsulta,
+  });
+  return { db: { update: vi.fn(), select: () => subconsulta } };
+});
 
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: vi.fn().mockResolvedValue(undefined),
@@ -131,5 +146,56 @@ describe("getAbandonAfterDays", () => {
   it("caps the wait so a typo cannot disable the sweep for a decade", () => {
     process.env.CONVERSATION_ABANDON_AFTER_DAYS = "99999";
     expect(getAbandonAfterDays()).toBe(90);
+  });
+});
+
+/**
+ * Lo que se cierra y lo que se audita tiene que ser lo mismo.
+ *
+ * El tope de 200 se aplicaba DESPUÉS del UPDATE: `closed.slice(0, CLOSE_LIMIT)`.
+ * O sea que el barrido cerraba TODOS los casos elegibles y auditaba los primeros
+ * doscientos. Con 250 elegibles —una cartera vieja con conversaciones a medias,
+ * o el cron que no corrió unos días— quedaban 50 casos en `cerrado` sin una sola
+ * línea en la auditoría: un analista abre uno, ve que se cerró solo, y no hay
+ * nada que le diga por qué ni cuándo.
+ *
+ * Ahora el tope va dentro del UPDATE y lo que sobra queda para la corrida
+ * siguiente. Mismo principio que la marca de agua del poller: no avanzar más
+ * allá de lo que se procesó.
+ */
+describe("closeAbandonedConversations — cerrar y auditar son el mismo conjunto", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("audita TODO lo que el UPDATE devolvió, sin recortar", async () => {
+    // 250 filas: más que el tope viejo de 200. Si volviera a recortarse acá,
+    // 50 quedarían cerradas sin rastro.
+    const muchos = Array.from({ length: 250 }, (_, i) => ({
+      id: `caso-${i}`,
+      tenant_id: "t-1",
+    }));
+    updateReturns(muchos);
+
+    const r = await closeAbandonedConversations();
+
+    expect(r.closed).toBe(250);
+    expect(writeAuditLog).toHaveBeenCalledTimes(250);
+  });
+
+  it("y el tope se pide en la consulta, no se recorta después", async () => {
+    /*
+     * El control de la otra mitad: que el tope siga EXISTIENDO. Un arreglo que
+     * sólo borrara el `slice` pasaría el test de arriba y dejaría al barrido
+     * cerrando una cartera entera de una sentada.
+     */
+    const fuente = await import("node:fs").then((fs) =>
+      fs.readFileSync("src/server/intake/close-abandoned.ts", "utf8")
+    );
+    expect(fuente).toContain(".limit(CLOSE_LIMIT)");
+    // `const capped` y no el `slice` a secas: el comentario del arreglo CITA el
+    // código viejo para explicar qué se cambió, y buscar la cita se chocaba con
+    // la explicación. La variable sólo puede estar si el recorte volvió.
+    expect(fuente).not.toContain("const capped");
   });
 });

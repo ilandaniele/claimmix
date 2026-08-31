@@ -76,20 +76,43 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
         closed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
+      /*
+       * El tope va DENTRO del UPDATE, no sobre lo que devuelve.
+       *
+       * Estaba abajo, como `closed.slice(0, CLOSE_LIMIT)`: el UPDATE cerraba
+       * TODOS los casos elegibles y después se auditaban los primeros 200. Con
+       * 250 elegibles —una cartera vieja con conversaciones a medias, o el cron
+       * que no corrió unos días— quedaban 50 casos en `cerrado` sin una sola
+       * línea en la auditoría. Un analista abre uno de esos, ve que se cerró
+       * solo, y no hay nada que le diga por qué ni cuándo.
+       *
+       * Ahora se cierra exactamente lo que se va a auditar, y lo que sobra
+       * queda para la corrida siguiente. Es el mismo principio que la marca de
+       * agua del poller de Gmail: no avanzar más allá de lo que se procesó.
+       */
       .where(
-        and(
-          inArray(cases.status, [...AWAITING_CLAIMANT]),
-          lt(
-            sql`coalesce(${cases.updated_at}, ${cases.created_at})`,
-            sql`now() - interval '${sql.raw(String(days))} days'`
-          )
+        inArray(
+          cases.id,
+          // sin-inquilino: la subconsulta que elige QUÉ cerrar, del mismo barrido
+          // de sistema que el UPDATE que la contiene. No se ejecuta sola.
+          db
+            .select({ id: cases.id })
+            .from(cases)
+            .where(
+              and(
+                inArray(cases.status, [...AWAITING_CLAIMANT]),
+                lt(
+                  sql`coalesce(${cases.updated_at}, ${cases.created_at})`,
+                  sql`now() - interval '${sql.raw(String(days))} days'`
+                )
+              )
+            )
+            .limit(CLOSE_LIMIT)
         )
       )
       .returning({ id: cases.id, tenant_id: cases.tenant_id });
 
-    const capped = closed.slice(0, CLOSE_LIMIT);
-
-    for (const row of capped) {
+    for (const row of closed) {
       await writeAuditLog({
         tenant_id: row.tenant_id,
         actor_id: null,

@@ -789,6 +789,103 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
     });
   });
 
+  // ── La cola que no entra en una corrida no se pierde ─────────────────────────
+
+  /**
+   * El pedido a `history.list` lleva `maxResults: 50` y nadie leía
+   * `nextPageToken`. La marca de agua, en cambio, se ponía siempre en
+   * `historyData.historyId`, que es el historyId ACTUAL del buzón — no el del
+   * final de la página.
+   *
+   * Con más de cincuenta mensajes acumulados —el empuje de Pub/Sub falla o el
+   * deploy está caído un rato; el webhook contesta 200 aunque `pollGmail` tire,
+   * así que Pub/Sub tampoco reintenta— se procesaban los primeros cincuenta, la
+   * marca saltaba hasta el presente, y el resto no se leía NUNCA. Denuncias
+   * perdidas, con `errors: 0` en el resultado.
+   */
+  describe("cuando quedan mensajes sin leer, la marca no los pasa por encima", () => {
+    /** Una respuesta de `history.list` con más páginas detrás. */
+    function historialConCola(ids: string[], ultimoRegistro: string) {
+      mockGmailFn.mockReturnValue({
+        users: {
+          history: {
+            list: mockHistoryList.mockResolvedValue({
+              data: {
+                historyId: HISTORY_ID_NEW,
+                nextPageToken: "hay-mas",
+                history: ids.map((id, i) => ({
+                  // El id del registro: es lo que permite retomar desde acá.
+                  id: i === ids.length - 1 ? ultimoRegistro : `r-${i}`,
+                  messagesAdded: [{ message: { id } }],
+                })),
+              },
+            }),
+          },
+          messages: {
+            list: mockMessagesList,
+            get: mockMessagesGet,
+            modify: mockMessagesModify.mockResolvedValue({ data: {} }),
+            attachments: { get: vi.fn().mockResolvedValue({ data: { data: "" } }) },
+          },
+        },
+      });
+    }
+
+    async function prepararCaso() {
+      const { getOrCreatePollState } = await import("@/server/email/gmail/poll-state");
+      (getOrCreatePollState as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "poll-state-uuid",
+        historyId: HISTORY_ID_START,
+      });
+      mockMessagesGet.mockResolvedValue({ data: buildGmailMessage({ id: MSG_ID_1 }) });
+      const { checkDuplicate } = await import("@/server/email/dedupe");
+      (checkDuplicate as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+      const { threadLookup } = await import("@/server/email/thread-lookup");
+      (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({ existingCaseId: undefined });
+    }
+
+    it("la marca queda en el último LEÍDO, no en el presente del buzón", async () => {
+      await prepararCaso();
+      historialConCola([MSG_ID_1], "12350");
+
+      const { advancePollState } = await import("@/server/email/gmail/poll-state");
+      const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
+      const result = await pollGmail();
+
+      expect(advancePollState).toHaveBeenCalledWith("poll-state-uuid", "12350");
+      expect(advancePollState).not.toHaveBeenCalledWith("poll-state-uuid", HISTORY_ID_NEW);
+      expect(result.history_id).toBe("12350");
+    });
+
+    it("y queda dicho, para que la cola no sea invisible", async () => {
+      await prepararCaso();
+      historialConCola([MSG_ID_1], "12350");
+      const dichos: string[] = [];
+      const espia = vi.spyOn(console, "warn").mockImplementation((...a) => {
+        dichos.push(a.map(String).join(" "));
+      });
+
+      const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
+      await pollGmail();
+
+      espia.mockRestore();
+      expect(dichos.join(" ")).toContain("gmail_poller.cola_pendiente");
+    });
+
+    it("sin cola, la marca sí llega al presente del buzón", async () => {
+      // El control. Un arreglo que dejara la marca atrasada SIEMPRE haría que
+      // cada corrida releyera lo mismo, y el test de arriba pasaría igual.
+      await prepararCaso();
+      setupGmailHistoryMock([MSG_ID_1], HISTORY_ID_NEW);
+
+      const { advancePollState } = await import("@/server/email/gmail/poll-state");
+      const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
+      await pollGmail();
+
+      expect(advancePollState).toHaveBeenCalledWith("poll-state-uuid", HISTORY_ID_NEW);
+    });
+  });
+
   // ── AC8: Watermark always advances when historyId moves forward ──────────────
   // (behavior: always advance to avoid permanent retry loops)
 

@@ -466,18 +466,58 @@ export async function pollGmail(
 
     const historyData = historyResponse.data;
 
-    // Update the watermark to the latest historyId from this page.
-    if (historyData.historyId) {
-      latestHistoryId = historyData.historyId;
-    }
-
     // Collect message IDs from history records (messageAdded events).
+    let ultimoRegistroLeido: string | null = null;
     for (const record of historyData.history ?? []) {
       for (const added of record.messagesAdded ?? []) {
         if (added.message?.id && !messageIds.includes(added.message.id)) {
           messageIds.push(added.message.id);
         }
       }
+      if (record.id) ultimoRegistroLeido = record.id;
+    }
+
+    /*
+     * ── La marca de agua NUNCA pasa de lo que se leyó ────────────────────────
+     *
+     * Antes se ponía en `historyData.historyId`, que es el historyId ACTUAL del
+     * buzón —no el del final de esta página—, y se ponía siempre. Como el pedido
+     * lleva `maxResults: 50` y nadie leía `nextPageToken`, con más de cincuenta
+     * mensajes acumulados pasaba esto: se procesaban los primeros cincuenta, la
+     * marca saltaba hasta el presente, y el resto no se leía nunca. Denuncias
+     * perdidas para siempre, con `errors: 0` en el resultado.
+     *
+     * Cincuenta suena mucho hasta que el empuje de Pub/Sub falla o el deploy
+     * está caído un rato: el webhook responde 200 aunque `pollGmail` tire (más
+     * arriba en este archivo), así que Pub/Sub tampoco reintenta y los mensajes
+     * se juntan. Un lunes a la mañana son cincuenta rápido.
+     *
+     * La solución no es paginar y procesar todo en una corrida —quinientos
+     * mensajes no entran en el tiempo de una función serverless— sino no mentir
+     * sobre hasta dónde llegamos: si quedó cola, la marca se deja en el último
+     * registro LEÍDO y la próxima corrida sigue desde ahí. Se procesa igual de
+     * a cincuenta; la diferencia es que ya no se pierde el resto.
+     *
+     * Volver a ver un mensaje ya visto es inofensivo: `processMessage` los
+     * saltea por `gmail_message_id`, que es lo que prueba AC2.
+     */
+    const quedaCola = Boolean(historyData.nextPageToken);
+
+    if (quedaCola && ultimoRegistroLeido) {
+      latestHistoryId = ultimoRegistroLeido;
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          service: "claimmix",
+          msg: "gmail_poller.cola_pendiente",
+          leidos: messageIds.length,
+          detalle:
+            "Había más mensajes de los que entran en una corrida. La marca queda " +
+            "en el último leído y la próxima sigue desde ahí.",
+        })
+      );
+    } else if (!quedaCola && historyData.historyId) {
+      latestHistoryId = historyData.historyId;
     }
   } catch (err: unknown) {
     // Detect historyNotFound (404) — watermark is stale, fall back to messages.list.

@@ -166,13 +166,26 @@ describe("buildConversationBody — when each message was sent", () => {
   // moved without anyone touching it.
   const msg = (body: string, at: string | null) => ({ body_text: body, received_at: at });
 
-  it("stamps every message with the day it arrived", () => {
+  it("stamps every message with the day it arrived — ACÁ, no en UTC", () => {
+    /*
+     * `2026-08-19T00:22:43Z` son las 21:22 del 18 en Buenos Aires.
+     *
+     * Este test decía `2026-08-19`, que es el día UTC, y está escrito justamente
+     * para que el modelo pueda resolver la palabra «ayer». Con el sello corrido
+     * un día, un mensaje mandado a las 21:22 del 18 diciendo «choqué ayer» lo
+     * llevaba a calcular el 18 en vez del 17: la fecha del siniestro, mal por un
+     * día, para todo mensaje entre las 21 y las 24.
+     *
+     * Que la expectativa vieja estuviera escrita acá no la hacía correcta.
+     * Hacía que el defecto tuviera un test que lo defendía.
+     */
     const out = buildConversationBody([
       msg("Choqué ayer en Bahía Blanca.", "2026-08-19T00:22:43Z"),
       msg("[Imagen adjunta sin texto]", "2026-08-20T19:17:00Z"),
     ]);
 
-    expect(out).toContain("recibido el 2026-08-19");
+    expect(out).toContain("recibido el 2026-08-18");
+    // El segundo llegó a las 16:17 de acá: el mismo día en las dos zonas.
     expect(out).toContain("recibido el 2026-08-20");
     expect(out).toContain("Choqué ayer en Bahía Blanca.");
   });
@@ -180,7 +193,9 @@ describe("buildConversationBody — when each message was sent", () => {
   it("stamps a lone message too — it is the one most likely to say 'ayer'", () => {
     const out = buildConversationBody([msg("Choqué ayer.", "2026-08-19T00:22:43Z")]);
 
-    expect(out).toBe("[Mensaje — recibido el 2026-08-19]\nChoqué ayer.");
+    // 00:22 UTC del 19 son las 21:22 del 18 acá, que es el día que el modelo
+    // tiene que usar para resolver «ayer».
+    expect(out).toBe("[Mensaje — recibido el 2026-08-18]\nChoqué ayer.");
   });
 
   it("keeps the numbering that tells the model what came first", () => {

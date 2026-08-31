@@ -506,3 +506,54 @@ describe("los buscadores normalizan los dos lados", () => {
     expect(db.select).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Las dos mitades de la normalización de póliza, atadas.
+ *
+ * `normalizarNumeroPoliza` saca espacios y sube a mayúsculas, y el SQL hace
+ * `upper(replace(policy_number, ' ', ''))`. Son la misma regla escrita dos veces
+ * en dos lenguajes, y nada las obligaba a coincidir.
+ *
+ * El encabezado del módulo AFIRMABA que `POL8812R` y `POL-8812-R` son el mismo
+ * contrato, y era falso. Ese comentario es la instrucción para que alguien
+ * «arregle» la función —agregando el guion al regex— sin tocar los tres sitios
+ * SQL, que el comentario ni menciona. Desde ese commit, `POL-8812-R` escrito
+ * EXACTAMENTE, que es como llegan los 94 casos reales que hay, dejaría de
+ * coincidir consigo mismo. Todas las búsquedas de póliza del producto, en
+ * silencio, sin una excepción ni una línea de log.
+ *
+ * Este test es lo que se pone rojo antes de que eso pase.
+ */
+describe("la póliza se normaliza igual en los dos lados", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("lo que el JS le saca al valor, el SQL se lo saca a la columna", async () => {
+    const chain = makeSelectChain([]);
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    await findCustomerMatches(TENANT_ID, { policy_number: "POL-8812-R" });
+
+    const parametro = parametrosDeLaConsulta(chain).find((p) => p.startsWith("POL"));
+    const sql = sqlDeLaConsulta(chain);
+
+    // El guion sobrevive de los dos lados: en el valor que viaja como parámetro…
+    expect(parametro).toBe("POL-8812-R");
+    // …y en la columna, donde `replace` saca sólo el espacio.
+    expect(sql).toContain("replace");
+    expect(sql).not.toContain("'-'");
+  });
+
+  it("y el espacio se va de los dos lados", async () => {
+    const chain = makeSelectChain([]);
+    vi.mocked(db.select).mockReturnValue(chain as any);
+
+    await findCustomerMatches(TENANT_ID, { policy_number: "pol 8812-r" });
+
+    // El JS lo sacó…
+    expect(parametrosDeLaConsulta(chain)).toContain("POL8812-R");
+    // …y el SQL le saca el mismo carácter a la columna.
+    expect(sqlDeLaConsulta(chain)).toContain("' '");
+  });
+});

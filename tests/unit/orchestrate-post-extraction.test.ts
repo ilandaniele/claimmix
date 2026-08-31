@@ -2827,3 +2827,111 @@ describe("orchestratePostExtraction — lo que el agente dice haber encontrado",
     expect(loQueDijo().info).toContain("agent.resolved_by_lookup");
   });
 });
+
+/**
+ * El conflicto llega con la clave canónica; el campo, con la que usó el modelo.
+ *
+ * `detectConflicts` compara sobre el diccionario ya canonizado, así que informa
+ * `dni`. Pero el extractor pudo haber emitido `dni_asegurado` —el propio
+ * repositorio documenta que el nombre cambia según el día, para eso existe
+ * `canonicalFieldKey`— y el `find` por igualdad exacta no lo encontraba.
+ *
+ * Resultado: el conflicto quedaba con `proposedValue: ""` y confianza 0, y el
+ * mail terminaba pidiéndole a la persona el dato que acababa de escribir.
+ */
+describe("orchestratePostExtraction — el conflicto y el nombre del campo", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** Un caso donde el extractor nombró el DNI con el alias en castellano. */
+  function conElAlias() {
+    return extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields.filter(
+          (f) => f.field_key !== "dni" && f.field_key !== "dni_asegurado"
+        ),
+        {
+          field_key: "dni_asegurado",
+          field_value: "30.111.222",
+          confidence: 0.93,
+          source: "ai" as const,
+        },
+      ],
+    });
+  }
+
+  const enConflicto: CustomerMatch = {
+    customerId: "cust-dni",
+    matchType: "email",
+    confidence: 0.75,
+    customerName: "Juan Pérez",
+    // El buscador informa la clave CANÓNICA.
+    conflictsWithExtracted: ["dni"],
+  };
+
+  function elAnalizadorPideConfirmar() {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        {
+          fieldName: "dni",
+          suggestedValue: "30.111.222",
+          conflictValue: "27654321",
+          reason: "conflict",
+        },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+  }
+
+  it("el valor que la persona escribió llega al pedido de confirmación", async () => {
+    elAnalizadorPideConfirmar();
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: conElAlias(), senderEmail: SENDER_EMAIL },
+      [enConflicto]
+    );
+
+    const filas = insertSpy.mock.calls.flatMap((c) =>
+      Array.isArray(c[0]) ? c[0] : [c[0]]
+    ) as Array<{ field_name?: string; suggested_value?: string | null }>;
+
+    const fila = filas.find((f) => f?.field_name === "dni");
+    expect(fila).toBeDefined();
+    // Lo que se rompía: quedaba en "" y el mail pedía el dato que acababa de dar.
+    expect(fila?.suggested_value).toBe("30.111.222");
+  });
+
+  it("y con la clave canónica sigue andando igual", async () => {
+    /*
+     * El control. Un arreglo que canonizara sólo un lado —o que rompiera el
+     * camino normal— pasaría el test de arriba y rompería el caso frecuente.
+     */
+    elAnalizadorPideConfirmar();
+    const conLaCanonica = extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "dni"),
+        { field_key: "dni", field_value: "30.111.222", confidence: 0.93, source: "ai" as const },
+      ],
+    });
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: conLaCanonica, senderEmail: SENDER_EMAIL },
+      [enConflicto]
+    );
+
+    const filas = insertSpy.mock.calls.flatMap((c) =>
+      Array.isArray(c[0]) ? c[0] : [c[0]]
+    ) as Array<{ field_name?: string; suggested_value?: string | null }>;
+
+    expect(filas.find((f) => f?.field_name === "dni")?.suggested_value).toBe("30.111.222");
+  });
+});

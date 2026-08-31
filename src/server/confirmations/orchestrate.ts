@@ -291,8 +291,21 @@ export async function orchestratePostExtraction(
       if (clavesEnConflicto.has(conflictField)) continue;
       clavesEnConflicto.add(conflictField);
 
+      /*
+       * El buscador informa el conflicto con la clave CANÓNICA, y `fields[]`
+       * viene como lo nombró el modelo ese día.
+       *
+       * `detectConflicts` compara sobre el diccionario ya canonizado, así que
+       * devuelve `dni`. Pero el extractor pudo haber emitido `dni_asegurado`, y
+       * este `find` por igualdad exacta no lo encontraba: el conflicto quedaba
+       * con `proposedValue: ""` y confianza 0, y el mail terminaba pidiéndole a
+       * la persona el dato que acababa de escribir.
+       *
+       * El propio repositorio documenta que el nombre del campo cambia según el
+       * día — para eso existe `canonicalFieldKey`.
+       */
       const extractedEntry = extractedClaim.fields.find(
-        (f) => f.field_key === conflictField
+        (f) => canonicalFieldKey(f.field_key) === conflictField
       );
       conflictos.push({
         fieldKey: conflictField,

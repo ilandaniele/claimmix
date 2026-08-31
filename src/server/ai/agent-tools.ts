@@ -39,6 +39,7 @@ import { customers, insuredAssets, policies } from "@/lib/db/schema";
  * Dos caminos a la misma tabla, uno tolerante y el otro no.
  */
 import { normalizarDni, normalizarNumeroPoliza } from "@/core/matching/normalizar";
+import { diaArgentino } from "@/core/fecha/dia-argentino";
 
 export interface ToolContext {
   tenantId: string;
@@ -362,6 +363,10 @@ export function describeTools(): string {
   }).join("\n\n");
 }
 
+/**
+ * Hoy, acá — no en UTC. Ver `@/core/fecha/dia-argentino` para el motivo y para
+ * los otros dos lugares que tenían el mismo sesgo.
+ */
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return diaArgentino();
 }

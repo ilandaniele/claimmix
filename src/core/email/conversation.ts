@@ -1,3 +1,4 @@
+import { diaArgentino } from "@/core/fecha/dia-argentino";
 /**
  * De una conversación de correo al texto que lee el extractor.
  *
@@ -23,7 +24,9 @@ export function dateSuffix(receivedAt: string | null): string {
   if (!receivedAt) return "";
   const at = new Date(receivedAt);
   if (Number.isNaN(at.getTime())) return "";
-  return ` — recibido el ${at.toISOString().slice(0, 10)}`;
+  // El día ACÁ, no en UTC: un mensaje de las 22:10 se mostraba con la fecha de
+  // mañana, y esa fecha la lee el modelo para decidir.
+  return ` — recibido el ${diaArgentino(at)}`;
 }
 
 /** El mismo sello para un mensaje suelto, que no lleva encabezado de bloque. */

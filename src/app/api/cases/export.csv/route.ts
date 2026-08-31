@@ -25,6 +25,7 @@ import {
   buildUserKey,
   getClientIp,
 } from "@/lib/rate-limit/index";
+import { diaArgentino } from "@/core/fecha/dia-argentino";
 
 /** CSV column headers (es-AR labels as specified in AC13) */
 const CSV_HEADERS = [
@@ -160,7 +161,7 @@ export async function GET(request: NextRequest) {
   const csv = buildCsv(CSV_HEADERS, rows);
 
   // ── 6. Build filename with today's date ───────────────────────────────────
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const today = diaArgentino(); // AAAA-MM-DD, en la zona del negocio y no en UTC
   const filename = `casos_${today}.csv`;
 
   // ── 7. Return CSV response ────────────────────────────────────────────────

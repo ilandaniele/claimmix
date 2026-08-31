@@ -185,8 +185,15 @@ async function matchByPolicyNumber(
         })
         .from(p)
         .leftJoin(c, eq(p.customer_id, c.id))
-        // Sin espacios y en mayúsculas de los dos lados: los números de póliza
-        // los tipea una persona, y `pol 8812-r` es el mismo contrato.
+        // Sin espacios y en mayúsculas de los DOS lados: los números de póliza
+        // los tipea una persona, y `pol-8812-r` es el mismo contrato que
+        // `POL-8812-R`.
+        //
+        // El guion no se saca, ni acá ni en `normalizarNumeroPoliza`, y tiene
+        // que seguir así en los dos o en ninguno: ver el motivo escrito en esa
+        // función. El ejemplo que estaba acá era `pol 8812-r`, que normaliza a
+        // `POL8812-R` y NO coincide con `POL-8812-R` — un comentario que se
+        // desmentía a sí mismo contra la consulta que documentaba.
         .where(
           sql`upper(replace(${p.policy_number}, ' ', '')) = ${normalizarNumeroPoliza(policyNumber)}`
         )

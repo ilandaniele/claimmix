@@ -154,7 +154,29 @@ function setupDbMocks({
   const mockDbTyped = db as MockDb;
 
   // Track all insert .values() and update .where() calls for assertions.
-  const insertSpy = vi.fn().mockResolvedValue([]);
+  /*
+   * Lo que devuelve `.values(...)` tiene que ser esperable Y encadenable.
+   *
+   * Devolvía una promesa pelada, así que un `.onConflictDoUpdate(...)` encima
+   * era `undefined` y tiraba TypeError. El único upsert del orquestador está en
+   * `recordLookedUpFields` —lo que el agente dice haber resuelto por búsqueda—
+   * y su `catch` se tragaba ese TypeError enterito: la función no escribía nada,
+   * no fallaba, y ningún test lo notaba porque ninguno miraba lo que escribe.
+   *
+   * O sea que ese camino nunca se ejercitó acá. Se descubrió al escribir el
+   * test del documento resuelto, más abajo, cuando la mitad legítima —anotar el
+   * número de póliza encontrado en nuestro propio padrón— tampoco pasaba.
+   */
+  const resultadoDeInsert: Record<string, unknown> = {};
+  Object.assign(resultadoDeInsert, {
+    then: (r: (v: unknown) => void, j?: (e: unknown) => void) =>
+      Promise.resolve([]).then(r, j),
+    onConflictDoUpdate: () => resultadoDeInsert,
+    onConflictDoNothing: () => resultadoDeInsert,
+    returning: () => Promise.resolve([]),
+  });
+
+  const insertSpy = vi.fn().mockReturnValue(resultadoDeInsert);
   const updateSpy = vi.fn().mockResolvedValue([]);
 
   // db.select() returns a chainable builder; from() decides the result.
@@ -2467,5 +2489,174 @@ describe("orchestratePostExtraction — never ask for what we can quote back", (
       .mock.calls.find((c) => c[0].template === "missing_information_request");
 
     expect(ask?.[0].data?.knownValues).not.toHaveProperty("policy_number");
+  });
+});
+
+/**
+ * Un documento no se da por recibido porque el agente diga que lo resolvió.
+ *
+ * `plan.resolved` hace dos cosas fuertes: escribe el valor con confianza 0.95 y
+ * CIERRA el pedido correspondiente. `validate` sólo exige que el plan haya
+ * llamado a alguna herramienta —no que el campo resuelto venga de esa llamada—
+ * así que con un `polizas_por_dni` cualquiera en el plan, el modelo podía
+ * nombrar `denuncia_policial` y el pedido del parte policial se cerraba.
+ *
+ * El caso podía llegar a `listo_para_core` y exportarse a la aseguradora
+ * diciendo que teníamos el parte policial de un robo. No lo teníamos: teníamos
+ * la palabra del modelo.
+ *
+ * Se encontró en los datos de producción —un `denuncia_policial` con
+ * `satisfied_at` puesto, `requested_at` en null y cero adjuntos en el caso— y se
+ * confirmó llamando a `validate` con ese plan: lo acepta.
+ */
+describe("orchestratePostExtraction — lo que el agente dice haber resuelto", () => {
+  const GAPS = ["policy_number", "denuncia_policial"];
+
+  function gapsAre(fields: string[]) {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: fields,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  }
+
+  /** Un plan que dice haber resuelto lo que se le pase, con una herramienta detrás. */
+  function planQueResuelve(resolved: Array<{ field: string; value: string }>) {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "answer_and_ask",
+      askFor: ["policy_number"],
+      question: "¿Nos pasás el número de póliza?",
+      reasoning: "",
+      noteForAnalyst: null,
+      resolved,
+      // Una llamada cualquiera: es lo único que `validate` exige.
+      toolCalls: [{ tool: "polizas_por_dni", args: { dni: "27654321" } }],
+    } as never);
+  }
+
+  /**
+   * Lo que dijo la consola durante la orquestación.
+   *
+   * Se mira el log y no las escrituras a propósito. El andamio de este archivo
+   * simula `update(...).set(...).where(...)` DESCARTANDO el `where`, así que
+   * desde acá no se puede saber QUÉ pedido se cerró — y por el orquestador pasan
+   * otros caminos que también cierran pedidos (los datos de contacto que ya
+   * teníamos, las confirmaciones que la persona acaba de contestar). O sea que
+   * «se escribió algún satisfied_at» no distingue nada: mi primera versión de
+   * este test afirmaba justo eso y pasaba CON el agujero puesto.
+   *
+   * `agent.resolved_by_lookup` en cambio lo escribe UNA sola función,
+   * `recordLookedUpFields`, y sólo después de haber escrito de verdad.
+   */
+  function loQueDijoLaConsola(): { info: string; warn: string } {
+    const juntar = (fn: unknown) =>
+      (fn as { mock: { calls: unknown[][] } }).mock.calls
+        .map((a) => a.map(String).join(" "))
+        .join(" | ");
+    return { info: juntar(console.info), warn: juntar(console.warn) };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("un DOCUMENTO resuelto por el agente no cierra el pedido", async () => {
+    planQueResuelve([
+      { field: "denuncia_policial", value: "El asegurado dice que ya hizo la denuncia" },
+    ]);
+    gapsAre(GAPS);
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    // La función ni siquiera llegó a escribir: no hay registro de búsqueda.
+    expect(loQueDijoLaConsola().info).not.toContain("agent.resolved_by_lookup");
+    // Y tampoco se guarda el texto como si fuera el documento.
+    const escrito = insertSpy.mock.calls.flatMap((c) =>
+      Array.isArray(c[0]) ? c[0] : [c[0]]
+    );
+    expect(JSON.stringify(escrito)).not.toContain("denuncia_policial");
+  });
+
+  it("pero un DATO resuelto sí se registra: es la mitad para la que existe", async () => {
+    /*
+     * La otra mitad, y es la que importa: buscar el número de póliza por DNI en
+     * nuestro propio padrón y anotarlo es MEJOR que pedírselo a alguien que
+     * acaba de chocar. Un filtro que matara las dos cosas habría arreglado el
+     * agujero rompiendo la función.
+     */
+    planQueResuelve([{ field: "policy_number", value: "POL-8812-R" }]);
+    gapsAre(["denuncia_policial"]);
+    setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const { info } = loQueDijoLaConsola();
+    expect(info).toContain("agent.resolved_by_lookup");
+    expect(info).toContain("policy_number");
+  });
+
+  it("mezclando los dos, pasa el dato y queda el documento", async () => {
+    planQueResuelve([
+      { field: "policy_number", value: "POL-8812-R" },
+      { field: "denuncia_policial", value: "dice que la hizo" },
+    ]);
+    gapsAre(GAPS);
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const { info, warn } = loQueDijoLaConsola();
+    expect(info).toContain("agent.resolved_by_lookup");
+    expect(warn).toContain("agent.resolvio_un_documento");
+
+    const escrito = JSON.stringify(
+      insertSpy.mock.calls.flatMap((c) => (Array.isArray(c[0]) ? c[0] : [c[0]]))
+    );
+    expect(escrito).toContain("POL-8812-R");
+    expect(escrito).not.toContain("dice que la hizo");
+  });
+
+  it("lo descartado queda dicho en el log, con el nombre y no con el valor", async () => {
+    // Un descarte silencioso deja el mismo agujero de antes: el pedido sigue
+    // abierto y nadie sabe que el agente creyó haberlo cerrado.
+    planQueResuelve([{ field: "denuncia_policial", value: "TEXTO-DEL-MODELO" }]);
+    gapsAre(GAPS);
+    setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const todo = loQueDijoLaConsola().warn;
+    expect(todo).toContain("agent.resolvio_un_documento");
+    expect(todo).toContain("denuncia_policial");
+    // El valor es texto que escribió una persona: no va al log.
+    expect(todo).not.toContain("TEXTO-DEL-MODELO");
   });
 });

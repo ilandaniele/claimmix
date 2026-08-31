@@ -275,3 +275,68 @@ describe("validate — filling a field in from a lookup", () => {
     ).toBe("asked_and_resolved:policy_number");
   });
 });
+
+/**
+ * Lo que `validate` NO revisa, y por qué la guarda vive río abajo.
+ *
+ * `resolved` hace dos cosas fuertes: escribe el valor con confianza 0.95 y
+ * cierra el pedido correspondiente. La única condición que `validate` le pone es
+ * que el plan haya llamado a ALGUNA herramienta — no que el campo resuelto venga
+ * de esa llamada, ni que sea un dato y no un archivo.
+ *
+ * Así que con un `polizas_por_dni` cualquiera en el plan, el modelo podía
+ * nombrar `denuncia_policial` en `resolved` y el pedido del parte policial se
+ * cerraba solo.
+ *
+ * Esto queda AFIRMADO, no arreglado acá, y es deliberado: rechazar el plan
+ * entero manda todo a la rama determinista y se pierde la parte buena. Es
+ * exactamente el costo que documenta `validate` unas líneas más arriba, donde
+ * una regla demasiado estricta hizo que se le pidieran fotos a un hombre cuya
+ * póliza había vencido en 2020. El descarte ocurre en `recordLookedUpFields`,
+ * que tira el documento, conserva el resto y lo dice en el log.
+ *
+ * Si alguna vez alguien agrega la regla acá, este test se pone rojo y le cuenta
+ * la historia antes de que la borre.
+ */
+describe("validate — el hueco conocido de `resolved`", () => {
+  const entrada = {
+    outstanding: ["policy_number", "denuncia_policial"],
+    lastAsked: ["policy_number"],
+  } as never;
+
+  const planBase = {
+    intent: "answer_and_ask",
+    askFor: ["policy_number"],
+    question: "¿Nos pasás el número de póliza?",
+    reasoning: "",
+    noteForAnalyst: null,
+    toolCalls: [{ tool: "polizas_por_dni", args: { dni: "27654321" } }],
+  };
+
+  it("acepta un plan que dice haber «resuelto» un documento", () => {
+    expect(
+      validate(
+        {
+          ...planBase,
+          resolved: [{ field: "denuncia_policial", value: "dice que ya la hizo" }],
+        } as never,
+        entrada
+      )
+    ).toBeNull();
+  });
+
+  it("lo único que sí exige es que haya mirado en algún lado", () => {
+    // La mitad que sí funciona: sin ninguna herramienta detrás, `resolved` es el
+    // modelo llenando un campo de memoria, y eso se rechaza.
+    expect(
+      validate(
+        {
+          ...planBase,
+          toolCalls: [],
+          resolved: [{ field: "denuncia_policial", value: "dice que ya la hizo" }],
+        } as never,
+        entrada
+      )
+    ).toBe("resolved_without_looking_anything_up");
+  });
+});

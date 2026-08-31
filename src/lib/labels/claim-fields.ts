@@ -414,6 +414,40 @@ export function isWorthConfirming(fieldKey: string): boolean {
 }
 
 /**
+ * ¿Es un ARCHIVO que sólo puede mandar la persona?
+ *
+ * La distinción no es cosmética. Un dato —el número de póliza, el DNI, el
+ * nombre— lo podemos averiguar nosotros: está en nuestro propio padrón, y
+ * buscarlo es mejor que pedírselo a alguien que acaba de chocar. Un documento
+ * no: la denuncia policial, el parte amistoso, las fotos de los daños son
+ * archivos que existen del lado de la persona y ninguna búsqueda los produce.
+ *
+ * La usa el orquestador para no dar por recibido un documento porque el agente
+ * dijo que lo resolvió. Ver `recordLookedUpFields`.
+ */
+export function isDocument(fieldKey: string): boolean {
+  const canonica = FIELD_LABELS[canonicalFieldKey(fieldKey)];
+  if (canonica) return canonica.kind === "documento";
+
+  // La clave cruda también: la tabla tiene los nombres canónicos y los alias en
+  // castellano que emite el extractor, y cualquiera de los dos es un nombre que
+  // elegimos a propósito.
+  const cruda = FIELD_LABELS[fieldKey];
+  if (cruda) return cruda.kind === "documento";
+
+  /*
+   * Una clave que no conocemos NO se trata como documento.
+   *
+   * Devolver `true` por las dudas bloquearía la mitad útil de esto —registrar
+   * el dato que encontramos en nuestra propia base— cada vez que el extractor
+   * invente un nombre nuevo, que lo hace seguido. El riesgo del otro lado es
+   * acotado: una clave desconocida no tiene fila en `missing_docs` con ese
+   * nombre, así que no hay pedido que cerrar.
+   */
+  return false;
+}
+
+/**
  * Fields we work out from another field, and the field they come from.
  *
  * Asking a claimant to confirm the province after they wrote "Bahía Blanca" is

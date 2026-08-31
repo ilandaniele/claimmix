@@ -55,6 +55,7 @@ import {
 } from "@/server/cases/documents";
 import {
   canonicalFieldKey,
+  isDocument,
   confirmationRank,
   isAffirmativeReply,
   isDerivable,
@@ -408,6 +409,17 @@ export async function orchestratePostExtraction(
         question: plan.question,
         // What it went and looked up before deciding.
         tools: plan.toolCalls,
+        /*
+         * Qué dio por sabido sin preguntarlo. Faltaba, y es el que más pesa.
+         *
+         * `resolved` hace dos cosas fuertes: escribe el valor con confianza 0.95
+         * y cierra el pedido correspondiente. Era el único campo del plan que no
+         * quedaba anotado, así que cuando un caso aparecía con un documento dado
+         * por recibido no había forma de saber si lo había cerrado el agente o
+         * el reconciliador de adjuntos. Se anotan los NOMBRES y los valores, que
+         * es lo mismo que ya queda en `extracted_fields`.
+         */
+        resolved: plan.resolved,
         // The one thing nobody could answer before: why did it say that.
         reasoning: plan.reasoning,
       },
@@ -895,14 +907,56 @@ function buildAskList(
  * typing the number from memory on a phone, and it should not sit in the
  * medium-confidence band waiting for them to confirm what we already know.
  *
- * `validate` has already refused anything not backed by a tool call, so
- * nothing reaching here was invented.
+ * `validate` exige que el plan haya llamado a ALGUNA herramienta antes de
+ * aceptar un `resolved` — pero no comprueba que el campo resuelto venga de esa
+ * llamada. Decía acá que «nada de lo que llega fue inventado», y era falso.
+ *
+ * ── Por qué un documento nunca se resuelve por búsqueda ──────────────────────
+ *
+ * Un dato lo podemos averiguar: el número de póliza está en nuestro propio
+ * padrón. Un documento no: la denuncia policial, el parte amistoso y las fotos
+ * de los daños son archivos que existen del lado de la persona, y ninguna
+ * herramienta los produce.
+ *
+ * Con una sola llamada a `polizas_por_dni` en el plan, el modelo podía nombrar
+ * `denuncia_policial` en `resolved` y el pedido del documento se cerraba: el
+ * caso podía llegar a `listo_para_core` y exportarse a la aseguradora diciendo
+ * que teníamos el parte policial de un robo. No lo teníamos — teníamos la
+ * palabra del modelo. Comprobado: `validate` acepta ese plan.
+ *
+ * Se FILTRA en vez de rechazar el plan entero. Rechazarlo manda todo a la rama
+ * determinista y se pierde la parte buena —la respuesta a lo que la persona
+ * preguntó—, que es exactamente el costo que documenta `validate` unas líneas
+ * más arriba, donde una regla demasiado estricta hizo que se le pidieran fotos
+ * a un hombre cuya póliza había vencido en 2020. Acá se descarta lo imposible,
+ * se conserva lo demás, y queda dicho en el log.
  */
 async function recordLookedUpFields(
   caseId: string,
   tenantId: string,
-  resolved: Array<{ field: string; value: string }>
+  resolvedCrudo: Array<{ field: string; value: string }>
 ): Promise<void> {
+  const documentos = resolvedCrudo.filter((r) => isDocument(r.field));
+  const resolved = resolvedCrudo.filter((r) => !isDocument(r.field));
+
+  if (documentos.length > 0) {
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        service: "claimmix",
+        msg: "agent.resolvio_un_documento",
+        case_id: caseId,
+        // Los nombres, no los valores: el valor es texto que escribió una persona.
+        campos: documentos.map((d) => d.field),
+        detalle:
+          "El agente dijo haber resuelto por búsqueda un archivo que sólo puede " +
+          "mandar la persona. Se descarta: el pedido sigue abierto.",
+      })
+    );
+  }
+
+  if (resolved.length === 0) return;
+
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {

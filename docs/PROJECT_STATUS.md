@@ -1006,6 +1006,61 @@ La regla vive en `@/core/case/poliza-encontrada` y no adentro del worker, por lo
 mismo que `status-after-extraction`: trece líneas puras entre consultas a la base
 no las prueba nadie.
 
+### 🧹 Barrido de tests que se salteaban solos (2026-08-31)
+
+Después del `if (csp)` —un e2e que pasaba en verde sin afirmar nada— fui a buscar
+a sus hermanos por todo el árbol. De **2.241 casos**:
+
+| lo que se buscó | resultado |
+|---|---|
+| afirmaciones adentro de un `if` | 28, de las cuales **25 son estrechamiento de tipo** (`if (result.success)` con un `expect(...).toBe(true)` arriba — el patrón idiomático de Zod). **3 vacías.** |
+| tests sin ninguna afirmación | **0.** Los 5 que marcó el detector delegan en un ayudante que sí afirma |
+| tests salteados | 52, **todos** con `skipIf` por credenciales o servidor, y todos visibles en el reporte |
+| expectativas construidas desde una constante de la implementación | **0** |
+
+Los tres vacíos:
+
+- **`policy-matcher`, «ordena activas antes que vencidas».** El cuerpo entero
+  adentro de dos `if` anidados: con una función que devolviera `[]` pasaba igual.
+- **`customer-matcher`, «el match por DNI (0.85) va primero».** Devolvía la
+  misma persona por los dos caminos, la deduplicación las juntaba en una, y el
+  `if (matches.length >= 2)` nunca se cumplía. Lo único en pie era
+  `expect(first).toBeDefined()`.
+- **`worker`, «procesando sólo transiciona a listo/esperando/escalado».** Si el
+  worker no escribía NINGÚN estado —un caso colgado, peor que transicionar mal—
+  el bucle no daba una vuelta.
+
+**Verificados con mutantes, no de palabra.** Orden invertido → cae. Confianza del
+DNI de 0.85 a 0.55 → caen tres. Estado prohibido → cae el del FSM. Y uno que NO
+cae: sacar `caseUpdate.status` no rompe nada porque hay otro escritor que igual
+deja «listo» — queda anotado en el test para no exagerar lo que cuida.
+
+Dos de propina: `Retry-After` se afirmaba `>= 0`, así que un `Retry-After: 0`
+pasaba (le dice al cliente que reintente ya mismo, justo lo que el tope existe
+para impedir); y nada afirmaba cuántos escenarios tiene el catálogo del extractor
+—los bucles GENERAN un test por escenario, así que borrar 140 bajaba el total y
+seguía todo verde. Piso en 160; hay 163.
+
+El detector tenía el defecto que buscaba: leía `async ({ page }) => {` y tomaba
+la llave de la desestructuración como cuerpo, así que reportaba como vacíos los
+cincuenta e2e de Playwright.
+
+### 🔌 El servidor de desarrollo dice a qué base le habla (2026-08-31)
+
+`next dev` lee `.env.local`, donde vive la cadena de **producción**, y eso está
+bien: hay un solo ambiente desplegado. Lo que no estaba bien es que no se notara
+— un `pnpm dev` olvidado contra la base de los clientes se ve igual que uno
+contra el ensayo.
+
+```
+[db] desarrollo → ep-damp-meadow-ac1xqhzs.sa-east-1.aws.neon.tech
+```
+
+Sólo el host: la contraseña viaja en la misma cadena y no tiene por qué aparecer
+en una terminal, un log de CI ni una captura. Callado en producción y bajo
+vitest. Cierra la mitad que faltaba del incidente de los e2e escribiendo en la
+base real.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada
@@ -1021,6 +1076,12 @@ no las prueba nadie.
   valor de Vercel estuviera mal, el primer deploy lo dice —`DATABASE_URL_APP no
   autentica`— en vez de descubrirse cuando un analista abre la bandeja vacía.
 
+- **Los primeros caracteres de `STAGING_DATABASE_URL` quedaron en un transcripto**
+  (2026-08-31). Al armar un script de verificación imprimí los primeros 30
+  caracteres de la cadena, que incluyen cuatro de la contraseña. Es la base del
+  ENSAYO, no la de los clientes, y cuatro caracteres no son la contraseña — pero
+  va anotado acá por la misma razón que los de abajo: lo que no se anota, no se
+  rota.
 - **La contraseña nueva de `claimmix_app` quedó impresa en el transcripto** de la
   sesión donde se rotó. Misma categoría que el token de WhatsApp y la clave de
   Google de más abajo: no se sabe filtrada, y ya no está sólo donde debería.

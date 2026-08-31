@@ -960,6 +960,52 @@ que se arregló el test. De paso se fue un `beforeEach` con `clearAllRateLimits(
 que no reiniciaba nada: limpiaba el mapa en memoria del proceso de los tests, no
 el del servidor, y el servidor ni cuenta en memoria — cuenta en Postgres.
 
+### 📄 Le encontrábamos la póliza y se la pedíamos igual (2026-08-31)
+
+El ensayo posterior al deploy encontró algo que ninguna de las 2.482
+verificaciones veía, que es exactamente para lo que está:
+
+```
+busca-la-poliza turno 1: no debería decir "número de póliza"
+```
+
+Cecilia da su DNI y no el número de póliza. El buscador la encuentra, el agente
+llama a `polizas_por_dni`, recibe **POL-8812-R**… y la respuesta siguiente
+arranca con «El número de póliza (por ejemplo POL-12345)».
+
+El agente no se equivocaba. Los faltantes se anotan en el paso (h) del worker y
+recién en (i) y (j) se busca en la base, así que `numero_poliza` le llegaba
+marcado como faltante aunque la póliza ya estuviera enlazada por `policy_id`.
+**Pedirle a alguien un dato que está en nuestra propia base es lo que hace un
+formulario**, que es lo que esto vino a reemplazar.
+
+No era una regresión: el post-deploy anterior pasó con el mismo código. El
+escenario lo destapaba a veces, y ese día lo destapó seis de seis.
+
+Ahora, cuando encontramos la póliza y la persona no dijo el número, se anota —el
+valor va a `extracted_fields` con la confianza del match, no inventada, y la fila
+de faltantes se marca satisfecha, igual que hace el reconciliador de documentos.
+La clave se canoniza antes de comparar: el extractor emite `numero_poliza` o
+`policy_number` según el día, y marcar sólo una dejaba viva la otra.
+
+Tres decisiones, las tres afirmadas:
+
+| la persona | encontramos | qué hace |
+|---|---|---|
+| no dijo número | una póliza | la completa sola |
+| dijo un número | cualquier cosa | **no lo pisa**, ni aunque no coincida |
+| no dijo número | dos pólizas | pregunta |
+
+La segunda importa tanto como la primera: un número equivocado es una
+conversación con la persona, no algo para corregirle por atrás. La tercera,
+porque con el auto y la casa a nombre de la misma persona no sabemos bajo cuál
+viene el siniestro, y elegir la primera sería adivinar y escribirlo como si lo
+supiéramos.
+
+La regla vive en `@/core/case/poliza-encontrada` y no adentro del worker, por lo
+mismo que `status-after-extraction`: trece líneas puras entre consultas a la base
+no las prueba nadie.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

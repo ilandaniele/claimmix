@@ -24,8 +24,8 @@ import type { KnownPattern } from "./prompt";
 /**
  * Check whether `text` (lowercase) contains `pattern` as a whole word or phrase.
  *
- * Uses word-boundary matching so "herido" does NOT match "sin heridos"
- * and "golpe leve" does NOT accidentally prevent "golpe" from matching.
+ * Matches singular AND plural, and skips occurrences that a negation turns
+ * into their own absence ("sin heridos", "no hubo heridos", "ningún herido").
  *
  * Rules:
  * - Multi-word phrases: plain substring match (the phrase boundary is already specific).
@@ -41,21 +41,80 @@ function matchesPattern(text: string, pattern: string): boolean {
     return text.includes(lower);
   }
 
-  // Single keyword — use word boundary.
-  // Build a regex with unicode-aware boundaries using \b equivalent:
-  // Match if the keyword is preceded and followed by a non-word character.
-  // We include Spanish accented letters as word characters.
-  const escaped = lower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = lower.replace(/[.*+?^${}()|[\\\\]]/g, "\\$&");
+
+  /*
+   * El plural cuenta igual que el singular.
+   *
+   * Antes no: la frontera de palabra hacía que «herido» NO matcheara «heridos»,
+   * y eso estaba escrito como una virtud —«así "herido" no matchea "sin
+   * heridos"»—. El costo estaba del otro lado y nadie lo había medido:
+   *
+   *   «Hay un herido.»                 → high     → especialista
+   *   «Hay tres heridos.»              → medium   → nadie
+   *   «Hubo un muerto.»                → critical → especialista
+   *   «Hubo dos muertos.»              → medium   → nadie
+   *
+   * O sea que el caso MÁS grave era el que se escapaba, y por una regla puesta
+   * para evitar un falso positivo que ahora se resuelve mirando la negación.
+   *
+   * La capa de patrones es la red: cuando el modelo acierta, escala igual. Esto
+   * es para cuando el modelo no está o se equivoca, que es exactamente cuando
+   * una red tiene que estar entera.
+   */
   // Regla detect-non-literal-regexp. `escaped` viene de la línea anterior,
   // que escapa los metacaracteres, y el patrón sale de una tabla fija del código,
   // no de nada que escriba un denunciante.
   // nosemgrep
   const re = new RegExp(
-    `(?:^|[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9])${escaped}(?:[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9]|$)`,
-    "i"
+    `(?:^|[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9])(${escaped}(?:es|s)?)(?:[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9]|$)`,
+    "gi"
   );
-  return re.test(text);
+
+  /*
+   * Y una aparición NEGADA no cuenta.
+   *
+   * Con el plural adentro, «sin heridos» pasaría a disparar «herido» y de ahí a
+   * `high`, porque la capa se queda con el máximo y el `sin heridos → low` de
+   * la tabla nunca gana. Antes eso lo evitaba el accidente de la frontera de
+   * palabra; ahora lo evita mirar lo que hay adelante, que es lo que la frase
+   * quiere decir.
+   *
+   * Se permite UNA palabra entre el negador y la palabra —«sin ningún herido»—
+   * y no más: con dos, «sin duda hay heridos» quedaría negado, y ahí sí hay
+   * heridos.
+   */
+  let alguna = false;
+  for (const m of text.matchAll(re)) {
+    // Dónde arranca la palabra: `m[0]` trae adelante el carácter de frontera.
+    const inicio = m.index + m[0].indexOf(m[1]);
+    // Los treinta caracteres de ANTES. La primera versión de esto cortaba
+    // desde `m.index`, o sea que miraba un único carácter —la frontera— y
+    // la negación no se veía nunca.
+    const antes = text.slice(Math.max(0, inicio - 30), inicio);
+    if (NEGADORES.test(antes)) continue;
+    alguna = true;
+    break;
+  }
+  return alguna;
 }
+
+/**
+ * Lo que convierte una palabra grave en su ausencia.
+ *
+ * «sin heridos», «no hubo heridos», «ningún herido», «sin heridos ni
+ * lesionados» — el `ni` arrastra la negación en castellano. Se mira sólo lo
+ * que está
+ * pegado adelante de la palabra, no toda la frase: «hay heridos, sin duda» no
+ * es una negación de «heridos».
+ *
+ * Una palabra intermedia como mucho. Con dos, «sin duda hay heridos» quedaría
+ * negado — y ahí sí hay heridos. Por lo mismo «ni bien llegó la ambulancia»
+ * (tres palabras de por medio) no niega la ambulancia, y «ni la ambulancia
+ * vino» (una) sí, que es lo que esa frase dice.
+ */
+const NEGADORES =
+  /(?:^|[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9])(?:sin|no hubo|no hay|no hab[ií]a|ning[uú]n|ninguna|ni)(?:[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9]+[a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9]+)?[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9]*$/i;
 
 /** Numeric rank for severity comparison (higher = more severe). */
 const SEVERITY_RANK: Record<Severity, number> = {

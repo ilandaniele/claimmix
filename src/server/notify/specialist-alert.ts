@@ -17,7 +17,7 @@
 
 import "server-only";
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, cases, claimMessages, users } from "@/lib/db/schema";
@@ -301,7 +301,30 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
   }
 }
 
-/** Has anyone already been told about this case? */
+/**
+ * ¿Ya se le avisó a alguien de este caso, DE VERDAD?
+ *
+ * Miraba si existía una fila de `claim.specialist_alerted` y nada más. Pero esa
+ * fila se escribe pase lo que pase con el envío: lleva `delivered: false` cuando
+ * Gmail no lo pudo entregar. O sea que un envío fallido dejaba una marca que
+ * después se leía como «alguien ya está mirando esto», y no se volvía a intentar
+ * NUNCA.
+ *
+ * La secuencia completa: llega un incendio con heridos, el caso pasa a
+ * `requiere_especialista`, al asegurado le sale la plantilla que le promete que
+ * «un especialista se va a comunicar con vos a la brevedad», el correo al
+ * especialista falla, y nadie se entera. El caso queda esperando a una persona a
+ * la que nunca se le avisó.
+ *
+ * El `catch` de acá abajo ya tenía escrita la regla correcta —«un aviso
+ * duplicado es ruido, uno que falta es una denuncia que nadie levanta»— y la
+ * consulta hacía lo contrario.
+ *
+ * Nota sobre las filas viejas: una sin `delivered` en el payload cuenta como no
+ * entregada, así que un caso de esos se volvería a avisar una vez. Es el lado
+ * correcto del error, y en la base de hoy no hay ninguna: los 28 avisos que hay
+ * llevan `delivered: true`.
+ */
 async function alreadyAlerted(caseId: string, tenantId: string): Promise<boolean> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
@@ -314,7 +337,8 @@ async function alreadyAlerted(caseId: string, tenantId: string): Promise<boolean
         .where(
           and(
             eq(auditLog.target_id, caseId),
-            eq(auditLog.event_type, AuditEvent.SPECIALIST_ALERTED)
+            eq(auditLog.event_type, AuditEvent.SPECIALIST_ALERTED),
+            sql`${auditLog.payload}->>'delivered' = 'true'`
           )
         )
         .limit(1)

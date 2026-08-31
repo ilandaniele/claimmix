@@ -59,6 +59,9 @@ vi.mock("@/lib/audit/log", () => ({
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
 
+/** El `where` con el que se preguntó «¿ya se avisó?», para poder compilarlo. */
+const condicionesDeYaSeAviso: unknown[] = [];
+
 const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
 
@@ -89,6 +92,7 @@ function database(opts: {
   // si no hay ninguno, `owner`. Se cuentan las llamadas para poder devolver
   // listas distintas y probar cuál gana.
   let porRol = 0;
+  condicionesDeYaSeAviso.length = 0;
 
   mockSelect.mockImplementation(() => ({
     from: () => ({
@@ -102,11 +106,15 @@ function database(opts: {
           return Promise.resolve(staff.map((email) => ({ email })));
         },
       }),
-      where: () => ({
+      where: (cond: unknown) => ({
         limit: () => {
           call += 1;
           // First: the case's channel. Second: has an alert already gone out.
           if (call === 1) return Promise.resolve([{ channel }]);
+          // El `where` de la segunda se guarda: es lo único que distingue «ya se
+          // avisó» de «ya se avisó Y SE ENTREGÓ», y el mock devuelve filas sin
+          // mirarlo.
+          condicionesDeYaSeAviso.push(cond);
           return Promise.resolve(opts.alreadySent ? [{ id: 1 }] : []);
         },
         // El contacto del denunciante, que es lo único que distingue a un
@@ -388,6 +396,55 @@ describe("alertSpecialists — un ensayo por canal real", () => {
     // `5490000` es el bloque reservado; `549000...` con otro dígito no lo es.
     // Una guarda demasiado ancha silencia siniestros de verdad.
     database({ channel: "whatsapp", remitente: "5490001234567" });
+
+    await alert();
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Un aviso que NO se pudo entregar no cuenta como aviso.
+ *
+ * La fila de `claim.specialist_alerted` se escribe pase lo que pase con el
+ * envío: lleva `delivered: false` cuando Gmail no lo pudo entregar. La guarda de
+ * idempotencia miraba sólo que la fila existiera, así que un envío fallido
+ * dejaba una marca que después se leía como «alguien ya está mirando esto», y no
+ * se volvía a intentar nunca.
+ *
+ * La secuencia: incendio con heridos, el caso pasa a `requiere_especialista`, al
+ * asegurado le sale la plantilla que le promete que «un especialista se va a
+ * comunicar con vos a la brevedad», el correo al especialista falla, y nadie se
+ * entera. El caso espera a una persona a la que nunca se le avisó.
+ *
+ * El `catch` de esa misma función ya tenía escrita la regla correcta: «un aviso
+ * duplicado es ruido, uno que falta es una denuncia que nadie levanta».
+ */
+describe("la guarda de «ya se avisó» mira si se entregó", () => {
+  it("pregunta por delivered, no sólo por la existencia de la fila", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    database({ alreadySent: false });
+
+    await alert();
+
+    expect(condicionesDeYaSeAviso.length).toBeGreaterThan(0);
+    const compilado = new PgDialect().sqlToQuery(
+      condicionesDeYaSeAviso[0] as never
+    ).sql;
+    expect(compilado).toContain("delivered");
+  });
+
+  it("con un aviso entregado, no se manda otro", async () => {
+    // La mitad que ya andaba y no se puede perder: la idempotencia sigue en pie.
+    database({ alreadySent: true });
+
+    await alert();
+
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("sin ningún aviso previo, se manda", async () => {
+    database({ alreadySent: false });
 
     await alert();
 

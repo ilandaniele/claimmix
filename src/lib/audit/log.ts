@@ -163,6 +163,23 @@ export const AuditEvent = {
   MISSING_INFO_REQUESTED: "claim.missing_info_requested",
 
   /**
+   * MESSAGE_NOT_READ: llegó un mensaje a un caso del que el worker no vuelve a
+   * arrancar, así que no se leyó. Payload: { status, motivo }.
+   *
+   * `no_relevante` y `listo_para_core` son terminales en la máquina de estados
+   * —`no_relevante` a propósito, bajo LLM08: la IA no saca un caso de un estado
+   * terminal— y el worker tiene una lista de estados desde los que puede
+   * empezar. Cuando llega un mensaje a un caso que quedó afuera de esa lista, el
+   * mensaje se guarda y NO se lee.
+   *
+   * Alguien escribe «hola», el clasificador dice que no es una denuncia, y
+   * después escribe la denuncia de verdad: eso queda sin leer. Abrir la máquina
+   * de estados es una decisión de producto; que el silencio deje de ser silencio
+   * no lo es.
+   */
+  MESSAGE_NOT_READ: "claim.message_not_read",
+
+  /**
    * SPECIALIST_REQUIRED: case escalated to specialist due to high severity.
    * Payload: { case_id, severity }.
    * AC11.

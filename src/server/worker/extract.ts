@@ -585,15 +585,43 @@ export async function runEmailExtractionWorker(
       "confirmacion_pendiente",
     ];
     if (!allowedStartStatuses.includes(caseRow.status)) {
-      console.info(
+      /*
+       * El mensaje se guardó y NO se va a leer. Que se sepa.
+       *
+       * Era un `level: "info"` y nada más, o sea que un mensaje sin leer se veía
+       * igual que cualquier otra línea del log. El caso que importa: alguien
+       * escribe «hola», el clasificador dice que no es una denuncia y el caso
+       * queda en `no_relevante` —terminal a propósito, bajo LLM08: la IA no
+       * saca un caso de un estado terminal—, y después escribe la denuncia de
+       * verdad. Ese mensaje entra, se guarda, y nadie lo lee nunca.
+       *
+       * Abrir la máquina de estados es una decisión de producto y no se toma
+       * acá. Que el silencio deje de ser silencio, sí: queda en `warn` y en la
+       * auditoría del caso, que es donde una persona lo puede ver.
+       *
+       * Medido antes de escribir esto: en la base no hay todavía ningún caso con
+       * un mensaje posterior a la última vez que se lo tocó. Es preventivo.
+       */
+      console.warn(
         JSON.stringify({
-          level: "info",
+          level: "warn",
           service: "claimmix",
-          msg: "email_worker.skipped.wrong_status",
+          msg: "email_worker.mensaje_sin_leer",
           case_id: caseId,
           status: caseRow.status,
+          detalle:
+            "Llegó un mensaje a un caso en un estado del que el worker no " +
+            "vuelve a arrancar. Se guardó y no se leyó.",
         })
       );
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.MESSAGE_NOT_READ,
+        target_type: "case",
+        target_id: caseId,
+        payload: { status: caseRow.status, motivo: "estado_no_reanudable" },
+      });
       return;
     }
 

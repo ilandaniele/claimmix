@@ -366,6 +366,11 @@ Three things worth remembering:
   is with a short-lived OIDC token and there is no JSON to leak at all. That is the
   real answer to a key living in three places, and it is not written yet.
 
+  Nota posterior (2026-08-31): la anulación **no quedó puesta**. Hoy la restricción
+  está activa y heredada de la organización — ver «Waiting on you» más abajo. Lo
+  que sigue abierto es lo de Workload Identity Federation, que es el arreglo de
+  verdad; esto sólo impide que aparezca una clave más.
+
 ### 🔕 The week the mailbox would have gone quiet (2026-08-24)
 
 Publishing the OAuth app was the last step of the migration, and the reason is narrow:
@@ -1263,9 +1268,27 @@ Y las dos decisiones de arquitectura:
   Pub/Sub topic and push subscription, the login OAuth client, and the tuning bucket —
   and each move was proved against production before the next one started. The mailbox
   had to re-consent, which is what set off the incident recorded below.
-- **Turn `iam.disableServiceAccountKeyCreation` back on** for `claimmix-506321`. New
-  organisations enforce it by default and it had to be overridden — at project level,
-  not org — to create the one key we needed. The override is still there.
+- ~~**Turn `iam.disableServiceAccountKeyCreation` back on** for `claimmix-506321`~~
+  ✅ **YA ESTABA, verificado en consola 2026-08-31.** Sobre el proyecto `claimmix`
+  (ID `claimmix-506321`, dentro de `veltra-claimmix-org`), la restricción figura
+  **Activa** y **heredada** de la organización. Lo mismo
+  `iam.disableServiceAccountKeyUpload`. La anulación de nivel proyecto que esta
+  nota decía que quedaba puesta **no está**: o se sacó en algún momento, o nunca
+  llegó a persistirse.
+
+  Vale la pena decir cómo casi lo leemos mal. La primera consulta se hizo con la
+  cuenta equivocada —`ilan.daniele@gmail.com`, que ve `ilan-daniele-org` y ni
+  siquiera puede describir `claimmix-506321`— y esa pantalla mostraba «Inactive /
+  Inherit parent's policy». O sea que el estado se ve DISTINTO según con qué
+  cuenta mires, y la versión equivocada era la que decía que faltaba hacer algo.
+
+  Verificado leyendo la consola, no la API: gcloud sigue teniendo sólo la cuenta
+  personal, así que no hay confirmación por CLI.
+
+  **Cuándo vuelve a importar:** el día que se rote esa clave, `keys create` va a
+  fallar. Ahí hay que poner una anulación temporal en el proyecto, rotar, y
+  sacarla. La restricción bloquea CREAR claves, no invalida las existentes — la
+  que está en Vercel y en GitHub sigue funcionando.
 - **Delete the downloaded key** from `Downloads`. The value lives in Vercel, in GitHub
   and in the git-ignored copy in the repo; a service-account key in a Downloads folder
   is the next leak.

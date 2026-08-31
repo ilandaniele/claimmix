@@ -74,6 +74,19 @@ export const claimAttachments = pgTable("claim_attachments", {
     onDelete: "cascade",
   }),
   rejected_reason: text("rejected_reason"),
+  /**
+   * Qué documento cerró este adjunto, si cerró alguno.
+   *
+   * `unmatchedAttachments` se llama así y devolvía TODOS los adjuntos del caso,
+   * porque no había dónde guardar cuál ya había coincidido. Con eso, cada
+   * mensaje nuevo volvía a ofrecerle al modelo las fotos viejas para tapar los
+   * documentos que faltan.
+   *
+   * Nullable a propósito: las filas que ya existen no saben qué cerraron y nadie
+   * puede reconstruirlo. Un adjunto sin marca se sigue ofreciendo, que es el
+   * comportamiento de siempre.
+   */
+  matched_doc_key: text("matched_doc_key"),
 });
 
 export const claimFieldConfirmations = pgTable("claim_field_confirmations", {

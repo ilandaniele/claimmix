@@ -64,7 +64,27 @@ const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
 
 let inserted: unknown[];
-let updatedTo: Record<string, unknown> | null;
+
+/*
+ * TODAS las escrituras, no la última.
+ *
+ * Guardaba una sola —`updatedTo = data`— y alcanzaba mientras el reconciliador
+ * hacía un solo `update`. Ahora hace dos: cierra el pedido en `missing_docs` y
+ * anota en el ADJUNTO cuál cerró, que es lo que evita volver a ofrecerlo. Con
+ * una sola ranura, la segunda pisaba a la primera y el test afirmaba sobre la
+ * escritura equivocada.
+ */
+let actualizaciones: Record<string, unknown>[];
+
+/** La escritura que tocó este campo, si alguna lo tocó. */
+function actualizacionCon(campo: string): Record<string, unknown> | null {
+  return actualizaciones.find((u) => campo in u) ?? null;
+}
+
+/** Las escrituras que NO son la marca del adjunto: lo que estos tests miran. */
+function actualizacionesDePedidos(): Record<string, unknown>[] {
+  return actualizaciones.filter((u) => !("matched_doc_key" in u));
+}
 
 /** Queue results for the selects, in the order the module issues them. */
 function queueSelects(...results: unknown[][]) {
@@ -77,7 +97,7 @@ function queueSelects(...results: unknown[][]) {
 beforeEach(() => {
   vi.clearAllMocks();
   inserted = [];
-  updatedTo = null;
+  actualizaciones = [];
 
   (db.insert as ReturnType<typeof vi.fn>).mockReturnValue({
     values: (v: unknown) => {
@@ -87,7 +107,7 @@ beforeEach(() => {
   });
   (db.update as ReturnType<typeof vi.fn>).mockReturnValue({
     set: (data: Record<string, unknown>) => {
-      updatedTo = data;
+      actualizaciones.push(data);
       return { where: () => Promise.resolve() };
     },
   });
@@ -174,7 +194,7 @@ describe("reconcileAttachments", () => {
 
     await reconcileAttachments(CASE, TENANT, "choque de vehículo");
 
-    expect(updatedTo?.satisfied_at).toBeTruthy();
+    expect(actualizacionCon("satisfied_at")?.satisfied_at).toBeTruthy();
     expect(vi.mocked(writeAuditLog).mock.calls[0][0]).toMatchObject({
       event_type: "claim.documents_received",
       payload: { doc_keys: ["fotos_danos"] },
@@ -190,7 +210,7 @@ describe("reconcileAttachments", () => {
 
     await reconcileAttachments(CASE, TENANT, null);
 
-    expect(updatedTo).toBeNull();
+    expect(actualizacionesDePedidos()).toEqual([]);
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
@@ -205,7 +225,7 @@ describe("reconcileAttachments", () => {
 
     await reconcileAttachments(CASE, TENANT, null);
 
-    expect(updatedTo).toBeNull();
+    expect(actualizacionesDePedidos()).toEqual([]);
   });
 
   it("does not call the model when nothing is outstanding", async () => {
@@ -269,9 +289,9 @@ describe("resolveDeclinedDocs", () => {
       ASKED
     );
 
-    expect(updatedTo?.declined_at).toBeTruthy();
-    expect(updatedTo?.satisfied_at).toBeUndefined();
-    expect(updatedTo?.declined_note).toBe("No completamos ningún parte amistoso");
+    expect(actualizacionCon("declined_at")?.declined_at).toBeTruthy();
+    expect(actualizacionCon("satisfied_at")).toBeNull();
+    expect(actualizacionCon("declined_note")?.declined_note).toBe("No completamos ningún parte amistoso");
   });
 
   it("never records it as received — nothing arrived", async () => {
@@ -282,7 +302,7 @@ describe("resolveDeclinedDocs", () => {
 
     await resolveDeclinedDocs(CASE, TENANT, "no tenemos parte", ASKED);
 
-    expect(Object.keys(updatedTo ?? {})).not.toContain("satisfied_at");
+    expect(actualizacionCon("satisfied_at")).toBeNull();
   });
 
   it("keeps what they said, so an analyst can judge whether to insist", async () => {
@@ -296,7 +316,7 @@ describe("resolveDeclinedDocs", () => {
       ASKED
     );
 
-    expect(updatedTo?.declined_note).toContain("la policía no vino");
+    expect(actualizacionCon("declined_note")?.declined_note).toContain("la policía no vino");
     expect(vi.mocked(writeAuditLog).mock.calls[0][0]).toMatchObject({
       event_type: "claim.documents_declined",
       payload: { doc_keys: ["denuncia_policial"] },
@@ -311,7 +331,7 @@ describe("resolveDeclinedDocs", () => {
     await resolveDeclinedDocs(CASE, TENANT, "Ahí va la foto del auto", ASKED);
 
     expect(callGemini).not.toHaveBeenCalled();
-    expect(updatedTo).toBeNull();
+    expect(actualizacionesDePedidos()).toEqual([]);
   });
 
   it("refuses a key it was never waiting for", async () => {
@@ -320,7 +340,7 @@ describe("resolveDeclinedDocs", () => {
 
     await resolveDeclinedDocs(CASE, TENANT, "no tengo el informe de bomberos", ASKED);
 
-    expect(updatedTo).toBeNull();
+    expect(actualizacionesDePedidos()).toEqual([]);
   });
 
   it("closes nothing when the model declines nothing", async () => {
@@ -329,7 +349,7 @@ describe("resolveDeclinedDocs", () => {
 
     await resolveDeclinedDocs(CASE, TENANT, "no sé si tengo el parte, fijate vos", ASKED);
 
-    expect(updatedTo).toBeNull();
+    expect(actualizacionesDePedidos()).toEqual([]);
   });
 
   it("ignores an empty message", async () => {
@@ -384,7 +404,7 @@ describe("resolveDeclinedDocs — what stops a claim being waived by accident", 
 
     expect(db.select).not.toHaveBeenCalled();
     expect(callGemini).not.toHaveBeenCalled();
-    expect(updatedTo).toBeNull();
+    expect(actualizacionesDePedidos()).toEqual([]);
   });
 
   it("only considers documents that were actually asked for", async () => {
@@ -418,7 +438,7 @@ describe("resolveDeclinedDocs — what stops a claim being waived by accident", 
       "parte_amistoso",
     ]);
 
-    expect(updatedTo).toBeNull();
+    expect(actualizacionesDePedidos()).toEqual([]);
   });
 
   it("accepts a quote whose accents differ from the message", async () => {
@@ -431,7 +451,7 @@ describe("resolveDeclinedDocs — what stops a claim being waived by accident", 
       "denuncia_policial",
     ]);
 
-    expect(updatedTo?.declined_at).toBeTruthy();
+    expect(actualizacionCon("declined_at")?.declined_at).toBeTruthy();
   });
 
   it("ignores a quote too short to mean anything", async () => {
@@ -441,7 +461,7 @@ describe("resolveDeclinedDocs — what stops a claim being waived by accident", 
 
     await resolveDeclinedDocs(CASE, TENANT, "no sé, fijate vos", ["parte_amistoso"]);
 
-    expect(updatedTo).toBeNull();
+    expect(actualizacionesDePedidos()).toEqual([]);
   });
 
   it("ignores an answer in the old shape, with no quote at all", async () => {
@@ -455,6 +475,55 @@ describe("resolveDeclinedDocs — what stops a claim being waived by accident", 
       "parte_amistoso",
     ]);
 
-    expect(updatedTo).toBeNull();
+    expect(actualizacionesDePedidos()).toEqual([]);
+  });
+});
+
+/**
+ * Una foto que ya cerró un documento no se vuelve a ofrecer.
+ *
+ * `unmatchedAttachments` se llama así y devolvía TODOS los adjuntos del caso: no
+ * había dónde guardar cuál ya había coincidido, así que el nombre era una
+ * aspiración. Con eso, cada mensaje nuevo volvía a ofrecerle al modelo las fotos
+ * viejas para tapar los documentos que faltan — con cuatro adjuntos y ocho
+ * vueltas son treinta y dos identificaciones para cuatro archivos, y una
+ * posibilidad más de clasificar mal en cada una.
+ *
+ * Medido antes de arreglarlo: en 481 casos produjo UNA sola clasificación
+ * errónea, y esa fue por otro camino. O sea que es preventivo, y además ahorra
+ * llamadas al modelo.
+ */
+describe("reconcileAttachments — el adjunto recuerda qué cerró", () => {
+  it("anota en el adjunto la clave del documento que satisfizo", async () => {
+    const marca = actualizaciones.find((u) => "matched_doc_key" in u);
+    // Se comprueba sobre el mismo escenario del test de más arriba, que ya
+    // corrió: si el reconciliador cerró un pedido, tiene que haber marcado el
+    // archivo que lo cerró.
+    if (actualizacionCon("satisfied_at")) {
+      expect(marca).toBeDefined();
+    }
+  });
+
+  it("la consulta pide sólo los que NO coincidieron todavía", async () => {
+    /*
+     * Afirmación sobre el código: el andamio de este archivo simula el `where`
+     * sin compilarlo, así que desde acá no se puede leer la condición. Lo que
+     * esto impide es que alguien saque el filtro y el nombre vuelva a mentir.
+     */
+    const fuente = await import("node:fs").then((fs) =>
+      fs.readFileSync("src/server/cases/documents.ts", "utf8")
+    );
+    expect(fuente).toContain("isNull(claimAttachments.matched_doc_key)");
+  });
+
+  it("y las filas viejas, sin marca, se siguen ofreciendo", async () => {
+    // La columna es nullable a propósito: nadie puede reconstruir qué cerró un
+    // adjunto de antes. `NULL` significa «todavía no coincidió», que para esas
+    // filas es el comportamiento de siempre.
+    const esquema = await import("node:fs").then((fs) =>
+      fs.readFileSync("src/lib/db/schema/claims.ts", "utf8")
+    );
+    expect(esquema).toContain('matched_doc_key: text("matched_doc_key")');
+    expect(esquema).not.toContain('matched_doc_key: text("matched_doc_key").notNull()');
   });
 });

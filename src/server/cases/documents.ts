@@ -170,13 +170,18 @@ export async function reconcileAttachments(
     if (attachments.length === 0) return;
 
     const satisfied = new Set<string>();
+    /** Qué adjunto cerró qué documento, para poder anotarlo después. */
+    const marcados: Array<[string, string]> = [];
 
     for (const attachment of attachments) {
       const remaining = pending.filter((k) => !satisfied.has(k));
       if (remaining.length === 0) break;
 
       const key = await identifyDocument(attachment, remaining, claimTypeLabel);
-      if (key) satisfied.add(key);
+      if (key) {
+        satisfied.add(key);
+        marcados.push([attachment.id, key]);
+      }
     }
 
     if (satisfied.size === 0) return;
@@ -193,6 +198,24 @@ export async function reconcileAttachments(
           )
         )
     );
+
+    /*
+     * Y se anota en el adjunto CUÁL cerró, que es lo que evita volver a
+     * ofrecerlo. Si esto falla, el pedido queda cerrado igual y el archivo se
+     * sigue ofreciendo: molesto, no incorrecto.
+     */
+    for (const [attachmentId, docKey] of marcados) {
+      try {
+        await enTenant(tenantCtx, (db) =>
+          db
+            .update(claimAttachments)
+            .set({ matched_doc_key: docKey })
+            .where(eq(claimAttachments.id, attachmentId))
+        );
+      } catch (err) {
+        console.error("[documents] no se pudo marcar el adjunto:", errCode(err));
+      }
+    }
 
     await writeAuditLog({
       tenant_id: tenantId,
@@ -234,7 +257,24 @@ async function unmatchedAttachments(
       })
       .from(claimAttachments)
       .where(
-        eq(claimAttachments.case_id, caseId)
+        and(
+          eq(claimAttachments.case_id, caseId),
+          /*
+           * Los que TODAVÍA no coincidieron con ningún documento.
+           *
+           * La función se llama `unmatchedAttachments` y devolvía todos: no
+           * había dónde guardar cuál ya había coincidido, así que el nombre era
+           * una aspiración. Cada mensaje nuevo volvía a ofrecerle al modelo las
+           * fotos viejas para tapar los documentos que faltan — con cuatro
+           * adjuntos y ocho vueltas, treinta y dos identificaciones para cuatro
+           * archivos, y una posibilidad más de clasificar mal en cada una.
+           *
+           * Las filas anteriores a la columna tienen NULL y se siguen
+           * ofreciendo, que es el comportamiento de siempre: nadie puede
+           * reconstruir qué cerraron.
+           */
+          isNull(claimAttachments.matched_doc_key)
+        )
       )
   );
 

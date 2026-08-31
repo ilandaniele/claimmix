@@ -53,6 +53,7 @@ import {
   seedRequiredDocs,
   satisfyContactDocsWeAlreadyHave,
 } from "@/server/cases/documents";
+import { separarPorRespaldo } from "@/core/case/respaldado-por-busqueda";
 import {
   canonicalFieldKey,
   isDocument,
@@ -430,7 +431,7 @@ export async function orchestratePostExtraction(
     // then asking the claimant for it is exactly what a form does.
     const resolved = plan.resolved ?? [];
     if (resolved.length > 0) {
-      await recordLookedUpFields(caseId, tenantId, resolved);
+      await recordLookedUpFields(caseId, tenantId, resolved, plan.lookupResults ?? []);
     }
 
     // Something a person handling the file would write down and no column was
@@ -934,10 +935,51 @@ function buildAskList(
 async function recordLookedUpFields(
   caseId: string,
   tenantId: string,
-  resolvedCrudo: Array<{ field: string; value: string }>
+  resolvedCrudo: Array<{ field: string; value: string }>,
+  /** Lo que devolvieron las consultas de este plan, en crudo. */
+  lookupResults: readonly string[]
 ): Promise<void> {
   const documentos = resolvedCrudo.filter((r) => isDocument(r.field));
-  const resolved = resolvedCrudo.filter((r) => !isDocument(r.field));
+  const datos = resolvedCrudo.filter((r) => !isDocument(r.field));
+
+  /*
+   * ── Y el valor tiene que estar en lo que devolvió alguna consulta ──────────
+   *
+   * `validate` exige que el plan haya llamado a alguna herramienta, no que el
+   * valor venga de alguna. Con `polizas_por_dni → { encontradas: 0 }` en el
+   * plan, un `policy_number = "POL-INVENTADA-9999"` pasaba: se guardaba con
+   * confianza 0.95 —la más alta que maneja el sistema— y encima cerraba el
+   * pedido de ese campo, así que nunca se le volvía a preguntar a la persona.
+   *
+   * El comentario del propio campo `resolved` ya lo advertía: «un modelo que
+   * puede escribir valores de memoria es un modelo que puede inventar un número
+   * de póliza». La guarda que lo impedía no existía.
+   *
+   * Se descarta lo no respaldado y se conserva el resto, por lo mismo que con
+   * los documentos: rechazar el plan entero manda todo a la rama determinista y
+   * se pierde la respuesta a lo que la persona preguntó.
+   */
+  const { respaldados: resolved, sinRespaldo } = separarPorRespaldo(
+    datos,
+    lookupResults
+  );
+
+  if (sinRespaldo.length > 0) {
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        service: "claimmix",
+        msg: "agent.resolvio_sin_respaldo",
+        case_id: caseId,
+        // Los nombres, no los valores: el valor es justamente lo dudoso.
+        campos: sinRespaldo.map((r) => r.field),
+        consultas: lookupResults.length,
+        detalle:
+          "El agente dijo haber encontrado un valor que no aparece en lo que " +
+          "devolvió ninguna consulta. Se descarta: el campo sigue faltando.",
+      })
+    );
+  }
 
   if (documentos.length > 0) {
     console.warn(

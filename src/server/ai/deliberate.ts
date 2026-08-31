@@ -76,6 +76,19 @@ export interface AgentPlan {
   resolved: Array<{ field: string; value: string }>;
   /** The lookups it made, in order, for the audit trail. */
   toolCalls: Array<{ tool: string; args: Record<string, unknown> }>;
+  /**
+   * Lo que DEVOLVIERON esas consultas, en crudo.
+   *
+   * Estaba sólo adentro de `think`, en el transcripto que se le muestra al
+   * modelo, y no salía de ahí. Sin esto, nadie río abajo puede comprobar que un
+   * valor de `resolved` haya salido de una búsqueda: `validate` sólo podía
+   * contar CUÁNTAS consultas se hicieron, que es una pregunta distinta.
+   *
+   * Con `polizas_por_dni → { encontradas: 0 }` en el plan, un
+   * `resolved: policy_number = "POL-INVENTADA"` pasaba y se guardaba con
+   * confianza 0.95.
+   */
+  lookupResults: string[];
 }
 
 export interface DeliberationInput {
@@ -120,9 +133,10 @@ export async function deliberate(
   if (input.isHighSeverity) return null;
 
   try {
-    const { plan, toolCalls } = await think(input);
+    const { plan, toolCalls, lookupResults } = await think(input);
     if (!plan) return null;
     plan.toolCalls = toolCalls;
+    plan.lookupResults = lookupResults;
 
     const problem = validate(plan, input);
     if (problem) {
@@ -171,7 +185,11 @@ const MAX_TOOL_CALLS = 3;
  */
 async function think(
   input: DeliberationInput
-): Promise<{ plan: AgentPlan | null; toolCalls: AgentPlan["toolCalls"] }> {
+): Promise<{
+  plan: AgentPlan | null;
+  toolCalls: AgentPlan["toolCalls"];
+  lookupResults: string[];
+}> {
   const ctx: ToolContext = { caseId: input.caseId, tenantId: input.tenantId };
   const toolCalls: AgentPlan["toolCalls"] = [];
   const transcript: string[] = [];
@@ -190,7 +208,7 @@ async function think(
       prompt,
       "Decidí qué corresponde hacer con este mensaje y devolvé el JSON pedido."
     );
-    if (!text) return { plan: null, toolCalls };
+    if (!text) return { plan: null, toolCalls, lookupResults: transcript };
 
     const parsed = JSON.parse(text) as Record<string, unknown>;
 
@@ -219,10 +237,10 @@ async function think(
       continue;
     }
 
-    return { plan: coerce(parsed), toolCalls };
+    return { plan: coerce(parsed), toolCalls, lookupResults: transcript };
   }
 
-  return { plan: null, toolCalls };
+  return { plan: null, toolCalls, lookupResults: transcript };
 }
 
 /** A tool call, if that is what came back rather than a plan. */
@@ -418,6 +436,8 @@ function coerce(raw: Record<string, unknown>): AgentPlan | null {
     noteForAnalyst: note,
     resolved,
     toolCalls: [],
+    // Los pega `deliberate`, que es quien los tiene.
+    lookupResults: [],
   };
 }
 

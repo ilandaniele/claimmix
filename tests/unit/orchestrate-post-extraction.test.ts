@@ -2368,6 +2368,12 @@ describe("orchestratePostExtraction — what the lookup found", () => {
       noteForAnalyst: null,
       resolved: [{ field: "policy_number", value: "POL-8812-R" }],
       toolCalls: [{ tool: "polizas_por_dni", args: { dni: "27654321" } }],
+      // Lo que DEVOLVIÓ la consulta. Sin esto el valor no está respaldado y se
+      // descarta — que es el punto de la guarda nueva, y por eso este test
+      // empezó a fallar: escribía un número que ninguna consulta devolvió.
+      lookupResults: [
+        'polizas_por_dni({"dni":"27654321"}) → {"encontradas":1,"polizas":[{"numero":"POL-8812-R","vigente":true}]}',
+      ],
     } as never);
 
     await orchestratePostExtraction(
@@ -2408,6 +2414,12 @@ describe("orchestratePostExtraction — what the lookup found", () => {
       noteForAnalyst: null,
       resolved: [{ field: "policy_number", value: "POL-8812-R" }],
       toolCalls: [{ tool: "polizas_por_dni", args: { dni: "27654321" } }],
+      // Lo que DEVOLVIÓ la consulta. Sin esto el valor no está respaldado y se
+      // descarta — que es el punto de la guarda nueva, y por eso este test
+      // empezó a fallar: escribía un número que ninguna consulta devolvió.
+      lookupResults: [
+        'polizas_por_dni({"dni":"27654321"}) → {"encontradas":1,"polizas":[{"numero":"POL-8812-R","vigente":true}]}',
+      ],
     } as never);
 
     await orchestratePostExtraction(
@@ -2532,6 +2544,16 @@ describe("orchestratePostExtraction — lo que el agente dice haber resuelto", (
       resolved,
       // Una llamada cualquiera: es lo único que `validate` exige.
       toolCalls: [{ tool: "polizas_por_dni", args: { dni: "27654321" } }],
+      /*
+       * Y lo que devolvió, que `validate` NO mira.
+       *
+       * Trae POL-8812-R, así que un `resolved` con ese número está respaldado, y
+       * uno con `denuncia_policial` —el texto de lo que dijo la persona— no lo
+       * está por partida doble: no es un dato y no salió de acá.
+       */
+      lookupResults: [
+        'polizas_por_dni({"dni":"27654321"}) → {"encontradas":1,"polizas":[{"numero":"POL-8812-R","vigente":true}]}',
+      ],
     } as never);
   }
 
@@ -2658,5 +2680,150 @@ describe("orchestratePostExtraction — lo que el agente dice haber resuelto", (
     expect(todo).toContain("denuncia_policial");
     // El valor es texto que escribió una persona: no va al log.
     expect(todo).not.toContain("TEXTO-DEL-MODELO");
+  });
+});
+
+/**
+ * Un valor que ninguna consulta devolvió no se escribe en la denuncia.
+ *
+ * `validate` exige que el plan haya llamado a alguna herramienta, no que el
+ * valor venga de alguna. Medido: con `polizas_por_dni → { encontradas: 0 }` en
+ * el plan, un `policy_number = "POL-INVENTADA-9999"` era ACEPTADO, y se guardaba
+ * con confianza 0.95 cerrando el pedido del campo — o sea que nunca se le volvía
+ * a preguntar a la persona.
+ */
+describe("orchestratePostExtraction — lo que el agente dice haber encontrado", () => {
+  function gapsAre(fields: string[]) {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: fields,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  }
+
+  function planConConsulta(
+    resolved: Array<{ field: string; value: string }>,
+    lookupResults: string[]
+  ) {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "ask",
+      askFor: ["hora_siniestro"],
+      question: null,
+      reasoning: "",
+      noteForAnalyst: null,
+      resolved,
+      toolCalls: [{ tool: "polizas_por_dni", args: { dni: "25888101" } }],
+      lookupResults,
+    } as never);
+  }
+
+  const NO_ENCONTRO = [
+    'polizas_por_dni({"dni":"25888101"}) → {"encontradas":0,"nota":"Ese DNI no figura como titular de ninguna póliza acá."}',
+  ];
+  const ENCONTRO = [
+    'polizas_por_dni({"dni":"27654321"}) → {"encontradas":1,"polizas":[{"numero":"POL-8812-R","vigente":true}]}',
+  ];
+
+  function loQueDijo(): { info: string; warn: string } {
+    const juntar = (fn: unknown) =>
+      (fn as { mock: { calls: unknown[][] } }).mock.calls
+        .map((a) => a.map(String).join(" "))
+        .join(" | ");
+    return { info: juntar(console.info), warn: juntar(console.warn) };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("un número que la consulta NO devolvió no se guarda", async () => {
+    planConConsulta(
+      [{ field: "policy_number", value: "POL-INVENTADA-9999" }],
+      NO_ENCONTRO
+    );
+    gapsAre(["policy_number", "hora_siniestro"]);
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const escrito = JSON.stringify(
+      insertSpy.mock.calls.flatMap((c) => (Array.isArray(c[0]) ? c[0] : [c[0]]))
+    );
+    expect(escrito).not.toContain("POL-INVENTADA-9999");
+    expect(loQueDijo().info).not.toContain("agent.resolved_by_lookup");
+  });
+
+  it("y queda dicho, con el nombre del campo y no con el valor", async () => {
+    planConConsulta(
+      [{ field: "policy_number", value: "POL-INVENTADA-9999" }],
+      NO_ENCONTRO
+    );
+    gapsAre(["policy_number"]);
+    setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const { warn } = loQueDijo();
+    expect(warn).toContain("agent.resolvio_sin_respaldo");
+    expect(warn).toContain("policy_number");
+    expect(warn).not.toContain("POL-INVENTADA-9999");
+  });
+
+  it("el que SÍ devolvió la consulta se guarda igual que siempre", async () => {
+    /*
+     * El control positivo. Una guarda que matara también esto habría arreglado
+     * el agujero rompiendo la función: buscar la póliza por DNI en nuestro
+     * propio padrón y anotarla es la razón por la que las herramientas existen.
+     */
+    planConConsulta([{ field: "policy_number", value: "POL-8812-R" }], ENCONTRO);
+    gapsAre(["policy_number", "hora_siniestro"]);
+    const { insertSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(loQueDijo().info).toContain("agent.resolved_by_lookup");
+    const escrito = JSON.stringify(
+      insertSpy.mock.calls.flatMap((c) => (Array.isArray(c[0]) ? c[0] : [c[0]]))
+    );
+    expect(escrito).toContain("POL-8812-R");
+  });
+
+  it("aunque el modelo lo reformatee", async () => {
+    // La consulta devuelve `POL-8812-R` y el plan escribe `pol 8812 r`: es el
+    // mismo dato, y exigir el calco descartaría un valor bueno.
+    planConConsulta([{ field: "policy_number", value: "pol 8812 r" }], ENCONTRO);
+    gapsAre(["policy_number"]);
+    setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(loQueDijo().info).toContain("agent.resolved_by_lookup");
   });
 });

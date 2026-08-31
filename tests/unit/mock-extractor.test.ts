@@ -204,7 +204,23 @@ describe("runMockExtractor — no duplicate field keys", () => {
 // ── Performance: < 500ms ──────────────────────────────────────────────────────
 
 describe("runMockExtractor — performance", () => {
-  it("completes in under 500ms for all 20 scenarios", () => {
+  it("el catálogo de escenarios no se encogió sin que nadie mirara", () => {
+    /*
+     * Los bucles de más arriba GENERAN un test por escenario, así que si el
+     * catálogo se vaciara la suite tendría menos casos y seguiría en verde: el
+     * total baja y nadie mira el total.
+     *
+     * Un piso, no un número exacto: agregar escenarios es lo que queremos que
+     * pase, y romper el test por eso enseña a subirle el número sin pensar.
+     *
+     * El piso decía 20, que era el número que estaba escrito en el nombre del
+     * test de performance desde que se escribió. Hoy hay 163. Un piso de 20
+     * dejaba pasar que se borraran 143 sin que nada se pusiera rojo.
+     */
+    expect(SCENARIOS.length).toBeGreaterThanOrEqual(160);
+  });
+
+  it("recorre el catálogo entero en menos de 500 ms", () => {
     const start = Date.now();
     for (const scenario of SCENARIOS) {
       runMockExtractor(scenario.raw_text, scenario.case_type);

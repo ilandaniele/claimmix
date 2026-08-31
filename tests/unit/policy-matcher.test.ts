@@ -172,20 +172,29 @@ describe("findPolicyMatches — sorting", () => {
     vi.clearAllMocks();
   });
 
+  /*
+   * Este test tenía el cuerpo entero adentro de dos `if` anidados
+   * —`if (matches.length >= 2)` y `if (activeIdx !== -1 && expiredIdx !== -1)`—
+   * y por lo tanto pasaba con una función que devolviera `[]`. Se llamaba
+   * «ordena activas antes que vencidas» y no comprobaba que devolviera nada.
+   *
+   * Sin `if`: primero que estén las dos, después el orden.
+   */
   it("sorts active policies before expired when using customer lookup", async () => {
     const mixed = [EXPIRED_POLICY_ROW, ACTIVE_POLICY_ROW]; // expired first in DB result
 
     vi.mocked(db.select).mockReturnValue(makeSelectChain(mixed) as any);
 
     const matches = await findPolicyMatches(TENANT_ID, undefined, CUSTOMER_ID);
-    if (matches.length >= 2) {
-      // Active should come before expired
-      const activeIdx = matches.findIndex((m) => m.status === "active");
-      const expiredIdx = matches.findIndex((m) => m.status === "expired");
-      if (activeIdx !== -1 && expiredIdx !== -1) {
-        expect(activeIdx).toBeLessThan(expiredIdx);
-      }
-    }
+
+    // Las dos vuelven: perder una es otra forma de «ordenar bien».
+    expect(matches.map((m) => m.status)).toEqual(["active", "expired"]);
+    expect(matches[0]!.policyId).toBe(ACTIVE_POLICY_ROW.id);
+    expect(matches[1]!.policyId).toBe(EXPIRED_POLICY_ROW.id);
+
+    // Y que el orden lo dio el estado y no la casualidad del arreglo: la base
+    // las devolvió al revés.
+    expect(mixed[0]).toBe(EXPIRED_POLICY_ROW);
   });
 });
 

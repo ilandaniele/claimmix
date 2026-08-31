@@ -137,7 +137,16 @@ describe("checkRateLimit wrapper — email-intake webhook", () => {
 
     expect(result.allowed).toBe(false);
     expect(typeof result.retryAfter).toBe("number");
-    expect(result.retryAfter!).toBeGreaterThanOrEqual(0);
+    /*
+     * Ni 0 ni más que la ventana.
+     *
+     * Decía `toBeGreaterThanOrEqual(0)`, y un `Retry-After: 0` pasaba: le dice
+     * al cliente que puede reintentar ya mismo, que es exactamente lo que el
+     * tope existe para impedir. El límite seguiría rechazando, pero la cabecera
+     * estaría invitando al bucle.
+     */
+    expect(result.retryAfter!).toBeGreaterThan(0);
+    expect(result.retryAfter!).toBeLessThanOrEqual(windowMs / 1000);
     expect(Number.isInteger(result.retryAfter!)).toBe(true);
   });
 });

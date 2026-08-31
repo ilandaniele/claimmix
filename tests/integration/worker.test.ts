@@ -504,16 +504,38 @@ describe("runExtractionWorker", () => {
 
   // ── FSM validation ─────────────────────────────────────────────────────────
 
+  /*
+   * Este test recorría las escrituras y afirmaba adentro de un
+   * `if (args.status !== undefined)`. Si el worker no escribía NINGÚN estado
+   * —un caso que se queda en `procesando` para siempre, que es una falla peor
+   * que transicionar mal— el bucle no daba una vuelta y el test pasaba.
+   *
+   * Ahora afirma las dos cosas: que escribió al menos uno, y que todos los que
+   * escribió están permitidos.
+   *
+   * Medido con los dos mutantes, para no exagerar lo que cuida:
+   *
+   *   · estado prohibido (`cerrado`) → lo caza
+   *   · sacar `caseUpdate.status`    → NO lo caza, porque en este camino hay
+   *     otro escritor que igual deja «listo». O sea que la guarda de «al menos
+   *     uno» cubre que el caso no quede colgado, no que lo escriba una línea en
+   *     particular. Es lo que dice el nombre del test, y nada más.
+   */
   it("FSM: procesando can only transition to listo, esperando, or escalado", async () => {
     mockRunMockExtractor.mockReturnValue(choqueAllFields(0.85));
 
     await runExtractionWorker("case-001", "tenant-001", "user-001");
 
-    const ALLOWED = new Set(["listo", "esperando", "escalado"]);
-    for (const args of mockDbHolder.state.capturedUpdateArgs) {
-      if (args.status !== undefined) {
-        expect(ALLOWED.has(String(args.status))).toBe(true);
-      }
-    }
+    const escritos = mockDbHolder.state.capturedUpdateArgs
+      .map((args) => args.status)
+      .filter((s): s is string => s !== undefined)
+      .map(String);
+
+    // Quedarse en `procesando` no es «no transicionar mal»: es un caso colgado.
+    expect(escritos.length).toBeGreaterThan(0);
+
+    const ALLOWED = ["listo", "esperando", "escalado"];
+    // El mensaje del error nombra el estado prohibido en vez de decir false.
+    expect(escritos.filter((e) => !ALLOWED.includes(e))).toEqual([]);
   });
 });

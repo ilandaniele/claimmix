@@ -197,13 +197,31 @@ describe("findCustomerMatches — match priority", () => {
     expect(matches[0]!.matchType).toBe("policy_number");
   });
 
+  /*
+   * Este test se llamaba «el match por DNI (0.85) va primero» y no lo probaba.
+   *
+   * Devolvía la MISMA persona por DNI y por correo, así que la deduplicación
+   * las juntaba en una sola y el `if (matches.length >= 2)` que envolvía la
+   * comparación nunca se cumplía. Lo único que quedaba en pie era
+   * `expect(first).toBeDefined()`: un test de ranking que sólo comprobaba que
+   * hubiera algo.
+   *
+   * Para que haya ranking tiene que haber dos personas distintas. Con una sola
+   * no hay nada que ordenar, y eso ahora se afirma aparte, abajo.
+   */
   it("when no policy match, DNI match (0.85) ranks first", async () => {
-    // Two fields: dni and email → two db.select calls
-    // Call 1: matchByDni → [CUSTOMER_A]
-    // Call 2: matchByEmail → [CUSTOMER_A] (same customer, deduped by seenCustomerIds)
+    // Dos personas DISTINTAS: una aparece por DNI, la otra por correo. Sin eso
+    // la deduplicación las junta y no queda orden que comprobar.
+    const POR_CORREO = {
+      id: "20000000-0000-0000-0000-000000000009",
+      full_name: "Otra Persona",
+      email: "juan@example.com",
+      dni: "99999999",
+    };
+
     vi.mocked(db.select)
-      .mockReturnValueOnce(makeSelectChain([CUSTOMER_A]) as any)
-      .mockReturnValueOnce(makeSelectChain([CUSTOMER_A]) as any);
+      .mockReturnValueOnce(makeSelectChain([CUSTOMER_A]) as any) // matchByDni
+      .mockReturnValueOnce(makeSelectChain([POR_CORREO]) as any); // matchByEmail
 
     const fields: Partial<ClaimFields> = {
       dni: "12345678",
@@ -211,13 +229,34 @@ describe("findCustomerMatches — match priority", () => {
     };
 
     const matches = await findCustomerMatches(TENANT_ID, fields);
-    // DNI (0.85) > email (0.75); same customer deduped → only one match
-    const first = matches[0];
-    expect(first).toBeDefined();
-    // The highest-confidence match should come first
-    if (matches.length >= 2) {
-      expect(matches[0]!.confidence).toBeGreaterThanOrEqual(matches[1]!.confidence);
-    }
+
+    // Sin `if`: que vengan las dos, en este orden, y con estas confianzas.
+    expect(matches).toHaveLength(2);
+    expect(matches[0]!.customerId).toBe(CUSTOMER_A.id);
+    expect(matches[0]!.confidence).toBe(0.85);
+    expect(matches[1]!.customerId).toBe(POR_CORREO.id);
+    expect(matches[1]!.confidence).toBe(0.75);
+  });
+
+  it("la misma persona encontrada por DNI y por correo es UNA sola", async () => {
+    /*
+     * La otra mitad, que era lo que el test de arriba hacía sin querer: si los
+     * dos caminos dan con la misma persona, sale una vez y con la confianza más
+     * alta de las dos. Sin esto, arreglar el de arriba habría dejado la
+     * deduplicación sin ninguna afirmación.
+     */
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([CUSTOMER_A]) as any)
+      .mockReturnValueOnce(makeSelectChain([CUSTOMER_A]) as any);
+
+    const matches = await findCustomerMatches(TENANT_ID, {
+      dni: "12345678",
+      email: "juan@example.com",
+    });
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0]!.customerId).toBe(CUSTOMER_A.id);
+    expect(matches[0]!.confidence).toBe(0.85);
   });
 });
 

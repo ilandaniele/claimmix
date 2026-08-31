@@ -2,8 +2,8 @@
  * Cómo escribe la gente los datos que usamos para encontrarla en el padrón.
  *
  * Un DNI se escribe `27.654.321`, `27654321` y `DNI 27 654 321`. Una póliza,
- * `POL-8812-R`, `pol 8812 r` y `POL8812R`. Un teléfono, `+54 9 291 555-0000` y
- * `5492915550000`. Son la misma persona y el mismo contrato.
+ * `POL-8812-R`, `pol 8812 r` y `POL8812R`. Un teléfono, `+54 9 11 0000-0000` y
+ * `5491100000000`. Son la misma persona y el mismo contrato.
  *
  * Esto ya estaba sabido: las herramientas del agente normalizan antes de buscar,
  * y hay un comentario en `agent-tools.ts` que enumera las tres formas del DNI.

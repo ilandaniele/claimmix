@@ -55,10 +55,10 @@ describe("normalizarNumeroPoliza", () => {
 
 describe("normalizarTelefono", () => {
   it("prefijo, espacios, guiones y paréntesis no cambian el número", () => {
-    const esperado = "5492915550000";
-    expect(normalizarTelefono("+54 9 291 555-0000")).toBe(esperado);
-    expect(normalizarTelefono("+5492915550000")).toBe(esperado);
-    expect(normalizarTelefono("(549) 291 555 0000")).toBe(esperado);
+    const esperado = "5491100000000";
+    expect(normalizarTelefono("+54 9 11 0000-0000")).toBe(esperado);
+    expect(normalizarTelefono("+5491100000000")).toBe(esperado);
+    expect(normalizarTelefono("(549) 11 0000 0000")).toBe(esperado);
   });
 
   it("un número sin código de país NO se hace igual a uno con código", () => {
@@ -67,7 +67,7 @@ describe("normalizarTelefono", () => {
      * coincidencia por teléfono asocia el caso a un cliente. Se pierde una
      * coincidencia posible antes que ganar una equivocada.
      */
-    expect(normalizarTelefono("2915550000")).not.toBe(normalizarTelefono("+5492915550000"));
+    expect(normalizarTelefono("1100000000")).not.toBe(normalizarTelefono("+5491100000000"));
   });
 });
 
@@ -96,6 +96,6 @@ describe("sirveParaBuscar", () => {
 
   it("un teléfono necesita al menos siete", () => {
     expect(sirveParaBuscar(normalizarTelefono("123"), MINIMO_TELEFONO)).toBe(false);
-    expect(sirveParaBuscar(normalizarTelefono("+54 9 291 555-0000"), MINIMO_TELEFONO)).toBe(true);
+    expect(sirveParaBuscar(normalizarTelefono("+54 9 11 0000-0000"), MINIMO_TELEFONO)).toBe(true);
   });
 });

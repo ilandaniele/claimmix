@@ -343,7 +343,7 @@ describe("el log de customer_matcher", () => {
       dichos.push(a.map(String).join(" "));
     });
 
-    await findCustomerMatches(TENANT_ID, { dni: "12345678", phone: "+5492915550000" });
+    await findCustomerMatches(TENANT_ID, { dni: "12345678", phone: "+5491100000000" });
 
     espia.mockRestore();
     const linea = dichos.find((d) => d.includes("customer_matcher.matches_found"))!;
@@ -363,14 +363,14 @@ describe("el log de customer_matcher", () => {
 
     await findCustomerMatches(TENANT_ID, {
       dni: "12345678",
-      phone: "+5492915550000",
+      phone: "+5491100000000",
       email: "cecilia@example.com",
     });
 
     espia.mockRestore();
     const todo = dichos.join("\n");
     expect(todo).not.toContain("12345678");
-    expect(todo).not.toContain("5492915550000");
+    expect(todo).not.toContain("5491100000000");
     expect(todo).not.toContain("cecilia@example.com");
   });
 
@@ -448,9 +448,9 @@ describe("los buscadores normalizan los dos lados", () => {
     const chain = makeSelectChain([]);
     vi.mocked(db.select).mockReturnValue(chain as any);
 
-    await findCustomerMatches(TENANT_ID, { phone: "+54 9 291 555-0000" });
+    await findCustomerMatches(TENANT_ID, { phone: "+54 9 11 0000-0000" });
 
-    expect(parametrosDeLaConsulta(chain)).toContain("5492915550000");
+    expect(parametrosDeLaConsulta(chain)).toContain("5491100000000");
   });
 
   it("una dirección en mayúsculas busca en minúsculas", async () => {

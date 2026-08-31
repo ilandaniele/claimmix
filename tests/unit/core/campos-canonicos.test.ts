@@ -31,7 +31,7 @@ describe("canonizarCampos", () => {
     const r = canonizarCampos(
       [
         campo("dni_asegurado", "27654321"),
-        campo("telefono_contacto", "+5492915550000"),
+        campo("telefono_contacto", "+5491100000000"),
         campo("numero_poliza", "POL-8812-R"),
         campo("nombre_asegurado", "Cecilia Ferrari"),
       ],
@@ -40,7 +40,7 @@ describe("canonizarCampos", () => {
     );
 
     expect(r.dni).toBe("27654321");
-    expect(r.phone).toBe("+5492915550000");
+    expect(r.phone).toBe("+5491100000000");
     expect(r.policy_number).toBe("POL-8812-R");
     expect(r.full_name).toBe("Cecilia Ferrari");
   });
@@ -96,13 +96,23 @@ describe("canonizarCampos", () => {
      * que sí encontramos en el texto, y el buscador se quedaría justo sin la
      * clave por la que iba a encontrar a la persona.
      */
+    /*
+     * Los dos teléfonos tienen que ser DISTINTOS, o el test no distingue nada.
+     *
+     * Al cambiar el número inventado por el del bloque de ejemplo, los dos lados
+     * quedaron con el mismo valor un momento y la afirmación pasaba a ser cierta
+     * pasara lo que pasara. Los dos que están acá son del bloque permitido y no
+     * son de nadie.
+     */
     const r = canonizarCampos(
-      [campo("dni", "27654321"), campo("phone", "+5492915550000")],
+      [campo("dni", "27654321"), campo("phone", "+549110000000")],
       { dni: "", phone: "+5491100000000" },
       CANONICAS
     );
 
+    // El `""` NO borra el valor que salió del texto…
     expect(r.dni).toBe("27654321");
+    // …y el valor que sí trajo el modelo SÍ pisa al anterior.
     expect(r.phone).toBe("+5491100000000");
   });
 

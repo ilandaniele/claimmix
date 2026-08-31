@@ -60,7 +60,7 @@ const {
   extractedFields,
   policies,
 } = await import("@/lib/db/schema");
-const { and, eq, asc, inArray, isNotNull, like, or } = await import("drizzle-orm");
+const { and, eq, asc, inArray, isNotNull, like, lt, or, sql } = await import("drizzle-orm");
 
 // ── What a rehearsal looks like ──────────────────────────────────────────────
 
@@ -953,7 +953,26 @@ async function sweepOldRehearsalCases(): Promise<void> {
           or(
             like(cases.email_thread_id, "5490000%"),
             like(cases.email_thread_id, "thread.%")
-          )
+          ),
+          /*
+           * Sólo los VIEJOS. Nunca los de un ensayo en vuelo.
+           *
+           * El barrido borraba por patrón, sin noción de «míos»: dos ensayos que
+           * se solapen contra la misma base se destruyen mutuamente. Pasa de
+           * verdad — el post-deploy corre este mismo script contra producción, y
+           * si alguien ensaya en local mientras hay un deploy en camino, el
+           * barrido del de allá se lleva los casos del de acá.
+           *
+           * Cuando eso pasa, el síntoma no dice nada: cada escritura falla con
+           * 23503 (clave foránea) porque la fila del caso ya no está, y el
+           * escenario reporta «estado undefined, esperaba requiere_especialista».
+           * Se lee como una regresión del agente y es una colisión de andamio.
+           * Me costó media hora.
+           *
+           * Una hora es de sobra: el ensayo entero tarda unos quince minutos, y
+           * un huérfano de verdad quedó de una corrida que ya terminó.
+           */
+          lt(cases.created_at, sql`now() - interval '1 hour'`)
         )
       );
 

@@ -36,7 +36,7 @@
  */
 
 import "server-only";
-import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -64,6 +64,8 @@ import {
   sePuedeTransicionar,
 } from "@/core/case/status-after-extraction";
 import { CLAIM_FIELD_KEYS } from "@/lib/schemas/extracted-claim";
+import { canonicalFieldKey } from "@/lib/labels/claim-fields";
+import { polizaParaCompletar } from "@/core/case/poliza-encontrada";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
@@ -906,7 +908,7 @@ export async function runEmailExtractionWorker(
 
     // Write missing_docs for fields with confidence < 0.60 (AC8).
     // Also include explicit missing_fields from extractor output.
-    const missingFieldKeys = [
+    let missingFieldKeys = [
       ...new Set([
         ...lowConfidenceFields.map((f) => f.field_key),
         ...(extractedClaim.missing_fields ?? []),
@@ -964,6 +966,33 @@ export async function runEmailExtractionWorker(
 
     if (!resolvedPolicyId && policyMatches.length > 0) {
       resolvedPolicyId = policyMatches[0]?.policyId;
+    }
+
+    /*
+     * ── j bis) La póliza que encontramos deja de ser algo que le pedimos ──────
+     *
+     * Los faltantes se anotan arriba, en (h), y recién acá —en (i) y (j)— se
+     * busca en la base. Así que alguien que daba su DNI y no el número de
+     * póliza quedaba con `numero_poliza` en la lista de faltantes AUNQUE el
+     * buscador acabara de encontrar su póliza, y el agente se la pedía.
+     *
+     * El ensayo lo dejó a la vista: `polizas_por_dni` devolvía POL-8812-R y la
+     * respuesta siguiente arrancaba con «El número de póliza (por ejemplo
+     * POL-12345)». Pedirle a una persona un dato que está en nuestra propia
+     * base es exactamente lo que hace un formulario, que es lo que esto vino a
+     * reemplazar.
+     *
+     * Cuándo se puede completar y cuándo hay que preguntar está en
+     * `@/core/case/poliza-encontrada`: son trece líneas puras que acá adentro,
+     * entre consultas, no las probaba nadie.
+     */
+    const polizaACompletar = polizaParaCompletar(policyNumber, policyMatches);
+    if (polizaACompletar) {
+      await anotarPolizaEncontrada(caseId, tenantCtx, polizaACompletar);
+      extractedClaimFields.policy_number = polizaACompletar.policyNumber;
+      missingFieldKeys = missingFieldKeys.filter(
+        (k) => canonicalFieldKey(k) !== "policy_number"
+      );
     }
 
     // ── k) En qué estado queda el caso tras leer el mensaje ───────────────────
@@ -1401,6 +1430,77 @@ async function insertMissingDocsIfAbsent(
       }))
     )
   );
+}
+
+/**
+ * Dejar registrado el número de póliza que encontró el buscador.
+ *
+ * Dos escrituras que van juntas: el valor pasa a `extracted_fields` con la
+ * confianza que trajo el match —no inventada—, y la fila de faltantes se marca
+ * satisfecha en vez de borrarse, que es como lo hace el reconciliador de
+ * documentos: la fila cuenta que en algún momento faltó.
+ *
+ * La clave puede haber quedado anotada como `numero_poliza` o como
+ * `policy_number` según qué haya emitido el extractor, así que se canoniza
+ * antes de comparar. Marcar sólo una de las dos dejaba a la otra viva y el
+ * agente seguía preguntando.
+ */
+async function anotarPolizaEncontrada(
+  caseId: string,
+  tenantCtx: TenantContext,
+  encontrada: { policyNumber: string; confidence: number }
+): Promise<void> {
+  try {
+    await upsertExtractedFields(caseId, tenantCtx, [
+      {
+        field_key: "policy_number",
+        field_value: encontrada.policyNumber,
+        confidence: encontrada.confidence,
+      },
+    ]);
+
+    const pendientes = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ doc_key: missingDocs.doc_key })
+        .from(missingDocs)
+        .where(and(eq(missingDocs.case_id, caseId), isNull(missingDocs.satisfied_at)))
+    );
+
+    const aSatisfacer = pendientes
+      .map((r) => r.doc_key)
+      .filter((k) => canonicalFieldKey(k) === "policy_number");
+
+    if (aSatisfacer.length > 0) {
+      await enTenant(tenantCtx, (db) =>
+        db
+          .update(missingDocs)
+          .set({ satisfied_at: new Date().toISOString() })
+          .where(
+            and(
+              eq(missingDocs.case_id, caseId),
+              isNull(missingDocs.satisfied_at),
+              inArray(missingDocs.doc_key, aSatisfacer)
+            )
+          )
+      );
+    }
+
+    console.info(
+      JSON.stringify({
+        level: "info",
+        service: "claimmix",
+        msg: "policy_matcher.numero_completado",
+        case_id: caseId,
+      })
+    );
+  } catch (err) {
+    /*
+     * Si esto falla, el caso queda como estaba: la póliza ya está enlazada por
+     * `policy_id` y el agente vuelve a pedir el número. Molesto, no roto — y no
+     * es motivo para tirar abajo la extracción entera.
+     */
+    console.error("[email-worker] no se pudo anotar la póliza encontrada:", dbErrCode(err));
+  }
 }
 
 async function updateCaseStatus(

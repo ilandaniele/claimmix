@@ -31,6 +31,7 @@ import "server-only";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { describeTools, runTool, type ToolContext } from "@/server/ai/agent-tools";
+import { redactObject, redactString } from "@/lib/audit/redact";
 
 export type AgentIntent =
   | "ask"
@@ -226,8 +227,11 @@ async function think(
           msg: "agent.tool_call",
           case_id: input.caseId,
           tool: call.tool,
-          args: call.args,
-          result: JSON.stringify(result).slice(0, 300),
+          // Los argumentos son el DNI, el número de póliza o el teléfono que
+          // escribió una persona, y esto va a los logs de Vercel. El resultado,
+          // lo mismo: trae el padrón.
+          args: redactObject(call.args),
+          result: redactString(JSON.stringify(result).slice(0, 300)),
         })
       );
 

@@ -66,6 +66,7 @@ import {
 } from "@/lib/labels/claim-fields";
 import { emailMessenger, type AgentMessenger } from "@/server/confirmations/messenger";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { redactObject } from "@/lib/audit/redact";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -417,7 +418,20 @@ export async function orchestratePostExtraction(
       event_type: AuditEvent.AGENT_DELIBERATED,
       target_type: "case",
       target_id: caseId,
-      payload: {
+      /*
+       * Por el mismo filtro que los demás payloads.
+       *
+       * Faltaba justo acá, que es el único que lleva los ARGUMENTOS de las
+       * consultas: `tools: [{ tool: "polizas_por_dni", args: { dni:
+       * "25.888.101" } }]`. El documento de una persona entraba crudo al
+       * `audit_log` — una tabla que se exporta, se muestra y se le entrega a la
+       * aseguradora — y `redactObject` estaba aplicado en otros dos payloads y
+       * en éste no.
+       *
+       * Las claves sobreviven, así que se sigue sabiendo qué consultó y qué dio
+       * por resuelto; lo que se va son los valores.
+       */
+      payload: redactObject({
         intent: plan.intent,
         ask_for: plan.askFor,
         question: plan.question,
@@ -436,7 +450,7 @@ export async function orchestratePostExtraction(
         resolved: plan.resolved,
         // The one thing nobody could answer before: why did it say that.
         reasoning: plan.reasoning,
-      },
+      }),
     });
 
     // What a lookup turned up goes onto the claim instead of into a question.

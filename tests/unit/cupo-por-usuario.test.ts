@@ -58,3 +58,40 @@ describe("el tope por usuario es alcanzable y no estorba", () => {
     expect(BUDGET).toContain("process.env.AI_USER_DAILY_TOKEN_CAP");
   });
 });
+
+/**
+ * Un usuario que no está en `users` no puede costar el registro del gasto.
+ *
+ * `ai_usage.user_id` tiene clave foránea, y el `userId` que llega al worker no
+ * siempre es una fila de `users`: el ensayo de conversaciones y las simulaciones
+ * inventan uno. Con la clave rota, el INSERT entero se cae —23503— y se pierde
+ * el registro del gasto, que es lo único que hace funcionar los TRES topes.
+ *
+ * Por eso el código original mandaba `null` siempre: no fallaba nunca, al precio
+ * de que el cupo por usuario no pudiera alcanzarse jamás. Arreglaba el síntoma
+ * tirando la función.
+ *
+ * Lo descubrí rompiéndolo: al empezar a pasar el usuario de verdad, el ensayo
+ * completo se llenó de 23503 y dos escenarios dieron diferencias falsas.
+ */
+describe("recordUsage sobrevive a un usuario desconocido", () => {
+  const FUENTE = readFileSync("src/server/ai/budget.ts", "utf8");
+
+  it("reintenta sin usuario cuando la clave foránea falla", () => {
+    expect(FUENTE).toContain('code === "23503"');
+    expect(FUENTE).toContain("user_id: null");
+  });
+
+  it("y lo dice, porque un usuario que no existe alguien debería mirarlo", () => {
+    expect(FUENTE).toContain("budget.usuario_desconocido");
+  });
+
+  it("el reintento es sólo para ESE error, no para cualquiera", () => {
+    /*
+     * El control. Un `catch` que reintentara sin usuario ante cualquier fallo
+     * volvería a grabar todo sin atribuir en cuanto la base tosa — o sea, el
+     * defecto original con más pasos.
+     */
+    expect(FUENTE).toContain('if (code === "23503" && userId)');
+  });
+});

@@ -389,18 +389,62 @@ export async function recordUsage(
   completionTokens: number,
   costUsd: number
 ): Promise<void> {
+  const fila = {
+    tenant_id: tenantId,
+    model,
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    cost_usd: costUsd.toFixed(4),
+  };
+
   try {
     await enTenant({ tenantId }, (db) =>
-      db.insert(tables.aiUsage).values({
-        tenant_id: tenantId,
-        user_id: userId,
-        model,
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        cost_usd: costUsd.toFixed(4),
-      })
+      db.insert(tables.aiUsage).values({ ...fila, user_id: userId })
     );
+    return;
   } catch (e) {
+    const code = (e as { code?: string })?.code;
+
+    /*
+     * Un usuario que no está en `users` no puede costar el registro del gasto.
+     *
+     * `ai_usage.user_id` tiene clave foránea, y el `userId` que llega hasta acá
+     * no siempre es una fila de `users`: el ensayo de conversaciones y las
+     * simulaciones inventan uno. Con la clave foránea rota, el INSERT entero se
+     * cae —23503— y se pierde el registro del gasto, que es lo único que hace
+     * funcionar los TRES topes.
+     *
+     * Por eso el código original mandaba `null` siempre. Eso lo hacía no fallar
+     * nunca, al precio de que el cupo por usuario no pudiera alcanzarse jamás:
+     * arregló el síntoma tirando la función.
+     *
+     * Se reintenta sin usuario: se pierde la atribución de esa llamada, no el
+     * gasto. Y queda dicho, porque un usuario que no existe es algo que alguien
+     * debería mirar.
+     */
+    if (code === "23503" && userId) {
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          service: "claimmix",
+          msg: "budget.usuario_desconocido",
+          detalle:
+            "El usuario del gasto no existe en `users`. Se registra sin " +
+            "atribuir, para no perder el consumo.",
+        })
+      );
+      try {
+        await enTenant({ tenantId }, (db) =>
+          db.insert(tables.aiUsage).values({ ...fila, user_id: null })
+        );
+        return;
+      } catch (e2) {
+        const n2 = e2 instanceof Error ? e2.name : "UnknownError";
+        console.error("[budget] Exception recording AI usage (sin usuario):", n2);
+        return;
+      }
+    }
+
     const name = e instanceof Error ? e.name : "UnknownError";
     console.error("[budget] Exception recording AI usage:", name);
   }

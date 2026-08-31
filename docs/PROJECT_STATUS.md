@@ -1063,6 +1063,60 @@ que corre en CI contra una base real, y ahí «desarrollo» era falso justo dond
 más importa saber a qué base se le escribe. Cierra la mitad que faltaba del incidente de los e2e escribiendo en la
 base real.
 
+### 🔎 Una persona escribía su DNI con puntos y no aparecía en el padrón (2026-08-31)
+
+El post-deploy volvió a fallar en `busca-la-poliza`. El aviso que se había
+agregado un rato antes —qué claves había para buscar, los nombres y nunca los
+valores— contestó de una:
+
+```
+"customer_matcher.matches_found","match_count":0,"claves_disponibles":["dni","phone"]
+```
+
+El DNI **estaba** y aun así no encontró a nadie. La primera hipótesis (que el
+modelo había mandado el alias `dni_asegurado`) era falsa, y ese log es lo único
+que lo demostró.
+
+La causa era una línea: `.where(eq(c.dni, dni))` — igualdad exacta contra una
+columna que guarda los dígitos pelados. Medido contra el ensayo, sembrando un
+cliente y buscándolo de las cuatro formas:
+
+| lo que escribe la persona | antes | después |
+|---|---|---|
+| `27.654.321` | **0** | 1 |
+| `27654321` | 1 | 1 |
+| `DNI 27 654 321` | **0** | 1 |
+| `s/d` | 0 | 0 |
+
+**No era una línea suelta: los cuatro caminos comparaban en crudo.** DNI e
+igualdad exacta; póliza igual, en los dos buscadores; correo con la entrada en
+minúsculas y la columna no; y el teléfono, el más elocuente — calculaba el
+normalizado y lo **tiraba**, con un `void normalized; // not in SQL` al lado.
+
+Y el sistema ya lo sabía: `verificar_poliza` y `polizas_por_dni` normalizan desde
+el día uno, con un comentario que enumera las tres formas de escribir un DNI. Dos
+caminos a la misma tabla, uno tolerante y el otro no, y el estricto era el que
+decide si el caso queda asociado a un cliente. Por eso el agente encontraba la
+póliza por DNI y el caso quedaba igual sin cliente.
+
+Ahora hay una sola normalización en `@/core/matching/normalizar`, y las copias de
+`agent-tools` la usan. La de `claim-parser` queda: normaliza distinto a propósito
+y es sobre el valor que se guarda y se muestra, no sobre el que se busca.
+
+**La mitad peligrosa, también afirmada.** Un `"s/d"` se normaliza a la cadena
+vacía, y buscar por vacío contra una columna normalizada devuelve a TODA persona
+con el documento vacío, con la confianza alta de una coincidencia por documento.
+Encontrar a cualquiera es peor que no encontrar a nadie: hay un mínimo por tipo
+de dato y por debajo ni se consulta.
+
+Verificado en vez de supuesto: interpolar el dato en un `sql` de Drizzle **no**
+es inyección — compila a `= $1` con el valor aparte, y hay un test con
+`X' OR '1'='1` que lo afirma.
+
+Efecto de punta a punta: `busca-la-poliza` registra `match_count: 1`, y
+`choque-completo` pasó de `confirmacion_pendiente` a `listo_para_core`, que es a
+lo que llega un caso cuando sí se asocia al cliente.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

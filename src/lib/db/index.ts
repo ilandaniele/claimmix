@@ -25,7 +25,7 @@ export function getDb(): Db {
 }
 
 /**
- * En desarrollo, decir a qué base se conectó. Una vez, y sin la contraseña.
+ * Decir a qué base se conectó. Una vez, sin la contraseña, y nunca en producción.
  *
  * `next dev` lee `.env.local`, donde vive la cadena de PRODUCCIÓN, y eso está
  * bien: es un proyecto con un solo ambiente desplegado. Lo que no está bien es
@@ -54,7 +54,15 @@ function avisarAQueBaseEnDesarrollo(connectionString: string): void {
     // mensaje, y no acá con uno peor.
   }
 
-  console.info(`[db] desarrollo → ${host}`);
+  /*
+   * Dice «conectando a», no «desarrollo».
+   *
+   * Esta línea sale en todo lo que no sea una compilación de producción, y eso
+   * incluye el ensayo de conversaciones que corre en CI contra una base real.
+   * Llamarle «desarrollo» ahí era falso justo donde más importa saber a qué base
+   * se le está escribiendo.
+   */
+  console.info(`[db] conectando a ${host}`);
 }
 
 export const db = new Proxy({} as Db, {

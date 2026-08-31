@@ -1053,12 +1053,14 @@ bien: hay un solo ambiente desplegado. Lo que no estaba bien es que no se notara
 contra el ensayo.
 
 ```
-[db] desarrollo → ep-damp-meadow-ac1xqhzs.sa-east-1.aws.neon.tech
+[db] conectando a ep-damp-meadow-ac1xqhzs.sa-east-1.aws.neon.tech
 ```
 
 Sólo el host: la contraseña viaja en la misma cadena y no tiene por qué aparecer
 en una terminal, un log de CI ni una captura. Callado en producción y bajo
-vitest. Cierra la mitad que faltaba del incidente de los e2e escribiendo en la
+vitest. Dice «conectando a» y no «desarrollo» porque también sale en el ensayo
+que corre en CI contra una base real, y ahí «desarrollo» era falso justo donde
+más importa saber a qué base se le escribe. Cierra la mitad que faltaba del incidente de los e2e escribiendo en la
 base real.
 
 ### 🙋 Waiting on you (not code)

@@ -1163,19 +1163,39 @@ falla cuando no funciona**.
 | **La pantalla decía «completitud automática: 0%»** con 28 casos completados: contaba estados que el canal real no escribe. | `kpis.ts` |
 | **Con más de 50 mensajes acumulados el resto se perdía**, con `errors: 0`: la marca de agua saltaba al presente sin leer la cola. | `gmail-poller.ts` |
 
+#### Los tres que seguían, y qué pasó al medirlos
+
+**Los tres eran defectos reales con CERO daño en producción.** Vale la pena
+decirlo junto: el resto del backlog probablemente también sea latente, y eso
+cambia la urgencia sin cambiar la validez.
+
+- ✅ **`validate` no comprobaba de dónde salía el valor.** Medido llamándola:
+  con `polizas_por_dni → { encontradas: 0 }` en el plan, un
+  `policy_number = "POL-INVENTADA-9999"` era **aceptado** y se guardaba con
+  confianza 0.95, cerrando el pedido del campo. `toolCalls` no llevaba los
+  resultados, así que `validate` no podía comprobarlo ni queriendo. Ahora viajan
+  en el plan y el valor tiene que aparecer en alguna respuesta. En el ensayo la
+  guarda disparó una vez de verdad.
+- ✅ **El mensaje a un caso ya cerrado.** No era la carrera de mitad de corrida:
+  es más ancho. `no_relevante` y `listo_para_core` son terminales, el worker no
+  arranca desde ahí, y el mensaje se guardaba sin leerse con un `info` suelto
+  como única huella. **No abrí la máquina de estados** —`no_relevante` es
+  terminal a propósito, bajo LLM08— pero el descarte ya no es invisible: queda en
+  la auditoría del caso. Medido: cero casos con un mensaje posterior a la última
+  vez que se los tocó.
+- ⏸️ **`unmatchedAttachments` — despriorizado por la medición.** Devuelve TODOS
+  los adjuntos del caso, no los no-coincididos: el nombre es una aspiración. Pero
+  en 481 casos hay **un solo** caso con más documentos cerrados que adjuntos, y
+  es el del parte policial que ya se arregló por otra vía. El máximo de adjuntos
+  en un caso es 4 y el de vueltas 8, así que el re-ofrecimiento cuesta unas pocas
+  llamadas. Y el arreglo limpio pide una columna nueva —qué adjunto cerró qué—,
+  o sea una migración a mano en Neon. No es donde conviene gastar el próximo
+  cambio.
+
 #### Pendientes, confirmados por dos escépticos
 
 Ordenados por daño. Ninguno tocado todavía.
 
-- **alta** — `validate` sólo cuenta CUÁNTAS consultas hizo el agente, no que el
-  valor haya salido de alguna: puede inventar un número de póliza después de una
-  búsqueda que no encontró nada. (Se cerró la mitad de los DOCUMENTOS; los datos
-  siguen abiertos.) `deliberate.ts:442`
-- **alta** — Un mensaje que llega a mitad de corrida se descarta contra el estado
-  que esa misma corrida acaba de escribir. `extract.ts:1273`
-- **alta** — `unmatchedAttachments` no filtra los que ya coincidieron: cada
-  mensaje nuevo vuelve a ofrecerle al modelo las fotos viejas para tapar
-  documentos que faltan. `documents.ts:221`
 - **alta** — El tope mensual de gasto de IA dice ser del proyecto y cuenta un solo
   inquilino: la base se lo acota con RLS. `budget.ts:236`
 - **alta** — El valor del padrón se busca, se compara y se tira: el mail de

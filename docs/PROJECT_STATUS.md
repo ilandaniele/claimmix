@@ -1163,66 +1163,55 @@ falla cuando no funciona**.
 | **La pantalla decía «completitud automática: 0%»** con 28 casos completados: contaba estados que el canal real no escribe. | `kpis.ts` |
 | **Con más de 50 mensajes acumulados el resto se perdía**, con `errors: 0`: la marca de agua saltaba al presente sin leer la cola. | `gmail-poller.ts` |
 
-#### Los tres que seguían, y qué pasó al medirlos
+#### Los 13, hechos
 
-**Los tres eran defectos reales con CERO daño en producción.** Vale la pena
-decirlo junto: el resto del backlog probablemente también sea latente, y eso
-cambia la urgencia sin cambiar la validez.
+Ninguno tenía daño medido en producción, y eso vale decirlo junto: casi todos son
+preventivos. Lo que los hacía urgentes no es lo que rompieron sino que rompen en
+silencio, el día que llegue volumen.
 
-- ✅ **`validate` no comprobaba de dónde salía el valor.** Medido llamándola:
-  con `polizas_por_dni → { encontradas: 0 }` en el plan, un
-  `policy_number = "POL-INVENTADA-9999"` era **aceptado** y se guardaba con
-  confianza 0.95, cerrando el pedido del campo. `toolCalls` no llevaba los
-  resultados, así que `validate` no podía comprobarlo ni queriendo. Ahora viajan
-  en el plan y el valor tiene que aparecer en alguna respuesta. En el ensayo la
-  guarda disparó una vez de verdad.
-- ✅ **El mensaje a un caso ya cerrado.** No era la carrera de mitad de corrida:
-  es más ancho. `no_relevante` y `listo_para_core` son terminales, el worker no
-  arranca desde ahí, y el mensaje se guardaba sin leerse con un `info` suelto
-  como única huella. **No abrí la máquina de estados** —`no_relevante` es
-  terminal a propósito, bajo LLM08— pero el descarte ya no es invisible: queda en
-  la auditoría del caso. Medido: cero casos con un mensaje posterior a la última
-  vez que se los tocó.
-- ⏸️ **`unmatchedAttachments` — despriorizado por la medición.** Devuelve TODOS
-  los adjuntos del caso, no los no-coincididos: el nombre es una aspiración. Pero
-  en 481 casos hay **un solo** caso con más documentos cerrados que adjuntos, y
-  es el del parte policial que ya se arregló por otra vía. El máximo de adjuntos
-  en un caso es 4 y el de vueltas 8, así que el re-ofrecimiento cuesta unas pocas
-  llamadas. Y el arreglo limpio pide una columna nueva —qué adjunto cerró qué—,
-  o sea una migración a mano en Neon. No es donde conviene gastar el próximo
-  cambio.
+| qué pasaba | dónde |
+|---|---|
+| El tope mensual de IA decía ser del proyecto y era **por aseguradora**: cuatro inquilinos a 199 son 796 contra un techo de 200 | `budget.ts` |
+| El mail de conflicto decía «Obtuvimos el siguiente dato:» **y nada después** | `orchestrate.ts` |
+| El remitente que indexa la memoria del cliente venía **siempre vacío** en el canal real | `confirm-field.ts` |
+| Por mail, la pregunta de la persona se caía en el borde y salía el pedido anterior **palabra por palabra** | `render.ts` |
+| El DNI entraba **crudo** al `audit_log` y a stdout | `redact.ts` |
+| El redactor **invertía frases**: «sin la póliza no se puede» → «sin la [POLIZA] se puede» | `redact.ts` |
+| Entre las 21 y las 24, una póliza que vence hoy figuraba **vencida** | tres lugares |
+| La caja de `/clientes` decía «nombre, DNI o email» y buscaba **sólo por nombre** | `clientes/page.tsx` |
+| El cupo por usuario **no podía alcanzarse**: 7.554 filas de uso, cero con usuario | `gemini-extractor.ts` |
+| El barrido nocturno cerraba 250 casos y auditaba **200** | `close-abandoned.ts` |
+| El re-despacho no miraba si el POST llegó, y la bandera ya estaba limpia | `extract.ts` |
+| El conflicto se detectaba con la clave canónica y se leía con la cruda: quedaba **vacío** | `orchestrate.ts` |
+| La cartera **contradecía la factura** ya emitida de un mes cerrado | `tenant-summary.ts` |
 
-#### Pendientes, confirmados por dos escépticos
+Y las dos decisiones de arquitectura:
 
-Ordenados por daño. Ninguno tocado todavía.
+- **`no_relevante` tiene una salida.** Alguien escribe «hola», queda clasificado
+  como no-denuncia, y la denuncia de verdad no la leía nadie. LLM08 sigue en pie:
+  la arista la toma el ingreso de correo cuando llega un mensaje, no el modelo.
+  Abrirla evaporó una guarda de PERMISOS en `/re-analyze` que preguntaba «¿es
+  terminal?» — lo cazó un test que ya estaba, y ahora son dos nombres distintos
+  para dos preguntas distintas.
+- **`claim_attachments.matched_doc_key`** (migración 0022, aplicada a las dos
+  bases): un adjunto que ya cerró un documento deja de ofrecerse.
 
-- **alta** — El tope mensual de gasto de IA dice ser del proyecto y cuenta un solo
-  inquilino: la base se lo acota con RLS. `budget.ts:236`
-- **alta** — El valor del padrón se busca, se compara y se tira: el mail de
-  conflicto sale con el campo vacío. `orchestrate.ts:1550`
-- **alta** — `getSenderEmail` lee `raw_messages`, que en el canal de correo real
-  puede estar vacío. `confirm-field.ts:399`
-- **alta** — Por mail, `answer_and_ask` sale sin la respuesta y repitiendo el
-  pedido anterior palabra por palabra. `render.ts:139`
-- **media** — El DNI entra crudo al `audit_log` y a stdout: `redactObject` existe
-  y falta justo en el payload que lleva el documento. `orchestrate.ts:410`
-- **media** — La vigencia de la póliza se compara contra el día UTC: entre las 21
-  y las 24 una póliza que vence hoy figura vencida. `agent-tools.ts:366`
-- **media** — El buscador de `/clientes` promete nombre, DNI y correo, y sólo
-  busca por nombre. `clientes/page.tsx:83`
-- **media** — `normalizarNumeroPoliza` no saca los guiones, y el comentario del
-  módulo afirma que sí: `POL8812R` no encuentra a `POL-8812-R`. (Comentario mío,
-  de hoy.) `normalizar.ts:29`
-- **media** — El cupo diario por usuario no se puede alcanzar: nadie escribe
-  `ai_usage.user_id`. `budget.ts:308`
-- **media** — El tope de 200 de `close-abandoned` se aplica DESPUÉS del UPDATE:
-  cierra todos y audita 200. `close-abandoned.ts:90`
-- **media** — El reintento del worker no mira si el POST contestó 200, y la
-  bandera que lo haría reintentar ya se borró. `extract.ts:508`
-- **media** — El conflicto se detecta con la clave canónica y el valor se busca
-  con la cruda: queda vacío. `orchestrate.ts:292`
-- **baja** — La cartera recalcula meses ya cerrados y contradice la factura
-  congelada. `tenant-summary.ts:80`
+#### Lo que aprendí arreglándolos, que vale más que los arreglos
+
+- **Un test defendía un defecto.** El sello «recibido el …» usaba el día UTC, y
+  el test que lo fijaba existe justamente para que el modelo resuelva la palabra
+  «ayer». Con el sello corrido, calculaba la fecha del siniestro un día tarde.
+- **Casi rompo permisos dos veces.** Abrir la máquina de estados evaporó una
+  guarda; los dos tests que la cazaron ya estaban escritos.
+- **Un comentario mío mentía.** El encabezado de `normalizarNumeroPoliza` decía
+  que `POL8812R` y `POL-8812-R` son el mismo contrato. No lo cambié —el índice
+  único es sobre el texto crudo, así que podrían ser dos contratos— pero es la
+  clase de comentario que hace que alguien «arregle» la función y rompa el 100 %
+  de las búsquedas en silencio. Hay un test que ata las dos mitades.
+- **Me equivoqué de base.** `migrate.mjs` lee `.env.local` directo e ignora el
+  entorno: creyendo que aplicaba al ensayo, apliqué a producción. Aditiva y sin
+  daño, pero no era lo que quise hacer. Para ensayar va `--env
+  STAGING_DATABASE_URL`.
 
 ### 🙋 Waiting on you (not code)
 

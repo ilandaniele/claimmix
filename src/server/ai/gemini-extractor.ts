@@ -594,7 +594,16 @@ export async function extractEmailClaimGemini(
     const costUsd = computeCostUsd(totalPromptTokens, totalCompletionTokens, model);
     if (tenantId) {
       try {
-        await recordUsage(tenantId, null, model, totalPromptTokens, totalCompletionTokens, costUsd);
+        /*
+         * `userId` y no `null`.
+         *
+         * Estaba en `null` teniéndolo a mano —llega en la firma de esta
+         * función— así que NINGUNA fila de `ai_usage` tenía usuario: 7.554 de
+         * 7.554 en cero. El cupo diario por usuario suma sobre un conjunto
+         * vacío, da 0, y deja pasar siempre. Un tope que no puede alcanzarse
+         * nunca.
+         */
+        await recordUsage(tenantId, userId ?? null, model, totalPromptTokens, totalCompletionTokens, costUsd);
       } catch {
         // recordUsage never throws, but defensive catch.
       }

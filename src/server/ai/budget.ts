@@ -212,7 +212,33 @@ export async function checkBudget(
   const tenantCtx: TenantContext = { tenantId };
   const monthlyCapUsd = readCap(process.env.MONTHLY_BUDGET_USD, 200);
   const tenantDailyTokenCap = readCap(process.env.AI_TENANT_DAILY_TOKEN_CAP, 5_000_000);
-  const userDailyTokenCap = readCap(process.env.AI_USER_DAILY_TOKEN_CAP, 100_000);
+  /*
+   * Dos millones, y el número está medido, no elegido.
+   *
+   * Era 100.000, y ese valor nunca se ejerció: `gemini-extractor` grababa
+   * `user_id: null`, así que el cupo sumaba sobre un conjunto vacío y no cortaba
+   * nunca. Al arreglar eso, el tope se PRENDE — y prenderlo en un número que
+   * nadie validó contra el uso real es la forma cara de arreglar esto.
+   *
+   * Medido sobre las 7.554 llamadas que hay en la base:
+   *
+   *   promedio por llamada    11.771 tokens
+   *   p95                     12.730
+   *   máximo                  34.798
+   *
+   * O sea que 100.000 son OCHO extracciones por persona por día. Un analista
+   * que re-analiza un puñado de casos lo agotaba antes del mediodía, y una
+   * tanda de los 108 escenarios de `/api/admin/batch-simulate` —unos 1,27
+   * millones— lo reventaba de entrada.
+   *
+   * Dos millones son ~170 extracciones: por encima de cualquier día de trabajo
+   * de una persona y de una tanda entera, y por debajo del tope del inquilino,
+   * que en producción está en 20 millones. Sigue frenando lo que este cupo
+   * existe para frenar: un bucle.
+   *
+   * `AI_USER_DAILY_TOKEN_CAP` lo baja cuando haga falta.
+   */
+  const userDailyTokenCap = readCap(process.env.AI_USER_DAILY_TOKEN_CAP, 2_000_000);
 
   // ── 1. Monthly cost check (project-wide) ─────────────────────────────────────
   const monthStart = new Date();

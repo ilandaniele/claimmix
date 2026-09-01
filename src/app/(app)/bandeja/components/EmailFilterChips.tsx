@@ -58,7 +58,7 @@ export function ChannelFilterChips({ activeChannel }: ChannelFilterChipsProps) {
             className={[
               "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400",
               isActive
-                ? "bg-slate-900 text-white"
+                ? "bg-violet-600 text-white"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900",
             ].join(" ")}
           >
@@ -79,7 +79,7 @@ interface SeverityFilterChipsProps {
 }
 
 const SEVERITY_ACTIVE: Record<string, string> = {
-  todos: "bg-slate-900 text-white",
+  todos: "bg-violet-600 text-white",
   low: "bg-slate-400 text-white",
   medium: "bg-yellow-500 text-white",
   high: "bg-orange-500 text-white",
@@ -204,7 +204,7 @@ export function IsClaimFilterChips({ activeIsClaim }: IsClaimFilterChipsProps) {
             className={[
               "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400",
               isActive
-                ? "bg-slate-900 text-white"
+                ? "bg-violet-600 text-white"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900",
             ].join(" ")}
           >

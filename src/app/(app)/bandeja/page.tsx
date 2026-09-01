@@ -26,6 +26,7 @@ import { SCENARIOS } from "@/server/intake/scenarios";
 import { DashboardClient, PER_PAGE_OPTIONS } from "./DashboardClient";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
+import { Card, KpiTile } from "../_components/ui";
 
 const VALID_STATUSES: CaseStatus[] = [
   "procesando",
@@ -193,39 +194,56 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     (allStatusCounts.find(s => s.status === "cerrado")?.count ?? 0);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Stat cards */}
-      <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
-        <div className="grid grid-cols-4 gap-3">
-          {/* Total */}
-          <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3">
-            <p className="text-xs text-slate-500">Total casos</p>
-            <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mt-0.5">{totalCount}</p>
-          </div>
-          {/* Critical */}
-          <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 p-3">
-            <p className="text-xs text-red-600 dark:text-red-400">Críticos</p>
-            <p className="text-2xl font-semibold text-red-700 dark:text-red-400 mt-0.5">{criticalCount}</p>
-          </div>
-          {/* Pending */}
-          <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 p-3">
-            <p className="text-xs text-amber-600 dark:text-amber-400">Pendientes</p>
-            <p className="text-2xl font-semibold text-amber-700 dark:text-amber-400 mt-0.5">{pendingCount}</p>
-          </div>
-          {/* Resolved */}
-          <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 p-3">
-            <p className="text-xs text-emerald-600 dark:text-emerald-400">Resueltos</p>
-            <p className="text-2xl font-semibold text-emerald-700 dark:text-emerald-400 mt-0.5">{resolvedCount}</p>
-          </div>
+    <div className="flex h-full flex-col">
+      <div className="px-6 pb-5 pt-1">
+        {/*
+         * El título de la pantalla, que antes no estaba.
+         *
+         * La barra de arriba sólo tiene los controles de la persona, así que la
+         * bandeja empezaba directamente en los números, sin decir dónde estás.
+         */}
+        <h1 className="text-balance text-[26px] font-semibold tracking-tight text-slate-900">
+          Bandeja
+        </h1>
+        <p className="mt-1 text-[13px] text-slate-500">
+          Lo que entró, y qué está esperando a quién.
+        </p>
+
+        {/*
+         * Los cuatro indicadores.
+         *
+         * Antes cada uno venía teñido de su color de fondo —rojo, ámbar, verde—
+         * y la fila entera competía por la atención: cuatro bloques de color no
+         * jerarquizan nada. Ahora la tarjeta es blanca como todas y el color
+         * queda SÓLO en el número, que es el dato que dice si hay que hacer algo.
+         */}
+        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiTile label="Total casos" value={totalCount} />
+          <KpiTile
+            label="Críticos"
+            value={criticalCount}
+            tone="critico"
+            hint={criticalCount > 0 ? "Necesitan una persona" : "Ninguno abierto"}
+          />
+          <KpiTile
+            label="Pendientes"
+            value={pendingCount}
+            tone="espera"
+            hint="Esperando al denunciante"
+          />
+          <KpiTile label="Resueltos" value={resolvedCount} tone="listo" />
         </div>
       </div>
-      {/* Cases list */}
-      <div className="flex-1 overflow-hidden">
-        <DashboardClient
-          initialData={initialData}
-          scenarios={SCENARIOS}
-          allStatusCounts={allStatusCounts}
-        />
+
+      {/* La lista, dentro de la misma tarjeta que todo lo demás. */}
+      <div className="flex-1 overflow-hidden px-6 pb-6">
+        <Card className="flex h-full flex-col overflow-hidden">
+          <DashboardClient
+            initialData={initialData}
+            scenarios={SCENARIOS}
+            allStatusCounts={allStatusCounts}
+          />
+        </Card>
       </div>
     </div>
   );

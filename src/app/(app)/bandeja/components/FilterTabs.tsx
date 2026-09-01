@@ -67,7 +67,7 @@ export function FilterTabs({ counts, activeStatus }: FilterTabsProps) {
               className={[
                 "rounded-full px-1.5 py-0.5 text-xs tabular-nums",
                 isActive
-                  ? "bg-slate-900 text-white"
+                  ? "bg-violet-600 text-white"
                   : "bg-slate-100 text-slate-600",
               ].join(" ")}
               aria-label={`${count} casos`}

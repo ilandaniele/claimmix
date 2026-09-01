@@ -35,10 +35,18 @@ function NavLink({ href, label, icon: Icon, disabled, disabledReason }: NavItemD
       <div
         aria-disabled="true"
         title={disabledReason}
-        className="flex cursor-not-allowed items-center gap-2.5 rounded-md px-3 py-2 text-slate-300 dark:text-slate-600"
+        /*
+         * `dark:text-slate-600` no se puede perder acá.
+         *
+         * Lo saqué al simplificar las clases y en modo oscuro el ítem
+         * DESHABILITADO pasó a verse más brillante que los habilitados: nada en
+         * `globals.css` pisa `text-slate-300`, así que se quedaba claro sobre
+         * fondo oscuro. Se vio en una captura; leyendo el diff no se nota.
+         */
+        className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-slate-300 dark:text-slate-600"
       >
-        <Icon size={14} className="text-slate-300 dark:text-slate-600" />
-        <span className="text-[13px] font-medium">{label}</span>
+        <Icon size={17} className="text-slate-300 dark:text-slate-600" />
+        <span className="text-[13.5px]">{label}</span>
         <Lock size={12} className="ml-auto text-slate-300 dark:text-slate-600" />
       </div>
     );
@@ -48,21 +56,24 @@ function NavLink({ href, label, icon: Icon, disabled, disabledReason }: NavItemD
     <Link
       href={href}
       className={[
-        "flex items-center gap-2.5 rounded-md px-3 py-2 transition-colors",
+        // El anillo de foco, con el acento nuevo. `focus-visible` y no `focus`:
+        // así aparece para quien navega con teclado y no en cada clic del mouse.
+        "flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1",
         isActive
-          ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100",
+          ? "bg-violet-50 text-violet-700 font-semibold"
+          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
       ].join(" ")}
     >
       <Icon
-        size={14}
+        size={17}
         className={
           isActive
-            ? "text-indigo-600 dark:text-indigo-400"
-            : "text-slate-400 dark:text-slate-500"
+            ? "text-violet-700"
+            : "text-slate-400"
         }
       />
-      <span className="text-[13px] font-medium">{label}</span>
+      <span className="text-[13.5px]">{label}</span>
     </Link>
   );
 }
@@ -107,14 +118,14 @@ export function Sidebar({
   return (
     <nav
       aria-label="Navegación principal"
-      className="flex h-full w-[220px] flex-shrink-0 flex-col border-r border-[#EEF0F3] bg-white dark:border-[#1E2D45] dark:bg-[#0F1929]"
+      className="flex h-full w-[232px] flex-shrink-0 flex-col border-r border-slate-200"
     >
       {/* Logo / brand */}
-      <div className="flex h-14 items-center gap-2.5 px-4">
-        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-indigo-600 text-xs font-bold text-white">
+      <div className="flex h-16 items-center gap-2.5 px-4">
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-violet-600 text-[11px] font-bold text-white">
           CM
         </div>
-        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+        <span className="text-[15px] font-semibold tracking-tight text-slate-900">
           ClaimMix
         </span>
       </div>
@@ -123,7 +134,7 @@ export function Sidebar({
       <div className="flex flex-1 flex-col overflow-y-auto px-2 py-3">
         {/* OPERACIÓN section */}
         <div className="mb-4">
-          <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          <p className="rotulo mb-2 px-3 text-slate-400">
             OPERACIÓN
           </p>
           <div className="space-y-0.5">
@@ -138,7 +149,7 @@ export function Sidebar({
 
         {/* ANÁLISIS section */}
         <div className="mb-2">
-          <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          <p className="rotulo mb-2 px-3 text-slate-400">
             ANÁLISIS
           </p>
           <div className="space-y-0.5">

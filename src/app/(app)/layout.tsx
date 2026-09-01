@@ -72,7 +72,12 @@ export default async function AppLayout({
   return (
     <LocaleProvider locale={locale}>
       <ThemeProvider>
-        <div className="flex h-screen overflow-hidden bg-[#F8FAFC] dark:bg-[#0B1120]">
+        {/*
+         * `lienzo` en vez del gris plano: el lavado lavanda que hace que las
+         * tarjetas se lean como si flotaran. Va como clase porque la CSP no
+         * acepta `style=` — ver `globals.css`.
+         */}
+        <div className="lienzo flex h-screen overflow-hidden">
           {/* Left sidebar */}
           <Sidebar role={role} isOperator={isOperator} />
 

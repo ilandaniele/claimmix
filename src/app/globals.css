@@ -1,9 +1,15 @@
 @import "tailwindcss";
 
 :root {
+  /*
+   * Sin esto, en modo oscuro las barras de scroll, los `<select>` nativos y los
+   * controles del navegador se quedan claros: la página es oscura y el borde
+   * del navegador no. Lo pide la guía de interfaz de Vercel y faltaba.
+   */
+  color-scheme: light;
   --background: #F8FAFC;
   --foreground: #0F172A;
-  --accent: #6366F1;
+  --accent: #6D3BEE;
   --sidebar-bg: #FFFFFF;
   --card-bg: #FFFFFF;
   --border: #EEF0F3;
@@ -24,9 +30,10 @@ body {
 }
 
 .dark {
+  color-scheme: dark;
   --background: #0B1120;
   --foreground: #F1F5F9;
-  --accent: #818CF8;
+  --accent: #A78BFA;
   --sidebar-bg: #0F1929;
   --card-bg: #162036;
   --border: #1E2D45;
@@ -35,6 +42,50 @@ body {
 .dark body {
   background: var(--background);
   color: var(--foreground);
+}
+
+/*
+ * ── El lienzo ───────────────────────────────────────────────────────────────
+ *
+ * El fondo plano gris se cambió por un lavado lavanda que baja en diagonal
+ * hacia el blanco. Es lo que hace que las tarjetas se lean como si flotaran en
+ * vez de estar pegadas sobre una hoja.
+ *
+ * Va como CLASE y no como `style=` porque la CSP no permite estilos en línea
+ * —`style-src` no lleva `unsafe-inline` desde que se sacaron las barras de
+ * progreso— y un degradado es justo lo que uno tiende a escribir así. Hay un
+ * test e2e que se pone rojo si `unsafe-inline` vuelve.
+ */
+.lienzo {
+  background: linear-gradient(158deg, #F2EEFE 0%, #F9F7FE 45%, #FFFFFF 100%);
+}
+
+.dark .lienzo {
+  background: linear-gradient(158deg, #17122C 0%, #0F0C1E 52%, #0B1120 100%);
+}
+
+/*
+ * Los números de un tablero de siniestros están para compararse entre sí:
+ * importes, cantidades, porcentajes. Con cifras de ancho variable las columnas
+ * bailan y el ojo pierde la comparación, que es lo único para lo que existe una
+ * tarjeta de KPI.
+ */
+.cifra {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/*
+ * La etiqueta de un campo, arriba del valor.
+ *
+ * Chica, en mayúsculas y con el espaciado abierto: así se lee como rótulo y no
+ * compite con el dato, que es lo que la persona vino a leer.
+ */
+.rotulo {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 
 /* --- bg overrides --- */
@@ -108,6 +159,37 @@ body {
 
 .dark .border-indigo-200 {
   border-color: #4338ca !important;
+}
+
+/* --- acento: violeta (el nuevo indigo) --- */
+.dark .bg-violet-50 {
+  background-color: #241a4d !important;
+}
+
+.dark .bg-violet-100 {
+  background-color: #2f2266 !important;
+}
+
+.dark .text-violet-600,
+.dark .text-violet-700 {
+  color: #A78BFA !important;
+}
+
+.dark .bg-violet-600 {
+  background-color: #7C4DFF !important;
+}
+
+.dark .hover\:bg-violet-700:hover {
+  background-color: #6A3AF0 !important;
+}
+
+.dark .border-violet-100,
+.dark .border-violet-200 {
+  border-color: #4c3a9e !important;
+}
+
+.dark .hover\:bg-violet-50:hover {
+  background-color: #241a4d !important;
 }
 
 /* --- status: emerald (success) --- */

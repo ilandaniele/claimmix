@@ -70,6 +70,11 @@ supabase/.temp/
 .claude/*
 !.claude/skills/
 
+# Los enlaces que deja `npx skills` apuntan a una ruta ABSOLUTA de la máquina
+# donde se instaló (`/c/Users/…`). El archivo de verdad vive en `.agents/skills/`
+# y ése sí se versiona; el enlace no le sirve a nadie más.
+.claude/skills/web-design-guidelines
+
 # MCP server config — may carry API tokens (e.g. WhatsApp Cloud API). Keep local.
 .mcp.json
 

@@ -51,7 +51,7 @@ export function TypeFilterChips({ activeType }: TypeFilterChipsProps) {
             className={[
               "rounded-full px-3 py-1 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400",
               isActive
-                ? "bg-slate-900 text-white"
+                ? "bg-violet-600 text-white"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900",
             ].join(" ")}
           >

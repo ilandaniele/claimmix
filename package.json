@@ -106,6 +106,7 @@
     "overrides": {
       "@opentelemetry/core": "2.8.0",
       "esbuild": ">=0.28.1",
+      "browserslist": ">=4.28.7",
       "form-data": "4.0.6",
       "postcss": ">=8.5.18",
       "fast-uri": ">=4.1.2",

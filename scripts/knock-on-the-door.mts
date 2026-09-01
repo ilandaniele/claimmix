@@ -94,15 +94,45 @@ const { and, desc, eq, like, sql } = await import("drizzle-orm");
  */
 async function waitForCase(
   find: () => Promise<{ id: string; status: string } | null>,
-  seconds = 90
+  seconds = 150
 ): Promise<{ id: string; status: string } | null> {
-  for (let i = 0; i < seconds; i++) {
+  /*
+   * ── Por qué 150 y no 90 ────────────────────────────────────────────────────
+   *
+   * Eran 90, y el 1º de septiembre esto se puso rojo sin que hubiera nada roto.
+   * El caso de WhatsApp apareció a los 104 segundos del webhook —arranque en
+   * frío del worker, justo después de un deploy— así que el guión leyó un caso
+   * todavía en `procesando`, contó 0 campos extraídos, no encontró respuesta, y
+   * reportó tres fallas. El mismo recorrido por mail había tardado 24 segundos.
+   *
+   * Media hora de alguien buscando un bug que no existía, que es exactamente
+   * contra lo que advierte el comentario de `replyFor` acá abajo. La corrida
+   * siguiente, sin tocar una línea de producto, tardó 39 segundos y dio 18
+   * campos.
+   *
+   * 150 deja lugar para un arranque en frío sin volver interminable el fallo de
+   * verdad: cuando algo esté realmente roto, el rojo tarda dos minutos y medio
+   * en llegar en vez de minuto y medio. Barato, comparado con un rojo mentiroso.
+   *
+   * ── Y por qué ahora `seconds` son segundos ────────────────────────────────
+   *
+   * Antes era `for (let i = 0; i < seconds; i++)` con un `sleep(1000)` adentro,
+   * o sea que cada vuelta costaba un segundo MÁS lo que tardara la consulta. Con
+   * la base a ~150 ms, esos «90 segundos» eran 104 de reloj — y ese desfasaje es
+   * parte de por qué la ventana era impredecible justo cuando importaba.
+   *
+   * Con una fecha límite, el número dice lo que mide.
+   */
+  const limite = Date.now() + seconds * 1000;
+
+  for (;;) {
     const row = await find();
     if (row && row.status !== "procesando" && row.status !== "recibido") return row;
-    if (row && i > seconds - 3) return row;
+    // Se acabó el tiempo: se devuelve lo último que se leyó, aunque siga
+    // procesando. Quien llama distingue «no apareció» de «apareció a medias».
+    if (Date.now() >= limite) return row;
     await sleep(1000);
   }
-  return find();
 }
 
 /**

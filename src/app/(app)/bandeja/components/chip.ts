@@ -32,10 +32,10 @@ export const CHIP_BASE =
   "flex-shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[12.5px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500";
 
 /** Elegido. El único con relleno. */
-export const CHIP_ACTIVO = `${CHIP_BASE} bg-violet-600 text-white`;
+const CHIP_ACTIVO = `${CHIP_BASE} bg-violet-600 text-white`;
 
 /** Sin elegir. Sin relleno hasta que el mouse encima lo pide. */
-export const CHIP_INACTIVO = `${CHIP_BASE} text-slate-500 hover:bg-slate-100 hover:text-slate-900`;
+const CHIP_INACTIVO = `${CHIP_BASE} text-slate-500 hover:bg-slate-100 hover:text-slate-900`;
 
 export function claseChip(activo: boolean): string {
   return activo ? CHIP_ACTIVO : CHIP_INACTIVO;

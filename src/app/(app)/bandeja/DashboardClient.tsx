@@ -22,6 +22,7 @@ import type { CaseRow, CaseListResult } from "@/server/cases/list";
 import type { SimulationScenario } from "@/server/intake/scenarios";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
+import { CardHeader } from "../_components/ui";
 
 const SKIP_CONFIRM_KEY = "claimmix:skip-delete-confirm";
 
@@ -143,21 +144,21 @@ function Pagination({ page, perPage, total, onPageChange, onPerPageChange }: Pag
   const to = Math.min(current * perPage, total);
 
   const navBtn =
-    "rounded-md px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors";
+    "rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40";
 
   return (
-    <div className="flex flex-col gap-3 pt-4 border-t border-slate-100 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-shrink-0 flex-col gap-3 border-t border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-3">
-        <p className="text-sm text-slate-500">
+        <p className="text-[13px] text-slate-500">
           {t("bandeja.showing")} {from}-{to} {t("pagination.of")} {total} {t("bandeja.claims")}
         </p>
-        <label className="flex items-center gap-1.5 text-sm text-slate-500">
+        <label className="flex items-center gap-1.5 text-[13px] text-slate-500">
           <span className="sr-only sm:not-sr-only">{t("pagination.perPage")}</span>
           <select
             value={perPage}
             onChange={(e) => onPerPageChange(Number(e.target.value))}
             aria-label={t("pagination.perPage")}
-            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 hover:border-slate-300 focus:border-slate-400 focus:outline-none"
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[13px] text-slate-700 hover:border-slate-300 focus:border-violet-400 focus:outline-none"
           >
             {PER_PAGE_OPTIONS.map((n) => (
               <option key={n} value={n}>
@@ -199,7 +200,7 @@ function Pagination({ page, perPage, total, onPageChange, onPerPageChange }: Pag
               aria-label={`${t("pagination.page")} ${item}`}
               className={
                 item === current
-                  ? "rounded-lg bg-violet-600 px-2.5 py-1.5 text-sm font-semibold text-white"
+                  ? "cifra rounded-lg bg-violet-600 px-2.5 py-1.5 text-[13px] font-semibold text-white"
                   : navBtn
               }
             >
@@ -455,75 +456,104 @@ export function DashboardClient({
 
   return (
     <>
-      <div className="flex flex-col h-full">
-        {/* Page header */}
-        <div className="border-b border-slate-200 bg-white px-6 py-4">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-xl font-semibold text-slate-900">
-                {t("bandeja.title")}
-              </h1>
-              <p className="text-sm text-slate-500 mt-0.5">
-                {t("bandeja.subtitle")}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <a
-                /*
-                 * El CSV se pide con los MISMOS filtros que muestra la pantalla.
-                 *
-                 * Este href armaba el querystring con status y type elegidos a
-                 * mano, así que filtrar por severidad o por canal y tocar Exportar
-                 * bajaba un archivo que no coincidía con lo que se estaba mirando.
-                 *
-                 * Se reenvían los parámetros de la URL tal cual, menos los de
-                 * paginación: el export siempre trae hasta mil filas y ordenadas
-                 * por fecha, así que `page` y `per_page` no significan nada acá y
-                 * mandarlos sólo invita a que alguien los interprete.
-                 */
-                href={`/api/cases/export.csv${exportQuery ? `?${exportQuery}` : ""}`}
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-                aria-label={t("bandeja.export")}
-              >
-                {t("bandeja.export")}
-              </a>
-              <button
-                type="button"
-                onClick={() => setShowSimulateModal(true)}
-                data-testid="simulate-button"
-                className="rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-700"
-              >
-                {t("bandeja.simulate")}
-              </button>
-            </div>
-          </div>
+      <div className="flex h-full min-h-0 flex-col">
+        {/*
+          * El encabezado de la tarjeta.
+          *
+          * Acá vivían un `<h1>` y su bajada que repetían PALABRA POR PALABRA el
+          * título de la pantalla, que está tres centímetros más arriba en
+          * `page.tsx`. Dos veces «Bandeja de siniestros» en la misma vista.
+          *
+          * Lo que va en su lugar no es una etiqueta sino un dato: cuántos
+          * siniestros hay bajo los filtros que están puestos ahora. Es la
+          * pregunta que uno se hace después de tocar un filtro, y hasta ahora
+          * había que ir a buscarla al paginador del fondo.
+          */}
+        <CardHeader
+          title={
+            <span className="cifra">
+              {visibleTotal} {t("bandeja.claims")}
+            </span>
+          }
+        >
+          <a
+            /*
+             * El CSV se pide con los MISMOS filtros que muestra la pantalla.
+             *
+             * Este href armaba el querystring con status y type elegidos a mano,
+             * así que filtrar por severidad o por canal y tocar Exportar bajaba
+             * un archivo que no coincidía con lo que se estaba mirando.
+             *
+             * Se reenvían los parámetros de la URL tal cual, menos los de
+             * paginación: el export siempre trae hasta mil filas y ordenadas por
+             * fecha, así que `page` y `per_page` no significan nada acá y
+             * mandarlos sólo invita a que alguien los interprete.
+             */
+            href={`/api/cases/export.csv${exportQuery ? `?${exportQuery}` : ""}`}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            aria-label={t("bandeja.export")}
+          >
+            {t("bandeja.export")}
+          </a>
+          <button
+            type="button"
+            onClick={() => setShowSimulateModal(true)}
+            data-testid="simulate-button"
+            className="rounded-lg bg-violet-600 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-violet-700"
+          >
+            {t("bandeja.simulate")}
+          </button>
+        </CardHeader>
+
+        {/*
+          * Los filtros: una sola franja, no tres.
+          *
+          * Eran tres tiras apiladas, cada una con su `border-b` y su `bg-white`
+          * propio, metidas adentro de una tarjeta que ya tiene fondo y borde.
+          * Tres líneas duras cruzando una tarjeta redondeada se ven como tres
+          * tarjetas mal apiladas, que es de dónde venía lo de «medio fea».
+          *
+          * Ahora hay UNA línea —la de las pestañas, que separa el encabezado de
+          * la lista— y los chips viven en la misma franja, agrupados con aire en
+          * vez de con bordes. Ningún control se fue: están los mismos veinte.
+          */}
+        <div className="border-b border-slate-100 px-5">
           <FilterTabs counts={tabCounts} activeStatus={activeStatus} />
         </div>
 
-        <div className="border-b border-slate-100 bg-white px-6 py-3">
+        <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3">
           <TypeFilterChips activeType={activeType} />
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <ChannelFilterChips activeChannel={activeChannel} />
+            <SeverityFilterChips activeSeverity={activeSeverity} />
+            <IsClaimFilterChips activeIsClaim={activeIsClaim} />
+          </div>
         </div>
 
-        <div className="border-b border-slate-100 bg-white px-6 py-2 flex flex-wrap items-center gap-x-6 gap-y-2">
-          <ChannelFilterChips activeChannel={activeChannel} />
-          <SeverityFilterChips activeSeverity={activeSeverity} />
-          <IsClaimFilterChips activeIsClaim={activeIsClaim} />
-        </div>
-
-        {/* Cases table */}
-        <div className="flex-1 overflow-auto px-6 py-4">
+        {/*
+          * `min-h-0` en este hijo y en el flex de arriba: sin eso un hijo de
+          * flex no se encoge por debajo de su contenido, la tabla empuja la
+          * tarjeta hacia abajo y el scroll aparece en la página entera en vez
+          * de adentro de la lista.
+          */}
+        <div className="min-h-0 flex-1 overflow-auto">
           <CasesTable cases={visibleCases} onDeleteMany={handleDeleteMany} />
-
-          {visibleTotal > 0 && (
-            <Pagination
-              page={activePage}
-              perPage={PER_PAGE}
-              total={visibleTotal}
-              onPageChange={handlePageChange}
-              onPerPageChange={handlePerPageChange}
-            />
-          )}
         </div>
+
+        {/*
+          * El paginador queda FUERA del área que scrollea: antes iba al final de
+          * la tabla, así que con cien filas había que bajar hasta el fondo para
+          * cambiar de página. Ahora la lista se mueve y el control se queda.
+          */}
+        {visibleTotal > 0 && (
+          <Pagination
+            page={activePage}
+            perPage={PER_PAGE}
+            total={visibleTotal}
+            onPageChange={handlePageChange}
+            onPerPageChange={handlePerPageChange}
+          />
+        )}
       </div>
 
       {/* Delete confirmation dialog */}

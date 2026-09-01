@@ -1,5 +1,33 @@
 @import "tailwindcss";
 
+/*
+ * ── Que `dark:` signifique la clase `.dark`, y no el tema del sistema ────────
+ *
+ * En Tailwind v4 el variante `dark:` viene atado a `prefers-color-scheme`, o
+ * sea al tema del SISTEMA OPERATIVO. Este producto no usa eso: tiene un botón
+ * que pone la clase `.dark` en el `<html>`.
+ *
+ * Sin esta línea las dos cosas no se hablan, y hay 255 clases `dark:` repartidas
+ * en 18 archivos que quedan enganchadas al interruptor equivocado:
+ *
+ *   · Con el sistema en claro, alguien toca la luna y la aplicación se pone
+ *     oscura —eso lo hacen los `!important` de más abajo— pero NINGUNA clase
+ *     `dark:` se aplica. Así se veía el ítem deshabilitado «Agente» del menú
+ *     MÁS brillante que los habilitados: su `dark:text-slate-600` no llegaba
+ *     nunca y se quedaba en el `text-slate-300` del modo claro.
+ *
+ *   · Y al revés: con el sistema en oscuro, alguien elige el tema claro y las
+ *     clases `dark:` se aplican igual, encima de una interfaz clara.
+ *
+ * Se ve mirando la pantalla en una máquina con el sistema en claro. En una con
+ * el sistema en oscuro está todo bien, que es por lo que sobrevivió tanto.
+ *
+ * `:where(...)` mantiene la especificidad en cero, así que esto no le gana a
+ * nada que ya estuviera ganando: los overrides con `!important` de abajo siguen
+ * mandando donde pisan la misma propiedad.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   /*
    * Sin esto, en modo oscuro las barras de scroll, los `<select>` nativos y los
@@ -119,6 +147,22 @@ body {
 
 .dark .text-slate-400 {
   color: #64748B !important;
+}
+
+/*
+ * El gris de «acá no hay nada»: el guión de una celda vacía, un separador.
+ *
+ * Faltaba, y en claro no se notaba —#CBD5E1 sobre blanco es apenas visible, que
+ * es la idea— pero sobre una tarjeta oscura ese mismo gris es CASI BLANCO. O
+ * sea que en modo oscuro los guiones de las columnas sin dato eran lo más
+ * brillante de la tabla: la ausencia gritando más fuerte que los datos.
+ *
+ * Ojo: esto pisa `text-slate-300` a secas. El `dark:text-slate-300` que usan las
+ * pantallas de administración es OTRA clase (`dark\:text-slate-300`) y no la
+ * toca — ahí el gris claro sobre fondo oscuro es justamente lo que se busca.
+ */
+.dark .text-slate-300 {
+  color: #475569 !important;
 }
 
 /* --- border overrides --- */

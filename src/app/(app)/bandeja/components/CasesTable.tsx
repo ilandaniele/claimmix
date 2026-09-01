@@ -13,6 +13,7 @@ import { StatusBadge } from "./StatusBadge";
 import { SeverityBadge } from "./SeverityBadge";
 import { SourceBadge } from "./SourceBadge";
 import { ConfidenceBar } from "./ConfidenceBar";
+import { Vacio } from "./Vacio";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 
@@ -97,7 +98,12 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
         accessorKey: "id",
         header: t("table.col.id"),
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs text-slate-700">
+          /*
+           * `whitespace-nowrap`: «SIN-91DB-1A14» se partia en dos lineas por el
+           * guion, y una tabla con la primera columna de doble altura se lee
+           * como si cada fila fuera dos.
+           */
+          <span className="whitespace-nowrap font-mono text-[12.5px] text-slate-600">
             {formatCaseId(getValue<string>())}
           </span>
         ),
@@ -105,18 +111,35 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
       {
         accessorKey: "policyholder_name",
         header: t("table.col.policyholder"),
-        cell: ({ getValue }) => (
-          <span className="text-sm text-slate-900 font-medium">
-            {getValue<string | null>() ?? "—"}
-          </span>
-        ),
+        cell: ({ getValue }) => {
+          const nombre = getValue<string | null>();
+          if (!nombre) return <Vacio />;
+          /*
+           * `truncate` y no envolver: «Martín Ezequiel Rodríguez» se partía en
+           * TRES líneas y la fila entera pasaba de 44 a 97 píxeles de alto. Con
+           * veinte filas eso es media pantalla de aire vacío, y la tabla se leía
+           * como una lista de tarjetas.
+           *
+           * El ancho tope evita lo contrario —un nombre larguísimo empujando la
+           * tabla al scroll horizontal— y el `title` deja el nombre completo a
+           * un hover de distancia.
+           */
+          return (
+            <span
+              className="block max-w-[11rem] truncate text-[13.5px] font-medium text-slate-900"
+              title={nombre}
+            >
+              {nombre}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "policy_number",
         header: t("table.col.policy"),
         cell: ({ getValue }) => (
-          <span className="text-sm text-slate-600 font-mono">
-            {getValue<string | null>() ?? "—"}
+          <span className="whitespace-nowrap font-mono text-[12.5px] text-slate-600">
+            {getValue<string | null>() ?? <Vacio />}
           </span>
         ),
       },
@@ -126,7 +149,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
         cell: ({ getValue }) => {
           const type = getValue<ClaimType>();
           return (
-            <span className="text-sm text-slate-700">
+            <span className="whitespace-nowrap text-[13.5px] text-slate-700">
               {CLAIM_TYPE_LABELS[type] ?? type}
             </span>
           );
@@ -157,12 +180,12 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
           // Non-claims are answered by design with silence, so "sin responder"
           // would read as a backlog item when it is the correct outcome.
           if (row.original.is_claim === false) {
-            return <span className="text-sm text-slate-400">—</span>;
+            return <Vacio />;
           }
 
           if (!at) {
             return (
-              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+              <span className="inline-flex items-center whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-0.5 text-[12px] font-medium text-amber-700">
                 {t("table.replied.pending")}
               </span>
             );
@@ -170,7 +193,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
 
           return (
             <span
-              className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800"
+              className="inline-flex items-center whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-0.5 text-[12px] font-medium text-emerald-700"
               title={new Intl.DateTimeFormat(locale, {
                 dateStyle: "medium",
                 timeStyle: "short",
@@ -192,12 +215,21 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
         accessorKey: "created_at",
         header: t("table.col.received"),
         cell: ({ getValue }) => (
-          <span className="text-sm text-slate-500 whitespace-nowrap">
+          <span className="whitespace-nowrap text-[13px] text-slate-500">
             {new Intl.DateTimeFormat(locale, {
               day: "2-digit",
               month: "short",
               hour: "2-digit",
               minute: "2-digit",
+              /*
+               * Reloj de 24 horas en castellano. `Intl` con `es-AR` devolvía
+               * «09:55 p. m.» —cinco caracteres de más por fila, y con doce
+               * columnas eso era lo que empujaba «Asignación» fuera de la
+               * pantalla—. Además en Argentina el horario se escribe 21:55.
+               *
+               * En inglés se deja el formato que la persona espera.
+               */
+              hour12: locale.startsWith("es") ? false : undefined,
             }).format(new Date(getValue<string>()))}
           </span>
         ),
@@ -207,19 +239,15 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
         header: t("case.detail.severity"),
         cell: ({ getValue }) => {
           const severity = getValue<Severity | null>();
-          return severity ? (
-            <SeverityBadge severity={severity} />
-          ) : (
-            <span className="text-slate-300 text-xs">—</span>
-          );
+          return severity ? <SeverityBadge severity={severity} /> : <Vacio />;
         },
       },
       {
         accessorKey: "assigned_to",
         header: t("table.col.assignedTo"),
         cell: ({ getValue }) => (
-          <span className="text-sm text-slate-500">
-            {getValue<string | null>() ? t("case.detail.assigned") : "—"}
+          <span className="whitespace-nowrap text-[13px] text-slate-500">
+            {getValue<string | null>() ? t("case.detail.assigned") : <Vacio />}
           </span>
         ),
       },
@@ -277,8 +305,8 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
 
   if (cases.length === 0) {
     return (
-      <div className="py-16 text-center text-sm text-slate-500" role="status">
-        {t("bandeja.empty")}
+      <div className="px-5 py-20 text-center" role="status">
+        <p className="text-[14px] text-slate-500">{t("bandeja.empty")}</p>
       </div>
     );
   }
@@ -287,7 +315,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
     <div>
       {/* Bulk action bar — visible when ≥1 row selected */}
       {onDeleteMany && selectedIds.size > 0 && (
-        <div className="mb-3 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5">
+        <div className="mx-5 mb-3 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
           <span className="text-sm font-medium text-red-700">
             {selectedIds.size} {t("bandeja.claims")} {t("bandeja.selected")}
           </span>
@@ -317,7 +345,14 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                   <th
                     key={header.id}
                     scope="col"
-                    className="border-b border-slate-200 pb-3 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-500 px-3 first:pl-0 last:pr-0"
+                    /*
+                     * `rotulo` es la clase de `globals.css` que ya usan los
+                     * indicadores y las etiquetas de campo: el encabezado de
+                     * columna es exactamente eso, un rotulo, y hasta ahora
+                     * repetia las mismas cuatro utilidades a mano con otro
+                     * tamano.
+                     */
+                    className="rotulo whitespace-nowrap border-b border-slate-100 px-2.5 pb-2.5 pt-1 text-slate-400 first:pl-5 last:pr-5"
                   >
                     {flexRender(
                       header.column.columnDef.header,
@@ -335,7 +370,11 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                 <tr
                   key={row.id}
                   onClick={() => router.push(`/casos/${row.original.id}`)}
-                  className={`group cursor-pointer border-b border-slate-100 transition-colors ${
+                  /*
+                   * La ultima fila no lleva linea: el borde de la tarjeta ya
+                   * cierra la lista, y las dos juntas se ven como un doble filo.
+                   */
+                  className={`group cursor-pointer border-b border-slate-100 transition-colors last:border-b-0 ${
                     isSelected ? "bg-red-50 hover:bg-red-100" : "hover:bg-slate-50"
                   }`}
                   role="row"
@@ -350,7 +389,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className="py-3 px-3 first:pl-0 last:pr-0"
+                      className="px-2.5 py-3 first:pl-5 last:pr-5"
                       onClick={
                         cell.column.id === "select" || cell.column.id === "row-delete"
                           ? (e) => e.stopPropagation()

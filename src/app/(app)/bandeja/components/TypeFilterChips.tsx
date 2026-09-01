@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useFilterParam } from "./useFilterParam";
+import { claseChip } from "./chip";
 import { useCallback } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { ClaimType } from "@/lib/schemas/cases";
@@ -37,7 +38,7 @@ export function TypeFilterChips({ activeType }: TypeFilterChipsProps) {
     <div
       role="group"
       aria-label={t("filter.isClaim")}
-      className="flex items-center gap-2 flex-wrap"
+      className="flex flex-wrap items-center gap-1"
     >
       {CHIPS.map(({ key, label }) => {
         const isActive =
@@ -48,12 +49,7 @@ export function TypeFilterChips({ activeType }: TypeFilterChipsProps) {
             key={key}
             onClick={() => handleChipClick(key)}
             aria-pressed={isActive}
-            className={[
-              "rounded-full px-3 py-1 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400",
-              isActive
-                ? "bg-violet-600 text-white"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900",
-            ].join(" ")}
+            className={claseChip(isActive)}
           >
             {label}
           </button>

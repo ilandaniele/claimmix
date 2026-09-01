@@ -27,6 +27,8 @@ import { DashboardClient, PER_PAGE_OPTIONS } from "./DashboardClient";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 import { Card, KpiTile } from "../_components/ui";
+import { getT } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
 
 const VALID_STATUSES: CaseStatus[] = [
   "procesando",
@@ -64,6 +66,7 @@ interface BandejaPageProps {
 
 async function BandejaContent({ searchParams }: BandejaPageProps) {
   const params = await searchParams;
+  const t = getT(await getServerLocale());
 
   const statusParam = params["status"];
   const typeParam = params["type"];
@@ -201,13 +204,15 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
          *
          * La barra de arriba sólo tiene los controles de la persona, así que la
          * bandeja empezaba directamente en los números, sin decir dónde estás.
+         *
+         * Sale del diccionario y no escrito a mano: puesto a mano decía
+         * «Bandeja» en castellano incluso con la interfaz en inglés, y encima
+         * `DashboardClient` repetía este mismo título adentro de la tarjeta.
          */}
         <h1 className="text-balance text-[26px] font-semibold tracking-tight text-slate-900">
-          Bandeja
+          {t("bandeja.title")}
         </h1>
-        <p className="mt-1 text-[13px] text-slate-500">
-          Lo que entró, y qué está esperando a quién.
-        </p>
+        <p className="mt-1 text-[13px] text-slate-500">{t("bandeja.subtitle")}</p>
 
         {/*
          * Los cuatro indicadores.
@@ -218,20 +223,20 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
          * queda SÓLO en el número, que es el dato que dice si hay que hacer algo.
          */}
         <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiTile label="Total casos" value={totalCount} />
+          <KpiTile label={t("kpi.total")} value={totalCount} />
           <KpiTile
-            label="Críticos"
+            label={t("tabs.escalado")}
             value={criticalCount}
             tone="critico"
-            hint={criticalCount > 0 ? "Necesitan una persona" : "Ninguno abierto"}
+            hint={criticalCount > 0 ? t("kpi.criticalHint") : t("kpi.criticalNone")}
           />
           <KpiTile
-            label="Pendientes"
+            label={t("tabs.esperando")}
             value={pendingCount}
             tone="espera"
-            hint="Esperando al denunciante"
+            hint={t("kpi.pendingHint")}
           />
-          <KpiTile label="Resueltos" value={resolvedCount} tone="listo" />
+          <KpiTile label={t("tabs.listo")} value={resolvedCount} tone="listo" />
         </div>
       </div>
 
@@ -249,29 +254,41 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   );
 }
 
+/**
+ * El esqueleto de carga, con la forma de lo que va a aparecer.
+ *
+ * Tenía la forma VIEJA de la pantalla —tres franjas con borde duro, sin las
+ * baldosas de indicador y sin tarjeta— así que al terminar de cargar el diseño
+ * saltaba a otra cosa. Un esqueleto que no coincide con su destino es peor que
+ * no tener esqueleto: promete un layout y entrega otro.
+ */
 function BandejaLoading() {
   return (
-    <div className="flex flex-col h-full">
-      <div className="border-b border-slate-200 bg-white px-6 py-4">
-        <div className="h-7 w-48 bg-slate-200 rounded animate-pulse mb-4" />
-        <div className="flex gap-2">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-8 w-20 bg-slate-100 rounded animate-pulse" />
+    <div className="flex h-full flex-col">
+      <div className="px-6 pb-5 pt-1">
+        <div className="h-8 w-64 animate-pulse rounded-lg bg-slate-200" />
+        <div className="mt-2 h-4 w-80 animate-pulse rounded bg-slate-100" />
+        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div
+              key={i}
+              className="h-[104px] animate-pulse rounded-2xl border border-slate-200 bg-white"
+            />
           ))}
         </div>
       </div>
-      <div className="px-6 py-3 border-b border-slate-100">
-        <div className="flex gap-2">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-7 w-16 bg-slate-100 rounded-full animate-pulse" />
-          ))}
-        </div>
-      </div>
-      <div className="px-6 py-4">
-        <div className="space-y-3">
-          {[...Array(8)].map((_, i) => (
-            <div key={i} className="h-12 bg-slate-50 rounded animate-pulse" />
-          ))}
+      <div className="flex-1 overflow-hidden px-6 pb-6">
+        <div className="h-full rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="flex gap-2">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-8 w-24 animate-pulse rounded-lg bg-slate-100" />
+            ))}
+          </div>
+          <div className="mt-6 space-y-3">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="h-11 animate-pulse rounded-lg bg-slate-50" />
+            ))}
+          </div>
         </div>
       </div>
     </div>

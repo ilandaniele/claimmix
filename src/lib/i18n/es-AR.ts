@@ -315,7 +315,14 @@ export const esAR = {
   // ── Bandeja filter labels ───────────────────────────────────────────────────
   "filter.channel": "Canal",
   "filter.severity": "Severidad",
-  "filter.isClaim": "Tipo",
+  /*
+   * Era «Tipo», la MISMA palabra que el filtro de tipo de siniestro que esta
+   * justo arriba. Con los dos grupos en la misma franja quedaban dos «Tipo:»
+   * pegados, uno ofreciendo Choque/Robo/Granizo y el otro Reclamos/No
+   * relevantes. Este filtro no pregunta de que tipo es el siniestro sino si el
+   * mensaje es un siniestro.
+   */
+  "filter.isClaim": "Relevancia",
   "filter.todos": "Todos",
   "filter.reclamos": "Reclamos",
   "filter.no_relevantes": "No relevantes",
@@ -429,6 +436,13 @@ export const esAR = {
   "clientes.detail.policyStatus": "Estado",
   "clientes.detail.validFrom": "Vigencia desde",
   "clientes.detail.validTo": "Vigencia hasta",
+  // ── Las baldosas de indicador de la bandeja ─────────────────────────────────
+  // Estaban escritas a mano en castellano dentro de `bandeja/page.tsx`, asi que
+  // con la interfaz en ingles la fila de indicadores seguia en castellano.
+  "kpi.total": "Total casos",
+  "kpi.criticalHint": "Necesitan una persona",
+  "kpi.criticalNone": "Ninguno abierto",
+  "kpi.pendingHint": "Esperando al denunciante",
 } as const;
 
 export type TranslationKey = keyof typeof esAR;

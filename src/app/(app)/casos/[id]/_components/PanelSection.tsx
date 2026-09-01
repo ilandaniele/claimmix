@@ -52,31 +52,41 @@ export function PanelSection({
   children,
 }: PanelSectionProps) {
   const idTitulo = `${id}-heading`;
-  // Sin insignia al lado, el margen va en el propio encabezado: así el DOM que
-  // sale es el mismo que había antes de que esto fuera un componente.
-  const encabezado = (
-    <h2
-      className={`text-sm font-semibold ${TITULO[tono]}${accesorio ? "" : " mb-4"}`}
-      id={idTitulo}
-    >
-      {titulo}
-    </h2>
-  );
 
+  /*
+   * El encabezado y el cuerpo son dos bloques con su propio padding, no un
+   * `p-5` con márgenes adentro.
+   *
+   * Es la misma forma que `CardHeader` en `_components/ui.tsx`: título a la
+   * izquierda, accesorio a la derecha, y una franja de aire menor abajo que
+   * arriba. Que las once secciones del detalle y las tarjetas de la bandeja
+   * tengan el mismo encabezado es lo que hace que se lean como un producto y
+   * no como dos pantallas parecidas.
+   *
+   * `justify-between` y no `gap-3`: la insignia —el nivel de riesgo de fraude,
+   * el contador de confirmaciones pendientes— se va al borde derecho en vez de
+   * quedar pegada al título, que es donde el ojo la busca.
+   */
   return (
     <section
       aria-labelledby={idTitulo}
-      className={`rounded-xl border p-5 shadow-sm ${MARCO[tono]}`}
+      className={`rounded-2xl border shadow-sm ${MARCO[tono]}`}
     >
-      {accesorio ? (
-        <div className="flex items-center gap-3 mb-3">
-          {encabezado}
-          {accesorio}
-        </div>
-      ) : (
-        encabezado
-      )}
-      {children}
+      <div className="flex items-center justify-between gap-3 px-5 pb-3 pt-4">
+        <h2
+          /*
+           * `min-w-0` + `truncate`: sin eso un título largo empuja la insignia
+           * fuera de la tarjeta — un hijo de flex no se encoge por debajo de su
+           * contenido salvo que se le diga.
+           */
+          className={`min-w-0 truncate text-[15px] font-semibold tracking-tight ${TITULO[tono]}`}
+          id={idTitulo}
+        >
+          {titulo}
+        </h2>
+        {accesorio ? <div className="flex-shrink-0">{accesorio}</div> : null}
+      </div>
+      <div className="px-5 pb-5">{children}</div>
     </section>
   );
 }

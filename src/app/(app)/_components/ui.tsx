@@ -159,6 +159,20 @@ export function Pill({
  * La etiqueta va chica y en mayúsculas (`rotulo`) para que se lea como rótulo y
  * no compita con el valor, que es lo que la persona vino a leer. Es la grilla
  * que estructura toda la pantalla de detalle.
+ *
+ * ── Va ADENTRO de un `<dl>` ─────────────────────────────────────────────────
+ *
+ * Sale `<div><dt>…</dt><dd>…</dd></div>`, no tres `<div>`. El detalle de un caso
+ * es literalmente una lista de pares término-descripción, y así se anuncia:
+ * un lector de pantalla dice «Póliza, ABC-123» en vez de leer dos textos
+ * sueltos y dejar que la persona adivine cuál describe a cuál.
+ *
+ * El `<div>` de envoltura entre el `<dl>` y el par es HTML5 válido, y es lo que
+ * permite que cada par sea una celda de la grilla.
+ *
+ * Quien use esto tiene que poner un `<dl>` alrededor: un `<dt>` suelto fuera de
+ * una lista de definiciones no es válido y pierde justamente la relación que es
+ * la razón de existir del componente.
  */
 export function Field({
   label,
@@ -168,9 +182,36 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <div>
-      <p className="rotulo text-slate-500">{label}</p>
-      <div className="mt-1 text-[14px] text-slate-900">{children ?? "—"}</div>
+    <div className="min-w-0">
+      <dt className="rotulo text-slate-500">{label}</dt>
+      {/*
+        * `?? "—"` no alcanzaba: `null` y `undefined` los tapa, pero el caso que
+        * de verdad pasa es un string vacío, y `"" ?? "—"` es `""` — o sea una
+        * fila con etiqueta y nada debajo, que se lee como un error de carga.
+        */}
+      <dd className="mt-1 break-words text-[14px] text-slate-900">
+        {children === null || children === undefined || children === "" ? (
+          <span className="text-slate-300">—</span>
+        ) : (
+          children
+        )}
+      </dd>
     </div>
   );
+}
+
+/**
+ * La grilla que contiene los `Field`.
+ *
+ * Existe para que el `<dl>` no se olvide: sin él los `<dt>`/`<dd>` quedan
+ * huérfanos y el HTML es inválido. Acá está escrito una sola vez.
+ */
+export function FieldGrid({
+  children,
+  className = "sm:grid-cols-2",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <dl className={`grid grid-cols-1 gap-x-6 gap-y-4 ${className}`}>{children}</dl>;
 }

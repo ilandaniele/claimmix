@@ -8,6 +8,8 @@
  *   null   → dash (case still procesando)
  */
 
+import { Vacio } from "./Vacio";
+
 interface ConfidenceBarProps {
   value: number | null;
 }
@@ -20,7 +22,7 @@ function getColorClass(value: number): string {
 
 export function ConfidenceBar({ value }: ConfidenceBarProps) {
   if (value === null || value === undefined) {
-    return <span className="text-slate-400 text-sm">—</span>;
+    return <Vacio />;
   }
 
   const pct = Math.round(value * 100);

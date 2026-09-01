@@ -23,6 +23,7 @@
 "use client";
 
 import { useT } from "@/lib/i18n/LocaleContext";
+import { Vacio } from "./Vacio";
 
 interface SourceBadgeProps {
   /** The case channel value from CaseRow */
@@ -60,5 +61,5 @@ export function SourceBadge({ channel }: SourceBadgeProps) {
   }
 
   // Future channels (whatsapp, etc.) and null/undefined → neutral dash
-  return <span className="text-slate-300 text-xs">—</span>;
+  return <Vacio />;
 }

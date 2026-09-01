@@ -41,6 +41,7 @@ import {
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
+import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
 import { formatAge, formatDate } from "@/lib/utils";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
@@ -204,12 +205,12 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
   const channelLabel = CHANNEL_LABELS[caseRow.channel] ?? caseRow.channel;
 
   return (
-    <div className="px-6 py-6 max-w-5xl mx-auto">
+    <div className="mx-auto max-w-5xl px-6 pb-8 pt-1">
       {/* Back button */}
       <div className="mb-4">
         <Link
           href="/bandeja"
-          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+          className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
           aria-label={t("case.detail.back")}
         >
           <svg
@@ -229,39 +230,64 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
         </Link>
       </div>
 
-      {/* Header card */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 mb-6 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex-1 min-w-0">
-            {/* Case number + claim type badge */}
-            <div className="flex items-center gap-3 mb-2 flex-wrap">
-              <h1 className="text-xl font-semibold text-slate-900 font-mono">
+      {/*
+        * El encabezado del caso.
+        *
+        * Antes la fila de metadatos era prosa con dos puntos —«Asignado a: Sin
+        * asignar   Creado: hace 3 días   18 ago 2026»— o sea etiquetas y valores
+        * al mismo tamaño, en la misma línea, separados sólo por espacios. Para
+        * leer un dato había que leer los tres.
+        *
+        * Ahora es la misma grilla de rótulo-sobre-valor que estructura el resto
+        * de la pantalla: el rótulo chico y en mayúsculas, el dato abajo y en
+        * tamaño de lectura. Se busca por posición, no leyendo.
+        */}
+      <Card className="mb-6">
+        <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="mb-4 flex flex-wrap items-center gap-2.5">
+              <h1 className="cifra text-[22px] font-semibold text-slate-900">
                 {caseNumber}
               </h1>
-              <span className="inline-flex items-center rounded-md bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 capitalize">
-                {caseRow.claim_type ? (CLAIM_TYPE_LABELS[caseRow.claim_type as ClaimType] ?? caseRow.claim_type) : "—"}
-              </span>
+              {/*
+                * El tipo va en gris y el estado en su color. Los dos eran
+                * insignias del mismo peso, y el tipo de siniestro —que no cambia
+                * nunca— competía con el estado, que es lo único que se mira.
+                */}
+              <Pill>
+                {caseRow.claim_type
+                  ? (CLAIM_TYPE_LABELS[caseRow.claim_type as ClaimType] ??
+                    caseRow.claim_type)
+                  : "—"}
+              </Pill>
               <StatusBadge status={caseRow.status as CaseStatus} />
             </div>
 
-            {/* Meta info row */}
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500">
-              <span>
-                <span className="font-medium text-slate-700">
-                  {t("case.detail.assignedTo")}:
-                </span>{" "}
-                {caseRow.assigned_to ? t("case.detail.assigned") : t("case.detail.unassigned")}
-              </span>
-              <span>
-                <span className="font-medium text-slate-700">{t("case.detail.created")}:</span>{" "}
-                {formatAge(caseRow.created_at)}
-              </span>
-              {caseRow.created_at && (
-                <span title={caseRow.created_at}>
-                  {formatDate(caseRow.created_at)}
-                </span>
-              )}
-            </div>
+            <FieldGrid className="sm:grid-cols-3">
+              <Field label={t("case.detail.assignedTo")}>
+                {caseRow.assigned_to
+                  ? t("case.detail.assigned")
+                  : t("case.detail.unassigned")}
+              </Field>
+              <Field label={t("case.detail.created")}>
+                {/*
+                  * Dos lineas y no una separada por un punto medio: en una
+                  * columna de un tercio de ancho, «Hace 14h · 31/08/2026, 09:55
+                  * p. m.» se partia donde caia y dejaba un «m.» solo abajo.
+                  *
+                  * Apiladas ademas dicen algo: arriba lo que se lee de un
+                  * vistazo —cuanto hace— y abajo el dato exacto, para cuando
+                  * hace falta.
+                  */}
+                <span className="whitespace-nowrap">{formatAge(caseRow.created_at)}</span>
+                {caseRow.created_at ? (
+                  <span className="mt-0.5 block whitespace-nowrap text-[12.5px] text-slate-500">
+                    {formatDate(caseRow.created_at)}
+                  </span>
+                ) : null}
+              </Field>
+              <Field label={t("case.detail.channel")}>{channelLabel}</Field>
+            </FieldGrid>
           </div>
 
           {/* Action buttons — client component handles FSM state */}
@@ -271,7 +297,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
             caseNumber={caseNumber}
           />
         </div>
-      </div>
+      </Card>
 
       {/* Two-column layout: left = main content, right = docs + audit */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -279,34 +305,28 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
         <div className="lg:col-span-2 flex flex-col gap-6">
           {/* Datos del asegurado */}
           <PanelSection id="insured-data" titulo={t("case.detail.insuredData")}>
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-              <div>
-                <dt className="text-slate-500">{t("case.detail.policyholderName")}</dt>
-                <dd className="mt-0.5 font-medium text-slate-900">
-                  {displayedPolicyholderName ?? "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">{t("case.detail.policyNumber")}</dt>
-                <dd className="mt-0.5 font-mono text-slate-900">
-                  {displayedPolicyNumber ?? "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">{t("case.detail.channel")}</dt>
-                <dd className="mt-0.5 text-slate-900">
-                  {channelLabel}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">{t("case.detail.confidence.col")}</dt>
-                <dd className="mt-0.5 text-slate-900">
-                  {displayedConfidence != null
-                    ? `${Math.round(displayedConfidence * 100)}%`
-                    : "—"}
-                </dd>
-              </div>
-            </dl>
+            {/*
+              * El canal se fue de acá al encabezado: por dónde entró el
+              * siniestro no es un dato del asegurado, y estaba ocupando el lugar
+              * de uno que sí lo es.
+              */}
+            <FieldGrid className="sm:grid-cols-3">
+              <Field label={t("case.detail.policyholderName")}>
+                {displayedPolicyholderName}
+              </Field>
+              <Field label={t("case.detail.policyNumber")}>
+                {displayedPolicyNumber ? (
+                  <span className="font-mono">{displayedPolicyNumber}</span>
+                ) : null}
+              </Field>
+              <Field label={t("case.detail.confidence.col")}>
+                {displayedConfidence != null ? (
+                  <span className="cifra">
+                    {Math.round(displayedConfidence * 100)}%
+                  </span>
+                ) : null}
+              </Field>
+            </FieldGrid>
           </PanelSection>
 
           {/* Campos extraídos */}
@@ -337,65 +357,48 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
             <>
               {/* Section A: Parsed email data */}
               <PanelSection id="parsed-email" titulo={t("case.detail.parsedEmail")}>
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                  <div>
-                    <dt className="text-slate-500">{t("case.detail.isClaim")}</dt>
-                    <dd className="mt-0.5 font-medium text-slate-900">
-                      {caseRow.is_claim === true
-                        ? t("common.yes")
-                        : caseRow.is_claim === false
+                <FieldGrid>
+                  <Field label={t("case.detail.isClaim")}>
+                    {caseRow.is_claim === true
+                      ? t("common.yes")
+                      : caseRow.is_claim === false
                         ? t("common.no")
-                        : "—"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-500">{t("case.detail.severity")}</dt>
-                    <dd className="mt-0.5">
-                      {caseRow.severity ? (
-                        <SeverityBadge severity={caseRow.severity} />
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </dd>
-                  </div>
+                        : null}
+                  </Field>
+                  <Field label={t("case.detail.severity")}>
+                    {caseRow.severity ? (
+                      <SeverityBadge severity={caseRow.severity} />
+                    ) : null}
+                  </Field>
                   {caseRow.customer_id && (
-                    <div>
-                      <dt className="text-slate-500">{t("case.detail.customer")}</dt>
-                      <dd className="mt-0.5">
-                        <Link
-                          href={`/clientes/${caseRow.customer_id}`}
-                          className="text-blue-600 hover:underline font-medium text-sm"
-                        >
-                          {t("clientes.detail.viewClient")}
-                        </Link>
-                      </dd>
-                    </div>
+                    <Field label={t("case.detail.customer")}>
+                      <Link
+                        href={`/clientes/${caseRow.customer_id}`}
+                        className="font-medium text-violet-700 hover:underline"
+                      >
+                        {t("clientes.detail.viewClient")}
+                      </Link>
+                    </Field>
                   )}
                   {caseRow.policy_id && (
-                    <div>
-                      <dt className="text-slate-500">{t("case.detail.policy")}</dt>
-                      <dd className="mt-0.5 font-mono text-slate-800">
+                    <Field label={t("case.detail.policy")}>
+                      <span className="font-mono">
                         {displayedPolicyNumber ?? t("case.detail.linked")}
-                      </dd>
-                    </div>
+                      </span>
+                    </Field>
                   )}
                   {caseRow.injury_severity && caseRow.injury_severity !== "none" && (
-                    <div>
-                      <dt className="text-slate-500">Severidad lesiones</dt>
-                      <dd className="mt-0.5">
-                        <InjurySeverityBadge severity={caseRow.injury_severity} />
-                      </dd>
-                    </div>
+                    <Field label="Severidad lesiones">
+                      <InjurySeverityBadge severity={caseRow.injury_severity} />
+                    </Field>
                   )}
                   {attachments.length > 0 && (
-                    <div>
-                      <dt className="text-slate-500">{t("case.detail.attachments")}</dt>
-                      <dd className="mt-0.5 font-medium text-slate-900">
-                        {attachments.length} {t("case.detail.attachmentCount")}
-                      </dd>
-                    </div>
+                    <Field label={t("case.detail.attachments")}>
+                      <span className="cifra">{attachments.length}</span>{" "}
+                      {t("case.detail.attachmentCount")}
+                    </Field>
                   )}
-                </dl>
+                </FieldGrid>
               </PanelSection>
 
               {/* Análisis de fraude — solo cuando hay indicadores */}
@@ -412,7 +415,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                   titulo="Alertas de fraude"
                   accesorio={<FraudRiskBadge level={caseRow.fraud_risk_level} />}
                 >
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                  <p className="mb-3 text-[12px] text-slate-500 dark:text-slate-400">
                     Análisis automático — solo orientativo. La decisión final la toma el ajustador.
                   </p>
                   {Array.isArray(caseRow.fraud_indicators) && caseRow.fraud_indicators.length > 0 ? (
@@ -420,7 +423,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                       {(caseRow.fraud_indicators as Array<{ type: string; description: string }>).map(
                         (indicator, i) => (
                           <li key={i} className="flex items-start gap-2 text-sm">
-                            <span className={`mt-0.5 shrink-0 text-xs font-mono rounded px-1.5 py-0.5 ${
+                            <span className={`mt-0.5 shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 font-mono text-[11px] ${
                               caseRow.fraud_risk_level === "high"
                                 ? "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200"
                                 : "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
@@ -439,16 +442,28 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
               )}
 
               {/* Section B: Field confirmations panel (AC21) */}
-              <PanelSection id="field-confirmations" titulo={
-                <>
-                  {t("case.detail.fieldConfirmations")}
-                  {confirmations.filter((c) => c.status === "pending").length > 0 && (
-                    <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                      {confirmations.filter((c) => c.status === "pending").length} {t("case.detail.pendingCount")}
-                    </span>
-                  )}
-                </>
-              }>
+              {/*
+                * El contador de pendientes pasa de estar DENTRO del título a ser
+                * el accesorio de la sección.
+                *
+                * No es cosmético: metido en el `<h2>` formaba parte del nombre
+                * accesible, así que un lector de pantalla anunciaba la sección
+                * como «Confirmaciones de campos 3 pendientes» y el nombre
+                * cambiaba cada vez que alguien confirmaba uno. Como accesorio se
+                * ve igual y la sección conserva un nombre estable.
+                */}
+              <PanelSection
+                id="field-confirmations"
+                titulo={t("case.detail.fieldConfirmations")}
+                accesorio={
+                  confirmations.filter((c) => c.status === "pending").length > 0 ? (
+                    <Pill tone="espera">
+                      {confirmations.filter((c) => c.status === "pending").length}{" "}
+                      {t("case.detail.pendingCount")}
+                    </Pill>
+                  ) : undefined
+                }
+              >
                 <FieldConfirmationsPanel
                   caseId={caseRow.id}
                   initialConfirmations={confirmations}
@@ -463,7 +478,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
               {/* Section D: Core sync action (AC17) */}
               {caseRow.status === "listo_para_core" && (
                 <PanelSection id="core-sync" tono="exito" titulo={t("case.detail.coreSyncAction")}>
-                  <p className="text-sm text-emerald-700 mb-4">
+                  <p className="mb-4 text-[13.5px] text-emerald-700">
                     {t("case.detail.coreReadyDescription")}
                   </p>
                   <CoreSyncButton
@@ -515,7 +530,7 @@ function RawEmailAccordion({
 
   if (!messages || messages.length === 0) {
     return (
-      <p className="text-sm text-slate-400">{t("case.detail.noRawEmail")}</p>
+      <p className="text-[13.5px] text-slate-400">{t("case.detail.noRawEmail")}</p>
     );
   }
 
@@ -528,10 +543,10 @@ function RawEmailAccordion({
         ) => (
           <details
             key={idx}
-            className="group rounded-lg border border-slate-200"
+            className="group rounded-xl border border-slate-200"
           >
-            <summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-lg select-none list-none">
-              <span>
+            <summary className="flex cursor-pointer select-none list-none items-center justify-between gap-3 rounded-xl px-4 py-3 text-[13.5px] font-medium text-slate-700 hover:bg-slate-50">
+              <span className="min-w-0 truncate">
                 {msg.subject
                   ? `${t("messages.thread.subject")}: ${msg.subject}`
                   : t("case.detail.rawEmailToggle")}
@@ -540,7 +555,7 @@ function RawEmailAccordion({
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 20 20"
                 fill="currentColor"
-                className="w-4 h-4 text-slate-400 transition-transform group-open:rotate-180"
+                className="h-4 w-4 flex-shrink-0 text-slate-400 transition-transform group-open:rotate-180"
                 aria-hidden="true"
               >
                 <path
@@ -550,7 +565,7 @@ function RawEmailAccordion({
                 />
               </svg>
             </summary>
-            <pre className="px-4 pb-4 pt-2 text-xs text-slate-600 whitespace-pre-wrap font-mono leading-relaxed border-t border-slate-100">
+            <pre className="overflow-x-auto whitespace-pre-wrap border-t border-slate-100 px-4 pb-4 pt-3 font-mono text-[12px] leading-relaxed text-slate-600">
               {msg.body}
             </pre>
           </details>

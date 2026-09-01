@@ -13,6 +13,28 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { SourceBadge } from "../../src/app/(app)/bandeja/components/SourceBadge";
+import { StatusBadge } from "../../src/app/(app)/bandeja/components/StatusBadge";
+import { SeverityBadge } from "../../src/app/(app)/bandeja/components/SeverityBadge";
+import type { CaseStatus, Severity } from "../../src/lib/schemas/cases";
+
+/** Los trece estados y las cuatro severidades: todas las variantes, no una muestra. */
+const STATUS_VALUES: CaseStatus[] = [
+  "procesando",
+  "listo",
+  "esperando",
+  "escalado",
+  "cerrado",
+  "recibido",
+  "info_faltante",
+  "confirmacion_pendiente",
+  "requiere_especialista",
+  "listo_para_core",
+  "enviado_a_core",
+  "error_core",
+  "no_relevante",
+];
+
+const SEVERITY_VALUES: Severity[] = ["low", "medium", "high", "critical"];
 import { CasesTable } from "../../src/app/(app)/bandeja/components/CasesTable";
 import type { CaseRow } from "../../src/server/cases/list";
 
@@ -44,9 +66,10 @@ describe("SourceBadge", () => {
     expect(badge.className).toContain("bg-blue-50");
     expect(badge.className).toContain("text-blue-700");
 
-    // StatusBadge uses bg-blue-100 text-blue-800 for "procesando" — NOT bg-blue-50
+    // El azul es exclusivo de esta insignia: ninguna de las otras dos lo usa.
+    // Quien lo verifica de verdad es el test de colisión de más abajo, que
+    // compara contra lo que las otras insignias pintan HOY.
     expect(badge.className).not.toContain("bg-blue-100");
-    expect(badge.className).not.toContain("text-blue-800");
   });
 
   // AC18 — Sim palette: bg-slate-200 + text-slate-600
@@ -56,53 +79,88 @@ describe("SourceBadge", () => {
     expect(badge.className).toContain("bg-slate-200");
     expect(badge.className).toContain("text-slate-600");
 
-    // StatusBadge  uses bg-slate-100 text-slate-800 (cerrado) and bg-slate-100 text-slate-600 (no_relevante)
-    // SeverityBadge uses bg-slate-100 text-slate-700 (low)
-    // SourceBadge Sim uses bg-slate-200 — different from all StatusBadge/SeverityBadge bg tokens
+    // Las otras dos insignias usan `bg-slate-100` para su tono gris; ésta usa
+    // `bg-slate-200`, un escalón más oscuro, y ésa es toda la diferencia.
     expect(badge.className).not.toContain("bg-slate-100");
-    // Text class text-slate-600 appears on StatusBadge no_relevante, but the COMBINED
-    // class string "bg-slate-200 text-slate-600" is not present in any other badge.
-    // The AC18 requirement says "class combo" — bg-slate-200 is unique to SourceBadge.
   });
 
-  // AC18 — comprehensive check: no StatusBadge-specific background colors leak in
-  it("AC18: SourceBadge does not use StatusBadge background colors", () => {
-    const statusBadgeBgs = [
-      "bg-green-100",
-      "bg-yellow-100",
-      "bg-red-100",
-      "bg-blue-100",
-      "bg-sky-100",
-      "bg-amber-100",
-      "bg-orange-100",
-      "bg-rose-100",
-      "bg-emerald-100",
-      "bg-teal-100",
+  /*
+   * AC18, comprobado contra la realidad y no contra una copia.
+   *
+   * Acá había dos tests que enumeraban a mano los colores que ELLOS CREÍAN que
+   * usaban StatusBadge y SeverityBadge —`bg-green-100`, `bg-teal-100`,
+   * `bg-rose-100`…— y verificaban que SourceBadge no usara ninguno.
+   *
+   * Ese trato tiene el problema de siempre con las listas copiadas: cuando la
+   * paleta de las otras dos insignias cambió, la lista quedó describiendo
+   * colores que ya nadie usa. Y lo peor no es que quedara vieja sino que seguía
+   * pasando en verde: comprobaba que SourceBadge no chocara con la paleta de
+   * ANTEAYER, mientras que un choque con la de hoy pasaba sin que nadie lo vea.
+   *
+   * Lo que va en su lugar renderiza las tres insignias, todas sus variantes, y
+   * exige que no haya dos que pinten lo mismo. Es la invariante que AC18 quería
+   * —que se distingan de un vistazo— y no hay nada que mantener sincronizado:
+   * si mañana alguien le pone a un estado el azul de Gmail, esto se pone rojo
+   * solo y dice cuáles dos chocaron.
+   */
+  it("AC18: ninguna de las tres insignias pinta igual que otra", () => {
+    const pintura = (el: Element) =>
+      (el as HTMLElement).className
+        .split(/\s+/)
+        .filter((c) => /^(bg|text)-[a-z]+-\d{2,3}$/.test(c))
+        .sort()
+        .join(" ");
+
+    const pinturasDe = (nodos: (Element | null)[]) => {
+      const set = new Set<string>();
+      for (const n of nodos) {
+        if (!n) continue; // El guion de «sin dato» no es una insignia.
+        const p = pintura(n);
+        if (p) set.add(p);
+      }
+      return set;
+    };
+
+    /*
+     * DENTRO de una familia repetir color es deliberado: los tres estados que
+     * piden una persona se ven igual justamente para que se lean como un grupo.
+     * Lo que AC18 pide es que no se confundan las FAMILIAS entre sí — que una
+     * severidad no se vea como un estado.
+     */
+    const estado = pinturasDe(
+      STATUS_VALUES.map(
+        (v) => render(<StatusBadge status={v} />).container.firstElementChild
+      )
+    );
+    const severidad = pinturasDe(
+      SEVERITY_VALUES.map(
+        (v) => render(<SeverityBadge severity={v} />).container.firstElementChild
+      )
+    );
+    const fuente = pinturasDe(
+      (["email", "email_sim"] as const).map(
+        (v) => render(<SourceBadge channel={v} />).container.firstElementChild
+      )
+    );
+
+    // Que haya algo que comparar: si `pintura` dejara de encontrar clases, los
+    // tres conjuntos quedarían vacíos y no chocar sería trivialmente cierto.
+    expect(estado.size).toBeGreaterThan(0);
+    expect(severidad.size).toBeGreaterThan(0);
+    expect(fuente.size).toBeGreaterThan(0);
+
+    const pares: [string, Set<string>, string, Set<string>][] = [
+      ["estado", estado, "severidad", severidad],
+      ["estado", estado, "fuente", fuente],
+      ["severidad", severidad, "fuente", fuente],
     ];
 
-    for (const channel of ["email", "email_sim"] as const) {
-      const { container } = render(<SourceBadge channel={channel} />);
-      const badge = container.firstElementChild as HTMLElement;
-      for (const cls of statusBadgeBgs) {
-        expect(badge.className).not.toContain(cls);
-      }
-    }
-  });
-
-  // AC18 — no SeverityBadge-specific background colors leak in
-  it("AC18: SourceBadge does not use SeverityBadge background colors", () => {
-    const severityBadgeBgs = [
-      "bg-yellow-100",
-      "bg-orange-100",
-      "bg-red-100",
-    ];
-
-    for (const channel of ["email", "email_sim"] as const) {
-      const { container } = render(<SourceBadge channel={channel} />);
-      const badge = container.firstElementChild as HTMLElement;
-      for (const cls of severityBadgeBgs) {
-        expect(badge.className).not.toContain(cls);
-      }
+    for (const [nombreA, a, nombreB, b] of pares) {
+      const chocan = [...a].filter((p) => b.has(p));
+      expect(
+        chocan,
+        `${nombreA} y ${nombreB} pintan igual: ${chocan.join(" | ")}`
+      ).toEqual([]);
     }
   });
 

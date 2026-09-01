@@ -9,6 +9,7 @@
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useFilterParam } from "./useFilterParam";
+import { CHIP_BASE, claseChip, ROTULO_GRUPO } from "./chip";
 import { useCallback } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { Severity } from "@/lib/schemas/cases";
@@ -42,9 +43,9 @@ export function ChannelFilterChips({ activeChannel }: ChannelFilterChipsProps) {
     <div
       role="group"
       aria-label={t("filter.channel")}
-      className="flex items-center gap-1.5 flex-wrap"
+      className="flex flex-wrap items-center gap-1"
     >
-      <span className="text-xs text-slate-500 font-medium mr-1">
+      <span className={ROTULO_GRUPO}>
         {t("filter.channel")}:
       </span>
       {CHANNEL_CHIPS.map(({ key, label }) => {
@@ -55,12 +56,7 @@ export function ChannelFilterChips({ activeChannel }: ChannelFilterChipsProps) {
             key={key}
             onClick={() => handleClick(key)}
             aria-pressed={isActive}
-            className={[
-              "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400",
-              isActive
-                ? "bg-violet-600 text-white"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900",
-            ].join(" ")}
+            className={claseChip(isActive)}
           >
             {label}
           </button>
@@ -92,35 +88,21 @@ export function SeverityFilterChips({
   const t = useT();
   const setFilter = useFilterParam();
 
-  const SEVERITY_CHIPS: { key: SeverityFilter; label: string; color: string }[] =
-    [
-      {
-        key: "todos",
-        label: t("filter.todos"),
-        color:
-          "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900",
-      },
-      {
-        key: "low",
-        label: t("severity.low"),
-        color: "bg-slate-100 text-slate-600 hover:bg-slate-200",
-      },
-      {
-        key: "medium",
-        label: t("severity.medium"),
-        color: "bg-yellow-50 text-yellow-800 hover:bg-yellow-100",
-      },
-      {
-        key: "high",
-        label: t("severity.high"),
-        color: "bg-orange-50 text-orange-800 hover:bg-orange-100",
-      },
-      {
-        key: "critical",
-        label: t("severity.critical"),
-        color: "bg-red-50 text-red-800 hover:bg-red-100",
-      },
-    ];
+  /*
+   * Los cinco chips ya no traen cada uno su color de reposo.
+   *
+   * Lo traian —gris, gris, amarillo, naranja, rojo— y el resultado era que la
+   * rampa entera estaba encendida todo el tiempo, con lo cual no se distinguia
+   * cual estaba elegido: los cinco se veian igual de "puestos". Ahora en reposo
+   * son texto, y el color aparece solo en el que esta filtrando.
+   */
+  const SEVERITY_CHIPS: { key: SeverityFilter; label: string }[] = [
+    { key: "todos", label: t("filter.todos") },
+    { key: "low", label: t("severity.low") },
+    { key: "medium", label: t("severity.medium") },
+    { key: "high", label: t("severity.high") },
+    { key: "critical", label: t("severity.critical") },
+  ];
 
   const handleClick = useCallback(
       (severity: SeverityFilter) => {
@@ -133,12 +115,12 @@ export function SeverityFilterChips({
     <div
       role="group"
       aria-label={t("filter.severity")}
-      className="flex items-center gap-1.5 flex-wrap"
+      className="flex flex-wrap items-center gap-1"
     >
-      <span className="text-xs text-slate-500 font-medium mr-1">
+      <span className={ROTULO_GRUPO}>
         {t("filter.severity")}:
       </span>
-      {SEVERITY_CHIPS.map(({ key, label, color }) => {
+      {SEVERITY_CHIPS.map(({ key, label }) => {
         const isActive =
           key === "todos" ? !activeSeverity : activeSeverity === key;
         return (
@@ -146,10 +128,17 @@ export function SeverityFilterChips({
             key={key}
             onClick={() => handleClick(key)}
             aria-pressed={isActive}
-            className={[
-              "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400",
-              isActive ? SEVERITY_ACTIVE[key] : color,
-            ].join(" ")}
+            className={
+              /*
+               * La severidad es el unico grupo que NO usa el violeta al estar
+               * activo: el chip se pinta del color de su nivel, porque eso es
+               * justamente lo que se esta filtrando. Inactivo se comporta como
+               * todos los demas.
+               */
+              isActive
+                ? `${CHIP_BASE} ${SEVERITY_ACTIVE[key]}`
+                : claseChip(false)
+            }
           >
             {label}
           </button>
@@ -188,9 +177,9 @@ export function IsClaimFilterChips({ activeIsClaim }: IsClaimFilterChipsProps) {
     <div
       role="group"
       aria-label={t("filter.isClaim")}
-      className="flex items-center gap-1.5 flex-wrap"
+      className="flex flex-wrap items-center gap-1"
     >
-      <span className="text-xs text-slate-500 font-medium mr-1">
+      <span className={ROTULO_GRUPO}>
         {t("filter.isClaim")}:
       </span>
       {IS_CLAIM_CHIPS.map(({ key, label }) => {
@@ -201,12 +190,7 @@ export function IsClaimFilterChips({ activeIsClaim }: IsClaimFilterChipsProps) {
             key={key}
             onClick={() => handleClick(key)}
             aria-pressed={isActive}
-            className={[
-              "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400",
-              isActive
-                ? "bg-violet-600 text-white"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900",
-            ].join(" ")}
+            className={claseChip(isActive)}
           >
             {label}
           </button>

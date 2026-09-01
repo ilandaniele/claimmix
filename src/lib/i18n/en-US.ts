@@ -312,7 +312,8 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Bandeja filter labels ───────────────────────────────────────────────────
   "filter.channel": "Channel",
   "filter.severity": "Severity",
-  "filter.isClaim": "Type",
+  // Was "Type", colliding with the claim-type chips above. See the es-AR note.
+  "filter.isClaim": "Relevance",
   "filter.todos": "All",
   "filter.reclamos": "Claims",
   "filter.no_relevantes": "Not relevant",
@@ -427,4 +428,9 @@ export const enUS: Record<TranslationKey, string> = {
   "clientes.detail.policyStatus": "Status",
   "clientes.detail.validFrom": "Valid from",
   "clientes.detail.validTo": "Valid to",
+  // Inbox KPI tiles — see the es-AR note.
+  "kpi.total": "Total cases",
+  "kpi.criticalHint": "Need a person",
+  "kpi.criticalNone": "None open",
+  "kpi.pendingHint": "Waiting on the claimant",
 } as const;

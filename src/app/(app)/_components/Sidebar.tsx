@@ -36,12 +36,18 @@ function NavLink({ href, label, icon: Icon, disabled, disabledReason }: NavItemD
         aria-disabled="true"
         title={disabledReason}
         /*
-         * `dark:text-slate-600` no se puede perder acá.
+         * El ítem deshabilitado tiene que verse MENOS que los habilitados, y
+         * durante un tiempo se vio más.
          *
-         * Lo saqué al simplificar las clases y en modo oscuro el ítem
-         * DESHABILITADO pasó a verse más brillante que los habilitados: nada en
-         * `globals.css` pisa `text-slate-300`, así que se quedaba claro sobre
-         * fondo oscuro. Se vio en una captura; leyendo el diff no se nota.
+         * La causa no estaba acá: `dark:text-slate-600` estaba escrito, pero el
+         * variante `dark:` de Tailwind seguía al tema del SISTEMA y no a la
+         * clase `.dark` que pone el botón del producto, así que en una máquina
+         * con el sistema en claro no llegaba nunca y quedaba el
+         * `text-slate-300` del modo claro: gris clarito sobre fondo oscuro.
+         *
+         * Se arregló en `globals.css` con `@custom-variant dark`, que es de
+         * dónde salía el problema. Las dos clases de acá son correctas y ahora
+         * además se aplican.
          */
         className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-slate-300 dark:text-slate-600"
       >

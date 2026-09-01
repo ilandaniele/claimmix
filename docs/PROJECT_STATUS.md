@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-08-24. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-01. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -1218,6 +1218,133 @@ Y las dos decisiones de arquitectura:
   daño, pero no era lo que quise hacer. Para ensayar va `--env
   STAGING_DATABASE_URL`.
 
+### 🎨 El tablero, con el lenguaje visual de la referencia (2026-09-01)
+
+Se copió el lenguaje visual de un producto de referencia sobre las dos
+pantallas que se usan todo el día. **Sólo el diseño**: no cambió ningún
+control, ningún botón, ninguna consulta de negocio.
+
+**La bandeja** se veía como tres tarjetas mal apiladas, y por razones
+concretas:
+
+| qué pasaba | por qué se veía mal |
+|---|---|
+| El título estaba escrito **dos veces** — «Bandeja de siniestros» en la pantalla y otra vez adentro de la tarjeta | dos encabezados a diez centímetros, los dos con cara de ser el de la pantalla |
+| **Tres franjas de filtros**, cada una con su `border-b` y su `bg-white`, adentro de una tarjeta que ya tenía fondo y borde | tres líneas duras cruzando algo redondeado |
+| Veinte chips, **todos rellenos de gris** salvo el activo | el elegido tenía que pelear por destacarse contra diecinueve iguales |
+| «Martín Ezequiel Rodríguez» se partía en **tres líneas** | la fila pasaba de 44 a 97 píxeles; con veinte filas, media pantalla de aire |
+| La hora en formato de 12 (`09:55 p. m.`) | cinco caracteres de más por fila, y con doce columnas eso empujaba «Asignación» fuera de la pantalla |
+
+Ahora: un encabezado que en vez de repetir el título dice **cuántos siniestros
+hay bajo los filtros puestos**, una sola franja de filtros, chips sin relleno
+salvo el elegido, nombre truncado con el completo en el `title`, y reloj de 24
+—que además es como se escribe la hora en Argentina—.
+
+**El detalle del caso** pasó a la grilla de rótulo-sobre-valor. La fila de
+metadatos era prosa con dos puntos —«Asignado a: Sin asignar   Creado: hace 3
+días»— o sea etiquetas y valores del mismo tamaño en la misma línea: para leer
+un dato había que leer los tres. `Field` sale como `<dt>`/`<dd>` adentro de un
+`<dl>`, así que un lector de pantalla dice «Póliza, ABC-123» en vez de dos
+textos sueltos.
+
+**La insignia de estado tenía trece colores, uno por estado.** Trece colores no
+informan: hay que leer la palabra igual, y mientras tanto la columna parece un
+semáforo roto. Ahora son **cinco tonos que contestan la única pregunta** que se
+hace alguien mirando la bandeja —¿esto me está esperando a mí?—: rojo pide una
+persona, ámbar espera al denunciante, violeta está en vuelo, verde salió bien,
+gris terminó. La palabra sigue distinguiendo los trece.
+
+#### El bug que sólo se ve en una máquina con el sistema en claro
+
+**El variante `dark:` de Tailwind seguía al tema del SISTEMA OPERATIVO, no a la
+clase `.dark` que pone el botón del producto.** En Tailwind v4 viene atado a
+`prefers-color-scheme` y hay que registrar `@custom-variant dark` para
+cambiarlo. Faltaba. Eran **255 clases `dark:` en 18 archivos** enganchadas al
+interruptor equivocado:
+
+- Con el sistema en claro, alguien toca la luna: la aplicación se pone oscura
+  —eso lo hacen los `!important` de `globals.css`— pero **ninguna clase `dark:`
+  se aplica**. Así se veía el ítem deshabilitado «Agente» del menú **más
+  brillante que los habilitados**: su `dark:text-slate-600` no llegaba nunca.
+- Y al revés: con el sistema en oscuro, alguien elige el tema claro y las
+  clases `dark:` se aplican igual, encima de una interfaz clara.
+
+Medido en las dos configuraciones antes de tocar nada: con el sistema en claro
+el ítem deshabilitado daba luminosidad **84,8** contra **49** de los
+habilitados; después del arreglo, **35,6**. En una máquina con el sistema en
+oscuro estaba todo bien, que es por lo que sobrevivió tanto tiempo.
+
+Faltaba además el override oscuro de `text-slate-300`: el guión de una celda
+vacía salía casi blanco sobre la tarjeta oscura, o sea que **la ausencia era lo
+más brillante de la tabla**.
+
+> Para el próximo: si una clase `dark:` no hace nada, mirá primero
+> `@custom-variant dark` en `globals.css`, no el componente.
+
+#### El buscador del padrón seguía roto un piso más abajo
+
+El hallazgo del 31-ago —la caja decía «nombre, DNI o email» y se buscaba sólo
+por nombre— se arregló **dentro del componente**, escribiendo una segunda
+consulta a mano. Abajo seguía `listCustomers` —el módulo extraído justamente
+para poder probar el filtro sin fabricar una petición HTTP— con el
+`ilike(full_name)` de siempre. Y es el que sirve `/api/customers`.
+
+O sea que `GET /api/customers?search=27654321` contestaba «no hay clientes»:
+**el mismo defecto, en el camino que no se miró**.
+
+Las dos copias además ya habían divergido en otra cosa: la de la pantalla
+armaba el patrón LIKE **sin escapar**. `%` y `_` son comodines, así que buscar
+«_» devolvía el padrón entero. Medido contra la base de ensayo: pasa de traer 3
+de 3 a traer 0, y «100%» encuentra al cliente que de verdad se llama así.
+
+Ahora las dos entran por `armarFiltroDeBusqueda`, y la pantalla deja de hacer
+dos viajes a la base.
+
+#### Tres tests que pasaban en verde sin proteger nada
+
+- **`status-badge`** fijaba un matiz por estado para **cinco de los trece**. Eso
+  era una foto de la hoja de estilos, no una invariante: cualquier cambio de
+  paleta lo rompía sin que nada estuviera mal, y los otros ocho no los miraba
+  nadie. Ahora cubre los trece y prueba que el color **agrupe por urgencia**.
+  Suma un guardián que rechaza cualquier familia de color que `globals.css` no
+  pise en modo oscuro —comprobado con un mutante: se pone rojo nombrando el
+  archivo que hay que tocar—.
+- **`source-badge`** enumeraba a mano los colores que **creía** que usaban las
+  otras dos insignias. Cuando la paleta cambió, la lista quedó describiendo
+  colores que ya nadie usa, y **seguía pasando en verde**: comprobaba que no
+  hubiera choque con la paleta de anteayer. Ahora renderiza las tres familias y
+  exige que ninguna pinte igual que otra. **Encontró un choque de verdad al
+  primer intento**: la severidad crítica y el estado escalado quedaban
+  idénticos, en columnas contiguas.
+- **`busqueda-libre`** leía `clientes/page.tsx` **como texto** y buscaba tres
+  palabras adentro. Con la búsqueda mudada a una función común, ese grep habría
+  seguido en verde apuntando al archivo equivocado. Ahora arma la consulta con
+  `QueryBuilder` —sin conexión— y mira el SQL que sale. Tres mutantes probados,
+  cada uno cae en un test distinto.
+
+#### `browserslist`: dos avisos altos que llegan por Sentry
+
+CI se puso rojo, y no por lo pusheado: el único paso que falló fue
+`pnpm audit --audit-level=high --prod`, con dos avisos contra `browserslist`
+<=4.28.6 (GHSA-c83g-rgw3-j3cx, GHSA-73wf-gq98-2v4g) que entran por siete
+caminos abajo de `@sentry/nextjs`. No son alcanzables acá —`browserslist` corre
+en el build, no en el servidor— pero el portón existe para no tener que rehacer
+ese razonamiento cada vez. Un `override` más en la lista que ya existe para
+esto. Queda `4.28.8`, con una sola versión resuelta en el lock.
+
+#### Verificación
+
+`pnpm check` completo en verde, incluida la variante `--deep` que prueba R2 y
+el modelo de verdad (subida, lectura y borrado correctos; el modelo responde).
+Las tres capas: 2.657 unitarios, 12 conversaciones sin diferencias, y el smoke
+contra `production`. CI entero en verde después del arreglo de dependencias:
+los 11 jobs, E2E incluidos.
+
+Lo visual se verificó **mirando**, no leyendo el diff: capturas de las dos
+pantallas en claro y en oscuro, más una medición de los colores computados. El
+bug del ítem deshabilitado no se ve de ninguna otra forma — de hecho ya había
+sido «arreglado» antes en el componente, y el componente estaba bien.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada
@@ -1233,6 +1360,13 @@ Y las dos decisiones de arquitectura:
   valor de Vercel estuviera mal, el primer deploy lo dice —`DATABASE_URL_APP no
   autentica`— en vez de descubrirse cuando un analista abre la bandeja vacía.
 
+- **`main` acepta pushes que saltan la protección de rama** (2026-09-01). Los
+  tres pushes de hoy contestaron «10 of 10 required status checks are expected»
+  y pasaron igual. No es teórico: así llegó a producción un CI rojo —era la
+  auditoría de dependencias, se arregló enseguida, pero si hubiera sido un test
+  roto se desplegaba igual—. Se cierra de dos formas: trabajar con rama + PR, o
+  sacar el bypass en la configuración de la regla desde la UI de GitHub. Queda
+  a decisión tuya; por ahora se sigue pusheando a `main`.
 - **Los primeros caracteres de `STAGING_DATABASE_URL` quedaron en un transcripto**
   (2026-08-31). Al armar un script de verificación imprimí los primeros 30
   caracteres de la cadena, que incluyen cuatro de la contraseña. Es la base del

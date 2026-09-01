@@ -1376,6 +1376,17 @@ sido «arreglado» antes en el componente, y el componente estaba bien.
 - **La contraseña nueva de `claimmix_app` quedó impresa en el transcripto** de la
   sesión donde se rotó. Misma categoría que el token de WhatsApp y la clave de
   Google de más abajo: no se sabe filtrada, y ya no está sólo donde debería.
+- **`INTEGRATION_TEST_PASSWORD` se escribió en texto plano a un archivo**
+  (2026-09-01). Para entrar por el navegador y sacar capturas la extraje de
+  `.env.local` a un archivo del directorio temporal de la sesión. Después el
+  enfoque cambió —los guiones la leen de `.env.local` en memoria y nunca la
+  escriben— y el archivo quedó ahí sin usarse hasta que se borró al cerrar.
+
+  El riesgo concreto es bajo: es la cuenta sembrada de pruebas, no una de
+  cliente; el archivo vivió en la misma máquina donde ya está `.env.local`; y ya
+  no existe. Va anotado igual por la regla de arriba —lo que no se anota, no se
+  rota— y porque el modo correcto ya estaba disponible: no había ninguna razón
+  para que esa contraseña tocara el disco.
 - ~~**Write to it once, from a real phone and a real mailbox**~~ ✅ **DONE 2026-08-24.**
   See "The last metre" below: a real mail, two real WhatsApps and a real photograph,
   all answered. Do it again after the next change to the mailbox, the number or their

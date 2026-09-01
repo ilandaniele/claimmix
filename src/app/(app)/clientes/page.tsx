@@ -10,25 +10,25 @@
 import { Suspense } from "react";
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { eq, and, ilike, desc, count, or, sql } from "drizzle-orm";
-import { customers, users } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { users } from "@/lib/db/schema";
 import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import { redirect } from "next/navigation";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
-import { enTenant } from "@/data/scope";
-import { interpretarBusqueda } from "@/core/matching/busqueda-libre";
+import { listCustomers } from "@/server/customers/list";
 
-interface Customer {
-  id: string;
-  full_name: string;
-  dni: string | null;
-  email: string | null;
-  phone: string | null;
-  created_at: string;
-}
+/*
+ * La fila la define `listCustomers`, no esta pantalla.
+ *
+ * Había una interfaz `Customer` escrita acá que declaraba `created_at: string`
+ * cuando la columna vuelve como `Date | null`, y un `as Customer[]` más abajo
+ * que hacía pasar la mentira. `formatDate` acepta las dos formas, así que nunca
+ * se rompió — pero un cast que tapa una diferencia real es cómo se rompe el día
+ * que alguien le haga `.slice()` a esa fecha creyendo que es un texto.
+ */
 
 interface ClientesPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -79,47 +79,36 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
   if (!(CUSTOMER_PII_ROLES as string[]).includes(userRow.role)) redirect("/bandeja");
 
   const tenantId = userRow.tenant_id;
+
   /*
-   * El filtro por inquilino lo pone la base; acá sólo queda la búsqueda.
+   * La búsqueda la hace `listCustomers`, que es de donde también sale
+   * `/api/customers`.
    *
-   * Buscaba SÓLO por nombre, con la caja diciendo «Buscar por nombre, DNI o
-   * email...». Un especialista que escribía el DNI del asegurado —el dato que
-   * tiene a mano cuando lo llama por teléfono— recibía «no hay clientes», que es
-   * indistinguible de «esa persona no está en el padrón». La pantalla no
-   * fallaba: mentía.
+   * Acá vivía una segunda implementación, escrita a mano en el componente
+   * —`or(ilike(full_name), ilike(email), …)` más su propio conteo—. Es la que
+   * se arregló el día que la caja prometía «nombre, DNI o email» y se buscaba
+   * sólo por nombre; el módulo extraído, que se había extraído justamente para
+   * poder probar el filtro sin fabricar una petición HTTP, quedó atrás.
    *
-   * El DNI se compara con los dígitos pelados de los dos lados, como en el
-   * buscador de casos: el padrón guarda `27654321` y la persona escribe
-   * `27.654.321`.
+   * Dos implementaciones de la misma búsqueda no se quedan iguales, y éstas ya
+   * habían divergido en dos cosas:
+   *
+   *   · la API seguía buscando sólo por nombre;
+   *   · y esta pantalla armaba el patrón LIKE sin escapar, así que un `%` o un
+   *     `_` en lo que escribe la persona son comodines. Buscar «_» devolvía el
+   *     padrón entero. `ilikeAny` —que usa el módulo— escapa los tres.
+   *
+   * De paso, el conteo y la página dejan de ser dos viajes: `listCustomers`
+   * los manda en un solo lote, con el MISMO `where` para los dos —que es lo que
+   * evita que el paginador prometa páginas que no existen—.
    */
-  const termino = search ? interpretarBusqueda(search) : null;
-  const whereClause = termino
-    ? or(
-        ilike(customers.full_name, `%${termino.nombre}%`),
-        ilike(customers.email, `%${termino.nombre}%`),
-        ...(termino.dni
-          ? [sql`regexp_replace(coalesce(${customers.dni}, ''), '[^0-9]', '', 'g') = ${termino.dni}`]
-          : []),
-        ...(termino.email ? [sql`lower(${customers.email}) = ${termino.email}`] : [])
-      )
-    : undefined;
+  const { data: customersData, meta } = await listCustomers(
+    { tenantId },
+    { search, page, per_page: PER_PAGE }
+  );
 
-  const [[{ total }], customersData] = await Promise.all([
-    enTenant({ tenantId }, (db) =>
-      db.select({ total: count() }).from(customers).where(whereClause)
-    ),
-    enTenant({ tenantId }, (db) =>
-      db
-        .select({ id: customers.id, full_name: customers.full_name, dni: customers.dni, email: customers.email, phone: customers.phone, created_at: customers.created_at })
-        .from(customers)
-        .where(whereClause)
-        .orderBy(desc(customers.created_at))
-        .limit(PER_PAGE)
-        .offset((page - 1) * PER_PAGE)
-    ),
-  ]);
-
-  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const total = meta.total;
+  const totalPages = Math.max(1, meta.pages);
 
   return (
     <div className="flex flex-col h-full">
@@ -213,7 +202,7 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
                 </tr>
               </thead>
               <tbody>
-                {(customersData as Customer[]).map((customer) => (
+                {customersData.map((customer) => (
                   <tr
                     key={customer.id}
                     className="border-b border-slate-100 hover:bg-slate-50 transition-colors"

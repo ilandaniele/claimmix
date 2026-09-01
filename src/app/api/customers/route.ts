@@ -1,7 +1,8 @@
 /**
  * GET /api/customers — el padrón de clientes de la aseguradora de la sesión.
  *
- * Filtros: search (por nombre), dni, email. Paginado.
+ * Filtros: search (nombre, correo o DNI, como la caja de la pantalla), y
+ * `dni` / `email` como coincidencia exacta. Paginado.
  *
  * Auth: rol con acceso a datos personales (owner / admin / especialista). Un
  * analista NO entra: acá salen DNI, correo y teléfono.

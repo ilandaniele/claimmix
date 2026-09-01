@@ -12,6 +12,13 @@
 
 import { describe, it, expect } from "vitest";
 
+import { QueryBuilder } from "drizzle-orm/pg-core";
+
+import { customers } from "@/lib/db/schema";
+import {
+  armarFiltroDeBusqueda,
+  type CustomerQuery,
+} from "@/server/customers/list";
 import { interpretarBusqueda } from "@/core/matching/busqueda-libre";
 
 describe("interpretarBusqueda", () => {
@@ -59,21 +66,82 @@ describe("interpretarBusqueda", () => {
   });
 });
 
-describe("la pantalla usa los tres modos", () => {
-  it("la consulta compara el DNI con los dígitos pelados de los dos lados", async () => {
-    /*
-     * Afirmación sobre el código, y lo digo: montar un componente de servidor de
-     * Next con su sesión, su rol y su base pediría más andamio que producto. Lo
-     * que esto impide es lo que efectivamente pasaba — que la consulta mire sólo
-     * `full_name` mientras la caja promete tres modos.
-     */
-    const fuente = await import("node:fs").then((fs) =>
-      fs.readFileSync("src/app/(app)/clientes/page.tsx", "utf8")
-    );
+describe("el padrón se busca por los tres modos", () => {
+  /*
+   * Antes esto leía `clientes/page.tsx` como texto y buscaba tres palabras
+   * adentro. Era una afirmación sobre el código, y el propio test lo decía:
+   * montar un componente de servidor de Next con su sesión, su rol y su base
+   * pedía más andamio que producto.
+   *
+   * Ya no hace falta. La búsqueda se mudó a `listCustomers`, que es una función
+   * común —fue extraída justamente para poder probar el filtro sin fabricar una
+   * petición HTTP— así que se puede mirar el SQL que sale, que es lo que
+   * importa. Un grep del archivo equivocado pasa en verde con la búsqueda rota;
+   * esto no.
+   *
+   * `QueryBuilder` arma la consulta sin conexión: no hay base de por medio.
+   */
+  const sqlDe = (query: Partial<CustomerQuery>) => {
+    const { sql: texto, params } = new QueryBuilder()
+      .select()
+      .from(customers)
+      .where(armarFiltroDeBusqueda({ page: 1, per_page: 25, ...query }))
+      .toSQL();
+    return { texto, params };
+  };
 
-    expect(fuente).toContain("interpretarBusqueda");
-    expect(fuente).toContain("regexp_replace");
-    expect(fuente).toContain("customers.email");
+  it("un DNI escrito con puntos compara los dígitos pelados de los dos lados", () => {
+    const { texto, params } = sqlDe({ search: "27.654.321" });
+
+    // El padrón guarda `27654321`; sin el `regexp_replace` no empareja nada.
+    expect(texto).toContain("regexp_replace");
+    expect(params).toContain("27654321");
+  });
+
+  it("el correo se busca por igualdad además de por subcadena", () => {
+    const { texto, params } = sqlDe({ search: "ana@empresa.com" });
+
+    expect(texto.toLowerCase()).toContain("lower");
+    expect(params).toContain("ana@empresa.com");
+  });
+
+  it("busca en la columna de correo, no sólo en la de nombre", () => {
+    const { texto } = sqlDe({ search: "ana" });
+
+    // Dos ILIKE: uno por nombre y otro por correo. Con uno solo, escribir parte
+    // de una dirección no encuentra a nadie.
+    expect(texto.match(/ilike/gi) ?? []).toHaveLength(2);
+  });
+
+  it("«Ana» no se toma por un documento", () => {
+    const { texto } = sqlDe({ search: "Ana" });
+
+    /*
+     * Si «Ana» normalizara a la cadena vacía y entrara igual a la comparación de
+     * documento, devolvería a toda persona con el DNI en blanco: en vez de no
+     * encontrar a nadie, encontraríamos a cualquiera.
+     */
+    expect(texto).not.toContain("regexp_replace");
+  });
+
+  it("los comodines de LIKE que escribe la persona se escapan", () => {
+    const { params } = sqlDe({ search: "100%" });
+
+    /*
+     * Sin escapar, `%` empareja cualquier cosa y `_` cualquier carácter: buscar
+     * «_» devuelve el padrón entero. Y quien busca no tiene forma de saber que
+     * le contestaron cualquier cosa.
+     *
+     * Esto se rompió de verdad: la pantalla armaba el patrón a mano mientras el
+     * módulo extraído usaba `ilikeAny`, que sí escapa. Dos implementaciones de
+     * la misma búsqueda, y sólo una escapaba.
+     */
+    expect(params).toContain("%100\\%%");
+  });
+
+  it("una caja vacía no arma ningún filtro", () => {
+    expect(armarFiltroDeBusqueda({ page: 1, per_page: 25 })).toBeUndefined();
+    expect(armarFiltroDeBusqueda({ page: 1, per_page: 25, search: "   " })).toBeUndefined();
   });
 
   it("y el texto de la caja sigue prometiendo los tres", async () => {

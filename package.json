@@ -50,6 +50,7 @@
     "busqueda": "tsx --tsconfig tsconfig.rehearsal.json scripts/medir-busqueda.mts",
     "explicar-busqueda": "tsx --tsconfig tsconfig.rehearsal.json scripts/explicar-busqueda.mts",
     "sembrar": "tsx --tsconfig tsconfig.rehearsal.json scripts/sembrar-para-integracion.mts",
+    "padron": "tsx --tsconfig tsconfig.rehearsal.json scripts/sembrar-padron.mts",
     "indices": "tsx --tsconfig tsconfig.rehearsal.json scripts/auditar-indices.mts",
     "rls-indices": "tsx --tsconfig tsconfig.rehearsal.json scripts/medir-rls-indices.mts",
     "peso": "node scripts/medir-peso.mjs",

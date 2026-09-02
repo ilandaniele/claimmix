@@ -26,7 +26,7 @@ const {
 function makeMockProvider(name: "gmail" = "gmail"): EmailProvider {
   return {
     name,
-    send: vi.fn<[SendEmailOptions], Promise<SendResult>>().mockResolvedValue({
+    send: vi.fn<(opciones: SendEmailOptions) => Promise<SendResult>>().mockResolvedValue({
       providerMessageId: "mock-provider-id",
     }),
   };

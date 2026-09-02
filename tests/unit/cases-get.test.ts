@@ -52,8 +52,8 @@ const mockCase = {
 };
 
 const mockExtractedFields = [
-  { id: "ef-1", case_id: "case-uuid-1", field_key: "date", field_value: "2024-01-15", confidence: 0.95 },
-  { id: "ef-2", case_id: "case-uuid-1", field_key: "location", field_value: "Av. Corrientes 1234", confidence: 0.88 },
+  { id: "ef-1", case_id: "case-uuid-1", field_key: "date", field_value: "2024-01-15", confidence: 0.95, source: "ai" as const },
+  { id: "ef-2", case_id: "case-uuid-1", field_key: "location", field_value: "Av. Corrientes 1234", confidence: 0.88, source: "ai" as const },
 ];
 
 const mockMissingDocs = [

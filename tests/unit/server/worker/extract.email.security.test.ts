@@ -188,6 +188,7 @@ import { db } from "@/lib/db";
 import { instalarDbSimulado } from "./db-simulado";
 import { scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ExtractedClaimSchema } from "@/lib/schemas/extracted-claim";
+import { extraccion } from "../../../helpers/extraccion";
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -222,7 +223,7 @@ describe("SEC-1: AC10 — prompt injection containment", () => {
     setupDbMock(injectionBody);
 
     // Model correctly identifies is_claim=true despite injection text
-    const claimResponse: ExtractedClaim = {
+    const claimResponse: ExtractedClaim = extraccion({
       extraction_model: "gpt-4o-mini",
       is_claim: true, // correct — the content IS a claim
       confidence: 0.92,
@@ -243,7 +244,7 @@ describe("SEC-1: AC10 — prompt injection containment", () => {
       prompt_tokens: 400,
       completion_tokens: 150,
       cost_usd: 0.00008,
-    };
+    });
     mockExtractEmailClaim.mockResolvedValue(claimResponse);
 
     await runEmailExtractionWorker("case-sec-001", "tenant-001", "user-001");
@@ -346,7 +347,7 @@ describe("SEC-2: AC11 — PII not present in summary after scrubbing", () => {
     mockFindCustomerMatches.mockResolvedValue([]);
     mockFindPolicyMatches.mockResolvedValue([]);
 
-    const claimWithPii: ExtractedClaim = {
+    const claimWithPii: ExtractedClaim = extraccion({
       extraction_model: "gpt-4o-mini",
       is_claim: true,
       confidence: 0.9,
@@ -365,7 +366,7 @@ describe("SEC-2: AC11 — PII not present in summary after scrubbing", () => {
       prompt_tokens: 100,
       completion_tokens: 50,
       cost_usd: 0.00002,
-    };
+    });
     mockExtractEmailClaim.mockResolvedValue(claimWithPii);
 
     const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {});

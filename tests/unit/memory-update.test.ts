@@ -98,7 +98,7 @@ function makeInsertChain() {
   const onConflictDoUpdate = vi.fn().mockResolvedValue([]);
   const onConflictDoNothing = vi.fn().mockResolvedValue([]);
   const valuesMock = vi.fn().mockReturnValue({ onConflictDoUpdate, onConflictDoNothing });
-  vi.mocked(db.insert).mockReturnValue({ values: valuesMock } as ReturnType<typeof db.insert>);
+  vi.mocked(db.insert).mockReturnValue({ values: valuesMock } as unknown as ReturnType<typeof db.insert>);
   return { valuesMock, onConflictDoUpdate, onConflictDoNothing };
 }
 
@@ -110,7 +110,7 @@ function makeSelectChain(rows: unknown[] = []) {
         limit: vi.fn().mockResolvedValue(rows),
       }),
     }),
-  } as ReturnType<typeof db.select>);
+  } as unknown as ReturnType<typeof db.select>);
   vi.mocked(firstRow).mockReturnValue(rows[0] ?? null);
 }
 

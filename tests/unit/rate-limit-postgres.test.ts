@@ -22,6 +22,7 @@ vi.mock("server-only", () => ({}));
 import { checkRateLimitPostgres, purgeExpiredRateLimits } from "@/lib/rate-limit/postgres";
 import { resolveProvider } from "@/lib/rate-limit/index";
 
+
 const SAVED = { ...process.env };
 
 beforeEach(() => {
@@ -106,13 +107,13 @@ describe("purgeExpiredRateLimits", () => {
 
 describe("resolveProvider", () => {
   it("en los tests usa memoria: son sobre la lógica, no sobre la base", () => {
-    process.env.NODE_ENV = "test";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "test";
     delete process.env.RATE_LIMIT_PROVIDER;
     expect(resolveProvider()).toBe("memory");
   });
 
   it("en producción usa la base, que es lo único compartido", () => {
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     process.env.DATABASE_URL = "postgres://…";
     delete process.env.RATE_LIMIT_PROVIDER;
     expect(resolveProvider()).toBe("postgres");
@@ -129,7 +130,7 @@ describe("resolveProvider", () => {
    * grita.
    */
   it("sin base cae a memoria, y lo dice", () => {
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     delete process.env.DATABASE_URL;
     delete process.env.RATE_LIMIT_PROVIDER;
     const grito = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -148,7 +149,7 @@ describe("resolveProvider", () => {
   it("forzar memoria en producción también avisa", () => {
     // Es la otra forma de llegar al mismo lugar, y la más fácil de hacer sin
     // querer: alguien pone la variable para una prueba y queda.
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     process.env.DATABASE_URL = "postgres://…";
     process.env.RATE_LIMIT_PROVIDER = "memory";
     const grito = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -160,7 +161,7 @@ describe("resolveProvider", () => {
 
   it("con base en producción no molesta a nadie", () => {
     // La otra mitad: un aviso que salta siempre se aprende a ignorar.
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     process.env.DATABASE_URL = "postgres://…";
     delete process.env.RATE_LIMIT_PROVIDER;
     const grito = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -171,7 +172,7 @@ describe("resolveProvider", () => {
   });
 
   it("en desarrollo tampoco: ahí memoria es lo correcto", () => {
-    process.env.NODE_ENV = "development";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "development";
     delete process.env.DATABASE_URL;
     delete process.env.RATE_LIMIT_PROVIDER;
     const grito = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -182,7 +183,7 @@ describe("resolveProvider", () => {
   });
 
   it("se puede forzar", () => {
-    process.env.NODE_ENV = "test";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "test";
     process.env.RATE_LIMIT_PROVIDER = "upstash";
     expect(resolveProvider()).toBe("upstash");
   });

@@ -11,7 +11,7 @@
  * así que esto se importa y no se corre solo.
  */
 
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 
 export interface FilaDeCaso {
   id: string;
@@ -54,7 +54,7 @@ export function filaDeCaso(
  */
 export function dbSimulado(
   fila: FilaDeCaso,
-  espiaDeUpdate: ReturnType<typeof vi.fn>
+  espiaDeUpdate: Mock<(data: Record<string, unknown>) => void>
 ) {
   let n = 0;
 
@@ -92,7 +92,7 @@ export function dbSimulado(
   });
 
   const cadenaUpdate = {
-    set: vi.fn().mockImplementation((data: Record<string, unknown>) => {
+    set: vi.fn<(data: Record<string, unknown>) => unknown>().mockImplementation((data: Record<string, unknown>) => {
       espiaDeUpdate(data);
       return {
         where: vi.fn().mockResolvedValue([]),
@@ -148,7 +148,7 @@ export interface OpcionesDelExtractor {
  */
 export function registrarMocks(opciones: {
   fila: FilaDeCaso;
-  espiaDeUpdate: ReturnType<typeof vi.fn>;
+  espiaDeUpdate: Mock<(data: Record<string, unknown>) => void>;
   espiaDeAuditoria?: ReturnType<typeof vi.fn>;
   necesitaEspecialista?: boolean;
   /** Reemplaza el mock de `isValidTransition`. Por omisión, todo vale. */
@@ -266,7 +266,7 @@ export function registrarMocks(opciones: {
 
 /** El `status` que quedó escrito en el caso, de todo lo que se haya escrito. */
 export function statusEscrito(
-  espiaDeUpdate: ReturnType<typeof vi.fn>
+  espiaDeUpdate: Mock<(data: Record<string, unknown>) => void>
 ): string | undefined {
   const conStatus = espiaDeUpdate.mock.calls
     .map((c) => c[0] as Record<string, unknown>)

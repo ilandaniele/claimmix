@@ -121,7 +121,6 @@ function makeContext(caseId = CASE_ID) {
  */
 function setupAuth(role: string = "analyst") {
   vi.mocked(requireRole).mockResolvedValue({
-    db: db as any,
     user: { id: USER_ID, email: "test@example.com" },
     userRow: { id: USER_ID, tenant_id: TENANT_ID, role: role as any },
   });

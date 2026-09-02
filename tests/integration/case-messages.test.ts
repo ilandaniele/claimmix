@@ -116,7 +116,6 @@ function buildContext(id: string) {
  */
 function setupAuth() {
   vi.mocked(requireRole).mockResolvedValue({
-    db: db as any,
     user: { id: USER_ID, email: "test@example.com" },
     userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "analyst" },
   });

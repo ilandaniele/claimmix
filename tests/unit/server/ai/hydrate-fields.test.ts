@@ -13,11 +13,12 @@ import {
   scrubPiiFromSummary,
 } from "@/server/ai/hydrate-fields";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
+import { extraccion } from "../../../helpers/extraccion";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function makeClaim(overrides: Partial<ExtractedClaim> = {}): ExtractedClaim {
-  return {
+  return extraccion({
     extraction_model: "gpt-4o-mini",
     fields: [],
     prompt_tokens: 0,
@@ -37,7 +38,7 @@ function makeClaim(overrides: Partial<ExtractedClaim> = {}): ExtractedClaim {
     summary: "",
     suggested_reply: "",
     ...overrides,
-  };
+  });
 }
 
 // ── hydrateFieldsFromExtracted ─────────────────────────────────────────────────

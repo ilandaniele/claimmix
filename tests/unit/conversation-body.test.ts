@@ -134,7 +134,7 @@ describe("loadInboundConversation", () => {
       },
     ]);
 
-    const out = await loadInboundConversation("case-1", "tenant-1");
+    const out = await loadInboundConversation("case-1", { tenantId: "tenant-1" });
 
     expect(out?.body).toContain("Choqué en Bahía Blanca");
     expect(out?.body).toContain("[Imagen adjunta sin texto]");
@@ -145,12 +145,12 @@ describe("loadInboundConversation", () => {
 
   it("returns null when the case has no inbound messages", async () => {
     inboundRows([]);
-    expect(await loadInboundConversation("case-1", "tenant-1")).toBeNull();
+    expect(await loadInboundConversation("case-1", { tenantId: "tenant-1" })).toBeNull();
   });
 
   it("returns null rather than guessing when the read gives back nonsense", async () => {
     inboundRows({ notAnArray: true });
-    expect(await loadInboundConversation("case-1", "tenant-1")).toBeNull();
+    expect(await loadInboundConversation("case-1", { tenantId: "tenant-1" })).toBeNull();
   });
 });
 

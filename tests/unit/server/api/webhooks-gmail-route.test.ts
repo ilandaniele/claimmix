@@ -20,6 +20,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
+
 // ── Hoist mock factories ───────────────────────────────────────────────────────
 
 const { mockVerifyIdToken, MockOAuth2Client, mockPollGmail, mockGetGmailAccountByEmail } =
@@ -168,7 +169,7 @@ describe("POST /api/webhooks/gmail", () => {
   describe("sin PUBSUB_AUDIENCE, según el entorno", () => {
     it("en producción rechaza y NO lee la casilla", async () => {
       const anterior = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
+      (process.env as Record<string, string | undefined>).NODE_ENV = "production";
       delete process.env.PUBSUB_AUDIENCE;
       const grito = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -185,14 +186,14 @@ describe("POST /api/webhooks/gmail", () => {
       expect(linea.msg).toBe("webhooks.gmail.sin_audiencia_en_produccion");
 
       grito.mockRestore();
-      process.env.NODE_ENV = anterior;
+      (process.env as Record<string, string | undefined>).NODE_ENV = anterior;
     });
 
     it("fuera de producción sigue salteando, para poder probar local", async () => {
       // La otra mitad: una guarda que rechaza siempre también pasaría el test
       // de arriba, y dejaría el desarrollo sin forma de ejercer este flujo.
       const anterior = process.env.NODE_ENV;
-      process.env.NODE_ENV = "development";
+      (process.env as Record<string, string | undefined>).NODE_ENV = "development";
       delete process.env.PUBSUB_AUDIENCE;
 
       const { POST } = await import("@/app/api/webhooks/gmail/route");
@@ -201,7 +202,7 @@ describe("POST /api/webhooks/gmail", () => {
       expect(res.status).toBe(200);
       expect(mockPollGmail).toHaveBeenCalled();
 
-      process.env.NODE_ENV = anterior;
+      (process.env as Record<string, string | undefined>).NODE_ENV = anterior;
     });
   });
 

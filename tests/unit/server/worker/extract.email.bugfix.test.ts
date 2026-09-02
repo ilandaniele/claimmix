@@ -190,12 +190,13 @@ import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { db } from "@/lib/db";
 import { instalarDbSimulado } from "./db-simulado";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
+import { extraccion } from "../../../helpers/extraccion";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeBugPatternClaim(): ExtractedClaim {
   // BUG PATTERN: extracted_fields populated, fields[] empty
-  return {
+  return extraccion({
     extraction_model: "gpt-4o-mini",
     is_claim: true,
     confidence: 0.95,
@@ -233,7 +234,7 @@ function makeBugPatternClaim(): ExtractedClaim {
     prompt_tokens: 500,
     completion_tokens: 200,
     cost_usd: 0.0001,
-  };
+  });
 }
 
 function setupDbMock() {
@@ -360,7 +361,7 @@ describe("INT-2: Customer matcher receives full_name even when only in fields[]"
 
   it("customer matcher receives full_name when it is only in fields[] (not extracted_fields)", async () => {
     // Model returned full_name only in fields[], NOT in extracted_fields
-    const claimWithFieldsOnly: ExtractedClaim = {
+    const claimWithFieldsOnly: ExtractedClaim = extraccion({
       extraction_model: "gpt-4o-mini",
       is_claim: true,
       confidence: 0.92,
@@ -382,7 +383,7 @@ describe("INT-2: Customer matcher receives full_name even when only in fields[]"
       prompt_tokens: 300,
       completion_tokens: 100,
       cost_usd: 0.00005,
-    };
+    });
 
     mockExtractEmailClaim.mockResolvedValue(claimWithFieldsOnly);
 

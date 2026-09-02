@@ -27,7 +27,10 @@
         "./src/*"
       ]
     },
-    "types": []
+    "types": [
+      "vitest/globals",
+      "node"
+    ]
   },
   "include": [
     "next-env.d.ts",
@@ -39,7 +42,6 @@
   ],
   "exclude": [
     "node_modules",
-    "tests/**",
     "src/**/*.test.ts",
     "src/**/*.test.tsx"
   ]

@@ -151,7 +151,7 @@ function setupDbMocks({
    */
   newFactRows = [] as Array<{ id: string }>,
 } = {}) {
-  const mockDbTyped = db as MockDb;
+  const mockDbTyped = db as unknown as MockDb;
 
   // Track all insert .values() and update .where() calls for assertions.
   /*
@@ -775,6 +775,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
     const conflictingMatch: CustomerMatch = {
       customerId: "cust-001",
       matchType: "email",
+      storedValues: {},
       confidence: 0.75,
       customerName: "Juan Pérez",
       conflictsWithExtracted: ["full_name"],
@@ -830,6 +831,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
     const conflictingMatch: CustomerMatch = {
       customerId: "cust-002",
       matchType: "email",
+      storedValues: {},
       confidence: 0.75,
       customerName: "Juan Pérez",
       conflictsWithExtracted: ["full_name"],
@@ -872,6 +874,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
     const conflictingMatch: CustomerMatch = {
       customerId: "cust-003",
       matchType: "email",
+      storedValues: {},
       confidence: 0.75,
       customerName: "Juan Pérez",
       conflictsWithExtracted: ["full_name"],
@@ -916,6 +919,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
     const conflictingMatch: CustomerMatch = {
       customerId: "cust-004",
       matchType: "email",
+      storedValues: {},
       confidence: 0.75,
       customerName: "Juan Pérez",
       conflictsWithExtracted: ["full_name", "email", "dni"],
@@ -957,6 +961,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
         {
           customerId: "cust-005",
           matchType: "email",
+      storedValues: {},
           confidence: 0.75,
           customerName: "Juan Pérez",
           conflictsWithExtracted: ["full_name", "email", "dni"],
@@ -993,6 +998,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
         {
           customerId: "cust-006",
           matchType: "email",
+      storedValues: {},
           confidence: 0.9,
           customerName: "Juan Pérez",
           conflictsWithExtracted: ["full_name"],
@@ -1000,6 +1006,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
         {
           customerId: "cust-007",
           matchType: "dni",
+      storedValues: {},
           confidence: 0.6,
           customerName: "Otro Titular",
           conflictsWithExtracted: ["full_name"],
@@ -1049,6 +1056,7 @@ describe("orchestratePostExtraction — customer conflict (AC9)", () => {
         {
           customerId: "cust-008",
           matchType: "email",
+      storedValues: {},
           confidence: 0.9,
           customerName: "Juan Pérez",
           conflictsWithExtracted: ["full_name"],
@@ -1240,6 +1248,7 @@ const COINCIDENCIA_ALTA: CustomerMatch = {
   customerId: "customer-uuid-001",
   policyId: "policy-uuid-001",
   matchType: "policy_number",
+      storedValues: {},
   confidence: 0.95,
   customerName: "Juan Pérez",
   conflictsWithExtracted: [],
@@ -1417,7 +1426,7 @@ describe("orchestratePostExtraction — checkConfirmationAlreadySent error paths
   it("sends confirmation_received when outbound_messages DB check throws (fail open)", async () => {
     const claim = extractEmailClaimMock();
 
-    const mockDbTyped = db as MockDb;
+    const mockDbTyped = db as unknown as MockDb;
 
     // Override select to throw for outbound_messages queries.
     mockDbTyped.select.mockImplementation(() => ({
@@ -1501,6 +1510,7 @@ describe("orchestratePostExtraction — getStoredFieldValue non-full_name field"
     const conflictOnEmail: CustomerMatch = {
       customerId: "cust-004",
       matchType: "email",
+      storedValues: {},
       confidence: 0.75,
       customerName: "Ana García",
       conflictsWithExtracted: ["email"], // non-full_name conflict
@@ -2864,6 +2874,7 @@ describe("orchestratePostExtraction — el conflicto y el nombre del campo", () 
   const enConflicto: CustomerMatch = {
     customerId: "cust-dni",
     matchType: "email",
+      storedValues: {},
     confidence: 0.75,
     customerName: "Juan Pérez",
     // El buscador informa la clave CANÓNICA.

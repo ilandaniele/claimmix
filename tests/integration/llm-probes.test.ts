@@ -64,9 +64,9 @@ describe("LLM01 — Prompt injection containment", () => {
   it("gap analysis never recommends cerrado as status — FSM containment (LLM08)", () => {
     // Gap analysis can only return: listo | esperando | escalado.
     const allFields = [
-      { field_key: "parte_amistoso", field_value: "si", confidence: 0.90 },
-      { field_key: "fotos_danos", field_value: "si", confidence: 0.85 },
-      { field_key: "licencia_conducir", field_value: "si", confidence: 0.88 },
+      { field_key: "parte_amistoso", field_value: "si", confidence: 0.90, source: "ai" as const },
+      { field_key: "fotos_danos", field_value: "si", confidence: 0.85, source: "ai" as const },
+      { field_key: "licencia_conducir", field_value: "si", confidence: 0.88, source: "ai" as const },
     ];
 
     const result = analyzeGaps("choque", allFields, 0.70);
@@ -97,7 +97,7 @@ describe("LLM02 — Output schema validation", () => {
   it("ExtractedClaimSchema rejects confidence > 1.0", () => {
     const result = ExtractedClaimSchema.safeParse({
       extraction_model: "gpt-4o-mini",
-      fields: [{ field_key: "date", field_value: "2024-01-01", confidence: 1.5 }],
+      fields: [{ field_key: "date", field_value: "2024-01-01", confidence: 1.5, source: "ai" as const }],
       prompt_tokens: 0,
       completion_tokens: 0,
       cost_usd: 0,
@@ -108,7 +108,7 @@ describe("LLM02 — Output schema validation", () => {
   it("ExtractedClaimSchema rejects confidence < 0", () => {
     const result = ExtractedClaimSchema.safeParse({
       extraction_model: "gpt-4o-mini",
-      fields: [{ field_key: "date", field_value: "2024-01-01", confidence: -0.1 }],
+      fields: [{ field_key: "date", field_value: "2024-01-01", confidence: -0.1, source: "ai" as const }],
       prompt_tokens: 0,
       completion_tokens: 0,
       cost_usd: 0,
@@ -119,7 +119,7 @@ describe("LLM02 — Output schema validation", () => {
   it("ExtractedClaimSchema accepts valid extraction result", () => {
     const result = ExtractedClaimSchema.safeParse({
       extraction_model: "mock-v1",
-      fields: [{ field_key: "incident_date", field_value: "15/03/2024", confidence: 0.85 }],
+      fields: [{ field_key: "incident_date", field_value: "15/03/2024", confidence: 0.85, source: "ai" as const }],
       prompt_tokens: 0,
       completion_tokens: 0,
       cost_usd: 0,
@@ -169,14 +169,14 @@ describe("LLM08 — FSM containment", () => {
     const claimTypes = ["choque", "robo", "granizo", "incendio"] as const;
     const emptyFields: import("@/lib/schemas/extracted-claim").ExtractedField[] = [];
     const fullHighConf = [
-      { field_key: "parte_amistoso", field_value: "si", confidence: 0.95 },
-      { field_key: "fotos_danos", field_value: "si", confidence: 0.92 },
-      { field_key: "licencia_conducir", field_value: "si", confidence: 0.91 },
+      { field_key: "parte_amistoso", field_value: "si", confidence: 0.95, source: "ai" as const },
+      { field_key: "fotos_danos", field_value: "si", confidence: 0.92, source: "ai" as const },
+      { field_key: "licencia_conducir", field_value: "si", confidence: 0.91, source: "ai" as const },
     ];
     const fullLowConf = [
-      { field_key: "parte_amistoso", field_value: "si", confidence: 0.40 },
-      { field_key: "fotos_danos", field_value: "si", confidence: 0.35 },
-      { field_key: "licencia_conducir", field_value: "si", confidence: 0.45 },
+      { field_key: "parte_amistoso", field_value: "si", confidence: 0.40, source: "ai" as const },
+      { field_key: "fotos_danos", field_value: "si", confidence: 0.35, source: "ai" as const },
+      { field_key: "licencia_conducir", field_value: "si", confidence: 0.45, source: "ai" as const },
     ];
 
     const FORBIDDEN_STATUSES = ["cerrado", "procesando"];

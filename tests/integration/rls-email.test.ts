@@ -144,7 +144,6 @@ describe("AC19: Cross-tenant IDOR defense", () => {
     // requireRole returns tenant A context
     const { requireRole } = await import("@/lib/auth/require-role");
     vi.mocked(requireRole).mockResolvedValue({
-      db: db as any,
       user: { id: TENANT_A_USER.id },
       userRow: TENANT_A_USER,
     });
@@ -192,7 +191,6 @@ describe("AC19: Cross-tenant IDOR defense", () => {
     // requireRole returns tenant A context
     const { requireRole } = await import("@/lib/auth/require-role");
     vi.mocked(requireRole).mockResolvedValue({
-      db: db as any,
       user: { id: TENANT_A_USER.id },
       userRow: TENANT_A_USER,
     });

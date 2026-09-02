@@ -33,7 +33,7 @@ import { db } from "@/lib/db";
 describe("writeAuditLog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(db.insert).mockReturnValue({ values: mockValues } as ReturnType<typeof db.insert>);
+    vi.mocked(db.insert).mockReturnValue({ values: mockValues } as unknown as ReturnType<typeof db.insert>);
     mockValues.mockResolvedValue({ rowCount: 1 });
   });
 
@@ -93,7 +93,7 @@ describe("writeAuditLog", () => {
   it("does not throw when db.insert returns a rejected promise", async () => {
     vi.mocked(db.insert).mockReturnValue({
       values: vi.fn().mockRejectedValue(new Error("neon error")),
-    } as ReturnType<typeof db.insert>);
+    } as unknown as ReturnType<typeof db.insert>);
 
     await expect(
       writeAuditLog({

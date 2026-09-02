@@ -36,7 +36,7 @@ const STATUS_VALUES: CaseStatus[] = [
 
 const SEVERITY_VALUES: Severity[] = ["low", "medium", "high", "critical"];
 import { CasesTable } from "../../src/app/(app)/bandeja/components/CasesTable";
-import type { CaseRow } from "../../src/server/cases/list";
+import type { CaseRow } from "@/server/cases/list";
 
 // ── SourceBadge unit tests ────────────────────────────────────────────────────
 
@@ -217,7 +217,7 @@ function makeCase(overrides: Partial<CaseRow> = {}): CaseRow {
     policyholder_name: "Ana García",
     claim_type: "choque",
     status: "procesando",
-    confidence_min: 0.85,
+    confidence_min: "0.85",
     assigned_to: null,
     channel: "email",
     created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
@@ -275,7 +275,7 @@ describe("CasesTable — Fuente column", () => {
 
   it("renders '—' for null channel in CasesTable", () => {
     const { container } = render(
-      <CasesTable cases={[makeCase({ channel: null })]} />
+      <CasesTable cases={[makeCase({ channel: null as unknown as CaseRow["channel"] })]} />
     );
     // No source badge present
     expect(container.querySelector("[data-source]")).toBeNull();

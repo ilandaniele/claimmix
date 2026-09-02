@@ -33,10 +33,12 @@ const defaultProps = {
   onEscalate: vi.fn(),
   onTransition: vi.fn(),
   onError: vi.fn(),
+  onReAnalyze: vi.fn(),
+  reAnalyzing: false,
   dialogOpen: false,
 };
 
-function renderStatus(status: CaseStatus, overrides = {}) {
+function renderStatus(status: CaseStatus, overrides: Record<string, unknown> = {}) {
   return render(
     <StatusActions {...defaultProps} status={status} {...overrides} />
   );

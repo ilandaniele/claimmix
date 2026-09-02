@@ -24,7 +24,7 @@
  * still run against the live source — only coverage attribution is skipped.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 
 // ── Static module mocks ───────────────────────────────────────────────────────
@@ -198,6 +198,7 @@ import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
+import { extraccion } from "../helpers/extraccion";
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -216,7 +217,7 @@ type MockDb = {
  * The worker reads extractedClaim.extracted_fields for the field-copy logic.
  */
 function makeExtractedClaim(extractedFields: Record<string, string>): ExtractedClaim {
-  return {
+  return extraccion({
     extraction_model: "mock-email-v1",
     fields: [],
     prompt_tokens: 0,
@@ -235,7 +236,7 @@ function makeExtractedClaim(extractedFields: Record<string, string>): ExtractedC
     not_relevant_reason: undefined,
     summary: "Test extraction",
     suggested_reply: "",
-  };
+  });
 }
 
 /**
@@ -254,9 +255,9 @@ function makeExtractedClaim(extractedFields: Record<string, string>): ExtractedC
  */
 function buildDbMocks(
   caseRow: Record<string, unknown>,
-  caseUpdateSpy: ReturnType<typeof vi.fn>
+  caseUpdateSpy: Mock<(data: Record<string, unknown>) => void>
 ) {
-  const mockDbTyped = db as MockDb;
+  const mockDbTyped = db as unknown as MockDb;
 
   let selectCallCount = 0;
 
@@ -311,9 +312,9 @@ function buildDbMocks(
   });
 
   mockDbTyped.update.mockImplementation(() => ({
-    set: vi.fn().mockImplementation((payload: unknown) => ({
+    set: vi.fn<(payload: unknown) => unknown>().mockImplementation((payload: unknown) => ({
       where: vi.fn().mockImplementation(() => {
-        caseUpdateSpy(payload);
+        caseUpdateSpy(payload as Record<string, unknown>);
         return Promise.resolve(undefined);
       }),
     })),
@@ -355,7 +356,7 @@ async function runWorker(
   caseRow: Record<string, unknown>,
   extractedFields: Record<string, string>
 ): Promise<Array<Record<string, unknown>>> {
-  const caseUpdateSpy = vi.fn();
+  const caseUpdateSpy = vi.fn<(data: Record<string, unknown>) => void>();
   buildDbMocks(caseRow, caseUpdateSpy);
 
   // The worker calls extractEmailClaimMock() when engine === "mock".

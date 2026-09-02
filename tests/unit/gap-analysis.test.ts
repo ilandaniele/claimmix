@@ -14,7 +14,7 @@ import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 function field(key: string, value: string, confidence: number): ExtractedField {
-  return { field_key: key, field_value: value, confidence };
+  return { field_key: key, field_value: value, confidence, source: "ai" };
 }
 
 // ── choque ────────────────────────────────────────────────────────────────────

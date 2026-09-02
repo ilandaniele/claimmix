@@ -33,6 +33,7 @@ function situation(overrides: Partial<DeliberationInput> = {}): DeliberationInpu
 
 function plan(overrides: Partial<AgentPlan> = {}): AgentPlan {
   return {
+    lookupResults: [],
     intent: "ask",
     askFor: ["policy_number"],
     question: null,

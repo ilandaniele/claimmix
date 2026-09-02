@@ -81,7 +81,7 @@ describe("Gemini extractor request", () => {
   it("caps 429 retry wait at 10 seconds so function lifetime is not exceeded", async () => {
     // Arrange: Gemini returns 429 with retry-after: 3600 (daily quota exhausted)
     let attempt = 0;
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn(async (_url?: unknown, _init?: RequestInit) => {
       attempt++;
       if (attempt === 1) {
         return new Response(
@@ -105,10 +105,10 @@ describe("Gemini extractor request", () => {
     // Track actual sleep durations
     const sleptMs: number[] = [];
     const origSetTimeout = globalThis.setTimeout;
-    vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => {
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: unknown, ms?: number, ...args: unknown[]) => {
       sleptMs.push(ms as number);
       return origSetTimeout(fn as TimerHandler, 0, ...args);
-    });
+    }) as unknown as typeof setTimeout);
 
     // Allow 1 retry so the 429 path is exercised
     process.env.GEMINI_MAX_RETRIES = "1";
@@ -131,7 +131,7 @@ describe("Gemini extractor request", () => {
   });
 
   it("requests Gemini JSON mode with the REST API field names", async () => {
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn(async (_url?: unknown, _init?: RequestInit) => {
       return new Response(JSON.stringify(geminiJsonResponse()), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -149,7 +149,7 @@ describe("Gemini extractor request", () => {
     expect(result.is_claim).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(String(url)).toContain("/gemini-2.5-flash:generateContent");
     expect(init?.headers).toMatchObject({
       "Content-Type": "application/json",

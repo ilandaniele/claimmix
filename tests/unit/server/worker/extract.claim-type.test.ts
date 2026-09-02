@@ -17,7 +17,7 @@
  * preventing cross-test state leakage.
  */
 
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach , type Mock } from "vitest";
 
 import { filaDeCaso, registrarMocks } from "./worker-harness";
 
@@ -42,8 +42,8 @@ function makeCaseRow(overrides: Record<string, unknown> = {}) {
 
 function registerCommonMocks(
   caseRow: ReturnType<typeof makeCaseRow>,
-  caseUpdateSpy: ReturnType<typeof vi.fn>,
-  auditLogSpy: ReturnType<typeof vi.fn>,
+  caseUpdateSpy: Mock<(data: Record<string, unknown>) => void>,
+  auditLogSpy: Mock<(...args: never[]) => unknown>,
   claimMockOverrides: Record<string, unknown> = {}
 ) {
   registrarMocks({
@@ -68,7 +68,7 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
     async () => {
       vi.resetModules();
 
-      const caseUpdateSpy = vi.fn();
+      const caseUpdateSpy = vi.fn<(data: Record<string, unknown>) => void>();
       const auditLogSpy   = vi.fn().mockResolvedValue(undefined);
       const caseRow = makeCaseRow({ claim_type: null });
 
@@ -127,7 +127,7 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
     async () => {
       vi.resetModules();
 
-      const caseUpdateSpy = vi.fn();
+      const caseUpdateSpy = vi.fn<(data: Record<string, unknown>) => void>();
       const auditLogSpy   = vi.fn().mockResolvedValue(undefined);
       const caseRow = makeCaseRow({ claim_type: null });
 
@@ -181,7 +181,7 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
     async () => {
       vi.resetModules();
 
-      const caseUpdateSpy = vi.fn();
+      const caseUpdateSpy = vi.fn<(data: Record<string, unknown>) => void>();
       const auditLogSpy   = vi.fn().mockResolvedValue(undefined);
       const caseRow = makeCaseRow({ claim_type: "choque" });  // existing value
 
@@ -239,7 +239,7 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
     async () => {
       vi.resetModules();
 
-      const caseUpdateSpy = vi.fn();
+      const caseUpdateSpy = vi.fn<(data: Record<string, unknown>) => void>();
       const auditLogSpy   = vi.fn().mockResolvedValue(undefined);
       // The case already has claim_type='choque' in the DB.
       const caseRow = makeCaseRow({ claim_type: "choque" });
@@ -291,7 +291,7 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
     async () => {
       vi.resetModules();
 
-      const caseUpdateSpy = vi.fn();
+      const caseUpdateSpy = vi.fn<(data: Record<string, unknown>) => void>();
       const auditLogSpy   = vi.fn().mockResolvedValue(undefined);
       const warnSpy       = vi.spyOn(console, "warn").mockImplementation(() => {});
       const caseRow = makeCaseRow({ claim_type: null });

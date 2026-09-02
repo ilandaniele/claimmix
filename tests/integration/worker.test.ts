@@ -303,6 +303,7 @@ vi.mock("@/lib/db", () => ({
 // ── Import worker after mocks ─────────────────────────────────────────────────
 
 import { runExtractionWorker } from "@/server/worker/extract";
+import { extraccion } from "../helpers/extraccion";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -317,48 +318,48 @@ const MOCK_CASE_DATA = {
 // ── Helper: build mock extraction results ─────────────────────────────────────
 
 function choqueAllFields(confidence = 0.85): ExtractedClaim {
-  return {
+  return extraccion({
     extraction_model: "mock-v1",
     fields: [
-      { field_key: "incident_date", field_value: "15/03/2024", confidence },
-      { field_key: "incident_location", field_value: "Av. Corrientes 2400", confidence },
-      { field_key: "parte_amistoso", field_value: "si", confidence },
-      { field_key: "fotos_danos", field_value: "si", confidence },
-      { field_key: "licencia_conducir", field_value: "si", confidence },
+      { field_key: "incident_date", field_value: "15/03/2024", confidence, source: "ai" as const },
+      { field_key: "incident_location", field_value: "Av. Corrientes 2400", confidence, source: "ai" as const },
+      { field_key: "parte_amistoso", field_value: "si", confidence, source: "ai" as const },
+      { field_key: "fotos_danos", field_value: "si", confidence, source: "ai" as const },
+      { field_key: "licencia_conducir", field_value: "si", confidence, source: "ai" as const },
     ],
     prompt_tokens: 0,
     completion_tokens: 0,
     cost_usd: 0,
-  };
+  });
 }
 
 function choqueMissingDocs(confidence = 0.85): ExtractedClaim {
-  return {
+  return extraccion({
     extraction_model: "mock-v1",
     fields: [
-      { field_key: "incident_date", field_value: "15/03/2024", confidence },
+      { field_key: "incident_date", field_value: "15/03/2024", confidence, source: "ai" as const },
       // parte_amistoso MISSING
-      { field_key: "fotos_danos", field_value: "si", confidence },
-      { field_key: "licencia_conducir", field_value: "si", confidence },
+      { field_key: "fotos_danos", field_value: "si", confidence, source: "ai" as const },
+      { field_key: "licencia_conducir", field_value: "si", confidence, source: "ai" as const },
     ],
     prompt_tokens: 0,
     completion_tokens: 0,
     cost_usd: 0,
-  };
+  });
 }
 
 function choqueAllLowConfidence(): ExtractedClaim {
-  return {
+  return extraccion({
     extraction_model: "mock-v1",
     fields: [
-      { field_key: "parte_amistoso", field_value: "si", confidence: 0.45 }, // LOW
-      { field_key: "fotos_danos", field_value: "si", confidence: 0.85 },
-      { field_key: "licencia_conducir", field_value: "si", confidence: 0.88 },
+      { field_key: "parte_amistoso", field_value: "si", confidence: 0.45, source: "ai" as const }, // LOW
+      { field_key: "fotos_danos", field_value: "si", confidence: 0.85, source: "ai" as const },
+      { field_key: "licencia_conducir", field_value: "si", confidence: 0.88, source: "ai" as const },
     ],
     prompt_tokens: 0,
     completion_tokens: 0,
     cost_usd: 0,
-  };
+  });
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -418,12 +419,12 @@ describe("runExtractionWorker", () => {
     mockRunMockExtractor.mockReturnValue({
       extraction_model: "mock-v1",
       fields: [
-        { field_key: "parte_amistoso", field_value: "si", confidence: 0.85 },
-        { field_key: "fotos_danos", field_value: "si", confidence: 0.85 },
-        { field_key: "licencia_conducir", field_value: "si", confidence: 0.85 },
+        { field_key: "parte_amistoso", field_value: "si", confidence: 0.85, source: "ai" as const },
+        { field_key: "fotos_danos", field_value: "si", confidence: 0.85, source: "ai" as const },
+        { field_key: "licencia_conducir", field_value: "si", confidence: 0.85, source: "ai" as const },
         // Injected fields — should be ignored for status determination.
-        { field_key: "status", field_value: "cerrado", confidence: 1.0 },
-        { field_key: "case_status", field_value: "listo", confidence: 1.0 },
+        { field_key: "status", field_value: "cerrado", confidence: 1.0, source: "ai" as const },
+        { field_key: "case_status", field_value: "listo", confidence: 1.0, source: "ai" as const },
       ],
       prompt_tokens: 0,
       completion_tokens: 0,

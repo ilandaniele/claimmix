@@ -57,9 +57,9 @@ describe("Choque reenvío email fixture", () => {
           accident_date: EXPECTED_CHOQUE_EXTRACTION.accident_date,
         },
       });
-      expect(result.extracted_fields.full_name).toBe("Carlos Mendoza");
-      expect(result.extracted_fields.email).toBe("carlos.mendoza.test@gmail.com");
-      expect(result.extracted_fields.accident_date).toBe("27/07/2025");
+      expect(result.extracted_fields!.full_name).toBe("Carlos Mendoza");
+      expect(result.extracted_fields!.email).toBe("carlos.mendoza.test@gmail.com");
+      expect(result.extracted_fields!.accident_date).toBe("27/07/2025");
     });
   });
 

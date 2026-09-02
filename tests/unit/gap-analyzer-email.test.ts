@@ -196,7 +196,7 @@ describe("analyzeEmailClaimGaps — missing required field", () => {
     );
     // Also have a pending confirmation
     const confirmationRows = [
-      { field_key: "full_name", proposed_value: "Juan Pérez", conflict_with_value: null, confidence: 0.72 },
+      { field_key: "full_name", proposed_value: "Juan Pérez", conflict_with_value: null, confidence: 0.72, source: "ai" as const },
     ];
     setupDbMocks([], confirmationRows);
     const result = await analyzeEmailClaimGaps(CASE_ID, fieldsNoDate, TENANT_ID);
@@ -256,8 +256,8 @@ describe("analyzeEmailClaimGaps — pending confirmation", () => {
 
   it("lists multiple pending confirmation fields", async () => {
     const confirmationRows = [
-      { field_key: "full_name", proposed_value: "Juan Pérez", conflict_with_value: null, confidence: 0.72 },
-      { field_key: "policy_number", proposed_value: "POL-9999", conflict_with_value: null, confidence: 0.65 },
+      { field_key: "full_name", proposed_value: "Juan Pérez", conflict_with_value: null, confidence: 0.72, source: "ai" as const },
+      { field_key: "policy_number", proposed_value: "POL-9999", conflict_with_value: null, confidence: 0.65, source: "ai" as const },
     ];
     setupDbMocks([], confirmationRows);
     const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, TENANT_ID);
@@ -421,12 +421,12 @@ describe("analyzeEmailClaimGaps — what the case already holds", () => {
   beforeEach(() => vi.clearAllMocks());
 
   const STORED = [
-    { field_key: "full_name",            field_value: "Ilan Daniele", confidence: 0.95 },
-    { field_key: "accident_date",        field_value: "2026-08-16",   confidence: 0.9 },
-    { field_key: "accident_description", field_value: "Choque",       confidence: 0.8 },
-    { field_key: "numero_poliza",        field_value: "POL-4471-A",   confidence: 0.95 },
-    { field_key: "dni_asegurado",        field_value: "30145882",     confidence: 0.95 },
-    { field_key: "telefono_contacto",    field_value: "2914567788",   confidence: 0.85 },
+    { field_key: "full_name", field_value: "Ilan Daniele", confidence: 0.95, source: "ai" as const },
+    { field_key: "accident_date", field_value: "2026-08-16", confidence: 0.9, source: "ai" as const },
+    { field_key: "accident_description", field_value: "Choque", confidence: 0.8, source: "ai" as const },
+    { field_key: "numero_poliza", field_value: "POL-4471-A", confidence: 0.95, source: "ai" as const },
+    { field_key: "dni_asegurado", field_value: "30145882", confidence: 0.95, source: "ai" as const },
+    { field_key: "telefono_contacto", field_value: "2914567788", confidence: 0.85, source: "ai" as const },
   ];
 
   it("does not re-ask for data an earlier message already supplied", async () => {
@@ -462,7 +462,7 @@ describe("analyzeEmailClaimGaps — what the case already holds", () => {
     setupDbMocks(
       [],
       [],
-      [...STORED, { field_key: "claim_type", field_value: "other", confidence: 0.86 }]
+      [...STORED, { field_key: "claim_type", field_value: "other", confidence: 0.86, source: "ai" as const }]
     );
 
     const result = await analyzeEmailClaimGaps(

@@ -33,9 +33,10 @@ import {
   RATE_LIMIT_CONFIGS,
 } from "@/lib/rate-limit/index";
 
+
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.NODE_ENV = "test";
+  (process.env as Record<string, string | undefined>).NODE_ENV = "test";
   delete process.env.RATE_LIMIT_PROVIDER;
 });
 

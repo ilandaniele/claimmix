@@ -160,7 +160,7 @@ function setupInsertResults(
     const valuesResult = { returning: returningMock };
     // When the code does: await db.insert(t).values({...})  (no .returning())
     // the chain needs to be a thenable. We add a then() so it resolves.
-    (valuesResult as unknown as Promise<unknown[]>).then = (resolve: (v: unknown[]) => unknown) =>
+    (valuesResult as { then?: unknown }).then = (resolve: (v: unknown[]) => unknown) =>
       Promise.resolve(cfg.rows ?? []).then(resolve);
     valuesMock.mockReturnValue(valuesResult);
     return { values: valuesMock };

@@ -208,6 +208,7 @@ import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { db } from "@/lib/db";
+import { extraccion } from "../helpers/extraccion";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -218,6 +219,7 @@ const SENDER_EMAIL = "claimant@example.com";
 const HIGH_CONFIDENCE_MATCH: CustomerMatch = {
   customerId: "customer-uuid-001",
   policyId:   "policy-uuid-001",
+  storedValues: {},
   matchType:  "policy_number",
   confidence: 0.95,
   customerName: "Juan Pérez",
@@ -235,7 +237,7 @@ function makeSelectChain(rows: unknown[]): any {
   };
 }
 
-function makeUpdateChain(spy?: ReturnType<typeof vi.fn>): any {
+function makeUpdateChain(spy?: (payload: Record<string, unknown>) => void): any {
   return {
     set: (payload: Record<string, unknown>) => ({
       where: (..._args: any[]) => {
@@ -331,11 +333,18 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
 
       // Mock policy matcher to return a policy match.
       vi.mocked(findPolicyMatches).mockResolvedValue([
-        { policyId: "policy-uuid-001", matchType: "exact", confidence: 0.95 },
+        {
+          policyId: "policy-uuid-001",
+          policyNumber: "POL-4471-A",
+          policyType: "auto",
+          status: "active",
+          customerName: "Ana García",
+          confidence: 0.95,
+        },
       ]);
 
       // Set up extractEmailClaimMock to return a valid claim.
-      vi.mocked(extractEmailClaimMock).mockReturnValue({
+      vi.mocked(extractEmailClaimMock).mockReturnValue(extraccion({
         extraction_model: "mock-email-v1",
         fields: [
           { field_key: "policy_number", field_value: "POL-1234",   confidence: 0.92, source: "ai" as const },
@@ -357,7 +366,7 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
         not_relevant_reason: undefined,
         summary: "Choque claim",
         suggested_reply: "",
-      });
+      }));
 
       await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
 

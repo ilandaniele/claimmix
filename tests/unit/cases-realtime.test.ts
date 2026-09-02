@@ -8,23 +8,47 @@
  *   - computeStatusCounts: counts all statuses correctly
  */
 
-import { formatCaseNumber, mergeCaseUpdate, computeStatusCounts } from "../../src/app/(app)/bandeja/components/casesRealtimeUtils";
-import type { CaseRow } from "../../src/server/cases/list";
+import { formatCaseNumber, mergeCaseUpdate, computeStatusCounts } from "@/app/(app)/bandeja/components/casesRealtimeUtils";
+import type { CaseRow } from "@/server/cases/list";
 
 function makeCase(overrides: Partial<CaseRow> = {}): CaseRow {
   return {
+    injury_severity: null,
     id: "00000000-0000-0000-0000-000000000001",
     tenant_id: "t1",
     policy_number: "POL-001",
     policyholder_name: "Test User",
     claim_type: "choque",
     status: "listo",
-    confidence_min: 0.85,
+    confidence_min: "0.85",
     assigned_to: null,
     channel: "email_sim",
     created_at: new Date().toISOString(),
     updated_at: null,
     closed_at: null,
+    /*
+     * Las dieciséis columnas que el fixture no declaraba.
+     *
+     * `CaseRow` es la fila entera de `cases`, no un recorte: sin esto el objeto
+     * decía ser una fila de la base y no lo era. Estaba en verde porque
+     * `tsconfig.json` excluía `tests/**` y nadie lo tipaba.
+     */
+    extraction_lease_at: null,
+    extraction_pending: false,
+    email_message_id: null,
+    email_thread_id: null,
+    is_claim: null,
+    not_relevant_reason: null,
+    requires_specialist: false,
+    severity: null,
+    core_external_id: null,
+    core_error_message: null,
+    core_sent_at: null,
+    fields_pending_confirmation: null,
+    customer_id: null,
+    policy_id: null,
+    fraud_risk_level: null,
+    fraud_indicators: null,
     ...overrides,
   };
 }

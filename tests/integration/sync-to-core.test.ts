@@ -164,7 +164,6 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     const { db } = await import("@/lib/db");
 
     vi.mocked(requireRole).mockResolvedValue({
-      db: db as any,
       user: { id: "user-1" },
       userRow: DEFAULT_USER_ROW,
     });
@@ -213,7 +212,6 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     const { writeAuditLog } = await import("@/lib/audit/log");
 
     vi.mocked(requireRole).mockResolvedValue({
-      db: db as any,
       user: { id: "user-1" },
       userRow: DEFAULT_USER_ROW,
     });
@@ -262,7 +260,6 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     const { db } = await import("@/lib/db");
 
     vi.mocked(requireRole).mockResolvedValue({
-      db: db as any,
       user: { id: "user-1" },
       userRow: DEFAULT_USER_ROW,
     });
@@ -322,7 +319,6 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     const { writeAuditLog } = await import("@/lib/audit/log");
 
     vi.mocked(requireRole).mockResolvedValue({
-      db: db as any,
       user: { id: "user-1" },
       userRow: DEFAULT_USER_ROW,
     });
@@ -383,7 +379,6 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     const { db } = await import("@/lib/db");
 
     vi.mocked(requireRole).mockResolvedValue({
-      db: db as any,
       user: { id: "user-1" },
       userRow: DEFAULT_USER_ROW,
     });
@@ -442,7 +437,6 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     const { db } = await import("@/lib/db");
 
     vi.mocked(requireRole).mockResolvedValue({
-      db: db as any,
       user: { id: "user-1" },
       userRow: DEFAULT_USER_ROW,
     });

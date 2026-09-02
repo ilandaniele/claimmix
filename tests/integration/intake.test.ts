@@ -520,7 +520,7 @@ describe("POST /api/intake/simulate", () => {
       body: JSON.stringify({ MessageID: "test" }),
       headers: { "Content-Type": "application/json" },
     }) as any;
-    const res = await emailPOST(req);
+    const res = await emailPOST();
     expect(res.status).toBe(410);
     const body = await res.json();
     expect(body.error.code).toBe("GONE");

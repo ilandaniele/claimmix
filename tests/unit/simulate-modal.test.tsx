@@ -17,6 +17,20 @@ import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { SimulateModal } from "../../src/app/(app)/bandeja/components/SimulateModal";
 import { SCENARIOS } from "../../src/server/intake/scenarios";
+import { esAR } from "../../src/lib/i18n/es-AR";
+
+/*
+ * Los textos salen del diccionario, no escritos a mano.
+ *
+ * Escritos a mano el test comprueba dos cosas a la vez y no distingue cual
+ * fallo: que el modal use la clave correcta, y que esa clave diga exactamente
+ * lo que alguien tipeo aca alguna vez. Lo segundo no es una invariante — el
+ * dia que se corrige un «Espere» por un «Espera», el test se pone rojo sin que
+ * se haya roto nada.
+ *
+ * Sin `LocaleProvider` alrededor, `useT` cae al valor por defecto del
+ * contexto, que es es-AR; por eso alcanza con este diccionario.
+ */
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -42,35 +56,35 @@ describe("SimulateModal", () => {
   it("renders modal title", () => {
     render(<SimulateModal {...defaultProps} />);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("Simular nuevo siniestro")).toBeInTheDocument();
+    expect(screen.getByText(esAR["simulate.title"])).toBeInTheDocument();
   });
 
   it("renders all scenarios in the dropdown", () => {
     render(<SimulateModal {...defaultProps} />);
-    const select = screen.getByLabelText("Escenario");
+    const select = screen.getByLabelText(esAR["simulate.escenarioLabel"]);
     const options = select.querySelectorAll("option");
     expect(options).toHaveLength(SCENARIOS.length);
   });
 
   it("shows first scenario selected by default", () => {
     render(<SimulateModal {...defaultProps} />);
-    const select = screen.getByLabelText("Escenario") as HTMLSelectElement;
+    const select = screen.getByLabelText(esAR["simulate.escenarioLabel"]) as HTMLSelectElement;
     expect(select.value).toBe(SCENARIOS[0]!.id);
   });
 
   it("calls onClose when Cancelar button is clicked", async () => {
     const user = userEvent.setup();
     render(<SimulateModal {...defaultProps} />);
-    await user.click(screen.getByText("Cancelar"));
+    await user.click(screen.getByText(esAR["simulate.cancel"]));
     expect(defaultProps.onClose).toHaveBeenCalledOnce();
   });
 
   it("switches to custom mode when text personalizado tab is clicked", async () => {
     const user = userEvent.setup();
     render(<SimulateModal {...defaultProps} />);
-    await user.click(screen.getByText("Texto personalizado"));
-    expect(screen.getByLabelText("Texto del siniestro")).toBeInTheDocument();
-    expect(screen.getByLabelText("Tipo de siniestro")).toBeInTheDocument();
+    await user.click(screen.getByText(esAR["simulate.modoTexto"]));
+    expect(screen.getByLabelText(esAR["simulate.textoLabel"])).toBeInTheDocument();
+    expect(screen.getByLabelText(esAR["simulate.scenario"])).toBeInTheDocument();
   });
 
   it("submits scenario mode with correct body", async () => {
@@ -93,7 +107,7 @@ describe("SimulateModal", () => {
         })
       );
     });
-    expect(defaultProps.onSuccess).toHaveBeenCalledWith("Procesando siniestro...");
+    expect(defaultProps.onSuccess).toHaveBeenCalledWith(esAR["simulate.procesando"]);
     expect(defaultProps.onClose).toHaveBeenCalled();
   });
 
@@ -106,8 +120,8 @@ describe("SimulateModal", () => {
     });
 
     render(<SimulateModal {...defaultProps} />);
-    await user.click(screen.getByText("Texto personalizado"));
-    await user.type(screen.getByLabelText("Texto del siniestro"), "Mi auto fue chocado");
+    await user.click(screen.getByText(esAR["simulate.modoTexto"]));
+    await user.type(screen.getByLabelText(esAR["simulate.textoLabel"]), "Mi auto fue chocado");
     await user.click(screen.getByTestId("simulate-submit"));
 
     await waitFor(() => {
@@ -135,9 +149,7 @@ describe("SimulateModal", () => {
     await user.click(screen.getByTestId("simulate-submit"));
 
     await waitFor(() => {
-      expect(defaultProps.onError).toHaveBeenCalledWith(
-        "Demasiadas simulaciones. Espere un momento."
-      );
+      expect(defaultProps.onError).toHaveBeenCalledWith(esAR["simulate.demasiadas"]);
     });
   });
 
@@ -192,7 +204,7 @@ describe("SimulateModal", () => {
   it("validates empty custom text and shows error", async () => {
     const user = userEvent.setup();
     render(<SimulateModal {...defaultProps} />);
-    await user.click(screen.getByText("Texto personalizado"));
+    await user.click(screen.getByText(esAR["simulate.modoTexto"]));
     // Don't type anything — submit with empty text
     await user.click(screen.getByTestId("simulate-submit"));
 

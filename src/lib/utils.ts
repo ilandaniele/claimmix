@@ -2,6 +2,8 @@
  * General-purpose utilities for ClaimMix.
  */
 
+import type { TranslationKey } from "@/lib/i18n/es-AR";
+
 /**
  * Merge class names conditionally (Tailwind-friendly).
  * Lightweight alternative to clsx — avoids an extra dependency for W1.
@@ -59,10 +61,21 @@ export function formatDateOnly(date: string): string {
 }
 
 /**
- * Format a duration in seconds to a human-readable string (es-AR).
- * Used for "antigüedad" (age of the case) in the dashboard.
+ * Hace cuánto entró un siniestro, en el idioma de quien mira.
+ *
+ * El traductor es obligatorio y no opcional a propósito. Esto devolvía «Hace
+ * 3d» en duro, así que la columna «Antigüedad» seguía en castellano con el
+ * producto entero en inglés — y era la última que quedaba, porque un valor por
+ * omisión hace que la próxima llamada que se olvide de pasarlo tampoco falle.
+ * Con el parámetro exigido, el compilador las encuentra todas.
+ *
+ * Los cortes —minuto, hora, día— y los textos en castellano quedan idénticos a
+ * como estaban; lo único que cambia es de dónde salen.
  */
-export function formatAge(createdAt: string): string {
+export function formatAge(
+  createdAt: string,
+  t: (key: TranslationKey) => string
+): string {
   const created = new Date(createdAt);
   const now = new Date();
   const diffMs = now.getTime() - created.getTime();
@@ -70,10 +83,17 @@ export function formatAge(createdAt: string): string {
   const diffHours = Math.floor(diffMs / 3_600_000);
   const diffDays = Math.floor(diffMs / 86_400_000);
 
-  if (diffMinutes < 1) return "Ahora";
-  if (diffMinutes < 60) return `Hace ${diffMinutes}m`;
-  if (diffHours < 24) return `Hace ${diffHours}h`;
-  return `Hace ${diffDays}d`;
+  /*
+   * El número va por `{n}` y no concatenado, porque en inglés va adelante
+   * («3d ago») y en castellano atrás («Hace 3d»). Concatenar un prefijo
+   * traducido funciona en un idioma y se rompe en el otro.
+   */
+  const con = (key: TranslationKey, n: number) => t(key).replace("{n}", String(n));
+
+  if (diffMinutes < 1) return t("age.now");
+  if (diffMinutes < 60) return con("age.minutes", diffMinutes);
+  if (diffHours < 24) return con("age.hours", diffHours);
+  return con("age.days", diffDays);
 }
 
 /**

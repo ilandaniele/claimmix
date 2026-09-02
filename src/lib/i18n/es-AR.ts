@@ -23,6 +23,23 @@ export const esAR = {
   "nav.configuracion": "Configuración",
   "nav.signOut": "Cerrar sesión",
   "nav.operation": "Operación",
+  "nav.demo": "Demo",
+  "nav.principal": "Navegación principal",
+  "nav.agente": "Agente",
+  "nav.agenteBloqueado": "Solo administradores pueden abrir la consola del agente.",
+  "nav.facturacion": "Facturación",
+  "nav.cartera": "Cartera",
+
+  /*
+   * La antigüedad de un siniestro. El `{n}` es el número, y es el único lugar
+   * del diccionario que lo usa: acá no alcanza con componer claves sueltas,
+   * porque en inglés el número va adelante («3d ago») y en castellano atrás
+   * («Hace 3d»). Es el orden de las palabras lo que cambia, no las palabras.
+   */
+  "age.now": "Ahora",
+  "age.minutes": "Hace {n}m",
+  "age.hours": "Hace {n}h",
+  "age.days": "Hace {n}d",
   "role.admin": "Administrador",
   "role.analyst": "Analista",
   "theme.toggle": "Cambiar tema",

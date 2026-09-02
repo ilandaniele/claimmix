@@ -4,6 +4,18 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cn, formatDate, formatDateOnly, formatAge, truncate } from "@/lib/utils";
+import { getT } from "@/lib/i18n";
+
+/*
+ * Los dos traductores de verdad, no uno de mentira.
+ *
+ * `formatAge` devolvía «Hace 3d» en duro y era el último texto del producto que
+ * no pasaba por el diccionario: la columna «Antigüedad» seguía en castellano con
+ * la interfaz entera en inglés. Estos tests usan los diccionarios reales, así
+ * que si alguien borra una clave `age.*` se enteran acá.
+ */
+const tES = getT("es-AR");
+const tEN = getT("en-US");
 
 describe("cn()", () => {
   it("joins truthy class names", () => {
@@ -97,7 +109,7 @@ describe("formatAge()", () => {
     const now = new Date("2024-06-01T12:00:00Z");
     vi.setSystemTime(now);
     const thirtySecondsAgo = new Date(now.getTime() - 30_000).toISOString();
-    expect(formatAge(thirtySecondsAgo)).toBe("Ahora");
+    expect(formatAge(thirtySecondsAgo, tES)).toBe("Ahora");
   });
 
   it("returns 'Hace Xm' for less than an hour", () => {
@@ -105,7 +117,7 @@ describe("formatAge()", () => {
     const now = new Date("2024-06-01T12:00:00Z");
     vi.setSystemTime(now);
     const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60_000).toISOString();
-    expect(formatAge(thirtyMinutesAgo)).toBe("Hace 30m");
+    expect(formatAge(thirtyMinutesAgo, tES)).toBe("Hace 30m");
   });
 
   it("returns 'Hace Xh' for less than a day", () => {
@@ -113,7 +125,7 @@ describe("formatAge()", () => {
     const now = new Date("2024-06-01T12:00:00Z");
     vi.setSystemTime(now);
     const fiveHoursAgo = new Date(now.getTime() - 5 * 3_600_000).toISOString();
-    expect(formatAge(fiveHoursAgo)).toBe("Hace 5h");
+    expect(formatAge(fiveHoursAgo, tES)).toBe("Hace 5h");
   });
 
   it("returns 'Hace Xd' for more than a day", () => {
@@ -121,7 +133,7 @@ describe("formatAge()", () => {
     const now = new Date("2024-06-01T12:00:00Z");
     vi.setSystemTime(now);
     const threeDaysAgo = new Date(now.getTime() - 3 * 86_400_000).toISOString();
-    expect(formatAge(threeDaysAgo)).toBe("Hace 3d");
+    expect(formatAge(threeDaysAgo, tES)).toBe("Hace 3d");
   });
 
   // AC5 — boundary: exactly 60 seconds ago must cross from "Ahora" into "Hace 1m"
@@ -130,7 +142,7 @@ describe("formatAge()", () => {
     const now = new Date("2024-06-01T12:00:00Z");
     vi.setSystemTime(now);
     const sixtySecondsAgo = new Date(now.getTime() - 60_000).toISOString();
-    expect(formatAge(sixtySecondsAgo)).toBe("Hace 1m");
+    expect(formatAge(sixtySecondsAgo, tES)).toBe("Hace 1m");
   });
 
   // AC2 — explicit 17-minute scenario
@@ -139,7 +151,7 @@ describe("formatAge()", () => {
     const now = new Date("2024-06-01T12:00:00Z");
     vi.setSystemTime(now);
     const seventeenMinutesAgo = new Date(now.getTime() - 17 * 60_000).toISOString();
-    expect(formatAge(seventeenMinutesAgo)).toBe("Hace 17m");
+    expect(formatAge(seventeenMinutesAgo, tES)).toBe("Hace 17m");
   });
 
   // AC3 — explicit 3-hour scenario
@@ -148,7 +160,44 @@ describe("formatAge()", () => {
     const now = new Date("2024-06-01T12:00:00Z");
     vi.setSystemTime(now);
     const threeHoursAgo = new Date(now.getTime() - 3 * 3_600_000).toISOString();
-    expect(formatAge(threeHoursAgo)).toBe("Hace 3h");
+    expect(formatAge(threeHoursAgo, tES)).toBe("Hace 3h");
+  });
+});
+
+describe("formatAge() en inglés", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Fija el reloj y devuelve un ISO de hace `ms`. */
+  function haceRato(ms: number): string {
+    const ahora = new Date("2024-06-01T12:00:00Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(ahora);
+    return new Date(ahora.getTime() - ms).toISOString();
+  }
+
+  it("el número va adelante, que es por lo que no alcanza con un prefijo", () => {
+    // Ésta es la razón de que la clave tenga `{n}` y no se componga de partes:
+    // en castellano el número va atrás («Hace 30m») y en inglés adelante.
+    expect(formatAge(haceRato(30 * 60_000), tEN)).toBe("30m ago");
+    expect(formatAge(haceRato(30 * 60_000), tES)).toBe("Hace 30m");
+  });
+
+  it("traduce las tres unidades y el «ahora»", () => {
+    expect(formatAge(haceRato(30_000), tEN)).toBe("Now");
+    expect(formatAge(haceRato(5 * 3_600_000), tEN)).toBe("5h ago");
+    expect(formatAge(haceRato(3 * 86_400_000), tEN)).toBe("3d ago");
+  });
+
+  it("no queda ningún `{n}` sin reemplazar", () => {
+    // El síntoma de una clave mal escrita no es un error: es un «Hace {n}m»
+    // dibujado en la pantalla.
+    for (const t of [tES, tEN]) {
+      for (const ms of [30_000, 30 * 60_000, 5 * 3_600_000, 3 * 86_400_000]) {
+        expect(formatAge(haceRato(ms), t)).not.toContain("{n}");
+      }
+    }
   });
 });
 

@@ -423,7 +423,7 @@ export default async function CustomerDetailPage({
                           que se lee de un vistazo, abajo el dato exacto. */}
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap">
                         <span className="whitespace-nowrap">
-                          {formatAge(c.created_at)}
+                          {formatAge(c.created_at, t)}
                         </span>
                         <span className="mt-0.5 block whitespace-nowrap text-[12.5px] text-slate-500">
                           {formatDate(c.created_at)}

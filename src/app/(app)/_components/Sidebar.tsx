@@ -124,27 +124,27 @@ export function Sidebar({
 
   const analisisItems: NavItemDef[] = [
     { label: t("nav.metricas") || "Métricas", href: "/metricas", icon: BarChart2 },
-    { label: "Demo", href: "/demo", icon: Play },
+    { label: t("nav.demo"), href: "/demo", icon: Play },
     {
-      label: "Agente",
+      label: t("nav.agente"),
       href: "/agente",
       icon: Brain,
       disabled: !canUseAgent,
-      disabledReason: "Solo administradores pueden abrir la consola del agente.",
+      disabledReason: t("nav.agenteBloqueado"),
     },
     { label: t("nav.admin") || "Usuarios", href: "/admin/users", icon: Shield },
-    { label: "Facturación", href: "/admin/facturacion", icon: Receipt },
+    { label: t("nav.facturacion"), href: "/admin/facturacion", icon: Receipt },
     // La cartera cruza tenants: la ve el operador, no el asegurador. Se
     // oculta en vez de deshabilitarse — que la pantalla exista tampoco es
     // algo que le tenga que constar a un cliente.
     ...(isOperator
-      ? [{ label: "Cartera", href: "/admin/cartera", icon: Briefcase }]
+      ? [{ label: t("nav.cartera"), href: "/admin/cartera", icon: Briefcase }]
       : []),
   ];
 
   return (
     <nav
-      aria-label="Navegación principal"
+      aria-label={t("nav.principal")}
       className="flex h-full w-[232px] flex-shrink-0 flex-col border-r border-slate-200"
     >
       {/* Logo / brand */}
@@ -161,8 +161,11 @@ export function Sidebar({
       <div className="flex flex-1 flex-col overflow-y-auto px-2 py-3">
         {/* OPERACIÓN section */}
         <div className="mb-4">
+          {/* El `.rotulo` lo pone en mayúscula por CSS, así que la clave
+              guarda «Operación» y no «OPERACIÓN»: el diccionario tiene el
+              texto, la hoja de estilos la forma. */}
           <p className="rotulo mb-2 px-3 text-slate-400">
-            OPERACIÓN
+            {t("nav.operation")}
           </p>
           <div className="space-y-0.5">
             {operacionItems.map((item) => (
@@ -177,7 +180,7 @@ export function Sidebar({
         {/* ANÁLISIS section */}
         <div className="mb-2">
           <p className="rotulo mb-2 px-3 text-slate-400">
-            ANÁLISIS
+            {t("nav.analisis")}
           </p>
           <div className="space-y-0.5">
             {analisisItems.map((item) => (

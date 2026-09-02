@@ -279,7 +279,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                   * vistazo —cuanto hace— y abajo el dato exacto, para cuando
                   * hace falta.
                   */}
-                <span className="whitespace-nowrap">{formatAge(caseRow.created_at)}</span>
+                <span className="whitespace-nowrap">{formatAge(caseRow.created_at, t)}</span>
                 {caseRow.created_at ? (
                   <span className="mt-0.5 block whitespace-nowrap text-[12.5px] text-slate-500">
                     {formatDate(caseRow.created_at)}

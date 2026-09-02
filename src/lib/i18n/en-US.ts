@@ -796,4 +796,66 @@ export const enUS: Record<TranslationKey, string> = {
   "simulate.textoLabel": "Claim text",
   "simulate.textoPlaceholder": "Paste the claim email text here…",
 
+
+  // ── Uso del proveedor — llamadas, errores y latencia de la IA ─────
+  // El estado de una llamada (`success`, `rate_limited`) y el código de error
+  // quedan crudos: son lo que devuelve el proveedor y lo que hay que poder
+  // pegar en su documentación o en un ticket.
+  "uso.actualizar": "Refresh",
+  "uso.cargando": "Loading statistics…",
+  "uso.cfg.backoff": "Base backoff",
+  "uso.cfg.concurrencia": "Concurrency",
+  "uso.cfg.configurable": "Configurable via",
+  "uso.cfg.delay": "Worker delay",
+  "uso.cfg.intervalo": "Min. interval",
+  "uso.cfg.reintentos": "Max retries",
+  "uso.cfg.yOtras": "and other environment variables.",
+  "uso.col.cuota": "Quota",
+  "uso.col.error": "Error",
+  "uso.col.latencia": "Latency",
+  "uso.col.modelo": "Model",
+  "uso.col.ok": "OK",
+  "uso.col.proveedor": "Provider",
+  "uso.col.rateLimit": "Rate limit",
+  "uso.col.total": "Total",
+  "uso.config": "Gemini worker configuration",
+  "uso.errorCarga": "The usage statistics could not be loaded.",
+  "uso.erroresRecientes": "Recent errors (24 h)",
+  "uso.erroresUno": "1 error",
+  "uso.erroresVarios": "{n} errors",
+  "uso.rateLimited": "{n} rate-limited",
+  "uso.sinErrores": "No errors",
+  "uso.sinLlamadas": "No calls recorded.",
+  "uso.subtitulo": "Calls, errors and latency recorded in real time.",
+  "uso.titulo": "AI provider usage",
+  "uso.ultimas24": "Last 24 hours",
+  "uso.ultimos7": "Last 7 days",
+
+
+  // ── Reglas de prompt — lo que el asegurador le enseña al agente ───
+  // `rule_type` es `text` en la base: un tipo que no esté acá se muestra crudo.
+  // Los ejemplos del placeholder están escritos con el vocabulario del
+  // producto, así que en inglés van con los valores en inglés.
+  "reglas.activar": "Activate",
+  "reglas.agregar": "Add rule",
+  "reglas.ayuda": "Active rules are included in the agent's prompt for the next extractions. Every change is audited.",
+  "reglas.creada": "Rule created. It will apply to the next extractions.",
+  "reglas.desactivar": "Deactivate",
+  "reglas.errorActualizar": "The rule could not be updated.",
+  "reglas.errorCampos": "Fill in the rule title and text (at least 3 characters).",
+  "reglas.errorCarga": "The rules could not be loaded.",
+  "reglas.errorCrear": "The rule could not be created.",
+  "reglas.guardando": "Saving…",
+  "reglas.inactiva": "Inactive",
+  "reglas.phTitulo": "Rule title",
+  "reglas.placeholder": "E.g.: “If the email mentions a collision, classify it as choque” · “If anyone is injured, severity high or critical” · “Never mark ready if the ID number or the policy number is missing”",
+  "reglas.tipo.classification": "Classification",
+  "reglas.tipo.core_mapping": "Core mapping",
+  "reglas.tipo.extraction": "Extraction",
+  "reglas.tipo.missing_fields": "Missing fields",
+  "reglas.tipo.reply_style": "Reply style",
+  "reglas.tipo.severity": "Severity",
+  "reglas.tipoRegla": "Rule type",
+  "reglas.vacio": "No training rules yet.",
+
 } as const;

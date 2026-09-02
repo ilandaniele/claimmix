@@ -820,6 +820,68 @@ export const esAR = {
   "simulate.textoLabel": "Texto del siniestro",
   "simulate.textoPlaceholder": "Pegá acá el texto del email del siniestro…",
 
+
+  // ── Uso del proveedor — llamadas, errores y latencia de la IA ─────
+  // El estado de una llamada (`success`, `rate_limited`) y el código de error
+  // quedan crudos: son lo que devuelve el proveedor y lo que hay que poder
+  // pegar en su documentación o en un ticket.
+  "uso.actualizar": "Actualizar",
+  "uso.cargando": "Cargando estadísticas…",
+  "uso.cfg.backoff": "Backoff base",
+  "uso.cfg.concurrencia": "Concurrencia",
+  "uso.cfg.configurable": "Se configura con",
+  "uso.cfg.delay": "Espera del worker",
+  "uso.cfg.intervalo": "Intervalo mín.",
+  "uso.cfg.reintentos": "Máx. reintentos",
+  "uso.cfg.yOtras": "y otras variables de entorno.",
+  "uso.col.cuota": "Cuota",
+  "uso.col.error": "Error",
+  "uso.col.latencia": "Latencia",
+  "uso.col.modelo": "Modelo",
+  "uso.col.ok": "OK",
+  "uso.col.proveedor": "Proveedor",
+  "uso.col.rateLimit": "Rate limit",
+  "uso.col.total": "Total",
+  "uso.config": "Configuración del worker Gemini",
+  "uso.errorCarga": "No se pudieron cargar las estadísticas de uso.",
+  "uso.erroresRecientes": "Errores recientes (24 h)",
+  "uso.erroresUno": "1 error",
+  "uso.erroresVarios": "{n} errores",
+  "uso.rateLimited": "{n} con rate limit",
+  "uso.sinErrores": "Sin errores",
+  "uso.sinLlamadas": "Sin llamadas registradas.",
+  "uso.subtitulo": "Llamadas, errores y latencia registrados en tiempo real.",
+  "uso.titulo": "Uso del proveedor de IA",
+  "uso.ultimas24": "Últimas 24 horas",
+  "uso.ultimos7": "Últimos 7 días",
+
+
+  // ── Reglas de prompt — lo que el asegurador le enseña al agente ───
+  // `rule_type` es `text` en la base: un tipo que no esté acá se muestra crudo.
+  // Los ejemplos del placeholder están escritos con el vocabulario del
+  // producto, así que en inglés van con los valores en inglés.
+  "reglas.activar": "Activar",
+  "reglas.agregar": "Agregar regla",
+  "reglas.ayuda": "Las reglas activas se incluyen en el prompt del agente para las próximas extracciones. Cada cambio queda auditado.",
+  "reglas.creada": "Regla creada. Se aplicará en las próximas extracciones.",
+  "reglas.desactivar": "Desactivar",
+  "reglas.errorActualizar": "No se pudo actualizar la regla.",
+  "reglas.errorCampos": "Completá el título y el texto de la regla (mínimo 3 caracteres).",
+  "reglas.errorCarga": "No se pudieron cargar las reglas.",
+  "reglas.errorCrear": "No se pudo crear la regla.",
+  "reglas.guardando": "Guardando…",
+  "reglas.inactiva": "Inactiva",
+  "reglas.phTitulo": "Título de la regla",
+  "reglas.placeholder": "Ej.: «Si el email menciona choque, clasificar como choque» · «Si hay personas heridas, severidad high o critical» · «Nunca marcar listo si falta DNI o número de póliza»",
+  "reglas.tipo.classification": "Clasificación",
+  "reglas.tipo.core_mapping": "Mapeo a core",
+  "reglas.tipo.extraction": "Extracción",
+  "reglas.tipo.missing_fields": "Campos faltantes",
+  "reglas.tipo.reply_style": "Estilo de respuesta",
+  "reglas.tipo.severity": "Severidad",
+  "reglas.tipoRegla": "Tipo de regla",
+  "reglas.vacio": "Todavía no hay reglas de entrenamiento.",
+
 } as const;
 
 export type TranslationKey = keyof typeof esAR;

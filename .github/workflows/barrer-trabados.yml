@@ -1,0 +1,108 @@
+# Barrer los casos que se quedaron en `procesando`.
+#
+# ── Por qué existe ────────────────────────────────────────────────────────────
+#
+# El webhook de WhatsApp contesta rápido y deja el trabajo pesado —extraer y
+# contestarle al asegurado— adentro de un `after()` de Vercel. Cuando esa
+# instancia se evapora antes de terminar, el caso queda en `procesando` para
+# siempre: nadie extrajo nada y nadie contestó. El repo ya lo tenía identificado;
+# lo dice el encabezado de `src/app/api/cron/reap-stuck/route.ts`.
+#
+# Pasó de verdad el 2026-09-02 en producción: el mismo commit, con la función
+# fría, tardó más de 150 s y no extrajo ni un campo; diez minutos después, en
+# caliente, tardó 13 s y extrajo 18.
+#
+# El barredor que arregla eso existe y funciona, pero hasta ahora sólo lo
+# llamaban `/api/intake/simulate` y `/api/admin/batch-simulate` —o sea, cuando un
+# admin corría una simulación— y un cron de Vercel una vez por día. Un siniestro
+# real que caía en ese hueco esperaba **hasta 24 horas** a que alguien lo mirara.
+#
+# ── Por qué acá y no en Vercel ────────────────────────────────────────────────
+#
+# `vercel.json` ya tiene dos crons y los dos son diarios: ése es el techo del
+# plan Hobby —dos tareas, una vez por día— y no vamos a plan pago. GitHub
+# Actions corre programado gratis en un repo público, así que el barrido vive
+# acá. No es un rodeo: es el único lugar sin costo donde esto puede correr
+# seguido.
+#
+# El cron de Vercel se deja igual. Éste puede no correr —GitHub demora las
+# tareas programadas cuando está cargado, y lo dice— y entonces el diario sigue
+# siendo la red abajo de la red.
+#
+# ── Lo que NO es ──────────────────────────────────────────────────────────────
+#
+# No es «mantener la función caliente». En Vercel cada ruta es su propia
+# función, así que pegarle a ésta no calienta el webhook de WhatsApp ni el
+# worker. Calentar el webhook pediría firmar un payload como Meta cada quince
+# minutos, que es fabricar tráfico falso contra el camino de producción. Esto
+# ataca la consecuencia —el caso trabado— y no la causa, a propósito.
+
+name: Barrer trabados
+
+on:
+  schedule:
+    # Cada quince minutos. El barredor escala lo que lleva más de veinte minutos
+    # en `procesando`, así que un caso trabado se ve en menos de media hora en
+    # vez de al otro día.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "A qué deploy pegarle"
+        required: false
+        default: "https://claimmix.vercel.app"
+
+# Si una corrida se demoró y ya viene la siguiente, con una alcanza.
+concurrency:
+  group: barrer-trabados
+  cancel-in-progress: false
+
+jobs:
+  barrer:
+    name: Escalar lo que quedó en procesando
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Pedirle al barredor que pase
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::Falta el secreto CRON_SECRET del repositorio."
+            exit 1
+          fi
+
+          # Tres intentos: la red de un runner se corta sola de vez en cuando, y
+          # un barrido que no salió no es una incidencia — lo es que no salga
+          # ninguno. Sólo se falla si fallan los tres.
+          for intento in 1 2 3; do
+            codigo=$(curl -sS -o respuesta.json -w '%{http_code}' \
+              --max-time 60 \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
+              "${URL}/api/cron/reap-stuck" || echo "000")
+
+            if [ "${codigo}" = "200" ]; then
+              echo "HTTP 200 en el intento ${intento}"
+              cat respuesta.json
+              echo
+
+              # Cuántos escaló, para que quede en el historial del workflow: si
+              # esto empieza a devolver números todos los días, el problema no
+              # es el barrido sino lo que traba los casos.
+              reaped=$(grep -o '"reaped":[0-9]*' respuesta.json | head -1 | cut -d: -f2)
+              if [ -n "${reaped:-}" ] && [ "${reaped}" != "0" ]; then
+                echo "::warning::Se escalaron ${reaped} caso(s) trabado(s) en procesando."
+              fi
+              exit 0
+            fi
+
+            echo "intento ${intento}: HTTP ${codigo}"
+            [ "${intento}" -lt 3 ] && sleep 10
+          done
+
+          echo "::error::El barredor no contestó 200 en tres intentos (último: ${codigo})."
+          cat respuesta.json 2>/dev/null || true
+          exit 1

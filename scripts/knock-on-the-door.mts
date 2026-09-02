@@ -94,7 +94,7 @@ const { and, desc, eq, like, sql } = await import("drizzle-orm");
  */
 async function waitForCase(
   find: () => Promise<{ id: string; status: string } | null>,
-  seconds = 150
+  seconds = 300
 ): Promise<{ id: string; status: string } | null> {
   /*
    * ── Por qué 150 y no 90 ────────────────────────────────────────────────────
@@ -110,9 +110,28 @@ async function waitForCase(
    * siguiente, sin tocar una línea de producto, tardó 39 segundos y dio 18
    * campos.
    *
-   * 150 deja lugar para un arranque en frío sin volver interminable el fallo de
-   * verdad: cuando algo esté realmente roto, el rojo tarda dos minutos y medio
-   * en llegar en vez de minuto y medio. Barato, comparado con un rojo mentiroso.
+   * ── Y por qué ahora 300 y no 150 ─────────────────────────────────────────
+   *
+   * Porque 150 tampoco alcanzó. El 2 de septiembre volvió a ponerse rojo, y esta
+   * vez quedó medido de las dos maneras en el mismo commit: en frío —el primer
+   * deploy en catorce horas y media— el caso de WhatsApp no había extraído nada
+   * a los 150 segundos; re-corriendo el job diez minutos después, con la función
+   * caliente, tardó 13 segundos y extrajo 18 campos. El correo, en la corrida
+   * fría, había andado bien tres segundos antes.
+   *
+   * Un orden de magnitud entre frío y caliente. Once corridas verdes seguidas
+   * habían tardado entre 67 y 101 segundos, todas en racimos de minutos: la
+   * ventana venía midiendo la temperatura de Vercel, no el producto.
+   *
+   * 300 deja lugar de sobra sin volver interminable el fallo de verdad: cuando
+   * algo esté realmente roto, el rojo tarda cinco minutos en llegar. Barato,
+   * comparado con un rojo mentiroso — que ya costó dos investigaciones.
+   *
+   * Y ojo con lo que esto NO arregla. La lentitud en frío es real y le pasa a
+   * una persona: si el `after()` de Vercel se evapora, el caso queda en
+   * `procesando` y nadie le contesta. Eso lo cubre `.github/workflows/
+   * barrer-trabados.yml`, que escala lo trabado cada quince minutos. Ensanchar
+   * esta ventana sólo evita que el timbre mienta.
    *
    * ── Y por qué ahora `seconds` son segundos ────────────────────────────────
    *

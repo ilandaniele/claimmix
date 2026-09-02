@@ -261,7 +261,7 @@ export default async function CustomerDetailPage({
           <div>
             <dt className="text-slate-500">{t("clientes.col.createdAt")}</dt>
             <dd className="mt-0.5 text-slate-900">
-              {customer.created_at ? formatDate(customer.created_at) : "—"}
+              {customer.created_at ? formatDate(customer.created_at, locale) : "—"}
             </dd>
           </div>
         </dl>
@@ -338,11 +338,11 @@ export default async function CustomerDetailPage({
                       </td>
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap">
                         {policy.start_date
-                          ? formatDateOnly(policy.start_date)
+                          ? formatDateOnly(policy.start_date, locale)
                           : "—"}
                       </td>
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap last:pr-0">
-                        {policy.end_date ? formatDateOnly(policy.end_date) : "—"}
+                        {policy.end_date ? formatDateOnly(policy.end_date, locale) : "—"}
                       </td>
                     </tr>
                   ))}
@@ -426,7 +426,7 @@ export default async function CustomerDetailPage({
                           {formatAge(c.created_at, t)}
                         </span>
                         <span className="mt-0.5 block whitespace-nowrap text-[12.5px] text-slate-500">
-                          {formatDate(c.created_at)}
+                          {formatDate(c.created_at, locale)}
                         </span>
                       </td>
                       <td className="py-2.5 px-3">

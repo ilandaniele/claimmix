@@ -38,7 +38,7 @@ describe("cn()", () => {
 describe("formatDate()", () => {
   it("formats a UTC date string to es-AR locale", () => {
     // 2024-01-15T12:00:00Z = 09:00 in Buenos Aires (UTC-3)
-    const result = formatDate("2024-01-15T12:00:00Z");
+    const result = formatDate("2024-01-15T12:00:00Z", "es-AR");
     expect(result).toContain("15");
     expect(result).toContain("01");
     expect(result).toContain("2024");
@@ -46,13 +46,13 @@ describe("formatDate()", () => {
 
   it("accepts a Date object", () => {
     const date = new Date("2024-06-01T00:00:00Z");
-    const result = formatDate(date);
+    const result = formatDate(date, "es-AR");
     expect(typeof result).toBe("string");
     expect(result.length).toBeGreaterThan(0);
   });
 
   it("returns a non-empty string for any valid date", () => {
-    const result = formatDate("2024-12-31T23:59:59Z");
+    const result = formatDate("2024-12-31T23:59:59Z", "es-AR");
     expect(result).toBeTruthy();
   });
 });
@@ -62,7 +62,7 @@ describe("formatDate()", () => {
  *
  * Los tres tests de `formatDate` que están acá arriba le pasan siempre un
  * instante completo con Z —"2024-01-15T12:00:00Z"—, así que ninguno tocaba el
- * caso que rompía: una fecha sola. `formatDate("2025-07-28")` devuelve
+ * caso que rompía: una fecha sola. `formatDate("2025-07-28", "es-AR")` devuelve
  * "27/07/2025, 09:00 p. m.", que es el día anterior más una hora inventada, y
  * así se dibujaban las vigencias de las pólizas.
  *
@@ -70,17 +70,17 @@ describe("formatDate()", () => {
  */
 describe("formatDateOnly()", () => {
   it("no corre el día de una fecha sola", () => {
-    expect(formatDateOnly("2025-07-28")).toBe("28/07/2025");
+    expect(formatDateOnly("2025-07-28", "es-AR")).toBe("28/07/2025");
   });
 
   it("aguanta el 1° de enero, que es donde el corrimiento cambia de año", () => {
     // El caso feo: medianoche UTC del 1/1 es el 31/12 a las 21 en Buenos Aires,
     // así que un formateo con zona se lleva puesto el día, el mes y el año.
-    expect(formatDateOnly("2026-01-01")).toBe("01/01/2026");
+    expect(formatDateOnly("2026-01-01", "es-AR")).toBe("01/01/2026");
   });
 
   it("no le agrega una hora a algo que no la tiene", () => {
-    const salida = formatDateOnly("2025-07-28");
+    const salida = formatDateOnly("2025-07-28", "es-AR");
     expect(salida).not.toMatch(/\d{1,2}:\d{2}/);
     expect(salida.toLowerCase()).not.toContain("m.");
   });
@@ -89,13 +89,52 @@ describe("formatDateOnly()", () => {
     // El contraste es el punto: la misma entrada, dos resultados, y por eso son
     // dos funciones. Si algún día `formatDate` dejara de correr la fecha sola,
     // este test avisa que `formatDateOnly` ya no hace falta.
-    expect(formatDate("2025-07-28")).not.toBe(formatDateOnly("2025-07-28"));
-    expect(formatDate("2025-07-28T12:00:00Z")).toContain("28/07/2025");
+    expect(formatDate("2025-07-28", "es-AR")).not.toBe(formatDateOnly("2025-07-28", "es-AR"));
+    expect(formatDate("2025-07-28T12:00:00Z", "es-AR")).toContain("28/07/2025");
   });
 
   it("devuelve el valor crudo si no tiene forma de fecha, en vez de inventar un día", () => {
-    expect(formatDateOnly("")).toBe("");
-    expect(formatDateOnly("mañana")).toBe("mañana");
+    expect(formatDateOnly("", "es-AR")).toBe("");
+    expect(formatDateOnly("mañana", "es-AR")).toBe("mañana");
+  });
+});
+
+/*
+ * El idioma de una fecha se dice, no se hereda.
+ *
+ * Estos tests pasaban `undefined` como locale después de que la firma cambió
+ * —`tsconfig.json` excluye `tests/**`, así que `tsc` no los mira— y quedaban en
+ * verde porque la máquina que los corría estaba en `es-UY`, que formatea igual
+ * que `es-AR`. En un runner en `en-US` habrían dado 07/28/2025 y el fallo se
+ * habría leído como un bug del producto.
+ */
+describe("las fechas siguen al idioma, pero no la zona", () => {
+  it("el orden de día y mes lo decide el idioma", () => {
+    expect(formatDateOnly("2025-07-28", "es-AR")).toBe("28/07/2025");
+    expect(formatDateOnly("2025-07-28", "en-US")).toBe("07/28/2025");
+  });
+
+  it("la hora NO se mueve cuando cambia el idioma", () => {
+    /*
+     * Lo que de verdad protege este archivo. Un siniestro entrado a las 22:10
+     * de Buenos Aires son las 22:10 para todo el mundo: si la zona siguiera al
+     * idioma, el mismo dato mostraría otra hora según quién lo abre.
+     *
+     * 2026-08-28T01:10:00Z = 27/08 22:10 en Buenos Aires. El día tiene que ser
+     * el 27 en los dos idiomas, aunque en UTC ya sea 28.
+     */
+    const instante = "2026-08-28T01:10:00.000Z";
+    expect(formatDate(instante, "es-AR")).toContain("27/08/2026");
+    expect(formatDate(instante, "en-US")).toContain("08/27/2026");
+    expect(formatDate(instante, "es-AR")).toContain("10:10");
+    expect(formatDate(instante, "en-US")).toContain("10:10");
+  });
+
+  it("una fecha sola tampoco se mueve al traducirla", () => {
+    // El 1° de enero es donde un formateo con zona se lleva puesto el año.
+    expect(formatDateOnly("2026-01-01", "es-AR")).toBe("01/01/2026");
+    expect(formatDateOnly("2026-01-01", "en-US")).toBe("01/01/2026");
+    expect(formatDateOnly("2026-01-31", "en-US")).toBe("01/31/2026");
   });
 });
 

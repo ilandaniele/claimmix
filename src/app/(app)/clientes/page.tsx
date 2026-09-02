@@ -226,7 +226,7 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
                     </td>
                     <td className="py-3 px-3 text-sm text-slate-500 whitespace-nowrap last:pr-0">
                       {customer.created_at
-                        ? formatDate(customer.created_at)
+                        ? formatDate(customer.created_at, locale)
                         : "—"}
                     </td>
                   </tr>

@@ -15,8 +15,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { CaseQuerySchema, type CaseStatus, type ClaimType } from "@/lib/schemas/cases";
-import { getT, type TranslationKey } from "@/lib/i18n";
+import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
+import { formatDate } from "@/lib/utils";
 import { listCasesForExport } from "@/server/cases/list";
 import { buildCsv } from "@/lib/csv/safe-encode";
 import { err } from "@/lib/api/respond";
@@ -92,15 +93,25 @@ export function etiquetasDeEstado(
   };
 }
 
-/** Format ISO date string as DD/MM/YYYY for es-AR locale */
-function formatDate(iso: string | null): string {
+/*
+ * La fecha de cada fila, en el idioma del que exporta y en la hora de acá.
+ *
+ * Tenía dos problemas y los dos se veían igual de poco. Escribía siempre
+ * DD/MM/YYYY aunque el resto del archivo —encabezados, tipos, estados— ya se
+ * traduce con `t`; y lo leía en UTC con `getUTCDate()`, así que un siniestro
+ * entrado a las 22:10 de Buenos Aires figuraba con la fecha del día siguiente.
+ * Es el mismo corrimiento de tres horas que el resto del producto ya resolvió,
+ * y encima el NOMBRE del archivo ya salía en hora argentina: el archivo decía
+ * un día y sus filas otro.
+ *
+ * La zona queda fija en la Argentina aunque el idioma cambie: la hora del
+ * negocio no depende de en qué idioma se lea el reporte.
+ */
+function formatDateCsv(iso: string | null, locale: Locale): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const yyyy = d.getUTCFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  return formatDate(d, locale, { hour: undefined, minute: undefined });
 }
 
 /** Format confidence score as percentage string */
@@ -185,7 +196,8 @@ export async function GET(request: NextRequest) {
   // El mismo idioma que la pantalla desde la que se apretó «Exportar CSV»: un
   // archivo en castellano bajado desde la interfaz en inglés se lee como un
   // error del producto.
-  const t = getT(await getServerLocale());
+  const locale = await getServerLocale();
+  const t = getT(locale);
   const TIPOS = etiquetasDeTipo(t);
   const ESTADOS = etiquetasDeEstado(t);
 
@@ -197,7 +209,7 @@ export async function GET(request: NextRequest) {
     ESTADOS[c.status as CaseStatus] ?? c.status,        // Estado
     // Drizzle numeric → string; convert to number at the boundary.
     formatConfidence(c.confidence_min === null ? null : Number(c.confidence_min)), // Confianza
-    formatDate(c.created_at),                           // Fecha
+    formatDateCsv(c.created_at, locale),                 // Fecha
     c.assigned_to ?? "",                                 // Analista (UUID — W5 will join name)
   ]);
 

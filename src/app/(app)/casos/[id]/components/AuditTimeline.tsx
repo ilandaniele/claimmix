@@ -1,7 +1,7 @@
 "use client";
 
 import { formatDate } from "@/lib/utils";
-import { useT } from "@/lib/i18n/LocaleContext";
+import { useT, useLocale } from "@/lib/i18n/LocaleContext";
 import { esAR, type TranslationKey } from "@/lib/i18n";
 
 /*
@@ -49,6 +49,7 @@ function dotColor(eventType: string): string {
 
 export function AuditTimeline({ events }: AuditTimelineProps) {
   const t = useT();
+  const { locale } = useLocale();
 
   if (events.length === 0) {
     return (
@@ -77,7 +78,7 @@ export function AuditTimeline({ events }: AuditTimelineProps) {
               dateTime={event.created_at}
               className="text-xs text-slate-400"
             >
-              {formatDate(event.created_at)}
+              {formatDate(event.created_at, locale)}
             </time>
             {event.reason != null && (
               <p className="text-xs text-slate-500 mt-0.5">

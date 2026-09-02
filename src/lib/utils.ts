@@ -2,7 +2,9 @@
  * General-purpose utilities for ClaimMix.
  */
 
+import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import type { TranslationKey } from "@/lib/i18n/es-AR";
+import type { Locale } from "@/lib/i18n";
 
 /**
  * Merge class names conditionally (Tailwind-friendly).
@@ -13,19 +15,26 @@ export function cn(...classes: (string | undefined | null | false)[]): string {
 }
 
 /**
- * Format a date string or Date object to a human-readable es-AR string.
- * Uses the "America/Argentina/Buenos_Aires" timezone.
+ * Una fecha con hora, escrita en el idioma de quien mira.
+ *
+ * El idioma cambia; la ZONA NO. Un siniestro que entró a las 18:09 en Buenos
+ * Aires entró a las 18:09 aunque el analista lea la pantalla en inglés: si la
+ * zona siguiera al idioma, el mismo dato mostraría otra hora según quién lo
+ * abre, y eso no es traducir sino falsear. Por eso `timeZone` está fijo y el
+ * primer argumento del formateador no.
  *
  * @example
- * formatDate("2024-01-15T10:30:00Z") // "15/01/2024 07:30"
+ * formatDate("2024-01-15T12:00:00Z", "es-AR") // "15/01/2024, 09:00 a. m."
+ * formatDate("2024-01-15T12:00:00Z", "en-US") // "01/15/2024, 09:00 AM"
  */
 export function formatDate(
   date: string | Date,
+  locale: Locale,
   options?: Intl.DateTimeFormatOptions
 ): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  return d.toLocaleString("es-AR", {
-    timeZone: "America/Argentina/Buenos_Aires",
+  return d.toLocaleString(locale, {
+    timeZone: ZONA_ARGENTINA,
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -49,15 +58,25 @@ export function formatDate(
  * forma más segura de no moverla es no construir un `Date`.
  *
  * @example
- * formatDateOnly("2026-01-01") // "01/01/2026"
+ * formatDateOnly("2026-01-01", "es-AR") // "01/01/2026"
+ * formatDateOnly("2026-01-31", "en-US") // "01/31/2026"
  */
-export function formatDateOnly(date: string): string {
+export function formatDateOnly(date: string, locale: Locale): string {
   const partes = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
   // Si no tiene la forma de una fecha sola, se devuelve tal cual: es preferible
   // mostrar el valor crudo que inventarle un día.
   if (!partes) return date;
   const [, anio, mes, dia] = partes;
-  return `${dia}/${mes}/${anio}`;
+  /*
+   * El orden lo decide el idioma, y para eso hay que armar la fecha — pero
+   * armada en UTC y formateada en UTC, que es la única forma de reordenarla sin
+   * moverla. Construirla en la zona local o formatearla en la argentina es
+   * exactamente el bug que esta función existe para no tener.
+   */
+  return new Date(Date.UTC(Number(anio), Number(mes) - 1, Number(dia))).toLocaleDateString(
+    locale,
+    { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric" }
+  );
 }
 
 /**

@@ -7,7 +7,7 @@
  * AC25: Prompt injection in email body does NOT change classification (mock output
  *        is deterministic and not affected by input text).
  *
- * Note: These tests use the mock extractor to avoid OpenAI API calls in CI.
+ * Nota: usan el extractor mock para no llamar al modelo en CI.
  * The mock extractor validates the interface contract between the worker and
  * the extraction pipeline. Real LLM behavior is tested in integration tests.
  */
@@ -35,7 +35,7 @@ describe("extractEmailClaimMock — interface conformance", () => {
     expect(result.extraction_model).toBe("mock-email-v1");
   });
 
-  it("has zero cost by default (no OpenAI call)", () => {
+  it("has zero cost by default (no model call)", () => {
     const result = extractEmailClaimMock();
     expect(result.cost_usd).toBe(0);
     expect(result.prompt_tokens).toBe(0);

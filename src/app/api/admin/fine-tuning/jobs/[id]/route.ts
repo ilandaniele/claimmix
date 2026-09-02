@@ -10,16 +10,20 @@ import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
   activateFineTunedModel,
-  approveFineTuneJob,
   startFineTuneJob,
-  syncFineTuneJob,
 } from "@/server/training/fine-tuning";
 
 export const dynamic = "force-dynamic";
 
 const ParamsSchema = z.object({ id: z.string().uuid() });
 const PatchSchema = z.object({
-  action: z.enum(["start", "sync", "approve", "activate"]),
+  /*
+   * "sync" y "approve" se fueron con OpenAI. Con un solo proveedor, "sync"
+   * hacia lo mismo que "start" —rearmar el paquete— y "approve" no tenia
+   * nada que aprobar: el paquete nace aprobado porque no se sube a ningun
+   * lado. Eran los pasos de mirar la evaluacion de OpenAI antes de activar.
+   */
+  action: z.enum(["start", "activate"]),
 });
 
 export async function PATCH(
@@ -40,16 +44,6 @@ export async function PATCH(
       if (parsed.data.action === "start") {
         return ok({
           job: await startFineTuneJob(userRow.tenant_id, user.id, params.data.id),
-        });
-      }
-      if (parsed.data.action === "sync") {
-        return ok({
-          job: await syncFineTuneJob(userRow.tenant_id, user.id, params.data.id),
-        });
-      }
-      if (parsed.data.action === "approve") {
-        return ok({
-          job: await approveFineTuneJob(userRow.tenant_id, user.id, params.data.id),
         });
       }
       return ok({

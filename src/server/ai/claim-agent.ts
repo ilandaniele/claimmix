@@ -1,21 +1,20 @@
 /**
  * Claim agent facade.
  *
- * The worker talks to this module. Provider adapters (OpenAI, Gemini, mock)
- * remain implementation details, and every provider returns the same validated
- * ExtractedClaim contract for deterministic DB writes.
+ * El worker le habla a este modulo y no a un extractor. Quedan dos motores
+ * —Gemini y el mock— y los dos devuelven el mismo `ExtractedClaim` validado,
+ * que es lo que hace que la escritura a la base sea igual venga de donde venga.
+ *
+ * La fachada sigue existiendo con un solo proveedor real a proposito: es el
+ * lugar donde `resolveExtractionEngine` decide, y el unico punto donde habria
+ * que tocar si mañana entra otro.
  */
 
 import "server-only";
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import { runMockExtractor, extractEmailClaimMock } from "@/server/ai/mock-extractor";
-import {
-  runOpenAIExtractor,
-  extractEmailClaim,
-  OpenAIExtractionError,
-  type EmailClaimPayload,
-} from "@/server/ai/openai-extractor";
+import type { EmailClaimPayload } from "@/server/ai/model-response";
 import {
   runGeminiExtractor,
   extractEmailClaimGemini,
@@ -43,23 +42,15 @@ export async function runClaimTextAgent(params: {
     if (engine === "mock") {
       return runMockExtractor(params.rawText, params.claimType);
     }
-    if (engine === "gemini") {
-      return runGeminiExtractor(
-        params.rawText,
-        params.claimType,
-        params.caseId,
-        params.tenantId,
-        params.userId
-      );
-    }
-    return runOpenAIExtractor(
+    return runGeminiExtractor(
       params.rawText,
       params.claimType,
       params.caseId,
-      params.tenantId
+      params.tenantId,
+      params.userId
     );
   } catch (e) {
-    if (e instanceof OpenAIExtractionError || e instanceof GeminiExtractionError) {
+    if (e instanceof GeminiExtractionError) {
       throw new ClaimAgentError("agent_output_invalid", e);
     }
     throw e;
@@ -74,13 +65,10 @@ export async function runEmailClaimAgent(params: {
 }): Promise<ExtractedClaim> {
   const engine = await resolveExtractionEngine(params.tenantId, params.userId);
   if (engine === "mock") return extractEmailClaimMock();
-  if (engine === "gemini") {
-    return extractEmailClaimGemini(
-      params.payload,
-      params.tenantId,
-      params.caseId,
-      params.userId
-    );
-  }
-  return extractEmailClaim(params.payload, params.tenantId, params.caseId);
+  return extractEmailClaimGemini(
+    params.payload,
+    params.tenantId,
+    params.caseId,
+    params.userId
+  );
 }

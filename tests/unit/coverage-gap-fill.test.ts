@@ -579,15 +579,12 @@ describe("listCasesForExport — filter branches", () => {
 describe("extract.ts — environment-driven mock selection (indirect)", () => {
   const originalMockAI = process.env.MOCK_AI;
   const originalAIMock = process.env.AI_MOCK;
-  const originalOpenAIKey = process.env.OPENAI_API_KEY;
 
   afterEach(() => {
     if (originalMockAI === undefined) delete process.env.MOCK_AI;
     else process.env.MOCK_AI = originalMockAI;
     if (originalAIMock === undefined) delete process.env.AI_MOCK;
     else process.env.AI_MOCK = originalAIMock;
-    if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = originalOpenAIKey;
   });
 
   it("uses mock mode when MOCK_AI=true (env branch)", () => {

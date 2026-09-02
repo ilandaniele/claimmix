@@ -180,9 +180,14 @@ export const modelTrainingJobs = pgTable("model_training_jobs", {
     .notNull()
     .references(() => tenants.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("draft"),
-  provider: text("provider").notNull().default("openai"),
+  // El default del esquema. La base viva sigue con `openai` hasta que corra
+  // una migración; no importa, porque el código SIEMPRE escribe el valor.
+  provider: text("provider").notNull().default("gemini"),
   base_model: text("base_model").notNull().default(""),
   fine_tuned_model_id: text("fine_tuned_model_id"),
+  // Guarda el nombre del recurso del job de Vertex AI. El nombre quedó de
+  // cuando había trabajos de OpenAI; renombrar la columna pide una
+  // migración sobre datos que sí se usan, así que se documenta y se queda.
   openai_fine_tuning_job_id: text("openai_fine_tuning_job_id"),
   training_file_id: text("training_file_id"),
   validation_file_id: text("validation_file_id"),
@@ -249,7 +254,7 @@ export const providerUsageEvents = pgTable("provider_usage_events", {
   tenant_id: uuid("tenant_id")
     .notNull()
     .references(() => tenants.id, { onDelete: "cascade" }),
-  provider: text("provider").notNull(), // "gemini" | "openai" | "mock"
+  provider: text("provider").notNull(), // "gemini" | "mock" (hay filas viejas con "openai")
   model: text("model").notNull(),
   operation: text("operation").notNull().default("extraction"), // "extraction" | "email_extraction" | "simulate"
   status: text("status").notNull(), // "success" | "error" | "rate_limited" | "quota_exceeded" | "invalid_json" | "timeout"

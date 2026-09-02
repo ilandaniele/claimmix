@@ -5,7 +5,7 @@
  * Proxy.ts includes /api/admin/health in PUBLIC_PREFIXES.
  *
  * Returns:
- *   200  { status: "ok", db: "connected", ai: "mock"|"gemini"|"openai", version, region }
+ *   200  { status: "ok", db: "connected", ai: "mock"|"gemini", version, region }
  *   200  { status: "degraded", db: "error", ... }  (200 so LB doesn't cycle)
  *
  * AC16 (security): env checks return booleans only — never exposes key values.
@@ -17,24 +17,21 @@ import { db, tables } from "@/lib/db";
 // package.json is a static asset — importing version avoids a runtime read.
 import packageJson from "../../../../../package.json";
 import { isVertexConfigured } from "@/server/ai/provider";
+import { resolverAiMode } from "@/server/ai/ai-mode";
 
 export async function GET() {
   // ── AI mode ──────────────────────────────────────────────────────────────────
-  const preferredProvider = process.env.AI_PROVIDER?.trim().toLowerCase();
   // Vertex authenticates with a service account, so "is Gemini configured?"
   // cannot be "is there an API key?" — that reading is what silently sent the
   // extractor to the mock, and here it would have this page report "mock" over
   // a perfectly working deployment.
   const geminiConfigured =
     isVertexConfigured() || Boolean(process.env.GEMINI_API_KEY?.trim());
-  const openaiConfigured = Boolean(process.env.OPENAI_API_KEY?.trim());
-  let aiMode: "mock" | "gemini" | "openai" = "mock";
-  if (process.env.MOCK_AI !== "true" && process.env.AI_MOCK !== "true") {
-    if (preferredProvider === "openai" && openaiConfigured) aiMode = "openai";
-    else if (preferredProvider === "gemini" && geminiConfigured) aiMode = "gemini";
-    else if (geminiConfigured) aiMode = "gemini";
-    else if (openaiConfigured) aiMode = "openai";
-  }
+  const aiMode = resolverAiMode({
+    mockAi: process.env.MOCK_AI,
+    aiMock: process.env.AI_MOCK,
+    geminiConfigurado: geminiConfigured,
+  });
 
   // ── DB ping ───────────────────────────────────────────────────────────────────
   let dbStatus: "connected" | "error" = "connected";
@@ -60,7 +57,7 @@ export async function GET() {
   /*
    * Arriba o abajo, y nada más.
    *
-   * Esto devolvía además el transporte del modelo, si había clave de OpenAI, la
+   * Esto devolvía además el transporte del modelo, si había clave del proveedor, la
    * región y si Sentry estaba prendido. Ninguno de esos datos es un secreto por
    * separado; juntos son reconocimiento gratis para cualquiera. El más útil
    * para quien mira desde afuera es el de Sentry: "sentry_dsn: false" dice que

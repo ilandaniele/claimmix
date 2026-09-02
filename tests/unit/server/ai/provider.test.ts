@@ -105,10 +105,11 @@ describe("getDefaultProvider", () => {
 });
 
 describe("hasProviderKey", () => {
-  it("reflects key presence per provider", () => {
+  it("dice si hay clave de Gemini y no mira ninguna otra", () => {
+    // Una OPENAI_API_KEY vieja en el entorno no habilita nada: el proveedor
+    // salio del producto y la variable puede seguir cargada en Vercel.
     process.env.OPENAI_API_KEY = "sk-test";
     delete process.env.GEMINI_API_KEY;
-    expect(hasProviderKey("openai")).toBe(true);
     expect(hasProviderKey("gemini")).toBe(false);
   });
 
@@ -171,13 +172,35 @@ describe("resolveExtractionEngine", () => {
     expect(await resolveExtractionEngine(TENANT)).toBe("gemini");
   });
 
-  it("falls back to the other provider when the preferred key is missing", async () => {
+  it("un proveedor guardado que ya no existe cae a gemini, no rompe", async () => {
+    // La columna es `text`, no un enum, asi que "openai" —de cuando el
+    // producto lo ofrecia— sigue siendo un valor posible en una base vieja.
+    // Tiene que caer al default y no dejar al inquilino sin extractor.
     process.env.MOCK_AI = "false";
     process.env.AI_MOCK = "false";
-    delete process.env.OPENAI_API_KEY;
     process.env.GEMINI_API_KEY = "g-test";
     setDbResult([{ provider: "openai" }]);
     expect(await resolveExtractionEngine(TENANT)).toBe("gemini");
+  });
+
+  it("sin credencial utilizable cae al mock, y lo dice", async () => {
+    // Caer al mock es lo peor que puede pasar: el caso se procesa igual y el
+    // asegurado recibe una respuesta con datos inventados. Ya paso una vez.
+    // Mientras hubo dos proveedores el aviso salia al cambiar de uno al otro;
+    // ahora esta es la unica degradacion posible, asi que tiene que gritar.
+    process.env.MOCK_AI = "false";
+    process.env.AI_MOCK = "false";
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_TRANSPORT;
+    setDbResult([]);
+    const avisos = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await resolveExtractionEngine(TENANT)).toBe("mock");
+      const dicho = avisos.mock.calls.map((c) => String(c[0])).join(" ");
+      expect(dicho).toContain("ai.provider.degraded_to_mock");
+    } finally {
+      avisos.mockRestore();
+    }
   });
 
   it("uses gemini by default when only the Gemini key is configured", async () => {

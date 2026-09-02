@@ -1,19 +1,24 @@
 /**
- * AI provider selection — per-tenant switch between OpenAI and Google Gemini.
+ * Qué motor extrae, y con qué clave.
  *
- * The active provider is resolved in this order:
- *   1. MOCK_AI / AI_MOCK env → "mock" (demo mode, no real LLM calls)
- *   2. tenant_ai_settings.provider for the tenant (set from Configuración)
- *   3. AI_PROVIDER env var
- *   4. default "gemini"
+ * Queda un solo proveedor real —Gemini— y el mock. El tipo `AiProvider` sigue
+ * existiendo con un miembro: es lo que hace que agregar otro sea cambiar una
+ * unión y que el compilador marque los lugares, en vez de buscar strings
+ * sueltos por el repo. Fue así como se sacó OpenAI.
  *
- * Whatever is selected, a provider without its API key configured is never
- * used: the resolver falls back to the other provider when possible, and to
- * "mock" only when neither key exists (so the pipeline still degrades
- * gracefully instead of crashing).
+ * El orden es:
+ *   1. MOCK_AI / AI_MOCK → "mock" (demo, sin llamadas de verdad)
+ *   2. tenant_ai_settings.provider del inquilino
+ *   3. AI_PROVIDER
+ *   4. "gemini"
  *
- * Fully defensive: a missing tenant_ai_settings table (migration not applied)
- * or any query error silently falls back to the env default.
+ * Defensivo de punta a punta: si falta la tabla `tenant_ai_settings` —la
+ * migración no aplicada— o la consulta falla, se cae al default del entorno en
+ * vez de romper.
+ *
+ * Un valor guardado que ya no exista —`"openai"`, de antes— NO rompe: no pasa
+ * `isAiProvider` y cae al default. Producción no tiene ninguno, pero la
+ * columna es `text` y eso no lo garantiza nadie.
  */
 
 import "server-only";
@@ -23,14 +28,14 @@ import { db, tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 
-export type AiProvider = "openai" | "gemini";
+export type AiProvider = "gemini";
 export type ExtractionEngine = AiProvider | "mock";
 
-export const AI_PROVIDERS: readonly AiProvider[] = ["gemini", "openai"] as const;
+export const AI_PROVIDERS: readonly AiProvider[] = ["gemini"] as const;
 const DEFAULT_AI_PROVIDER: AiProvider = "gemini";
 
 function isAiProvider(value: unknown): value is AiProvider {
-  return value === "openai" || value === "gemini";
+  return value === "gemini";
 }
 
 // ── Key encryption (AES-256-GCM, same as Gmail token storage) ────────────────
@@ -179,16 +184,8 @@ export async function setTenantGeminiKey(tenantId: string, apiKey: string): Prom
 // ── Provider key checks ───────────────────────────────────────────────────────
 
 /** True when the provider's API key is configured in env (non-empty). */
-export function hasProviderKey(provider: AiProvider): boolean {
-  const key =
-    provider === "gemini"
-      ? process.env.GEMINI_API_KEY
-      : process.env.OPENAI_API_KEY;
-  return Boolean(key && key.trim());
-}
-
-export function getDefaultOpenAIModel(): string {
-  return process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+export function hasProviderKey(_provider: AiProvider): boolean {
+  return Boolean(process.env.GEMINI_API_KEY?.trim());
 }
 
 export function getDefaultGeminiModel(): string {
@@ -196,31 +193,6 @@ export function getDefaultGeminiModel(): string {
   // "no longer available to new users" 404s on freshly-created keys. -latest
   // always resolves to the current Flash, immune to that deprecation trap.
   return process.env.GEMINI_MODEL ?? "gemini-flash-latest";
-}
-
-export async function getTenantOpenAIModel(tenantId?: string | null): Promise<string> {
-  if (!tenantId) return getDefaultOpenAIModel();
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
-  try {
-    const row = await enTenant(tenantCtx, (db) =>
-      db
-        .select({
-          openai_model: tables.tenantAiSettings.openai_model,
-          active_model_provider: tables.tenantAiSettings.active_model_provider,
-          active_model: tables.tenantAiSettings.active_model,
-        })
-        .from(tables.tenantAiSettings)
-        .limit(1)
-    ).then(firstRow);
-
-    if (row?.active_model_provider === "openai" && row.active_model?.trim()) {
-      return row.active_model.trim();
-    }
-    return row?.openai_model?.trim() || getDefaultOpenAIModel();
-  } catch {
-    return getDefaultOpenAIModel();
-  }
 }
 
 export async function getTenantGeminiModel(tenantId?: string | null): Promise<string> {
@@ -250,7 +222,7 @@ export async function getTenantGeminiModel(tenantId?: string | null): Promise<st
 
 export async function setTenantModelDefaults(
   tenantId: string,
-  values: { provider?: AiProvider; openaiModel?: string; geminiModel?: string }
+  values: { provider?: AiProvider; geminiModel?: string }
 ): Promise<void> {
   const t = tables.tenantAiSettings;
   const now = new Date().toISOString();
@@ -258,7 +230,6 @@ export async function setTenantModelDefaults(
   const insertValues = {
     tenant_id: tenantId,
     provider,
-    openai_model: values.openaiModel?.trim() || getDefaultOpenAIModel(),
     gemini_model: values.geminiModel?.trim() || getDefaultGeminiModel(),
     active_model_provider: provider,
     active_model: null,
@@ -278,7 +249,6 @@ export async function setTenantModelDefaults(
                 active_model: null,
               }
             : {}),
-          ...(values.openaiModel ? { openai_model: values.openaiModel.trim() } : {}),
           ...(values.geminiModel ? { gemini_model: values.geminiModel.trim() } : {}),
           updated_at: now,
         },
@@ -287,23 +257,25 @@ export async function setTenantModelDefaults(
 }
 
 /** True when the provider has a usable API key (user → tenant → env). */
-export async function hasProviderKeyForTenant(tenantId: string, provider: AiProvider, userId?: string): Promise<boolean> {
-  if (provider === "openai") return hasProviderKey("openai");
-
-  // Vertex authenticates with a service account, not an API key, so asking for
-  // an API key answers the wrong question.
+export async function hasProviderKeyForTenant(tenantId: string, _provider: AiProvider, userId?: string): Promise<boolean> {
+  // Vertex autentica con una cuenta de servicio, no con una API key, así que
+  // preguntar por una API key contesta la pregunta equivocada.
   //
-  // This failed silently and completely. A rehearsal ran with the Vertex
-  // credentials and no GEMINI_API_KEY: the resolver decided Gemini was
-  // unavailable, then that OpenAI was unavailable, and fell all the way
-  // through to the mock extractor. Twelve conversations were rehearsed against
-  // canned data and reported as the agent's behaviour.
+  // Esto falló en silencio y por completo. Un ensayo corrió con las
+  // credenciales de Vertex y sin GEMINI_API_KEY: el resolvedor decidió que
+  // Gemini no estaba disponible, después que OpenAI tampoco, y se cayó hasta
+  // el extractor mock. Doce conversaciones ensayadas contra datos inventados y
+  // reportadas como el comportamiento del agente.
   //
-  // Production happens to carry a leftover GEMINI_API_KEY, which is the only
-  // reason it was not doing the same thing — an insurer's deployment quietly
-  // answering claimants with mock output is about the worst outcome this
-  // codebase has available, and one unused environment variable was standing
-  // between us and it.
+  // Producción tenía de casualidad una GEMINI_API_KEY vieja, y esa es la única
+  // razón por la que no estaba haciendo lo mismo: el deploy de una aseguradora
+  // contestándole a sus asegurados con salida del mock es lo peor que este
+  // repo tiene disponible, y una variable de entorno sin usar era todo lo que
+  // se interponía.
+  //
+  // El paso del medio —«después que OpenAI tampoco»— ya no existe: queda un
+  // solo proveedor, así que si esta función devuelve false se va derecho al
+  // mock. Por eso `resolveExtractionEngine` ahora lo registra.
   if (isVertexConfigured()) return true;
 
   return Boolean(await getTenantGeminiKey(tenantId, userId));
@@ -348,9 +320,23 @@ export async function getTenantAiProvider(
 }
 
 /**
- * Resolve which extraction engine to actually run for this tenant/user,
- * accounting for mock mode and which API keys are configured.
- * Resolution order: user key → tenant key → env var.
+ * Qué motor corre de verdad para este inquilino. Orden de la clave: usuario →
+ * inquilino → entorno.
+ *
+ * ⚠️ Caer al mock es lo peor que puede pasar acá, y es silencioso por diseño
+ * del tipo de retorno: nada explota, el caso se procesa, y el asegurado recibe
+ * una respuesta armada con datos inventados. Ya pasó una vez —un ensayo entero
+ * corrió contra el mock y se reportó como el comportamiento del agente— y lo
+ * único que separaba a producción de lo mismo era una `GEMINI_API_KEY` vieja
+ * que nadie estaba usando.
+ *
+ * Mientras hubo dos proveedores, el aviso salía al cambiar de uno al otro y la
+ * caída al mock no avisaba nada. Ahora que queda uno, la caída al mock es la
+ * ÚNICA degradación posible, así que es la que tiene que gritar.
+ *
+ * El comportamiento no cambia —sigue devolviendo "mock" en vez de tirar—
+ * porque decidir que un caso se caiga en vez de contestar con datos falsos es
+ * una decisión de producto, no una limpieza. Pero ahora queda en el log.
  */
 export async function resolveExtractionEngine(
   tenantId: string,
@@ -364,20 +350,18 @@ export async function resolveExtractionEngine(
   const preferred = await getTenantAiProvider(tenantId);
   if (await hasProviderKeyForTenant(tenantId, preferred, uid)) return preferred;
 
-  const fallback: AiProvider = preferred === "openai" ? "gemini" : "openai";
-  if (await hasProviderKeyForTenant(tenantId, fallback, uid)) {
-    console.warn(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "ai.provider.fallback",
-        preferred,
-        used: fallback,
-        reason: "missing_api_key",
-      })
-    );
-    return fallback;
-  }
-
+  console.warn(
+    JSON.stringify({
+      level: "warn",
+      service: "claimmix",
+      msg: "ai.provider.degraded_to_mock",
+      tenant_id: tenantId,
+      preferred,
+      reason: "missing_api_key",
+      detalle:
+        "Sin credencial utilizable para Gemini. Las extracciones salen del mock: " +
+        "son datos inventados y NO sirven para contestarle a un asegurado.",
+    })
+  );
   return "mock";
 }

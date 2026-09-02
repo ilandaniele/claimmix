@@ -1,5 +1,5 @@
 /**
- * OpenAI prompt builder for claim extraction.
+ * El armado del prompt de extracción.
  *
  * LLM01: XML sentinel delimiters isolate user content from instructions.
  * The system prompt explicitly instructs the model to treat content
@@ -140,7 +140,7 @@ const FIELD_HINTS: Record<ClaimType, string> = {
 };
 
 /**
- * Build the system prompt for OpenAI claim extraction.
+ * Arma el system prompt de la extracción.
  *
  * @param claimType - The claim type determines which fields to extract.
  * @returns The system prompt string.
@@ -259,7 +259,7 @@ ${truncated}
  * @param memoryHints   - Known field values for this sender from claim_memory (AC13)
  * @param knownPatterns - Known severity/claim patterns from known_claim_patterns table
  * @param senderEmail   - Sender email address (PII — not echoed in output)
- * @returns             - The system prompt string (injected into OpenAI messages[0].content)
+ * @returns             - El system prompt (va como primer mensaje del modelo)
  */
 /**
  * Operator-controlled learning context injected into the extraction prompt.

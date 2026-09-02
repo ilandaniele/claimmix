@@ -387,7 +387,6 @@ export const esAR = {
   "aiProvider.title": "Modelo de IA",
   "aiProvider.helper":
     "Elegí qué proveedor de IA analiza los emails entrantes. El cambio aplica de inmediato a los próximos emails.",
-  "aiProvider.openaiHelper": "GPT — requiere créditos de API en OpenAI.",
   "aiProvider.geminiHelper": "Gemini — capa gratuita de Google AI Studio.",
   "aiProvider.active": "Activo",
   "aiProvider.notConfigured": "No configurado",
@@ -887,14 +886,11 @@ export const esAR = {
   // El estado de un trabajo (`draft`, `eval_pending`, `approved`) queda crudo:
   // es el mismo que devuelve la API de Google y el que hay que poder pegar en
   // su consola cuando algo se traba.
-  "ft.activar": "Activar",
   "ft.activarGemini": "Activar Gemini",
   "ft.actualizar": "Actualizar",
-  "ft.aprobarEval": "Aprobar eval",
   "ft.ayuda": "Para crear un paquete primero hacen falta ejemplos aprobados. Gemini no llama a ninguna API de fine-tuning; el JSONL exportado documenta los ejemplos que ya alimentan al agente.",
   "ft.cargando": "Cargando…",
   "ft.crearGemini": "Crear paquete Gemini",
-  "ft.crearOpenai": "Crear trabajo OpenAI",
   "ft.ejemploUno": "1 ejemplo",
   "ft.ejemplosVarios": "{n} ejemplos",
   "ft.errorActualizar": "No se pudo actualizar el trabajo.",
@@ -903,15 +899,9 @@ export const esAR = {
   "ft.errorRollback": "No se pudo hacer rollback.",
   "ft.geminiActivo": "Proveedor activo: Gemini. Crear un trabajo arma un paquete contextual JSONL para evaluar, respaldar y reutilizar la memoria del agente.",
   "ft.geminiContext": "Contexto Gemini",
-  "ft.iniciar": "Iniciar",
-  "ft.openaiFinetune": "Fine-tune OpenAI",
-  "ft.openaiSoloConOpenai": "Los trabajos de OpenAI sólo se pueden iniciar o activar con OpenAI como proveedor activo.",
-  "ft.rollback": "Rollback",
-  "ft.rollbackSoloOpenai": "El rollback de fine-tuning está disponible sólo con OpenAI activo.",
   "ft.sinPaquetes": "No hay paquetes de entrenamiento.",
   "ft.sinPaquetesDetalle": "Los ejemplos aprobados ya están disponibles como contexto del agente. Crear un paquete genera un JSONL portable para Gemini.",
-  "ft.sincronizar": "Sincronizar",
-  "ft.subtitulo": "Gemini usa los ejemplos aprobados, las reglas y la memoria como contexto activo, sin costo de fine-tuning externo. OpenAI queda disponible sólo si lo elegís como proveedor.",
+  "ft.subtitulo": "Gemini usa los ejemplos aprobados, las reglas y la memoria como contexto activo. El paquete que se arma acá es un JSONL portable: sirve para respaldar y evaluar esa memoria, no para entrenar un modelo afuera.",
   "ft.titulo": "Entrenamiento del agente",
   "ft.vertex.activarModelo": "Activar modelo",
   "ft.vertex.activoDesde": "Activo desde {f}",
@@ -939,6 +929,21 @@ export const esAR = {
   "ft.vertex.titulo": "Vertex AI Gemini — fine-tuning supervisado",
   "ft.vertex.trabajoUno": "1 trabajo iniciado",
   "ft.vertex.trabajosVarios": "{n} trabajos iniciados",
+
+
+  // ── Guardar el modelo, en el panel del proveedor ──────────────────
+  // «Guardar modelos» estaba escrito a mano y sobrevivió a la pasada de i18n:
+  // el archivo ya usaba `useT`, así que la medición no lo marcó.
+  "aiProvider.guardando": "Guardando…",
+  "aiProvider.guardarModelo": "Guardar modelo",
+
+
+  // ── Las acciones de un trabajo de Vertex ──────────────────────────
+  // Estaban en el bloque de fine-tuning junto a las de OpenAI. El panel de
+  // Vertex las sigue usando: ahí sí hay un trabajo corriendo del otro lado.
+  "ft.iniciar": "Iniciar",
+  "ft.rollback": "Rollback",
+  "ft.sincronizar": "Sincronizar",
 
 } as const;
 

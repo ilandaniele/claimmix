@@ -4,7 +4,7 @@
  * Implements the full lifecycle:
  *   draft → start (GCS upload + Vertex AI tuning job) → sync → activate/rollback
  *
- * Does NOT call OpenAI. All external calls go to GCS and Vertex AI REST APIs,
+ * Todas las llamadas externas van a GCS y a las APIs REST de Vertex AI,
  * authenticated via google-auth-library (Application Default Credentials or
  * GOOGLE_APPLICATION_CREDENTIALS service account file).
  *
@@ -129,7 +129,7 @@ function mapVertexAiStatus(vertexState: string): string {
  *     "contents": [ { "role": "user",  "parts": [{ "text": ... }] },
  *                   { "role": "model", "parts": [{ "text": ... }] } ] }
  *
- * It does NOT accept the OpenAI ChatCompletions `{ messages: [{ role, content }] }`
+ * NO acepta el `{ messages: [{ role, content }] }` de ChatCompletions
  * shape — uploading that fails the tuning job with:
  *   "Converting from 'ChatCompletions' to 'GenerateContent' dataset format is
  *    currently not supported for this model."

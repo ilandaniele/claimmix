@@ -373,7 +373,6 @@ export const enUS: Record<TranslationKey, string> = {
   "aiProvider.title": "AI model",
   "aiProvider.helper":
     "Choose which AI provider analyzes incoming emails. The change applies immediately to the next emails.",
-  "aiProvider.openaiHelper": "GPT — requires API credits on OpenAI.",
   "aiProvider.geminiHelper": "Gemini — Google AI Studio free tier.",
   "aiProvider.active": "Active",
   "aiProvider.notConfigured": "Not configured",
@@ -863,14 +862,11 @@ export const enUS: Record<TranslationKey, string> = {
   // El estado de un trabajo (`draft`, `eval_pending`, `approved`) queda crudo:
   // es el mismo que devuelve la API de Google y el que hay que poder pegar en
   // su consola cuando algo se traba.
-  "ft.activar": "Activate",
   "ft.activarGemini": "Activate Gemini",
   "ft.actualizar": "Refresh",
-  "ft.aprobarEval": "Approve eval",
   "ft.ayuda": "Creating a bundle needs approved examples first. Gemini calls no fine-tuning API; the exported JSONL documents the examples that already feed the agent.",
   "ft.cargando": "Loading…",
   "ft.crearGemini": "Create Gemini bundle",
-  "ft.crearOpenai": "Create OpenAI job",
   "ft.ejemploUno": "1 example",
   "ft.ejemplosVarios": "{n} examples",
   "ft.errorActualizar": "The job could not be updated.",
@@ -879,15 +875,9 @@ export const enUS: Record<TranslationKey, string> = {
   "ft.errorRollback": "The rollback failed.",
   "ft.geminiActivo": "Active provider: Gemini. Creating a job builds a JSONL context bundle to evaluate, back up and reuse the agent's memory.",
   "ft.geminiContext": "Gemini context",
-  "ft.iniciar": "Start",
-  "ft.openaiFinetune": "OpenAI fine-tune",
-  "ft.openaiSoloConOpenai": "OpenAI jobs can only be started or activated while OpenAI is the active provider.",
-  "ft.rollback": "Roll back",
-  "ft.rollbackSoloOpenai": "Fine-tuning rollback is only available while OpenAI is the active provider.",
   "ft.sinPaquetes": "No training bundles yet.",
   "ft.sinPaquetesDetalle": "The approved examples are already available as the agent's context. Creating a bundle produces a portable JSONL for Gemini.",
-  "ft.sincronizar": "Sync",
-  "ft.subtitulo": "Gemini uses the approved examples, the rules and the memory as live context, with no external fine-tuning cost. OpenAI is available only if you pick it as the provider.",
+  "ft.subtitulo": "Gemini uses the approved examples, the rules and the memory as live context. The bundle built here is a portable JSONL: it is for backing up and evaluating that memory, not for training a model elsewhere.",
   "ft.titulo": "Agent training",
   "ft.vertex.activarModelo": "Activate model",
   "ft.vertex.activoDesde": "Active since {f}",
@@ -915,5 +905,20 @@ export const enUS: Record<TranslationKey, string> = {
   "ft.vertex.titulo": "Vertex AI Gemini — supervised fine-tuning",
   "ft.vertex.trabajoUno": "1 job started",
   "ft.vertex.trabajosVarios": "{n} jobs started",
+
+
+  // ── Guardar el modelo, en el panel del proveedor ──────────────────
+  // «Guardar modelos» estaba escrito a mano y sobrevivió a la pasada de i18n:
+  // el archivo ya usaba `useT`, así que la medición no lo marcó.
+  "aiProvider.guardando": "Saving…",
+  "aiProvider.guardarModelo": "Save model",
+
+
+  // ── Las acciones de un trabajo de Vertex ──────────────────────────
+  // Estaban en el bloque de fine-tuning junto a las de OpenAI. El panel de
+  // Vertex las sigue usando: ahí sí hay un trabajo corriendo del otro lado.
+  "ft.iniciar": "Start",
+  "ft.rollback": "Roll back",
+  "ft.sincronizar": "Sync",
 
 } as const;

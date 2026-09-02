@@ -54,16 +54,6 @@ vi.mock("@/data/scope", async () => {
   };
 });
 
-vi.mock("@/server/ai/openai-extractor", () => ({
-  extractEmailClaim: mockExtractEmailClaim,
-  OpenAIExtractionError: class OpenAIExtractionError extends Error {
-    constructor(msg: string) {
-      super(msg);
-      this.name = "OpenAIExtractionError";
-    }
-  },
-}));
-
 vi.mock("@/server/ai/mock-extractor", () => ({
   extractEmailClaimMock: vi.fn(),
   runMockExtractor: vi.fn(),
@@ -99,7 +89,7 @@ vi.mock("@/server/confirmations/orchestrate", () => ({
 }));
 
 vi.mock("@/server/ai/gemini-extractor", () => ({
-  extractEmailClaimGemini: vi.fn(),
+  extractEmailClaimGemini: mockExtractEmailClaim,
   runGeminiExtractor: vi.fn(),
   GeminiExtractionError: class GeminiExtractionError extends Error {
     constructor(msg: string) {
@@ -110,7 +100,7 @@ vi.mock("@/server/ai/gemini-extractor", () => ({
 }));
 
 vi.mock("@/server/ai/provider", () => ({
-  resolveExtractionEngine: vi.fn().mockResolvedValue("openai"),
+  resolveExtractionEngine: vi.fn().mockResolvedValue("gemini"),
 }));
 
 vi.mock("@/server/ai/severity-classifier", () => ({

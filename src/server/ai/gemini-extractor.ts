@@ -1,5 +1,5 @@
 /**
- * Google Gemini claim extractor — drop-in alternative to the OpenAI extractor.
+ * Google Gemini claim extractor — el único camino de extracción del producto.
  *
  * Uses the Generative Language REST API directly (no SDK dependency):
  *   POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
@@ -9,22 +9,22 @@
  * tier gratis de AI Studio, y dejó de serlo al pasar a Vertex postpago. Un tope
  * mensual en dólares contra una suma que siempre da cero no salta nunca.
  *
- * Same security posture as the OpenAI extractor:
+ * Postura de seguridad:
  * LLM01: prompts built by buildEmailClaimPrompt / buildSystemPrompt (XML sentinels).
  * LLM02: JSON output requested via Gemini structured output plus schema
  *        embedded in the prompt; output validated against ExtractedClaimSchema
  *        before any DB write (parseEmailResponse / parseResponse are shared
- *        with OpenAI).
+ *        histórico).
  * LLM06: Logs only case_id/tenant_id + token counts — never email bodies/PII.
  *        The API key travels in the x-goog-api-key header, never in the URL.
  *
- * Retry policy mirrors OpenAI: one retry with a stricter prompt, then
+ * Retry policy: one retry with a stricter prompt, then
  * safe default (email flow) or thrown error (simulate flow → case escalates).
  */
 
 import "server-only";
 import { GoogleAuth } from "google-auth-library";
-import { OPENAI_JSON_SCHEMA } from "@/lib/schemas/extracted-claim";
+import { RESPUESTA_JSON_SCHEMA } from "@/lib/schemas/extracted-claim";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { ClaimType } from "@/lib/schemas/cases";
 import { buildSystemPrompt, buildUserMessage, buildEmailClaimPrompt } from "./prompt";
@@ -34,8 +34,8 @@ import {
   parseResponse,
   parseEmailResponse,
   buildSafeDefault,
-} from "./openai-extractor";
-import type { EmailClaimPayload } from "./openai-extractor";
+} from "./model-response";
+import type { EmailClaimPayload } from "./model-response";
 import { getDefaultGeminiModel, getTenantGeminiKey, getTenantGeminiModel } from "./provider";
 
 /** Custom error for unrecoverable Gemini extraction failures (simulate flow). */
@@ -68,7 +68,7 @@ export function getGeminiModel(): string {
  *  so the exact output shape is stated in the prompt and validated with Zod. */
 function schemaSuffix(): string {
   return `\n\nOUTPUT JSON SCHEMA — return ONE JSON object matching this schema exactly (no markdown, no code fences, no extra text):\n${JSON.stringify(
-    OPENAI_JSON_SCHEMA.json_schema.schema
+    RESPUESTA_JSON_SCHEMA.json_schema.schema
   )}`;
 }
 
@@ -296,7 +296,7 @@ export async function callGemini(
     const key = apiKey ?? process.env.GEMINI_API_KEY;
     if (!key) {
       throw new GeminiExtractionError(
-        "GEMINI_API_KEY is not set. Configure it in Configuración or switch the tenant provider to OpenAI."
+        "GEMINI_API_KEY is not set. Configure it in Configuración."
       );
     }
     endpoint = `${GEMINI_API_BASE}/${model}:generateContent`;
@@ -416,7 +416,7 @@ function errMeta(e: unknown): { name: string; status: number | null; code: strin
 // ── Email claim extractor (primary production path) ───────────────────────────
 
 /**
- * Gemini counterpart of extractEmailClaim() — same payload, same validation,
+ * El extractor de emails entrantes — mismo payload, misma validación,
  * same safe-default containment. cost_usd is always 0 (free tier).
  */
 export async function extractEmailClaimGemini(
@@ -648,7 +648,7 @@ export async function extractEmailClaimGemini(
 // ── Simulate-flow extractor ────────────────────────────────────────────────────
 
 /**
- * Gemini counterpart of runOpenAIExtractor() — used by the simulate pipeline.
+ * El extractor del camino de simulación.
  * Throws GeminiExtractionError after two failed attempts (worker escalates).
  */
 export async function runGeminiExtractor(

@@ -3,7 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
 
-type ProviderId = "openai" | "gemini";
+/*
+ * Queda un proveedor y la pantalla sigue siendo un radiogroup de uno.
+ *
+ * Podria ser un cartel que diga «Gemini» y listo, pero entonces el dia que
+ * entre otro hay que volver a escribir la pantalla. Asi, entra en la lista.
+ */
+type ProviderId = "gemini";
 
 type ProviderInfo = {
   configured: boolean;
@@ -15,7 +21,7 @@ type SettingsResponse = {
   providers: Record<ProviderId, ProviderInfo>;
 };
 
-const PROVIDER_ORDER: ProviderId[] = ["gemini", "openai"];
+const PROVIDER_ORDER: ProviderId[] = ["gemini"];
 
 export function AiProviderPanel() {
   const t = useT();
@@ -26,7 +32,6 @@ export function AiProviderPanel() {
   const [savingModels, setSavingModels] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-  const [openaiModel, setOpenaiModel] = useState("");
   const [geminiModel, setGeminiModel] = useState("");
 
   // Gemini key form state
@@ -40,7 +45,6 @@ export function AiProviderPanel() {
   function applyPayload(payload: SettingsResponse) {
     setProvider(payload.provider);
     setProviders(payload.providers);
-    setOpenaiModel(payload.providers.openai.model);
     setGeminiModel(payload.providers.gemini.model);
   }
 
@@ -155,10 +159,7 @@ export function AiProviderPanel() {
       const res = await fetch("/api/admin/ai-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          openaiModel: openaiModel.trim(),
-          geminiModel: geminiModel.trim(),
-        }),
+        body: JSON.stringify({ geminiModel: geminiModel.trim() }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {
@@ -178,7 +179,6 @@ export function AiProviderPanel() {
   }
 
   const labels: Record<ProviderId, { name: string; helper: string }> = {
-    openai: { name: "OpenAI", helper: t("aiProvider.openaiHelper") },
     gemini: { name: "Google Gemini", helper: t("aiProvider.geminiHelper") },
   };
 
@@ -196,7 +196,7 @@ export function AiProviderPanel() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={t("aiProvider.title")}>
+      <div className="grid gap-3" role="radiogroup" aria-label={t("aiProvider.title")}>
         {PROVIDER_ORDER.map((id) => {
           const info = providers?.[id];
           const active = provider === id;
@@ -246,13 +246,7 @@ export function AiProviderPanel() {
       </div>
 
       {/* Gemini API key input — shown when not configured or user clicked the card */}
-      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-        <input
-          value={openaiModel}
-          onChange={(e) => setOpenaiModel(e.target.value)}
-          className="rounded-md border border-slate-200 px-3 py-2 font-mono text-xs text-slate-800"
-          placeholder="gpt-4o-mini"
-        />
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
         <input
           value={geminiModel}
           onChange={(e) => setGeminiModel(e.target.value)}
@@ -262,10 +256,10 @@ export function AiProviderPanel() {
         <button
           type="button"
           onClick={saveModels}
-          disabled={savingModels || !openaiModel.trim() || !geminiModel.trim()}
+          disabled={savingModels || !geminiModel.trim()}
           className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
-          {savingModels ? "..." : "Guardar modelos"}
+          {savingModels ? t("aiProvider.guardando") : t("aiProvider.guardarModelo")}
         </button>
       </div>
 

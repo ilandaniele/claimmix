@@ -11,7 +11,6 @@ type FineTuneJob = {
   provider: ProviderId;
   base_model: string;
   fine_tuned_model_id: string | null;
-  openai_fine_tuning_job_id: string | null;
   training_example_count: number;
   error_message: string | null;
   created_at: string;
@@ -22,7 +21,7 @@ type FineTuneJob = {
   validation_file_id: string | null;
 };
 
-type ProviderId = "gemini" | "openai";
+type ProviderId = "gemini";
 type SettingsResponse = {
   provider: ProviderId;
 };
@@ -453,8 +452,6 @@ export function FineTuneJobsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const openAiSelected = activeProvider === "openai";
-
   async function createDraft() {
     setBusy("draft");
     setError("");
@@ -475,35 +472,7 @@ export function FineTuneJobsPanel() {
     }
   }
 
-  async function rollback() {
-    if (!openAiSelected) {
-      setError(t("ft.rollbackSoloOpenai"));
-      return;
-    }
-    setBusy("rollback");
-    setError("");
-    try {
-      const res = await fetch("/api/admin/fine-tuning/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "rollback" }),
-      });
-      if (!res.ok) {
-        throw new Error(await readErrorMessage(res, t("ft.errorRollback")));
-      }
-      await reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("ft.errorRollback"));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function action(job: FineTuneJob, actionName: "start" | "sync" | "approve" | "activate") {
-    if (job.provider === "openai" && !openAiSelected) {
-      setError(t("ft.openaiSoloConOpenai"));
-      return;
-    }
+  async function action(job: FineTuneJob, actionName: "start" | "activate") {
     setBusy(`${job.id}:${actionName}`);
     setError("");
     try {
@@ -527,7 +496,7 @@ export function FineTuneJobsPanel() {
 
   return (
     <div className="space-y-6">
-      {/* ── Context-pack / OpenAI section ── */}
+      {/* ── El paquete de contexto de Gemini ── */}
       <div className="space-y-4">
         <div className="space-y-1">
           <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
@@ -551,15 +520,7 @@ export function FineTuneJobsPanel() {
             disabled={busy !== null}
             className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
           >
-            {activeProvider === "gemini" ? t("ft.crearGemini") : t("ft.crearOpenai")}
-          </button>
-          <button
-            type="button"
-            onClick={rollback}
-            disabled={busy !== null || !openAiSelected}
-            className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-          >
-            {t("ft.rollback")}
+            {t("ft.crearGemini")}
           </button>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -590,7 +551,7 @@ export function FineTuneJobsPanel() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{job.id.slice(0, 8)}</span>
                       <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200">
-                        {job.provider === "gemini" ? t("ft.geminiContext") : t("ft.openaiFinetune")}
+                        {t("ft.geminiContext")}
                       </span>
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                         {job.status}
@@ -615,61 +576,22 @@ export function FineTuneJobsPanel() {
                     )}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {job.provider === "gemini" ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => action(job, "start")}
-                          disabled={busy !== null}
-                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                        >
-                          {t("ft.actualizar")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => action(job, "activate")}
-                          disabled={busy !== null || activeProvider === "gemini"}
-                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                        >
-                          {t("ft.activarGemini")}
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => action(job, "start")}
-                          disabled={busy !== null || !openAiSelected || !["draft", "failed"].includes(job.status)}
-                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                        >
-                          {t("ft.iniciar")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => action(job, "sync")}
-                          disabled={busy !== null || !openAiSelected || !job.openai_fine_tuning_job_id}
-                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                        >
-                          {t("ft.sincronizar")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => action(job, "approve")}
-                          disabled={busy !== null || !openAiSelected || job.status !== "eval_pending" || !job.fine_tuned_model_id}
-                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                        >
-                          {t("ft.aprobarEval")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => action(job, "activate")}
-                          disabled={busy !== null || !openAiSelected || job.status !== "approved" || !job.fine_tuned_model_id}
-                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-                        >
-                          {t("ft.activar")}
-                        </button>
-                      </>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => action(job, "start")}
+                      disabled={busy !== null}
+                      className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                    >
+                      {t("ft.actualizar")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => action(job, "activate")}
+                      disabled={busy !== null || activeProvider === "gemini"}
+                      className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                    >
+                      {t("ft.activarGemini")}
+                    </button>
                     {job.training_file_id && (
                       <a
                         href={`/api/admin/fine-tuning/jobs/${job.id}/export?kind=train`}

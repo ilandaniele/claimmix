@@ -3,7 +3,7 @@
  *
  * GET   - current provider + which providers have an API key configured.
  * PATCH - change the provider and/or save a Gemini API key.
- *         Body: { provider?: "openai" | "gemini", geminiKey?: string }
+ *         Body: { provider?: "gemini", geminiKey?: string }
  *
  * Gemini key is stored encrypted in tenant_ai_settings.gemini_api_key_encrypted
  * (same AES-256-GCM as Gmail token storage). The extraction worker reads it on
@@ -20,10 +20,8 @@ import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import {
   getTenantAiProvider,
-  hasProviderKey,
   hasProviderKeyForTenant,
   getTenantGeminiKey,
-  getTenantOpenAIModel,
   getTenantGeminiModel,
   setTenantModelDefaults,
   setTenantGeminiKey,
@@ -33,22 +31,25 @@ export const dynamic = "force-dynamic";
 
 const PatchSchema = z
   .object({
-    provider: z.enum(["openai", "gemini"]).optional(),
+    provider: z.enum(["gemini"]).optional(),
     geminiKey: z.string().min(1).max(500).optional(),
-    openaiModel: z.string().trim().min(1).max(120).optional(),
     geminiModel: z.string().trim().min(1).max(120).optional(),
   })
   .refine((d) => Object.keys(d).length > 0, {
     message: "Provide at least one setting to update",
   });
 
+/*
+ * Sigue siendo un objeto por proveedor con un solo proveedor adentro.
+ *
+ * La pantalla y el endpoint de salud lo leen por nombre —`estado.gemini`— y
+ * aplanarlo a un solo objeto obligaría a cambiar los dos consumidores por una
+ * forma que hay que volver a abrir el día que entre otro modelo. El costo de
+ * dejarlo es una llave; el de sacarlo, dos archivos y la vuelta.
+ */
 async function providerStatus(tenantId: string) {
   const geminiKey = await getTenantGeminiKey(tenantId);
   return {
-    openai: {
-      configured: hasProviderKey("openai"),
-      model: await getTenantOpenAIModel(tenantId),
-    },
     gemini: {
       configured: Boolean(geminiKey),
       model: await getTenantGeminiModel(tenantId),
@@ -78,7 +79,7 @@ export async function PATCH(request: NextRequest) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
     }
 
-    const { provider, geminiKey, openaiModel, geminiModel } = parsed.data;
+    const { provider, geminiKey, geminiModel } = parsed.data;
 
     if (geminiKey) {
       await setTenantGeminiKey(userRow.tenant_id, geminiKey);
@@ -89,18 +90,15 @@ export async function PATCH(request: NextRequest) {
       if (!canUse) {
         throw new AppError(
           "VALIDATION_FAILED",
-          provider === "gemini"
-            ? "Gemini no esta configurado: ingresa tu API key primero."
-            : "OpenAI no esta configurado: falta OPENAI_API_KEY en el servidor."
+          "Gemini no está configurado: ingresá tu API key primero."
         );
       }
     }
 
-    if (provider || openaiModel || geminiModel) {
+    if (provider || geminiModel) {
       try {
         await setTenantModelDefaults(userRow.tenant_id, {
           provider,
-          openaiModel,
           geminiModel,
         });
       } catch (e) {

@@ -26,17 +26,13 @@ function firstRow<T>(rows: T[]): T | null {
   return rows[0] ?? null;
 }
 
-function getExportDefaultProvider(): "openai" | "gemini" {
-  const provider = process.env.AI_PROVIDER?.trim().toLowerCase();
-  return provider === "openai" || provider === "gemini" ? provider : "gemini";
-}
-
-function toProvider(value: unknown): "openai" | "gemini" | null {
-  return value === "openai" || value === "gemini" ? value : null;
-}
-
-function getExportDefaultOpenAIModel(): string {
-  return process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+/*
+ * Un valor guardado que ya no exista —"openai", de antes— devuelve null y cae
+ * al default. El export es un archivo que alguien se lleva: mejor que diga el
+ * proveedor que el producto usa hoy y no uno que ya no sabe atender.
+ */
+function toProvider(value: unknown): "gemini" | null {
+  return value === "gemini" ? value : null;
 }
 
 function getExportDefaultGeminiModel(): string {
@@ -316,7 +312,6 @@ async function loadProviderSettings(tenantId: string) {
         .select({
           tenant_id: t.tenant_id,
           provider: t.provider,
-          openai_model: t.openai_model,
           gemini_model: t.gemini_model,
           active_model_provider: t.active_model_provider,
           active_model: t.active_model,
@@ -330,25 +325,21 @@ async function loadProviderSettings(tenantId: string) {
     )
   );
 
-  const defaultProvider = toProvider(row?.provider) ?? getExportDefaultProvider();
+  const defaultProvider = toProvider(row?.provider) ?? "gemini";
   const activeModelProvider = toProvider(row?.active_model_provider) ?? defaultProvider;
   const activeModel =
-    row?.active_model ??
-    (activeModelProvider === "openai"
-      ? row?.openai_model ?? getExportDefaultOpenAIModel()
-      : row?.gemini_model ?? getExportDefaultGeminiModel());
+    row?.active_model ?? row?.gemini_model ?? getExportDefaultGeminiModel();
 
   return {
     provider: {
       default_provider: defaultProvider,
       active_model: activeModel,
       active_model_provider: activeModelProvider,
-      fallback_provider: defaultProvider === "gemini" ? "openai" : "gemini",
+      fallback_provider: null,
       fallback_enabled: false,
     },
     model_settings: {
       provider: defaultProvider,
-      openai_model: row?.openai_model ?? getExportDefaultOpenAIModel(),
       gemini_model: row?.gemini_model ?? getExportDefaultGeminiModel(),
       active_model_provider: activeModelProvider,
       active_model: activeModel,

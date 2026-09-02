@@ -10,7 +10,7 @@
  * LLM08: AI cannot set case.status to cerrado.
  * LLM10: Budget exhaustion returns proper error.
  *
- * All OpenAI calls are mocked — these test the containment logic, not the model.
+ * Las llamadas al modelo están mockeadas — esto prueba la contención, no el modelo.
  */
 
 import { describe, it, expect, vi } from "vitest";

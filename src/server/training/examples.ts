@@ -5,7 +5,7 @@
  *   1. Immediate: approved examples are retrieved as few-shot context for
  *      future extractions of the same tenant (loadApprovedExamples).
  *   2. Prompt learning: agent_prompt_rules (see prompt-rules.ts).
- *   3. Optional training package: Gemini context packs by default, with OpenAI
+ *   3. Paquete de entrenamiento opcional: el paquete de contexto de Gemini.
  *      fine-tuning still available only when explicitly selected.
  *
  * Security invariants:

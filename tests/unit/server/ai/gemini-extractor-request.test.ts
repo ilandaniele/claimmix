@@ -11,8 +11,6 @@ vi.mock("@/server/ai/provider", () => ({
   getDefaultGeminiModel: vi.fn(() => "gemini-2.5-flash"),
   getTenantGeminiModel: vi.fn(async () => "gemini-2.5-flash"),
   getTenantGeminiKey: vi.fn(async () => null),
-  getDefaultOpenAIModel: vi.fn(() => "gpt-4o-mini"),
-  getTenantOpenAIModel: vi.fn(async () => "gpt-4o-mini"),
 }));
 
 import { extractEmailClaimGemini } from "@/server/ai/gemini-extractor";

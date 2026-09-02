@@ -1,5 +1,5 @@
 /**
- * Mock AI extractor — deterministic local extraction, no OpenAI calls.
+ * Extractor mock — extracción local determinista, sin llamar a ningún modelo.
  *
  * AC9:  MOCK_AI=true or missing OPENAI_API_KEY → uses this extractor.
  * AC8:  Extraction completes in < 500ms deterministically.
@@ -12,7 +12,7 @@
  *   - Boolean docs: keyword presence check (denuncia, VTV, bomberos, etc.)
  *   - Confidence: scaled by keyword match quality (0.50–0.95 range per spec).
  *
- * Same interface as the OpenAI extractor (ExtractedClaim type).
+ * Mismo contrato que el extractor real (ExtractedClaim).
  * The worker uses this transparently when MOCK_AI=true.
  */
 
@@ -307,9 +307,9 @@ const EXTRACTORS: Record<ClaimType, (text: string) => ExtractedField[]> = {
 /**
  * Run the mock extractor on the given raw text.
  *
- * AC9: Same interface as real OpenAI extractor.
+ * AC9: mismo contrato que el extractor real.
  * extraction_model = "mock-v1".
- * No OpenAI call is made.
+ * No se llama a ningún modelo.
  *
  * @param rawText   - Raw email body.
  * @param claimType - Claim type to determine which fields to extract.

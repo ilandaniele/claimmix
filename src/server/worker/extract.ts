@@ -3,7 +3,7 @@
  *
  * Original pipeline (simulate flow — still active):
  *   1. Check budget (LLM10)
- *   2. Select extractor: mock vs OpenAI (based on MOCK_AI env or key presence)
+ *   2. Elegir extractor: mock o Gemini (según MOCK_AI o si hay credencial)
  *   3. Run extractor → ExtractedClaim
  *   4. Gap analysis → recommended_status + missing_doc_keys
  *   5. Write extracted_fields to DB (service role)
@@ -214,7 +214,7 @@ export async function runExtractionWorker(
     return;
   }
 
-  // ── 2. Select and run extractor (per-tenant provider: openai | gemini | mock) ─
+  // ── 2. Elegir y correr el extractor (gemini | mock) ──────────────────────────
   let extractedClaim;
 
   try {
@@ -811,7 +811,7 @@ export async function runEmailExtractionWorker(
       return;
     }
 
-    // ── e) Run extractor (per-tenant provider: openai | gemini | mock) ───────
+    // ── e) Correr el extractor (gemini | mock) ───────────────────────────────
     let extractedClaim;
 
     const emailPayload = {
@@ -1008,7 +1008,7 @@ export async function runEmailExtractionWorker(
 
     // ── i) Customer matching — AC6, AC22 ─────────────────────────────────────
     // Build from fields array first (always present), then overlay with
-    // extracted_fields typed object (may be absent if OpenAI omitted it).
+    // extracted_fields typed object (puede faltar si el modelo lo omitió).
     /*
      * Con los sinónimos resueltos, o el buscador no encuentra a nadie.
      *

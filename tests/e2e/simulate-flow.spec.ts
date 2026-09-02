@@ -7,7 +7,7 @@
  * Requirements:
  *   - Needs a live app with DATABASE_URL configured.
  *   - Uses MOCK_AI=true (set in playwright.config.ts webServer env) so no real
- *     OpenAI call is made during simulation.
+ *     llamada al modelo se hace durante la simulación.
  *   - Needs TEST_ANALYST_EMAIL, TEST_ANALYST_PASSWORD env vars for authenticated flow.
  *
  * Without live backend the test is skipped automatically.

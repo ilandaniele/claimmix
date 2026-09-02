@@ -5,7 +5,7 @@
  * No AI output can directly set case.status — only extracted_fields and
  * missing_docs flow through.
  *
- * AC8: Schema used for both real OpenAI extractor and mock extractor
+ * AC8: el mismo esquema para el extractor real y para el mock
  * to guarantee interface symmetry.
  *
  * Extended in W1 (email-intake) with:
@@ -213,7 +213,7 @@ export const ExtractedClaimSchema = z.object({
   suggested_reply: z.string().max(5000).default(""),
 
   /**
-   * Set by the extractor (never by the model) when BOTH OpenAI attempts
+   * Set by the extractor (never by the model) when BOTH attempts
    * returned unparseable output and the safe default was used. Consumed by
    * the trainability assessment — a run without valid JSON can never be
    * suggested (or approved) as a training example.
@@ -259,13 +259,13 @@ export const ExtractedClaimSchema = z.object({
 export type ExtractedClaim = z.infer<typeof ExtractedClaimSchema>;
 
 /**
- * JSON schema object for OpenAI structured output (response_format).
+ * El esquema JSON de la respuesta estructurada que se le pide al modelo.
  * LLM02: strict=true prevents arbitrary JSON shape from the model.
  *
  * This must stay in sync with ExtractedClaimSchema above.
  * Extended with email-intake fields.
  */
-export const OPENAI_JSON_SCHEMA = {
+export const RESPUESTA_JSON_SCHEMA = {
   type: "json_schema" as const,
   json_schema: {
     name: "extracted_claim",

@@ -1,80 +1,59 @@
 /**
- * Unit tests for /api/admin/health endpoint logic.
+ * El modo de IA que informa /api/admin/health.
  *
- * Tests the AI mode detection and response shape logic.
- * DB ping is tested via integration tests (requires Neon).
+ * Este archivo tenía la lógica COPIADA, con la nota «mirrors the logic in
+ * health/route.ts». Un espejo se deja de parecer sin que nadie avise: cuando
+ * OpenAI salió del producto, la ruta cambió y estos tests siguieron en verde
+ * probando su propia copia, tres de ellos afirmando que devolvía «openai».
  *
- * Deployment validation (W7): health endpoint returns correct AI mode,
- * version, and region fields.
+ * Ahora importa la función que la ruta usa de verdad.
  */
 
 import { describe, it, expect } from "vitest";
 import packageJson from "../../package.json";
+import { resolverAiMode } from "@/server/ai/ai-mode";
 
-// ── AI mode detection (mirrors the logic in health/route.ts) ──────────────────
-
-function getAiMode(
-  mockAiEnv: string | undefined,
-  openAiKey: string | undefined,
-  geminiKey?: string | undefined,
-  preferredProvider?: string | undefined
-): "mock" | "gemini" | "openai" {
-  if (mockAiEnv === "true") return "mock";
-  if (preferredProvider === "openai" && openAiKey) return "openai";
-  if (preferredProvider === "gemini" && geminiKey) return "gemini";
-  if (geminiKey) return "gemini";
-  if (openAiKey) return "openai";
-  return "mock";
-}
-
-// ── Tests ──────────────────────────────────────────────────────────────────────
-
-describe("health endpoint AI mode detection", () => {
-  it("returns mock when MOCK_AI=true regardless of key presence", () => {
-    expect(getAiMode("true", "sk-some-key")).toBe("mock");
+describe("el modo de IA que se informa", () => {
+  it("MOCK_AI=true gana sobre cualquier credencial", () => {
+    expect(resolverAiMode({ mockAi: "true", aiMock: undefined, geminiConfigurado: true })).toBe("mock");
+    expect(resolverAiMode({ mockAi: undefined, aiMock: "true", geminiConfigurado: true })).toBe("mock");
   });
 
-  it("returns mock when OPENAI_API_KEY is not set", () => {
-    expect(getAiMode(undefined, undefined)).toBe("mock");
-    expect(getAiMode("false", undefined)).toBe("mock");
-    expect(getAiMode(undefined, "")).toBe("mock");
+  it("sin credencial utilizable, mock", () => {
+    expect(resolverAiMode({ mockAi: undefined, aiMock: undefined, geminiConfigurado: false })).toBe("mock");
+    expect(resolverAiMode({ mockAi: "false", aiMock: "false", geminiConfigurado: false })).toBe("mock");
   });
 
-  it("returns gemini when Gemini key is present", () => {
-    expect(getAiMode("false", undefined, "g-key")).toBe("gemini");
-    expect(getAiMode(undefined, "sk-some-key", "g-key")).toBe("gemini");
+  it("con Gemini configurado, gemini", () => {
+    expect(resolverAiMode({ mockAi: undefined, aiMock: undefined, geminiConfigurado: true })).toBe("gemini");
+    expect(resolverAiMode({ mockAi: "false", aiMock: undefined, geminiConfigurado: true })).toBe("gemini");
   });
 
-  it("returns openai when MOCK_AI!=true and key is present", () => {
-    expect(getAiMode("false", "sk-some-key")).toBe("openai");
-    expect(getAiMode(undefined, "sk-some-key")).toBe("openai");
-    expect(getAiMode(undefined, "sk-some-key", "g-key", "openai")).toBe("openai");
+  it("nunca devuelve un proveedor que el producto no tiene", () => {
+    // `geminiConfigurado` lo resuelve quien llama —Vertex O una API key—
+    // justamente para que esta función no vuelva a preguntar «¿hay key?».
+    for (const configurado of [true, false]) {
+      const modo = resolverAiMode({ mockAi: undefined, aiMock: undefined, geminiConfigurado: configurado });
+      expect(["mock", "gemini"]).toContain(modo);
+    }
   });
 });
 
-describe("health endpoint response fields", () => {
-  it("package.json version is semver-like", () => {
+describe("la forma de la respuesta", () => {
+  it("la versión del package.json parece semver", () => {
     expect(packageJson.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 
-  it("response has the required fields", () => {
-    // Validate the shape of the health response
-    const expectedFields = ["status", "db", "ai", "version", "region"];
-    const mockResponse = {
+  it("están los cinco campos que la pantalla espera", () => {
+    const respuesta = {
       status: "ok",
       db: "connected",
       ai: "mock" as const,
       version: packageJson.version,
       region: "local",
     };
-    for (const field of expectedFields) {
-      expect(mockResponse).toHaveProperty(field);
+    for (const campo of ["status", "db", "ai", "version", "region"]) {
+      expect(respuesta).toHaveProperty(campo);
     }
-  });
-
-  it("ai field is limited to mock | gemini | openai", () => {
-    const validValues = ["mock", "gemini", "openai"];
-    const aiValue = getAiMode("true", undefined);
-    expect(validValues).toContain(aiValue);
   });
 });

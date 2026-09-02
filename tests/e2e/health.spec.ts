@@ -21,7 +21,7 @@ test.describe("Health endpoint", () => {
    * Este endpoint es público —lo pinga un monitor de uptime cada 5 minutos— y
    * por eso lo único que puede decir es si está vivo.
    *
-   * Antes devolvía además el transporte del modelo, si había clave de OpenAI,
+   * Antes devolvía además el transporte del modelo, si había clave del proveedor,
    * la región y si Sentry estaba prendido. Ninguno es un secreto por separado;
    * juntos son reconocimiento gratis para cualquiera. El más útil para quien
    * mira desde afuera es el de Sentry: "false" dice que nadie se entera de los

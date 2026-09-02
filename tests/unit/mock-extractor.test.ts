@@ -4,7 +4,7 @@
  * AC9: Same interface as real extractor (ExtractedClaim type).
  * AC8: Deterministic output (same input → same output).
  * AC9: extraction_model = "mock-v1".
- * AC9: No OpenAI calls.
+ * AC9: no se llama a ningún modelo.
  * AC9: Completes synchronously (no async needed in tests, but confirms < 500ms).
  */
 

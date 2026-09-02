@@ -135,12 +135,6 @@ vi.mock("@/server/ai/mock-extractor", () => ({
   runMockExtractor: vi.fn(),
 }));
 
-vi.mock("@/server/ai/openai-extractor", () => ({
-  extractEmailClaim: vi.fn(),
-  runOpenAIExtractor: vi.fn(),
-  OpenAIExtractionError: class OpenAIExtractionError extends Error {},
-}));
-
 vi.mock("@/server/ai/gemini-extractor", () => ({
   extractEmailClaimGemini: vi.fn(),
   runGeminiExtractor: vi.fn(),

@@ -11,14 +11,17 @@ import { AppError } from "@/lib/errors";
 import {
   createDraftFineTuneJob,
   listFineTuneJobs,
-  rollbackFineTunedModel,
 } from "@/server/training/fine-tuning";
-import { getTenantAiProvider } from "@/server/ai/provider";
 
 export const dynamic = "force-dynamic";
 
+/*
+ * Queda `draft` sola. `rollback` era volver a un modelo fine-tuned anterior de
+ * OpenAI: escribia `provider: "openai"` en la configuracion del inquilino, un
+ * valor que el producto ya no sabe leer.
+ */
 const PostSchema = z.object({
-  action: z.enum(["draft", "rollback"]).default("draft"),
+  action: z.enum(["draft"]).default("draft"),
 });
 
 export async function GET() {
@@ -39,20 +42,8 @@ export async function POST(request: NextRequest) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
     }
 
-    const provider = await getTenantAiProvider(userRow.tenant_id);
-    if (parsed.data.action === "rollback") {
-      if (provider !== "openai") {
-        throw new AppError(
-          "VALIDATION_FAILED",
-          "Rollback solo aplica a modelos fine-tuned de OpenAI. Gemini usa paquetes contextuales."
-        );
-      }
-      const result = await rollbackFineTunedModel(userRow.tenant_id, user.id);
-      return ok({ result });
-    }
-
     try {
-      const job = await createDraftFineTuneJob(userRow.tenant_id, user.id, provider);
+      const job = await createDraftFineTuneJob(userRow.tenant_id, user.id);
       return ok({ job }, 201);
     } catch (e) {
       if (e instanceof Error && e.message === "NO_APPROVED_EXAMPLES") {

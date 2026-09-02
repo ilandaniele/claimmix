@@ -1,7 +1,7 @@
 /**
  * El conjunto de ejemplos con el que se entrena, sin importar contra quién.
  *
- * Esto estaba escrito dos veces, idéntico, en `fine-tuning.ts` (OpenAI) y en
+ * Esto estaba escrito dos veces, idéntico, en `fine-tuning.ts` y en
  * `vertex-ai-fine-tuning.ts`. Lo que cambia de verdad entre los dos proveedores
  * es el FORMATO de cada línea del JSONL —uno quiere `messages`, el otro
  * `contents`— y eso se queda en cada módulo. Qué ejemplos entran, cómo se

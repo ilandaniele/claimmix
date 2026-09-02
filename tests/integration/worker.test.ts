@@ -16,7 +16,7 @@ import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 
 const {
   mockRunMockExtractor,
-  mockRunOpenAIExtractor,
+  mockRunGeminiExtractor,
   mockCheckBudget,
   mockResolveExtractionEngine,
   mockDbHolder,
@@ -139,7 +139,7 @@ const {
 
   return {
     mockRunMockExtractor: vi.fn(),
-    mockRunOpenAIExtractor: vi.fn(),
+    mockRunGeminiExtractor: vi.fn(),
     mockCheckBudget: vi.fn(),
     mockResolveExtractionEngine: vi.fn(),
     mockDbHolder: holder,
@@ -180,19 +180,8 @@ vi.mock("@/server/ai/mock-extractor", () => ({
   extractEmailClaimMock: vi.fn(),
 }));
 
-vi.mock("@/server/ai/openai-extractor", () => ({
-  runOpenAIExtractor: mockRunOpenAIExtractor,
-  extractEmailClaim: vi.fn(),
-  OpenAIExtractionError: class OpenAIExtractionError extends Error {
-    constructor(msg: string) {
-      super(msg);
-      this.name = "OpenAIExtractionError";
-    }
-  },
-}));
-
 vi.mock("@/server/ai/gemini-extractor", () => ({
-  runGeminiExtractor: vi.fn(),
+  runGeminiExtractor: mockRunGeminiExtractor,
   extractEmailClaimGemini: vi.fn(),
   GeminiExtractionError: class GeminiExtractionError extends Error {
     constructor(msg: string) {
@@ -442,12 +431,12 @@ describe("runExtractionWorker", () => {
 
   // ── AI output invalid → escalado ───────────────────────────────────────────
 
-  it("escalates to escalado when extractor throws OpenAIExtractionError", async () => {
-    mockResolveExtractionEngine.mockResolvedValue("openai");
+  it("un fallo de extraccion escala el caso, no lo deja a medias", async () => {
+    mockResolveExtractionEngine.mockResolvedValue("gemini");
 
-    const { OpenAIExtractionError } = await import("@/server/ai/openai-extractor");
-    mockRunOpenAIExtractor.mockRejectedValue(
-      new OpenAIExtractionError("AI output invalid after retry")
+    const { GeminiExtractionError } = await import("@/server/ai/gemini-extractor");
+    mockRunGeminiExtractor.mockRejectedValue(
+      new GeminiExtractionError("AI output invalid after retry")
     );
 
     await runExtractionWorker("case-001", "tenant-001", "user-001");

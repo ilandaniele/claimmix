@@ -8,8 +8,6 @@ vi.mock("@/server/ai/budget", () => ({
 }));
 
 vi.mock("@/server/ai/provider", () => ({
-  getDefaultOpenAIModel: vi.fn(() => "gpt-4o-mini"),
-  getTenantOpenAIModel: vi.fn(async () => "gpt-4o-mini"),
 }));
 
 import {
@@ -17,7 +15,7 @@ import {
   extractJsonObjectTexts,
   parseEmailResponse,
   parseResponse,
-} from "@/server/ai/openai-extractor";
+} from "@/server/ai/model-response";
 
 function validExtraction() {
   return {

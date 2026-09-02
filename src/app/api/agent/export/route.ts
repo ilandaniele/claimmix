@@ -1,7 +1,7 @@
 /**
  * GET /api/agent/export
  *
- * Download provider-aware Gemini/OpenAI agent configuration and memory.
+ * Descarga la configuración y la memoria del agente.
  * Tenant boundary is enforced through the authenticated users.tenant_id.
  */
 

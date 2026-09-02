@@ -47,11 +47,20 @@ export async function logAgentRun(
 ): Promise<string | null> {
   const { claim, trainability } = params;
 
+  /*
+   * Sale del NOMBRE del modelo, no de la configuracion, para que la fila diga
+   * quien contesto de verdad y no quien estaba elegido cuando alguien miro.
+   *
+   * El ultimo tramo era `: "openai"`. Ahora es "gemini", que es el unico
+   * proveedor real: un modelo que no empiece con "mock" ni con "gemini" —un
+   * endpoint afinado de Vertex, por ejemplo, que se llama `projects/...`— es
+   * Gemini igual. Las filas viejas con "openai" guardado se quedan como
+   * estan: es historia de lo que efectivamente corrio, y reescribirla seria
+   * mentir sobre 683 extracciones.
+   */
   const modelProvider = claim.extraction_model?.startsWith("mock")
     ? "mock"
-    : claim.extraction_model?.startsWith("gemini")
-      ? "gemini"
-      : "openai";
+    : "gemini";
 
   // Output payload: full validated extractor output. Token/cost metadata is
   // useful for review; PII inside is tenant-RLS-protected like claim_messages.
@@ -120,7 +129,7 @@ export interface LogAgentRunErrorParams {
   claimMessageId?: string | null;
   providerMessageId?: string | null;
   modelName?: string;
-  /** Provider that failed ("gemini" | "openai"). Defaults to "gemini". */
+  /** Proveedor que fallo. Por omision "gemini". */
   modelProvider?: string;
   input: {
     subject: string;

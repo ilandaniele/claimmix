@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 
+import { useLocale, useT } from "@/lib/i18n/LocaleContext";
+import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
+
 type FineTuneJob = {
   id: string;
   status: string;
@@ -91,6 +94,7 @@ function VertexAiSection() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [confirmStart, setConfirmStart] = useState<string | null>(null);
+  const { locale, t } = useLocale();
 
   async function reload() {
     const res = await fetch("/api/admin/fine-tuning/vertex", { cache: "no-store" });
@@ -163,7 +167,7 @@ function VertexAiSection() {
     }
   }
 
-  if (loading) return <p className="text-xs text-slate-500">Cargando Vertex AI...</p>;
+  if (loading) return <p className="text-xs text-slate-500">{t("ft.vertex.cargando")}</p>;
 
   const enabled = config?.enabled ?? false;
 
@@ -177,29 +181,29 @@ function VertexAiSection() {
     <div className="space-y-3">
       <div className="space-y-1">
         <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
-          Vertex AI Gemini — fine-tuning supervisado
+          {t("ft.vertex.titulo")}
         </p>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Entrenamiento real vía Google Cloud. Requiere{" "}
+          {t("ft.vertex.requiere")}{" "}
           <code className="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-800">
             VERTEX_AI_TUNING_ENABLED=true
           </code>{" "}
-          y configuración de GCP. Precio estimado: $0.008/1K tokens de entrenamiento.
+          {t("ft.vertex.precio")}
         </p>
       </div>
 
       {!enabled && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          Vertex AI no está habilitado. Configurá las variables de entorno en el servidor para activarlo.
+          {t("ft.vertex.deshabilitado")}
         </div>
       )}
 
       {enabled && config && (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-950/30 dark:text-slate-300">
-          <span className="font-medium">Proyecto:</span> {config.project ?? "—"}{" "}
-          <span className="ml-3 font-medium">Región:</span> {config.location ?? "—"}{" "}
-          <span className="ml-3 font-medium">Modelo base:</span> {config.base_model ?? "—"}{" "}
-          <span className="ml-3 font-medium">Mín. ejemplos:</span> {config.min_examples}
+          <span className="font-medium">{t("ft.vertex.proyecto")}</span> {config.project ?? "—"}{" "}
+          <span className="ml-3 font-medium">{t("ft.vertex.region")}</span> {config.location ?? "—"}{" "}
+          <span className="ml-3 font-medium">{t("ft.vertex.modeloBase")}</span> {config.base_model ?? "—"}{" "}
+          <span className="ml-3 font-medium">{t("ft.vertex.minEjemplos")}</span> {config.min_examples}
         </div>
       )}
 
@@ -207,13 +211,15 @@ function VertexAiSection() {
       {startedJobs.length > 0 && (
         <div className="flex items-center gap-3 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-xs dark:border-violet-900 dark:bg-violet-950/30">
           <span className="font-medium text-violet-800 dark:text-violet-200">
-            Gasto estimado total
+            {t("ft.vertex.gastoTotal")}
           </span>
           <span className="rounded-full bg-violet-100 px-2 py-0.5 font-mono font-semibold text-violet-800 dark:bg-violet-900/60 dark:text-violet-100">
             {fmtUsd(totalEstimatedCost)}
           </span>
           <span className="text-slate-500 dark:text-slate-400">
-            {startedJobs.length} trabajo{startedJobs.length !== 1 ? "s" : ""} iniciado{startedJobs.length !== 1 ? "s" : ""}
+            {startedJobs.length === 1
+              ? t("ft.vertex.trabajoUno")
+              : t("ft.vertex.trabajosVarios").replace("{n}", String(startedJobs.length))}
           </span>
         </div>
       )}
@@ -222,10 +228,10 @@ function VertexAiSection() {
         <button
           type="button"
           disabled={busy !== null || !enabled}
-          onClick={() => vtxPost({ action: "draft" }, "draft", "No se pudo crear el borrador.")}
+          onClick={() => vtxPost({ action: "draft" }, "draft", t("ft.vertex.errorBorrador"))}
           className="rounded-md bg-violet-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
         >
-          Crear borrador
+          {t("ft.vertex.crearBorrador")}
         </button>
       </div>
 
@@ -237,8 +243,8 @@ function VertexAiSection() {
 
       {jobs.length === 0 ? (
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          No hay trabajos de Vertex AI.{" "}
-          {enabled ? "Creá un borrador para comenzar." : "Habilitá Vertex AI primero."}
+          {t("ft.vertex.sinTrabajos")}{" "}
+          {enabled ? t("ft.vertex.creaBorrador") : t("ft.vertex.habilitaPrimero")}
         </p>
       ) : (
         <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
@@ -264,7 +270,12 @@ function VertexAiSection() {
                         {job.status}
                       </span>
                       <span className="text-xs text-slate-500 dark:text-slate-400">
-                        {job.training_example_count} ejemplos
+                        {job.training_example_count === 1
+                          ? t("ft.ejemploUno")
+                          : t("ft.ejemplosVarios").replace(
+                              "{n}",
+                              String(job.training_example_count)
+                            )}
                       </span>
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -275,7 +286,7 @@ function VertexAiSection() {
                             : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-200"
                         }`}
                       >
-                        {fmtUsd(jobCost)} est.
+                        {fmtUsd(jobCost)} {t("ft.vertex.est")}
                       </span>
                     </div>
                     <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -293,7 +304,18 @@ function VertexAiSection() {
                     )}
                     {job.activated_at && (
                       <p className="mt-0.5 text-xs text-emerald-600 dark:text-emerald-400">
-                        Activo desde {new Date(job.activated_at).toLocaleDateString()}
+                        {/*
+                          * Idioma de quien mira, zona del negocio. Sin
+                          * argumentos tomaba las dos del navegador, y la fecha
+                          * se comparaba despues contra el resto del producto,
+                          * que esta fijado a Buenos Aires.
+                          */}
+                        {t("ft.vertex.activoDesde").replace(
+                          "{f}",
+                          new Date(job.activated_at).toLocaleDateString(locale, {
+                            timeZone: ZONA_ARGENTINA,
+                          })
+                        )}
                       </p>
                     )}
                     {job.error_message && (
@@ -304,7 +326,7 @@ function VertexAiSection() {
                     {isPendingConfirm && (
                       <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-950/40">
                         <span className="text-xs text-amber-800 dark:text-amber-200">
-                          Esto iniciará un trabajo de fine-tuning en Google Cloud con un costo estimado de{" "}
+                          {t("ft.vertex.confirmarCosto")}{" "}
                           <strong>{fmtUsd(jobCost)}</strong>.
                         </span>
                         <button
@@ -315,19 +337,19 @@ function VertexAiSection() {
                             vtxPost(
                               { action: "start", jobId: job.id },
                               `${job.id}:start`,
-                              "No se pudo iniciar el trabajo."
+                              t("ft.vertex.errorIniciar")
                             );
                           }}
                           className="shrink-0 rounded-md bg-amber-700 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
                         >
-                          Confirmar
+                          {t("ft.vertex.confirmar")}
                         </button>
                         <button
                           type="button"
                           onClick={() => setConfirmStart(null)}
                           className="shrink-0 rounded-md border border-amber-300 px-2.5 py-1 text-xs text-amber-700 dark:border-amber-700 dark:text-amber-300"
                         >
-                          Cancelar
+                          {t("ft.vertex.cancelar")}
                         </button>
                       </div>
                     )}
@@ -342,7 +364,7 @@ function VertexAiSection() {
                       }}
                       className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                     >
-                      Iniciar
+                      {t("ft.iniciar")}
                     </button>
                     <button
                       type="button"
@@ -351,32 +373,32 @@ function VertexAiSection() {
                         vtxPost(
                           { action: "sync", jobId: job.id },
                           `${job.id}:sync`,
-                          "No se pudo sincronizar."
+                          t("ft.vertex.errorSincronizar")
                         )
                       }
                       className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                     >
-                      Sincronizar
+                      {t("ft.sincronizar")}
                     </button>
                     <button
                       type="button"
                       disabled={busy !== null || !enabled || !isActivatable}
                       onClick={() =>
-                        vtxJobPost(job.id, "activate", "No se pudo activar el modelo.")
+                        vtxJobPost(job.id, "activate", t("ft.vertex.errorActivar"))
                       }
                       className="rounded-md border border-emerald-300 px-2.5 py-1 text-xs text-emerald-700 disabled:opacity-50 dark:border-emerald-700 dark:text-emerald-300"
                     >
-                      Activar modelo
+                      {t("ft.vertex.activarModelo")}
                     </button>
                     <button
                       type="button"
                       disabled={busy !== null || !enabled}
                       onClick={() =>
-                        vtxJobPost(job.id, "rollback", "No se pudo hacer rollback.")
+                        vtxJobPost(job.id, "rollback", t("ft.errorRollback"))
                       }
                       className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                     >
-                      Rollback
+                      {t("ft.rollback")}
                     </button>
                   </div>
                 </div>
@@ -397,6 +419,7 @@ export function FineTuneJobsPanel() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const t = useT();
 
   async function reload() {
     const [nextJobs, nextProvider] = await Promise.all([
@@ -417,7 +440,7 @@ export function FineTuneJobsPanel() {
         }
       })
       .catch(() => {
-        if (!cancelled) setError("No se pudo cargar fine-tuning.");
+        if (!cancelled) setError(t("ft.errorCarga"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -425,6 +448,9 @@ export function FineTuneJobsPanel() {
     return () => {
       cancelled = true;
     };
+    // `t` cambia con el idioma; el mensaje ya escrito no se retraduce solo, y
+    // volver a pedir los trabajos por eso seria peor que el problema.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openAiSelected = activeProvider === "openai";
@@ -439,11 +465,11 @@ export function FineTuneJobsPanel() {
         body: JSON.stringify({ action: "draft" }),
       });
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res, "No se pudo crear el trabajo."));
+        throw new Error(await readErrorMessage(res, t("ft.errorCrear")));
       }
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear el trabajo.");
+      setError(err instanceof Error ? err.message : t("ft.errorCrear"));
     } finally {
       setBusy(null);
     }
@@ -451,7 +477,7 @@ export function FineTuneJobsPanel() {
 
   async function rollback() {
     if (!openAiSelected) {
-      setError("Rollback de fine-tuning esta disponible solo con OpenAI activo.");
+      setError(t("ft.rollbackSoloOpenai"));
       return;
     }
     setBusy("rollback");
@@ -463,11 +489,11 @@ export function FineTuneJobsPanel() {
         body: JSON.stringify({ action: "rollback" }),
       });
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res, "No se pudo hacer rollback."));
+        throw new Error(await readErrorMessage(res, t("ft.errorRollback")));
       }
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo hacer rollback.");
+      setError(err instanceof Error ? err.message : t("ft.errorRollback"));
     } finally {
       setBusy(null);
     }
@@ -475,7 +501,7 @@ export function FineTuneJobsPanel() {
 
   async function action(job: FineTuneJob, actionName: "start" | "sync" | "approve" | "activate") {
     if (job.provider === "openai" && !openAiSelected) {
-      setError("Los trabajos de OpenAI solo se pueden iniciar o activar con OpenAI como proveedor activo.");
+      setError(t("ft.openaiSoloConOpenai"));
       return;
     }
     setBusy(`${job.id}:${actionName}`);
@@ -487,17 +513,17 @@ export function FineTuneJobsPanel() {
         body: JSON.stringify({ action: actionName }),
       });
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res, "No se pudo actualizar el trabajo."));
+        throw new Error(await readErrorMessage(res, t("ft.errorActualizar")));
       }
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo actualizar el trabajo.");
+      setError(err instanceof Error ? err.message : t("ft.errorActualizar"));
     } finally {
       setBusy(null);
     }
   }
 
-  if (loading) return <p className="text-sm text-slate-500">Cargando...</p>;
+  if (loading) return <p className="text-sm text-slate-500">{t("ft.cargando")}</p>;
 
   return (
     <div className="space-y-6">
@@ -505,16 +531,16 @@ export function FineTuneJobsPanel() {
       <div className="space-y-4">
         <div className="space-y-1">
           <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
-            Entrenamiento del agente
+            {t("ft.titulo")}
           </p>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Gemini usa ejemplos aprobados, reglas y memoria como contexto activo sin costo de fine-tuning externo. OpenAI queda disponible solo si lo elegis como proveedor.
+            {t("ft.subtitulo")}
           </p>
         </div>
 
         {activeProvider === "gemini" && (
           <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-            Proveedor activo: Gemini. Crear trabajo arma un paquete contextual JSONL para evaluar, respaldar y reutilizar la memoria del agente.
+            {t("ft.geminiActivo")}
           </div>
         )}
 
@@ -525,7 +551,7 @@ export function FineTuneJobsPanel() {
             disabled={busy !== null}
             className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
           >
-            {activeProvider === "gemini" ? "Crear paquete Gemini" : "Crear trabajo OpenAI"}
+            {activeProvider === "gemini" ? t("ft.crearGemini") : t("ft.crearOpenai")}
           </button>
           <button
             type="button"
@@ -533,11 +559,11 @@ export function FineTuneJobsPanel() {
             disabled={busy !== null || !openAiSelected}
             className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
           >
-            Rollback
+            {t("ft.rollback")}
           </button>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Para crear un paquete primero necesitas ejemplos aprobados. Gemini no llama APIs de fine-tuning; el JSONL exportado documenta los ejemplos que ya alimentan al agente.
+          {t("ft.ayuda")}
         </p>
 
         {error && (
@@ -549,10 +575,10 @@ export function FineTuneJobsPanel() {
         {jobs.length === 0 ? (
           <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
             <p className="font-medium text-slate-800 dark:text-slate-100">
-              No hay paquetes de entrenamiento.
+              {t("ft.sinPaquetes")}
             </p>
             <p className="mt-1">
-              Los ejemplos aprobados ya estan disponibles como contexto del agente. Crear paquete genera un JSONL portable para Gemini.
+              {t("ft.sinPaquetesDetalle")}
             </p>
           </div>
         ) : (
@@ -564,12 +590,19 @@ export function FineTuneJobsPanel() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{job.id.slice(0, 8)}</span>
                       <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200">
-                        {job.provider === "gemini" ? "Gemini context" : "OpenAI fine-tune"}
+                        {job.provider === "gemini" ? t("ft.geminiContext") : t("ft.openaiFinetune")}
                       </span>
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                         {job.status}
                       </span>
-                      <span className="text-xs text-slate-500 dark:text-slate-400">{job.training_example_count} ejemplos</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {job.training_example_count === 1
+                          ? t("ft.ejemploUno")
+                          : t("ft.ejemplosVarios").replace(
+                              "{n}",
+                              String(job.training_example_count)
+                            )}
+                      </span>
                     </div>
                     <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                       <span className="font-mono">{job.base_model}</span>
@@ -590,7 +623,7 @@ export function FineTuneJobsPanel() {
                           disabled={busy !== null}
                           className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                         >
-                          Actualizar
+                          {t("ft.actualizar")}
                         </button>
                         <button
                           type="button"
@@ -598,7 +631,7 @@ export function FineTuneJobsPanel() {
                           disabled={busy !== null || activeProvider === "gemini"}
                           className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                         >
-                          Activar Gemini
+                          {t("ft.activarGemini")}
                         </button>
                       </>
                     ) : (
@@ -609,7 +642,7 @@ export function FineTuneJobsPanel() {
                           disabled={busy !== null || !openAiSelected || !["draft", "failed"].includes(job.status)}
                           className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                         >
-                          Iniciar
+                          {t("ft.iniciar")}
                         </button>
                         <button
                           type="button"
@@ -617,7 +650,7 @@ export function FineTuneJobsPanel() {
                           disabled={busy !== null || !openAiSelected || !job.openai_fine_tuning_job_id}
                           className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                         >
-                          Sincronizar
+                          {t("ft.sincronizar")}
                         </button>
                         <button
                           type="button"
@@ -625,7 +658,7 @@ export function FineTuneJobsPanel() {
                           disabled={busy !== null || !openAiSelected || job.status !== "eval_pending" || !job.fine_tuned_model_id}
                           className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                         >
-                          Aprobar eval
+                          {t("ft.aprobarEval")}
                         </button>
                         <button
                           type="button"
@@ -633,7 +666,7 @@ export function FineTuneJobsPanel() {
                           disabled={busy !== null || !openAiSelected || job.status !== "approved" || !job.fine_tuned_model_id}
                           className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                         >
-                          Activar
+                          {t("ft.activar")}
                         </button>
                       </>
                     )}

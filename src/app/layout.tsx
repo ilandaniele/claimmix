@@ -9,6 +9,8 @@
 
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+
+import { SCRIPT_TEMA_INICIAL } from "@/lib/theme/script-inicial";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -31,11 +33,39 @@ export default async function RootLayout({
       <head>
         {/*
           Nonce is passed to Next.js via the `nonce` prop on Script tags.
-          The layout itself doesn't add inline scripts, but child pages may.
           Example:
             import Script from 'next/script';
             <Script nonce={nonce} id="my-script">...</Script>
         */}
+        {/*
+          El tema, decidido ANTES del primer pintado.
+
+          El tema lo elegía `ThemeProvider` en un `useEffect`, o sea después de
+          que la página ya se dibujó. Medido: con el sistema en oscuro, el
+          servidor mandaba `class="h-full antialiased"` y el fondo salía
+          rgb(248,250,252) —blanco— hasta que el efecto lo pasaba a
+          rgb(11,17,32). Un destello blanco en cada carga completa, para todo el
+          que tenga el sistema en oscuro.
+
+          No hay forma de arreglarlo desde React: el servidor no puede saber qué
+          tema quiere este navegador, y cualquier cosa que corra después de
+          hidratar corre después de pintar. Tiene que ser un script bloqueante
+          en el <head>, que es lo único que pasa entre el HTML y la pantalla.
+
+          Lleva el nonce porque el CSP es `script-src 'self' 'nonce-…'
+          'strict-dynamic'`, sin `unsafe-inline`: sin el nonce no corre y el
+          destello vuelve sin que nada falle a la vista.
+
+          Toca el DOM y no React, así que no participa de la hidratación. La
+          clave y la lógica son las mismas que las de ThemeContext; si una
+          cambia, la otra tiene que cambiar — el test las compara.
+        */}
+        <script
+          nonce={nonce}
+          dangerouslySetInnerHTML={{
+            __html: SCRIPT_TEMA_INICIAL,
+          }}
+        />
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground">
         {children}

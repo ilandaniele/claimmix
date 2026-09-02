@@ -17,7 +17,12 @@
 
 import { describe, it, expect } from "vitest";
 
-import { diaArgentino, ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
+import {
+  diaArgentino,
+  mesArgentino,
+  nombreDelMesArgentino,
+  ZONA_ARGENTINA,
+} from "@/core/fecha/dia-argentino";
 
 describe("diaArgentino", () => {
   it("a las 22:10 de acá todavía es HOY, aunque en UTC sea mañana", () => {
@@ -59,5 +64,60 @@ describe("diaArgentino", () => {
 
   it("la zona es la del negocio, escrita una sola vez", () => {
     expect(ZONA_ARGENTINA).toBe("America/Argentina/Buenos_Aires");
+  });
+});
+
+/*
+ * La ventana del mes es el mismo error, un piso más arriba y con menos suerte.
+ *
+ * `new Date(now.getFullYear(), now.getMonth(), 1)` construye la medianoche del
+ * primero en la zona del PROCESO. En una máquina argentina da bien — y por eso
+ * nadie lo vio nunca corriendo local—; en Vercel, que corre en UTC, da las 21:00
+ * del último día del mes anterior.
+ *
+ * Estos tests fijan el reloj en la franja de las tres horas: si alguien vuelve a
+ * escribir la ventana sin decir la zona, fallan acá aunque la máquina que los
+ * corre esté en Buenos Aires.
+ */
+describe("mesArgentino", () => {
+  it("a las 22:30 del 31 de agosto el mes sigue siendo agosto", () => {
+    // 2026-08-31 22:30 en Buenos Aires = 2026-09-01 01:30 UTC.
+    const cuando = new Date("2026-09-01T01:30:00.000Z");
+
+    // Lo que decía el código viejo en un servidor UTC: septiembre.
+    expect(cuando.getUTCMonth()).toBe(8);
+
+    const { inicio, fin } = mesArgentino(cuando);
+    expect(inicio).toBe("2026-08-01T03:00:00.000Z");
+    expect(fin).toBe("2026-09-01T03:00:00.000Z");
+  });
+
+  it("el instante que se le pasa cae adentro de su propia ventana", () => {
+    // La propiedad que de verdad importa: un siniestro que entra ahora tiene
+    // que contarse en el mes que el panel dice estar mostrando.
+    const cuando = new Date("2026-09-01T01:30:00.000Z");
+    const { inicio, fin } = mesArgentino(cuando);
+
+    expect(cuando.toISOString() >= inicio).toBe(true);
+    expect(cuando.toISOString() < fin).toBe(true);
+  });
+
+  it("de diciembre pasa a enero del año siguiente", () => {
+    const { inicio, fin } = mesArgentino(new Date("2026-12-15T12:00:00.000Z"));
+    expect(inicio).toBe("2026-12-01T03:00:00.000Z");
+    expect(fin).toBe("2027-01-01T03:00:00.000Z");
+  });
+
+  it("la ventana arranca a la medianoche de acá, no a la de UTC", () => {
+    const { inicio } = mesArgentino(new Date("2026-09-15T12:00:00.000Z"));
+    // Medianoche argentina del 1° = 03:00 UTC. Si algún día esto diera
+    // 00:00:00Z, la ventana volvió a estar corrida tres horas.
+    expect(inicio.endsWith("T03:00:00.000Z")).toBe(true);
+  });
+});
+
+describe("nombreDelMesArgentino", () => {
+  it("a las 22:30 del 31 de agosto el título dice agosto, no septiembre", () => {
+    expect(nombreDelMesArgentino(new Date("2026-09-01T01:30:00.000Z"))).toContain("agosto");
   });
 });

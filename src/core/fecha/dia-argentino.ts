@@ -31,3 +31,78 @@ export const ZONA_ARGENTINA = "America/Argentina/Buenos_Aires";
 export function diaArgentino(cuando: Date = new Date()): string {
   return cuando.toLocaleDateString("en-CA", { timeZone: ZONA_ARGENTINA });
 }
+
+/**
+ * Cuánto hay que sumarle a la hora de pared argentina para llegar a UTC, en ms.
+ *
+ * Se mide EN el instante que se pregunta y no de una vez para siempre. Hoy
+ * Argentina está fija en UTC-3 —no mueve el reloj desde 2009— y sería más corto
+ * escribir un `3` en algún lado, pero eso es una constante que un día deja de
+ * ser cierta sin que nada avise. Preguntarle a `Intl` cuesta lo mismo.
+ */
+function desfasajeArgentino(instante: Date): number {
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: ZONA_ARGENTINA,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(instante);
+  const p = Object.fromEntries(partes.map((x) => [x.type, x.value]));
+  const comoSiFueraUtc = Date.UTC(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day),
+    Number(p.hour),
+    Number(p.minute),
+    Number(p.second)
+  );
+  return instante.getTime() - comoSiFueraUtc;
+}
+
+/** El instante exacto en que empieza un día argentino, en ISO (UTC). */
+function medianocheArgentina(anio: number, mes: number, dia: number): string {
+  const tentativo = Date.UTC(anio, mes - 1, dia, 0, 0, 0, 0);
+  return new Date(tentativo + desfasajeArgentino(new Date(tentativo))).toISOString();
+}
+
+/**
+ * La ventana del mes corriente, en horario argentino.
+ *
+ * Las métricas la armaban con `new Date(now.getFullYear(), now.getMonth(), 1)`,
+ * que construye la medianoche del primero **en la zona del proceso**. En una
+ * máquina argentina eso da bien y en Vercel —que corre en UTC— da las 21:00 del
+ * último día del mes anterior: el panel de septiembre venía con las últimas tres
+ * horas de agosto adentro, y los siniestros de la primera madrugada de
+ * septiembre contados en el mes equivocado.
+ *
+ * Es el peor tipo de error: correcto en la máquina de quien lo escribe,
+ * incorrecto en la única máquina que le importa a alguien, y sin forma de
+ * reproducirlo localmente. Por eso la zona va dicha y no heredada.
+ *
+ * `fin` es el arranque del mes siguiente, o sea exclusivo — como lo usan las
+ * consultas, que hacen `gte(inicio)` y `lt(fin)`.
+ */
+export function mesArgentino(cuando: Date = new Date()): {
+  inicio: string;
+  fin: string;
+} {
+  const [anio, mes] = diaArgentino(cuando).split("-").map(Number);
+  return {
+    inicio: medianocheArgentina(anio, mes, 1),
+    // Mes 13 lo resuelve `Date.UTC` solo: pasa a enero del año siguiente.
+    fin: medianocheArgentina(anio, mes + 1, 1),
+  };
+}
+
+/** El nombre del mes corriente en la Argentina, para encabezados. */
+export function nombreDelMesArgentino(cuando: Date = new Date()): string {
+  return cuando.toLocaleDateString("es-AR", {
+    timeZone: ZONA_ARGENTINA,
+    month: "long",
+    year: "numeric",
+  });
+}

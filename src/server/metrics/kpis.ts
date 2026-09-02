@@ -19,6 +19,7 @@ import {
   ESTADOS_ESCALADO,
 } from "@/core/case/fsm";
 
+import { mesArgentino } from "@/core/fecha/dia-argentino";
 import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
@@ -85,10 +86,16 @@ function normalizeUsage(row?: {
 export async function getTenantKpis(
   tenantCtx: TenantContext
 ): Promise<MetricasData> {
-  // ── Date window ────────────────────────────────────────────────────────────
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+  /*
+   * ── La ventana del mes, en horario argentino ────────────────────────────────
+   *
+   * Esto era `new Date(now.getFullYear(), now.getMonth(), 1)`, que arma la
+   * medianoche del primero en la zona del PROCESO. En una máquina argentina da
+   * bien; en Vercel, que corre en UTC, da las 21:00 del último día del mes
+   * anterior. O sea que el panel de septiembre traía adentro las últimas tres
+   * horas de agosto, y no había forma de verlo desde acá.
+   */
+  const { inicio: monthStart, fin: monthEnd } = mesArgentino();
 
   const [
     [resumenMes],

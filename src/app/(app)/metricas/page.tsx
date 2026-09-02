@@ -10,6 +10,7 @@
  * All numbers in Spanish (es-AR). Empty state shown when no data exists.
  */
 
+import { nombreDelMesArgentino } from "@/core/fecha/dia-argentino";
 import { getSessionContext } from "@/lib/auth/session";
 import { formatUsd as formatUsdShared } from "@/lib/utils";
 import {
@@ -73,9 +74,11 @@ function formatMinutes(minutes: number | null): string {
   return `${h}h ${m}min`;
 }
 
+// El encabezado nombra el mismo mes que la ventana de `kpis.ts`, y por lo tanto
+// también tiene que decir la zona. Sin ella, en Vercel la última noche de agosto
+// el título dice «septiembre» sobre datos de agosto.
 function formatCurrentMonth(): string {
-  const now = new Date();
-  return now.toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+  return nombreDelMesArgentino();
 }
 
 function formatNumber(value: number): string {

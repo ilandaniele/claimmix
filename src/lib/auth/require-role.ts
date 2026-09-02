@@ -24,32 +24,22 @@ import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { users } from "@/lib/db/schema";
+import type { UserRole } from "@/lib/auth/roles";
 import { AppError } from "@/lib/errors";
 
-export const ALL_ROLES = ["owner", "admin", "specialist", "analyst", "viewer"] as const;
-export type UserRole = (typeof ALL_ROLES)[number];
-
-/** Roles allowed to confirm training examples (spec item 3). */
-export const TRAINING_APPROVER_ROLES: UserRole[] = ["owner", "admin", "specialist"];
-
 /*
- * Quién puede ver los datos personales de un cliente: nombre, DNI, correo y
- * teléfono.
- *
- * Tiene los mismos tres miembros que TRAINING_APPROVER_ROLES y son constantes
- * separadas a propósito. Aprobar un ejemplo de entrenamiento y leer el padrón
- * de clientes cambian por razones distintas: el día que se decida que un
- * analista puede aprobar ejemplos, eso no debería abrirle el padrón. Unificarlas
- * porque hoy coinciden es exactamente cómo un cambio de producto en una se
- * filtra a la otra sin que nadie lo note.
+ * La lista de roles vive en `roles.ts`, sin dependencias, para que la barra
+ * lateral pueda leerla sin arrastrar `@/lib/db` al navegador. Se vuelven a
+ * exportar desde acá para no tocar a nadie que ya las importaba.
  */
-export const CUSTOMER_PII_ROLES: UserRole[] = ["owner", "admin", "specialist"];
-
-/** Roles with admin-level configuration access. */
-export const ADMIN_ROLES: UserRole[] = ["owner", "admin"];
-
-/** Roles allowed to mutate cases / confirm fields (everything except viewer). */
-export const CASE_EDITOR_ROLES: UserRole[] = ["owner", "admin", "specialist", "analyst"];
+export {
+  ALL_ROLES,
+  TRAINING_APPROVER_ROLES,
+  CUSTOMER_PII_ROLES,
+  ADMIN_ROLES,
+  CASE_EDITOR_ROLES,
+} from "@/lib/auth/roles";
+export type { UserRole } from "@/lib/auth/roles";
 
 export interface RoleContext {
   user: { id: string; email?: string };

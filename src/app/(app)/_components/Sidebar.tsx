@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+
+import { CUSTOMER_PII_ROLES } from "@/lib/auth/roles";
 import { usePathname } from "next/navigation";
 import { useT } from "@/lib/i18n/LocaleContext";
 import {
@@ -94,11 +96,30 @@ export function Sidebar({
 }) {
   const t = useT();
   const canUseAgent = role === "owner" || role === "admin";
+  const puedeVerClientes = (CUSTOMER_PII_ROLES as string[]).includes(role);
 
   const operacionItems: NavItemDef[] = [
     { label: t("nav.bandeja") || "Bandeja", href: "/bandeja", icon: Inbox },
     { label: t("nav.escalados") || "Escalados", href: "/escalados", icon: AlertTriangle },
-    { label: t("nav.clientes") || "Clientes", href: "/clientes", icon: Users },
+    /*
+     * «Clientes» sólo para quien puede ver datos personales.
+     *
+     * Estaba sin condición, así que un analista y un viewer lo veían en la barra
+     * permanente, lo apretaban, y `clientes/page.tsx` los mandaba de vuelta a
+     * /bandeja sin decir nada. Un enlace que siempre está y nunca funciona se
+     * lee como que el producto está roto, no como que no les corresponde.
+     *
+     * Se esconde y no se deshabilita —al revés que «Agente», que sí se
+     * deshabilita con su motivo— porque acá lo que está del otro lado son datos
+     * personales de terceros. Que la pantalla exista no es algo que le tenga que
+     * constar a alguien que no la puede abrir.
+     *
+     * Esto NO es la guarda: la guarda es el chequeo del servidor, que sigue
+     * donde estaba. Esto es que el menú diga la verdad.
+     */
+    ...(puedeVerClientes
+      ? [{ label: t("nav.clientes") || "Clientes", href: "/clientes", icon: Users }]
+      : []),
   ];
 
   const analisisItems: NavItemDef[] = [

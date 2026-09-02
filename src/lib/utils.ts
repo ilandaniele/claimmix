@@ -34,6 +34,31 @@ export function formatDate(
 }
 
 /**
+ * Dibuja una columna `date` de Postgres, que no tiene hora ni zona.
+ *
+ * `formatDate` no sirve para esto, y el error es de los que no se notan: una
+ * columna `date` vuelve como "2025-07-28", `new Date` la lee como medianoche
+ * UTC, y formatearla en horario argentino la corre tres horas para atrás — o
+ * sea al día anterior, a las nueve de la noche. Una póliza que arranca el 1° de
+ * enero se dibujaba como 31 de diciembre, con una hora que nadie cargó nunca.
+ *
+ * Acá no hay conversión ninguna: se parte el texto y se reordena. Una fecha sin
+ * hora no tiene zona horaria, así que cualquier cosa que la mueva está mal, y la
+ * forma más segura de no moverla es no construir un `Date`.
+ *
+ * @example
+ * formatDateOnly("2026-01-01") // "01/01/2026"
+ */
+export function formatDateOnly(date: string): string {
+  const partes = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
+  // Si no tiene la forma de una fecha sola, se devuelve tal cual: es preferible
+  // mostrar el valor crudo que inventarle un día.
+  if (!partes) return date;
+  const [, anio, mes, dia] = partes;
+  return `${dia}/${mes}/${anio}`;
+}
+
+/**
  * Format a duration in seconds to a human-readable string (es-AR).
  * Used for "antigüedad" (age of the case) in the dashboard.
  */

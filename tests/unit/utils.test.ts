@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cn, formatDate, formatAge, truncate } from "@/lib/utils";
+import { cn, formatDate, formatDateOnly, formatAge, truncate } from "@/lib/utils";
 
 describe("cn()", () => {
   it("joins truthy class names", () => {
@@ -42,6 +42,48 @@ describe("formatDate()", () => {
   it("returns a non-empty string for any valid date", () => {
     const result = formatDate("2024-12-31T23:59:59Z");
     expect(result).toBeTruthy();
+  });
+});
+
+/*
+ * Una columna `date` no tiene hora ni zona, y por lo tanto no se puede correr.
+ *
+ * Los tres tests de `formatDate` que están acá arriba le pasan siempre un
+ * instante completo con Z —"2024-01-15T12:00:00Z"—, así que ninguno tocaba el
+ * caso que rompía: una fecha sola. `formatDate("2025-07-28")` devuelve
+ * "27/07/2025, 09:00 p. m.", que es el día anterior más una hora inventada, y
+ * así se dibujaban las vigencias de las pólizas.
+ *
+ * Estos tests fallan si alguien vuelve a meter un `Date` en el medio.
+ */
+describe("formatDateOnly()", () => {
+  it("no corre el día de una fecha sola", () => {
+    expect(formatDateOnly("2025-07-28")).toBe("28/07/2025");
+  });
+
+  it("aguanta el 1° de enero, que es donde el corrimiento cambia de año", () => {
+    // El caso feo: medianoche UTC del 1/1 es el 31/12 a las 21 en Buenos Aires,
+    // así que un formateo con zona se lleva puesto el día, el mes y el año.
+    expect(formatDateOnly("2026-01-01")).toBe("01/01/2026");
+  });
+
+  it("no le agrega una hora a algo que no la tiene", () => {
+    const salida = formatDateOnly("2025-07-28");
+    expect(salida).not.toMatch(/\d{1,2}:\d{2}/);
+    expect(salida.toLowerCase()).not.toContain("m.");
+  });
+
+  it("es lo que NO hace formatDate, que sigue sirviendo para timestamps", () => {
+    // El contraste es el punto: la misma entrada, dos resultados, y por eso son
+    // dos funciones. Si algún día `formatDate` dejara de correr la fecha sola,
+    // este test avisa que `formatDateOnly` ya no hace falta.
+    expect(formatDate("2025-07-28")).not.toBe(formatDateOnly("2025-07-28"));
+    expect(formatDate("2025-07-28T12:00:00Z")).toContain("28/07/2025");
+  });
+
+  it("devuelve el valor crudo si no tiene forma de fecha, en vez de inventar un día", () => {
+    expect(formatDateOnly("")).toBe("");
+    expect(formatDateOnly("mañana")).toBe("mañana");
   });
 });
 

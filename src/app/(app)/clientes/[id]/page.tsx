@@ -12,16 +12,16 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, count } from "drizzle-orm";
 import { cases, customers, policies, users } from "@/lib/db/schema";
 import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
 import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
-import { formatDate, formatAge } from "@/lib/utils";
+import { formatDate, formatDateOnly, formatAge } from "@/lib/utils";
 import Link from "next/link";
-import type { CaseStatus } from "@/lib/schemas/cases";
+import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
 
 interface CustomerDetailPageProps {
   params: Promise<{ id: string }>;
@@ -61,8 +61,19 @@ const POLICY_TYPE_LABELS: Record<string, string> = {
   other: "Otro",
 };
 
+/*
+ * Los tres estados, en la paleta que el modo oscuro sabe pintar.
+ *
+ * «Activa» era `bg-green-100 text-green-800`, y la familia `green` es la única
+ * que `globals.css` no pisa en oscuro —la palabra no aparece en el archivo—.
+ * O sea que de los tres estados, los dos problemáticos se oscurecían y el bueno
+ * quedaba verde menta sobre una tarjeta oscura: la codificación al revés, el
+ * estado normal gritando y los que importan apagados.
+ *
+ * `emerald` es el par de «éxito» que ya usa StatusBadge y que sí está pisado.
+ */
 const POLICY_STATUS_CLASSES: Record<string, string> = {
-  active: "bg-green-100 text-green-800",
+  active: "bg-emerald-50 text-emerald-700",
   expired: "bg-slate-100 text-slate-600",
   cancelled: "bg-red-100 text-red-700",
 };
@@ -72,6 +83,9 @@ const POLICY_STATUS_LABELS: Record<string, string> = {
   expired: "Vencida",
   cancelled: "Cancelada",
 };
+
+/** Cuántos siniestros se dibujan. El total se cuenta aparte y se muestra igual. */
+const MAX_CASOS = 50;
 
 /** Format case UUID to short SIN-XXXX-XXXX display string */
 function formatCaseNumber(id: string): string {
@@ -85,6 +99,26 @@ export default async function CustomerDetailPage({
   const { id } = await params;
   const locale = await getServerLocale();
   const t = getT(locale);
+
+  /*
+   * Los tipos de siniestro traducidos, como en todas las demás pantallas.
+   *
+   * Acá la celda era `{c.claim_type}` con `capitalize`: el mismo caso que en la
+   * bandeja dice «Resp. Civil» decía «Rc», y el que dice «Robo de contenido»
+   * decía «Robo_contenido». Alguien que abre la ficha de un cliente para ver su
+   * historial leía claves de base de datos.
+   */
+  const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
+    choque: t("type.choque"),
+    robo: t("type.robo"),
+    granizo: t("type.granizo"),
+    incendio: t("type.incendio"),
+    cristales: t("type.cristales"),
+    rc: t("type.rc"),
+    robo_contenido: t("type.robo_contenido"),
+    accidente_personal: t("type.accidente_personal"),
+    other: t("type.other"),
+  };
 
   const session = await getSessionContext();
   if (!session?.user) notFound();
@@ -111,19 +145,33 @@ export default async function CustomerDetailPage({
 
   const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
-  // Fetch customer (explicit tenant check — wrong tenant → 404)
-  const [customer] = await enTenant(tenantCtx, (db) =>
+  /*
+   * El id de la URL contra una columna `uuid`, sin creerle a la URL.
+   *
+   * Esto era `await enTenant(...)` pelado, y `id` viaja crudo desde la barra de
+   * direcciones a un `eq()` contra una columna `uuid`. Una letra de más y
+   * Postgres tira «invalid input syntax for type uuid», que sube hasta el
+   * componente y sale como «Application error» — la pantalla entera en blanco
+   * por una URL mal tipeada.
+   *
+   * `/casos/[id]` ya resuelve esto igual, y por eso contesta 404 en el mismo
+   * caso: envuelve la consulta y devuelve null (src/server/cases/get.ts:77).
+   * Un id que no existe y un id que no puede existir son la misma respuesta.
+   */
+  const customer = await enTenant(tenantCtx, (db) =>
     db
       .select({ id: customers.id, full_name: customers.full_name, dni: customers.dni, email: customers.email, phone: customers.phone, created_at: customers.created_at })
       .from(customers)
       .where(eq(customers.id, id))
       .limit(1)
-  );
+  )
+    .then((filas) => filas[0])
+    .catch(() => undefined);
 
   if (!customer) notFound();
 
   // Fetch policies + cases in parallel
-  const [policiesData, casesData] = await Promise.all([
+  const [policiesData, casesData, [casesCountRow]] = await Promise.all([
     enTenant(tenantCtx, (db) =>
       db
         .select({ id: policies.id, policy_number: policies.policy_number, policy_type: policies.policy_type, status: policies.status, start_date: policies.start_date, end_date: policies.end_date })
@@ -137,12 +185,25 @@ export default async function CustomerDetailPage({
         .from(cases)
         .where(eq(cases.customer_id, id))
         .orderBy(desc(cases.created_at))
-        .limit(50)
+        .limit(MAX_CASOS)
+    ),
+    /*
+     * El total de siniestros, que no es lo mismo que los que se dibujan.
+     *
+     * El encabezado decía `({customerCases.length})` sobre una consulta con
+     * `.limit(50)`: un cliente con 63 siniestros leía «Siniestros (50)» y se
+     * quedaba sin trece, sin que nada en la pantalla lo dijera. Un conteo que
+     * copia el largo de la página no es un conteo, es el largo de la página.
+     */
+    enTenant(tenantCtx, (db) =>
+      db.select({ n: count() }).from(cases).where(eq(cases.customer_id, id))
     ),
   ]);
 
   const customerPolicies: Policy[] = policiesData;
   const customerCases: CustomerCase[] = casesData;
+  const totalCasos = casesCountRow?.n ?? customerCases.length;
+  const casosRecortados = totalCasos > customerCases.length;
 
   return (
     <div className="px-6 py-6 max-w-5xl mx-auto">
@@ -270,11 +331,11 @@ export default async function CustomerDetailPage({
                       </td>
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap">
                         {policy.start_date
-                          ? formatDate(policy.start_date)
+                          ? formatDateOnly(policy.start_date)
                           : "—"}
                       </td>
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap last:pr-0">
-                        {policy.end_date ? formatDate(policy.end_date) : "—"}
+                        {policy.end_date ? formatDateOnly(policy.end_date) : "—"}
                       </td>
                     </tr>
                   ))}
@@ -295,9 +356,17 @@ export default async function CustomerDetailPage({
           >
             {t("clientes.detail.cases")}
             <span className="ml-2 text-slate-400 font-normal">
-              ({customerCases.length})
+              ({totalCasos})
             </span>
           </h2>
+          {/* Y si no entran todos, que la pantalla lo diga en vez de recortar
+              trece en silencio. */}
+          {casosRecortados && (
+            <p className="-mt-2 mb-4 text-xs text-slate-500">
+              {t("bandeja.showing")} {customerCases.length}{" "}
+              {t("pagination.of")} {totalCasos} {t("bandeja.claims")}
+            </p>
+          )}
           {customerCases.length === 0 ? (
             <p className="text-sm text-slate-400">
               {t("clientes.detail.noCases")}
@@ -312,7 +381,7 @@ export default async function CustomerDetailPage({
                   <tr>
                     {[
                       t("table.col.id"),
-                      "Fecha",
+                      t("table.col.received"),
                       t("table.col.status"),
                       t("case.detail.severity"),
                       t("table.col.type"),
@@ -341,8 +410,17 @@ export default async function CustomerDetailPage({
                           {formatCaseNumber(c.id)}
                         </Link>
                       </td>
+                      {/* La columna decía «Fecha» y dibujaba «Hace 63d»: la
+                          fecha del siniestro no estaba en la pantalla. Van las
+                          dos, apiladas como en el detalle del caso — arriba lo
+                          que se lee de un vistazo, abajo el dato exacto. */}
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap">
-                        {formatAge(c.created_at)}
+                        <span className="whitespace-nowrap">
+                          {formatAge(c.created_at)}
+                        </span>
+                        <span className="mt-0.5 block whitespace-nowrap text-[12.5px] text-slate-500">
+                          {formatDate(c.created_at)}
+                        </span>
                       </td>
                       <td className="py-2.5 px-3">
                         <StatusBadge status={c.status as CaseStatus} />
@@ -354,8 +432,13 @@ export default async function CustomerDetailPage({
                           <span className="text-slate-300 text-xs">—</span>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 text-sm text-slate-700 capitalize last:pr-0">
-                        {c.claim_type}
+                      <td className="py-2.5 px-3 text-sm text-slate-700 last:pr-0">
+                        {c.claim_type ? (
+                          CLAIM_TYPE_LABELS[c.claim_type as ClaimType] ??
+                          c.claim_type
+                        ) : (
+                          <span className="text-slate-300 text-xs">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}

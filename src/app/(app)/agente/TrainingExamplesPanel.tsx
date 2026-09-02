@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 
+import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
+
 type TrainingExample = {
   id: string;
   case_id: string | null;
@@ -10,6 +13,16 @@ type TrainingExample = {
   status: string;
   approved_at: string | null;
   created_at: string;
+};
+
+/**
+ * `status` es `text` en la base, no un enum, asi que un estado que no este aca
+ * se muestra crudo: es preferible a dibujar un hueco.
+ */
+const ESTADO: Record<string, TranslationKey> = {
+  approved: "ejemplos.estado.approved",
+  rejected: "ejemplos.estado.rejected",
+  pending: "ejemplos.estado.pending",
 };
 
 async function fetchExamples(): Promise<TrainingExample[]> {
@@ -23,6 +36,7 @@ export function TrainingExamplesPanel() {
   const [examples, setExamples] = useState<TrainingExample[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const t = useT();
 
   async function reload() {
     setExamples(await fetchExamples());
@@ -35,7 +49,7 @@ export function TrainingExamplesPanel() {
         if (!cancelled) setExamples(data);
       })
       .catch(() => {
-        if (!cancelled) setError("No se pudieron cargar los ejemplos.");
+        if (!cancelled) setError(t("ejemplos.errorCarga"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -43,6 +57,9 @@ export function TrainingExamplesPanel() {
     return () => {
       cancelled = true;
     };
+    // `t` cambia si cambia el idioma; el mensaje ya escrito no se retraduce
+    // solo, y volver a pedir los ejemplos por eso seria peor que el problema.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function setStatus(example: TrainingExample, status: "approved" | "rejected") {
@@ -53,13 +70,13 @@ export function TrainingExamplesPanel() {
       body: JSON.stringify({ status }),
     });
     if (!res.ok) {
-      setError("No se pudo actualizar el ejemplo.");
+      setError(t("ejemplos.errorActualizar"));
       return;
     }
     await reload();
   }
 
-  if (loading) return <p className="text-sm text-slate-500">Cargando...</p>;
+  if (loading) return <p className="text-sm text-slate-500">{t("ejemplos.cargando")}</p>;
 
   return (
     <div className="space-y-3">
@@ -67,19 +84,18 @@ export function TrainingExamplesPanel() {
       {examples.length === 0 ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
           <p className="font-medium text-slate-800 dark:text-slate-100">
-            Todavia no hay ejemplos aprobados.
+            {t("ejemplos.vacio.titulo")}
           </p>
           <p className="mt-1">
-            Abri un caso procesado, revisa o corrige los campos del analisis y usa
-            <span className="font-medium"> Confirmar como ejemplo de entrenamiento seguro</span>.
-            Los ejemplos aprobados se usan como contexto en las proximas ejecuciones del agente
-            Gemini/OpenAI. El paquete de entrenamiento es opcional y portable.
+            {t("ejemplos.vacio.como")}
+            <span className="font-medium"> {t("agente.confirmar")}</span>
+            {t("ejemplos.vacio.paraQue")}
           </p>
           <a
             href="/bandeja?is_claim=true"
             className="mt-3 inline-flex rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
           >
-            Ver casos
+            {t("ejemplos.verCasos")}
           </a>
         </div>
       ) : (
@@ -90,10 +106,10 @@ export function TrainingExamplesPanel() {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                      {example.input_payload?.subject || "(sin asunto)"}
+                      {example.input_payload?.subject || t("ejemplos.sinAsunto")}
                     </span>
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                      {example.status}
+                      {ESTADO[example.status] ? t(ESTADO[example.status]) : example.status}
                     </span>
                     {example.claim_type && (
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
@@ -112,7 +128,7 @@ export function TrainingExamplesPanel() {
                     disabled={example.status === "approved"}
                     className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                   >
-                    Aprobar
+                    {t("ejemplos.aprobar")}
                   </button>
                   <button
                     type="button"
@@ -120,7 +136,7 @@ export function TrainingExamplesPanel() {
                     disabled={example.status === "rejected"}
                     className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
                   >
-                    Rechazar
+                    {t("ejemplos.rechazar")}
                   </button>
                 </div>
               </div>

@@ -8,6 +8,10 @@
  *   null   → dash (case still procesando)
  */
 
+"use client";
+
+import { useT } from "@/lib/i18n/LocaleContext";
+
 import { Vacio } from "./Vacio";
 
 interface ConfidenceBarProps {
@@ -21,6 +25,8 @@ function getColorClass(value: number): string {
 }
 
 export function ConfidenceBar({ value }: ConfidenceBarProps) {
+  const t = useT();
+
   if (value === null || value === undefined) {
     return <Vacio />;
   }
@@ -29,7 +35,7 @@ export function ConfidenceBar({ value }: ConfidenceBarProps) {
   const colorClass = getColorClass(value);
 
   return (
-    <span className={`text-sm tabular-nums ${colorClass}`} aria-label={`Confianza: ${pct}%`}>
+    <span className={`text-sm tabular-nums ${colorClass}`} aria-label={t("confianza.aria").replace("{n}", String(pct))}>
       {pct}%
     </span>
   );

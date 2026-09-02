@@ -12,6 +12,10 @@
  * estilo más suave. Es lo correcto para algo que puede cambiar del lado del
  * modelo sin avisarle a la pantalla.
  */
+"use client";
+
+import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
 
 const ESTILO_FRAUDE: Record<string, string> = {
   high: "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-100",
@@ -19,20 +23,21 @@ const ESTILO_FRAUDE: Record<string, string> = {
   low: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/60 dark:text-yellow-100",
 };
 
-const TEXTO_FRAUDE: Record<string, string> = {
-  high: "Riesgo alto",
-  medium: "Riesgo medio",
-  low: "Riesgo bajo",
+const TEXTO_FRAUDE: Record<string, TranslationKey> = {
+  high: "riesgo.fraude.high",
+  medium: "riesgo.fraude.medium",
+  low: "riesgo.fraude.low",
 };
 
 export function FraudRiskBadge({ level }: { level: string }) {
+  const t = useT();
   return (
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
         ESTILO_FRAUDE[level] ?? ESTILO_FRAUDE.low
       }`}
     >
-      {TEXTO_FRAUDE[level] ?? level}
+      {TEXTO_FRAUDE[level] ? t(TEXTO_FRAUDE[level]) : level}
     </span>
   );
 }
@@ -44,21 +49,22 @@ const ESTILO_LESIONES: Record<string, string> = {
   none: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
 };
 
-const TEXTO_LESIONES: Record<string, string> = {
-  fatal: "Fatal",
-  severe: "Graves",
-  minor: "Leves",
-  none: "Sin lesiones",
+const TEXTO_LESIONES: Record<string, TranslationKey> = {
+  fatal: "riesgo.lesiones.fatal",
+  severe: "riesgo.lesiones.severe",
+  minor: "riesgo.lesiones.minor",
+  none: "riesgo.lesiones.none",
 };
 
 export function InjurySeverityBadge({ severity }: { severity: string }) {
+  const t = useT();
   return (
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
         ESTILO_LESIONES[severity] ?? ESTILO_LESIONES.none
       }`}
     >
-      {TEXTO_LESIONES[severity] ?? severity}
+      {TEXTO_LESIONES[severity] ? t(TEXTO_LESIONES[severity]) : severity}
     </span>
   );
 }

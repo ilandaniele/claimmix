@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { Activity, Brain, CheckCircle2, ListChecks, Settings2, SlidersHorizontal, Layers } from "lucide-react";
 
+import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
+
 import { AiProviderPanel } from "../configuracion/AiProviderPanel";
 import { PromptRulesPanel } from "../configuracion/PromptRulesPanel";
 import { CustomFieldsPanel } from "./CustomFieldsPanel";
@@ -14,25 +17,32 @@ import { BatchSimulatePanel } from "./BatchSimulatePanel";
 
 type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento" | "uso" | "lote";
 
+/**
+ * La etiqueta es una CLAVE, no un texto: la lista se arma una sola vez cuando
+ * carga el módulo, y ahí todavía no hay locale ni hook. Traducir en el `map`,
+ * que sí corre dentro del componente, es lo que hace que las solapas cambien
+ * de idioma sin recargar.
+ */
 const TABS = [
-  { id: "modelos", label: "Modelos", icon: Settings2 },
-  { id: "campos", label: "Campos personalizados", icon: SlidersHorizontal },
-  { id: "reglas", label: "Reglas de prompt", icon: ListChecks },
-  { id: "ejemplos", label: "Ejemplos aprobados", icon: CheckCircle2 },
-  { id: "entrenamiento", label: "Fine-tuning opcional", icon: Brain },
-  { id: "uso", label: "Uso del proveedor", icon: Activity },
-  { id: "lote", label: "Simulación en lote", icon: Layers },
-] as const;
+  { id: "modelos", clave: "consola.tab.modelos", icon: Settings2 },
+  { id: "campos", clave: "consola.tab.campos", icon: SlidersHorizontal },
+  { id: "reglas", clave: "consola.tab.reglas", icon: ListChecks },
+  { id: "ejemplos", clave: "consola.tab.ejemplos", icon: CheckCircle2 },
+  { id: "entrenamiento", clave: "consola.tab.entrenamiento", icon: Brain },
+  { id: "uso", clave: "consola.tab.uso", icon: Activity },
+  { id: "lote", clave: "consola.tab.lote", icon: Layers },
+] as const satisfies readonly { id: TabId; clave: TranslationKey; icon: unknown }[];
 
 export function AgentConsoleClient({ role }: { role: string }) {
   const [tab, setTab] = useState<TabId>("modelos");
+  const t = useT();
 
   return (
     <div className="space-y-5">
       <AgentExportPanel role={role} />
 
       <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">
-        {TABS.map(({ id, label, icon: Icon }) => {
+        {TABS.map(({ id, clave, icon: Icon }) => {
           const active = tab === id;
           return (
             <button
@@ -47,7 +57,7 @@ export function AgentConsoleClient({ role }: { role: string }) {
               ].join(" ")}
             >
               <Icon size={15} />
-              {label}
+              {t(clave)}
             </button>
           );
         })}

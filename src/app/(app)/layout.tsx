@@ -19,6 +19,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { users } from "@/lib/db/schema";
 import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
+import { getT } from "@/lib/i18n";
 import { LocaleProvider } from "@/lib/i18n/LocaleContext";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { ThemeProvider } from "@/lib/theme/ThemeContext";
@@ -55,7 +56,9 @@ export default async function AppLayout({
     }
   }
 
-  const fullName: string = userRow?.full_name ?? user?.email ?? "Analista";
+  // El nombre en el idioma del usuario, así que se resuelve DESPUÉS del
+  // locale — ver más abajo, donde la preferencia de la cuenta le gana a la
+  // cookie del dispositivo.
   const role: string = userRow?.role ?? "analyst";
   // Sólo para decidir si el enlace a la cartera aparece. La pantalla se
   // defiende sola con requireOperator: esconder un enlace no es una guarda.
@@ -68,6 +71,8 @@ export default async function AppLayout({
     accountLocale === "es-AR" || accountLocale === "en-US"
       ? accountLocale
       : cookieLocale;
+  const t = getT(locale);
+  const fullName: string = userRow?.full_name ?? user?.email ?? t("layout.nombreFallback");
 
   return (
     <LocaleProvider locale={locale}>

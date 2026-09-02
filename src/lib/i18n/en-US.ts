@@ -498,7 +498,6 @@ export const enUS: Record<TranslationKey, string> = {
   "agente.valoresExtraidos": "Extracted values (latest analysis)",
   "agente.yaConfirmado": "Example already confirmed",
 
-  // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
 
   // ── Los nombres comerciales de los planes ──────────────────────────
   // El precio y la aritmética siguen en `lib/billing/plans.ts`, que no conoce
@@ -508,6 +507,8 @@ export const enUS: Record<TranslationKey, string> = {
   "plan.profesional": "Professional",
   "plan.corporativo": "Corporate",
   "plan.enterprise": "Enterprise",
+
+  // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
   "cartera.aFacturar": "To bill",
   "cartera.ayuda.alta": "A new client is created with",
   "cartera.ayuda.aplica": ", which applies the plan's terms and prints what is left to set up by hand. The whole sign-up is rehearsed on a throwaway tenant with",
@@ -629,5 +630,76 @@ export const enUS: Record<TranslationKey, string> = {
   "usuarios.toast.creado": "User created. An invitation email will be sent.",
   "usuarios.toast.rolActualizado": "Role updated.",
   "usuarios.vacio": "No users on record.",
+
+
+  // ── La consola del agente — /agente, la pantalla entera ───────────
+  // Distinto de `agente.*`, que es el panel de análisis adentro de un caso.
+  // Acá se configura el agente; allá se lee lo que el agente extrajo.
+  "consola.tab.campos": "Custom fields",
+  "consola.tab.ejemplos": "Approved examples",
+  "consola.tab.entrenamiento": "Optional fine-tuning",
+  "consola.tab.lote": "Batch simulation",
+  "consola.tab.modelos": "Models",
+  "consola.tab.reglas": "Prompt rules",
+  "consola.tab.uso": "Provider usage",
+  "consola.titulo": "Agent console",
+
+
+  // ── Lo que dice un lector de pantalla donde no hay texto ──────────
+  // Un guión y un porcentaje no se leen solos en voz alta: el `aria-label` es
+  // el único texto que existe ahí, así que es el que más falta hace traducir.
+  "confianza.aria": "Confidence: {n}%",
+  "vacio.sinDato": "No data",
+
+
+  // ── Las dos insignias del análisis automático, en el detalle ──────
+  // Un nivel que el modelo devuelva y no esté acá se muestra crudo: el valor
+  // puede cambiar del lado del modelo sin avisarle a la pantalla.
+  "riesgo.fraude.high": "High risk",
+  "riesgo.fraude.low": "Low risk",
+  "riesgo.fraude.medium": "Medium risk",
+  "riesgo.lesiones.fatal": "Fatal",
+  "riesgo.lesiones.minor": "Minor",
+  "riesgo.lesiones.none": "No injuries",
+  "riesgo.lesiones.severe": "Severe",
+
+
+  // ── El shell — lo poco que el layout dice por sí mismo ────────────
+  "layout.nombreFallback": "Analyst",
+
+
+  // ── Ejemplos aprobados — la solapa de la consola del agente ───────
+  // `status` es `text` en la base, no un enum: un estado que no esté acá se
+  // muestra crudo antes que dibujar un hueco.
+  "ejemplos.aprobar": "Approve",
+  "ejemplos.cargando": "Loading…",
+  "ejemplos.errorActualizar": "The example could not be updated.",
+  "ejemplos.errorCarga": "The examples could not be loaded.",
+  "ejemplos.estado.approved": "Approved",
+  "ejemplos.estado.pending": "Pending",
+  "ejemplos.estado.rejected": "Rejected",
+  "ejemplos.rechazar": "Reject",
+  "ejemplos.sinAsunto": "(no subject)",
+  "ejemplos.vacio.como": "Open a processed case, review or correct the analysis fields, and use",
+  "ejemplos.vacio.paraQue": ". Approved examples are used as context in the agent's next Gemini/OpenAI runs. The training bundle is optional and portable.",
+  "ejemplos.vacio.titulo": "No approved examples yet.",
+  "ejemplos.verCasos": "View cases",
+
+
+  // ── La clave de Gemini propia de cada usuario, en configuración ───
+  "claveIa.actualizar": "Update key",
+  "claveIa.agregar": "Add key",
+  "claveIa.cancelar": "Cancel",
+  "claveIa.cifrada": ". It is stored encrypted and never shared.",
+  "claveIa.configurada": "Configured",
+  "claveIa.eliminar": "Delete",
+  "claveIa.errorEliminar": "The key could not be deleted.",
+  "claveIa.errorGuardar": "The key could not be saved. Try again.",
+  "claveIa.guardada": "Key saved.",
+  "claveIa.guardando": "Saving…",
+  "claveIa.guardar": "Save",
+  "claveIa.noConfigurada": "Not configured",
+  "claveIa.obtene": "Get your key at",
+  "claveIa.personal": "(personal — only used for your cases)",
 
 } as const;

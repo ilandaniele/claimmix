@@ -13,9 +13,14 @@
  * eso, este mismo guión salía casi blanco sobre la tarjeta oscura y era lo más
  * brillante de la tabla — exactamente al revés de lo que se busca.
  */
+"use client";
+
+import { useT } from "@/lib/i18n/LocaleContext";
+
 export function Vacio() {
+  const t = useT();
   return (
-    <span className="text-slate-300" aria-label="Sin dato">
+    <span className="text-slate-300" aria-label={t("vacio.sinDato")}>
       —
     </span>
   );

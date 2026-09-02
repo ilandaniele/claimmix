@@ -522,7 +522,6 @@ export const esAR = {
   "agente.valoresExtraidos": "Valores extraídos (último análisis)",
   "agente.yaConfirmado": "Ejemplo ya confirmado",
 
-  // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
 
   // ── Los nombres comerciales de los planes ──────────────────────────
   // El precio y la aritmética siguen en `lib/billing/plans.ts`, que no conoce
@@ -532,6 +531,8 @@ export const esAR = {
   "plan.profesional": "Profesional",
   "plan.corporativo": "Corporativo",
   "plan.enterprise": "Enterprise",
+
+  // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
   "cartera.aFacturar": "A facturar",
   "cartera.ayuda.alta": "Un cliente nuevo se da de alta con",
   "cartera.ayuda.aplica": ", que aplica los términos del plan e imprime lo que queda por configurar a mano. El alta entera se ensaya sobre un tenant descartable con",
@@ -653,6 +654,77 @@ export const esAR = {
   "usuarios.toast.creado": "Usuario creado. Se enviará un correo de invitación.",
   "usuarios.toast.rolActualizado": "Rol actualizado.",
   "usuarios.vacio": "No hay usuarios registrados.",
+
+
+  // ── La consola del agente — /agente, la pantalla entera ───────────
+  // Distinto de `agente.*`, que es el panel de análisis adentro de un caso.
+  // Acá se configura el agente; allá se lee lo que el agente extrajo.
+  "consola.tab.campos": "Campos personalizados",
+  "consola.tab.ejemplos": "Ejemplos aprobados",
+  "consola.tab.entrenamiento": "Fine-tuning opcional",
+  "consola.tab.lote": "Simulación en lote",
+  "consola.tab.modelos": "Modelos",
+  "consola.tab.reglas": "Reglas de prompt",
+  "consola.tab.uso": "Uso del proveedor",
+  "consola.titulo": "Consola del agente",
+
+
+  // ── Lo que dice un lector de pantalla donde no hay texto ──────────
+  // Un guión y un porcentaje no se leen solos en voz alta: el `aria-label` es
+  // el único texto que existe ahí, así que es el que más falta hace traducir.
+  "confianza.aria": "Confianza: {n}%",
+  "vacio.sinDato": "Sin dato",
+
+
+  // ── Las dos insignias del análisis automático, en el detalle ──────
+  // Un nivel que el modelo devuelva y no esté acá se muestra crudo: el valor
+  // puede cambiar del lado del modelo sin avisarle a la pantalla.
+  "riesgo.fraude.high": "Riesgo alto",
+  "riesgo.fraude.low": "Riesgo bajo",
+  "riesgo.fraude.medium": "Riesgo medio",
+  "riesgo.lesiones.fatal": "Fatal",
+  "riesgo.lesiones.minor": "Leves",
+  "riesgo.lesiones.none": "Sin lesiones",
+  "riesgo.lesiones.severe": "Graves",
+
+
+  // ── El shell — lo poco que el layout dice por sí mismo ────────────
+  "layout.nombreFallback": "Analista",
+
+
+  // ── Ejemplos aprobados — la solapa de la consola del agente ───────
+  // `status` es `text` en la base, no un enum: un estado que no esté acá se
+  // muestra crudo antes que dibujar un hueco.
+  "ejemplos.aprobar": "Aprobar",
+  "ejemplos.cargando": "Cargando…",
+  "ejemplos.errorActualizar": "No se pudo actualizar el ejemplo.",
+  "ejemplos.errorCarga": "No se pudieron cargar los ejemplos.",
+  "ejemplos.estado.approved": "Aprobado",
+  "ejemplos.estado.pending": "Pendiente",
+  "ejemplos.estado.rejected": "Rechazado",
+  "ejemplos.rechazar": "Rechazar",
+  "ejemplos.sinAsunto": "(sin asunto)",
+  "ejemplos.vacio.como": "Abrí un caso procesado, revisá o corregí los campos del análisis y usá",
+  "ejemplos.vacio.paraQue": ". Los ejemplos aprobados se usan como contexto en las próximas ejecuciones del agente Gemini/OpenAI. El paquete de entrenamiento es opcional y portable.",
+  "ejemplos.vacio.titulo": "Todavía no hay ejemplos aprobados.",
+  "ejemplos.verCasos": "Ver casos",
+
+
+  // ── La clave de Gemini propia de cada usuario, en configuración ───
+  "claveIa.actualizar": "Actualizar clave",
+  "claveIa.agregar": "Agregar clave",
+  "claveIa.cancelar": "Cancelar",
+  "claveIa.cifrada": ". Se almacena cifrada y nunca se comparte.",
+  "claveIa.configurada": "Configurada",
+  "claveIa.eliminar": "Eliminar",
+  "claveIa.errorEliminar": "No se pudo eliminar la clave.",
+  "claveIa.errorGuardar": "No se pudo guardar la clave. Intentá de nuevo.",
+  "claveIa.guardada": "Clave guardada correctamente.",
+  "claveIa.guardando": "Guardando…",
+  "claveIa.guardar": "Guardar",
+  "claveIa.noConfigurada": "No configurada",
+  "claveIa.obtene": "Obtené tu clave en",
+  "claveIa.personal": "(personal — solo usada para tus casos)",
 
 } as const;
 

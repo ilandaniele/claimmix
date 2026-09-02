@@ -436,6 +436,27 @@ export const esAR = {
   "clientes.detail.policyStatus": "Estado",
   "clientes.detail.validFrom": "Vigencia desde",
   "clientes.detail.validTo": "Vigencia hasta",
+  /*
+   * Lo que quedaba escrito a mano en las dos pantallas de clientes.
+   *
+   * Los encabezados sí pasaban por `t()`, así que con la interfaz en inglés
+   * quedaba una mezcla: columnas «Name / ID number / Registered» y al lado
+   * botones «Buscar» y «Limpiar», celdas «Automóvil» y «Activa», y al pie
+   * «Mostrando 1–14 de 14 clientes». Hasta ahora no se notaba porque el padrón
+   * de ensayo estaba vacío.
+   */
+  "clientes.doSearch": "Buscar",
+  "clientes.clear": "Limpiar",
+  "clientes.tableLabel": "Tabla de clientes",
+  "clientes.plural": "clientes",
+  "clientes.policyType.auto": "Automóvil",
+  "clientes.policyType.home": "Hogar",
+  "clientes.policyType.life": "Vida",
+  "clientes.policyType.business": "Empresa",
+  "clientes.policyType.other": "Otro",
+  "clientes.policyStatus.active": "Activa",
+  "clientes.policyStatus.expired": "Vencida",
+  "clientes.policyStatus.cancelled": "Cancelada",
   // ── Las baldosas de indicador de la bandeja ─────────────────────────────────
   // Estaban escritas a mano en castellano dentro de `bandeja/page.tsx`, asi que
   // con la interfaz en ingles la fila de indicadores seguia en castellano.

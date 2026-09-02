@@ -13,6 +13,12 @@ import { and, desc, eq, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { interpretarBusqueda } from "@/core/matching/busqueda-libre";
+import {
+  MINIMO_DNI,
+  normalizarDni,
+  normalizarEmail,
+  sirveParaBuscar,
+} from "@/core/matching/normalizar";
 import type { TenantContext } from "@/data/scope";
 import { ilikeAny } from "@/lib/db/helpers";
 import { paginarEnTenant, type Pagina } from "@/lib/db/paginacion";
@@ -98,8 +104,37 @@ export function armarFiltroDeBusqueda(
       if (libre) condiciones.push(libre);
     }
   }
-  if (query.dni) condiciones.push(eq(customers.dni, query.dni));
-  if (query.email) condiciones.push(eq(customers.email, query.email));
+  /*
+   * Los filtros exactos, normalizados igual que la búsqueda libre de arriba.
+   *
+   * Eran `eq(customers.dni, query.dni)` y `eq(customers.email, query.email)`, o
+   * sea comparación cruda. El resultado era que el MISMO dato encontraba o no
+   * según por qué parámetro entrara: `?search=27.903.415` devolvía a Elena
+   * Duarte y `?dni=27.903.415` devolvía cero. Y cero es indistinguible de «esa
+   * persona no está», que es justamente lo que este archivo ya dice del
+   * buscador — la pantalla no falla, miente.
+   *
+   * El SQL es el mismo que usa la rama de búsqueda libre, a propósito: dos
+   * formas de comparar el mismo campo en el mismo archivo se separan.
+   */
+  if (query.dni) {
+    const dni = normalizarDni(query.dni);
+    // La misma guarda que `interpretarBusqueda`: sin ella, un `?dni=—` normaliza
+    // a la cadena vacía y devuelve a toda persona con el documento vacío. Buscar
+    // a alguien y recibir a cualquiera es peor que no encontrarlo.
+    if (sirveParaBuscar(dni, MINIMO_DNI)) {
+      condiciones.push(
+        sql`regexp_replace(coalesce(${customers.dni}, ''), '[^0-9]', '', 'g') = ${dni}`
+      );
+    } else {
+      // Pidieron filtrar por un documento que no puede serlo: no hay resultado,
+      // y eso es distinto de no filtrar.
+      condiciones.push(sql`false`);
+    }
+  }
+  if (query.email) {
+    condiciones.push(sql`lower(${customers.email}) = ${normalizarEmail(query.email)}`);
+  }
 
   return and(...condiciones);
 }

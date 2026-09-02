@@ -154,14 +154,14 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
             type="submit"
             className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 transition-colors"
           >
-            Buscar
+            {t("clientes.doSearch")}
           </button>
           {search && (
             <Link
               href="/clientes"
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
             >
-              Limpiar
+              {t("clientes.clear")}
             </Link>
           )}
         </form>
@@ -177,10 +177,10 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
             {t("clientes.empty")}
           </div>
         ) : (
-          <div className="overflow-x-auto" role="region" aria-label="Tabla de clientes">
+          <div className="overflow-x-auto" role="region" aria-label={t("clientes.tableLabel")}>
             <table
               className="w-full table-auto text-left"
-              aria-label="Clientes"
+              aria-label={t("clientes.title")}
             >
               <thead>
                 <tr>
@@ -240,8 +240,10 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
         {Number(total) > 0 && (
           <div className="flex items-center justify-between pt-4 border-t border-slate-100">
             <p className="text-sm text-slate-500">
-              Mostrando {Math.min((page - 1) * PER_PAGE + 1, Number(total))}–
-              {Math.min(page * PER_PAGE, Number(total))} de {Number(total)} clientes
+              {t("bandeja.showing")}{" "}
+              {Math.min((page - 1) * PER_PAGE + 1, Number(total))}–
+              {Math.min(page * PER_PAGE, Number(total))} {t("pagination.of")}{" "}
+              {Number(total)} {t("clientes.plural")}
             </p>
             <div className="flex items-center gap-2">
               {page > 1 && (

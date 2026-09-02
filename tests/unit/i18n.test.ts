@@ -155,3 +155,46 @@ describe("AC10 — unknown key fallback (no throw)", () => {
     expect(() => t("completely.unknown.key" as any)).not.toThrow();
   });
 });
+
+/*
+ * Las dos pantallas de clientes tenían la mitad del texto en castellano en duro.
+ *
+ * Los encabezados sí pasaban por `t()`, así que con la interfaz en inglés
+ * quedaba una mezcla: columnas «Name / ID number / Registered» y al lado
+ * botones «Buscar» y «Limpiar», celdas «Automóvil» y «Activa», y al pie
+ * «Mostrando 1–14 de 14 clientes».
+ *
+ * La paridad de claves ya la comprueba el test de arriba. Lo que falta es que
+ * la traducción sea una traducción: copiar el castellano al diccionario inglés
+ * pasa la paridad y deja la pantalla exactamente igual de mezclada.
+ */
+describe("las claves nuevas de /clientes están traducidas de verdad", () => {
+  const CLAVES = [
+    "clientes.doSearch",
+    "clientes.clear",
+    "clientes.tableLabel",
+    "clientes.plural",
+    "clientes.policyType.auto",
+    "clientes.policyType.home",
+    "clientes.policyType.life",
+    "clientes.policyType.business",
+    "clientes.policyStatus.active",
+    "clientes.policyStatus.expired",
+    "clientes.policyStatus.cancelled",
+  ] as const;
+
+  it("existen en los dos diccionarios", () => {
+    for (const clave of CLAVES) {
+      expect(esAR[clave], `falta ${clave} en es-AR`).toBeTruthy();
+      expect(enUS[clave], `falta ${clave} en en-US`).toBeTruthy();
+    }
+  });
+
+  it("el inglés no es el castellano copiado", () => {
+    // `other` queda afuera: «Otro»/«Other» y «Email» son legítimamente
+    // parecidos, pero éstas once son palabras distintas en los dos idiomas.
+    for (const clave of CLAVES) {
+      expect(enUS[clave], `${clave} está igual en los dos idiomas`).not.toBe(esAR[clave]);
+    }
+  });
+});

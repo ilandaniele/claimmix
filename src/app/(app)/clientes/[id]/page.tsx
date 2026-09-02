@@ -53,14 +53,6 @@ interface Customer {
   created_at: string;
 }
 
-const POLICY_TYPE_LABELS: Record<string, string> = {
-  auto: "Automóvil",
-  home: "Hogar",
-  life: "Vida",
-  business: "Empresa",
-  other: "Otro",
-};
-
 /*
  * Los tres estados, en la paleta que el modo oscuro sabe pintar.
  *
@@ -78,12 +70,6 @@ const POLICY_STATUS_CLASSES: Record<string, string> = {
   cancelled: "bg-red-100 text-red-700",
 };
 
-const POLICY_STATUS_LABELS: Record<string, string> = {
-  active: "Activa",
-  expired: "Vencida",
-  cancelled: "Cancelada",
-};
-
 /** Cuántos siniestros se dibujan. El total se cuenta aparte y se muestra igual. */
 const MAX_CASOS = 50;
 
@@ -99,6 +85,27 @@ export default async function CustomerDetailPage({
   const { id } = await params;
   const locale = await getServerLocale();
   const t = getT(locale);
+
+  /*
+   * Los tipos y estados de póliza, que estaban en castellano en duro.
+   *
+   * Con la interfaz en inglés la tabla quedaba «Policy number / Type / Status»
+   * con celdas «Automóvil» y «Activa». El botón EN está a un clic en la barra
+   * de arriba.
+   */
+  const POLICY_TYPE_LABELS: Record<string, string> = {
+    auto: t("clientes.policyType.auto"),
+    home: t("clientes.policyType.home"),
+    life: t("clientes.policyType.life"),
+    business: t("clientes.policyType.business"),
+    other: t("clientes.policyType.other"),
+  };
+
+  const POLICY_STATUS_LABELS: Record<string, string> = {
+    active: t("clientes.policyStatus.active"),
+    expired: t("clientes.policyStatus.expired"),
+    cancelled: t("clientes.policyStatus.cancelled"),
+  };
 
   /*
    * Los tipos de siniestro traducidos, como en todas las demás pantallas.

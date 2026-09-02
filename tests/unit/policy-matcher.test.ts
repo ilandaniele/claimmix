@@ -40,6 +40,9 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+import { QueryBuilder } from "drizzle-orm/pg-core";
+import { policies } from "@/lib/db/schema";
+import { armarFiltroDePolizas, type PolicyQuery } from "@/server/policies/list";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { db } from "@/lib/db";
@@ -225,5 +228,48 @@ describe("findPolicyMatches — edge cases", () => {
 
     const matches = await findPolicyMatches(TENANT_ID, "POL-ERROR");
     expect(Array.isArray(matches)).toBe(true);
+  });
+});
+
+/*
+ * El filtro de `/api/policies`, que comparaba el número crudo.
+ *
+ * `normalizar.ts` avisa, en mayúsculas, que si el criterio cambia hay que
+ * cambiar TAMBIÉN el lado SQL de los tres buscadores. Este era un cuarto lugar
+ * que nadie contó: `?policy_number=pol-4471-a` no encontraba lo que el agente
+ * sí encuentra, y los números de póliza los tipea una persona.
+ */
+describe("el filtro de /api/policies", () => {
+  const sqlDe = (query: Partial<PolicyQuery>) => {
+    const { sql: texto, params } = new QueryBuilder()
+      .select()
+      .from(policies)
+      .where(armarFiltroDePolizas({ page: 1, per_page: 25, ...query }))
+      .toSQL();
+    return { texto, params };
+  };
+
+  it("el número en minúsculas y con espacios encuentra igual", () => {
+    const { texto, params } = sqlDe({ policy_number: "pol - 4471 - a" });
+
+    expect(texto.toLowerCase()).toContain("upper");
+    expect(texto.toLowerCase()).toContain("replace");
+    expect(params).toContain("POL-4471-A");
+  });
+
+  it("el guion viaja de los dos lados, o de ninguno", () => {
+    /*
+     * La regla que `normalizar.ts` documenta y que no se puede aflojar acá sola:
+     * `POL-8812-R` y `POL8812R` pueden ser dos contratos distintos del mismo
+     * inquilino, y el índice único es sobre el texto crudo. Si alguien saca el
+     * guion en la función pero no en los cuatro sitios SQL, se rompen todas las
+     * búsquedas de póliza en silencio.
+     */
+    const { texto, params } = sqlDe({ policy_number: "POL-8812-R" });
+
+    expect(params).toContain("POL-8812-R");
+    expect(params).not.toContain("POL8812R");
+    // El SQL saca espacios, no guiones.
+    expect(texto).toContain("' '");
   });
 });

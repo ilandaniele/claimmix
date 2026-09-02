@@ -140,13 +140,30 @@ body {
   color: #F1F5F9 !important;
 }
 
+/*
+ * El texto secundario, que estaba por debajo de lo legible y además aplastado.
+ *
+ * Los tres niveles —600, 500 y 400— caían en el mismo #64748B, que sobre la
+ * tarjeta oscura (#162036) da 3,41:1. AA pide 4,5. En /clientes eso es el DNI,
+ * el correo y el teléfono de cada persona: la columna entera de datos que
+ * alguien está leyendo para llamar por teléfono.
+ *
+ * Y de paso el colapso borraba la jerarquía: el dato secundario y el rótulo
+ * terciario salían idénticos, así que la tabla no tenía forma de decir qué era
+ * más importante.
+ *
+ * Los valores están elegidos por paridad con el modo claro, no a ojo: en claro,
+ * slate-600 sobre blanco da 7,58:1, y #A3B2C7 sobre la tarjeta da 7,53:1. El
+ * 400 queda un escalón abajo pero sigue arriba de AA en las tres superficies
+ * (5,60 sobre tarjeta, 6,50 sobre el fondo, 4,78 sobre bg-slate-100).
+ */
 .dark .text-slate-600,
 .dark .text-slate-500 {
-  color: #64748B !important;
+  color: #A3B2C7 !important;
 }
 
 .dark .text-slate-400 {
-  color: #64748B !important;
+  color: #8A99AE !important;
 }
 
 /*

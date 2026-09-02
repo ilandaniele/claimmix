@@ -7,9 +7,10 @@
 
 import "server-only";
 
-import { and, desc, eq, type SQL } from "drizzle-orm";
+import { and, desc, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
+import { normalizarNumeroPoliza } from "@/core/matching/normalizar";
 import type { TenantContext } from "@/data/scope";
 import { paginarEnTenant, type Pagina } from "@/lib/db/paginacion";
 import { customers, policies } from "@/lib/db/schema";
@@ -36,12 +37,35 @@ export interface PolicyRow {
   created_at: Date | null;
 }
 
-function armarFiltro(query: PolicyQuery): SQL | undefined {
+/**
+ * El filtro, exportado para poder mirarle el SQL sin fabricar una petición.
+ *
+ * Es la misma razón por la que `customers/list.ts` exporta el suyo: el defecto
+ * que tenía —comparar el número de póliza crudo— sólo se ve en el SQL que sale,
+ * y probarlo contra un db de mentira no comprueba nada.
+ */
+export function armarFiltroDePolizas(query: PolicyQuery): SQL | undefined {
   const condiciones: SQL[] = [];
 
   if (query.customer_id) condiciones.push(eq(policies.customer_id, query.customer_id));
+  /*
+   * El número de póliza, normalizado como en los otros tres buscadores.
+   *
+   * Era `eq(policies.policy_number, query.policy_number)`, comparación cruda,
+   * así que `?policy_number=pol-4471-a` no encontraba nada mientras el agente sí
+   * lo encuentra — y los números de póliza los tipea una persona.
+   *
+   * El SQL es idéntico al de `policy-matcher.ts:125`, `customer-matcher.ts:213`
+   * y `agent-tools.ts:136`, que es lo que pide el encabezado de `normalizar.ts`:
+   * el guion viaja de los dos lados o de ninguno. Sacar el espacio y subir a
+   * mayúsculas, nada más — `POL-8812-R` y `POL8812R` pueden ser dos contratos
+   * distintos del mismo inquilino, y `(tenant_id, policy_number)` es único sobre
+   * el texto crudo.
+   */
   if (query.policy_number)
-    condiciones.push(eq(policies.policy_number, query.policy_number));
+    condiciones.push(
+      sql`upper(replace(${policies.policy_number}, ' ', '')) = ${normalizarNumeroPoliza(query.policy_number)}`
+    );
   if (query.status) condiciones.push(eq(policies.status, query.status));
 
   return and(...condiciones);
@@ -51,7 +75,7 @@ export async function listPolicies(
   ctx: TenantContext,
   query: PolicyQuery
 ): Promise<Pagina<PolicyRow>> {
-  const where = armarFiltro(query);
+  const where = armarFiltroDePolizas(query);
   const offset = (query.page - 1) * query.per_page;
 
   // En el esquema las fechas se llaman `start_date` / `end_date`; el contrato

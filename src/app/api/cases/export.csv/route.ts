@@ -14,7 +14,9 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
-import { CaseQuerySchema } from "@/lib/schemas/cases";
+import { CaseQuerySchema, type CaseStatus, type ClaimType } from "@/lib/schemas/cases";
+import { getT, type TranslationKey } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
 import { listCasesForExport } from "@/server/cases/list";
 import { buildCsv } from "@/lib/csv/safe-encode";
 import { err } from "@/lib/api/respond";
@@ -39,22 +41,56 @@ const CSV_HEADERS = [
   "Analista",
 ];
 
-/** Claim type Spanish labels */
-const CLAIM_TYPE_LABELS: Record<string, string> = {
-  choque: "Choque",
-  robo: "Robo",
-  granizo: "Granizo",
-  incendio: "Incendio",
-};
+/*
+ * Los nombres de tipo y estado, del mismo diccionario que las pantallas.
+ *
+ * Acá había dos mapas escritos a mano con 4 de los 9 tipos y 5 de los 13
+ * estados. Todo lo que faltaba salía con la clave pelada: una denuncia de
+ * responsabilidad civil aparecía como `rc` y una lista para el core como
+ * `listo_para_core`. El CSV es lo único de esto que ve alguien de afuera —se
+ * abre en Excel, se manda por correo, se archiva— y se leía peor que la
+ * pantalla.
+ *
+ * Los `Record<ClaimType, …>` y `Record<CaseStatus, …>` son a propósito: si
+ * mañana se agrega un estado al esquema, esto no compila. Un mapa
+ * `Record<string, string>` es exactamente cómo se llegó a que faltaran ocho sin
+ * que nadie se enterara.
+ */
+export function etiquetasDeTipo(
+  t: (k: TranslationKey) => string
+): Record<ClaimType, string> {
+  return {
+    choque: t("type.choque"),
+    robo: t("type.robo"),
+    granizo: t("type.granizo"),
+    incendio: t("type.incendio"),
+    cristales: t("type.cristales"),
+    rc: t("type.rc"),
+    robo_contenido: t("type.robo_contenido"),
+    accidente_personal: t("type.accidente_personal"),
+    other: t("type.other"),
+  };
+}
 
-/** Status Spanish labels */
-const STATUS_LABELS: Record<string, string> = {
-  procesando: "Procesando",
-  listo: "Listo",
-  esperando: "Esperando",
-  escalado: "Escalado",
-  cerrado: "Cerrado",
-};
+export function etiquetasDeEstado(
+  t: (k: TranslationKey) => string
+): Record<CaseStatus, string> {
+  return {
+    procesando: t("status.procesando"),
+    listo: t("status.listo"),
+    esperando: t("status.esperando"),
+    escalado: t("status.escalado"),
+    cerrado: t("status.cerrado"),
+    recibido: t("status.recibido"),
+    info_faltante: t("status.info_faltante"),
+    confirmacion_pendiente: t("status.confirmacion_pendiente"),
+    requiere_especialista: t("status.requiere_especialista"),
+    listo_para_core: t("status.listo_para_core"),
+    enviado_a_core: t("status.enviado_a_core"),
+    error_core: t("status.error_core"),
+    no_relevante: t("status.no_relevante"),
+  };
+}
 
 /** Format ISO date string as DD/MM/YYYY for es-AR locale */
 function formatDate(iso: string | null): string {
@@ -146,12 +182,19 @@ export async function GET(request: NextRequest) {
   }
 
   // ── 5. Build CSV rows ─────────────────────────────────────────────────────
+  // El mismo idioma que la pantalla desde la que se apretó «Exportar CSV»: un
+  // archivo en castellano bajado desde la interfaz en inglés se lee como un
+  // error del producto.
+  const t = getT(await getServerLocale());
+  const TIPOS = etiquetasDeTipo(t);
+  const ESTADOS = etiquetasDeEstado(t);
+
   const rows = cases.map((c) => [
     c.id,                                               // Nro. Siniestro (UUID)
     c.policyholder_name ?? "",                           // Asegurado
     c.policy_number ?? "",                               // Póliza
-    c.claim_type ? (CLAIM_TYPE_LABELS[c.claim_type] ?? c.claim_type) : "",  // Tipo
-    STATUS_LABELS[c.status] ?? c.status,                // Estado
+    c.claim_type ? (TIPOS[c.claim_type as ClaimType] ?? c.claim_type) : "",  // Tipo
+    ESTADOS[c.status as CaseStatus] ?? c.status,        // Estado
     // Drizzle numeric → string; convert to number at the boundary.
     formatConfidence(c.confidence_min === null ? null : Number(c.confidence_min)), // Confianza
     formatDate(c.created_at),                           // Fecha

@@ -153,3 +153,64 @@ describe("el padrón se busca por los tres modos", () => {
     expect(i18n).toContain("Buscar por nombre, DNI o email");
   });
 });
+
+/*
+ * Los filtros exactos de la API, que decían otra cosa que la búsqueda libre.
+ *
+ * `?search=27.903.415` encontraba a Elena Duarte y `?dni=27.903.415` devolvía
+ * cero, en el mismo archivo y contra la misma columna. El mismo dato, dos
+ * respuestas, según por qué parámetro entrara. Y cero es indistinguible de «esa
+ * persona no está», que es exactamente el defecto que este archivo ya contaba
+ * del buscador.
+ */
+describe("los filtros exactos de /api/customers", () => {
+  const sqlDe = (query: Partial<CustomerQuery>) => {
+    const { sql: texto, params } = new QueryBuilder()
+      .select()
+      .from(customers)
+      .where(armarFiltroDeBusqueda({ page: 1, per_page: 25, ...query }))
+      .toSQL();
+    return { texto, params };
+  };
+
+  it("?dni con puntos compara los dígitos pelados, igual que la caja", () => {
+    const { texto, params } = sqlDe({ dni: "27.903.415" });
+
+    expect(texto).toContain("regexp_replace");
+    expect(params).toContain("27903415");
+    // Y sobre todo: no compara el crudo, que es lo que devolvía cero.
+    expect(params).not.toContain("27.903.415");
+  });
+
+  it("?email en mayúsculas encuentra igual", () => {
+    const { texto, params } = sqlDe({ email: "Elena.Duarte@Example.com" });
+
+    expect(texto.toLowerCase()).toContain("lower");
+    expect(params).toContain("elena.duarte@example.com");
+  });
+
+  it("un ?dni que no puede ser un documento no devuelve a cualquiera", () => {
+    /*
+     * La guarda que importa. `?dni=—` normaliza a la cadena vacía, y comparar
+     * vacío contra la columna normalizada devuelve a TODA persona con el
+     * documento en blanco. Recibir a cualquiera es mucho peor que no encontrar
+     * a nadie, y con la confianza de una coincidencia por documento.
+     */
+    const { texto, params } = sqlDe({ dni: "—" });
+
+    expect(params).not.toContain("");
+    expect(texto.toLowerCase()).toContain("false");
+  });
+
+  it("los dos parámetros de DNI dan el mismo SQL de comparación", () => {
+    // La propiedad de fondo: mientras haya dos formas de comparar el mismo
+    // campo en el mismo archivo, se van a separar otra vez.
+    const porCaja = sqlDe({ search: "27.903.415" });
+    const porFiltro = sqlDe({ dni: "27.903.415" });
+
+    expect(porCaja.params).toContain("27903415");
+    expect(porFiltro.params).toContain("27903415");
+    expect(porCaja.texto).toContain("regexp_replace");
+    expect(porFiltro.texto).toContain("regexp_replace");
+  });
+});

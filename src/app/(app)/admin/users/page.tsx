@@ -14,6 +14,8 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { AdminUsersClient } from "./AdminUsersClient";
+import { getT } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
 
 interface UserRow {
   id: string;
@@ -26,6 +28,7 @@ interface UserRow {
 type UserRole = "owner" | "admin" | "specialist" | "analyst" | "viewer";
 
 export default async function AdminUsersPage() {
+  const t = getT(await getServerLocale());
   let ctx: Awaited<ReturnType<typeof requireAdmin>>;
   try {
     ctx = await requireAdmin();
@@ -67,10 +70,10 @@ export default async function AdminUsersPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
-            Gestión de usuarios
+            {t("usuarios.title")}
           </h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Invitá usuarios y asigná roles operativos o administradores.
+            {t("usuarios.subtitle")}
           </p>
         </div>
       </div>

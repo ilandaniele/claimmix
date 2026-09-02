@@ -98,9 +98,20 @@ export function mesArgentino(cuando: Date = new Date()): {
   };
 }
 
-/** El nombre del mes corriente en la Argentina, para encabezados. */
-export function nombreDelMesArgentino(cuando: Date = new Date()): string {
-  return cuando.toLocaleDateString("es-AR", {
+/**
+ * El nombre del mes corriente, dicho en la Argentina.
+ *
+ * El IDIOMA entra por parámetro; la ZONA no. Qué mes es se decide en Buenos
+ * Aires —si no, la última noche del mes el encabezado nombra el siguiente sobre
+ * datos del anterior— pero cómo se escribe ese mes lo decide quien mira. Estaba
+ * fijo en `es-AR`, así que el tablero en inglés decía «System KPIs — septiembre
+ * de 2026».
+ */
+export function nombreDelMesArgentino(
+  locale: string,
+  cuando: Date = new Date()
+): string {
+  return cuando.toLocaleDateString(locale, {
     timeZone: ZONA_ARGENTINA,
     month: "long",
     year: "numeric",

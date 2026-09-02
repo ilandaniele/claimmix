@@ -15,8 +15,10 @@
  */
 
 import { redirect } from "next/navigation";
-import { formatUsd } from "@/lib/utils";
+import { formatDate, formatUsd } from "@/lib/utils";
 
+import { getT, type TranslationKey } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
 import { requireOperator } from "@/lib/auth/require-operator";
 import { AppError } from "@/lib/errors";
 import { listTenantSummaries } from "@/server/billing/tenant-summary";
@@ -33,11 +35,13 @@ const STATUS_STYLES: Record<string, string> = {
   churned: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  active: "Activo",
-  trial: "Prueba",
-  suspended: "Suspendido",
-  churned: "Se fue",
+// El mapa guarda claves del diccionario, no textos: el rótulo lo resuelve `t`
+// adentro del componente, que es el único lugar donde se sabe el idioma.
+const STATUS_LABELS: Record<string, TranslationKey> = {
+  active: "cartera.estado.active",
+  trial: "cartera.estado.trial",
+  suspended: "cartera.estado.suspended",
+  churned: "cartera.estado.churned",
 };
 
 export default async function CarteraPage({
@@ -54,14 +58,17 @@ export default async function CarteraPage({
     redirect("/bandeja");
   }
 
+  const locale = await getServerLocale();
+  const t = getT(locale);
+
   const raw = (await searchParams).month;
   const { month, tenants } = await listTenantSummaries(typeof raw === "string" ? raw : null);
 
   const totals = tenants.reduce(
-    (acc, t) => ({
-      revenue: acc.revenue + t.invoice_total_usd,
-      cost: acc.cost + t.ai_cost_usd,
-      claims: acc.claims + t.billable_claims,
+    (acc, fila) => ({
+      revenue: acc.revenue + fila.invoice_total_usd,
+      cost: acc.cost + fila.ai_cost_usd,
+      claims: acc.claims + fila.billable_claims,
     }),
     { revenue: 0, cost: 0, claims: 0 }
   );
@@ -69,23 +76,25 @@ export default async function CarteraPage({
   return (
     <div className="px-6 py-8 max-w-6xl">
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Cartera</h1>
+        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+          {t("cartera.title")}
+        </h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          La cartera y sus números de {month}. Sólo la ve quien opera ClaimMix.
+          {t("cartera.subtitle")} {month}. {t("cartera.subtitleOperator")}
         </p>
       </div>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-4">
-        <Stat label="Clientes" value={String(tenants.length)} />
-        <Stat label="Denuncias facturables" value={totals.claims.toLocaleString("es-AR")} />
-        <Stat label="A facturar" value={money(totals.revenue)} />
+        <Stat label={t("cartera.stat.clientes")} value={String(tenants.length)} />
+        <Stat label={t("cartera.stat.denuncias")} value={totals.claims.toLocaleString("es-AR")} />
+        <Stat label={t("cartera.aFacturar")} value={money(totals.revenue)} />
         <Stat
-          label="Costo de IA"
+          label={t("cartera.stat.costoIa")}
           value={money(totals.cost)}
           hint={
             totals.revenue > 0
-              ? `${Math.round(((totals.revenue - totals.cost) / totals.revenue) * 1000) / 10}% de margen`
-              : "sin ingresos todavía"
+              ? `${Math.round(((totals.revenue - totals.cost) / totals.revenue) * 1000) / 10}% ${t("cartera.deMargen")}`
+              : t("cartera.sinIngresos")
           }
         />
       </div>
@@ -94,60 +103,70 @@ export default async function CarteraPage({
         <table className="w-full text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
             <tr>
-              <th className="px-4 py-2.5 font-medium">Cliente</th>
-              <th className="px-4 py-2.5 font-medium">Plan</th>
-              <th className="px-4 py-2.5 font-medium">Estado</th>
-              <th className="px-4 py-2.5 text-right font-medium">Denuncias</th>
-              <th className="px-4 py-2.5 text-right font-medium">A facturar</th>
-              <th className="px-4 py-2.5 text-right font-medium">Costo IA</th>
-              <th className="px-4 py-2.5 text-right font-medium">Margen</th>
+              <th className="px-4 py-2.5 font-medium">{t("cartera.col.cliente")}</th>
+              <th className="px-4 py-2.5 font-medium">{t("cartera.col.plan")}</th>
+              <th className="px-4 py-2.5 font-medium">{t("table.col.status")}</th>
+              <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.denuncias")}</th>
+              <th className="px-4 py-2.5 text-right font-medium">{t("cartera.aFacturar")}</th>
+              <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.costoIa")}</th>
+              <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.margen")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {tenants.map((t) => (
-              <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+            {tenants.map((fila) => (
+              <tr key={fila.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                 <td className="px-4 py-3">
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{t.name}</p>
-                  {t.contact_email && (
-                    <p className="text-xs text-slate-500 dark:text-slate-400">{t.contact_email}</p>
+                  <p className="font-medium text-slate-900 dark:text-slate-100">{fila.name}</p>
+                  {fila.contact_email && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {fila.contact_email}
+                    </p>
                   )}
                 </td>
                 <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                  {t.plan_label}
+                  {fila.plan_label}
                   <span className="block text-xs text-slate-400">
-                    {money(t.monthly_fee_usd)} · {t.included_claims.toLocaleString("es-AR")} incl.
+                    {money(fila.monthly_fee_usd)} · {fila.included_claims.toLocaleString("es-AR")}{" "}
+                    {t("cartera.incluidas")}
                   </span>
                 </td>
                 <td className="px-4 py-3">
                   <span
                     className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                      STATUS_STYLES[t.billing_status] ?? STATUS_STYLES.churned
+                      STATUS_STYLES[fila.billing_status] ?? STATUS_STYLES.churned
                     }`}
                   >
-                    {STATUS_LABELS[t.billing_status] ?? t.billing_status}
+                    {STATUS_LABELS[fila.billing_status]
+                      ? t(STATUS_LABELS[fila.billing_status])
+                      : fila.billing_status}
                   </span>
-                  {t.billing_status === "trial" && t.trial_ends_at && (
+                  {fila.billing_status === "trial" && fila.trial_ends_at && (
                     <span className="block text-xs text-slate-400">
-                      hasta {new Date(t.trial_ends_at).toLocaleDateString("es-AR")}
+                      {t("cartera.hasta")}{" "}
+                      {formatDate(fila.trial_ends_at, locale, {
+                        hour: undefined,
+                        minute: undefined,
+                      })}
                     </span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums text-slate-900 dark:text-slate-100">
-                  {t.billable_claims.toLocaleString("es-AR")}
-                  {t.total_cases > t.billable_claims && (
+                  {fila.billable_claims.toLocaleString("es-AR")}
+                  {fila.total_cases > fila.billable_claims && (
                     <span className="block text-xs text-slate-400">
-                      de {t.total_cases.toLocaleString("es-AR")} mensajes
+                      {t("pagination.of")} {fila.total_cases.toLocaleString("es-AR")}{" "}
+                      {t("cartera.mensajes")}
                     </span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums text-slate-900 dark:text-slate-100">
-                  {money(t.invoice_total_usd)}
+                  {money(fila.invoice_total_usd)}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">
-                  {money(t.ai_cost_usd)}
+                  {money(fila.ai_cost_usd)}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">
-                  {t.margin_pct === null ? "—" : `${t.margin_pct}%`}
+                  {fila.margin_pct === null ? "—" : `${fila.margin_pct}%`}
                 </td>
               </tr>
             ))}
@@ -155,7 +174,7 @@ export default async function CarteraPage({
             {tenants.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
-                  Todavía no hay clientes.
+                  {t("cartera.empty")}
                 </td>
               </tr>
             )}
@@ -164,12 +183,11 @@ export default async function CarteraPage({
       </div>
 
       <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
-        Un cliente nuevo se da de alta con{" "}
+        {t("cartera.ayuda.alta")}{" "}
         <code className="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-800">
           node scripts/create-tenant.mjs --name &quot;…&quot; --plan operativo --apply
         </code>
-        , que aplica los términos del plan e imprime lo que queda por configurar a mano. El alta
-        entera se ensaya sobre un tenant descartable con{" "}
+        {t("cartera.ayuda.aplica")}{" "}
         <code className="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-800">pnpm onboard</code>.
       </p>
     </div>

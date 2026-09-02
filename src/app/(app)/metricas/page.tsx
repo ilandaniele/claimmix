@@ -7,11 +7,14 @@
  *   - Cases by type (donut-style percentage bars)
  *   - Top 5 analysts table
  *
- * All numbers in Spanish (es-AR). Empty state shown when no data exists.
+ * Los textos salen del diccionario; los números y la moneda quedan en formato
+ * es-AR en todo el producto a propósito (ver `formatUsd` en lib/utils.ts).
  */
 
 import { nombreDelMesArgentino } from "@/core/fecha/dia-argentino";
 import { getSessionContext } from "@/lib/auth/session";
+import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
 import { formatUsd as formatUsdShared } from "@/lib/utils";
 import {
   getTenantKpis,
@@ -77,8 +80,8 @@ function formatMinutes(minutes: number | null): string {
 // El encabezado nombra el mismo mes que la ventana de `kpis.ts`, y por lo tanto
 // también tiene que decir la zona. Sin ella, en Vercel la última noche de agosto
 // el título dice «septiembre» sobre datos de agosto.
-function formatCurrentMonth(): string {
-  return nombreDelMesArgentino();
+function formatCurrentMonth(locale: Locale): string {
+  return nombreDelMesArgentino(locale);
 }
 
 function formatNumber(value: number): string {
@@ -99,19 +102,25 @@ const STATUS_COLORS: Record<string, string> = {
   cerrado: "bg-slate-400",
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  listo: "Listos",
-  esperando: "Esperando",
-  escalado: "Escalados",
-  procesando: "Procesando",
-  cerrado: "Cerrados",
+/*
+ * Los rótulos no viven más acá: estos mapas guardan la CLAVE del diccionario y
+ * el texto se resuelve adentro del componente, que es el único lugar donde se
+ * sabe en qué idioma está mirando quien pidió la página. El orden de las
+ * entradas sigue siendo el orden en que se dibujan las barras.
+ */
+const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
+  listo: "tabs.listo",
+  esperando: "tabs.esperando",
+  escalado: "tabs.escalado",
+  procesando: "tabs.procesando",
+  cerrado: "tabs.cerrado",
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  choque: "Choque",
-  robo: "Robo",
-  granizo: "Granizo",
-  incendio: "Incendio",
+const TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
+  choque: "type.choque",
+  robo: "type.robo",
+  granizo: "type.granizo",
+  incendio: "type.incendio",
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -124,6 +133,8 @@ const TYPE_COLORS: Record<string, string> = {
 // ── Page component ────────────────────────────────────────────────────────────
 
 export default async function MetricasPage() {
+  const locale = await getServerLocale();
+  const t = getT(locale);
   let data: MetricasData | null;
 
   try {
@@ -154,16 +165,18 @@ export default async function MetricasPage() {
     <div className="px-6 py-8 max-w-6xl">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-slate-900">Métricas</h1>
+        <h1 className="text-xl font-semibold text-slate-900">
+          {t("metricas.title")}
+        </h1>
         <p className="mt-1 text-sm text-slate-500">
-          KPIs del sistema — {formatCurrentMonth()}
+          {t("metricas.subtitle")} — {formatCurrentMonth(locale)}
         </p>
       </div>
 
       {!hasData ? (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-6 py-12 text-center">
           <p className="text-sm text-slate-500">
-            No hay datos disponibles para el período seleccionado.
+            {t("metricas.emptyPeriod")}
           </p>
         </div>
       ) : (
@@ -171,23 +184,23 @@ export default async function MetricasPage() {
           {/* ── Summary cards ────────────────────────────────────────────────── */}
           <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryCard
-              label="Total siniestros (mes)"
-              value={`${data!.summary.total_cases_month} siniestros`}
+              label={t("metricas.card.totalMes")}
+              value={`${data!.summary.total_cases_month} ${t("bandeja.claims")}`}
               accent="blue"
             />
             <SummaryCard
-              label="Tiempo medio de apertura"
+              label={t("metricas.card.tiempoApertura")}
               value={formatMinutes(data!.summary.avg_opening_time_minutes)}
               accent="slate"
             />
             <SummaryCard
-              label="Tasa de completitud automática"
+              label={t("metricas.card.completitudAuto")}
               value={`${data!.summary.auto_completion_rate}%`}
               accent="green"
             />
             <SummaryCard
-              label="Siniestros escalados"
-              value={`${data!.summary.escalated_count} siniestros`}
+              label={t("metricas.card.escalados")}
+              value={`${data!.summary.escalated_count} ${t("bandeja.claims")}`}
               accent="red"
             />
           </div>
@@ -196,33 +209,33 @@ export default async function MetricasPage() {
           <section className="mb-8">
             <div className="mb-4">
               <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                Uso de IA
+                {t("metricas.ia.titulo")}
               </h2>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Tokens consumidos y costo estimado del tenant.
+                {t("metricas.ia.subtitulo")}
               </p>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <UsageStat
-                label="Tokens este mes"
+                label={t("metricas.ia.tokensMes")}
                 value={formatNumber(data!.ai_usage.month.total_tokens)}
-                helper={`${formatNumber(data!.ai_usage.month.prompt_tokens)} prompt / ${formatNumber(data!.ai_usage.month.completion_tokens)} respuesta`}
+                helper={`${formatNumber(data!.ai_usage.month.prompt_tokens)} ${t("metricas.ia.prompt")} / ${formatNumber(data!.ai_usage.month.completion_tokens)} ${t("metricas.ia.respuesta")}`}
               />
               <UsageStat
-                label="Costo este mes"
+                label={t("metricas.ia.costoMes")}
                 value={formatUsd(data!.ai_usage.month.cost_usd)}
-                helper={`${formatNumber(data!.ai_usage.month.calls)} ejecuciones`}
+                helper={`${formatNumber(data!.ai_usage.month.calls)} ${t("metricas.ia.ejecuciones")}`}
               />
               <UsageStat
-                label="Tokens históricos"
+                label={t("metricas.ia.tokensTotal")}
                 value={formatNumber(data!.ai_usage.all_time.total_tokens)}
-                helper={`${formatNumber(data!.ai_usage.all_time.prompt_tokens)} prompt / ${formatNumber(data!.ai_usage.all_time.completion_tokens)} respuesta`}
+                helper={`${formatNumber(data!.ai_usage.all_time.prompt_tokens)} ${t("metricas.ia.prompt")} / ${formatNumber(data!.ai_usage.all_time.completion_tokens)} ${t("metricas.ia.respuesta")}`}
               />
               <UsageStat
-                label="Costo histórico"
+                label={t("metricas.ia.costoTotal")}
                 value={formatUsd(data!.ai_usage.all_time.cost_usd)}
-                helper={`${formatNumber(data!.ai_usage.all_time.calls)} ejecuciones`}
+                helper={`${formatNumber(data!.ai_usage.all_time.calls)} ${t("metricas.ia.ejecuciones")}`}
               />
             </div>
 
@@ -230,20 +243,26 @@ export default async function MetricasPage() {
               <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70">
                 <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-100">
-                    Tokens por usuario este mes
+                    {t("metricas.ia.porUsuario")}
                   </h3>
                 </div>
                 {data!.ai_usage.by_user.length === 0 ? (
                   <div className="px-5 py-8 text-center text-sm text-slate-400">
-                    Sin consumo de IA este mes.
+                    {t("metricas.ia.vacio")}
                   </div>
                 ) : (
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400">
-                        <th className="px-5 py-3 text-left">Usuario</th>
-                        <th className="px-5 py-3 text-right">Tokens</th>
-                        <th className="px-5 py-3 text-right">Costo</th>
+                        <th className="px-5 py-3 text-left">
+                          {t("metricas.col.usuario")}
+                        </th>
+                        <th className="px-5 py-3 text-right">
+                          {t("metricas.col.tokens")}
+                        </th>
+                        <th className="px-5 py-3 text-right">
+                          {t("metricas.col.costo")}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -265,7 +284,7 @@ export default async function MetricasPage() {
                           <td className="px-5 py-3 text-right text-slate-700 dark:text-slate-200">
                             {formatNumber(row.total_tokens)}
                             <div className="text-xs text-slate-400">
-                              {formatNumber(row.calls)} ejec.
+                              {formatNumber(row.calls)} {t("metricas.ia.ejecAbrev")}
                             </div>
                           </td>
                           <td className="px-5 py-3 text-right text-slate-700 dark:text-slate-200">
@@ -281,20 +300,26 @@ export default async function MetricasPage() {
               <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70">
                 <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-100">
-                    Tokens por modelo este mes
+                    {t("metricas.ia.porModelo")}
                   </h3>
                 </div>
                 {data!.ai_usage.by_model.length === 0 ? (
                   <div className="px-5 py-8 text-center text-sm text-slate-400">
-                    Sin consumo de IA este mes.
+                    {t("metricas.ia.vacio")}
                   </div>
                 ) : (
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400">
-                        <th className="px-5 py-3 text-left">Modelo</th>
-                        <th className="px-5 py-3 text-right">Tokens</th>
-                        <th className="px-5 py-3 text-right">Costo</th>
+                        <th className="px-5 py-3 text-left">
+                          {t("metricas.col.modelo")}
+                        </th>
+                        <th className="px-5 py-3 text-right">
+                          {t("metricas.col.tokens")}
+                        </th>
+                        <th className="px-5 py-3 text-right">
+                          {t("metricas.col.costo")}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -309,7 +334,7 @@ export default async function MetricasPage() {
                           <td className="px-5 py-3 text-right text-slate-700 dark:text-slate-200">
                             {formatNumber(row.total_tokens)}
                             <div className="text-xs text-slate-400">
-                              {formatNumber(row.calls)} ejec.
+                              {formatNumber(row.calls)} {t("metricas.ia.ejecAbrev")}
                             </div>
                           </td>
                           <td className="px-5 py-3 text-right text-slate-700 dark:text-slate-200">
@@ -328,13 +353,14 @@ export default async function MetricasPage() {
             {/* Cases by status */}
             <div className="rounded-lg border border-slate-200 bg-white p-5">
               <h2 className="mb-4 text-sm font-semibold text-slate-700">
-                Siniestros por estado
+                {t("metricas.porEstado")}
               </h2>
               {totalByStatus === 0 ? (
-                <p className="text-sm text-slate-400">Sin datos.</p>
+                <p className="text-sm text-slate-400">{t("metricas.sinDatos")}</p>
               ) : (
                 <div className="space-y-3">
-                  {Object.entries(STATUS_LABELS).map(([key, label]) => {
+                  {Object.entries(STATUS_LABEL_KEYS).map(([key, labelKey]) => {
+                    const label = t(labelKey);
                     const count = data!.by_status[key] ?? 0;
                     const pct =
                       totalByStatus > 0
@@ -368,13 +394,14 @@ export default async function MetricasPage() {
             {/* Cases by type */}
             <div className="rounded-lg border border-slate-200 bg-white p-5">
               <h2 className="mb-4 text-sm font-semibold text-slate-700">
-                Siniestros por tipo
+                {t("metricas.porTipo")}
               </h2>
               {totalByType === 0 ? (
-                <p className="text-sm text-slate-400">Sin datos.</p>
+                <p className="text-sm text-slate-400">{t("metricas.sinDatos")}</p>
               ) : (
                 <div className="space-y-3">
-                  {Object.entries(TYPE_LABELS).map(([key, label]) => {
+                  {Object.entries(TYPE_LABEL_KEYS).map(([key, labelKey]) => {
+                    const label = t(labelKey);
                     const count = data!.by_type[key] ?? 0;
                     const pct =
                       totalByType > 0
@@ -410,20 +437,22 @@ export default async function MetricasPage() {
           <div className="rounded-lg border border-slate-200 bg-white">
             <div className="border-b border-slate-100 px-5 py-3">
               <h2 className="text-sm font-semibold text-slate-700">
-                Top 5 analistas — casos cerrados este mes
+                {t("metricas.topAnalistas")}
               </h2>
             </div>
             {data!.top_analysts.length === 0 ? (
               <div className="px-5 py-8 text-center text-sm text-slate-400">
-                Ningún caso cerrado este mes.
+                {t("metricas.sinCasosCerrados")}
               </div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500">
                     <th className="px-5 py-3 text-left">#</th>
-                    <th className="px-5 py-3 text-left">Analista</th>
-                    <th className="px-5 py-3 text-right">Casos cerrados</th>
+                    <th className="px-5 py-3 text-left">{t("role.analyst")}</th>
+                    <th className="px-5 py-3 text-right">
+                      {t("metricas.col.casosCerrados")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>

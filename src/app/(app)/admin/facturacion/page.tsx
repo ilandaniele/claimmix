@@ -22,17 +22,27 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { AppError } from "@/lib/errors";
 import { resolveBillingPeriod } from "@/lib/billing/period";
 import { getStatement } from "@/server/billing/statement";
+import { getT, type Locale } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
 
 export const dynamic = "force-dynamic";
 
 // Uno solo para todo el producto: ver formatUsd en lib/utils.
 const money = (n: number) => formatUsd(n);
 
-/** `2026-03` → `marzo de 2026`, para que el encabezado se lea como una fecha. */
-function monthLabel(month: string): string {
+/**
+ * `2026-03` → `marzo de 2026`, para que el encabezado se lea como una fecha.
+ *
+ * El nombre del mes sigue al idioma, así que el locale entra por parámetro: es
+ * una función de módulo y acá no hay `t`. `nombreDelMesArgentino` no sirve
+ * porque recibe una fecha y fija `es-AR` adentro. La zona sigue siendo UTC — el
+ * `Date` se arma en UTC en la línea de abajo, y formatearlo en otra zona lo
+ * correría al mes anterior.
+ */
+function monthLabel(month: string, locale: Locale): string {
   const [year, m] = month.split("-");
   const date = new Date(Date.UTC(Number(year), Number(m) - 1, 1));
-  return date.toLocaleDateString("es-AR", { month: "long", year: "numeric", timeZone: "UTC" });
+  return date.toLocaleDateString(locale, { month: "long", year: "numeric", timeZone: "UTC" });
 }
 
 function shiftMonth(month: string, delta: number): string {
@@ -54,6 +64,9 @@ export default async function FacturacionPage({
     redirect("/bandeja");
   }
 
+  const locale = await getServerLocale();
+  const t = getT(locale);
+
   const raw = (await searchParams).month;
   const requested = typeof raw === "string" ? raw : null;
 
@@ -63,12 +76,14 @@ export default async function FacturacionPage({
   if (!range) {
     return (
       <div className="px-6 py-8 max-w-3xl">
-        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Facturación</h1>
+        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+          {t("nav.facturacion")}
+        </h1>
         <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-          <strong>{String(requested)}</strong> no es un período válido. Se espera{" "}
-          <code>AAAA-MM</code>.{" "}
+          <strong>{String(requested)}</strong> {t("facturacion.periodoInvalido")}{" "}
+          {t("facturacion.periodoEsperado")} <code>{t("facturacion.formatoPeriodo")}</code>.{" "}
           <Link href="/admin/facturacion" className="underline">
-            Ver el mes en curso
+            {t("facturacion.verMesEnCurso")}
           </Link>
         </p>
       </div>
@@ -85,25 +100,28 @@ export default async function FacturacionPage({
     <div className="px-6 py-8 max-w-5xl">
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Facturación</h1>
+          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            {t("nav.facturacion")}
+          </h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            {tenant.name} · plan {tenant.plan_label} · {monthLabel(statement.month)}
+            {tenant.name} · {t("facturacion.plan").replace("{n}", tenant.plan_label)} ·{" "}
+            {monthLabel(statement.month, locale)}
           </p>
         </div>
 
-        <nav className="flex items-center gap-1 text-sm" aria-label="Cambiar de mes">
+        <nav className="flex items-center gap-1 text-sm" aria-label={t("facturacion.cambiarMes")}>
           <Link
             href={`/admin/facturacion?month=${shiftMonth(statement.month, -1)}`}
             className="rounded-md border border-slate-200 px-2.5 py-1.5 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            ← Mes anterior
+            ← {t("facturacion.mesAnterior")}
           </Link>
           {statement.month !== current && (
             <Link
               href={`/admin/facturacion?month=${shiftMonth(statement.month, 1)}`}
               className="rounded-md border border-slate-200 px-2.5 py-1.5 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
-              Mes siguiente →
+              {t("facturacion.mesSiguiente")} →
             </Link>
           )}
         </nav>
@@ -123,14 +141,14 @@ export default async function FacturacionPage({
       >
         {statement.frozen ? (
           <>
-            <strong>Período cerrado.</strong> Esta liquidación quedó guardada el{" "}
-            {new Date(statement.frozen_at!).toLocaleDateString("es-AR", { timeZone: "UTC" })} y ya
-            no cambia, aunque después se editen o se borren casos de ese mes.
+            <strong>{t("facturacion.periodoCerrado")}</strong>{" "}
+            {t("facturacion.cerradoAntesDeLaFecha")}{" "}
+            {new Date(statement.frozen_at!).toLocaleDateString(locale, { timeZone: "UTC" })}{" "}
+            {t("facturacion.cerradoDespuesDeLaFecha")}
           </>
         ) : (
           <>
-            <strong>Mes en curso.</strong> El número sube con cada denuncia que entra. Se cierra
-            solo cuando termine el mes, y a partir de ahí no se mueve.
+            <strong>{t("facturacion.mesEnCurso")}</strong> {t("facturacion.mesEnCursoDetalle")}
           </>
         )}
       </p>
@@ -138,20 +156,32 @@ export default async function FacturacionPage({
       <div className="grid gap-6 md:grid-cols-2">
         {/* ── Lo que se cobra ─────────────────────────────────────────────── */}
         <section className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">A facturar</h2>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+            {t("facturacion.aFacturar")}
+          </h2>
 
           <dl className="mt-4 space-y-2.5 text-sm">
-            <Row label={`Abono ${tenant.plan_label}`} value={money(invoice.monthly_fee_usd)} />
+            {/*
+              El único `{n}` de la pantalla: el nombre del plan va detrás en
+              castellano («Abono Profesional») y delante en inglés, así que acá
+              no alcanza con pegar dos claves sueltas.
+            */}
             <Row
-              label={`Denuncias incluidas`}
-              value={`${invoice.claims.toLocaleString("es-AR")} de ${invoice.included_claims.toLocaleString("es-AR")}`}
+              label={t("facturacion.abonoPlan").replace("{n}", tenant.plan_label)}
+              value={money(invoice.monthly_fee_usd)}
             />
             <Row
-              label={`Excedente (${invoice.overage_claims} × ${money(invoice.overage_price_usd)})`}
+              label={t("facturacion.denunciasIncluidas")}
+              value={`${invoice.claims.toLocaleString("es-AR")} ${t("pagination.of")} ${invoice.included_claims.toLocaleString("es-AR")}`}
+            />
+            <Row
+              label={`${t("facturacion.excedente")} (${invoice.overage_claims} × ${money(invoice.overage_price_usd)})`}
               value={money(invoice.overage_total_usd)}
             />
             <div className="!mt-4 flex items-center justify-between border-t border-slate-200 pt-3 dark:border-slate-700">
-              <dt className="text-sm font-semibold text-slate-900 dark:text-slate-100">Total</dt>
+              <dt className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {t("facturacion.total")}
+              </dt>
               <dd className="text-lg font-semibold text-slate-900 dark:text-slate-100">
                 {money(invoice.total_usd)}
               </dd>
@@ -162,19 +192,27 @@ export default async function FacturacionPage({
         {/* ── Lo que costó ────────────────────────────────────────────────── */}
         <section className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            Lo que costó atenderlo
+            {t("facturacion.loQueCosto")}
           </h2>
 
           <dl className="mt-4 space-y-2.5 text-sm">
-            <Row label="Llamadas al modelo" value={cost.calls.toLocaleString("es-AR")} />
-            <Row label="Costo de IA" value={money(cost.cost_usd)} />
-            <Row label="Por denuncia facturable" value={money(cost.cost_per_billable_claim_usd)} />
+            <Row
+              label={t("facturacion.llamadasAlModelo")}
+              value={cost.calls.toLocaleString("es-AR")}
+            />
+            <Row label={t("facturacion.costoDeIa")} value={money(cost.cost_usd)} />
+            <Row
+              label={t("facturacion.porDenunciaFacturable")}
+              value={money(cost.cost_per_billable_claim_usd)}
+            />
             <div className="!mt-4 flex items-center justify-between border-t border-slate-200 pt-3 dark:border-slate-700">
-              <dt className="text-sm font-semibold text-slate-900 dark:text-slate-100">Margen</dt>
+              <dt className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {t("facturacion.margen")}
+              </dt>
               <dd className="text-lg font-semibold text-slate-900 dark:text-slate-100">
                 {margin.margin_pct === null ? (
                   <span className="text-sm font-normal text-slate-500 dark:text-slate-400">
-                    sin ingresos este mes
+                    {t("facturacion.sinIngresos")}
                   </span>
                 ) : (
                   <>
@@ -193,19 +231,24 @@ export default async function FacturacionPage({
       {/* ── De dónde sale el número ───────────────────────────────────────── */}
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
         <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-          De dónde sale ese número
+          {t("facturacion.deDondeSale")}
         </h2>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Se factura la denuncia que el agente reconoció como denuncia. Lo que descartó por no
-          serlo no se cobra: cobrar el spam filtrado convertiría al filtro en una fuente de
-          ingresos.
+          {t("facturacion.deDondeSaleDetalle")}
         </p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-4">
-          <Bucket label="Facturables" value={volume.billable_claims} accent />
-          <Bucket label="No eran denuncias" value={volume.rejected_not_a_claim} />
-          <Bucket label="Sin resolver" value={volume.unresolved} />
-          <Bucket label="Mensajes en total" value={volume.total_cases} />
+          <Bucket
+            label={t("facturacion.bucket.facturables")}
+            value={volume.billable_claims}
+            accent
+          />
+          <Bucket
+            label={t("facturacion.bucket.noEranDenuncias")}
+            value={volume.rejected_not_a_claim}
+          />
+          <Bucket label={t("facturacion.bucket.sinResolver")} value={volume.unresolved} />
+          <Bucket label={t("facturacion.bucket.mensajesEnTotal")} value={volume.total_cases} />
         </div>
       </section>
     </div>

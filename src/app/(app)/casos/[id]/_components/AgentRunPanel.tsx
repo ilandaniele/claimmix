@@ -18,6 +18,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
+import type { TranslationKey } from "@/lib/i18n";
+import { useT, useLocale } from "@/lib/i18n/LocaleContext";
+import { formatDate } from "@/lib/utils";
 
 // ── Types (mirror /api/cases/:id/agent-run response) ──────────────────────────
 
@@ -74,12 +77,14 @@ const PROCESSING_STATUSES = new Set(["recibido", "procesando"]);
 const POLL_INTERVAL_MS = 5_000;
 const MAX_POLLS = 24; // ~2 minutes
 
-const BLOCKING_LABELS: Record<string, string> = {
-  invalid_json: "JSON inválido",
-  not_a_claim: "No es un reclamo",
-  no_linked_case: "Sin caso vinculado",
-  prompt_injection_suspected: "Posible inyección de prompt",
-  unresolved_conflicts: "Conflictos sin resolver",
+// El motivo llega crudo desde la base; acá sólo se elige con qué clave se
+// escribe. Si aparece uno que no está en el mapa se muestra tal cual.
+const BLOCKING_LABEL_KEYS: Record<string, TranslationKey> = {
+  invalid_json: "agente.bloqueo.invalid_json",
+  not_a_claim: "agente.bloqueo.not_a_claim",
+  no_linked_case: "agente.bloqueo.no_linked_case",
+  prompt_injection_suspected: "agente.bloqueo.prompt_injection_suspected",
+  unresolved_conflicts: "agente.bloqueo.unresolved_conflicts",
 };
 
 // ── Small confidence bar ──────────────────────────────────────────────────────
@@ -107,6 +112,8 @@ interface AgentRunPanelProps {
 }
 
 export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps) {
+  const t = useT();
+  const { locale } = useLocale();
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [data, setData] = useState<AgentRunResponse | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -172,17 +179,17 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
       if (!res.ok) {
         setConfirmMsg({
           kind: "error",
-          text: body?.error?.message ?? "No se pudo confirmar el ejemplo.",
+          text: body?.error?.message ?? t("agente.confirmarError"),
         });
         return;
       }
       setData((prev) => (prev ? { ...prev, already_approved: true } : prev));
       setConfirmMsg({
         kind: "ok",
-        text: "Ejemplo confirmado. El agente lo usará como contexto aprobado en próximos análisis.",
+        text: t("agente.confirmarOk"),
       });
     } catch {
-      setConfirmMsg({ kind: "error", text: "No se pudo confirmar el ejemplo." });
+      setConfirmMsg({ kind: "error", text: t("agente.confirmarError") });
     } finally {
       setConfirming(false);
     }
@@ -191,7 +198,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
   // ── Loading state ────────────────────────────────────────────────────────────
   if (loadState === "loading") {
     return (
-      <div className="space-y-2 animate-pulse" aria-busy="true" aria-label="Cargando análisis del agente">
+      <div className="space-y-2 animate-pulse" aria-busy="true" aria-label={t("agente.cargando")}>
         <div className="h-4 w-40 rounded bg-slate-200" />
         <div className="h-3 w-full rounded bg-slate-100" />
         <div className="h-3 w-4/5 rounded bg-slate-100" />
@@ -203,7 +210,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
   if (loadState === "error" || !data) {
     return (
       <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
-        No se pudo cargar el análisis del agente. Recargá la página para reintentar.
+        {t("agente.errorCarga")}
       </div>
     );
   }
@@ -215,9 +222,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
     const processing = PROCESSING_STATUSES.has(data.case_status);
     return (
       <p className="text-sm text-slate-400">
-        {processing
-          ? "El agente está procesando este email… los valores extraídos aparecerán acá automáticamente."
-          : "Todavía no hay un análisis del agente registrado para este caso. Usá «Re-analizar» para generarlo."}
+        {processing ? t("agente.procesando") : t("agente.sinAnalisis")}
       </p>
     );
   }
@@ -252,9 +257,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
         <span aria-hidden="true">·</span>
         <span className="font-mono">{run.prompt_version}</span>
         <span aria-hidden="true">·</span>
-        <time dateTime={run.created_at}>
-          {new Date(run.created_at).toLocaleString("es-AR")}
-        </time>
+        <time dateTime={run.created_at}>{formatDate(run.created_at, locale)}</time>
       </div>
 
       {/* ── Trainability suggestion ──────────────────────────────────────────── */}
@@ -269,11 +272,11 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
               }`}
             >
               {run.is_trainable_suggestion
-                ? "Sugerido para entrenamiento"
-                : "No sugerido para entrenamiento"}
+                ? t("agente.sugerido")
+                : t("agente.noSugerido")}
             </span>
             <span className="text-xs tabular-nums text-slate-500">
-              Puntaje: {scorePct}%
+              {t("agente.puntaje")}: {scorePct}%
             </span>
           </div>
 
@@ -282,7 +285,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
               href={`/api/cases/${caseId}/extraction.json`}
               className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
-              Descargar JSON extraído
+              {t("agente.descargarJson")}
             </a>
             {canConfirmTraining && (
               <button
@@ -292,10 +295,10 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
                 className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
               >
                 {data.already_approved
-                  ? "Ejemplo ya confirmado"
+                  ? t("agente.yaConfirmado")
                   : confirming
-                    ? "Confirmando…"
-                    : "Confirmar como ejemplo de entrenamiento seguro"}
+                    ? t("agente.confirmando")
+                    : t("agente.confirmar")}
               </button>
             )}
           </div>
@@ -303,14 +306,17 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
 
         {run.blocking_reasons.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {run.blocking_reasons.map((reason) => (
-              <span
-                key={reason}
-                className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
-              >
-                {BLOCKING_LABELS[reason] ?? reason}
-              </span>
-            ))}
+            {run.blocking_reasons.map((reason) => {
+              const labelKey = BLOCKING_LABEL_KEYS[reason];
+              return (
+                <span
+                  key={reason}
+                  className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
+                >
+                  {labelKey ? t(labelKey) : reason}
+                </span>
+              );
+            })}
           </div>
         )}
 
@@ -327,17 +333,14 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
           </div>
         )}
 
-        <p className="mt-2 text-xs text-slate-400">
-          El agente nunca aprende de un email automáticamente: solo después de
-          esta confirmación humana se usa como ejemplo aprobado.
-        </p>
+        <p className="mt-2 text-xs text-slate-400">{t("agente.avisoAprendizaje")}</p>
       </div>
 
       {/* ── Extracted values + confidence bars ───────────────────────────────── */}
       {runFields.length > 0 ? (
         <div>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Valores extraídos (último análisis)
+            {t("agente.valoresExtraidos")}
           </h3>
           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
             {runFields.map((field) => (
@@ -359,19 +362,17 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
           </ul>
         </div>
       ) : (
-        <p className="text-sm text-slate-400">
-          El agente no extrajo valores en el último análisis.
-        </p>
+        <p className="text-sm text-slate-400">{t("agente.sinValores")}</p>
       )}
 
       {/* ── Pending confirmation + missing fields ────────────────────────────── */}
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Pendientes de confirmación
+            {t("agente.pendientes")}
           </h3>
           {pendingKeys.length === 0 ? (
-            <p className="text-xs text-slate-400">Sin campos pendientes.</p>
+            <p className="text-xs text-slate-400">{t("agente.sinPendientes")}</p>
           ) : (
             <ul className="space-y-1">
               {pendingKeys.map((key) => (
@@ -387,10 +388,10 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
         </div>
         <div>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Campos faltantes
+            {t("agente.faltantes")}
           </h3>
           {missingKeys.length === 0 ? (
-            <p className="text-xs text-slate-400">Sin campos faltantes.</p>
+            <p className="text-xs text-slate-400">{t("agente.sinFaltantes")}</p>
           ) : (
             <ul className="space-y-1">
               {missingKeys.map((key) => (
@@ -409,18 +410,18 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
       {/* ── Original email ───────────────────────────────────────────────────── */}
       <details className="group rounded-lg border border-slate-200">
         <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50">
-          Email original analizado
+          {t("agente.emailOriginal")}
           {run.input_payload.subject ? ` — ${run.input_payload.subject}` : ""}
         </summary>
         <pre className="max-h-80 overflow-auto border-t border-slate-100 px-4 pb-4 pt-2 font-mono text-xs leading-relaxed text-slate-600 whitespace-pre-wrap">
-          {run.input_payload.body || "(sin cuerpo)"}
+          {run.input_payload.body || t("agente.sinCuerpo")}
         </pre>
       </details>
 
       {/* ── Raw extracted JSON ───────────────────────────────────────────────── */}
       <details className="group rounded-lg border border-slate-200">
         <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50">
-          JSON extraído (crudo)
+          {t("agente.jsonCrudo")}
         </summary>
         <pre className="max-h-80 overflow-auto border-t border-slate-100 px-4 pb-4 pt-2 font-mono text-xs leading-relaxed text-slate-600">
           {JSON.stringify(run.output_payload, null, 2)}

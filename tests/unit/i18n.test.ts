@@ -198,3 +198,85 @@ describe("las claves nuevas de /clientes están traducidas de verdad", () => {
     }
   });
 });
+
+/*
+ * Las cinco pantallas que estaban enteras en castellano.
+ *
+ * No era el olvido de una palabra: facturación, cartera, métricas, la consola
+ * del agente y el alta de usuarios no tenían UNA sola llamada al diccionario.
+ * La pasada agregó 141 claves de una, y a esa escala el riesgo cambia: copiar
+ * el castellano al lado inglés pasa la paridad, pasa los tipos, y deja las
+ * cinco pantallas exactamente igual de mezcladas que antes.
+ *
+ * Este test no enumera claves a mano —serían 141 y se atrasaría con la próxima—
+ * sino que barre por prefijo. Una clave nueva de estas pantallas queda cubierta
+ * sola.
+ */
+describe("las cinco pantallas nuevas están traducidas de verdad", () => {
+  const PREFIJOS = ["facturacion.", "cartera.", "metricas.", "agente.", "usuarios."];
+
+  /*
+   * Las que legítimamente se escriben igual en los dos idiomas.
+   *
+   * Van enumeradas y no detectadas por heurística: la lista corta es la
+   * afirmación de que se las miró una por una. Si mañana alguien copia una
+   * clave sin traducir, el test falla en vez de crecer en silencio.
+   */
+  const IGUALES_A_PROPOSITO = new Set([
+    "usuarios.rol.owner",      // «Owner» se usa igual en los dos
+    "usuarios.rol.admin",      // «Admin», idem
+    "usuarios.col.email",      // «Email»
+    "metricas.ia.prompt",      // «prompt», término técnico
+    "metricas.col.tokens",     // «Tokens»
+    "facturacion.total",       // «Total»
+    "cartera.col.plan",        // «Plan»
+    "cartera.incluidas",       // «incl.», abreviatura igual en los dos
+  ]);
+
+  const clavesNuevas = Object.keys(esAR).filter((k) =>
+    PREFIJOS.some((p) => k.startsWith(p))
+  );
+
+  it("hay claves de las cinco pantallas", () => {
+    // Si esto da cero, el barrido de abajo no prueba nada y quedaría verde.
+    expect(clavesNuevas.length).toBeGreaterThan(100);
+    for (const prefijo of PREFIJOS) {
+      expect(
+        clavesNuevas.some((k) => k.startsWith(prefijo)),
+        `ninguna clave ${prefijo}*`
+      ).toBe(true);
+    }
+  });
+
+  it("existen en los dos diccionarios y ninguna quedó vacía", () => {
+    for (const clave of clavesNuevas) {
+      const k = clave as keyof typeof esAR;
+      expect(esAR[k], `falta ${clave} en es-AR`).toBeTruthy();
+      expect(enUS[k as keyof typeof enUS], `falta ${clave} en en-US`).toBeTruthy();
+    }
+  });
+
+  it("el inglés no es el castellano copiado", () => {
+    const copiadas = clavesNuevas.filter((clave) => {
+      if (IGUALES_A_PROPOSITO.has(clave)) return false;
+      return (
+        esAR[clave as keyof typeof esAR] === enUS[clave as keyof typeof enUS]
+      );
+    });
+    expect(
+      copiadas,
+      `estas claves tienen el mismo texto en los dos idiomas: ${copiadas.join(", ")}`
+    ).toEqual([]);
+  });
+
+  it("la lista de excepciones no junta polvo", () => {
+    // Una excepción que ya no hace falta es una excepción que tapa el próximo
+    // descuido. Si alguien traduce una de éstas, hay que sacarla de la lista.
+    for (const clave of IGUALES_A_PROPOSITO) {
+      expect(
+        esAR[clave as keyof typeof esAR],
+        `${clave} ya está traducida: sacala de IGUALES_A_PROPOSITO`
+      ).toBe(enUS[clave as keyof typeof enUS]);
+    }
+  });
+});

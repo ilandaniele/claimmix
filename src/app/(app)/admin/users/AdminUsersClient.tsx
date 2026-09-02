@@ -14,6 +14,9 @@ import { useEffect, useState, useCallback } from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
+import { useT, useLocale } from "@/lib/i18n/LocaleContext";
+import { formatDate } from "@/lib/utils";
+
 interface UserRow {
   id: string;
   full_name: string;
@@ -23,6 +26,9 @@ interface UserRow {
 }
 
 type UserRole = "owner" | "admin" | "specialist" | "analyst" | "viewer";
+
+/** El `t` de los ayudantes que viven fuera del componente y lo reciben por parámetro. */
+type Translate = ReturnType<typeof useT>;
 
 interface Props {
   initialUsers: UserRow[];
@@ -40,25 +46,33 @@ const ROLE_STYLES: Record<string, string> = {
   viewer: "bg-slate-100 text-slate-700",
 };
 
-const ROLE_LABELS: Record<string, string> = {
-  owner: "Owner",
-  admin: "Admin",
-  specialist: "Especialista",
-  analyst: "Analista",
-  viewer: "Visor",
-};
+/*
+ * El orden en que se ofrecen los roles en los dos desplegables. Los rótulos ya
+ * no viven acá: los pone `roleLabel`, que necesita el idioma elegido.
+ */
+const ROLE_ORDER: UserRole[] = ["analyst", "specialist", "viewer", "admin", "owner"];
 
-const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
-  { value: "analyst", label: "Analista" },
-  { value: "specialist", label: "Especialista" },
-  { value: "viewer", label: "Visor" },
-  { value: "admin", label: "Admin" },
-  { value: "owner", label: "Owner" },
-];
+function roleLabel(role: string, t: Translate): string {
+  switch (role) {
+    case "owner":
+      return t("usuarios.rol.owner");
+    case "admin":
+      return t("usuarios.rol.admin");
+    case "specialist":
+      return t("usuarios.rol.specialist");
+    case "analyst":
+      return t("usuarios.rol.analyst");
+    case "viewer":
+      return t("usuarios.rol.viewer");
+    default:
+      return role;
+  }
+}
 
 function RoleBadge({ role }: { role: string }) {
+  const t = useT();
   const styles = ROLE_STYLES[role] ?? "bg-slate-100 text-slate-800";
-  const label = ROLE_LABELS[role] ?? role;
+  const label = roleLabel(role, t);
   return (
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles}`}
@@ -92,37 +106,6 @@ async function readApiError(res: Response, fallback: string): Promise<string> {
   return data?.error?.message ?? fallback;
 }
 
-async function createUserAction(
-  _prev: FormState,
-  formData: FormData
-): Promise<FormState> {
-  const body = {
-    full_name: formData.get("full_name"),
-    email: formData.get("email"),
-    role: formData.get("role"),
-  };
-
-  try {
-    const res = await fetch("/api/admin/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      return {
-        error:
-          data?.error?.message ?? "Error al crear el usuario. Intentá de nuevo.",
-      };
-    }
-
-    return { success: true };
-  } catch {
-    return { error: "Error de red. Intentá de nuevo." };
-  }
-}
-
 // ── Create user dialog ────────────────────────────────────────────────────────
 
 function CreateUserDialog({
@@ -134,6 +117,43 @@ function CreateUserDialog({
   onCreated: () => void;
   currentUserRole: string;
 }) {
+  const t = useT();
+
+  /*
+   * La acción vive adentro porque los mensajes de error son texto visible y
+   * necesitan el idioma. `t` es estable mientras no cambie el idioma, así que
+   * la identidad de la acción tampoco cambia entre renders.
+   */
+  const createUserAction = useCallback(
+    async (_prev: FormState, formData: FormData): Promise<FormState> => {
+      const body = {
+        full_name: formData.get("full_name"),
+        email: formData.get("email"),
+        role: formData.get("role"),
+      };
+
+      try {
+        const res = await fetch("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          return {
+            error: data?.error?.message ?? t("usuarios.error.crear"),
+          };
+        }
+
+        return { success: true };
+      } catch {
+        return { error: t("usuarios.error.red") };
+      }
+    },
+    [t]
+  );
+
   const [state, action] = useActionState<FormState, FormData>(createUserAction, {});
 
   useEffect(() => {
@@ -148,11 +168,11 @@ function CreateUserDialog({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       role="dialog"
       aria-modal="true"
-      aria-label="Invitar usuario"
+      aria-label={t("usuarios.invitar")}
     >
       <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
         <h2 className="mb-4 text-base font-semibold text-slate-900">
-          Invitar usuario
+          {t("usuarios.invitar")}
         </h2>
 
         <form action={action} className="space-y-4">
@@ -161,7 +181,7 @@ function CreateUserDialog({
               htmlFor="full_name"
               className="mb-1 block text-xs font-medium text-slate-600"
             >
-              Nombre completo
+              {t("usuarios.form.nombre")}
             </label>
             <input
               id="full_name"
@@ -171,7 +191,7 @@ function CreateUserDialog({
               minLength={2}
               maxLength={100}
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-              placeholder="Ej: María García"
+              placeholder={t("usuarios.form.nombrePlaceholder")}
             />
           </div>
 
@@ -180,7 +200,7 @@ function CreateUserDialog({
               htmlFor="email"
               className="mb-1 block text-xs font-medium text-slate-600"
             >
-              Correo electrónico
+              {t("usuarios.form.email")}
             </label>
             <input
               id="email"
@@ -188,7 +208,7 @@ function CreateUserDialog({
               type="email"
               required
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-              placeholder="analista@empresa.com"
+              placeholder={t("usuarios.form.emailPlaceholder")}
             />
           </div>
 
@@ -197,7 +217,7 @@ function CreateUserDialog({
               htmlFor="role"
               className="mb-1 block text-xs font-medium text-slate-600"
             >
-              Rol
+              {t("usuarios.form.rol")}
             </label>
             <select
               id="role"
@@ -205,13 +225,15 @@ function CreateUserDialog({
               defaultValue="analyst"
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
             >
-              {ROLE_OPTIONS.map((option) => (
+              {ROLE_ORDER.map((value) => (
                 <option
-                  key={option.value}
-                  value={option.value}
-                  disabled={option.value === "owner" && currentUserRole !== "owner"}
+                  key={value}
+                  value={value}
+                  disabled={value === "owner" && currentUserRole !== "owner"}
                 >
-                  {option.value === "viewer" ? "Visor (solo lectura)" : option.label}
+                  {value === "viewer"
+                    ? t("usuarios.rol.viewerSoloLectura")
+                    : roleLabel(value, t)}
                 </option>
               ))}
             </select>
@@ -232,9 +254,12 @@ function CreateUserDialog({
               onClick={onClose}
               className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
             >
-              Cancelar
+              {t("usuarios.cancelar")}
             </button>
-            <SubmitButton label="Invitar" pendingLabel="Invitando..." />
+            <SubmitButton
+              label={t("usuarios.enviarInvitacion")}
+              pendingLabel={t("usuarios.enviandoInvitacion")}
+            />
           </div>
         </form>
       </div>
@@ -244,19 +269,13 @@ function CreateUserDialog({
 
 // ── Main client component ─────────────────────────────────────────────────────
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
-
 export function AdminUsersClient({
   initialUsers,
   currentUserId,
   currentUserRole,
 }: Props) {
+  const t = useT();
+  const { locale } = useLocale();
   const [users, setUsers] = useState<UserRow[]>(initialUsers);
   const [showDialog, setShowDialog] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -286,7 +305,7 @@ export function AdminUsersClient({
   }, [refreshUsers]);
 
   function handleCreated() {
-    setToast("Usuario creado. Se enviará un correo de invitación.");
+    setToast(t("usuarios.toast.creado"));
     refreshUsers();
     setTimeout(() => setToast(null), 4000);
   }
@@ -303,16 +322,16 @@ export function AdminUsersClient({
       });
 
       if (!res.ok) {
-        throw new Error(await readApiError(res, "No se pudo actualizar el rol."));
+        throw new Error(await readApiError(res, t("usuarios.error.rol")));
       }
 
       setUsers((prev) =>
         prev.map((item) => (item.id === user.id ? { ...item, role } : item))
       );
-      setToast("Rol actualizado.");
+      setToast(t("usuarios.toast.rolActualizado"));
       setTimeout(() => setToast(null), 4000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo actualizar el rol.");
+      setError(err instanceof Error ? err.message : t("usuarios.error.rol"));
     } finally {
       setChangingUserId(null);
     }
@@ -355,7 +374,7 @@ export function AdminUsersClient({
           onClick={() => setShowDialog(true)}
           className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
         >
-          + Invitar usuario
+          + {t("usuarios.invitar")}
         </button>
       </div>
 
@@ -364,24 +383,24 @@ export function AdminUsersClient({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500">
-              <th className="px-5 py-3 text-left">Nombre</th>
-              <th className="px-5 py-3 text-left">Email</th>
-              <th className="px-5 py-3 text-left">Rol</th>
-              <th className="px-5 py-3 text-left">Estado</th>
-              <th className="px-5 py-3 text-left">Creado</th>
+              <th className="px-5 py-3 text-left">{t("usuarios.col.nombre")}</th>
+              <th className="px-5 py-3 text-left">{t("usuarios.col.email")}</th>
+              <th className="px-5 py-3 text-left">{t("usuarios.col.rol")}</th>
+              <th className="px-5 py-3 text-left">{t("usuarios.col.estado")}</th>
+              <th className="px-5 py-3 text-left">{t("usuarios.col.creado")}</th>
             </tr>
           </thead>
           <tbody>
             {loading && users.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
-                  Cargando...
+                  {t("usuarios.cargando")}
                 </td>
               </tr>
             ) : users.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
-                  No hay usuarios registrados.
+                  {t("usuarios.vacio")}
                 </td>
               </tr>
             ) : (
@@ -411,35 +430,35 @@ export function AdminUsersClient({
                             void handleRoleChange(user, e.target.value as UserRole)
                           }
                           disabled={!canChangeRole || changingUserId === user.id}
-                          aria-label={`Cambiar rol de ${user.full_name}`}
+                          aria-label={`${t("usuarios.cambiarRol")} ${user.full_name}`}
                           className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-200"
                         >
-                          {ROLE_OPTIONS.map((option) => (
+                          {ROLE_ORDER.map((value) => (
                             <option
-                              key={option.value}
-                              value={option.value}
+                              key={value}
+                              value={value}
                               disabled={
-                                option.value === "owner" && currentUserRole !== "owner"
+                                value === "owner" && currentUserRole !== "owner"
                               }
                             >
-                              {option.label}
+                              {roleLabel(value, t)}
                             </option>
                           ))}
                         </select>
                         {!canChangeRole && (
                           <span className="text-xs text-slate-400">
-                            {isSelf ? "Tu usuario" : "Bloqueado"}
+                            {isSelf ? t("usuarios.propio") : t("usuarios.bloqueado")}
                           </span>
                         )}
                       </div>
                     </td>
                     <td className="px-5 py-3">
                       <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
-                        Activo
+                        {t("usuarios.activo")}
                       </span>
                     </td>
                     <td className="px-5 py-3 text-slate-500">
-                      {formatDate(user.created_at)}
+                      {formatDate(user.created_at, locale)}
                     </td>
                   </tr>
                 );

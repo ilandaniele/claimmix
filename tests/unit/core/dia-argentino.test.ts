@@ -117,7 +117,21 @@ describe("mesArgentino", () => {
 });
 
 describe("nombreDelMesArgentino", () => {
+  const NOCHE_DEL_31 = new Date("2026-09-01T01:30:00.000Z"); // 31/08 22:30 en AR
+
   it("a las 22:30 del 31 de agosto el título dice agosto, no septiembre", () => {
-    expect(nombreDelMesArgentino(new Date("2026-09-01T01:30:00.000Z"))).toContain("agosto");
+    expect(nombreDelMesArgentino("es-AR", NOCHE_DEL_31)).toContain("agosto");
+  });
+
+  it("el idioma lo decide quien mira, el mes lo decide Buenos Aires", () => {
+    /*
+     * Las dos mitades a la vez, que es lo que hace a esta función distinta de
+     * un `toLocaleDateString` cualquiera: el nombre cambia con el idioma y el
+     * MES no. Antes de esto el tablero en inglés decía «septiembre de 2026»,
+     * y si además la zona siguiera al idioma diría «September» sobre los datos
+     * de agosto.
+     */
+    expect(nombreDelMesArgentino("en-US", NOCHE_DEL_31).toLowerCase()).toContain("august");
+    expect(nombreDelMesArgentino("es-AR", NOCHE_DEL_31)).toContain("agosto");
   });
 });

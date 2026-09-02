@@ -22,6 +22,7 @@
 
 import { test, expect } from "@playwright/test";
 import { SESION_ANALISTA } from "./sesiones";
+import { enCualquierIdioma } from "./texto";
 
 const TEST_EMAIL = process.env.PLAYWRIGHT_TEST_EMAIL;
 const TEST_PASSWORD = process.env.PLAYWRIGHT_TEST_PASSWORD;
@@ -92,7 +93,7 @@ test.describe("Messages thread — Gmail case with messages (Scenario 1)", () =>
     await expect(page).not.toHaveURL(/\/login/);
 
     // The section heading is rendered by casos/[id]/page.tsx when isEmailCase=true
-    const heading = page.getByRole("heading", { name: /mensajes recibidos/i });
+    const heading = page.getByRole("heading", { name: enCualquierIdioma("messages.thread.title") });
     await expect(heading).toBeVisible();
   });
 
@@ -161,7 +162,7 @@ test.describe("Messages thread — case with no messages (Scenario 2)", () => {
     // The section heading should not appear on the page.
     // Wait briefly for the fetch to complete before asserting absence.
     await page.waitForTimeout(2000);
-    const heading = page.getByRole("heading", { name: /mensajes recibidos/i });
+    const heading = page.getByRole("heading", { name: enCualquierIdioma("messages.thread.title") });
     await expect(heading).not.toBeVisible();
   });
 

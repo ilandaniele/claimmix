@@ -12,6 +12,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { enCualquierIdioma } from "./texto";
 
 const FAKE_CASE_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -91,7 +92,7 @@ test.describe("Case detail — FSM validation API", () => {
 test.describe("Case detail — page structure", () => {
   test("login page is accessible from detail navigation", async ({ page }) => {
     await page.goto("/login");
-    await expect(page.getByRole("heading", { name: /iniciar sesión/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: enCualquierIdioma("auth.signIn.title") })).toBeVisible();
   });
 
   test("detail page for non-existent case with auth redirects to login", async ({

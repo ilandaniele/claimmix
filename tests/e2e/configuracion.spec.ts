@@ -14,6 +14,7 @@
 
 import { test, expect } from "@playwright/test";
 import { SESION_ADMIN, SESION_ANALISTA } from "./sesiones";
+import { enCualquierIdioma } from "./texto";
 
 const ADMIN_EMAIL = process.env.PLAYWRIGHT_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.PLAYWRIGHT_ADMIN_PASSWORD;
@@ -42,7 +43,7 @@ test.describe("configuración sin sesión", () => {
 
     await expect(page).toHaveURL(/\/login/);
     await expect(
-      page.getByRole("heading", { name: /cuentas gmail de ingreso/i })
+      page.getByRole("heading", { name: enCualquierIdioma("gmail.accounts.title") })
     ).not.toBeVisible();
   });
 });
@@ -64,7 +65,7 @@ test.describe("configuración como admin", () => {
     await expect(page).not.toHaveURL(/\/login/);
 
     await expect(
-      page.getByRole("heading", { name: /cuentas gmail de ingreso/i })
+      page.getByRole("heading", { name: enCualquierIdioma("gmail.accounts.title") })
     ).toBeVisible();
   });
 });
@@ -91,7 +92,7 @@ test.describe("configuración como analista", () => {
     await expect(page).not.toHaveURL(/\/login/);
 
     await expect(
-      page.getByRole("heading", { name: /cuentas gmail de ingreso/i })
+      page.getByRole("heading", { name: enCualquierIdioma("gmail.accounts.title") })
     ).toBeVisible();
   });
 });
@@ -115,8 +116,14 @@ test.describe("el padrón de clientes", () => {
     await page.goto("/clientes");
 
     await expect(page).toHaveURL(/\/bandeja/);
-    // Y que no se haya alcanzado a pintar la tabla antes de redirigir.
-    await expect(page.getByRole("columnheader", { name: /dni/i })).not.toBeVisible();
+    /*
+     * Por clave y no por texto: es una afirmacion NEGATIVA, asi que un
+     * encabezado que no matchea por estar en el otro idioma la deja pasar
+     * sola. `clientes.col.dni` es «DNI» en castellano y «ID number» en
+     * ingles: con la interfaz en ingles, `/dni/i` daba verde aunque la tabla
+     * se hubiera pintado entera.
+     */
+    await expect(page.getByRole("columnheader", { name: enCualquierIdioma("clientes.col.dni") })).not.toBeVisible();
   });
 
   test("tampoco al detalle de un cliente", async ({ page }) => {

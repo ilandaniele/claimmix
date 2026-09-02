@@ -14,6 +14,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { enCualquierIdioma } from "./texto";
 
 const TEST_EMAIL = process.env.TEST_ANALYST_EMAIL ?? "";
 const TEST_PASSWORD = process.env.TEST_ANALYST_PASSWORD ?? "";
@@ -27,7 +28,7 @@ async function signIn(page: import("@playwright/test").Page) {
   await page.goto("/login");
   await page.getByLabel(/correo electrónico/i).fill(TEST_EMAIL);
   await page.getByLabel(/contraseña/i).fill(TEST_PASSWORD);
-  await page.getByRole("button", { name: /iniciar sesión/i }).click();
+  await page.getByRole("button", { name: enCualquierIdioma("auth.signIn.title") }).click();
   await page.waitForURL(/\/bandeja/, { timeout: 15_000 });
 }
 
@@ -119,7 +120,7 @@ test.describe("Simulate modal structure (no auth required)", () => {
     await page.goto("/login");
     await expect(page).toHaveURL(/\/login/);
     await expect(
-      page.getByRole("heading", { name: /iniciar sesión/i })
+      page.getByRole("heading", { name: enCualquierIdioma("auth.signIn.title") })
     ).toBeVisible();
   });
 });

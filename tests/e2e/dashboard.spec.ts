@@ -14,6 +14,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { enCualquierIdioma } from "./texto";
 
 test.describe("Bandeja — unauthenticated redirect", () => {
   test("redirects to /login when no session", async ({ page, context }) => {
@@ -53,7 +54,7 @@ test.describe("Bandeja — page structure (auth-gated)", () => {
     await page.goto("/login");
     await expect(page).toHaveURL(/\/login/);
     await expect(
-      page.getByRole("heading", { name: /iniciar sesión/i })
+      page.getByRole("heading", { name: enCualquierIdioma("auth.signIn.title") })
     ).toBeVisible();
   });
 
@@ -62,13 +63,13 @@ test.describe("Bandeja — page structure (auth-gated)", () => {
     await expect(page.getByLabel(/correo electrónico/i)).toBeVisible();
     await expect(page.getByLabel(/contraseña/i)).toBeVisible();
     // Button text is "Iniciar sesión" per auth.spec.ts
-    await expect(page.getByRole("button", { name: /iniciar sesión/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: enCualquierIdioma("auth.signIn.title") })).toBeVisible();
   });
 
   test("login page shows button after interacting", async ({ page }) => {
     await page.goto("/login");
     // Verify button is present and interactive
-    const submitButton = page.getByRole("button", { name: /iniciar sesión/i });
+    const submitButton = page.getByRole("button", { name: enCualquierIdioma("auth.signIn.title") });
     await expect(submitButton).toBeVisible();
     await expect(submitButton).not.toBeDisabled();
   });

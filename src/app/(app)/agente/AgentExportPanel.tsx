@@ -3,10 +3,19 @@
 import { useState } from "react";
 import { Download } from "lucide-react";
 
+import { useT } from "@/lib/i18n/LocaleContext";
+
 type ExportType = "config_only" | "memory_only" | "full";
 type PiiMode = "masked" | "excluded" | "full_admin_only";
 type ExportFormat = "json" | "jsonl" | "csv";
 
+/*
+ * Los valores quedan crudos a proposito. `config_only`, `masked` y
+ * `csv_summary` son los parametros que viajan a la API y los que terminan en
+ * el nombre del archivo descargado: traducirlos seria inventar un segundo
+ * vocabulario para la misma cosa, y quien despues abra el archivo o mire el
+ * log de la API leeria dos nombres distintos.
+ */
 const EXPORT_TYPES: Array<{ value: ExportType; label: string }> = [
   { value: "config_only", label: "config_only" },
   { value: "memory_only", label: "memory_only" },
@@ -37,6 +46,7 @@ export function AgentExportPanel({ role }: { role: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const t = useT();
 
   const canExportFull = role === "owner" || role === "admin";
 
@@ -69,9 +79,13 @@ export function AgentExportPanel({ role }: { role: string }) {
       link.click();
       link.remove();
       URL.revokeObjectURL(href);
-      setMessage("Export listo.");
+      setMessage(t("exportar.listo"));
     } catch (err) {
-      setError(err instanceof Error && err.message !== "export_failed" ? err.message : "No se pudo exportar.");
+      setError(
+        err instanceof Error && err.message !== "export_failed"
+          ? err.message
+          : t("exportar.error")
+      );
     } finally {
       setBusy(false);
     }
@@ -83,7 +97,7 @@ export function AgentExportPanel({ role }: { role: string }) {
     <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/70">
       <div className="grid gap-3 lg:grid-cols-[minmax(160px,1fr)_minmax(160px,1fr)_minmax(210px,1fr)_auto]">
         <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-          Export type
+          {t("exportar.tipo")}
           <select
             value={exportType}
             onChange={(event) => setExportType(event.target.value as ExportType)}
@@ -98,7 +112,7 @@ export function AgentExportPanel({ role }: { role: string }) {
         </label>
 
         <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-          PII mode
+          {t("exportar.pii")}
           <select
             value={piiMode}
             onChange={(event) => setPiiMode(event.target.value as PiiMode)}
@@ -113,7 +127,7 @@ export function AgentExportPanel({ role }: { role: string }) {
         </label>
 
         <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-          Format
+          {t("exportar.formato")}
           <select
             value={format}
             onChange={(event) => setFormat(event.target.value as ExportFormat)}
@@ -134,7 +148,7 @@ export function AgentExportPanel({ role }: { role: string }) {
           className="inline-flex min-h-10 items-center justify-center gap-2 self-end rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
         >
           <Download size={16} />
-          {busy ? "Exporting..." : "Export Agent Memory & Config"}
+          {busy ? t("exportar.exportando") : t("exportar.boton")}
         </button>
       </div>
 

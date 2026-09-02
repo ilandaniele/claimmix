@@ -702,4 +702,56 @@ export const enUS: Record<TranslationKey, string> = {
   "claveIa.obtene": "Get your key at",
   "claveIa.personal": "(personal — only used for your cases)",
 
+
+  // ── Exportar la memoria y la configuración del agente ─────────────
+  // Los valores de los desplegables —`config_only`, `masked`, `csv_summary`—
+  // quedan crudos a propósito: son los parámetros que viajan a la API y los
+  // que terminan en el nombre del archivo. Traducirlos sería inventar un
+  // segundo vocabulario para lo mismo.
+  "exportar.boton": "Export memory & config",
+  "exportar.error": "The export failed.",
+  "exportar.exportando": "Exporting…",
+  "exportar.formato": "Format",
+  "exportar.listo": "Export ready.",
+  "exportar.pii": "PII mode",
+  "exportar.tipo": "Export type",
+
+
+  // ── Cambiar la contraseña, en configuración ───────────────────────
+  "password.actual": "Current password",
+  "password.actualPlaceholder": "Your current password",
+  "password.actualizando": "Updating…",
+  "password.boton": "Change password",
+  "password.confirmar": "Confirm new password",
+  "password.confirmarPlaceholder": "Repeat the new password",
+  "password.corta": "The password must be at least 8 characters long.",
+  "password.errorCambio": "The password could not be changed. Check that the current password is correct.",
+  "password.errorInesperado": "Unexpected error. Try again.",
+  "password.noCoinciden": "The passwords do not match.",
+  "password.nueva": "New password",
+  "password.nuevaPlaceholder": "At least 8 characters",
+  "password.ok": "Password updated. Sessions on your other devices have been closed —it can take up to a minute to take effect— and you are still signed in on this one.",
+
+
+  // ── Simulación en lote — la solapa que fabrica casos de prueba ────
+  // Los tipos de siniestro NO se repiten acá: son los mismos `type.*` que usan
+  // los filtros de la bandeja. El desplegable decía «Responsabilidad civil» y
+  // el filtro «Resp. Civil» para la misma cosa.
+  "lote.aleatorio": "Random",
+  "lote.cantidad": "How many (1–50)",
+  "lote.delay": "Delay between cases (ms)",
+  "lote.descripcion": "Runs N simulations back to back on the server. You do not need to keep the tab open — the processing happens entirely in the background.",
+  "lote.errorHttp": "Error {n} starting the batch.",
+  "lote.errorRed": "Network error starting the batch.",
+  "lote.iniciadaUna": "1 simulation started",
+  "lote.iniciadasVarias": "{n} simulations started",
+  "lote.iniciando": "Starting batch…",
+  "lote.iniciarUna": "Start 1 simulation",
+  "lote.iniciarVarias": "Start {n} simulations",
+  "lote.limite": "max. 2 batches every 10 minutes. Each batch can take several minutes to finish, depending on Gemini. Cases show up in the inbox as they are processed.",
+  "lote.limiteRotulo": "Limit:",
+  "lote.mas": "+{n} more",
+  "lote.tipo": "Claim type",
+  "lote.titulo": "Batch simulation — server-side",
+
 } as const;

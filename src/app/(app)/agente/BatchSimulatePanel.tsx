@@ -3,17 +3,27 @@
 import { useState } from "react";
 import { Play, CheckCircle, AlertCircle } from "lucide-react";
 import type { ClaimType } from "@/lib/schemas/cases";
+import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
 
-const CLAIM_TYPES: { value: ClaimType | ""; label: string }[] = [
-  { value: "", label: "Aleatorio" },
-  { value: "choque", label: "Choque" },
-  { value: "robo", label: "Robo" },
-  { value: "granizo", label: "Granizo" },
-  { value: "incendio", label: "Incendio" },
-  { value: "cristales", label: "Cristales" },
-  { value: "rc", label: "Responsabilidad civil" },
-  { value: "robo_contenido", label: "Robo de contenido" },
-  { value: "accidente_personal", label: "Accidente personal" },
+/*
+ * Los tipos son los MISMOS `type.*` que usan los filtros de la bandeja, no una
+ * lista propia. Estaban escritos dos veces con nombres distintos —aca
+ * «Responsabilidad civil», alla «Resp. Civil»— para exactamente la misma cosa.
+ *
+ * La lista se arma al cargar el modulo, cuando todavia no hay locale ni hook,
+ * asi que la etiqueta es una CLAVE y se traduce en el `map` de abajo.
+ */
+const CLAIM_TYPES: { value: ClaimType | ""; clave: TranslationKey }[] = [
+  { value: "", clave: "lote.aleatorio" },
+  { value: "choque", clave: "type.choque" },
+  { value: "robo", clave: "type.robo" },
+  { value: "granizo", clave: "type.granizo" },
+  { value: "incendio", clave: "type.incendio" },
+  { value: "cristales", clave: "type.cristales" },
+  { value: "rc", clave: "type.rc" },
+  { value: "robo_contenido", clave: "type.robo_contenido" },
+  { value: "accidente_personal", clave: "type.accidente_personal" },
 ];
 
 type BatchResult = {
@@ -29,6 +39,7 @@ export function BatchSimulatePanel() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<BatchResult | null>(null);
   const [error, setError] = useState("");
+  const t = useT();
 
   async function run() {
     setRunning(true);
@@ -54,13 +65,13 @@ export function BatchSimulatePanel() {
 
       if (!res.ok) {
         const msg = (data as { error?: { message?: string } } | null)?.error?.message;
-        setError(msg ?? `Error ${res.status} al iniciar el lote.`);
+        setError(msg ?? t("lote.errorHttp").replace("{n}", String(res.status)));
         return;
       }
 
       setResult(data as unknown as BatchResult);
     } catch {
-      setError("Error de red al iniciar el lote.");
+      setError(t("lote.errorRed"));
     } finally {
       setRunning(false);
     }
@@ -70,11 +81,10 @@ export function BatchSimulatePanel() {
     <div className="space-y-5">
       <div className="space-y-0.5">
         <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
-          Simulación en lote — server-side
+          {t("lote.titulo")}
         </p>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Ejecuta N simulaciones secuencialmente en el servidor. No requiere tener la pestaña
-          abierta — el procesamiento ocurre completamente en background.
+          {t("lote.descripcion")}
         </p>
       </div>
 
@@ -82,7 +92,7 @@ export function BatchSimulatePanel() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="space-y-1">
           <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-            Cantidad (1–50)
+            {t("lote.cantidad")}
           </label>
           <input
             type="number"
@@ -96,7 +106,7 @@ export function BatchSimulatePanel() {
 
         <div className="space-y-1">
           <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-            Delay entre casos (ms)
+            {t("lote.delay")}
           </label>
           <input
             type="number"
@@ -111,16 +121,16 @@ export function BatchSimulatePanel() {
 
         <div className="space-y-1">
           <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-            Tipo de siniestro
+            {t("lote.tipo")}
           </label>
           <select
             value={claimType}
             onChange={(e) => setClaimType(e.target.value as ClaimType | "")}
             className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
           >
-            {CLAIM_TYPES.map(({ value, label }) => (
+            {CLAIM_TYPES.map(({ value, clave }) => (
               <option key={value || "random"} value={value}>
-                {label}
+                {t(clave)}
               </option>
             ))}
           </select>
@@ -134,7 +144,11 @@ export function BatchSimulatePanel() {
         className="flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
       >
         <Play size={14} />
-        {running ? "Iniciando lote..." : `Iniciar ${count} simulaciones`}
+        {running
+          ? t("lote.iniciando")
+          : count === 1
+            ? t("lote.iniciarUna")
+            : t("lote.iniciarVarias").replace("{n}", String(count))}
       </button>
 
       {result && (
@@ -142,14 +156,17 @@ export function BatchSimulatePanel() {
           <CheckCircle size={16} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
           <div>
             <p className="font-medium text-emerald-800 dark:text-emerald-300">
-              {result.accepted} simulaciones iniciadas
+              {result.accepted === 1
+                ? t("lote.iniciadaUna")
+                : t("lote.iniciadasVarias").replace("{n}", String(result.accepted))}
             </p>
             <p className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-400">
               {result.message}
             </p>
             <p className="mt-1 font-mono text-xs text-emerald-600 dark:text-emerald-500">
               {result.case_ids.slice(0, 3).join(", ")}
-              {result.case_ids.length > 3 && ` +${result.case_ids.length - 3} más`}
+              {result.case_ids.length > 3 &&
+                " " + t("lote.mas").replace("{n}", String(result.case_ids.length - 3))}
             </p>
           </div>
         </div>
@@ -163,8 +180,7 @@ export function BatchSimulatePanel() {
       )}
 
       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-        <strong>Límite:</strong> máx. 2 lotes cada 10 minutos. Cada lote puede tardar varios minutos
-        en completarse dependiendo de Gemini. Los casos aparecerán en la bandeja a medida que se procesan.
+        <strong>{t("lote.limiteRotulo")}</strong> {t("lote.limite")}
       </div>
     </div>
   );

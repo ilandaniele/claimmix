@@ -726,6 +726,58 @@ export const esAR = {
   "claveIa.obtene": "Obtené tu clave en",
   "claveIa.personal": "(personal — solo usada para tus casos)",
 
+
+  // ── Exportar la memoria y la configuración del agente ─────────────
+  // Los valores de los desplegables —`config_only`, `masked`, `csv_summary`—
+  // quedan crudos a propósito: son los parámetros que viajan a la API y los
+  // que terminan en el nombre del archivo. Traducirlos sería inventar un
+  // segundo vocabulario para lo mismo.
+  "exportar.boton": "Exportar memoria y configuración",
+  "exportar.error": "No se pudo exportar.",
+  "exportar.exportando": "Exportando…",
+  "exportar.formato": "Formato",
+  "exportar.listo": "Export listo.",
+  "exportar.pii": "Modo PII",
+  "exportar.tipo": "Tipo de export",
+
+
+  // ── Cambiar la contraseña, en configuración ───────────────────────
+  "password.actual": "Contraseña actual",
+  "password.actualPlaceholder": "Tu contraseña actual",
+  "password.actualizando": "Actualizando…",
+  "password.boton": "Cambiar contraseña",
+  "password.confirmar": "Confirmar nueva contraseña",
+  "password.confirmarPlaceholder": "Repetí la nueva contraseña",
+  "password.corta": "La contraseña debe tener al menos 8 caracteres.",
+  "password.errorCambio": "Error al cambiar la contraseña. Verificá que la contraseña actual sea correcta.",
+  "password.errorInesperado": "Error inesperado. Intentá de nuevo.",
+  "password.noCoinciden": "Las contraseñas no coinciden.",
+  "password.nueva": "Nueva contraseña",
+  "password.nuevaPlaceholder": "Mínimo 8 caracteres",
+  "password.ok": "Contraseña actualizada. Se cerraron las sesiones abiertas en otros dispositivos —puede tardar hasta un minuto en hacerse efectivo— y en éste seguís conectado.",
+
+
+  // ── Simulación en lote — la solapa que fabrica casos de prueba ────
+  // Los tipos de siniestro NO se repiten acá: son los mismos `type.*` que usan
+  // los filtros de la bandeja. El desplegable decía «Responsabilidad civil» y
+  // el filtro «Resp. Civil» para la misma cosa.
+  "lote.aleatorio": "Aleatorio",
+  "lote.cantidad": "Cantidad (1–50)",
+  "lote.delay": "Espera entre casos (ms)",
+  "lote.descripcion": "Ejecuta N simulaciones seguidas en el servidor. No hace falta dejar la pestaña abierta: el procesamiento pasa entero por atrás.",
+  "lote.errorHttp": "Error {n} al iniciar el lote.",
+  "lote.errorRed": "Error de red al iniciar el lote.",
+  "lote.iniciadaUna": "1 simulación iniciada",
+  "lote.iniciadasVarias": "{n} simulaciones iniciadas",
+  "lote.iniciando": "Iniciando lote…",
+  "lote.iniciarUna": "Iniciar 1 simulación",
+  "lote.iniciarVarias": "Iniciar {n} simulaciones",
+  "lote.limite": "máx. 2 lotes cada 10 minutos. Cada lote puede tardar varios minutos en completarse, según Gemini. Los casos aparecen en la bandeja a medida que se procesan.",
+  "lote.limiteRotulo": "Límite:",
+  "lote.mas": "+{n} más",
+  "lote.tipo": "Tipo de siniestro",
+  "lote.titulo": "Simulación en lote — del lado del servidor",
+
 } as const;
 
 export type TranslationKey = keyof typeof esAR;

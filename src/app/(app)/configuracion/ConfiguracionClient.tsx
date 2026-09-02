@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import { authClient } from "@/lib/auth/client";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 type FormState = "idle" | "loading" | "success" | "error";
 
@@ -17,17 +18,18 @@ export function ConfiguracionClient() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [state, setState] = useState<FormState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const t = useT();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErrorMsg("");
 
     if (newPassword.length < 8) {
-      setErrorMsg("La contraseña debe tener al menos 8 caracteres.");
+      setErrorMsg(t("password.corta"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setErrorMsg("Las contraseñas no coinciden.");
+      setErrorMsg(t("password.noCoinciden"));
       return;
     }
 
@@ -54,7 +56,7 @@ export function ConfiguracionClient() {
       });
 
       if (error) {
-        setErrorMsg("Error al cambiar la contraseña. Verificá que la contraseña actual sea correcta.");
+        setErrorMsg(t("password.errorCambio"));
         setState("error");
         return;
       }
@@ -65,7 +67,7 @@ export function ConfiguracionClient() {
       setConfirmPassword("");
       setTimeout(() => setState("idle"), 4000);
     } catch {
-      setErrorMsg("Error inesperado. Intentá de nuevo.");
+      setErrorMsg(t("password.errorInesperado"));
       setState("error");
     }
   }
@@ -77,7 +79,7 @@ export function ConfiguracionClient() {
           htmlFor="current_password"
           className="mb-1 block text-xs font-medium text-slate-600"
         >
-          Contraseña actual
+          {t("password.actual")}
         </label>
         <input
           id="current_password"
@@ -86,7 +88,7 @@ export function ConfiguracionClient() {
           value={currentPassword}
           onChange={(e) => setCurrentPassword(e.target.value)}
           className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-          placeholder="Tu contraseña actual"
+          placeholder={t("password.actualPlaceholder")}
           autoComplete="current-password"
         />
       </div>
@@ -96,7 +98,7 @@ export function ConfiguracionClient() {
           htmlFor="new_password"
           className="mb-1 block text-xs font-medium text-slate-600"
         >
-          Nueva contraseña
+          {t("password.nueva")}
         </label>
         <input
           id="new_password"
@@ -106,7 +108,7 @@ export function ConfiguracionClient() {
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
           className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-          placeholder="Mínimo 8 caracteres"
+          placeholder={t("password.nuevaPlaceholder")}
           autoComplete="new-password"
         />
       </div>
@@ -116,7 +118,7 @@ export function ConfiguracionClient() {
           htmlFor="confirm_password"
           className="mb-1 block text-xs font-medium text-slate-600"
         >
-          Confirmar nueva contraseña
+          {t("password.confirmar")}
         </label>
         <input
           id="confirm_password"
@@ -126,7 +128,7 @@ export function ConfiguracionClient() {
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
           className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-          placeholder="Repetí la nueva contraseña"
+          placeholder={t("password.confirmarPlaceholder")}
           autoComplete="new-password"
         />
       </div>
@@ -137,9 +139,7 @@ export function ConfiguracionClient() {
           aria-live="polite"
           className="rounded-md bg-green-50 px-3 py-2 text-xs text-green-700"
         >
-          Contraseña actualizada. Se cerraron las sesiones abiertas en otros
-          dispositivos —puede tardar hasta un minuto en hacerse efectivo— y en
-          éste seguís conectado.
+          {t("password.ok")}
         </div>
       )}
 
@@ -158,7 +158,7 @@ export function ConfiguracionClient() {
           disabled={state === "loading"}
           className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
         >
-          {state === "loading" ? "Actualizando..." : "Cambiar contraseña"}
+          {state === "loading" ? t("password.actualizando") : t("password.boton")}
         </button>
       </div>
     </form>

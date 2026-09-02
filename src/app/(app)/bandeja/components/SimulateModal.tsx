@@ -11,7 +11,8 @@
 import { useState, useCallback } from "react";
 import type { SimulationScenario } from "@/server/intake/scenarios";
 import type { ClaimType } from "@/lib/schemas/cases";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
 
 interface SimulateModalProps {
   scenarios: SimulationScenario[];
@@ -22,12 +23,40 @@ interface SimulateModalProps {
 
 type InputMode = "scenario" | "custom";
 
-const CLAIM_TYPES: { value: ClaimType; label: string }[] = [
-  { value: "choque", label: t("simulate.scenario.choque") },
-  { value: "robo", label: t("simulate.scenario.robo") },
-  { value: "granizo", label: t("simulate.scenario.granizo") },
-  { value: "incendio", label: t("simulate.scenario.incendio") },
+/*
+ * La etiqueta es una CLAVE y no un texto ya traducido.
+ *
+ * Decia `label: t("simulate.scenario.choque")`, con el `t` de modulo, que no
+ * recibe locale y por eso siempre devuelve es-AR. Ademas corria UNA vez, al
+ * cargar el archivo, antes de que exista ningun idioma: aunque el `t` hubiera
+ * sabido el locale, la lista habria quedado congelada en el primero.
+ *
+ * Es la peor forma del defecto —parece traducido y no lo esta—, asi que la
+ * traduccion baja al `map`, que corre adentro del componente.
+ */
+const CLAIM_TYPES: { value: ClaimType; clave: TranslationKey }[] = [
+  { value: "choque", clave: "simulate.scenario.choque" },
+  { value: "robo", clave: "simulate.scenario.robo" },
+  { value: "granizo", clave: "simulate.scenario.granizo" },
+  { value: "incendio", clave: "simulate.scenario.incendio" },
 ];
+
+/*
+ * El escenario muestra su tipo capitalizado a mano. Si el tipo esta en el
+ * vocabulario del producto se dice como en todas las demas pantallas; si no,
+ * se sigue capitalizando el valor crudo antes que no mostrarlo.
+ */
+const TIPO: Record<string, TranslationKey> = {
+  choque: "type.choque",
+  robo: "type.robo",
+  granizo: "type.granizo",
+  incendio: "type.incendio",
+  cristales: "type.cristales",
+  rc: "type.rc",
+  robo_contenido: "type.robo_contenido",
+  accidente_personal: "type.accidente_personal",
+  other: "type.other",
+};
 
 function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
@@ -47,6 +76,7 @@ export function SimulateModal({
   const [customText, setCustomText] = useState("");
   const [customType, setCustomType] = useState<ClaimType>("choque");
   const [submitting, setSubmitting] = useState(false);
+  const t = useT();
 
   const handleSubmit = useCallback(async () => {
     setSubmitting(true);
@@ -56,14 +86,14 @@ export function SimulateModal({
 
       if (mode === "scenario") {
         if (!selectedScenarioId) {
-          onError("Seleccioná un escenario.");
+          onError(t("simulate.elegiEscenario"));
           setSubmitting(false);
           return;
         }
         body = { scenario_id: selectedScenarioId };
       } else {
         if (!customText.trim()) {
-          onError("Ingresá el texto del siniestro.");
+          onError(t("simulate.ingresaTexto"));
           setSubmitting(false);
           return;
         }
@@ -77,7 +107,7 @@ export function SimulateModal({
       });
 
       if (res.status === 429) {
-        onError("Demasiadas simulaciones. Espere un momento.");
+        onError(t("simulate.demasiadas"));
         onClose();
         return;
       }
@@ -92,7 +122,7 @@ export function SimulateModal({
         return;
       }
 
-      onSuccess("Procesando siniestro...");
+      onSuccess(t("simulate.procesando"));
       onClose();
     } catch {
       onError(t("simulate.error"));
@@ -100,7 +130,7 @@ export function SimulateModal({
     } finally {
       setSubmitting(false);
     }
-  }, [mode, selectedScenarioId, customText, customType, onClose, onSuccess, onError]);
+  }, [mode, selectedScenarioId, customText, customType, onClose, onSuccess, onError, t]);
 
   // Close on backdrop click
   const handleBackdropClick = useCallback(
@@ -139,7 +169,7 @@ export function SimulateModal({
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200",
             ].join(" ")}
           >
-            Escenario pre-cargado
+            {t("simulate.modoEscenario")}
           </button>
           <button
             type="button"
@@ -151,7 +181,7 @@ export function SimulateModal({
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200",
             ].join(" ")}
           >
-            Texto personalizado
+            {t("simulate.modoTexto")}
           </button>
         </div>
 
@@ -162,7 +192,7 @@ export function SimulateModal({
               htmlFor="scenario-select"
               className="block text-sm font-medium text-slate-700 mb-1"
             >
-              Escenario
+              {t("simulate.escenarioLabel")}
             </label>
             <select
               id="scenario-select"
@@ -172,7 +202,9 @@ export function SimulateModal({
             >
               {scenarios.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.case_type.charAt(0).toUpperCase() + s.case_type.slice(1)}{" "}
+                  {TIPO[s.case_type]
+                    ? t(TIPO[s.case_type])
+                    : s.case_type.charAt(0).toUpperCase() + s.case_type.slice(1)}{" "}
                   — {s.policyholder_name}:{" "}
                   {truncate(s.raw_text.replace(/\n/g, " "), 80)}
                 </option>
@@ -189,7 +221,7 @@ export function SimulateModal({
                 htmlFor="custom-type"
                 className="block text-sm font-medium text-slate-700 mb-1"
               >
-                Tipo de siniestro
+                {t("simulate.scenario")}
               </label>
               <select
                 id="custom-type"
@@ -197,9 +229,9 @@ export function SimulateModal({
                 onChange={(e) => setCustomType(e.target.value as ClaimType)}
                 className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400"
               >
-                {CLAIM_TYPES.map(({ value, label }) => (
+                {CLAIM_TYPES.map(({ value, clave }) => (
                   <option key={value} value={value}>
-                    {label}
+                    {t(clave)}
                   </option>
                 ))}
               </select>
@@ -209,14 +241,14 @@ export function SimulateModal({
                 htmlFor="custom-text"
                 className="block text-sm font-medium text-slate-700 mb-1"
               >
-                Texto del siniestro
+                {t("simulate.textoLabel")}
               </label>
               <textarea
                 id="custom-text"
                 rows={5}
                 value={customText}
                 onChange={(e) => setCustomText(e.target.value)}
-                placeholder="Pegá el texto del email de siniestro aquí..."
+                placeholder={t("simulate.textoPlaceholder")}
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
               />
             </div>
@@ -231,7 +263,7 @@ export function SimulateModal({
             disabled={submitting}
             className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
           >
-            Cancelar
+            {t("simulate.cancel")}
           </button>
           <button
             type="button"

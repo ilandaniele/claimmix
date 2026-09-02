@@ -754,4 +754,46 @@ export const enUS: Record<TranslationKey, string> = {
   "lote.tipo": "Claim type",
   "lote.titulo": "Batch simulation — server-side",
 
+
+  // ── Campos personalizados — la solapa que define qué extraer ──────
+  // Los tipos de campo —`text`, `enum`, `phone`— quedan crudos: son el valor
+  // que se guarda en la base y el que viaja a la API, igual que en el export.
+  "campos.activar": "Activate",
+  "campos.activo": "Active",
+  "campos.agregar": "Add",
+  "campos.cargando": "Loading…",
+  "campos.col.accion": "Action",
+  "campos.col.clave": "Key",
+  "campos.col.estado": "Status",
+  "campos.col.etiqueta": "Label",
+  "campos.col.siniestro": "Claim",
+  "campos.col.tipo": "Type",
+  "campos.desactivar": "Deactivate",
+  "campos.errorActualizar": "The field could not be updated.",
+  "campos.errorCarga": "The fields could not be loaded.",
+  "campos.errorGuardar": "The field could not be saved.",
+  "campos.guardando": "Saving…",
+  "campos.inactivo": "Inactive",
+  "campos.pedirSiFalta": "Ask if missing",
+  "campos.phClave": "field_key",
+  "campos.phDescripcion": "Description",
+  "campos.phEtiqueta": "Label",
+  "campos.phOpciones": "options, separated, by commas",
+  "campos.requerido": "Required",
+
+
+  // ── Lo que le faltaba al modal de simular un siniestro ────────────
+  // El resto de `simulate.*` ya estaba arriba. Esto es lo que quedaba suelto,
+  // más lo que el modal traducía con el `t` de módulo —que es siempre es-AR.
+  "simulate.cancel": "Cancel",
+  "simulate.demasiadas": "Too many simulations. Wait a moment.",
+  "simulate.elegiEscenario": "Choose a scenario.",
+  "simulate.escenarioLabel": "Scenario",
+  "simulate.ingresaTexto": "Enter the claim text.",
+  "simulate.modoEscenario": "Preloaded scenario",
+  "simulate.modoTexto": "Custom text",
+  "simulate.procesando": "Processing claim…",
+  "simulate.textoLabel": "Claim text",
+  "simulate.textoPlaceholder": "Paste the claim email text here…",
+
 } as const;

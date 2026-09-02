@@ -778,6 +778,48 @@ export const esAR = {
   "lote.tipo": "Tipo de siniestro",
   "lote.titulo": "Simulación en lote — del lado del servidor",
 
+
+  // ── Campos personalizados — la solapa que define qué extraer ──────
+  // Los tipos de campo —`text`, `enum`, `phone`— quedan crudos: son el valor
+  // que se guarda en la base y el que viaja a la API, igual que en el export.
+  "campos.activar": "Activar",
+  "campos.activo": "Activo",
+  "campos.agregar": "Agregar",
+  "campos.cargando": "Cargando…",
+  "campos.col.accion": "Acción",
+  "campos.col.clave": "Clave",
+  "campos.col.estado": "Estado",
+  "campos.col.etiqueta": "Etiqueta",
+  "campos.col.siniestro": "Siniestro",
+  "campos.col.tipo": "Tipo",
+  "campos.desactivar": "Desactivar",
+  "campos.errorActualizar": "No se pudo actualizar el campo.",
+  "campos.errorCarga": "No se pudieron cargar los campos.",
+  "campos.errorGuardar": "No se pudo guardar el campo.",
+  "campos.guardando": "Guardando…",
+  "campos.inactivo": "Inactivo",
+  "campos.pedirSiFalta": "Pedir si falta",
+  "campos.phClave": "clave_campo",
+  "campos.phDescripcion": "Descripción",
+  "campos.phEtiqueta": "Etiqueta",
+  "campos.phOpciones": "opciones, separadas, por coma",
+  "campos.requerido": "Requerido",
+
+
+  // ── Lo que le faltaba al modal de simular un siniestro ────────────
+  // El resto de `simulate.*` ya estaba arriba. Esto es lo que quedaba suelto,
+  // más lo que el modal traducía con el `t` de módulo —que es siempre es-AR.
+  "simulate.cancel": "Cancelar",
+  "simulate.demasiadas": "Demasiadas simulaciones. Esperá un momento.",
+  "simulate.elegiEscenario": "Elegí un escenario.",
+  "simulate.escenarioLabel": "Escenario",
+  "simulate.ingresaTexto": "Ingresá el texto del siniestro.",
+  "simulate.modoEscenario": "Escenario pre-cargado",
+  "simulate.modoTexto": "Texto personalizado",
+  "simulate.procesando": "Procesando siniestro…",
+  "simulate.textoLabel": "Texto del siniestro",
+  "simulate.textoPlaceholder": "Pegá acá el texto del email del siniestro…",
+
 } as const;
 
 export type TranslationKey = keyof typeof esAR;

@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 
+import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
+
 type CustomField = {
   id: string;
   key: string;
@@ -15,11 +18,31 @@ type CustomField = {
   active: boolean;
 };
 
+// Crudos a proposito: es el valor que se guarda en `field_type` y el que
+// viaja a la API. Traducirlos daria dos nombres para la misma cosa.
 const FIELD_TYPES = ["text", "number", "date", "boolean", "enum", "email", "phone"];
-const CLAIM_TYPES = [
-  "", "choque", "robo", "granizo", "incendio", "other",
-  "cristales", "rc", "robo_contenido", "accidente_personal",
-];
+
+/*
+ * Los mismos `type.*` que la bandeja y el lote. `""` es «todos los
+ * siniestros», que en la base se guarda como `null`.
+ *
+ * `TIPO_SINIESTRO` tambien traduce lo que VUELVE de la base en la tabla de
+ * abajo, con caida al valor crudo: `claim_type` es `text` y un tipo que el
+ * producto todavia no conozca tiene que verse, no desaparecer.
+ */
+const TIPO_SINIESTRO: Record<string, TranslationKey> = {
+  "": "type.todos",
+  choque: "type.choque",
+  robo: "type.robo",
+  granizo: "type.granizo",
+  incendio: "type.incendio",
+  other: "type.other",
+  cristales: "type.cristales",
+  rc: "type.rc",
+  robo_contenido: "type.robo_contenido",
+  accidente_personal: "type.accidente_personal",
+};
+const CLAIM_TYPES = Object.keys(TIPO_SINIESTRO);
 
 async function fetchFields(): Promise<CustomField[]> {
   const res = await fetch("/api/admin/custom-fields", { cache: "no-store" });
@@ -33,6 +56,7 @@ export function CustomFieldsPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const t = useT();
   const [form, setForm] = useState({
     key: "",
     label: "",
@@ -51,7 +75,7 @@ export function CustomFieldsPanel() {
         if (!cancelled) setFields(data);
       })
       .catch(() => {
-        if (!cancelled) setError("No se pudieron cargar los campos.");
+        if (!cancelled) setError(t("campos.errorCarga"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -59,6 +83,9 @@ export function CustomFieldsPanel() {
     return () => {
       cancelled = true;
     };
+    // `t` cambia con el idioma; un mensaje ya escrito no se retraduce solo, y
+    // volver a pedir los campos por eso seria peor que el problema.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function reload() {
@@ -98,7 +125,7 @@ export function CustomFieldsPanel() {
       });
       await reload();
     } catch {
-      setError("No se pudo guardar el campo.");
+      setError(t("campos.errorGuardar"));
     } finally {
       setSaving(false);
     }
@@ -112,13 +139,13 @@ export function CustomFieldsPanel() {
       body: JSON.stringify({ active: !field.active }),
     });
     if (!res.ok) {
-      setError("No se pudo actualizar el campo.");
+      setError(t("campos.errorActualizar"));
       return;
     }
     await reload();
   }
 
-  if (loading) return <p className="text-sm text-slate-500">Cargando...</p>;
+  if (loading) return <p className="text-sm text-slate-500">{t("campos.cargando")}</p>;
 
   return (
     <div className="space-y-5">
@@ -126,13 +153,13 @@ export function CustomFieldsPanel() {
         <input
           value={form.key}
           onChange={(e) => setForm((prev) => ({ ...prev, key: e.target.value }))}
-          placeholder="clave_campo"
+          placeholder={t("campos.phClave")}
           className="rounded-md border border-slate-200 px-3 py-2 text-sm"
         />
         <input
           value={form.label}
           onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))}
-          placeholder="Etiqueta"
+          placeholder={t("campos.phEtiqueta")}
           className="rounded-md border border-slate-200 px-3 py-2 text-sm"
         />
         <select
@@ -153,20 +180,20 @@ export function CustomFieldsPanel() {
         >
           {CLAIM_TYPES.map((type) => (
             <option key={type || "all"} value={type}>
-              {type || "todos"}
+              {t(TIPO_SINIESTRO[type])}
             </option>
           ))}
         </select>
         <input
           value={form.description}
           onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-          placeholder="Descripcion"
+          placeholder={t("campos.phDescripcion")}
           className="rounded-md border border-slate-200 px-3 py-2 text-sm lg:col-span-2"
         />
         <input
           value={form.enum_values}
           onChange={(e) => setForm((prev) => ({ ...prev, enum_values: e.target.value }))}
-          placeholder="opciones, separadas, por coma"
+          placeholder={t("campos.phOpciones")}
           className="rounded-md border border-slate-200 px-3 py-2 text-sm"
         />
         <button
@@ -174,7 +201,7 @@ export function CustomFieldsPanel() {
           disabled={saving}
           className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {saving ? "Guardando..." : "Agregar"}
+          {saving ? t("campos.guardando") : t("campos.agregar")}
         </button>
         <label className="inline-flex items-center gap-2 text-sm text-slate-700">
           <input
@@ -182,7 +209,7 @@ export function CustomFieldsPanel() {
             checked={form.required}
             onChange={(e) => setForm((prev) => ({ ...prev, required: e.target.checked }))}
           />
-          Requerido
+          {t("campos.requerido")}
         </label>
         <label className="inline-flex items-center gap-2 text-sm text-slate-700">
           <input
@@ -190,7 +217,7 @@ export function CustomFieldsPanel() {
             checked={form.ask_if_missing}
             onChange={(e) => setForm((prev) => ({ ...prev, ask_if_missing: e.target.checked }))}
           />
-          Pedir si falta
+          {t("campos.pedirSiFalta")}
         </label>
       </form>
 
@@ -200,12 +227,12 @@ export function CustomFieldsPanel() {
         <table className="min-w-full divide-y divide-slate-100 text-sm">
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
-              <th className="px-3 py-2 text-left font-medium">Clave</th>
-              <th className="px-3 py-2 text-left font-medium">Etiqueta</th>
-              <th className="px-3 py-2 text-left font-medium">Tipo</th>
-              <th className="px-3 py-2 text-left font-medium">Siniestro</th>
-              <th className="px-3 py-2 text-left font-medium">Estado</th>
-              <th className="px-3 py-2 text-right font-medium">Accion</th>
+              <th className="px-3 py-2 text-left font-medium">{t("campos.col.clave")}</th>
+              <th className="px-3 py-2 text-left font-medium">{t("campos.col.etiqueta")}</th>
+              <th className="px-3 py-2 text-left font-medium">{t("campos.col.tipo")}</th>
+              <th className="px-3 py-2 text-left font-medium">{t("campos.col.siniestro")}</th>
+              <th className="px-3 py-2 text-left font-medium">{t("campos.col.estado")}</th>
+              <th className="px-3 py-2 text-right font-medium">{t("campos.col.accion")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -214,9 +241,13 @@ export function CustomFieldsPanel() {
                 <td className="px-3 py-2 font-mono text-xs">{field.key}</td>
                 <td className="px-3 py-2">{field.label}</td>
                 <td className="px-3 py-2 text-slate-500">{field.field_type}</td>
-                <td className="px-3 py-2 text-slate-500">{field.claim_type ?? "todos"}</td>
+                <td className="px-3 py-2 text-slate-500">
+                  {TIPO_SINIESTRO[field.claim_type ?? ""]
+                    ? t(TIPO_SINIESTRO[field.claim_type ?? ""])
+                    : field.claim_type}
+                </td>
                 <td className="px-3 py-2">
-                  {field.active ? "Activo" : "Inactivo"}
+                  {field.active ? t("campos.activo") : t("campos.inactivo")}
                 </td>
                 <td className="px-3 py-2 text-right">
                   <button
@@ -224,7 +255,7 @@ export function CustomFieldsPanel() {
                     onClick={() => toggleField(field)}
                     className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50"
                   >
-                    {field.active ? "Desactivar" : "Activar"}
+                    {field.active ? t("campos.desactivar") : t("campos.activar")}
                   </button>
                 </td>
               </tr>

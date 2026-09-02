@@ -705,7 +705,7 @@ export const esAR = {
   "ejemplos.rechazar": "Rechazar",
   "ejemplos.sinAsunto": "(sin asunto)",
   "ejemplos.vacio.como": "Abrí un caso procesado, revisá o corregí los campos del análisis y usá",
-  "ejemplos.vacio.paraQue": ". Los ejemplos aprobados se usan como contexto en las próximas ejecuciones del agente Gemini/OpenAI. El paquete de entrenamiento es opcional y portable.",
+  "ejemplos.vacio.paraQue": ". Los ejemplos aprobados se usan como contexto en las próximas ejecuciones del agente. El paquete de entrenamiento es opcional y portable.",
   "ejemplos.vacio.titulo": "Todavía no hay ejemplos aprobados.",
   "ejemplos.verCasos": "Ver casos",
 

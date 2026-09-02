@@ -681,7 +681,7 @@ export const enUS: Record<TranslationKey, string> = {
   "ejemplos.rechazar": "Reject",
   "ejemplos.sinAsunto": "(no subject)",
   "ejemplos.vacio.como": "Open a processed case, review or correct the analysis fields, and use",
-  "ejemplos.vacio.paraQue": ". Approved examples are used as context in the agent's next Gemini/OpenAI runs. The training bundle is optional and portable.",
+  "ejemplos.vacio.paraQue": ". Approved examples are used as context in the agent's next runs. The training bundle is optional and portable.",
   "ejemplos.vacio.titulo": "No approved examples yet.",
   "ejemplos.verCasos": "View cases",
 

@@ -1345,6 +1345,61 @@ pantallas en claro y en oscuro, más una medición de los colores computados. El
 bug del ítem deshabilitado no se ve de ninguna otra forma — de hecho ya había
 sido «arreglado» antes en el componente, y el componente estaba bien.
 
+### 🌐 La interfaz habla los dos idiomas, y los tests dejaron de apostar a uno (2026-09-02)
+
+**Diecinueve archivos medidos, dieciséis traducidos, 233 claves.** No era el
+olvido de una palabra: no tenían UNA sola llamada al diccionario, así que con la
+interfaz en inglés quedaban enteros en castellano. Tres de los diecinueve salen
+sin tocar con motivo —`ui.tsx` y `PanelSection.tsx` reciben todo por props,
+`escalados/page.tsx` es un `redirect`— y uno, `CasesTable.tsx`, ya estaba entero:
+usa `useLocale` y la medición buscaba `useT|getT`.
+
+**Lo que NO se traduce, y es una decisión.** Los valores que viajan a una API o
+se guardan en una columna quedan crudos: `config_only` y `masked` en el export,
+`text`/`enum`/`phone` en campos personalizados, `draft`/`eval_pending` en
+fine-tuning, `success`/`rate_limited` en el uso del proveedor. Son lo que hay que
+poder pegar en la consola de Google o en un ticket; traducirlos daría dos nombres
+para la misma cosa.
+
+**El peor caso no era un texto sin traducir: era uno que parecía traducido.**
+`SimulateModal` importaba `t` de `@/lib/i18n` —la firma sin locale, que devuelve
+siempre es-AR— y encima la llamaba en el cuerpo del módulo, una vez al cargar el
+archivo, antes de que exista ningún idioma. Era el único del producto así.
+
+**El idioma sigue a quien mira; la zona, nunca.** Tres fechas más se estampaban
+con `toLocale*String()` sin argumentos, o sea idioma Y zona del navegador. Qué
+mes/hora es se decide en Buenos Aires —`ZONA_ARGENTINA`— y cómo se escribe lo
+decide quien mira. La excepción es `core/fecha/mes-calendario.ts`: `"2026-09"` no
+es un instante sino una etiqueta de período, se arma y se formatea en UTC, y
+formatearla en hora argentina la correría al mes ANTERIOR.
+
+⛔ **Antes de confiar en un e2e que busca texto de la interfaz.** El idioma sale
+de `users.locale`, una preferencia por usuario guardada en la base. Los e2e
+corren contra staging, que es COMPARTIDA y sobrevive a los runs, y el selector de
+idioma hace `PATCH /api/auth/me` —no sólo la cookie—, así que alcanza con que
+alguien lo toque una vez para dejar esa cuenta en otro idioma para siempre. Desde
+ahí el resultado depende de una carrera: `LocaleProvider` escribe la cookie en un
+efecto y `auth.setup.ts` guarda el `storageState` apenas entra. Pasó: 72 tests en
+verde a las 21:12 y el mismo test en rojo a las 21:33 sin un cambio en el medio.
+Se arregló con `tests/e2e/texto.ts` — se busca por CLAVE y se aceptan los dos
+idiomas.
+
+**Y ahí apareció uno peor que el que se rompió.** `un analista no entra a
+/clientes` afirmaba que NO se ve la columna `/dni/i`. Es una afirmación NEGATIVA,
+así que el idioma equivocado la deja pasar sola — y `clientes.col.dni` es «DNI»
+en castellano y «ID number» en inglés. Con la interfaz en inglés ese test daba
+verde aunque la tabla de clientes se hubiera pintado entera para alguien que no
+tiene que verla. **Una guarda que se aprueba sola es peor que no tenerla**, y una
+afirmación negativa sobre texto es la forma más fácil de escribir una.
+
+**Pendiente, medido y no hecho.** OpenAI sigue nombrado en 24 archivos —un
+extractor entero, el camino de fine-tuning, valores guardados en la columna
+`provider` y la política de privacidad—. El selector lo sigue ofreciendo, así que
+esos textos son ciertos mientras se pueda elegir. Se sacó sólo la frase que era
+falsa: los ejemplos aprobados vuelven como contexto del agente, no «del agente
+Gemini/OpenAI». Sacarlo del producto es una decisión de producto, no una
+corrección de texto.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

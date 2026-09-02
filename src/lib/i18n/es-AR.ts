@@ -523,6 +523,15 @@ export const esAR = {
   "agente.yaConfirmado": "Ejemplo ya confirmado",
 
   // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
+
+  // ── Los nombres comerciales de los planes ──────────────────────────
+  // El precio y la aritmética siguen en `lib/billing/plans.ts`, que no conoce
+  // el diccionario: acá está sólo cómo se escribe el nombre.
+  "plan.piloto": "Piloto",
+  "plan.operativo": "Operativo",
+  "plan.profesional": "Profesional",
+  "plan.corporativo": "Corporativo",
+  "plan.enterprise": "Enterprise",
   "cartera.aFacturar": "A facturar",
   "cartera.ayuda.alta": "Un cliente nuevo se da de alta con",
   "cartera.ayuda.aplica": ", que aplica los términos del plan e imprime lo que queda por configurar a mano. El alta entera se ensaya sobre un tenant descartable con",

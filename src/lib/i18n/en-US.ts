@@ -499,6 +499,15 @@ export const enUS: Record<TranslationKey, string> = {
   "agente.yaConfirmado": "Example already confirmed",
 
   // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
+
+  // ── Los nombres comerciales de los planes ──────────────────────────
+  // El precio y la aritmética siguen en `lib/billing/plans.ts`, que no conoce
+  // el diccionario: acá está sólo cómo se escribe el nombre.
+  "plan.piloto": "Pilot",
+  "plan.operativo": "Operational",
+  "plan.profesional": "Professional",
+  "plan.corporativo": "Corporate",
+  "plan.enterprise": "Enterprise",
   "cartera.aFacturar": "To bill",
   "cartera.ayuda.alta": "A new client is created with",
   "cartera.ayuda.aplica": ", which applies the plan's terms and prints what is left to set up by hand. The whole sign-up is rehearsed on a throwaway tenant with",

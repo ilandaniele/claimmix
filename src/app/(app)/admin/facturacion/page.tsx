@@ -22,28 +22,15 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { AppError } from "@/lib/errors";
 import { resolveBillingPeriod } from "@/lib/billing/period";
 import { getStatement } from "@/server/billing/statement";
-import { getT, type Locale } from "@/lib/i18n";
+import { mesDeCalendario } from "@/core/fecha/mes-calendario";
+import { nombreDePlan } from "@/lib/billing/plan-label";
+import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 
 export const dynamic = "force-dynamic";
 
 // Uno solo para todo el producto: ver formatUsd en lib/utils.
 const money = (n: number) => formatUsd(n);
-
-/**
- * `2026-03` → `marzo de 2026`, para que el encabezado se lea como una fecha.
- *
- * El nombre del mes sigue al idioma, así que el locale entra por parámetro: es
- * una función de módulo y acá no hay `t`. `nombreDelMesArgentino` no sirve
- * porque recibe una fecha y fija `es-AR` adentro. La zona sigue siendo UTC — el
- * `Date` se arma en UTC en la línea de abajo, y formatearlo en otra zona lo
- * correría al mes anterior.
- */
-function monthLabel(month: string, locale: Locale): string {
-  const [year, m] = month.split("-");
-  const date = new Date(Date.UTC(Number(year), Number(m) - 1, 1));
-  return date.toLocaleDateString(locale, { month: "long", year: "numeric", timeZone: "UTC" });
-}
 
 function shiftMonth(month: string, delta: number): string {
   const [year, m] = month.split("-");
@@ -104,8 +91,8 @@ export default async function FacturacionPage({
             {t("nav.facturacion")}
           </h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            {tenant.name} · {t("facturacion.plan").replace("{n}", tenant.plan_label)} ·{" "}
-            {monthLabel(statement.month, locale)}
+            {tenant.name} · {t("facturacion.plan").replace("{n}", nombreDePlan(tenant.plan, tenant.plan_label, t))} ·{" "}
+            {mesDeCalendario(statement.month, locale)}
           </p>
         </div>
 
@@ -167,7 +154,7 @@ export default async function FacturacionPage({
               no alcanza con pegar dos claves sueltas.
             */}
             <Row
-              label={t("facturacion.abonoPlan").replace("{n}", tenant.plan_label)}
+              label={t("facturacion.abonoPlan").replace("{n}", nombreDePlan(tenant.plan, tenant.plan_label, t))}
               value={money(invoice.monthly_fee_usd)}
             />
             <Row

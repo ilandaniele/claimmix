@@ -22,6 +22,8 @@ import { getServerLocale } from "@/lib/i18n/locale";
 import { requireOperator } from "@/lib/auth/require-operator";
 import { AppError } from "@/lib/errors";
 import { listTenantSummaries } from "@/server/billing/tenant-summary";
+import { mesDeCalendario } from "@/core/fecha/mes-calendario";
+import { nombreDePlan } from "@/lib/billing/plan-label";
 
 export const dynamic = "force-dynamic";
 
@@ -80,7 +82,7 @@ export default async function CarteraPage({
           {t("cartera.title")}
         </h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          {t("cartera.subtitle")} {month}. {t("cartera.subtitleOperator")}
+          {t("cartera.subtitle")} {mesDeCalendario(month, locale)}. {t("cartera.subtitleOperator")}
         </p>
       </div>
 
@@ -124,7 +126,7 @@ export default async function CarteraPage({
                   )}
                 </td>
                 <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                  {fila.plan_label}
+                  {nombreDePlan(fila.plan, fila.plan_label, t)}
                   <span className="block text-xs text-slate-400">
                     {money(fila.monthly_fee_usd)} · {fila.included_claims.toLocaleString("es-AR")}{" "}
                     {t("cartera.incluidas")}

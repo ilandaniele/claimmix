@@ -103,45 +103,48 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
            * guion, y una tabla con la primera columna de doble altura se lee
            * como si cada fila fuera dos.
            */
-          <span className="whitespace-nowrap font-mono text-[12.5px] text-slate-600">
+          /*
+           * Violeta y no gris: es el identificador de la entidad, lo que en la
+           * referencia se dibuja como enlace. Es el UNICO acento de la fila —
+           * el estado y la severidad llevan color semantico, no de marca.
+           */
+          <span className="whitespace-nowrap font-mono text-[12.5px] font-medium text-violet-700">
             {formatCaseId(getValue<string>())}
           </span>
         ),
       },
+      /*
+       * Asegurado y poliza en la misma celda, uno sobre el otro.
+       *
+       * Es el idioma de la referencia —rotulo chico sobre valor— y ademas
+       * saca una columna: la poliza sola, en su propia columna mono, era un
+       * codigo suelto lejos de la persona a la que pertenece. Debajo del
+       * nombre se lee como lo que es, y la tabla gana aire horizontal.
+       */
       {
         accessorKey: "policyholder_name",
         header: t("table.col.policyholder"),
-        cell: ({ getValue }) => {
-          const nombre = getValue<string | null>();
-          if (!nombre) return <Vacio />;
-          /*
-           * `truncate` y no envolver: «Martín Ezequiel Rodríguez» se partía en
-           * TRES líneas y la fila entera pasaba de 44 a 97 píxeles de alto. Con
-           * veinte filas eso es media pantalla de aire vacío, y la tabla se leía
-           * como una lista de tarjetas.
-           *
-           * El ancho tope evita lo contrario —un nombre larguísimo empujando la
-           * tabla al scroll horizontal— y el `title` deja el nombre completo a
-           * un hover de distancia.
-           */
+        cell: ({ row }) => {
+          const nombre = row.original.policyholder_name;
+          const poliza = row.original.policy_number;
+          if (!nombre && !poliza) return <Vacio />;
           return (
-            <span
-              className="block max-w-[11rem] truncate text-[13.5px] font-medium text-slate-900"
-              title={nombre}
-            >
-              {nombre}
-            </span>
+            <div className="min-w-0 max-w-[13rem]">
+              {nombre ? (
+                <span className="block truncate text-[13.5px] font-semibold text-slate-900" title={nombre}>
+                  {nombre}
+                </span>
+              ) : (
+                <Vacio />
+              )}
+              {poliza && (
+                <span className="mt-0.5 block whitespace-nowrap font-mono text-[11.5px] text-slate-500">
+                  {poliza}
+                </span>
+              )}
+            </div>
           );
         },
-      },
-      {
-        accessorKey: "policy_number",
-        header: t("table.col.policy"),
-        cell: ({ getValue }) => (
-          <span className="whitespace-nowrap font-mono text-[12.5px] text-slate-600">
-            {getValue<string | null>() ?? <Vacio />}
-          </span>
-        ),
       },
       {
         accessorKey: "claim_type",
@@ -401,7 +404,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                    * lo que se dibuja afuera.
                    */
                   className={`group cursor-pointer border-b border-slate-100 transition-colors last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500 ${
-                    isSelected ? "bg-red-50 hover:bg-red-100" : "hover:bg-slate-50"
+                    isSelected ? "bg-red-50 hover:bg-red-100" : "hover:bg-violet-50"
                   }`}
                   role="row"
                   aria-label={`Siniestro ${formatCaseId(row.original.id)}`}
@@ -415,7 +418,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className="px-3 py-2.5 first:pl-5 last:pr-5"
+                      className="px-3 py-3 align-middle first:pl-5 last:pr-5"
                       onClick={
                         cell.column.id === "select" || cell.column.id === "row-delete"
                           ? (e) => e.stopPropagation()

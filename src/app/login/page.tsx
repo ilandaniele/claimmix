@@ -35,23 +35,40 @@ export const metadata = {
  * Google terminaba redirigiendo a `/login?error=…` y se veía un formulario
  * limpio, sin una palabra. Desde afuera eso es «apreté y no pasó nada».
  */
-const ERRORES: Record<string, string> = {
+export const ERRORES: Record<string, string> = {
   google_signin_failed:
     "No pudimos empezar el ingreso con Google. Probá de nuevo o entrá con tu contraseña.",
   auth_callback_failed:
     "Google nos devolvió, pero no pudimos completar el ingreso. Entrá con tu contraseña y escribinos si sigue pasando.",
   account_not_linked:
-    "Ya existe una cuenta con ese correo y todavía no está vinculada a Google. Entrá con tu contraseña esta vez.",
+    "Ese correo ya tiene una cuenta con contraseña. Entrá con tu contraseña y, una vez adentro, vinculá Google desde Configuración — después el botón te va a funcionar.",
 };
+
+/**
+ * El código de error, tolerando que venga repetido.
+ *
+ * Un parámetro repetido llega como array, y hacer `ERRORES[array]` no encuentra
+ * nada y cae al texto genérico. Pasó de verdad: la URL de error traía su propia
+ * query y Better Auth le sumaba la suya con `&`.
+ *
+ * Se queda con el ÚLTIMO, que es el que agrega quien más cerca estuvo del
+ * fallo y por lo tanto el más específico.
+ */
+export function codigoDeError(error: string | string[] | undefined): string | null {
+  if (!error) return null;
+  return Array.isArray(error) ? (error.at(-1) ?? null) : error;
+}
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ aviso?: string; error?: string }>;
+  searchParams: Promise<{ aviso?: string; error?: string | string[] }>;
 }) {
   const { aviso, error } = await searchParams;
-  const mensajeError = error
-    ? (ERRORES[error] ?? "No pudimos completar el ingreso. Probá de nuevo.")
+  const codigo = codigoDeError(error);
+  const mensajeError = codigo
+    ? (ERRORES[codigo] ??
+       "No pudimos completar el ingreso. Entrá con tu contraseña y escribinos si sigue pasando.")
     : null;
 
   return (

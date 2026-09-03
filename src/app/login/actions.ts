@@ -203,7 +203,20 @@ export async function signInWithGoogle(): Promise<void> {
       body: {
         provider: "google",
         callbackURL: "/bandeja",
-        errorCallbackURL: "/login?error=auth_callback_failed",
+        /*
+         * SIN query propia, y es la diferencia entre un mensaje util y uno
+         * inutil.
+         *
+         * Better Auth appendea asi: `sep = errorURL.includes("?") ? "&" : "?"`.
+         * Con `/login?error=auth_callback_failed` la URL final quedaba
+         * `?error=auth_callback_failed&error=account_not_linked` — el parametro
+         * DOS veces. Next entrega los repetidos como array, el mapa de mensajes
+         * no encuentra la clave y cae al texto generico, que ademas aconseja
+         * reintentar, que es justo lo unico que nunca va a andar.
+         *
+         * Dejando `/login` pelado, el codigo real llega solo y limpio.
+         */
+        errorCallbackURL: "/login",
       },
       headers: await headers(),
     });

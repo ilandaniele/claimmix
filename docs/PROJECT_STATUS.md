@@ -1513,6 +1513,19 @@ criterio en una transacción con conteo — hoy 130 sembrados, 130 borrados.
 Una captura con sesión real es la prueba que se le muestra a quien reportó;
 «ya cambié el diseño» sin captura fue exactamente lo que no alcanzó.
 
+**El «pooler lento» nunca fue Neon: era la red de esta máquina.** Se midió
+0,8–5 s por conexión a Neon y se concluyó «pooler degradado». Nunca se midió
+contra OTRO destino. Cuando llegó «la app tarda en cargar», el desglose lo
+mostró: `favicon.ico` —estático, servido por el borde de Vercel desde caché,
+sin función ni base— tardaba 2,7–4,6 s; el handshake TCP solo, 2,6–4 s;
+`nextjs.org`, 5–14 s; y `google.com`, 3,3 s. Una conexión degradada hacia
+todo internet, no un proveedor. Producción estaba bien todo el tiempo.
+
+⛔ **Regla:** una latencia se atribuye a un destino sólo después de medir
+otro. Antes de culpar a Neon o a Vercel, `curl -w '%{time_connect}'` contra
+`google.com`. Si el TCP a Google tarda segundos, el problema está de este
+lado del cable y ningún commit lo arregla.
+
 **Y una trampa más, la que costó más tiempo: los topes.** El 3/9 por la
 tarde el pooler de Neon respondía a 0,8–5 s por conexión desde esta máquina
 (baseline 0,15–0,6 s). El `pnpm check` completo falló tres veces, ~90 min, y

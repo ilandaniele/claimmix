@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
+import { PER_PAGE_OPTIONS } from "./per-page";
 import { FilterTabs } from "./components/FilterTabs";
 import { usePaginacion } from "./components/useFilterParam";
 import { TypeFilterChips } from "./components/TypeFilterChips";
@@ -106,8 +107,6 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }: DeleteConfirmDialog
 
 // ── Pagination ────────────────────────────────────────────────────────────────
 
-/** Page-size options offered in the inbox. `listCases` caps per_page at 100. */
-export const PER_PAGE_OPTIONS = [10, 20, 50, 100] as const;
 
 /**
  * Page numbers to render, collapsing long ranges with ellipses so the control

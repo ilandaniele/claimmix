@@ -1400,6 +1400,47 @@ falsa: los ejemplos aprobados vuelven como contexto del agente, no «del agente
 Gemini/OpenAI». Sacarlo del producto es una decisión de producto, no una
 corrección de texto.
 
+### 🔑 Google entra, salir se ve, y el registro está cerrado (2026-09-03)
+
+**«Continuar con Google» no funcionaba, y no era Google.** El `redirect_uri`
+era el correcto. Se cortaba en el vinculado: Better Auth 1.6.25 tiene una
+segunda condición, `requireLocalEmailVerified` —por omisión `true`—, que
+`trustedProviders` NO cubre. La única cuenta de producción con contraseña tenía
+`email_verified = false`, así que caía en `account not linked`. Y encima el
+login nunca leía `?error=`, así que la persona volvía a un formulario limpio:
+«apreté y no pasó nada».
+
+⛔ **No se apagó `requireLocalEmailVerified`, y es a propósito.** Era una
+línea. Pero `/registro` estaba abierto a cualquier dirección, así que apagarla
+dejaba que quien se adelantara a registrar el correo de otro se quedara con su
+cuenta cuando el dueño real entrara por Google. Se resolvió vinculando desde
+adentro (Configuración → Vincular Google), que prueba las dos mitades.
+Verificado contra la base: la cuenta tiene `credential` + `google`.
+
+**Un bug del propio arreglo, que conviene recordar.** `errorCallbackURL` era
+`/login?error=auth_callback_failed`. Better Auth appendea con `&` si ya hay
+`?`, así que llegaba `?error=a&error=b`, Next lo entrega como array, y el
+lookup caía al mensaje inútil «Probá de nuevo» — que además aconsejaba mal.
+Ahora `errorCallbackURL` es `/login` a secas y `codigoDeError` tolera el array.
+
+**Salir de la sesión «quedaba colgado».** Dos cosas: un icono de 28px sin
+ningún estado de espera contra un viaje a Neon que tarda, y navegación desde el
+cliente en carrera con la cookie recién borrada. Ahora usa la acción de
+servidor con `useFormStatus`. Y la tercera, que nadie había visto: **esa acción
+es la única que escribe `AUTH_SIGN_OUT` en la auditoría, y nadie la llamaba.**
+Ningún cierre de sesión desde la interfaz quedó registrado nunca. Hay un e2e
+que aprieta y espera LLEGAR al login.
+
+**El registro está cerrado.** `SIGNUP_ALLOWED_EMAILS` + `ADMIN_EMAILS`, en
+`user.create.before` —el único punto por el que pasan `/registro` Y la primera
+entrada por Google— además de la capa que ya existía en `provision.ts`. Un
+admin da de alta a quien quiera desde `/admin/users` (`enAltaDeAdmin`). Las
+seis direcciones de producción están cargadas en Vercel. **Sondeado en
+producción**: una dirección fuera de la lista recibe 400 y no deja fila.
+
+Direcciones exactas y no dominios, porque las seis cuentas de producción son
+`@gmail.com`: una lista de dominios que las incluya deja entrar al planeta.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

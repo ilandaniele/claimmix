@@ -6,21 +6,34 @@
  * aprieta y espera el destino. Y después vuelve a pedir una pantalla privada
  * para comprobar que la sesión se cerró de verdad, no que sólo se navegó.
  *
- * Reusa la sesión que deja `auth.setup.ts`; se saltea sin credenciales.
+ * ── Entra con SU sesión, no con la compartida ───────────────────────────────
+ *
+ * La primera versión reusaba `SESION_ADMIN`, la que deja `auth.setup.ts` para
+ * toda la suite. Cerrar sesión borra la fila en la base; el `storageState`
+ * sigue teniendo la cookie pero del otro lado ya no hay nada, así que cada spec
+ * que corría después quedaba deslogueado. Este test pasaba y rompía al
+ * siguiente — un fixture compartido destruido por quien lo usa, que es la misma
+ * clase de bug que ya nos había costado una tarde con el idioma de staging.
+ *
+ * Por eso entra por la pantalla con las credenciales, como hace el setup, y
+ * cierra únicamente la sesión que él mismo abrió. Cuesta un login más por run;
+ * el tope es cinco cada diez segundos por IP y correo, y el setup usa dos.
  */
 
 import { test, expect } from "@playwright/test";
-import { SESION_ADMIN } from "./sesiones";
 
-const HAY_ADMIN = !!(process.env.PLAYWRIGHT_ADMIN_EMAIL && process.env.PLAYWRIGHT_ADMIN_PASSWORD);
+const CORREO = process.env.PLAYWRIGHT_ADMIN_EMAIL;
+const CLAVE = process.env.PLAYWRIGHT_ADMIN_PASSWORD;
 
 test.describe("cerrar sesión", () => {
-  test.skip(!HAY_ADMIN, "Falta PLAYWRIGHT_ADMIN_EMAIL / PLAYWRIGHT_ADMIN_PASSWORD");
-  test.use({ storageState: SESION_ADMIN });
+  test.skip(!CORREO || !CLAVE, "Falta PLAYWRIGHT_ADMIN_EMAIL / PLAYWRIGHT_ADMIN_PASSWORD");
 
   test("apretar salir lleva al login, y la sesión queda cerrada", async ({ page }) => {
-    await page.goto("/bandeja");
-    await expect(page).not.toHaveURL(/\/login/);
+    await page.goto("/login");
+    await page.fill('[name="email"]', CORREO!);
+    await page.fill('[name="password"]', CLAVE!);
+    await Promise.all([page.waitForURL(/\/bandeja/), page.click('[type="submit"]')]);
+    await expect(page).toHaveURL(/\/bandeja/);
 
     const salir = page.getByTestId("signout-button");
     await expect(salir).toBeEnabled();

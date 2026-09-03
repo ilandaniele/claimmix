@@ -1490,6 +1490,29 @@ ensayo matado a mitad deja huérfanos — hoy cinco, dos veces, borrados por ese
 mismo criterio en una transacción con conteo antes y después.
 `cleanup:cases` NO sirve para esto: borra todos los casos del inquilino.
 
+**El e2e que estaba en verde y no contaba filas.** «Pongo 100 y la tabla
+sigue en 20» llegó DESPUÉS de que el e2e de cien por página pasara en CI.
+Afirmaba que el selector decía «100» y que había un solo scroller — nunca
+contó `tbody tr`, porque el tenant contra el que corría tenía un caso. Un
+test que no mira lo que el usuario mira no prueba lo que el usuario ve.
+Ahora cuenta filas contra el total del pie, en los dos tamaños y por el
+desplegable, y CI corre contra el tenant del padrón (131 casos).
+
+⛔ **Cómo se verifica una pantalla, entonces:** no leyendo el código —eso
+dio «el cableado está bien» dos veces— sino con Playwright entrando de
+verdad contra staging. Localmente:
+
+```
+DATABASE_URL=$STAGING_DATABASE_URL DATABASE_URL_APP=$STAGING_DATABASE_URL_APP \nPLAYWRIGHT_ADMIN_EMAIL=mariela@seguros-del-sur.com.ar \nPLAYWRIGHT_ADMIN_PASSWORD=$INTEGRATION_ADMIN_PASSWORD \nnpx playwright test tests/e2e/por-pagina.spec.ts --project=chromium
+```
+
+Playwright tipea la contraseña; nadie la imprime. Si hace falta más de
+veinte casos para distinguir tamaños, se siembran marcados
+(`email_thread_id LIKE 'sembrado-100-%'`) y se borran por ese mismo
+criterio en una transacción con conteo — hoy 130 sembrados, 130 borrados.
+Una captura con sesión real es la prueba que se le muestra a quien reportó;
+«ya cambié el diseño» sin captura fue exactamente lo que no alcanzó.
+
 **Y una trampa más, la que costó más tiempo: los topes.** El 3/9 por la
 tarde el pooler de Neon respondía a 0,8–5 s por conexión desde esta máquina
 (baseline 0,15–0,6 s). El `pnpm check` completo falló tres veces, ~90 min, y

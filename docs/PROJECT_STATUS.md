@@ -1441,6 +1441,66 @@ producción**: una dirección fuera de la lista recibe 400 y no deja fila.
 Direcciones exactas y no dominios, porque las seis cuentas de producción son
 `@gmail.com`: una lista de dominios que las incluya deja entrar al planeta.
 
+### 🧭 La bandeja: un scroller, cien por página, y tres trampas (2026-09-03)
+
+**«Si selecciono 100 se rompe» era un crash del servidor, y estaba desde
+siempre.** `page.tsx` —componente de servidor— importaba `PER_PAGE_OPTIONS`
+desde `DashboardClient.tsx`, que es `"use client"`. En React Server Components
+un export que no es componente NO cruza esa frontera como valor: cruza como
+referencia de cliente, un proxy. En el servidor no era un array y `.includes`
+tiraba `TypeError` cada vez que la URL traía `?per_page=`. Con el valor por
+omisión el parámetro no viaja, así que la rama nunca corría. Ni `tsc` (ve el
+tipo real) ni `next build` (el proxy se resuelve en ejecución) lo agarran. Lo
+encontró un e2e que navega a `/bandeja?per_page=100` con sesión real — y la
+lectura previa de que «el cableado está bien» estaba equivocada porque nunca
+ejecutó esa rama. Ahora vive en `bandeja/per-page.ts`, sin directiva.
+
+⛔ **Regla que sale de eso:** un módulo `"use client"` exporta componentes y
+hooks. Un valor —constante, tabla, función pura— que un componente de
+servidor necesite va en un archivo sin directiva. Escáner rápido: buscar
+`export const` en archivos con `"use client"` e importadores sin ella. Hoy no
+queda ninguno.
+
+**Las dos barras de scroll eran tres contenedores anidados.** La tabla tenía
+`max-h` + `overflow-auto` propios —puestos para que el encabezado `sticky`
+tuviera contra qué pegarse— adentro de una envoltura que ya scrolleaba,
+adentro del `<main>` del layout. Con 20 filas nada scrolleaba y no se veía;
+con 100, dos barras y el encabezado pegado dos veces. Scrollea sólo la
+envoltura de la lista (`data-scroll="lista"`); el `sticky` se pega al
+scroller más cercano, que es uno. Barra fina en los dos motores
+(`scrollbar-*` y `::-webkit-scrollbar`), clase `.scroll-fino`.
+
+**Trampa de verificación: `| grep | head` miente.** El estado de salida de
+un pipeline es el del último comando. `tsc | grep | head` devuelve cero con
+`tsc` en rojo; con `pipefail`, `grep -v` sobre salida vacía devuelve 1 y mata
+la cadena antes del commit. Un commit con error de sintaxis llegó a `main`
+así (`7da1482`). Desde entonces cada verificación corre sola y se lee su exit
+code explícito; el push va en la misma orden que el commit.
+
+**Trampa de diagnóstico: el log de `tsx` redirigido a archivo se bufferiza.**
+Un `pnpm rehearse > log` matado a mitad muestra una línea aunque haya corrido
+diez minutos e insertado cinco casos — el buffer muere con el proceso. Dos
+veces se leyó «colgado en la primera llamada» cuando era «avanzando lento».
+La base dice la verdad: `created_at` de los casos de ensayo.
+
+**El ensayo escribe en PRODUCCIÓN y se limpia solo al arrancar.** Sus casos se
+reconocen por `email_thread_id LIKE '5490000%'` y clientes
+`ensayo.*@example.com`; los hijos de `cases` son `ON DELETE CASCADE`. Un
+ensayo matado a mitad deja huérfanos — hoy cinco, dos veces, borrados por ese
+mismo criterio en una transacción con conteo antes y después.
+`cleanup:cases` NO sirve para esto: borra todos los casos del inquilino.
+
+**Y un pendiente que no es de código.** El 3/9 por la tarde el pooler de Neon
+respondía a 0,8–4,4 s por conexión desde esta máquina (baseline 0,15–0,6 s).
+Producción —Vercel, misma región— insertaba normal. El `pnpm check` completo
+no cerró en verde desde acá: tres intentos, ~90 min, la capa `rehearse`
+matada por los topes. Todo lo demás verde: CI con 74 e2e, post-deploy, smoke
+sobre `36c8c11`. Correrlo de nuevo cuando el pooler vuelva a la normalidad:
+
+```
+pnpm check
+```
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

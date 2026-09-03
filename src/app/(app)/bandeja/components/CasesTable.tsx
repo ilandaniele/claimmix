@@ -351,7 +351,6 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
         * que ahora es uno solo.
         */}
       <div role="region" aria-label={t("bandeja.tableLabel")}>
-      >
         <table className="w-full table-auto text-left" aria-label={t("bandeja.tableLabel")}>
           <thead className="sticky top-0 z-10 bg-slate-50">
             {table.getHeaderGroups().map((headerGroup) => (

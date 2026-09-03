@@ -59,10 +59,15 @@ test.describe("Login page — Spanish UI (AC4)", () => {
   });
 
   test("login page shows ClaimMix brand", async ({ page }) => {
-    await expect(page.getByText("ClaimMix")).toBeVisible();
-    await expect(
-      page.getByText("Gestión de siniestros asistida por IA")
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "ClaimMix" })).toBeVisible();
+    /*
+     * El descriptor y el subtitulo son dos piezas desde el redisenio: «Gestion
+     * de siniestros» es la pildora de rotulo arriba del nombre, y la linea de
+     * abajo dice lo que el producto hace con eso. Antes era una sola frase y
+     * este test la buscaba entera — se rompio al partirla, no al cambiarla.
+     */
+    await expect(page.getByText("Gestión de siniestros", { exact: true })).toBeVisible();
+    await expect(page.getByText("Asistida por IA, decidida por personas")).toBeVisible();
   });
 
   test("form has accessible labels", async ({ page }) => {

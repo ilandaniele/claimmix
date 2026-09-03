@@ -318,23 +318,35 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
     <div>
       {/* Bulk action bar — visible when ≥1 row selected */}
       {onDeleteMany && selectedIds.size > 0 && (
-        <div className="mx-5 mb-3 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
-          <span className="text-sm font-medium text-red-700">
-            {selectedIds.size} {t("bandeja.claims")} {t("bandeja.selected")}
+        /*
+         * Era una banda roja entera. Ahora es una barra neutra con UN dato
+         * en el acento —cuantos hay marcados— y la unica cosa roja es el
+         * boton que borra, delineado y no relleno, separado del resto.
+         */
+        <div
+          role="toolbar"
+          aria-label={t("bandeja.selected")}
+          className="mx-5 mb-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+        >
+          <span className="cifra rounded-full bg-violet-600 px-2 py-0.5 text-[12px] font-semibold text-white">
+            {selectedIds.size}
+          </span>
+          <span className="text-[13px] text-slate-700">
+            {t("bandeja.claims")} {t("bandeja.selected")}
           </span>
           <button
             type="button"
-            onClick={() => onDeleteMany([...selectedIds], clearSelection)}
-            className="ml-auto rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+            onClick={clearSelection}
+            className="ml-auto rounded-md px-2.5 py-1.5 text-[13px] font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
           >
-            {t("bandeja.deleteSelected")} ({selectedIds.size})
+            {t("bandeja.deleteCancel")}
           </button>
           <button
             type="button"
-            onClick={clearSelection}
-            className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-100 transition-colors"
+            onClick={() => onDeleteMany([...selectedIds], clearSelection)}
+            className="rounded-md border border-red-300 px-3 py-1.5 text-[13px] font-medium text-red-700 transition-colors hover:bg-red-50"
           >
-            {t("bandeja.deleteCancel")}
+            {t("bandeja.deleteSelected")} ({selectedIds.size})
           </button>
         </div>
       )}
@@ -404,7 +416,12 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                    * lo que se dibuja afuera.
                    */
                   className={`group cursor-pointer border-b border-slate-100 transition-colors last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500 ${
-                    isSelected ? "bg-red-50 hover:bg-red-100" : "hover:bg-violet-50"
+                    /*
+                     * Seleccionar es un ESTADO; borrar es una ACCION. El rojo
+                     * es de la accion, y pintaba de alarma diez filas que la
+                     * persona solo habia marcado.
+                     */
+                    isSelected ? "bg-violet-50" : "hover:bg-violet-50"
                   }`}
                   role="row"
                   aria-label={`Siniestro ${formatCaseId(row.original.id)}`}
@@ -459,7 +476,13 @@ function IndeterminateCheckbox({
       }}
       onChange={onChange}
       onClick={(e) => e.stopPropagation()}
-      className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 cursor-pointer"
+      /*
+       * `text-violet-600` es el color del tilde (asi lo lee el plugin de
+       * formularios). Era `text-slate-900`: un tilde negro en un producto
+       * cuyo unico acento es el violeta, y en modo oscuro una caja blanca
+       * con tilde negro, lo mas brillante de la fila.
+       */
+      className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 transition-colors focus:ring-2 focus:ring-violet-500 focus:ring-offset-0"
       aria-label={ariaLabel}
     />
   );

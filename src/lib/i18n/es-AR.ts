@@ -945,6 +945,18 @@ export const esAR = {
   "ft.rollback": "Rollback",
   "ft.sincronizar": "Sincronizar",
 
+
+  // ── Vincular Google a una cuenta que ya existe ────────────────────
+  // El «Continuar con Google» del login sirve para ENTRAR. Vincular es otra
+  // cosa y sólo es seguro desde adentro: ver `vincular-google.ts`.
+  "google.ayuda": "Se vincula desde acá y no desde la pantalla de entrada a propósito: entrando con tu contraseña y volviendo de Google quedan probadas las dos mitades, así que nadie que se haya adelantado con tu dirección puede quedarse con tu cuenta.",
+  "google.sinVincular": "Sin vincular",
+  "google.titulo": "Entrar con Google",
+  "google.vinculado": "Listo. La próxima vez podés entrar con Google.",
+  "google.vincular": "Vincular Google",
+  "google.vinculoError": "No pudimos vincular tu cuenta de Google. Probá de nuevo.",
+  "google.yaVinculada": "Vinculada: ya podés entrar con Google",
+
 } as const;
 
 export type TranslationKey = keyof typeof esAR;

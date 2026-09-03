@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockDb, mockWriteAuditLog } = vi.hoisted(() => ({
-  mockDb: { delete: vi.fn(), select: vi.fn() },
+  mockDb: { delete: vi.fn(), select: vi.fn(), update: vi.fn() },
   mockWriteAuditLog: vi.fn(),
 }));
 
@@ -28,7 +28,7 @@ vi.mock("@/lib/audit/log", () => ({
 }));
 
 import { onPasswordReset } from "@/lib/auth/on-password-reset";
-import { sessions } from "@/lib/db/schema";
+import { authUsers, sessions } from "@/lib/db/schema";
 
 const USER = { id: "user-001" };
 
@@ -37,11 +37,23 @@ function conBase(opciones: {
   sesionesBorradas?: unknown[];
   borrarFalla?: boolean;
   perfil?: unknown[];
+  marcarFalla?: boolean;
 } = {}) {
-  const { sesionesBorradas = [{ id: "s-1" }, { id: "s-2" }], borrarFalla = false, perfil = [{ tenant_id: "tenant-1" }] } =
+  const { sesionesBorradas = [{ id: "s-1" }, { id: "s-2" }], borrarFalla = false, perfil = [{ tenant_id: "tenant-1" }], marcarFalla = false } =
     opciones;
 
   const tablasBorradas: unknown[] = [];
+  const marcados: { tabla: unknown; valores: unknown }[] = [];
+  mockDb.update.mockImplementation((tabla: unknown) => ({
+    set: vi.fn().mockImplementation((valores: unknown) => {
+      marcados.push({ tabla, valores });
+      return {
+        where: vi.fn().mockImplementation(() =>
+          marcarFalla ? Promise.reject(new Error("se cayo la base")) : Promise.resolve()
+        ),
+      };
+    }),
+  }));
   mockDb.delete.mockImplementation((tabla: unknown) => {
     tablasBorradas.push(tabla);
     return {
@@ -63,7 +75,7 @@ function conBase(opciones: {
     }),
   });
 
-  return { tablasBorradas };
+  return { tablasBorradas, marcados };
 }
 
 beforeEach(() => {
@@ -137,5 +149,34 @@ describe("onPasswordReset", () => {
 
     expect(mockDb.delete).toHaveBeenCalledTimes(1);
     expect(mockWriteAuditLog).not.toHaveBeenCalled();
+  });
+
+  /*
+   * Terminar un restablecimiento prueba que el enlace llego a esa casilla y
+   * que quien lo abrio lo uso — que es exactamente lo que `emailVerified`
+   * afirma. Antes la bandera se quedaba en `false` para siempre, porque el
+   * alta no pide verificar y nada mas la tocaba.
+   *
+   * No es cosmetico: Better Auth se niega a vincular Google a un usuario con
+   * el correo sin verificar, asi que quien se dio de alta con contrasena no
+   * podia usar «Continuar con Google» nunca.
+   */
+  it("marca el correo como verificado", async () => {
+    const { marcados } = conBase();
+
+    await onPasswordReset(USER);
+
+    expect(marcados).toHaveLength(1);
+    expect(marcados[0]!.tabla).toBe(authUsers);
+    expect(marcados[0]!.valores).toEqual({ emailVerified: true });
+  });
+
+  it("si no se puede marcar, la persona igual puede volver a entrar", async () => {
+    conBase({ marcarFalla: true });
+
+    // Lo que no puede pasar es que tire: eso dejaria el restablecimiento a
+    // medias y a la persona afuera con una contrasena que ya cambio.
+    await expect(onPasswordReset(USER)).resolves.toBeUndefined();
+    expect(mockWriteAuditLog).toHaveBeenCalledTimes(1);
   });
 });

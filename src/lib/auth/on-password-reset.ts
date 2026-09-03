@@ -29,7 +29,44 @@ import { eq } from "drizzle-orm";
 
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { db } from "@/lib/db";
-import { sessions, users } from "@/lib/db/schema";
+import { authUsers, sessions, users } from "@/lib/db/schema";
+
+/**
+ * Marcar el correo como verificado.
+ *
+ * Terminar un restablecimiento es exactamente la prueba que `emailVerified`
+ * dice tener: el enlace llegó a esa casilla y quien lo abrió lo usó. Hasta
+ * ahora la bandera quedaba en `false` para siempre, porque el alta no pide
+ * verificar (`requireEmailVerification: false`) y nada más la tocaba.
+ *
+ * No es cosmético. Better Auth se niega a vincular una cuenta de Google a un
+ * usuario local con el correo sin verificar —`requireLocalEmailVerified`, que
+ * por omisión es `true`— así que quien se dio de alta con contraseña no podía
+ * usar «Continuar con Google» nunca. Con esto, restablecer también destraba
+ * ese camino, y lo destraba con la única prueba que sirve.
+ *
+ * Nunca tira: que no se pueda marcar no puede impedirle a alguien volver a
+ * entrar con su contraseña nueva.
+ */
+async function marcarCorreoVerificado(userId: string): Promise<void> {
+  try {
+    // sin-inquilino: la tabla de usuarios de Better Auth no tiene columna de
+    // inquilino; la clave es el usuario, ya identificado por el token.
+    await db
+      .update(authUsers)
+      .set({ emailVerified: true })
+      .where(eq(authUsers.id, userId));
+  } catch {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "auth.reset.no_se_pudo_marcar_verificado",
+        user_id: userId,
+      })
+    );
+  }
+}
 
 /**
  * Cierra las sesiones de un usuario y devuelve cuántas eran.
@@ -62,6 +99,7 @@ async function cerrarSesionesDe(userId: string): Promise<number> {
 
 export async function onPasswordReset(user: { id: string }): Promise<void> {
   const sesionesCerradas = await cerrarSesionesDe(user.id);
+  await marcarCorreoVerificado(user.id);
 
   try {
     // sin-inquilino: se AVERIGUA de quién es la cuenta, igual que en el login.

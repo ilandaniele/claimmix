@@ -921,4 +921,16 @@ export const enUS: Record<TranslationKey, string> = {
   "ft.rollback": "Roll back",
   "ft.sincronizar": "Sync",
 
+
+  // ── Vincular Google a una cuenta que ya existe ────────────────────
+  // El «Continuar con Google» del login sirve para ENTRAR. Vincular es otra
+  // cosa y sólo es seguro desde adentro: ver `vincular-google.ts`.
+  "google.ayuda": "You link it here rather than from the sign-in screen on purpose: signing in with your password and then returning from Google proves both halves, so nobody who registered your address first can end up with your account.",
+  "google.sinVincular": "Not linked",
+  "google.titulo": "Sign in with Google",
+  "google.vinculado": "Done. Next time you can sign in with Google.",
+  "google.vincular": "Link Google",
+  "google.vinculoError": "We could not link your Google account. Try again.",
+  "google.yaVinculada": "Linked — you can sign in with Google",
+
 } as const;

@@ -20,6 +20,7 @@ import { users } from "@/lib/db/schema";
 import { ConfiguracionClient } from "./ConfiguracionClient";
 import { GmailAccountsPanel } from "./GmailAccountsPanel";
 import { UserAiKeyPanel } from "./UserAiKeyPanel";
+import { GoogleVinculo } from "./GoogleVinculo";
 import { getUserGeminiKey } from "@/server/ai/provider";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
@@ -80,7 +81,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default async function ConfiguracionPage() {
+export default async function ConfiguracionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ vinculo?: string }>;
+}) {
+  const { vinculo } = await searchParams;
   const locale = await getServerLocale();
   const t = getT(locale);
 
@@ -146,6 +152,10 @@ export default async function ConfiguracionPage() {
         </Section>
 
         {/* ── Umbrales de IA ────────────────────────────────────────────────── */}
+        <Section title={t("google.titulo")}>
+          <GoogleVinculo aviso={vinculo} />
+        </Section>
+
         <Section title="Umbrales de IA">
           <div className="divide-y divide-slate-50">
             <Field label="Umbral de confianza">

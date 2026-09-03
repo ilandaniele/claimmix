@@ -1,11 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useFormStatus } from "react-dom";
 import { LogOut } from "lucide-react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useT } from "@/lib/i18n/LocaleContext";
-import { authClient } from "@/lib/auth/client";
+import { signOut } from "@/app/login/actions";
 
 interface TopBarProps {
   fullName: string;
@@ -21,15 +21,43 @@ function getInitials(name: string): string {
     .join("");
 }
 
-export function TopBar({ fullName, role }: TopBarProps) {
-  const router = useRouter();
-  const t = useT();
+/*
+ * El boton de salir, con su espera visible.
+ *
+ * Va aparte porque `useFormStatus` solo lee el formulario que lo CONTIENE:
+ * puesto en `TopBar` no ve nada. Es la unica razon de que exista.
+ *
+ * Mientras el servidor cierra la sesion el boton se deshabilita y muestra que
+ * esta trabajando. Antes no mostraba nada: un icono de 28px que al apretarlo
+ * no cambiaba, y del otro lado un viaje a Neon que en el plan gratuito puede
+ * tardar unos segundos. Eso se lee como «aprete y no paso nada», y la persona
+ * vuelve a apretar.
+ */
+function BotonSalir({ etiqueta }: { etiqueta: string }) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      aria-busy={pending}
+      aria-label={etiqueta}
+      data-testid="signout-button"
+      className="flex h-9 w-9 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-wait disabled:opacity-60 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+    >
+      {pending ? (
+        <span
+          className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+          aria-hidden="true"
+        />
+      ) : (
+        <LogOut size={16} aria-hidden="true" />
+      )}
+    </button>
+  );
+}
 
-  async function handleSignOut() {
-    await authClient.signOut();
-    router.push("/login");
-    router.refresh();
-  }
+export function TopBar({ fullName, role }: TopBarProps) {
+  const t = useT();
 
   const initials = getInitials(fullName);
   const isAdmin = role === "admin" || role === "owner";
@@ -78,15 +106,20 @@ export function TopBar({ fullName, role }: TopBarProps) {
           {roleLabel}
         </span>
 
-        {/* Sign out icon button */}
-        <button
-          onClick={handleSignOut}
-          data-testid="signout-button"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-          aria-label={t("nav.signOut") || "Cerrar sesión"}
-        >
-          <LogOut size={16} />
-        </button>
+        {/*
+          * Por la accion de servidor y no por `authClient.signOut()`.
+          *
+          * El camino de cliente hacia dos cosas mal. Cerraba la sesion sin
+          * pasar por `signOut` de `login/actions.ts`, que es el que escribe
+          * AUTH_SIGN_OUT en la auditoria: ningun cierre de sesion desde esta
+          * barra quedo registrado nunca. Y despues navegaba con `router.push`
+          * mas `router.refresh` desde el cliente, una carrera contra la cookie
+          * que se acababa de borrar. La accion de servidor audita y redirige
+          * en el mismo pedido.
+          */}
+        <form action={signOut}>
+          <BotonSalir etiqueta={t("nav.signOut") || "Cerrar sesión"} />
+        </form>
       </div>
     </header>
   );

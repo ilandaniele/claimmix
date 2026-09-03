@@ -68,10 +68,10 @@ export function FilterTabs({ counts, activeStatus }: FilterTabsProps) {
             {label}
             <span
               className={[
-                "cifra rounded-full px-1.5 py-0.5 text-[11px]",
+                "cifra rounded-full px-1.5 py-0.5 text-[11px] font-medium",
                 isActive
-                  ? "bg-violet-100 text-violet-700"
-                  : "bg-slate-100 text-slate-500",
+                  ? "bg-violet-600 text-white"
+                  : "bg-slate-100 text-slate-600",
               ].join(" ")}
               aria-label={`${count} casos`}
             >

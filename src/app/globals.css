@@ -348,3 +348,26 @@ body {
 .dark .border-blue-200 {
   border-color: #1d4ed8 !important;
 }
+
+/*
+ * La barra de scroll de la lista, fina y del color del tema.
+ *
+ * La de sistema es gruesa y gris claro sobre la tarjeta oscura: era lo mas
+ * brillante de la pantalla. Se declara en las dos formas porque los motores
+ * no comparten ninguna: `scrollbar-*` es el estandar (Firefox, Chrome 121+) y
+ * `::-webkit-scrollbar` el que entienden Safari y los Chrome viejos.
+ */
+.scroll-fino {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.scroll-fino::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-fino::-webkit-scrollbar-track { background: transparent; }
+.scroll-fino::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.dark .scroll-fino { scrollbar-color: #334155 transparent; }
+.dark .scroll-fino::-webkit-scrollbar-thumb { background: #334155; background-clip: padding-box; }

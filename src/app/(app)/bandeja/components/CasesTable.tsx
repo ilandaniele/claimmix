@@ -337,24 +337,23 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
       )}
 
       {/*
-        * `max-h` + `overflow-auto` y no solo `overflow-x-auto`.
+        * Esta caja NO scrollea. Scrollea la que la envuelve en DashboardClient.
         *
-        * Sin una altura maxima el `sticky` del encabezado no tiene contra que
-        * pegarse: se queda quieto porque su contenedor crece con la tabla y
-        * nunca hay scroll propio. Con 480 siniestros y 20 por pagina la lista
-        * entra justo, pero a 100 por pagina se scrollea y los nombres de las
-        * columnas se iban de pantalla — que es cuando mas se necesitan.
+        * Tenia `max-h` + `overflow-auto` propios para que el encabezado `sticky`
+        * tuviera contra que pegarse. Pero la envoltura de arriba —`min-h-0
+        * flex-1 overflow-auto`— ya es un scroller, y el `<main>` del layout
+        * otro: TRES contenedores anidados. Con 20 filas no se notaba porque
+        * nada llegaba a scrollear; a 100 aparecian dos barras verticales, el
+        * encabezado se pegaba dos veces y la rueda movia la caja equivocada.
+        * Era «a 100 se rompe».
         *
-        * El `max(24rem, ...)` es el piso: en una pantalla baja o con el zoom
-        * grande, la resta sola daria una franja de dos filas o un negativo.
+        * El `sticky` sigue funcionando: se pega contra el scroller mas cercano,
+        * que ahora es uno solo.
         */}
-      <div
-        className="max-h-[max(24rem,calc(100dvh-22rem))] overflow-auto"
-        role="region"
-        aria-label={t("bandeja.tableLabel")}
+      <div role="region" aria-label={t("bandeja.tableLabel")}>
       >
         <table className="w-full table-auto text-left" aria-label={t("bandeja.tableLabel")}>
-          <thead className="sticky top-0 z-10 bg-white">
+          <thead className="sticky top-0 z-10 bg-slate-50">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
@@ -373,7 +372,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                      * 2.6:1, muy por debajo del 4.5:1 que pide texto. El 500 da
                      * 4.8:1. Es el nombre de la columna, no una decoracion.
                      */
-                    className="rotulo sticky top-0 whitespace-nowrap border-b border-slate-200 bg-white px-2.5 pb-2.5 pt-3 text-slate-500 first:pl-5 last:pr-5"
+                    className="rotulo sticky top-0 whitespace-nowrap bg-slate-50 px-3 py-2.5 text-slate-500 shadow-[inset_0_-1px_0_0_theme(colors.slate.200)] first:pl-5 last:pr-5"
                   >
                     {flexRender(
                       header.column.columnDef.header,
@@ -417,7 +416,7 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className="px-2.5 py-3 first:pl-5 last:pr-5"
+                      className="px-3 py-2.5 first:pl-5 last:pr-5"
                       onClick={
                         cell.column.id === "select" || cell.column.id === "row-delete"
                           ? (e) => e.stopPropagation()

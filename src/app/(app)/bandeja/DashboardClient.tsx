@@ -536,7 +536,7 @@ export function DashboardClient({
           * tarjeta hacia abajo y el scroll aparece en la página entera en vez
           * de adentro de la lista.
           */}
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="scroll-fino min-h-0 flex-1 overflow-auto" data-scroll="lista">
           <CasesTable cases={visibleCases} onDeleteMany={handleDeleteMany} />
         </div>
 

@@ -336,9 +336,25 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
         </div>
       )}
 
-      <div className="overflow-x-auto" role="region" aria-label={t("bandeja.tableLabel")}>
+      {/*
+        * `max-h` + `overflow-auto` y no solo `overflow-x-auto`.
+        *
+        * Sin una altura maxima el `sticky` del encabezado no tiene contra que
+        * pegarse: se queda quieto porque su contenedor crece con la tabla y
+        * nunca hay scroll propio. Con 480 siniestros y 20 por pagina la lista
+        * entra justo, pero a 100 por pagina se scrollea y los nombres de las
+        * columnas se iban de pantalla — que es cuando mas se necesitan.
+        *
+        * El `max(24rem, ...)` es el piso: en una pantalla baja o con el zoom
+        * grande, la resta sola daria una franja de dos filas o un negativo.
+        */}
+      <div
+        className="max-h-[max(24rem,calc(100dvh-22rem))] overflow-auto"
+        role="region"
+        aria-label={t("bandeja.tableLabel")}
+      >
         <table className="w-full table-auto text-left" aria-label={t("bandeja.tableLabel")}>
-          <thead>
+          <thead className="sticky top-0 z-10 bg-white">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
@@ -352,7 +368,12 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                      * repetia las mismas cuatro utilidades a mano con otro
                      * tamano.
                      */
-                    className="rotulo whitespace-nowrap border-b border-slate-100 px-2.5 pb-2.5 pt-1 text-slate-400 first:pl-5 last:pr-5"
+                    /*
+                     * `text-slate-500` y no 400: el 400 sobre blanco da
+                     * 2.6:1, muy por debajo del 4.5:1 que pide texto. El 500 da
+                     * 4.8:1. Es el nombre de la columna, no una decoracion.
+                     */
+                    className="rotulo sticky top-0 whitespace-nowrap border-b border-slate-200 bg-white px-2.5 pb-2.5 pt-3 text-slate-500 first:pl-5 last:pr-5"
                   >
                     {flexRender(
                       header.column.columnDef.header,
@@ -374,7 +395,14 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                    * La ultima fila no lleva linea: el borde de la tarjeta ya
                    * cierra la lista, y las dos juntas se ven como un doble filo.
                    */
-                  className={`group cursor-pointer border-b border-slate-100 transition-colors last:border-b-0 ${
+                  /*
+                   * Las filas ya eran navegables con teclado (`tabIndex={0}` y
+                   * Enter/Espacio) pero no dibujaban NADA al recibir el foco:
+                   * quien no usa mouse recorria 20 filas a ciegas. El anillo va
+                   * por dentro (`ring-inset`) porque una fila de tabla recorta
+                   * lo que se dibuja afuera.
+                   */
+                  className={`group cursor-pointer border-b border-slate-100 transition-colors last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500 ${
                     isSelected ? "bg-red-50 hover:bg-red-100" : "hover:bg-slate-50"
                   }`}
                   role="row"

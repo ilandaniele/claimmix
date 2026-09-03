@@ -164,7 +164,7 @@ export function Sidebar({
           {/* El `.rotulo` lo pone en mayúscula por CSS, así que la clave
               guarda «Operación» y no «OPERACIÓN»: el diccionario tiene el
               texto, la hoja de estilos la forma. */}
-          <p className="rotulo mb-2 px-3 text-slate-400">
+          <p className="rotulo mb-2 px-3 text-slate-500">
             {t("nav.operation")}
           </p>
           <div className="space-y-0.5">
@@ -179,7 +179,7 @@ export function Sidebar({
 
         {/* ANÁLISIS section */}
         <div className="mb-2">
-          <p className="rotulo mb-2 px-3 text-slate-400">
+          <p className="rotulo mb-2 px-3 text-slate-500">
             {t("nav.analisis")}
           </p>
           <div className="space-y-0.5">

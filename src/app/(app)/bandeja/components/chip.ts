@@ -48,4 +48,10 @@ export function claseChip(activo: boolean): string {
  * de campo— para que se lea como rótulo y no como un chip más apagado, que es
  * exactamente cómo se leía antes.
  */
-export const ROTULO_GRUPO = "rotulo mr-0.5 text-slate-400";
+/*
+ * `text-slate-500` y no 400. El 400 sobre blanco da 2.6:1 — muy por debajo del
+ * 4.5:1 que pide texto— y esto NO es decoracion: dice de que es el grupo de
+ * chips que sigue. Sin leerlo, «Todos Email Simulacion» y «Todos Bajo Medio
+ * Alto Critico» son dos hileras de palabras sueltas en la misma linea.
+ */
+export const ROTULO_GRUPO = "rotulo mr-0.5 text-slate-500";

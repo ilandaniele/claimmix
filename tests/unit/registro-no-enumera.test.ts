@@ -90,6 +90,17 @@ beforeEach(() => {
   // El alta necesita una aseguradora por omisión para poder provisionar; sin
   // esto corta antes de llegar a lo que se está probando.
   process.env.GOOGLE_DEFAULT_TENANT_ID = "tenant-por-omision-0000-0000-0000";
+  /*
+   * Y la dirección tiene que estar permitida, por lo mismo: desde que el
+   * registro está cerrado, una dirección de afuera de la lista se va al aviso
+   * neutro sin llegar nunca al proveedor. Lo que se prueba acá es qué contesta
+   * el alta de alguien que SÍ puede registrarse, así que la lista se pone.
+   *
+   * Que una dirección de afuera termine en ese mismo aviso neutro no es un
+   * agujero en esta cobertura: es la propiedad, y la prueba
+   * `registro-permitido.test.ts`.
+   */
+  process.env.SIGNUP_ALLOWED_EMAILS = "@aseguradora.com";
   mockRateLimit.mockResolvedValue({ allowed: true, remaining: 2, resetAt: 0, retryAfterSeconds: 0 });
   mockTopePorIp.mockResolvedValue({ allowed: true, remaining: 29, resetAt: 0, retryAfterSeconds: 0 });
   mockWriteAuditLog.mockResolvedValue(undefined);
@@ -143,5 +154,28 @@ describe("el alta no distingue una dirección que ya existe", () => {
 
     expect(r.destino).toBeUndefined();
     expect(r.error).toMatch(/no se pudo crear la cuenta/i);
+  });
+
+  /*
+   * La propiedad nueva, desde que el registro esta cerrado.
+   *
+   * Si una direccion fuera de la lista contestara distinto de una que ya tiene
+   * cuenta, alcanzaria con probar direcciones para leer la lista. Y como la
+   * lista puede ser de direcciones exactas —lo es cuando el equipo usa
+   * casillas de Gmail— eso no revela «que dominios atiende el producto» sino
+   * el padron de empleados de la aseguradora.
+   *
+   * La primera version de este cierre devolvia «no se puede crear una cuenta
+   * con esa direccion» y abria exactamente ese agujero.
+   */
+  it("una dirección fuera de la lista va al MISMO lugar que una ya tomada", async () => {
+    process.env.SIGNUP_ALLOWED_EMAILS = "@otra-empresa.com";
+
+    const r = await darDeAlta();
+
+    expect(r.destino).toBe("/login?aviso=usa_tu_cuenta");
+    expect(r.error).toBeUndefined();
+    // Y no se llega a crear nada: nadie ocupa una direccion ajena.
+    expect(mockSignUpEmail).not.toHaveBeenCalled();
   });
 });

@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { auth } from "@/lib/auth";
+import { enAltaDeAdmin } from "@/lib/auth/registro-permitido";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
@@ -85,12 +86,26 @@ export async function POST(request: NextRequest) {
     // Generate a temporary password if none provided
     const password = parsed.data.password ?? crypto.randomUUID().replace(/-/g, "");
 
-    // Create auth user via Better Auth
-    const result = await auth.api.signUpEmail({
-      body: { name: full_name, email, password },
-      // No request headers — server-side creation skips cookie setting
-      headers: new Headers(),
-    });
+    /*
+     * El alta de un admin no pasa por `SIGNUP_ALLOWED_EMAILS`.
+     *
+     * La lista existe para cerrar el AUTOREGISTRO: quien llega solo a
+     * `/registro` o entra por Google por primera vez. Quien está acá ya pasó
+     * por `requireAdmin`, y si además tuviera que estar en la lista, sumar a
+     * alguien de afuera pediría un cambio de variable de entorno y un redeploy
+     * para una operación que un admin tiene derecho a hacer.
+     *
+     * La marca viaja por `AsyncLocalStorage` y no por una variable de módulo:
+     * el servidor atiende pedidos concurrentes y una bandera global la podría
+     * leer el registro de un desconocido que llegó en el mismo instante.
+     */
+    const result = await enAltaDeAdmin(() =>
+      auth.api.signUpEmail({
+        body: { name: full_name, email, password },
+        // No request headers — server-side creation skips cookie setting
+        headers: new Headers(),
+      })
+    );
 
     const newUserId = result.user.id;
 

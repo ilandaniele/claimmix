@@ -1,3 +1,7 @@
+import {
+  permitidosConfigurados,
+  puedeRegistrarse,
+} from "./registro-permitido";
 import "server-only";
 
 import { eq } from "drizzle-orm";
@@ -84,17 +88,16 @@ function isSignupAllowed(
   // fail-safe the function already used for a stranger: the account exists,
   // it reaches nothing, and an admin attaches it from /admin/users.
   if (!emailVerified) return false;
-  const entries = [process.env.SIGNUP_ALLOWED_EMAILS, process.env.ADMIN_EMAILS]
-    .filter(Boolean)
-    .join(",")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  if (entries.length === 0) return false;
 
-  const addr = email.trim().toLowerCase();
-  const domain = addr.slice(addr.indexOf("@"));
-  return entries.some((e) => (e.startsWith("@") ? e === domain : e === addr));
+  /*
+   * La lista se lee de `registro-permitido.ts` y ya no se parsea acá.
+   *
+   * Estaba escrita dos veces desde que el gancho `user.create.before` mira la
+   * MISMA lista para negar la creación antes de que exista la cuenta. Dos
+   * copias de una regla de acceso es el peor lugar posible para que la próxima
+   * corrección se aplique en una sola.
+   */
+  return puedeRegistrarse(email, permitidosConfigurados());
 }
 
 export function resolveDefaultTenantId(): string | null {

@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { accounts, authUsers, sessions, verifications } from "@/lib/db/schema";
 
 import { provisionUserProfile } from "./provision";
+import { altaHabilitada } from "./registro-permitido";
 
 function resolveBaseURL(): string {
   if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
@@ -140,6 +141,33 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
+        /*
+         * La puerta del registro, y esta es la unica que hay.
+         *
+         * Va aca y no en el Server Action de `/registro` porque ese formulario
+         * NO es el unico camino publico para crear una cuenta: la primera
+         * entrada por Google tambien crea el usuario, sin pasar por ninguna
+         * pantalla nuestra. Cerrar solo el formulario habria dejado la puerta
+         * de al lado abierta — y esa es la que menos se mira.
+         *
+         * Devolver `false` aborta la creacion. La pantalla de registro ademas
+         * comprueba antes, para poder decir algo entendible en vez del error
+         * generico que sale de aca.
+         */
+        before: async (user) => {
+          const email = typeof user.email === "string" ? user.email : "";
+          if (altaHabilitada(email)) return;
+          console.warn(
+            JSON.stringify({
+              level: "warn",
+              service: "claimmix",
+              msg: "auth.registro.rechazado",
+              dominio: email.slice(email.lastIndexOf("@") + 1) || "(sin dominio)",
+              motivo: "fuera_de_signup_allowed_emails",
+            })
+          );
+          return false;
+        },
         after: async (user) => {
           await provisionUserProfile(user);
         },

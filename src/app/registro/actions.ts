@@ -24,6 +24,10 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { auth } from "@/lib/auth";
 import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import {
+  permitidosConfigurados,
+  puedeRegistrarse,
+} from "@/lib/auth/registro-permitido";
+import {
   RATE_LIMIT_CONFIGS,
   clientIpFromHeaders,
   rateLimit,
@@ -74,6 +78,30 @@ export async function signUp(
   const tenantId = resolveDefaultTenantId();
   if (!tenantId) {
     return { error: "El registro no está habilitado. Contactá al administrador." };
+  }
+
+  /*
+   * La lista de quién puede registrarse, mirada ANTES de llamar a Better Auth.
+   *
+   * La puerta de verdad está en el gancho `user.create.before` —es el único
+   * punto por el que pasan el formulario Y la primera entrada por Google—.
+   * Esto es para no llegar hasta allá y volver con un error genérico.
+   *
+   * ── Va al MISMO lugar que una dirección ya tomada, y eso es el punto ───────
+   *
+   * La primera versión de esto devolvía «no se puede crear una cuenta con esa
+   * dirección», y `registro-no-enumera.test.ts` la rechazó con razón: si una
+   * dirección permitida y una que no lo está contestan distinto, alcanza con
+   * probar direcciones para leer la lista. Y como la lista puede ser de
+   * direcciones exactas —lo es cuando el equipo usa casillas de Gmail— eso no
+   * revela «qué dominios atiende el producto» sino el padrón de empleados de
+   * la aseguradora, que es justo lo que ese test existe para proteger.
+   *
+   * Así que las dos cosas terminan en el aviso neutro. Quien tenga que entrar
+   * y no pueda, habla con un admin — que es el mismo camino que ya tenía.
+   */
+  if (!puedeRegistrarse(email, permitidosConfigurados())) {
+    redirect("/login?aviso=usa_tu_cuenta");
   }
 
   // ── 4. Create the auth user (profile row provisioned by the create hook) ──

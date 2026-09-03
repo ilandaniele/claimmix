@@ -3,7 +3,8 @@
 import Link from "next/link";
 
 import { CUSTOMER_PII_ROLES } from "@/lib/auth/roles";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { hrefActivo } from "./nav-activo";
 import { useT } from "@/lib/i18n/LocaleContext";
 import {
   Inbox,
@@ -28,9 +29,17 @@ interface NavItemDef {
   disabledReason?: string;
 }
 
-function NavLink({ href, label, icon: Icon, disabled, disabledReason }: NavItemDef) {
-  const pathname = usePathname();
-  const isActive = pathname === href || pathname.startsWith(href + "/");
+/*
+ * `active` viene de afuera. Cada item lo calculaba solo mirando el
+ * `pathname`, y eso alcanzaba mientras cada item fuera una ruta distinta.
+ * Desde que «Escalados» apunta a `/bandeja?status=escalado`, dos items
+ * comparten camino: la lista decide cual se resalta —ver `nav-activo.ts`—
+ * y el item solo lo dibuja.
+ */
+type NavLinkProps = NavItemDef & { active: boolean };
+
+function NavLink({ href, label, icon: Icon, disabled, disabledReason, active }: NavLinkProps) {
+  const isActive = active;
 
   if (disabled) {
     return (
@@ -95,12 +104,20 @@ export function Sidebar({
   isOperator?: boolean;
 }) {
   const t = useT();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const canUseAgent = role === "owner" || role === "admin";
   const puedeVerClientes = (CUSTOMER_PII_ROLES as string[]).includes(role);
 
   const operacionItems: NavItemDef[] = [
     { label: t("nav.bandeja") || "Bandeja", href: "/bandeja", icon: Inbox },
-    { label: t("nav.escalados") || "Escalados", href: "/escalados", icon: AlertTriangle },
+    /*
+     * Directo a la bandeja filtrada. `/escalados` era una pagina de nueve
+     * lineas que hacia `redirect` aca mismo: un click, dos viajes al
+     * servidor. La pagina sigue existiendo para quien tenga el enlace
+     * guardado; la barra ya no pasa por ella.
+     */
+    { label: t("nav.escalados") || "Escalados", href: "/bandeja?status=escalado", icon: AlertTriangle },
     /*
      * «Clientes» sólo para quien puede ver datos personales.
      *
@@ -142,6 +159,13 @@ export function Sidebar({
       : []),
   ];
 
+  const CONFIG_HREF = "/configuracion";
+  const activo = hrefActivo(
+    [...operacionItems, ...analisisItems].map((i) => i.href).concat(CONFIG_HREF),
+    pathname,
+    searchParams
+  );
+
   return (
     <nav
       aria-label={t("nav.principal")}
@@ -169,7 +193,7 @@ export function Sidebar({
           </p>
           <div className="space-y-0.5">
             {operacionItems.map((item) => (
-              <NavLink key={item.href} {...item} />
+              <NavLink key={item.href} {...item} active={item.href === activo} />
             ))}
           </div>
         </div>
@@ -184,7 +208,7 @@ export function Sidebar({
           </p>
           <div className="space-y-0.5">
             {analisisItems.map((item) => (
-              <NavLink key={item.href} {...item} />
+              <NavLink key={item.href} {...item} active={item.href === activo} />
             ))}
           </div>
         </div>
@@ -192,9 +216,10 @@ export function Sidebar({
         {/* Settings at bottom */}
         <div className="space-y-0.5 pb-2">
           <NavLink
-            href="/configuracion"
+            href={CONFIG_HREF}
             label={t("nav.configuracion") || "Configuración"}
             icon={Settings}
+            active={CONFIG_HREF === activo}
           />
         </div>
       </div>

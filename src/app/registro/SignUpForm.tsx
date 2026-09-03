@@ -19,7 +19,7 @@ type FormState = {
 const initialState: FormState = {};
 
 const inputClass =
-  "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-500/20 disabled:cursor-not-allowed disabled:opacity-50";
+  "w-full rounded-xl border border-slate-300 bg-white dark:border-slate-600 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-500/20 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function SignUpForm() {
   const [state, formAction] = useActionState<FormState, FormData>(
@@ -42,7 +42,7 @@ export function SignUpForm() {
         <div
           role="alert"
           aria-live="assertive"
-          className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
           {state.error}
         </div>
@@ -52,7 +52,7 @@ export function SignUpForm() {
       <div className="mb-4">
         <label
           htmlFor="full_name"
-          className="mb-1.5 block text-sm font-medium text-zinc-700"
+          className="mb-1.5 block text-sm font-medium text-slate-700"
         >
           Nombre completo
         </label>
@@ -80,7 +80,7 @@ export function SignUpForm() {
       <div className="mb-4">
         <label
           htmlFor="email"
-          className="mb-1.5 block text-sm font-medium text-zinc-700"
+          className="mb-1.5 block text-sm font-medium text-slate-700"
         >
           Correo electrónico
         </label>
@@ -108,7 +108,7 @@ export function SignUpForm() {
       <div className="mb-6">
         <label
           htmlFor="password"
-          className="mb-1.5 block text-sm font-medium text-zinc-700"
+          className="mb-1.5 block text-sm font-medium text-slate-700"
         >
           Contraseña
         </label>
@@ -137,7 +137,7 @@ export function SignUpForm() {
         type="submit"
         disabled={isPending}
         aria-busy={isPending}
-        className="w-full rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-zinc-900/50 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-full rounded-full bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-slate-900/50 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isPending ? (
           <span className="flex items-center justify-center gap-2">

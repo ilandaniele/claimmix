@@ -23,15 +23,15 @@ export function RecuperarForm() {
   if (state.listo) {
     return (
       <div>
-        <p role="status" className="text-sm text-zinc-700">
+        <p role="status" className="text-sm text-slate-700">
           {SIEMPRE_LO_MISMO}
         </p>
-        <p className="mt-4 text-sm text-zinc-500">
+        <p className="mt-4 text-sm text-slate-500">
           El enlace vence en una hora y sirve una sola vez.
         </p>
         <Link
           href="/login"
-          className="mt-6 inline-block text-sm font-medium text-zinc-800 underline-offset-2 hover:underline"
+          className="mt-6 inline-block text-sm font-medium text-slate-800 underline-offset-2 hover:underline"
         >
           Volver a iniciar sesión
         </Link>
@@ -45,19 +45,19 @@ export function RecuperarForm() {
         <div
           role="alert"
           aria-live="assertive"
-          className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
           {state.error}
         </div>
       )}
 
-      <p className="mb-4 text-sm text-zinc-600">
+      <p className="mb-4 text-sm text-slate-600">
         Decinos con qué correo entrás y te mandamos un enlace para poner una
         contraseña nueva.
       </p>
 
       <div className="mb-6">
-        <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-zinc-700">
+        <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">
           Correo electrónico
         </label>
         <input
@@ -69,7 +69,7 @@ export function RecuperarForm() {
           aria-required="true"
           aria-describedby={state.fieldErrors?.email ? "email-error" : undefined}
           aria-invalid={!!state.fieldErrors?.email}
-          className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-xl border border-slate-300 bg-white dark:border-slate-600 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-500/20 disabled:cursor-not-allowed disabled:opacity-50"
           placeholder="analista@aseguradora.com"
           disabled={isPending}
         />
@@ -83,7 +83,7 @@ export function RecuperarForm() {
       <button
         type="submit"
         disabled={isPending}
-        className="w-full rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {isPending ? "Enviando…" : "Enviarme el enlace"}
       </button>

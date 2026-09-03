@@ -184,6 +184,18 @@ export async function signOut(): Promise<void> {
   redirect("/login");
 }
 
+/**
+ * Empezar el ingreso con Google.
+ *
+ * El `catch` se tragaba el motivo entero: cualquier fallo terminaba en el mismo
+ * `/login?error=google_signin_failed`, y como la pantalla ni siquiera leía
+ * `error`, desde afuera se veía «apreté y volví al principio». Ahora el motivo
+ * queda en el log del servidor —donde sí se puede leer— y la pantalla explica
+ * qué pasó.
+ *
+ * `redirect()` NO puede ir adentro del try: tira un error interno de Next para
+ * disparar la redirección, y el catch se lo comería.
+ */
 export async function signInWithGoogle(): Promise<void> {
   let url: string | undefined;
   try {
@@ -196,7 +208,15 @@ export async function signInWithGoogle(): Promise<void> {
       headers: await headers(),
     });
     url = result.url ?? undefined;
-  } catch {
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "auth.google.signin_start_failed",
+        detalle: e instanceof Error ? e.message : String(e),
+      })
+    );
     url = undefined;
   }
 

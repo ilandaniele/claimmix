@@ -23,7 +23,7 @@ export function SignInForm() {
           <div
             role="alert"
             aria-live="assertive"
-            className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
           >
             {state.error}
           </div>
@@ -32,7 +32,7 @@ export function SignInForm() {
         <div className="mb-4">
           <label
             htmlFor="email"
-            className="mb-1.5 block text-sm font-medium text-zinc-700"
+            className="mb-1.5 block text-sm font-medium text-slate-700"
           >
             Correo electrónico
           </label>
@@ -45,12 +45,12 @@ export function SignInForm() {
             aria-required="true"
             aria-describedby={state.fieldErrors?.email ? "email-error" : undefined}
             aria-invalid={!!state.fieldErrors?.email}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:placeholder-slate-500"
             placeholder="analista@aseguradora.com"
             disabled={isPending}
           />
           {state.fieldErrors?.email && (
-            <p id="email-error" role="alert" className="mt-1 text-xs text-red-600">
+            <p id="email-error" role="alert" className="mt-1 text-xs text-red-600 dark:text-red-300">
               {state.fieldErrors.email[0]}
             </p>
           )}
@@ -59,7 +59,7 @@ export function SignInForm() {
         <div className="mb-6">
           <label
             htmlFor="password"
-            className="mb-1.5 block text-sm font-medium text-zinc-700"
+            className="mb-1.5 block text-sm font-medium text-slate-700"
           >
             Contraseña
           </label>
@@ -72,12 +72,12 @@ export function SignInForm() {
             aria-required="true"
             aria-describedby={state.fieldErrors?.password ? "password-error" : undefined}
             aria-invalid={!!state.fieldErrors?.password}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:placeholder-slate-500"
             placeholder="••••••••"
             disabled={isPending}
           />
           {state.fieldErrors?.password && (
-            <p id="password-error" role="alert" className="mt-1 text-xs text-red-600">
+            <p id="password-error" role="alert" className="mt-1 text-xs text-red-600 dark:text-red-300">
               {state.fieldErrors.password[0]}
             </p>
           )}
@@ -87,7 +87,7 @@ export function SignInForm() {
           type="submit"
           disabled={isPending}
           aria-busy={isPending}
-          className="w-full rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-zinc-900/50 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full rounded-full bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isPending ? (
             <span className="flex items-center justify-center gap-2">
@@ -103,16 +103,16 @@ export function SignInForm() {
         </button>
       </form>
 
-      <div className="my-4 flex items-center gap-3 text-xs text-zinc-400">
-        <span className="h-px flex-1 bg-zinc-200" />
-        <span>o</span>
-        <span className="h-px flex-1 bg-zinc-200" />
+      <div className="my-5 flex items-center gap-3 text-xs text-slate-400">
+        <span className="h-px flex-1 bg-slate-200" />
+        <span className="uppercase tracking-[0.08em]">o</span>
+        <span className="h-px flex-1 bg-slate-200" />
       </div>
 
       <form action={signInWithGoogle}>
         <button
           type="submit"
-          className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:ring-offset-2"
+          className="flex w-full items-center justify-center gap-2.5 rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-500/25 dark:border-slate-600"
         >
           <GoogleIcon />
           Continuar con Google

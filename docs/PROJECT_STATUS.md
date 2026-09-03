@@ -1490,16 +1490,18 @@ ensayo matado a mitad deja huérfanos — hoy cinco, dos veces, borrados por ese
 mismo criterio en una transacción con conteo antes y después.
 `cleanup:cases` NO sirve para esto: borra todos los casos del inquilino.
 
-**Y un pendiente que no es de código.** El 3/9 por la tarde el pooler de Neon
-respondía a 0,8–4,4 s por conexión desde esta máquina (baseline 0,15–0,6 s).
-Producción —Vercel, misma región— insertaba normal. El `pnpm check` completo
-no cerró en verde desde acá: tres intentos, ~90 min, la capa `rehearse`
-matada por los topes. Todo lo demás verde: CI con 74 e2e, post-deploy, smoke
-sobre `36c8c11`. Correrlo de nuevo cuando el pooler vuelva a la normalidad:
-
-```
-pnpm check
-```
+**Y una trampa más, la que costó más tiempo: los topes.** El 3/9 por la
+tarde el pooler de Neon respondía a 0,8–5 s por conexión desde esta máquina
+(baseline 0,15–0,6 s). El `pnpm check` completo falló tres veces, ~90 min, y
+se leyó como «la capa `rehearse` no puede conectar». No era eso: el ensayo
+AVANZABA —un caso cada ~2 min en vez de ~30 s— y lo mataban el techo de 10
+min de la herramienta de shell y después un `timeout 600` puesto a mano.
+Cada muerte dejaba huérfanos y un log de una línea (el buffer de `tsx`), que
+reforzaba la lectura equivocada. Lanzado desligado del proceso de la
+herramienta y sin tope, cerró en verde: 12 conversaciones sin diferencias,
+smoke sobre `5b7e6d0`, **11,8 min** (normal ~7). Con el pooler lento el
+ensayo tarda casi el doble, no falla. Un tope corto convierte «lento» en
+«roto» y además ensucia producción.
 
 ### 🙋 Waiting on you (not code)
 

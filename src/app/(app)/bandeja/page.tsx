@@ -131,21 +131,18 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const tenantId = userRow.tenant_id;
 
   // Fetch cases matching the current filter.
-  const initialData = await listCases({ tenantId }, {
-    status,
-    type,
-    page,
-    per_page,
-    sort: "created_at",
-    order: "desc",
-    // Email-intake filters (AC18)
-    channel,
-    severity,
-    is_claim,
-  });
-
   /*
-   * Un solo viaje para los catorce contadores.
+   * La lista y los contadores salen JUNTOS, no uno después del otro.
+   *
+   * Estaban en serie: `await listCases(...)` y recién después el `await` de
+   * los contadores. Las dos consultas sólo necesitan `tenantId`; ninguna
+   * depende de la otra. En serie, la página pagaba un viaje entero al pooler
+   * de más antes de pintar — y con quinientos casos lo que domina el tiempo
+   * es la ida y vuelta, no la consulta. Es la regla `async-parallel` de las
+   * guías de rendimiento de Vercel: operaciones independientes van en un
+   * `Promise.all`.
+   *
+   * ── Los catorce contadores en un solo viaje ─────────────────────────────
    *
    * Eran catorce `countRows` en un `Promise.all`: uno por estado más el total.
    * Estar en paralelo no los junta — cada `enTenant` abre su propio `batch()`
@@ -159,14 +156,26 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
    * que se puede esperar pero que `batch()` no puede armar, y rompió estos
    * mismos contadores en producción. Ver src/lib/db/helpers.ts.
    */
-  const porEstado = await enTenant<Array<{ status: string; n: number }>>(
-    { tenantId },
-    (db) =>
+  const [initialData, porEstado] = await Promise.all([
+    listCases({ tenantId }, {
+      status,
+      type,
+      page,
+      per_page,
+      sort: "created_at",
+      order: "desc",
+      // Email-intake filters (AC18)
+      channel,
+      severity,
+      is_claim,
+    }),
+    enTenant<Array<{ status: string; n: number }>>({ tenantId }, (db) =>
       db
         .select({ status: cases.status, n: sql<number>`count(*)::int` })
         .from(cases)
         .groupBy(cases.status)
-  );
+    ),
+  ]);
 
   /*
    * El total suma TODAS las filas que devuelve el grupo, no sólo las de los

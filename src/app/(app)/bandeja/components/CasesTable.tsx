@@ -24,6 +24,9 @@ function formatCaseId(id: string): string {
 
 interface CasesTableProps {
   cases: CaseRow[];
+  /** Modo seleccion: las filas se marcan en vez de abrirse. */
+  seleccionando?: boolean;
+  onSalirDeSeleccion?: () => void;
   /**
    * Called with the IDs to delete and a callback to clear the selection
    * once the parent has finished (or started) the operation.
@@ -31,7 +34,12 @@ interface CasesTableProps {
   onDeleteMany?: (ids: string[], onDone: () => void) => void;
 }
 
-export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
+export function CasesTable({
+  cases,
+  onDeleteMany,
+  seleccionando = false,
+  onSalirDeSeleccion,
+}: CasesTableProps) {
   const { t, locale } = useLocale();
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -71,26 +79,39 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
 
   const columns = useMemo<ColumnDef<CaseRow>[]>(
     () => [
-      ...(onDeleteMany
+      /*
+       * Sin recuadros. Los checkboxes cuadrados en cada fila eran veinte cajas
+       * que competian con el contenido para una accion que se usa de vez en
+       * cuando. La columna existe solo en modo seleccion, y el control es un
+       * circulo del acento: vacio, o relleno con un tilde al marcar.
+       */
+      ...(onDeleteMany && seleccionando
         ? [
             {
               id: "select",
-              header: () => (
-                <IndeterminateCheckbox
-                  checked={allSelected}
-                  indeterminate={someSelected}
-                  onChange={toggleAll}
-                  aria-label={t("bandeja.selectAll")}
-                />
-              ),
-              cell: ({ row }: { row: { original: CaseRow } }) => (
-                <IndeterminateCheckbox
-                  checked={selectedIds.has(row.original.id)}
-                  indeterminate={false}
-                  onChange={() => toggleOne(row.original.id)}
-                  aria-label={`${t("bandeja.selectCase")} ${formatCaseId(row.original.id)}`}
-                />
-              ),
+              header: "",
+              cell: ({ row }: { row: { original: CaseRow } }) => {
+                const marcado = selectedIds.has(row.original.id);
+                return (
+                  <span
+                    role="checkbox"
+                    aria-checked={marcado}
+                    aria-label={t("bandeja.marcar").replace("{id}", formatCaseId(row.original.id))}
+                    className={[
+                      "inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 transition-colors",
+                      marcado
+                        ? "border-violet-600 bg-violet-600 text-white"
+                        : "border-slate-300 bg-white group-hover:border-violet-400",
+                    ].join(" ")}
+                  >
+                    {marcado && (
+                      <svg viewBox="0 0 12 12" className="h-3 w-3" aria-hidden="true">
+                        <path d="M2.5 6.5l2.2 2.2L9.5 3.9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </span>
+                );
+              },
             } as ColumnDef<CaseRow>,
           ]
         : []),
@@ -316,17 +337,16 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
 
   return (
     <div>
-      {/* Bulk action bar — visible when ≥1 row selected */}
-      {onDeleteMany && selectedIds.size > 0 && (
-        /*
-         * Era una banda roja entera. Ahora es una barra neutra con UN dato
-         * en el acento —cuantos hay marcados— y la unica cosa roja es el
-         * boton que borra, delineado y no relleno, separado del resto.
-         */
+      {/*
+        * La barra del modo seleccion. «Seleccionar todos» es una ACCION con
+        * su numero, no una casilla en el encabezado: dice cuantas va a marcar
+        * y se convierte en «Quitar seleccion» cuando ya estan todas.
+        */}
+      {onDeleteMany && seleccionando && (
         <div
           role="toolbar"
-          aria-label={t("bandeja.selected")}
-          className="mx-5 mb-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+          aria-label={t("bandeja.seleccionar")}
+          className="mx-5 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
         >
           <span className="cifra rounded-full bg-violet-600 px-2 py-0.5 text-[12px] font-semibold text-white">
             {selectedIds.size}
@@ -336,18 +356,34 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
           </span>
           <button
             type="button"
-            onClick={clearSelection}
-            className="ml-auto rounded-md px-2.5 py-1.5 text-[13px] font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            onClick={toggleAll}
+            className="rounded-md px-2.5 py-1.5 text-[13px] font-medium text-violet-700 transition-colors hover:bg-violet-50"
           >
-            {t("bandeja.deleteCancel")}
+            {allSelected
+              ? t("bandeja.quitarSeleccion")
+              : t("bandeja.seleccionarPagina").replace("{n}", String(allIds.length))}
           </button>
-          <button
-            type="button"
-            onClick={() => onDeleteMany([...selectedIds], clearSelection)}
-            className="rounded-md border border-red-300 px-3 py-1.5 text-[13px] font-medium text-red-700 transition-colors hover:bg-red-50"
-          >
-            {t("bandeja.deleteSelected")} ({selectedIds.size})
-          </button>
+          <span className="ml-auto flex items-center gap-2">
+            {selectedIds.size > 0 && (
+              <button
+                type="button"
+                onClick={() => onDeleteMany([...selectedIds], clearSelection)}
+                className="rounded-md border border-red-300 px-3 py-1.5 text-[13px] font-medium text-red-700 transition-colors hover:bg-red-50"
+              >
+                {t("bandeja.deleteSelected")} ({selectedIds.size})
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                clearSelection();
+                onSalirDeSeleccion?.();
+              }}
+              className="rounded-md bg-slate-900 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-slate-700"
+            >
+              {t("bandeja.listo")}
+            </button>
+          </span>
         </div>
       )}
 
@@ -403,7 +439,11 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
               return (
                 <tr
                   key={row.id}
-                  onClick={() => router.push(`/casos/${row.original.id}`)}
+                  onClick={() =>
+                    seleccionando
+                      ? toggleOne(row.original.id)
+                      : router.push(`/casos/${row.original.id}`)
+                  }
                   /*
                    * La ultima fila no lleva linea: el borde de la tarjeta ya
                    * cierra la lista, y las dos juntas se ven como un doble filo.
@@ -428,7 +468,9 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
                   tabIndex={0}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
-                      router.push(`/casos/${row.original.id}`);
+                      e.preventDefault();
+                      if (seleccionando) toggleOne(row.original.id);
+                      else router.push(`/casos/${row.original.id}`);
                     }
                   }}
                 >
@@ -456,34 +498,3 @@ export function CasesTable({ cases, onDeleteMany }: CasesTableProps) {
 }
 
 /** Checkbox that supports the indeterminate state via a ref callback. */
-function IndeterminateCheckbox({
-  checked,
-  indeterminate,
-  onChange,
-  "aria-label": ariaLabel,
-}: {
-  checked: boolean;
-  indeterminate: boolean;
-  onChange: () => void;
-  "aria-label"?: string;
-}) {
-  return (
-    <input
-      type="checkbox"
-      checked={checked}
-      ref={(el) => {
-        if (el) el.indeterminate = indeterminate;
-      }}
-      onChange={onChange}
-      onClick={(e) => e.stopPropagation()}
-      /*
-       * `text-violet-600` es el color del tilde (asi lo lee el plugin de
-       * formularios). Era `text-slate-900`: un tilde negro en un producto
-       * cuyo unico acento es el violeta, y en modo oscuro una caja blanca
-       * con tilde negro, lo mas brillante de la fila.
-       */
-      className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 transition-colors focus:ring-2 focus:ring-violet-500 focus:ring-offset-0"
-      aria-label={ariaLabel}
-    />
-  );
-}

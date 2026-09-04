@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useNavegacion } from "./navegacion-pendiente";
 
 /**
  * Poner o sacar un filtro de la URL, que es donde vive el estado de la bandeja.
@@ -16,7 +17,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
  * cada uno su propio `if`.
  */
 export function useFilterParam(): (clave: string, valor: string | null) => void {
-  const router = useRouter();
+  const { empujar } = useNavegacion();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -29,9 +30,9 @@ export function useFilterParam(): (clave: string, valor: string | null) => void 
       // Cambiar de filtro siempre vuelve a la primera página: el conjunto es otro.
       params.delete("page");
 
-      router.push(`${pathname}?${params.toString()}`);
+      empujar(`${pathname}?${params.toString()}`);
     },
-    [router, pathname, searchParams]
+    [empujar, pathname, searchParams]
   );
 }
 
@@ -50,7 +51,7 @@ export function usePaginacion(): {
   irAPagina: (pagina: number) => void;
   cambiarTamanoDePagina: (porPagina: number) => void;
 } {
-  const router = useRouter();
+  const { empujar } = useNavegacion();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -58,9 +59,9 @@ export function usePaginacion(): {
     (pagina: number) => {
       const params = new URLSearchParams(searchParams.toString());
       params.set("page", String(pagina));
-      router.push(`${pathname}?${params.toString()}`);
+      empujar(`${pathname}?${params.toString()}`);
     },
-    [router, pathname, searchParams]
+    [empujar, pathname, searchParams]
   );
 
   const cambiarTamanoDePagina = useCallback(
@@ -71,9 +72,9 @@ export function usePaginacion(): {
       // número de página viejo puede caer más allá del final de una lista más
       // corta.
       params.set("page", "1");
-      router.push(`${pathname}?${params.toString()}`);
+      empujar(`${pathname}?${params.toString()}`);
     },
-    [router, pathname, searchParams]
+    [empujar, pathname, searchParams]
   );
 
   return { irAPagina, cambiarTamanoDePagina };

@@ -933,4 +933,15 @@ export const enUS: Record<TranslationKey, string> = {
   "google.vinculoError": "We could not link your Google account. Try again.",
   "google.yaVinculada": "Linked — you can sign in with Google",
 
+
+  // ── La bandeja que responde al click, y la selección sin recuadros ───
+  // «Actualizando…» es lo que dice la lista mientras la navegación está en
+  // vuelo: el control ya cambió, el servidor todavía no contestó.
+  "bandeja.actualizando": "Updating the list…",
+  "bandeja.listo": "Done",
+  "bandeja.marcar": "Mark {id}",
+  "bandeja.quitarSeleccion": "Clear selection",
+  "bandeja.seleccionar": "Select",
+  "bandeja.seleccionarPagina": "Select all {n} on this page",
+
 } as const;

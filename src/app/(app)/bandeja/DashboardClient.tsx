@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { PER_PAGE_OPTIONS } from "./per-page";
 import { FilterTabs } from "./components/FilterTabs";
 import { usePaginacion } from "./components/useFilterParam";
+import { NavegacionPendienteProvider, useNavegacion } from "./components/navegacion-pendiente";
 import { TypeFilterChips } from "./components/TypeFilterChips";
 import {
   ChannelFilterChips,
@@ -137,6 +138,17 @@ interface PaginationProps {
 
 function Pagination({ page, perPage, total, onPageChange, onPerPageChange }: PaginationProps) {
   const t = useT();
+  /*
+   * El desplegable muestra lo elegido en el mismo instante del cambio.
+   * `perPage` ya viene del destino en vuelo, pero un `<select>` controlado
+   * vuelve a su `value` hasta el proximo render: sin esto, en un enlace
+   * lento se veia saltar a 100 y volver a 20 por un momento.
+   */
+  const [elegido, setElegido] = useState(perPage);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setElegido(perPage);
+  }, [perPage]);
   const totalPages = Math.max(1, Math.ceil(total / perPage));
   const current = Math.min(page, totalPages);
   const from = total === 0 ? 0 : (current - 1) * perPage + 1;
@@ -154,8 +166,12 @@ function Pagination({ page, perPage, total, onPageChange, onPerPageChange }: Pag
         <label className="flex items-center gap-1.5 text-[13px] text-slate-500">
           <span className="sr-only sm:not-sr-only">{t("pagination.perPage")}</span>
           <select
-            value={perPage}
-            onChange={(e) => onPerPageChange(Number(e.target.value))}
+            value={elegido}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              setElegido(n);
+              onPerPageChange(n);
+            }}
             aria-label={t("pagination.perPage")}
             className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[13px] text-slate-700 hover:border-slate-300 focus:border-violet-400 focus:outline-none"
           >
@@ -237,15 +253,23 @@ interface DashboardClientProps {
   allStatusCounts: { status: CaseStatus | "todos"; count: number }[];
 }
 
-export function DashboardClient({
+function DashboardClientInterno({
   initialData,
   scenarios,
   allStatusCounts,
 }: DashboardClientProps) {
   const t = useT();
   const searchParams = useSearchParams();
-  const activeStatus = (searchParams.get("status") as CaseStatus) || undefined;
-  const activeType = (searchParams.get("type") as ClaimType) || undefined;
+  /*
+   * Lo activo se lee de `paramsVisibles`: el destino mientras la navegacion
+   * esta en vuelo, la URL cuando no. Asi la pestaña, el chip y la pagina se
+   * resaltan al instante del click y no cuando el servidor contesta.
+   * `exportQuery`, mas abajo, sigue leyendo la URL real: el CSV es de lo que
+   * ya se esta mirando, no de lo que esta por llegar.
+   */
+  const { pending, paramsVisibles } = useNavegacion();
+  const activeStatus = (paramsVisibles.get("status") as CaseStatus) || undefined;
+  const activeType = (paramsVisibles.get("type") as ClaimType) || undefined;
 
   // Lo que va al CSV: todo lo que filtra la pantalla, sin la paginación.
   const exportQuery = (() => {
@@ -254,13 +278,15 @@ export function DashboardClient({
     p.delete("per_page");
     return p.toString();
   })();
-  const activePage = parseInt(searchParams.get("page") ?? "1", 10) || 1;
+  const activePage = parseInt(paramsVisibles.get("page") ?? "1", 10) || 1;
   const activeChannel =
-    (searchParams.get("channel") as "email" | "email_sim") || undefined;
-  const activeSeverity = (searchParams.get("severity") as Severity) || undefined;
-  const activeIsClaimRaw = searchParams.get("is_claim") as "true" | "false" | null;
+    (paramsVisibles.get("channel") as "email" | "email_sim") || undefined;
+  const activeSeverity = (paramsVisibles.get("severity") as Severity) || undefined;
+  const activeIsClaimRaw = paramsVisibles.get("is_claim") as "true" | "false" | null;
   const activeIsClaim = activeIsClaimRaw ?? undefined;
 
+  const [seleccionando, setSeleccionando] = useState(false);
+  const onDeleteManyDisponible = true;
   const [cases, setCases] = useState<CaseRow[]>(initialData.data);
   const [total, setTotal] = useState(initialData.meta.total);
   const [statusCountsBase, setStatusCountsBase] = useState(allStatusCounts);
@@ -434,7 +460,7 @@ export function DashboardClient({
   useCasesRealtime({ onInsert: handleInsert, onUpdate: handleUpdate });
 
   // ── Filtering & pagination ─────────────────────────────────────────────────
-  const PER_PAGE = initialData.meta.per_page;
+  const PER_PAGE = parseInt(paramsVisibles.get("per_page") ?? "", 10) || initialData.meta.per_page;
   const visibleCases = cases.filter((c) => {
     if (activeStatus && c.status !== activeStatus) return false;
     if (activeType && c.claim_type !== activeType) return false;
@@ -475,6 +501,15 @@ export function DashboardClient({
             </span>
           }
         >
+          {onDeleteManyDisponible && !seleccionando && (
+            <button
+              type="button"
+              onClick={() => setSeleccionando(true)}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            >
+              {t("bandeja.seleccionar")}
+            </button>
+          )}
           <a
             /*
              * El CSV se pide con los MISMOS filtros que muestra la pantalla.
@@ -535,8 +570,32 @@ export function DashboardClient({
           * tarjeta hacia abajo y el scroll aparece en la página entera en vez
           * de adentro de la lista.
           */}
-        <div className="scroll-fino min-h-0 flex-1 overflow-auto" data-scroll="lista">
-          <CasesTable cases={visibleCases} onDeleteMany={handleDeleteMany} />
+        {/*
+          * Mientras la navegacion esta en vuelo la lista se atenua y una barra
+          * fina avanza arriba. Los controles siguen respondiendo: es la
+          * pantalla vieja diciendo «ya te escuche», no un bloqueo.
+          */}
+        <div className="relative min-h-0 flex-1">
+          {pending && (
+            <div role="status" aria-live="polite" className="absolute inset-x-0 top-0 z-20">
+              <div className="h-0.5 w-full overflow-hidden bg-violet-100">
+                <div className="barra-espera h-full w-1/3 bg-violet-600" />
+              </div>
+              <span className="sr-only">{t("bandeja.actualizando")}</span>
+            </div>
+          )}
+          <div
+            className={`scroll-fino h-full overflow-auto transition-opacity ${pending ? "pointer-events-none opacity-60" : ""}`}
+            data-scroll="lista"
+            aria-busy={pending}
+          >
+            <CasesTable
+              cases={visibleCases}
+              onDeleteMany={handleDeleteMany}
+              seleccionando={seleccionando}
+              onSalirDeSeleccion={() => setSeleccionando(false)}
+            />
+          </div>
         </div>
 
         {/*
@@ -576,5 +635,18 @@ export function DashboardClient({
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
+  );
+}
+
+/**
+ * El proveedor de la navegacion pendiente tiene que estar POR ENCIMA de todo
+ * lo que lee `useNavegacion` —incluido el propio cuerpo de la bandeja—, asi
+ * que envuelve desde afuera. `page.tsx` sigue importando `DashboardClient`.
+ */
+export function DashboardClient(props: Parameters<typeof DashboardClientInterno>[0]) {
+  return (
+    <NavegacionPendienteProvider>
+      <DashboardClientInterno {...props} />
+    </NavegacionPendienteProvider>
   );
 }

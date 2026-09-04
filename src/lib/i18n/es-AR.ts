@@ -957,6 +957,17 @@ export const esAR = {
   "google.vinculoError": "No pudimos vincular tu cuenta de Google. Probá de nuevo.",
   "google.yaVinculada": "Vinculada: ya podés entrar con Google",
 
+
+  // ── La bandeja que responde al click, y la selección sin recuadros ───
+  // «Actualizando…» es lo que dice la lista mientras la navegación está en
+  // vuelo: el control ya cambió, el servidor todavía no contestó.
+  "bandeja.actualizando": "Actualizando la lista…",
+  "bandeja.listo": "Listo",
+  "bandeja.marcar": "Marcar {id}",
+  "bandeja.quitarSeleccion": "Quitar selección",
+  "bandeja.seleccionar": "Seleccionar",
+  "bandeja.seleccionarPagina": "Seleccionar los {n} de esta página",
+
 } as const;
 
 export type TranslationKey = keyof typeof esAR;

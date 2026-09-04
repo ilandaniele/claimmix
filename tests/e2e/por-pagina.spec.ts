@@ -66,6 +66,9 @@ test.describe("cien por página", () => {
       name: enCualquierIdioma("pagination.perPage"),
     });
     await selector.selectOption("100");
+    // Al instante, antes de que el servidor conteste: es lo que se reporto
+    // como «pongo 100 y no cambia».
+    await expect(selector).toHaveValue("100", { timeout: 300 });
     await expect(page).toHaveURL(/per_page=100/);
     await expect.poll(() => filas(page), { timeout: 10_000 }).toBe(Math.min(100, total));
   });

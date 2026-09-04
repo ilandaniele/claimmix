@@ -17,6 +17,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { and, eq, sql } from "drizzle-orm";
 import { getSessionContext } from "@/lib/auth/session";
+import { getUserRow } from "@/lib/auth/user-row";
 import { db } from "@/lib/db";
 import { enTenant } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -118,15 +119,8 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   // Resolve the tenant boundary (RLS is gone — explicit tenant_id filter only).
   const session = await getSessionContext();
   if (!session?.user) redirect("/login");
-  const userRow = firstRow(
-    // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
-    // No puede pasar por una capa que necesita el dato que ella busca.
-    await db
-      .select({ tenant_id: users.tenant_id })
-      .from(users)
-      .where(eq(users.id, session.user.id))
-      .limit(1)
-  );
+  // Deduplicada con la del layout: ver lib/auth/user-row.ts.
+  const userRow = await getUserRow(session.user.id);
   if (!userRow) redirect("/login");
   const tenantId = userRow.tenant_id;
 

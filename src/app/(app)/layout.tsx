@@ -14,6 +14,7 @@ import { eq } from "drizzle-orm";
 
 import { getSessionContext } from "@/lib/auth/session";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
+import { getUserRow } from "@/lib/auth/user-row";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { users } from "@/lib/db/schema";
@@ -36,25 +37,9 @@ export default async function AppLayout({
   // must never crash the shell (falls back to session email / defaults).
   let userRow: { full_name: string; role: string; locale: string | null } | null =
     null;
-  if (user?.id) {
-    try {
-      userRow = firstRow(
-        // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
-        // No puede pasar por una capa que necesita el dato que ella busca.
-        await db
-          .select({
-            full_name: users.full_name,
-            role: users.role,
-            locale: users.locale,
-          })
-          .from(users)
-          .where(eq(users.id, user.id))
-          .limit(1)
-      );
-    } catch {
-      userRow = null;
-    }
-  }
+  // La misma fila que despues pide la pagina: `getUserRow` la dedupe por
+  // pedido, asi que entre el layout y la pagina la base la entrega una vez.
+  if (user?.id) userRow = await getUserRow(user.id);
 
   // El nombre en el idioma del usuario, así que se resuelve DESPUÉS del
   // locale — ver más abajo, donde la preferencia de la cuenta le gana a la

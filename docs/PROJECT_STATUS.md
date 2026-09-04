@@ -1539,6 +1539,35 @@ smoke sobre `5b7e6d0`, **11,8 min** (normal ~7). Con el pooler lento el
 ensayo tarda casi el doble, no falla. Un tope corto convierte «lento» en
 «roto» y además ensucia producción.
 
+### ⚡ La bandeja responde al click, y dos viajes menos por pantalla (2026-09-04)
+
+**«Aprieto y tarda en cambiar.»** Todo el estado de la bandeja vive en la URL y
+cambiarlo era `router.push`: hasta que el servidor contestaba no se movía nada.
+Ahora hay UNA transición para toda la bandeja (`navegacion-pendiente.tsx`):
+pestañas, chips, página y tamaño se dibujan a partir del destino en vuelo —el
+click se refleja al instante— y la lista se atenúa con una barra fina mientras
+llega la respuesta. El e2e afirma que el desplegable dice «100» en menos de
+300 ms, antes de que cambie la URL.
+
+**«Está lento para pocos casos.»** Con quinientos casos ninguna consulta es
+cara; lo que domina es cuántas veces va y vuelve al pooler antes de pintar. Dos
+cascadas se fueron: la lista y los contadores por estado salen en un
+`Promise.all` (eran serie), y la fila de `users` —que el layout pedía para la
+barra y CADA página volvía a pedir para el `tenant_id`— pasa por
+`lib/auth/user-row.ts`, un `cache()` de React que la dedupe por pedido. Layout,
+bandeja, clientes, métricas y el detalle de caso la usan; quedan cuatro páginas
+con el select a mano (analisis, configuracion, admin/users, clientes/[id]).
+
+Las dos reglas son `async-parallel` y `server-cache-react` de
+`vercel-react-best-practices` (Vercel Engineering, 185K instalaciones),
+instalada globalmente a pedido con `find-skills`. Sobre `base_claude.md`: no
+existe en el repo, en `~/.claude` ni en el home; lo que rige es `CLAUDE.md` →
+`AGENTS.md`.
+
+⛔ **Lo que no se pudo medir en milisegundos** desde esta máquina, porque el
+enlace estuvo entre 0,25 y 2,2 s de ping: la ganancia se cuenta en viajes
+secuenciales —cuatro donde había seis en `/bandeja`—, no en tiempos.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

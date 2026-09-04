@@ -69,7 +69,9 @@ test.describe("cien por página", () => {
     // Al instante, antes de que el servidor conteste: es lo que se reporto
     // como «pongo 100 y no cambia».
     await expect(selector).toHaveValue("100", { timeout: 300 });
-    await expect(page).toHaveURL(/per_page=100/);
+    // La URL llega cuando el servidor contesta: en un enlace lento son
+    // segundos, y lo que se afirma es que llega, no cuándo.
+    await expect(page).toHaveURL(/per_page=100/, { timeout: 15_000 });
     await expect.poll(() => filas(page), { timeout: 10_000 }).toBe(Math.min(100, total));
   });
 

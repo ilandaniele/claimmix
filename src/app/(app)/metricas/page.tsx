@@ -13,6 +13,7 @@
 
 import { nombreDelMesArgentino } from "@/core/fecha/dia-argentino";
 import { getSessionContext } from "@/lib/auth/session";
+import { getUserRow } from "@/lib/auth/user-row";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { formatUsd as formatUsdShared } from "@/lib/utils";
@@ -47,13 +48,8 @@ async function fetchMetricas(): Promise<MetricasData | null> {
     const session = await getSessionContext();
     if (!session?.user) return null;
 
-    // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
-    // No puede pasar por una capa que necesita el dato que ella busca.
-    const [userRow] = await db
-      .select({ tenant_id: users.tenant_id })
-      .from(users)
-      .where(eq(users.id, session.user.id))
-      .limit(1);
+    // Deduplicada con la del layout: ver lib/auth/user-row.ts.
+    const userRow = await getUserRow(session.user.id);
     // El chequeo va ANTES de leerle un campo: estaba al revés, así que una
     // sesión sin perfil reventaba en la línea de abajo en vez de devolver null.
     if (!userRow) return null;

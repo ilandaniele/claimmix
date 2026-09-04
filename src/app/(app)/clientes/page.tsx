@@ -9,6 +9,7 @@
 
 import { Suspense } from "react";
 import { getSessionContext } from "@/lib/auth/session";
+import { getUserRow } from "@/lib/auth/user-row";
 import { db } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { users } from "@/lib/db/schema";
@@ -56,13 +57,8 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
 
   const session = await getSessionContext();
   if (!session?.user) redirect("/login");
-  // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
-  // No puede pasar por una capa que necesita el dato que ella busca.
-  const [userRow] = await db
-    .select({ tenant_id: users.tenant_id, role: users.role })
-    .from(users)
-    .where(eq(users.id, session.user.id))
-    .limit(1);
+  // Deduplicada con la del layout: ver lib/auth/user-row.ts.
+  const userRow = await getUserRow(session.user.id);
   if (!userRow) redirect("/login");
 
   /*

@@ -16,6 +16,7 @@
 import { notFound, redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { getSessionContext } from "@/lib/auth/session";
+import { getUserRow } from "@/lib/auth/user-row";
 import { db } from "@/lib/db";
 import type { TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -103,15 +104,8 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
   if (!session?.user) {
     redirect("/login");
   }
-  const me = firstRow(
-    // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
-    // No puede pasar por una capa que necesita el dato que ella busca.
-    await db
-      .select({ tenant_id: users.tenant_id, role: users.role })
-      .from(users)
-      .where(eq(users.id, session.user.id))
-      .limit(1)
-  );
+  // Deduplicada con la del layout: ver lib/auth/user-row.ts.
+  const me = await getUserRow(session.user.id);
   if (!me) {
     redirect("/login");
   }

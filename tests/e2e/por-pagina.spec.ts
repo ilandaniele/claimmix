@@ -50,10 +50,20 @@ test.describe("cien por página", () => {
     await expect.poll(() => filas(page), { timeout: 10_000 }).toBe(Math.min(100, total));
   });
 
-  test("el tamaño por omisión muestra 20", async ({ page }) => {
+  test("el tamaño por omisión muestra 20, y el servidor contesta en tiempo", async ({ page }) => {
     await page.goto("/bandeja");
     const total = await totalDelPie(page);
     await expect.poll(() => filas(page), { timeout: 10_000 }).toBe(Math.min(20, total));
+
+    // Server time for /bandeja as seen from CI's network: printed every run,
+    // and a tripwire against a new DB round-trip creeping back in.
+    const servidorMs = await page.evaluate(() => {
+      const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+      return nav ? Math.round(nav.responseStart - nav.requestStart) : -1;
+    });
+    console.log(`[perf] /bandeja servidor: ${servidorMs} ms`);
+    expect(servidorMs).toBeGreaterThan(0);
+    expect(servidorMs).toBeLessThan(4000);
   });
 
   test("cambiar el selector en la pantalla cambia las filas", async ({ page }) => {

@@ -1,20 +1,4 @@
-/**
- * Cómo se lee lo que contestó un modelo.
- *
- * Estaba adentro de `openai-extractor.ts` y no era de OpenAI: el extractor de
- * Gemini importaba de ahí el parseo, la validación y el tipo del payload de
- * email. Cuando OpenAI salió del producto, borrar ese archivo se llevaba
- * puesta la mitad del camino que sí se usa — así que primero se separó lo
- * neutral, que es esto.
- *
- * Nada de acá sabe qué proveedor contestó. Recibe un texto, saca de adentro el
- * JSON —un modelo lo envuelve en prosa, en un bloque markdown o en un objeto
- * de razonamiento antes de la respuesta final— y lo valida contra
- * `ExtractedClaimSchema` antes de que llegue a la base.
- *
- * AC17: nada que no haya pasado por el esquema se escribe.
- * LLM06: acá no se registra texto del reclamo, sólo conteos.
- */
+// Parse and validate a model's JSON answer. Provider-agnostic.
 
 import "server-only";
 import { ExtractedClaimSchema } from "@/lib/schemas/extracted-claim";

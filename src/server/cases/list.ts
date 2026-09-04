@@ -11,11 +11,11 @@
  * AC12: Pagination per_page is capped at 100.
  */
 
-import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { countRows, ilikeAny } from "@/lib/db/helpers";
 import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
-import { cases, extractedFields } from "@/lib/db/schema";
+import { cases } from "@/lib/db/schema";
 import type { CaseRow } from "@/lib/db/types";
 import type { CaseQuery, SortColumn } from "@/lib/schemas/cases";
 
@@ -142,8 +142,19 @@ export async function listCases(
         .select({
         id: cases.id,
         tenant_id: cases.tenant_id,
-        policy_number: cases.policy_number,
-        policyholder_name: cases.policyholder_name,
+        // Fallback inline: a second round-trip fired on nearly every render.
+        policy_number: sql<string | null>`coalesce(${cases.policy_number}, (
+          select ef.field_value from extracted_fields ef
+           where ef.case_id = ${cases.id}
+             and ef.tenant_id = ${cases.tenant_id}
+             and ef.field_key = 'policy_number'
+        ))`,
+        policyholder_name: sql<string | null>`coalesce(${cases.policyholder_name}, (
+          select ef.field_value from extracted_fields ef
+           where ef.case_id = ${cases.id}
+             and ef.tenant_id = ${cases.tenant_id}
+             and ef.field_key = 'full_name'
+        ))`,
         claim_type: cases.claim_type,
         status: cases.status,
         confidence_min: cases.confidence_min,
@@ -204,7 +215,7 @@ export async function listCases(
     throw new Error(`[listCases] query error: ${errCode(err)}`);
   }
 
-  const rows = await hydrateCaseListIdentity(ctx, data as unknown as CaseRow[]);
+  const rows = data as unknown as CaseRow[];
 
   return {
     data: rows,
@@ -215,58 +226,6 @@ export async function listCases(
       pages: Math.ceil(total / per_page),
     },
   };
-}
-
-async function hydrateCaseListIdentity(
-  ctx: TenantContext,
-  rows: CaseRow[]
-): Promise<CaseRow[]> {
-  const caseIdsNeedingHydration = rows
-    .filter((row) => !row.policyholder_name || !row.policy_number)
-    .map((row) => row.id);
-
-  if (caseIdsNeedingHydration.length === 0) return rows;
-
-  let data: Array<{ case_id: string; field_key: string; field_value: string }>;
-  try {
-    data = await enTenant(ctx, (db) =>
-      db
-        .select({
-          case_id: extractedFields.case_id,
-          field_key: extractedFields.field_key,
-          field_value: extractedFields.field_value,
-        })
-        .from(extractedFields)
-        // Sin `eq(extractedFields.tenant_id, …)`: lo pone la base. Los dos
-        // `inArray` que quedan son filtros de negocio, no de seguridad.
-        .where(
-          and(
-            inArray(extractedFields.case_id, caseIdsNeedingHydration),
-            inArray(extractedFields.field_key, ["full_name", "policy_number"])
-          )
-        )
-    );
-  } catch (err) {
-    console.error("[listCases] extracted_fields hydration error:", errCode(err));
-    return rows;
-  }
-
-  const fieldsByCase = new Map<string, Record<string, string>>();
-  for (const field of data) {
-    const entry = fieldsByCase.get(field.case_id) ?? {};
-    entry[field.field_key] = field.field_value;
-    fieldsByCase.set(field.case_id, entry);
-  }
-
-  return rows.map((row) => {
-    const fields = fieldsByCase.get(row.id);
-    if (!fields) return row;
-    return {
-      ...row,
-      policyholder_name: row.policyholder_name ?? fields.full_name ?? null,
-      policy_number: row.policy_number ?? fields.policy_number ?? null,
-    };
-  });
 }
 
 /**

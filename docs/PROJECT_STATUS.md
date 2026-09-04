@@ -1554,9 +1554,9 @@ cara; lo que domina es cuántas veces va y vuelve al pooler antes de pintar. Dos
 cascadas se fueron: la lista y los contadores por estado salen en un
 `Promise.all` (eran serie), y la fila de `users` —que el layout pedía para la
 barra y CADA página volvía a pedir para el `tenant_id`— pasa por
-`lib/auth/user-row.ts`, un `cache()` de React que la dedupe por pedido. Layout,
-bandeja, clientes, métricas y el detalle de caso la usan; quedan cuatro páginas
-con el select a mano (analisis, configuracion, admin/users, clientes/[id]).
+`lib/auth/user-row.ts`, un `cache()` de React que la dedupe por pedido. La usan el
+layout y las ocho páginas que resolvían el inquilino a mano (`admin/users` no
+lo hacía: su `from(users)` es el listado del inquilino). No queda ninguna.
 
 Las dos reglas son `async-parallel` y `server-cache-react` de
 `vercel-react-best-practices` (Vercel Engineering, 185K instalaciones),

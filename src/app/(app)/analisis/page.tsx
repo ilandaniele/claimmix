@@ -7,10 +7,11 @@
  */
 
 import { getSessionContext } from "@/lib/auth/session";
+import { getUserRow } from "@/lib/auth/user-row";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { eq, and, gte, count } from "drizzle-orm";
-import { cases, users } from "@/lib/db/schema";
+import { and, gte, count } from "drizzle-orm";
+import { cases } from "@/lib/db/schema";
 import { statusOptions, claimTypeOptions } from "@/lib/labels/case-catalog";
 import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";
@@ -50,13 +51,8 @@ async function fetchAnalisis(): Promise<AnalisisData | null> {
     const session = await getSessionContext();
     if (!session?.user) return null;
 
-    // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
-    // No puede pasar por una capa que necesita el dato que ella busca.
-    const [userRow] = await db
-      .select({ tenant_id: users.tenant_id })
-      .from(users)
-      .where(eq(users.id, session.user.id))
-      .limit(1);
+    // Deduplicada con la del layout: ver lib/auth/user-row.ts.
+    const userRow = await getUserRow(session.user.id);
     /*
      * La comprobación va ANTES de leer la fila, no después.
      *

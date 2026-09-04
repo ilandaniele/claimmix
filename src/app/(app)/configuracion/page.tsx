@@ -11,12 +11,10 @@
  * password change form (requires interactivity).
  */
 
-import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
 import { getSessionContext } from "@/lib/auth/session";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
+import { getUserRow } from "@/lib/auth/user-row";
 import { ConfiguracionClient } from "./ConfiguracionClient";
 import { GmailAccountsPanel } from "./GmailAccountsPanel";
 import { UserAiKeyPanel } from "./UserAiKeyPanel";
@@ -93,13 +91,8 @@ export default async function ConfiguracionPage({
   const session = await getSessionContext();
   if (!session?.user) redirect("/login");
 
-  // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
-  // No puede pasar por una capa que necesita el dato que ella busca.
-  const [userRow] = await db
-    .select({ full_name: users.full_name, role: users.role })
-    .from(users)
-    .where(eq(users.id, session.user.id))
-    .limit(1);
+  // Deduplicada con la del layout: ver lib/auth/user-row.ts.
+  const userRow = await getUserRow(session.user.id);
 
   const fullName: string = userRow?.full_name ?? session.user.email ?? "Analista";
   const role: string = userRow?.role ?? "analyst";

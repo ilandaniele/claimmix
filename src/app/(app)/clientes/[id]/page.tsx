@@ -10,10 +10,11 @@
 
 import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
+import { getUserRow } from "@/lib/auth/user-row";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { eq, and, desc, count } from "drizzle-orm";
-import { cases, customers, policies, users } from "@/lib/db/schema";
+import { cases, customers, policies } from "@/lib/db/schema";
 import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
@@ -129,13 +130,8 @@ export default async function CustomerDetailPage({
 
   const session = await getSessionContext();
   if (!session?.user) notFound();
-  // sin-inquilino: Ésta es la consulta que AVERIGUA de qué inquilino es la sesión.
-  // No puede pasar por una capa que necesita el dato que ella busca.
-  const [userRow] = await db
-    .select({ tenant_id: users.tenant_id, role: users.role })
-    .from(users)
-    .where(eq(users.id, session.user.id))
-    .limit(1);
+  // Deduplicada con la del layout: ver lib/auth/user-row.ts.
+  const userRow = await getUserRow(session.user.id);
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   // Este contexto es lo único que le dice de quién son los datos.
   // El chequeo va ANTES de leerle un campo: estaba al revés, así que una

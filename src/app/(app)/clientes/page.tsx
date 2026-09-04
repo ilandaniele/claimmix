@@ -10,9 +10,6 @@
 import { Suspense } from "react";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { db } from "@/lib/db";
-import { eq } from "drizzle-orm";
-import { users } from "@/lib/db/schema";
 import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import { redirect } from "next/navigation";
 import { getT } from "@/lib/i18n";

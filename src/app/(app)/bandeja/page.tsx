@@ -15,13 +15,12 @@
 
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { and, eq, sql } from "drizzle-orm";
+import { and, sql } from "drizzle-orm";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { db } from "@/lib/db";
 import { enTenant } from "@/data/scope";
-import { firstRow } from "@/lib/db/helpers";
-import { cases, users } from "@/lib/db/schema";
+import { cases } from "@/lib/db/schema";
 import { listCases } from "@/server/cases/list";
 import { SCENARIOS } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";

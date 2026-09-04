@@ -14,12 +14,9 @@
  */
 
 import { notFound, redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { db } from "@/lib/db";
 import type { TenantContext } from "@/data/scope";
-import { firstRow } from "@/lib/db/helpers";
 import { users } from "@/lib/db/schema";
 import {
   cargarDetalleDeCaso,

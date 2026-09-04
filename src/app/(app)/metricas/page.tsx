@@ -23,10 +23,9 @@ import {
   type AiUsageByUser,
   type AiUsageByModel,
 } from "@/server/metrics/kpis";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { eq, and, gte, lt, count, sql, isNotNull } from "drizzle-orm";
-import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
+import { and, gte, lt, count, sql, isNotNull } from "drizzle-orm";
+import { aiUsage, authUsers, cases } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";

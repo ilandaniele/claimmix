@@ -20,7 +20,7 @@
 
 import "server-only";
 import { createHash } from "crypto";
-import { GoogleAuth } from "google-auth-library";
+import { tokenDeGcp } from "@/server/gcp/credenciales";
 import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db, tables } from "@/lib/db";
@@ -73,26 +73,6 @@ function getMinExamples(): number {
 }
 
 // ── Auth helper ────────────────────────────────────────────────────────────
-
-let _auth: GoogleAuth | null = null;
-
-function getGoogleAuth(): GoogleAuth {
-  if (!_auth) {
-    _auth = new GoogleAuth({
-      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-    });
-  }
-  return _auth;
-}
-
-async function getAccessToken(): Promise<string> {
-  const auth = getGoogleAuth();
-  const client = await auth.getClient();
-  const tokenResponse = await client.getAccessToken();
-  const token = typeof tokenResponse === "string" ? tokenResponse : tokenResponse?.token;
-  if (!token) throw new Error("Failed to obtain Google access token");
-  return token;
-}
 
 // ── Vertex AI state mapping ────────────────────────────────────────────────
 
@@ -433,7 +413,7 @@ export async function startVertexAiTuningJob(
   const timestamp = Date.now();
 
   // Get auth token once for all GCS + Vertex AI calls
-  const token = await getAccessToken();
+  const token = await tokenDeGcp();
 
   // Upload training JSONL
   const trainPath = `${tenantId}/train_${timestamp}.jsonl`;
@@ -547,7 +527,7 @@ export async function syncVertexAiTuningJobStatus(
   const vertexJobId = extractVertexJobId(vertexJobName);
   if (!vertexJobId) throw new Error("INVALID_VERTEX_JOB_NAME");
 
-  const token = await getAccessToken();
+  const token = await tokenDeGcp();
   const vertexJob = await getVertexTuningJob(project, location, vertexJobId, token);
 
   const mappedStatus = vertexJob.state

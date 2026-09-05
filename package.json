@@ -63,6 +63,7 @@
     "@neondatabase/serverless": "^1.1.0",
     "@sentry/nextjs": "^10.59.0",
     "@tanstack/react-table": "^8.21.3",
+    "@vercel/oidc": "3.8.5",
     "better-auth": "^1.6.25",
     "drizzle-orm": "^0.45.2",
     "google-auth-library": "^10.7.0",

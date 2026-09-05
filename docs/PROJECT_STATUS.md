@@ -371,6 +371,9 @@ Three things worth remembering:
   que sigue abierto es lo de Workload Identity Federation, que es el arreglo de
   verdad; esto sólo impide que aparezca una clave más.
 
+  Nota posterior (2026-09-05): hecho para Vercel — ver «Vercel le prueba a
+  Google quién es, sin clave». Falta la copia del post-deploy en GitHub.
+
 ### 🔕 The week the mailbox would have gone quiet (2026-08-24)
 
 Publishing the OAuth app was the last step of the migration, and the reason is narrow:
@@ -1568,6 +1571,45 @@ existe en el repo, en `~/.claude` ni en el home; lo que rige es `CLAUDE.md` →
 enlace estuvo entre 0,25 y 2,2 s de ping: la ganancia se cuenta en viajes
 secuenciales —cuatro donde había seis en `/bandeja`—, no en tiempos.
 
+### 🔐 Vercel le prueba a Google quién es, sin clave (2026-09-05)
+
+Producción hablaba con Vertex con una clave JSON de la service account pegada
+en `GOOGLE_SERVICE_ACCOUNT_JSON`: el mismo secreto en Vercel, en GitHub y en
+esta máquina, y una restricción de la organización impidiendo crear otra. Hoy
+Vercel firma un token OIDC por pedido (`x-vercel-oidc-token`, dos horas de
+vida) y Google lo acepta por Workload Identity Federation: pool y proveedor
+`vercel` en `claimmix-506321`, emisor
+`https://oidc.vercel.com/ilandaniele-3471s-projects`, condición que fija
+`owner_id` y `project_id` (inmutables: renombrar el equipo o el proyecto cambia
+`sub`, `iss` y `aud`) y sólo `production`/`preview`. El token se canjea en STS
+y se impersona a `claimmix-extractor` con `roles/iam.workloadIdentityUser`, así
+que la identidad y los permisos son los mismos que con la clave.
+
+`src/server/gcp/credenciales.ts` decide el modo: `oidc` si están las cuatro
+`GCP_*`, si no `clave`, si no `adc`. `/api/health` lo informa y con `deep=1`
+acuña un token por ese camino antes de llamar al modelo.
+
+Probado antes de tocar producción: un token real de Vercel (entorno
+`development`, permitido sólo durante la prueba) recorrió STS, la
+impersonación y una llamada a Vertex desde esta máquina. Dos cosas para saber:
+
+- **La primera llamada tras crear el binding dio 403**
+  (`iam.serviceAccounts.getAccessToken` denegado); un minuto después pasó.
+  Propagación de IAM, no configuración.
+- **El supplier llama a `getVercelOidcToken()` sin argumentos** a propósito.
+  `google-auth-library` le pasa un contexto con `audience`, y con eso
+  `@vercel/oidc` canjearía el token por uno de audiencia custom que el
+  proveedor no acepta.
+
+Orden de salida: el código llega con las `GCP_*` ausentes (modo `clave`, nada
+cambia), se agregan las variables, `/api/health?deep=1` tiene que decir
+`credenciales: oidc`, un ensayo contra producción ejercita el camino real (el
+agente corre dentro de `after()`), y recién ahí sale
+`GOOGLE_SERVICE_ACCOUNT_JSON` de Vercel.
+
+Queda una copia más: el post-deploy en GitHub le pasa la misma clave al
+ensayo. Se cierra igual, con el OIDC de GitHub Actions contra el mismo pool.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada
@@ -1583,7 +1625,10 @@ secuenciales —cuatro donde había seis en `/bandeja`—, no en tiempos.
   valor de Vercel estuviera mal, el primer deploy lo dice —`DATABASE_URL_APP no
   autentica`— en vez de descubrirse cuando un analista abre la bandeja vacía.
 
-- **`main` acepta pushes que saltan la protección de rama** (2026-09-01). Los
+- ~~**`main` acepta pushes que saltan la protección de rama**~~ ✅ **HECHO 2026-09-05.**
+  `enforce_admins` activo en la protección de `main`: los diez checks valen
+  también para el admin, y todo cambio entra por rama + PR. Lo que sigue es el
+  relato original (2026-09-01). Los
   tres pushes de hoy contestaron «10 of 10 required status checks are expected»
   y pasaron igual. No es teórico: así llegó a producción un CI rojo —era la
   auditoría de dependencias, se arregló enseguida, pero si hubiera sido un test

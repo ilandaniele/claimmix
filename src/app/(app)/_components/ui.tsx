@@ -65,11 +65,16 @@ export function CardHeader({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-3">
+    <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4 pb-3">
       {/*
         * `min-w-0` + `truncate`: sin eso, un título largo empuja los botones
         * fuera de la tarjeta. Un hijo de flex no se encoge por debajo de su
         * contenido salvo que se le diga.
+        *
+        * `flex-wrap` en los dos niveles: con tres botones y una ventana
+        * angosta, la fila no daba y los botones se salían de la tarjeta o se
+        * amontonaban desparejos. Ahora bajan a una segunda línea, alineados a
+        * la derecha.
         *
         * `text-balance` reparte el título en líneas parejas en vez de dejar una
         * palabra huérfana abajo.
@@ -77,7 +82,9 @@ export function CardHeader({
       <h2 className="min-w-0 truncate text-balance text-[15px] font-semibold tracking-tight text-slate-900">
         {title}
       </h2>
-      {children ? <div className="flex items-center gap-2">{children}</div> : null}
+      {children ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>
+      ) : null}
     </div>
   );
 }

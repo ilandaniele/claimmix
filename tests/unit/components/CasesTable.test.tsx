@@ -7,15 +7,16 @@
  * without a LocaleProvider gives Spanish labels — same pattern as status-badge.test.tsx.
  */
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import { CasesTable } from "../../../src/app/(app)/bandeja/components/CasesTable";
 import { LocaleProvider } from "../../../src/lib/i18n/LocaleContext";
 import type { CaseRow } from "../../../src/server/cases/list";
 
 // next/navigation must be mocked — CasesTable calls useRouter()
+const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push }),
 }));
 
 /** Minimal CaseRow factory for test data. */
@@ -88,5 +89,50 @@ describe("CasesTable — AC17 (claim_type = 'other')", () => {
     expect(
       screen.getByText("No hay siniestros que coincidan con los filtros.")
     ).toBeInTheDocument();
+  });
+});
+
+describe("CasesTable — modo selección", () => {
+  const dos = [makeCase(), makeCase({ id: "00000000-0000-0000-0000-000000000002" })];
+  function montar(seleccionando = true) {
+    return render(
+      <LocaleProvider locale="es-AR">
+        <CasesTable cases={dos} seleccionando={seleccionando} onDeleteMany={vi.fn()} />
+      </LocaleProvider>
+    );
+  }
+
+  it("tocar el círculo marca la fila", () => {
+    montar();
+    const [c1] = screen.getAllByRole("checkbox");
+    expect(c1).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(c1);
+    expect(c1).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: /Eliminar seleccionados \(1\)/ })).toBeInTheDocument();
+  });
+
+  it("tocar la fila marca y no navega", () => {
+    montar();
+    fireEvent.click(screen.getAllByRole("row", { name: /Siniestro/ })[1]);
+    expect(screen.getAllByRole("checkbox")[1]).toHaveAttribute("aria-checked", "true");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("salir del modo olvida lo marcado", () => {
+    const { rerender } = montar();
+    fireEvent.click(screen.getAllByRole("checkbox")[0]);
+    const sin = (
+      <LocaleProvider locale="es-AR">
+        <CasesTable cases={dos} seleccionando={false} onDeleteMany={vi.fn()} />
+      </LocaleProvider>
+    );
+    rerender(sin);
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    rerender(
+      <LocaleProvider locale="es-AR">
+        <CasesTable cases={dos} seleccionando onDeleteMany={vi.fn()} />
+      </LocaleProvider>
+    );
+    for (const c of screen.getAllByRole("checkbox")) expect(c).toHaveAttribute("aria-checked", "false");
   });
 });

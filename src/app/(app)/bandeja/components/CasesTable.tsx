@@ -6,6 +6,7 @@ import {
   useReactTable,
   getCoreRowModel,
   flexRender,
+  type CellContext,
   type ColumnDef,
 } from "@tanstack/react-table";
 import type { CaseRow } from "@/server/cases/list";
@@ -26,7 +27,6 @@ interface CasesTableProps {
   cases: CaseRow[];
   /** Modo seleccion: las filas se marcan en vez de abrirse. */
   seleccionando?: boolean;
-  onSalirDeSeleccion?: () => void;
   /**
    * Called with the IDs to delete and a callback to clear the selection
    * once the parent has finished (or started) the operation.
@@ -38,11 +38,17 @@ export function CasesTable({
   cases,
   onDeleteMany,
   seleccionando = false,
-  onSalirDeSeleccion,
 }: CasesTableProps) {
   const { t, locale } = useLocale();
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Entrar o salir del modo empieza de cero: lo marcado no sobrevive al «Listo».
+  const [modoPrevio, setModoPrevio] = useState(seleccionando);
+  if (modoPrevio !== seleccionando) {
+    setModoPrevio(seleccionando);
+    setSelectedIds(new Set());
+  }
 
   const allIds = useMemo(() => cases.map((c) => c.id), [cases]);
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
@@ -84,19 +90,26 @@ export function CasesTable({
        * que competian con el contenido para una accion que se usa de vez en
        * cuando. La columna existe solo en modo seleccion, y el control es un
        * circulo del acento: vacio, o relleno con un tilde al marcar.
+       *
+       * Lo marcado se lee de `meta`, no de la clausura: si `selectedIds`
+       * fuera dependencia de este memo, cada marca rearmaria las columnas y
+       * `flexRender` desmontaria y volveria a montar TODAS las celdas.
        */
       ...(onDeleteMany && seleccionando
         ? [
             {
               id: "select",
               header: "",
-              cell: ({ row }: { row: { original: CaseRow } }) => {
+              cell: ({ row, table }: CellContext<CaseRow, unknown>) => {
+                const { selectedIds } = table.options.meta as { selectedIds: Set<string> };
                 const marcado = selectedIds.has(row.original.id);
                 return (
-                  <span
+                  <button
+                    type="button"
                     role="checkbox"
                     aria-checked={marcado}
                     aria-label={t("bandeja.marcar").replace("{id}", formatCaseId(row.original.id))}
+                    onClick={() => toggleOne(row.original.id)}
                     className={[
                       "inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 transition-colors",
                       marcado
@@ -109,7 +122,7 @@ export function CasesTable({
                         <path d="M2.5 6.5l2.2 2.2L9.5 3.9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     )}
-                  </span>
+                  </button>
                 );
               },
             } as ColumnDef<CaseRow>,
@@ -317,7 +330,7 @@ export function CasesTable({
         : []),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, onDeleteMany, selectedIds, allSelected, someSelected, toggleAll, toggleOne]
+    [t, onDeleteMany, seleccionando, toggleOne]
   );
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table intentionally opts out of React Compiler memoization.
@@ -325,6 +338,7 @@ export function CasesTable({
     data: cases,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    meta: { selectedIds },
   });
 
   if (cases.length === 0) {
@@ -363,27 +377,15 @@ export function CasesTable({
               ? t("bandeja.quitarSeleccion")
               : t("bandeja.seleccionarPagina").replace("{n}", String(allIds.length))}
           </button>
-          <span className="ml-auto flex items-center gap-2">
-            {selectedIds.size > 0 && (
-              <button
-                type="button"
-                onClick={() => onDeleteMany([...selectedIds], clearSelection)}
-                className="rounded-md border border-red-300 px-3 py-1.5 text-[13px] font-medium text-red-700 transition-colors hover:bg-red-50"
-              >
-                {t("bandeja.deleteSelected")} ({selectedIds.size})
-              </button>
-            )}
+          {selectedIds.size > 0 && (
             <button
               type="button"
-              onClick={() => {
-                clearSelection();
-                onSalirDeSeleccion?.();
-              }}
-              className="rounded-md bg-slate-900 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-slate-700"
+              onClick={() => onDeleteMany([...selectedIds], clearSelection)}
+              className="ml-auto rounded-md border border-red-300 px-3 py-1.5 text-[13px] font-medium text-red-700 transition-colors hover:bg-red-50"
             >
-              {t("bandeja.listo")}
+              {t("bandeja.deleteSelected")} ({selectedIds.size})
             </button>
-          </span>
+          )}
         </div>
       )}
 

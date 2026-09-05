@@ -290,26 +290,31 @@ async function checkStorage(deep: boolean): Promise<Check> {
 /** The model. Shallow: are the credentials here. Deep: does it answer. */
 async function checkModel(deep: boolean): Promise<Check> {
   const vertex = process.env.GEMINI_TRANSPORT === "vertex";
+  const { modoDeCredenciales, tokenDeGcp } = await import("@/server/gcp/credenciales");
+  const modo = modoDeCredenciales();
   const missing = vertex
-    ? ["GOOGLE_CLOUD_PROJECT", "GOOGLE_SERVICE_ACCOUNT_JSON"].filter(
-        (v) => !process.env[v]?.trim()
-      )
+    ? [
+        !process.env.GOOGLE_CLOUD_PROJECT?.trim() && "GOOGLE_CLOUD_PROJECT",
+        modo === "adc" && process.env.VERCEL && "GCP_* (OIDC) o GOOGLE_SERVICE_ACCOUNT_JSON",
+      ].filter((v): v is string => !!v)
     : ["GEMINI_API_KEY"].filter((v) => !process.env[v]?.trim());
 
   if (missing.length > 0) {
     return down("modelo", `sin configurar: ${missing.join(", ")}`);
   }
+  const credenciales = vertex ? ` · credenciales: ${modo}` : "";
   if (!deep) {
-    return ok("modelo", `${vertex ? "vertex" : "ai studio"} configurado (sin probar)`);
+    return ok("modelo", `${vertex ? "vertex" : "ai studio"} configurado (sin probar)${credenciales}`);
   }
 
   try {
+    if (vertex) await tokenDeGcp();
     const { callGemini } = await import("@/server/ai/gemini-extractor");
     const { text } = await callGemini(
       'Respondé exactamente {"ok": true} y nada más.',
       "ping"
     );
-    return text ? ok("modelo", "responde") : down("modelo", "respondió vacío");
+    return text ? ok("modelo", `responde${credenciales}`) : down("modelo", "respondió vacío");
   } catch (err) {
     return down("modelo", why(err));
   }

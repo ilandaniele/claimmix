@@ -23,7 +23,7 @@
  */
 
 import "server-only";
-import { GoogleAuth } from "google-auth-library";
+import { tokenDeGcp } from "@/server/gcp/credenciales";
 import { RESPUESTA_JSON_SCHEMA } from "@/lib/schemas/extracted-claim";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { ClaimType } from "@/lib/schemas/cases";
@@ -220,35 +220,12 @@ function getVertexModel(): string {
   return process.env.VERTEX_EXTRACTION_MODEL?.trim() || "gemini-2.5-flash";
 }
 
-let _vertexAuth: GoogleAuth | null = null;
 async function getVertexToken(): Promise<string> {
-  if (!_vertexAuth) {
-    const scopes = ["https://www.googleapis.com/auth/cloud-platform"];
-    // Serverless (Vercel) has no filesystem for a key file, so
-    // GOOGLE_APPLICATION_CREDENTIALS (a PATH) can't work there. Accept the
-    // service-account JSON inline instead; fall back to ADC/key-file locally.
-    const inline = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
-    if (inline) {
-      let credentials: Record<string, unknown>;
-      try {
-        credentials = JSON.parse(inline);
-      } catch {
-        throw new GeminiExtractionError(
-          "GOOGLE_SERVICE_ACCOUNT_JSON is set but is not valid JSON"
-        );
-      }
-      _vertexAuth = new GoogleAuth({ credentials, scopes });
-    } else {
-      _vertexAuth = new GoogleAuth({ scopes });
-    }
+  try {
+    return await tokenDeGcp();
+  } catch (err) {
+    throw new GeminiExtractionError(`Vertex: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const client = await _vertexAuth.getClient();
-  const res = await client.getAccessToken();
-  const token = typeof res === "string" ? res : res?.token;
-  if (!token) {
-    throw new GeminiExtractionError("Vertex: could not obtain a service-account access token");
-  }
-  return token;
 }
 
 /**

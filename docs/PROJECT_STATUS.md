@@ -371,8 +371,9 @@ Three things worth remembering:
   que sigue abierto es lo de Workload Identity Federation, que es el arreglo de
   verdad; esto sólo impide que aparezca una clave más.
 
-  Nota posterior (2026-09-05): hecho para Vercel — ver «Vercel le prueba a
-  Google quién es, sin clave». Falta la copia del post-deploy en GitHub.
+  Nota posterior (2026-09-05): hecho, para Vercel y para el post-deploy de
+  GitHub — ver «Vercel le prueba a Google quién es, sin clave». La clave sólo
+  queda en esta máquina, para entrenar.
 
 ### 🔕 The week the mailbox would have gone quiet (2026-08-24)
 
@@ -1607,8 +1608,28 @@ cambia), se agregan las variables, `/api/health?deep=1` tiene que decir
 agente corre dentro de `after()`), y recién ahí sale
 `GOOGLE_SERVICE_ACCOUNT_JSON` de Vercel.
 
-Queda una copia más: el post-deploy en GitHub le pasa la misma clave al
-ensayo. Se cierra igual, con el OIDC de GitHub Actions contra el mismo pool.
+Salió así el 2026-09-05: `/api/health?deep=1` dijo `credenciales: oidc` con
+`32bec99`, el post-deploy completo (ensayo incluido) pasó, se quitó
+`GOOGLE_SERVICE_ACCOUNT_JSON` de Vercel, se redeployó y el post-deploy volvió
+a pasar. Vercel ya no tiene ninguna clave.
+
+La copia de GitHub se cerró igual: el ensayo del post-deploy entra con el
+token OIDC de GitHub Actions (`google-github-actions/auth`, proveedor `github`
+en el mismo pool, sólo este repo y sólo `post-deploy.yml`) y el secreto
+`GOOGLE_SERVICE_ACCOUNT_JSON` se borró del repo. Una trampa que costó una
+corrida roja: **Vercel crea los deployments de GitHub con `ref` = SHA del
+commit**, no `main`, así que en un run por `deployment_status` el token dice
+`ref=<sha>` y una condición `assertion.ref=='refs/heads/main'` lo rechaza
+(«rejected by the attribute condition»). La condición acepta `main` o
+`event_name=='deployment_status'`; quién puede disparar eso lo sigue
+decidiendo la protección de rama y la puerta `environment == 'Production'`
+del job. La corrida que lo prueba es el post-deploy de este mismo commit.
+
+La clave queda en un solo lugar: `claimmix-veltra-sa-key.json` en esta
+máquina, para el entrenamiento local. **No borrarla en GCP**: la organización
+impide crear otra (`iam.disableServiceAccountKeyCreation`). Volver atrás es
+pegar ese archivo en `GOOGLE_SERVICE_ACCOUNT_JSON` de Vercel, sacar las
+`GCP_*` y redeployar.
 
 ### 🙋 Waiting on you (not code)
 
@@ -1732,9 +1753,9 @@ Studio now 404s for newly-created keys.
 - **Config** (`GEMINI_TRANSPORT=vertex`, set in Vercel prod + `.env.local`):
   `GOOGLE_CLOUD_PROJECT=claimmix-506321` (Veltra's org and billing since 2026-08-24;
   it was `claimmix` before), `GOOGLE_CLOUD_LOCATION=us-central1`,
-  `VERTEX_EXTRACTION_MODEL=gemini-2.5-flash`, and `GOOGLE_SERVICE_ACCOUNT_JSON`
-  (the SA JSON **inline** — serverless has no filesystem, so the key-file path in
-  `GOOGLE_APPLICATION_CREDENTIALS` cannot work on Vercel).
+  `VERTEX_EXTRACTION_MODEL=gemini-2.5-flash`, and the credentials: on Vercel the
+  four `GCP_*` variables (OIDC, no key — see «Vercel le prueba a Google quién es,
+  sin clave», 2026-09-05); locally `GOOGLE_APPLICATION_CREDENTIALS` with the key file.
 - **Model is `flash`, deliberately not `flash-lite`.** Lite measured 0/3 on
   responsabilidad-civil scenarios (invalid_json on both attempts → case escalates);
   flash 3/3. RC claims are the high-value ones.

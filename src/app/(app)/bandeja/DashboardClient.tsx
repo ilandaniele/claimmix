@@ -501,13 +501,23 @@ function DashboardClientInterno({
             </span>
           }
         >
-          {onDeleteManyDisponible && !seleccionando && (
+          {/*
+            * El mismo boton entra y sale del modo. Antes desaparecia al entrar
+            * y la unica salida quedaba dentro de la lista: apretar «Seleccionar»
+            * y ver que el boton se esfuma se lee como una falla, no como un modo.
+            */}
+          {onDeleteManyDisponible && (
             <button
               type="button"
-              onClick={() => setSeleccionando(true)}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+              aria-pressed={seleccionando}
+              onClick={() => setSeleccionando((v) => !v)}
+              className={
+                seleccionando
+                  ? "rounded-lg bg-slate-900 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-slate-700"
+                  : "rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+              }
             >
-              {t("bandeja.seleccionar")}
+              {seleccionando ? t("bandeja.listo") : t("bandeja.seleccionar")}
             </button>
           )}
           <a
@@ -593,7 +603,6 @@ function DashboardClientInterno({
               cases={visibleCases}
               onDeleteMany={handleDeleteMany}
               seleccionando={seleccionando}
-              onSalirDeSeleccion={() => setSeleccionando(false)}
             />
           </div>
         </div>

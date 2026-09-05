@@ -35,6 +35,17 @@ test.describe("selección sin recuadros", () => {
 
     await page.getByRole("button", { name: enCualquierIdioma("bandeja.seleccionar") }).click();
 
+    // Al entrar, los círculos aparecen en el acto y vacíos. Antes el memo de
+    // columnas no dependía del modo y la columna recién aparecía al tocar
+    // otra cosa: «apreté Seleccionar y no selecciona».
+    await expect(page.getByRole("checkbox")).toHaveCount(enPagina);
+    await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(0);
+
+    // Tocar el círculo marca esa fila, y sólo esa.
+    await page.getByRole("checkbox").first().click();
+    await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(1);
+    await expect(page).toHaveURL(/\/bandeja/);
+
     // «Seleccionar los N de esta página» dice cuántos y los marca todos.
     await page
       .getByRole("button", { name: new RegExp(`^(Seleccionar los ${enPagina}|Select all ${enPagina})`) })

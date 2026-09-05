@@ -69,6 +69,8 @@ supabase/.temp/
 # trabaje acá, no sólo para la máquina donde se bajaron.
 .claude/*
 !.claude/skills/
+# Los workflows de orquestación también: describen cómo se trabaja en este repo.
+!.claude/workflows/
 
 # Los enlaces que deja `npx skills` apuntan a una ruta ABSOLUTA de la máquina
 # donde se instaló (`/c/Users/…`). El archivo de verdad vive en `.agents/skills/`

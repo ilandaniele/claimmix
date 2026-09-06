@@ -8,7 +8,8 @@ function literal(v: string): string {
   return v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function enCualquierIdioma(clave: TranslationKey): RegExp {
-  const variantes = [...new Set([esAR[clave], enUS[clave]])].map(literal);
-  return new RegExp(variantes.join("|"), "i");
+export function enCualquierIdioma(clave: TranslationKey, { exacto = false } = {}): RegExp {
+  const variantes = [...new Set([esAR[clave], enUS[clave]])].map(literal).join("|");
+  // `exacto` ancla: «Siguiente|Next» suelto también matchea «Open Next.js Dev Tools».
+  return new RegExp(exacto ? `^(${variantes})$` : variantes, "i");
 }

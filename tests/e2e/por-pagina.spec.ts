@@ -13,25 +13,14 @@
  * página, espera el total; si hay más, espera el tamaño.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { SESION_ADMIN } from "./sesiones";
 import { enCualquierIdioma } from "./texto";
+import { totalDelPie, filas } from "./bandeja";
 
 const HAY_ADMIN = !!(
   process.env.PLAYWRIGHT_ADMIN_EMAIL && process.env.PLAYWRIGHT_ADMIN_PASSWORD
 );
-
-/** El total que el pie declara: «Mostrando 1-100 de 261 siniestros» → 261. */
-async function totalDelPie(page: Page): Promise<number> {
-  const texto = await page.getByText(/\b\d+-\d+\s+\S+\s+\d+\b/).first().innerText();
-  const m = texto.match(/\d+-\d+\s+\S+\s+(\d+)/);
-  if (!m) throw new Error(`no pude leer el total del pie: ${JSON.stringify(texto)}`);
-  return Number(m[1]);
-}
-
-async function filas(page: Page): Promise<number> {
-  return page.locator('[data-scroll="lista"] tbody tr').count();
-}
 
 test.describe("cien por página", () => {
   test.skip(!HAY_ADMIN, "Falta PLAYWRIGHT_ADMIN_EMAIL / PLAYWRIGHT_ADMIN_PASSWORD");
@@ -47,13 +36,13 @@ test.describe("cien por página", () => {
     await expect(selector).toHaveValue("100");
 
     const total = await totalDelPie(page);
-    await expect.poll(() => filas(page), { timeout: 10_000 }).toBe(Math.min(100, total));
+    await expect(filas(page)).toHaveCount(Math.min(100, total), { timeout: 10_000 });
   });
 
   test("el tamaño por omisión muestra 20, y el servidor contesta en tiempo", async ({ page }) => {
     await page.goto("/bandeja");
     const total = await totalDelPie(page);
-    await expect.poll(() => filas(page), { timeout: 10_000 }).toBe(Math.min(20, total));
+    await expect(filas(page)).toHaveCount(Math.min(20, total), { timeout: 10_000 });
 
     // Server time for /bandeja as seen from CI's network: printed every run,
     // and a tripwire against a new DB round-trip creeping back in.
@@ -82,7 +71,7 @@ test.describe("cien por página", () => {
     // La URL llega cuando el servidor contesta: en un enlace lento son
     // segundos, y lo que se afirma es que llega, no cuándo.
     await expect(page).toHaveURL(/per_page=100/, { timeout: 15_000 });
-    await expect.poll(() => filas(page), { timeout: 10_000 }).toBe(Math.min(100, total));
+    await expect(filas(page)).toHaveCount(Math.min(100, total), { timeout: 10_000 });
   });
 
   test("scrollea la lista, no la página", async ({ page }) => {

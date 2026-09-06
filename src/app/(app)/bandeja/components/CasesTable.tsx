@@ -43,14 +43,19 @@ export function CasesTable({
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Entrar o salir del modo empieza de cero: lo marcado no sobrevive al «Listo».
-  const [modoPrevio, setModoPrevio] = useState(seleccionando);
-  if (modoPrevio !== seleccionando) {
-    setModoPrevio(seleccionando);
-    setSelectedIds(new Set());
+  const allIds = useMemo(() => cases.map((c) => c.id), [cases]);
+
+  // Invariante, no evento: lo marcado es subconjunto de lo que está en
+  // pantalla, y nada fuera del modo. Cambiar de página o de filtro poda lo
+  // que se fue; una fila nueva del polling o un update en el lugar no tocan
+  // nada. Se compara por ids: `cases` es referencia nueva en cada render.
+  // Así lo que va al DELETE es siempre lo visible: con fantasmas se borraban
+  // filas fuera de pantalla y los contadores por estado quedaban corridos.
+  const visibles = new Set(seleccionando ? allIds : []);
+  if (selectedIds.size > 0 && [...selectedIds].some((id) => !visibles.has(id))) {
+    setSelectedIds(new Set([...selectedIds].filter((id) => visibles.has(id))));
   }
 
-  const allIds = useMemo(() => cases.map((c) => c.id), [cases]);
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
   const someSelected = !allSelected && selectedIds.size > 0;
 

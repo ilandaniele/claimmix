@@ -294,7 +294,7 @@ Rama: ${rama}. Plan: ${plan.resumen}
 Hallazgos confirmados y corregidos: ${JSON.stringify(confirmados)}
 Comprobación: ${JSON.stringify(comprobacion)}
 
-Hacé UN commit con todo lo de la rama (git add de los archivos tocados, nada de "git add -A" a ciegas): mensaje de una línea en castellano, presente, que diga qué cambia y por qué, como los del historial ("git log --oneline -15"), y el trailer "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>". Pusheá la rama y abrí el PR con "gh pr create": título = la línea del commit; cuerpo con el porqué, qué se probó y qué NO se pudo probar${verde ? '' : ' (el check NO quedó verde: decilo arriba de todo)'}, y al final "🤖 Generated with [Claude Code](https://claude.com/claude-code)". NO mergees.${REGLAS}`,
+Hacé UN commit con todo lo de la rama (git add de los archivos tocados, nada de "git add -A" a ciegas): mensaje de una línea en castellano, presente, que diga qué cambia y por qué, como los del historial ("git log --oneline -15"), y el trailer de coautoría "Co-Authored-By: <modelo> <noreply@anthropic.com>", donde <modelo> es el nombre del modelo con el que estás corriendo VOS. No lo copies de un commit viejo ni de acá: el historial tiene que decir quién lo escribió. Pusheá la rama y abrí el PR con "gh pr create": título = la línea del commit; cuerpo con el porqué, qué se probó y qué NO se pudo probar${verde ? '' : ' (el check NO quedó verde: decilo arriba de todo)'}, y al final "🤖 Generated with [Claude Code](https://claude.com/claude-code)". NO mergees.${REGLAS}`,
   { label: 'pr', schema: ENTREGA },
 )
 

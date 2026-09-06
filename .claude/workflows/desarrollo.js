@@ -215,6 +215,14 @@ const LENTES = [
   { clave: 'next', lente: 'uso correcto de Next.js 16 según node_modules/next/dist/docs: RSC vs cliente, server actions, caché, after(), rutas; deprecaciones' },
 ]
 const clave = (h) => `${h.archivo}::${h.titulo.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/g, ' ').trim()}`
+
+// Quien revisa mira el ÁRBOL DE TRABAJO, no `main...HEAD`.
+//
+// El commit es el último paso del proceso, así que hasta ahí `git diff
+// main...HEAD` está vacío: quien mire ahí revisa la nada y devuelve una lista
+// limpia que no significa nada. Un archivo nuevo tampoco sale en `git diff` a
+// secas, y sin decirlo el revisor lo reporta como si fuera el defecto.
+const DONDE_MIRAR = 'Los cambios están SIN commitear en el árbol de trabajo, a propósito: el commit lo hace el último paso del proceso. Así que "git diff main...HEAD" está VACÍO y no te sirve, y «no está commiteado» o «archivo sin trackear» no es un hallazgo. Mirá "git status --short" y "git diff", y leé entero cada archivo que ahí figure como nuevo.'
 const vistos = new Set()
 const confirmados = []
 
@@ -224,10 +232,12 @@ for (let ronda = 1; ronda <= RONDAS; ronda++) {
   const encontrados = (await parallel(LENTES.map((l) => () => agent(
     `Tarea: ${tarea}
 Plan: ${plan.resumen}
-Rama: ${rama} (mirá "git diff main...HEAD" y los archivos completos que toca).
+Rama: ${rama}. ${DONDE_MIRAR}
+
+Ronda ${ronda} de revisión.${ronda > 1 ? ' Ya hubo una ronda antes y lo que encontró se corrigió: el árbol cambió, miralo de nuevo. Los de antes no hace falta repetirlos.' : ''}
 
 Revisá SOLO desde este lente: ${l.lente}. No cambies nada. Cada hallazgo con archivo, línea, por qué es un problema de verdad (no una preferencia) y gravedad. Si no hay nada, devolvé la lista vacía: un hallazgo inventado cuesta tres verificaciones.${REGLAS}`,
-    { label: `revisar:${l.clave}`, phase: 'Revisar', schema: HALLAZGOS },
+    { label: `revisar:${l.clave}:ronda${ronda}`, phase: 'Revisar', schema: HALLAZGOS },
   )))).filter(Boolean).flatMap((r) => r.hallazgos)
 
   const nuevos = encontrados.filter((h) => !vistos.has(clave(h)))
@@ -237,7 +247,9 @@ Revisá SOLO desde este lente: ${l.lente}. No cambies nada. Cada hallazgo con ar
 
   const juzgados = await parallel(nuevos.map((h) => () =>
     parallel([0, 1, 2].map((i) => () => agent(
-      `Rama: ${rama} (git diff main...HEAD). Hallazgo de una revisión: ${JSON.stringify(h)}
+      `Rama: ${rama}. ${DONDE_MIRAR}
+
+Hallazgo de una revisión: ${JSON.stringify(h)}
 
 Sos el refutador ${i + 1} de 3. Tu trabajo es DEMOSTRAR que el hallazgo está mal, no aplica, o no tiene impacto real, leyendo el código. Si no lo podés refutar con evidencia concreta, refutado=false. Ante la duda, refutado=true.${REGLAS}`,
       { label: `refutar:${h.titulo.slice(0, 30)}`, phase: 'Revisar', schema: REFUTACION, effort: 'high' },

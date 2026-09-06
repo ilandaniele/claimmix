@@ -94,12 +94,22 @@ describe("CasesTable — AC17 (claim_type = 'other')", () => {
 
 describe("CasesTable — modo selección", () => {
   const dos = [makeCase(), makeCase({ id: "00000000-0000-0000-0000-000000000002" })];
-  function montar(seleccionando = true) {
-    return render(
+  function pintar(cases: CaseRow[], seleccionando = true, borrar = vi.fn()) {
+    return (
       <LocaleProvider locale="es-AR">
-        <CasesTable cases={dos} seleccionando={seleccionando} onDeleteMany={vi.fn()} />
+        <CasesTable cases={cases} seleccionando={seleccionando} onDeleteMany={borrar} />
       </LocaleProvider>
     );
+  }
+  function montar(seleccionando = true) {
+    return render(pintar(dos, seleccionando));
+  }
+  /** La cifra de la barra: cuántas dice que hay marcadas. */
+  function cifra() {
+    return screen.getByRole("toolbar").querySelector(".cifra");
+  }
+  function marcada(id: string) {
+    return screen.getByRole("checkbox", { name: new RegExp(id) });
   }
 
   it("tocar el círculo marca la fila", () => {
@@ -121,18 +131,74 @@ describe("CasesTable — modo selección", () => {
   it("salir del modo olvida lo marcado", () => {
     const { rerender } = montar();
     fireEvent.click(screen.getAllByRole("checkbox")[0]);
-    const sin = (
-      <LocaleProvider locale="es-AR">
-        <CasesTable cases={dos} seleccionando={false} onDeleteMany={vi.fn()} />
-      </LocaleProvider>
-    );
-    rerender(sin);
+    rerender(pintar(dos, false));
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    rerender(pintar(dos));
+    for (const c of screen.getAllByRole("checkbox")) expect(c).toHaveAttribute("aria-checked", "false");
+  });
+
+  // Lo marcado es subconjunto de lo que está en pantalla. Cambiar de página
+  // o de filtro poda; una fila nueva o cambiada del polling no toca nada.
+
+  it("cambian las filas y se olvida lo marcado", () => {
+    const { rerender } = montar();
+    fireEvent.click(screen.getAllByRole("checkbox")[0]);
     rerender(
-      <LocaleProvider locale="es-AR">
-        <CasesTable cases={dos} seleccionando onDeleteMany={vi.fn()} />
-      </LocaleProvider>
+      pintar([
+        makeCase({ id: "00000000-0000-0000-0000-000000000003" }),
+        makeCase({ id: "00000000-0000-0000-0000-000000000004" }),
+      ])
     );
     for (const c of screen.getAllByRole("checkbox")) expect(c).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByRole("button", { name: /Eliminar seleccionados/ })).toBeNull();
+    expect(cifra()).toHaveTextContent("0");
+  });
+
+  it("otra referencia con los mismos ids no olvida", () => {
+    const { rerender } = montar();
+    fireEvent.click(screen.getAllByRole("checkbox")[0]);
+    rerender(pintar(dos.map((c) => ({ ...c }))));
+    expect(marcada("SIN-0000-0001")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: /Eliminar seleccionados \(1\)/ })).toBeInTheDocument();
+  });
+
+  it("una fila nueva arriba no toca lo marcado", () => {
+    const { rerender } = montar();
+    fireEvent.click(marcada("SIN-0000-0001"));
+    rerender(pintar([makeCase({ id: "00000000-0000-0000-0000-000000000009" }), ...dos]));
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+    expect(marcada("SIN-0000-0001")).toHaveAttribute("aria-checked", "true");
+    expect(marcada("SIN-0000-0009")).toHaveAttribute("aria-checked", "false");
+    expect(cifra()).toHaveTextContent("1");
+  });
+
+  it("una fila cambiada en el lugar no toca lo marcado", () => {
+    const { rerender } = montar();
+    fireEvent.click(marcada("SIN-0000-0001"));
+    rerender(pintar([makeCase({ status: "listo" }), dos[1]]));
+    expect(marcada("SIN-0000-0001")).toHaveAttribute("aria-checked", "true");
+    expect(cifra()).toHaveTextContent("1");
+  });
+
+  it("se va una fila marcada y quedan las otras; borrar manda sólo lo visible", () => {
+    const borrar = vi.fn();
+    const { rerender } = render(pintar(dos, true, borrar));
+    fireEvent.click(screen.getByRole("button", { name: /Seleccionar los 2 de esta página/ }));
+    rerender(pintar([dos[1]], true, borrar));
+    const casillas = screen.getAllByRole("checkbox");
+    expect(casillas).toHaveLength(1);
+    expect(casillas[0]).toHaveAttribute("aria-checked", "true");
+    expect(cifra()).toHaveTextContent("1");
+    fireEvent.click(screen.getByRole("button", { name: /Eliminar seleccionados \(1\)/ }));
+    expect(borrar).toHaveBeenCalledWith(["00000000-0000-0000-0000-000000000002"], expect.any(Function));
+  });
+
+  it("lista vacía y de vuelta: nada marcado", () => {
+    const { rerender } = montar();
+    fireEvent.click(screen.getAllByRole("checkbox")[0]);
+    rerender(pintar([]));
+    rerender(pintar(dos));
+    for (const c of screen.getAllByRole("checkbox")) expect(c).toHaveAttribute("aria-checked", "false");
+    expect(cifra()).toHaveTextContent("0");
   });
 });

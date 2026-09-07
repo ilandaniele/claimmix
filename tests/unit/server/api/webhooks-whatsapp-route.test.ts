@@ -63,7 +63,12 @@ describe("/api/webhooks/whatsapp", () => {
     process.env.WHATSAPP_VERIFY_TOKEN = VERIFY_TOKEN;
     process.env.WHATSAPP_TENANT_ID = TENANT;
     process.env.WHATSAPP_WEBHOOK_SECRET = "bearer-secret";
-    mockCreateWhatsAppIntake.mockResolvedValue({ caseId: "case-1", tenantId: TENANT, created: true });
+    mockCreateWhatsAppIntake.mockResolvedValue({
+      caseId: "case-1",
+      tenantId: TENANT,
+      created: true,
+      duplicado: false,
+    });
     mockRunIntakeAgent.mockResolvedValue(undefined);
   });
   afterEach(() => vi.clearAllMocks());
@@ -166,5 +171,91 @@ describe("/api/webhooks/whatsapp", () => {
     expect(mockCreateWhatsAppIntake).toHaveBeenCalledWith(
       expect.objectContaining({ senderName: "Martín Sosa" })
     );
+  });
+});
+
+/**
+ * Las dos mitades de lo mismo: qué hace el webhook cuando el mensaje no es
+ * nuevo, y qué le contesta a Meta cuando no lo pudo guardar.
+ *
+ * Van juntas porque arreglar una sola empeora las cosas. Devolver 500 hace que
+ * Meta reentregue el evento ENTERO, incluidos los mensajes que sí entraron; si
+ * cada reentrega vuelve a correr el agente, cambiar un mensaje perdido por N
+ * extracciones repetidas y N mensajes al asegurado no es un arreglo.
+ */
+describe("/api/webhooks/whatsapp — reentregas de Meta", () => {
+  beforeEach(() => {
+    afterCallbacks.length = 0;
+    process.env.WHATSAPP_APP_SECRET = APP_SECRET;
+    process.env.WHATSAPP_TENANT_ID = TENANT;
+    process.env.WHATSAPP_WEBHOOK_SECRET = "bearer-secret";
+    mockRunIntakeAgent.mockResolvedValue(undefined);
+  });
+
+  it("un mensaje nuevo corre el agente", async () => {
+    mockCreateWhatsAppIntake.mockResolvedValue({
+      caseId: "case-1",
+      tenantId: TENANT,
+      created: true,
+      duplicado: false,
+    });
+
+    const res = await POST(metaReq(TEXT_PAYLOAD, sign(TEXT_PAYLOAD)));
+
+    expect(res.status).toBe(200);
+    expect(afterCallbacks).toHaveLength(1);
+  });
+
+  it("una reentrega del mismo mensaje no lo vuelve a correr", async () => {
+    // La base ya lo frenaba —hay un índice único sobre el id del proveedor—
+    // pero el aviso se perdía: `insertWhatsAppMessage` devolvía `null`, que es
+    // lo mismo que devuelve cuando todo salió bien. Cada reintento de Meta era
+    // otra extracción contra Vertex y otro mensaje al asegurado.
+    mockCreateWhatsAppIntake.mockResolvedValue({
+      caseId: "case-1",
+      tenantId: TENANT,
+      created: false,
+      duplicado: true,
+    });
+
+    const res = await POST(metaReq(TEXT_PAYLOAD, sign(TEXT_PAYLOAD)));
+
+    // Sigue siendo 200: el mensaje está guardado, no hay nada que reintentar.
+    expect(res.status).toBe(200);
+    expect(afterCallbacks).toHaveLength(0);
+  });
+
+  it("si el mensaje no se guardó, Meta se entera", async () => {
+    // Antes: el try/catch estaba adentro del for, se tragaba el error, y la
+    // ruta contestaba 200. Un hipo de Neon durante un pico y esa denuncia no
+    // existía en ningún lado, marcada como entregada y sin reintento posible.
+    mockCreateWhatsAppIntake.mockRejectedValue(
+      new Error("whatsapp_claim_message_insert_failed:53300")
+    );
+
+    const res = await POST(metaReq(TEXT_PAYLOAD, sign(TEXT_PAYLOAD)));
+
+    expect(res.status).toBe(500);
+    expect(afterCallbacks).toHaveLength(0);
+  });
+
+  it("el teléfono de la persona no sale en el log del error", async () => {
+    // El log imprimía `err.name` —siempre "Error"— junto al número de quien
+    // escribió. Lo primero no dice nada y lo segundo es un dato de alguien.
+    const errores: unknown[][] = [];
+    const espia = vi.spyOn(console, "error").mockImplementation((...args) => {
+      errores.push(args);
+    });
+
+    mockCreateWhatsAppIntake.mockRejectedValue(
+      new Error("whatsapp_claim_message_insert_failed:53300")
+    );
+    await POST(metaReq(TEXT_PAYLOAD, sign(TEXT_PAYLOAD)));
+    espia.mockRestore();
+
+    const todo = errores.flat().map(String).join(" ");
+    expect(todo).not.toContain("5492916426930");
+    // Y el código de Postgres, que es lo único que sirve para diagnosticar.
+    expect(todo).toContain("53300");
   });
 });

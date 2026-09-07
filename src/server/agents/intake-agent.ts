@@ -72,6 +72,17 @@ export interface StoredWhatsAppIntake {
   caseId: string;
   tenantId: string;
   created: boolean;
+  /**
+   * Este mensaje ya estaba guardado: es una reentrega, no algo nuevo.
+   *
+   * La base ya lo frenaba —hay un índice único sobre el id de mensaje del
+   * proveedor— pero el aviso se perdía: `insertWhatsAppMessage` devolvía
+   * `null`, que es lo mismo que devuelve cuando todo salió bien y no había
+   * adjuntos. Quien llamaba no tenía cómo distinguirlos y corría el agente
+   * igual: cada reentrega de Meta era otra extracción contra Vertex y otro
+   * mensaje al asegurado diciendo lo mismo.
+   */
+  duplicado: boolean;
 }
 
 type CaseRow = {
@@ -186,7 +197,7 @@ export async function createWhatsAppIntake(
   const caseId =
     existingCaseId ?? (await createWhatsAppCase(input.tenantId, threadId, channel));
 
-  const claimMessageId = await insertWhatsAppMessage({
+  const guardado = await insertWhatsAppMessage({
     caseId,
     tenantId: input.tenantId,
     from: input.from,
@@ -196,8 +207,8 @@ export async function createWhatsAppIntake(
     senderName: input.senderName ?? null,
   });
 
-  if (claimMessageId && input.media?.length) {
-    await storeWhatsAppMedia(input.tenantId, caseId, claimMessageId, input.media);
+  if (guardado.claimMessageId && input.media?.length) {
+    await storeWhatsAppMedia(input.tenantId, caseId, guardado.claimMessageId, input.media);
   }
 
   await writeAuditLog({
@@ -217,6 +228,7 @@ export async function createWhatsAppIntake(
     caseId,
     tenantId: input.tenantId,
     created: !existingCaseId,
+    duplicado: guardado.duplicado,
   };
 }
 
@@ -402,7 +414,7 @@ async function insertWhatsAppMessage(
     threadId: string;
     senderName: string | null;
   }
-): Promise<string | null> {
+): Promise<{ claimMessageId: string | null; duplicado: boolean }> {
   const now = new Date().toISOString();
   let claimMessageId: string | null = null;
 
@@ -435,7 +447,7 @@ async function insertWhatsAppMessage(
     // 23505: this exact provider message was already stored. Attachments were
     // handled on the first pass; returning null keeps the second from
     // re-uploading them.
-    if (code === "23505") return null;
+    if (code === "23505") return { claimMessageId: null, duplicado: true };
     throw new Error(`whatsapp_claim_message_insert_failed:${code}`);
   }
 
@@ -455,5 +467,5 @@ async function insertWhatsAppMessage(
     // The Neon call ignored insert errors here — preserve that behaviour.
   }
 
-  return claimMessageId;
+  return { claimMessageId, duplicado: false };
 }

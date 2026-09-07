@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-01. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-07. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -1630,6 +1630,112 @@ máquina, para el entrenamiento local. **No borrarla en GCP**: la organización
 impide crear otra (`iam.disableServiceAccountKeyCreation`). Volver atrás es
 pegar ese archivo en `GOOGLE_SERVICE_ACCOUNT_JSON` de Vercel, sacar las
 `GCP_*` y redeployar.
+
+### 📬 El correo lo escribe el agente, y el ensayo lo imprime (2026-09-07)
+
+Un asegurado escribió al buzón de ingreso y el sistema le contestó a los doce
+segundos con un mail que abría **«gracias por tu reclamo.»**, en minúscula y
+descabezado. La causa inmediata era una línea de la plantilla; lo de fondo era
+que **por mail salía la plantilla determinista y por WhatsApp pasaba por
+`composeReply`**. Mismo cerebro, dos productos.
+
+Ahora `emailMessenger` compone igual que el de WhatsApp: `writeWhatsAppReply`
+pasó a `writeReply(message, fallback, channel)`, porque nada debajo de esa firma
+era específico del canal. La plantilla sigue siendo el piso —redactor apagado,
+guardas que rechazan o excepción: sale byte por byte lo de antes— y la
+composición ocurre en el mensajero y no en `dispatch`, para que la vista previa
+del ensayo y el envío real coincidan por construcción.
+
+Alrededor: `src/core/nombres/nombre-de-persona.ts` (los dos canales traían el
+nombre en el sobre y lo tiraban; entra como `source: "canal"`, que **no** cruza
+contra el padrón ni se copia a `cases.policyholder_name`, y **no** necesita
+migración porque `extracted_fields` no tiene columna `source`) y
+`src/core/email/html.ts` (todo lo que la plantilla interpola sale de un correo
+que escribió un desconocido, y el destinatario lo elige el mismo atacante:
+phishing firmado con el DKIM de la aseguradora).
+
+**Lo que encontró la revisión adversarial de ese mismo cambio, antes de
+mergearlo.** Cinco dimensiones, dos lentes de refutación por hallazgo, 41
+agentes: 18 hallazgos, 4 sobreviven, y son dos regresiones que el propio cambio
+introducía.
+
+- `writeReply` mapea `fields` desde `data.missingFields` y la rama de conflictos
+  manda `data.fields`. El redactor recibía «Señalar la diferencia entre los dos
+  valores» **sin ningún valor**, y la verificación de campos caídos sólo corría
+  para `ask`, así que cualquier párrafo vago pasaba a la primera. Al asegurado
+  le llegaba un aviso de diferencia sin decir qué dato ni entre qué valores, sin
+  el bloque que le pide responder «Confirmo», y el caso quedaba trabado en
+  `confirmacion_pendiente` esperando esa respuesta. Es AC7 y AC9. **Es el único
+  mensaje del producto cuyo piso ES un dato.**
+- AC24 lo sostenía la plantilla al renderizar, o sea DESPUÉS. Con la prosa en el
+  medio ese enmascarado ya no está en el camino, y el prompt recibía el correo
+  crudo del asegurado —con su DNI entero, porque se lo pedimos nosotros—.
+
+Se arregló enmascarando lo que **entra** al prompt (`conflictosParaElRedactor`,
+`sinNumerosEnteros`): un modelo no repite un número que nunca vio, y eso no
+depende de que una expresión regular lo reconozca a la salida.
+
+**Y el ensayo no tenía ese escenario**, que es por qué se rompió sin que nadie
+lo viera. Los trece pasaron a catorce: escribe un familiar del titular y no
+coincide ni el nombre ni el documento. Las unitarias lo agarran ahora, pero un
+mensaje que nombra los dos datos y suena a interrogatorio pasa igual todas las
+verificaciones — por eso tiene que estar impreso.
+
+### 🛡️ Tres guardas que no veían lo que decían ver (2026-09-07)
+
+El patrón de toda la sesión: una guarda que sólo ve el camino conocido convierte
+al desvío en el camino fácil.
+
+- **`check-architecture.mjs` no corría en CI.** Vivía sólo dentro de `pnpm
+  verify` y `pnpm listo`; la CI corre los pedazos por separado y ninguno lo
+  incluía, así que en un pull request la guarda contra fugas entre inquilinos no
+  se ejecutaba nunca. Va como job `arquitectura` en `secrets.yml` (sólo módulos
+  nativos de node: corre en segundos sin instalar nada). Y `find-raw-db.mjs`, en
+  la que delega, sólo veía `db.select(`: no veía `db.query.casos.findMany(` ni
+  `getDb().select(`. Ponerla en CI sin ampliarla habría dado confianza por una
+  guarda con dos agujeros.
+- **`pnpm peso` medía JavaScript, y el peso no era JavaScript.** `/bandeja` le
+  pasaba `SCENARIOS` entero como prop a un componente de cliente: **145,9 KB**
+  de texto de denuncias serializados adentro del HTML en cada carga, para
+  dibujar un desplegable de 163 renglones. `medir-peso.mjs` lee
+  `.next/static/chunks` y comprime, así que el chequeo estuvo en verde todo el
+  tiempo. Recortado a **29,1 KB** (−80%) con una prueba de paridad que arma las
+  163 etiquetas desde el `raw_text` completo y las compara: el desplegable sale
+  byte por byte igual. Y `tests/unit/la-frontera-no-lleva-bultos.test.ts` mide
+  de ahí en más lo que cruza la frontera servidor→cliente (tope 48 KB). No ve
+  `prop={armarLista()}`, y lo dice.
+- **El webhook de WhatsApp.** La base frenaba el mensaje repetido pero el aviso
+  se perdía —`return null` en el 23505 es exactamente lo que devuelve un INSERT
+  que salió bien— así que cada reentrega de Meta era otra extracción contra
+  Vertex y otro mensaje al asegurado diciendo lo mismo. Y el `try/catch` adentro
+  del `for` se comía el error de un INSERT fallido y contestaba 200 igual: un
+  hipo de Neon en un pico y esa denuncia no existía en ningún lado, marcada como
+  entregada y sin reintento posible. Van juntas porque devolver 500 hace que
+  Meta reentregue el evento entero, incluidos los que sí entraron.
+
+⚠️ **`idx_ai_usage_tenant_cubridor` se sacó** (migración 0024, aplicada). El
+planificador lo ignoraba y hacía bien: 9.616 de 9.621 filas eran del mismo
+inquilino. Costaba una escritura por cada llamada de IA a cambio de nada. Los
+otros dos índices de la 0023 se quedan.
+
+⚠️ **El endpoint público de la demo no registraba su gasto.** `DEMO_USER_ID` era
+`"demo-public"`, que no es un uuid, así que el INSERT de `ai_usage` rompía con
+`22P02` y el tope no veía nada. (Yo mismo había dicho antes que sí registraba:
+había comprobado que `recordUsage` se llama, no que el INSERT entrara.)
+
+**Pendiente, y es una decisión de producto, no un defecto:** `renderConflict` de
+WhatsApp muestra los valores del conflicto **sin enmascarar**, y siempre lo
+hizo — AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee un asegurado.
+
+**También:** los hallazgos de la auditoría pasaron por verificación adversarial
+de dos lentes (26 de 62 sobreviven, 23 distintos). Lo arreglado esta sesión son
+los puntos 1, 2, 3, 9, 10 y 16 del informe. Quedan, en orden: el barredor de 15
+minutos, la reentrega que trata el 200 como leído, las llamadas al modelo sin
+registrar, la falta de timeouts de proveedor, la marca de agua del poller de
+Gmail, que nadie consulta `/api/health`, los KPIs de la bandeja, el mensaje de
+cierre duplicado, la pantalla de caso que dice «no existe» ante un error de
+base, el adjunto de WhatsApp que se bufferea entero antes de mirar el tamaño, y
+siete de accesibilidad.
 
 ### 🙋 Waiting on you (not code)
 

@@ -12,6 +12,15 @@
  * durante meses, sobre un número que nadie miró.
  *
  * Mide sobre el build de verdad y comprime con gzip, que es lo que viaja.
+ *
+ * **Mide JavaScript, y eso no es todo lo que le llega al navegador.** Una prop
+ * que un componente de servidor le pasa a uno de cliente viaja serializada
+ * adentro del HTML, en la carga útil RSC. No es un .js y este script no la ve:
+ * la bandeja mandó 145,9 KB de texto de denuncias en cada carga con este chequeo
+ * en verde. No falló — no miraba ahí.
+ *
+ * Eso lo cubre `tests/unit/la-frontera-no-lleva-bultos.test.ts`, que corre con
+ * los unitarios y no necesita build.
  */
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { gzipSync } from "node:zlib";
@@ -72,6 +81,12 @@ console.log(`\n▸ Sin desglose por pantalla`);
 console.log(`   Turbopack nombra los chunks por hash y el manifiesto no los`);
 console.log(`   mapea a rutas. El total de arriba es lo que se puede medir,`);
 console.log(`   y es el número que decide si una pestaña se pone pesada.`);
+
+console.log(`\n▸ Lo que este número NO incluye`);
+console.log(`   La carga útil RSC: lo que un componente de servidor le pasa a`);
+console.log(`   uno de cliente viaja serializado adentro del HTML y no es un`);
+console.log(`   .js, así que no está contado acá. Lo cubre la prueba`);
+console.log(`   tests/unit/la-frontera-no-lleva-bultos.test.ts.`);
 
 const problemas = [];
 if (totalCompartido > TOPE_KB) {

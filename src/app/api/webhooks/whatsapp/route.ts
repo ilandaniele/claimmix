@@ -144,19 +144,65 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const messages = parseCloudApiMessages(payload);
     const caseIds: string[] = [];
+    let sinGuardar = 0;
+
     for (const msg of messages) {
       try {
         const stored = await ingest(tenantId, msg);
         caseIds.push(stored.caseId);
-        scheduleAgent(stored.caseId, tenantId);
+
+        // Una reentrega no vuelve a correr el agente.
+        //
+        // La base ya frenaba el mensaje repetido, pero el aviso se perdía y
+        // esto se llamaba igual: cada reintento de Meta era otra extracción
+        // contra Vertex y un segundo mensaje al asegurado diciendo lo mismo.
+        // Meta reintenta cuando el acuse tarda, y el acuse mide 2,9 s p95.
+        if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId);
       } catch (err) {
-        const name = err instanceof Error ? err.name : "UnknownError";
-        console.error("[webhooks/whatsapp] Intake error:", name, "from:", msg.from); // crew-debug-ok
+        sinGuardar++;
+        // El mensaje del error, no su nombre: `insertWhatsAppMessage` se toma
+        // el trabajo de meter el código de Postgres adentro y `err.name` es
+        // siempre "Error". Y sin el teléfono, que es de la persona.
+        console.error(
+          JSON.stringify({
+            level: "error",
+            service: "claimmix",
+            msg: "whatsapp.webhook.intake_failed",
+            provider_message_id: msg.providerMessageId ?? null,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        ); // crew-debug-ok
       }
     }
 
-    // Always 200 for a validly-signed event (incl. status/read events with no
-    // messages) so Meta marks it delivered and stops retrying.
+    /*
+     * Si algún mensaje no se guardó, esto NO es un 200.
+     *
+     * El `try` de arriba se tragaba el error y la ruta contestaba 200 igual:
+     * un hipo de Neon durante un pico y esa denuncia no existía en ningún
+     * lado, con Meta marcándola entregada y sin reintentarla nunca. Con el
+     * número real, ese mensaje es de alguien que acaba de chocar.
+     *
+     * Devolver 500 hace que Meta reentregue el evento ENTERO, incluidos los
+     * mensajes que sí entraron. Eso sólo es seguro por el `duplicado` de
+     * arriba: sin él, cada reentrega volvía a correr el agente sobre los que
+     * ya estaban. Las dos mitades van juntas o no van.
+     */
+    if (sinGuardar > 0) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "INTAKE_FAILED",
+            message: "Some messages could not be stored.",
+          },
+        },
+        { status: 500 }
+      );
+    }
+
+    // 200 para un evento bien firmado que se guardó entero —incluidos los de
+    // estado y lectura, que no traen mensajes— para que Meta lo marque
+    // entregado y deje de reintentar.
     return NextResponse.json({ ok: true, received: caseIds.length, case_ids: caseIds }, { status: 200 });
   }
 
@@ -214,7 +260,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // account gets flagged.
       simulated: true,
     });
-    scheduleAgent(stored.caseId, tenantId);
+    // Igual que arriba: un adaptador que reintenta no dispara otra extracción.
+    if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId);
 
     return NextResponse.json(
       { ok: true, case_id: stored.caseId, created: stored.created, status: "received" },

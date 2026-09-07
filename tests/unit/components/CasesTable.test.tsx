@@ -190,7 +190,18 @@ describe("CasesTable — modo selección", () => {
     expect(casillas[0]).toHaveAttribute("aria-checked", "true");
     expect(cifra()).toHaveTextContent("1");
     fireEvent.click(screen.getByRole("button", { name: /Eliminar seleccionados \(1\)/ }));
-    expect(borrar).toHaveBeenCalledWith(["00000000-0000-0000-0000-000000000002"], expect.any(Function));
+    expect(borrar).toHaveBeenCalledWith(["00000000-0000-0000-0000-000000000002"]);
+  });
+
+  // La papelera por fila vive con sólo tener `onDeleteMany`, dentro y fuera del
+  // modo: por eso se monta con `seleccionando = false`.
+  it("la papelera de una fila pide borrar sólo esa y no navega", () => {
+    const borrar = vi.fn();
+    render(pintar(dos, false, borrar));
+    push.mockClear();
+    fireEvent.click(screen.getAllByRole("button", { name: "Eliminar caso" })[0]);
+    expect(borrar).toHaveBeenCalledWith(["00000000-0000-0000-0000-000000000001"]);
+    expect(push).not.toHaveBeenCalled();
   });
 
   it("lista vacía y de vuelta: nada marcado", () => {

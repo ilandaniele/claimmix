@@ -104,10 +104,20 @@ for (const f of archivos) {
   // El \s* del medio no es adorno: las consultas largas se escriben con
   // `await db` y el `.select(` en la línea siguiente, y sin eso la regla
   // dejaba pasar justo las más grandes.
-  const re = /(?:^|[^.\w])(db)\s*\.\s*(select|insert|update|delete|\$count|execute)\b/g;
+  //
+  // Dos formas que la regla no veía, y las dos entran a la misma base:
+  //
+  //   db.query.casos.findMany(...)   la API relacional de drizzle
+  //   getDb().select(...)            el accesor, en vez del proxy `db`
+  //
+  // Hoy no las usa nadie —por eso ampliarlo no rompe nada— pero la guarda
+  // tiene que cubrir las maneras de esquivarla, no sólo la que se usó hasta
+  // ahora. Una regla que sólo ve el camino conocido convierte al desvío en el
+  // camino fácil.
+  const re = /(?:^|[^.\w])(db|getDb\(\))\s*\.\s*(select|insert|update|delete|\$count|execute|query)\b/g;
   let m;
   while ((m = re.exec(s))) {
-    const pos = s.indexOf("db", m.index);
+    const pos = s.indexOf(m[1], m.index);
     if (dichos.some(([a, b]) => pos > a && pos < b)) continue;
     if (tramos.some(([a, b]) => pos > a && pos < b)) continue;
     // Qué tabla toca, para poder separar las de inquilino de las globales.

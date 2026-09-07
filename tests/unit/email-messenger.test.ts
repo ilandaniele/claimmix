@@ -297,3 +297,135 @@ describe("emailMessenger — los dos caminos del despachador", () => {
     expect(enviado.subject).toBe(renderTemplate("missing_information_request", PEDIDO).subject);
   });
 });
+
+/**
+ * El correo de conflicto es el único cuyo piso ES un dato.
+ *
+ * Los otros cuatro pisos son una frase que el redactor puede decir mejor. Éste
+ * dice «el DNI que nos diste termina en 1222 y el que tenemos termina en 5678,
+ * ¿cuál va?», y AC7/AC9 son exactamente eso: si la prosa reemplaza el cuerpo y
+ * no nombra los dos valores, a la persona le llega un mail que le avisa que
+ * hay una diferencia sin decir en qué dato ni entre qué, no puede contestar, y
+ * el caso queda trabado en `confirmacion_pendiente` esperándola.
+ *
+ * Pasaba: `writeReply` mapeaba `fields` desde `data.missingFields`, y la rama
+ * de conflictos manda `data.fields`. El redactor recibía `undefined` y la
+ * instrucción «Señalar la diferencia entre los dos valores» sin ningún valor.
+ */
+describe("emailMessenger — el conflicto lleva sus valores", () => {
+  const CONFLICTO = {
+    caseId: CASE,
+    claimantName: "Ilan",
+    fields: [
+      { fieldKey: "dni", proposedValue: "30111222", conflictWithValue: "20345678" },
+      {
+        fieldKey: "full_name",
+        proposedValue: "Juan Perez",
+        conflictWithValue: "Roberto Paz",
+      },
+    ],
+  };
+
+  it("el redactor recibe los dos valores de cada campo", async () => {
+    escribe(
+      "Ilan, encontramos dos diferencias. El documento que nos diste termina en ****1222 " +
+        "y el que figura en nuestro sistema termina en ****5678. Y el nombre: vos nos " +
+        'decís "Juan Perez" y nosotros tenemos "Roberto Paz". ¿Cuáles son los correctos?'
+    );
+
+    await mandar("data_confirmation_request", CONFLICTO);
+
+    expect(compose.mock.calls[0][0]).toMatchObject({
+      intent: "conflict",
+      conflicts: [
+        { fieldKey: "dni", proposed: "****1222", stored: "****5678" },
+        { fieldKey: "full_name", proposed: "Juan Perez", stored: "Roberto Paz" },
+      ],
+    });
+  });
+
+  it("el DNI le llega enmascarado, no entero", async () => {
+    // AC24. La plantilla enmascaraba al renderizar, o sea después; con la prosa
+    // en el medio ese enmascarado ya no está en el camino. Un número que el
+    // modelo no ve es uno que no puede copiar.
+    escribe(
+      "Ilan, el documento que nos diste termina en ****1222 y el que tenemos termina " +
+        'en ****5678. También difiere el nombre: "Juan Perez" contra "Roberto Paz". ' +
+        "¿Cuáles son los correctos?"
+    );
+
+    await mandar("data_confirmation_request", CONFLICTO);
+
+    const prompt = String(modelo.mock.calls[0][0].prompt ?? modelo.mock.calls[0][0]);
+    expect(prompt).not.toContain("30111222");
+    expect(prompt).not.toContain("20345678");
+    expect(prompt).toContain("****1222");
+    expect(prompt).toContain("****5678");
+  });
+
+  it("una prosa que no nombra los valores no sale: sale la plantilla", async () => {
+    // Sin esto, cualquier párrafo vago de más de veinte caracteres pasaba a la
+    // primera, porque la verificación de campos caídos sólo corría para `ask`.
+    escribe(
+      "Hola Ilan, notamos una diferencia entre lo que nos indicaste y lo que figura " +
+        "en nuestro sistema. Decinos cuál es el correcto y seguimos."
+    );
+
+    await mandar("data_confirmation_request", CONFLICTO);
+
+    // Dos intentos: el primero rechazado, el segundo también, y después el piso.
+    expect(modelo).toHaveBeenCalledTimes(2);
+
+    // Byte a byte la plantilla, igual que el resto de los rechazos: con los
+    // dos bloques «Campo: ...» y el pedido de responder «Confirmo», que es
+    // lo único que le da a la persona una forma de contestar.
+    const piso = renderTemplate("data_confirmation_request", CONFLICTO);
+    expect(cuerpoEnviado()).toBe(piso.html);
+    expect(cuerpoEnviado()).toContain("Confirmo");
+  });
+
+  it("un conflicto sin el valor guardado no se le pide al redactor", async () => {
+    // No es un conflicto sino un dato que falta, y la guarda no tendría contra
+    // qué comparar: pedirle que nombre "los dos valores" cuando hay uno solo es
+    // mandarlo a fallar.
+    escribe("Ilan, necesitamos que nos confirmes tu documento para poder seguir.");
+
+    await mandar("data_confirmation_request", {
+      caseId: CASE,
+      fields: [{ fieldKey: "dni", proposedValue: "30111222", conflictWithValue: null }],
+    });
+
+    expect(compose.mock.calls[0][0]).toMatchObject({ conflicts: [] });
+  });
+});
+
+/**
+ * Lo que la persona escribió entra al prompt para dar tono, y trae su DNI.
+ *
+ * Se lo pedimos nosotros, así que viene entero. Mientras el cuerpo lo armaba la
+ * plantilla eso no salía a ningún lado; desde que la prosa lo reemplaza, lo que
+ * el modelo leyó puede terminar en el mail.
+ */
+describe("emailMessenger — el mensaje de la persona entra sin números enteros", () => {
+  it("el DNI del cuerpo del correo no llega al prompt", async () => {
+    escribe("Ilan, para seguir con tu reclamo necesitamos el número de póliza.");
+
+    await emailMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO,
+      template: "missing_information_request",
+      data: PEDIDO,
+      lastMessage:
+        "Tuve un choque con mi renault clio patente ABC-321. Mi dni es 38919917 y " +
+        "mi póliza es POL-12345678.",
+    });
+
+    const prompt = String(modelo.mock.calls[0][0].prompt ?? modelo.mock.calls[0][0]);
+    expect(prompt).not.toContain("38919917");
+    expect(prompt).not.toContain("POL-12345678");
+    expect(prompt).toContain("****9917");
+    // La patente no es un número entero de nadie y sirve para el tono.
+    expect(prompt).toContain("ABC-321");
+  });
+});

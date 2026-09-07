@@ -23,7 +23,12 @@ import { db } from "@/lib/db";
 import { outboundMessages } from "@/lib/db/schema";
 import { labelForField, labelForClaimType, displayFieldValue } from "@/lib/labels/claim-fields";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
-import { renderTemplate, type EmailTemplate } from "@/server/email/render";
+import {
+  maskDni,
+  maskPolicyNumber,
+  renderTemplate,
+  type EmailTemplate,
+} from "@/server/email/render";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
 import { isReservedTestNumber } from "@/core/phone/reserved";
@@ -323,6 +328,42 @@ const WHATSAPP_TEMPLATE_NAMES: Record<string, string> = {
  * `intentFor` and the mapping out of `message.data` read the orchestrator's
  * decision, which is the same decision either way.
  */
+/**
+ * Los valores del conflicto como se los puede ver el redactor.
+ *
+ * Enmascarados con las mismas funciones que usa la plantilla de mail, y por
+ * el mismo motivo: AC24 dice que un DNI o un número de póliza no se escriben
+ * enteros. La plantilla los enmascaraba al renderizar, o sea después; desde
+ * que la prosa del modelo reemplaza el cuerpo, ese enmascarado ya no está en
+ * el camino y hay que hacerlo ANTES, sobre lo que entra al prompt.
+ *
+ * Enmascarar a la entrada y no filtrar a la salida es a propósito: un modelo
+ * no puede repetir un número que nunca vio, y eso no depende de que una
+ * expresión regular lo reconozca.
+ *
+ * Se descartan los campos sin los dos valores. Un conflicto sin el valor
+ * guardado no es un conflicto — es un dato que falta — y la guarda de
+ * `composeReply` no tendría con qué comparar.
+ */
+function conflictosParaElRedactor(
+  data: Record<string, unknown>
+): Array<{ fieldKey: string; proposed: string; stored: string }> {
+  const enmascarar = (fieldKey: string, valor: string): string =>
+    fieldKey === "dni"
+      ? maskDni(valor)
+      : fieldKey === "policy_number"
+        ? maskPolicyNumber(valor)
+        : valor;
+
+  return camposDeConflicto(data)
+    .filter((c) => c.proposed && c.stored)
+    .map((c) => ({
+      fieldKey: c.fieldKey,
+      proposed: enmascarar(c.fieldKey, c.proposed),
+      stored: enmascarar(c.fieldKey, c.stored),
+    }));
+}
+
 async function writeReply(
   message: AgentMessage,
   fallback: string,
@@ -334,6 +375,10 @@ async function writeReply(
     fields: Array.isArray(message.data.missingFields)
       ? (message.data.missingFields as string[]).map(String)
       : undefined,
+    conflicts:
+      message.template === "data_confirmation_request"
+        ? conflictosParaElRedactor(message.data)
+        : undefined,
     knownValues: (message.data.knownValues ?? undefined) as
       | Record<string, string>
       | undefined,

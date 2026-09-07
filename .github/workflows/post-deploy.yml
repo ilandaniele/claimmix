@@ -304,6 +304,16 @@ jobs:
   # La fase de escritura — cien asegurados a la vez contra el webhook — NO corre
   # acá: cuesta plata en cada deploy y el número no cambia solo. Se corre a
   # mano antes de un piloto, con `pnpm load --write --claimants 100`.
+  #
+  # De las cuatro formas de lectura corre UNA, la de carga, que es la que
+  # contesta la pregunta de un deploy: ¿esto quedó más lento que ayer? Las otras
+  # tres (pico, resistencia, estrés) tienen sentido a mano y no en cada deploy:
+  # miden minutos contra la base de producción para contestar preguntas que no
+  # cambian de un commit al otro. `pnpm load --forma todas`.
+  #
+  # El reporte se guarda como artefacto porque, cuando esto falla, el mensaje de
+  # abajo pide compararlo con la corrida anterior — y hasta ahora esa corrida no
+  # quedaba en ningún lado.
   carga:
     name: Carga (lectura)
     runs-on: ubuntu-latest
@@ -321,7 +331,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Medir las consultas del tablero
-        run: pnpm load
+        run: pnpm load --reporte carga.json
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # La capa de datos entra por acá. Sin esto, toda consulta que pase por
@@ -330,6 +340,18 @@ jobs:
           DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
           GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+
+      # `always()`: el reporte del deploy que FALLÓ es justamente el que hay que
+      # poder mirar.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: carga
+          path: |
+            carga.json
+            carga.html
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Qué significa que esto falle
         if: failure()
@@ -340,7 +362,9 @@ jobs:
           echo "                             Mirá qué cambió en el orden o los filtros"
           echo "                             de listCases (src/server/cases/list.ts)."
           echo "  · p95 por encima del presupuesto → puede ser volumen real."
-          echo "                             Comparalo con la corrida del deploy anterior."
+          echo "                             Comparalo con el artefacto 'carga' del deploy"
+          echo "                             anterior: carga.json tiene los números medidos"
+          echo "                             y carga.html los muestra."
           echo ""
           echo "Reproducilo con: pnpm load"
 

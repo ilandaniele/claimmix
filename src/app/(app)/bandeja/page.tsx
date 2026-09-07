@@ -15,13 +15,9 @@
 
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { and, sql } from "drizzle-orm";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { db } from "@/lib/db";
-import { enTenant } from "@/data/scope";
-import { cases } from "@/lib/db/schema";
-import { listCases } from "@/server/cases/list";
+import { contarPorEstado, listCases } from "@/server/cases/list";
 import { SCENARIOS } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
 import { PER_PAGE_OPTIONS } from "./per-page";
@@ -162,12 +158,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
       severity,
       is_claim,
     }),
-    enTenant<Array<{ status: string; n: number }>>({ tenantId }, (db) =>
-      db
-        .select({ status: cases.status, n: sql<number>`count(*)::int` })
-        .from(cases)
-        .groupBy(cases.status)
-    ),
+    contarPorEstado({ tenantId }),
   ]);
 
   /*

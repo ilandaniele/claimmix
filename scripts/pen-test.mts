@@ -32,6 +32,8 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as dotenv from "dotenv";
 
+import { findRoutes, routePattern, routeToUrl } from "./lib/rutas-api.mjs";
+
 const envPath = path.resolve(process.cwd(), ".env.local");
 dotenv.config({ path: fs.existsSync(envPath) ? envPath : undefined });
 
@@ -96,31 +98,6 @@ const INTENTIONALLY_PUBLIC = new Map<string, string>([
   ["/api/admin/health", "el monitor de uptime la pinga cada 5 minutos; abajo se controla qué dice"],
 ]);
 
-/** Convierte src/app/api/x/[id]/route.ts en /api/x/<uuid>. */
-function routeToUrl(file: string): string {
-  return (
-    "/" +
-    file
-      .replace(/\\/g, "/")
-      .replace(/^src\/app\//, "")
-      .replace(/\/route\.ts$/, "")
-      .split("/")
-      .map((seg) =>
-        seg.startsWith("[...") ? "probe" : seg.startsWith("[") ? "00000000-0000-0000-0000-000000000001" : seg
-      )
-      .join("/")
-  );
-}
-
-function findRoutes(dir: string, acc: string[] = []): string[] {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) findRoutes(full, acc);
-    else if (entry.name === "route.ts") acc.push(path.relative(process.cwd(), full));
-  }
-  return acc;
-}
-
 async function attackSurface(): Promise<void> {
   console.log("─".repeat(70));
   console.log(`LA SUPERFICIE — sin credenciales, contra ${BASE}\n`);
@@ -132,8 +109,7 @@ async function attackSurface(): Promise<void> {
   const open: string[] = [];
 
   for (const file of routes) {
-    const pattern =
-      "/" + file.replace(/\\/g, "/").replace(/^src\/app\//, "").replace(/\/route\.ts$/, "");
+    const pattern = routePattern(file);
     if (INTENTIONALLY_PUBLIC.has(pattern)) continue;
 
     const url = BASE + routeToUrl(file);

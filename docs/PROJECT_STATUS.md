@@ -1718,6 +1718,12 @@ planificador lo ignoraba y hacía bien: 9.616 de 9.621 filas eran del mismo
 inquilino. Costaba una escritura por cada llamada de IA a cambio de nada. Los
 otros dos índices de la 0023 se quedan.
 
+Comprobado contra la base de producción el 2026-09-07, que es la única
+respuesta que vale en este proyecto:  sobre  devuelve
+,  e ,
+y **no** el cubridor. El reparto sigue igual de torcido: 9.896 filas, 2
+inquilinos, 9.891 contra 5.
+
 ⚠️ **El endpoint público de la demo no registraba su gasto.** `DEMO_USER_ID` era
 `"demo-public"`, que no es un uuid, así que el INSERT de `ai_usage` rompía con
 `22P02` y el tope no veía nada. (Yo mismo había dicho antes que sí registraba:
@@ -1728,7 +1734,7 @@ WhatsApp muestra los valores del conflicto **sin enmascarar**, y siempre lo
 hizo — AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee un asegurado.
 
 **También:** los hallazgos de la auditoría pasaron por verificación adversarial
-de dos lentes (26 de 62 sobreviven, 23 distintos). Lo arreglado esta sesión son
+de dos lentes: 116 veredictos sobre los 62 hallazgos —los 42 que habían quedado sin votar, incluidos—, 36 refutados, 26 en pie, 23 distintos. Lo arreglado esta sesión son
 los puntos 1, 2, 3, 9, 10 y 16 del informe. Quedan, en orden: el barredor de 15
 minutos, la reentrega que trata el 200 como leído, las llamadas al modelo sin
 registrar, la falta de timeouts de proveedor, la marca de agua del poller de

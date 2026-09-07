@@ -68,6 +68,13 @@ function chain() {
         // A bare where() with no join and no limit is one of two queries: the
         // policy count, or the vehicles on a policy.
         where: resultado,
+        // `.from(policies).limit(1)` es la pregunta «¿el padrón tiene algo?».
+        // Lo que importa es CUÁNTAS filas vuelven, no qué traen: por eso una
+        // sola fila cualquiera, o ninguna.
+        limit: () =>
+          name === "policies"
+            ? Promise.resolve(policiesOnFile > 0 ? [{ hay: 1 }] : [])
+            : found(),
         // Y desde que el filtro por inquilino lo pone la base, hay consultas
         // que no tienen where en absoluto: `.from(t)` y nada más. En drizzle
         // eso es válido —significa "sin WHERE"— así que el mock también tiene

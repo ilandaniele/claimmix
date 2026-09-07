@@ -9,13 +9,13 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type { SimulationScenario } from "@/server/intake/scenarios";
+import type { OpcionDeEscenario } from "@/server/intake/scenarios";
 import type { ClaimType } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
 
 interface SimulateModalProps {
-  scenarios: SimulationScenario[];
+  scenarios: readonly OpcionDeEscenario[];
   onClose: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
@@ -46,7 +46,7 @@ const CLAIM_TYPES: { value: ClaimType; clave: TranslationKey }[] = [
  * vocabulario del producto se dice como en todas las demas pantallas; si no,
  * se sigue capitalizando el valor crudo antes que no mostrarlo.
  */
-const TIPO: Record<string, TranslationKey> = {
+export const TIPO: Record<string, TranslationKey> = {
   choque: "type.choque",
   robo: "type.robo",
   granizo: "type.granizo",
@@ -57,11 +57,6 @@ const TIPO: Record<string, TranslationKey> = {
   accidente_personal: "type.accidente_personal",
   other: "type.other",
 };
-
-function truncate(str: string, max: number): string {
-  if (str.length <= max) return str;
-  return str.slice(0, max) + "...";
-}
 
 export function SimulateModal({
   scenarios,
@@ -205,8 +200,7 @@ export function SimulateModal({
                   {TIPO[s.case_type]
                     ? t(TIPO[s.case_type])
                     : s.case_type.charAt(0).toUpperCase() + s.case_type.slice(1)}{" "}
-                  — {s.policyholder_name}:{" "}
-                  {truncate(s.raw_text.replace(/\n/g, " "), 80)}
+                  — {s.policyholder_name}: {s.preview}
                 </option>
               ))}
             </select>

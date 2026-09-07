@@ -15,8 +15,11 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
-import { SimulateModal } from "../../src/app/(app)/bandeja/components/SimulateModal";
-import { SCENARIOS } from "../../src/server/intake/scenarios";
+import { SimulateModal, TIPO } from "../../src/app/(app)/bandeja/components/SimulateModal";
+import {
+  OPCIONES_DE_ESCENARIO,
+  SCENARIOS,
+} from "../../src/server/intake/scenarios";
 import { esAR } from "../../src/lib/i18n/es-AR";
 
 /*
@@ -43,7 +46,7 @@ vi.stubGlobal("crypto", {
 
 describe("SimulateModal", () => {
   const defaultProps = {
-    scenarios: SCENARIOS,
+    scenarios: OPCIONES_DE_ESCENARIO,
     onClose: vi.fn(),
     onSuccess: vi.fn(),
     onError: vi.fn(),
@@ -63,14 +66,56 @@ describe("SimulateModal", () => {
     render(<SimulateModal {...defaultProps} />);
     const select = screen.getByLabelText(esAR["simulate.escenarioLabel"]);
     const options = select.querySelectorAll("option");
-    expect(options).toHaveLength(SCENARIOS.length);
+    expect(options).toHaveLength(OPCIONES_DE_ESCENARIO.length);
   });
 
   it("shows first scenario selected by default", () => {
     render(<SimulateModal {...defaultProps} />);
     const select = screen.getByLabelText(esAR["simulate.escenarioLabel"]) as HTMLSelectElement;
-    expect(select.value).toBe(SCENARIOS[0]!.id);
+    expect(select.value).toBe(OPCIONES_DE_ESCENARIO[0]!.id);
   });
+
+  /*
+   * El desplegable dice exactamente lo mismo que antes de recortar la prop.
+   *
+   * `page.tsx` le pasaba a este modal los 163 escenarios enteros —145,9 KB de
+   * texto de denuncias serializados adentro del HTML en cada carga de la
+   * bandeja— para mostrar un renglón por escenario. Ahora recibe sólo el
+   * renglon, y esta prueba es la que dice que el recorte no cambió la pantalla:
+   * arma la etiqueta a partir de `SCENARIOS`, que sigue teniendo el `raw_text`
+   * completo, y la compara contra lo que el componente renderiza con la lista
+   * recortada.
+   *
+   * Si algún día el modal necesita mostrar más del escenario, esto falla y
+   * obliga a agregar el campo al recorte en vez de volver a mandar todo.
+   */
+  it("cada opción dice lo mismo que diría con el escenario entero", () => {
+    render(<SimulateModal {...defaultProps} />);
+    const select = screen.getByLabelText(esAR["simulate.escenarioLabel"]);
+    const opciones = Array.from(select.querySelectorAll("option"));
+
+    const cortarComoAntes = (str: string, max: number) =>
+      str.length <= max ? str : str.slice(0, max) + "...";
+
+    for (const [i, escenario] of SCENARIOS.entries()) {
+      const clave = TIPO[escenario.case_type];
+      const tipo = clave
+        ? esAR[clave]
+        : escenario.case_type.charAt(0).toUpperCase() + escenario.case_type.slice(1);
+      const esperado =
+        tipo +
+        " — " +
+        escenario.policyholder_name +
+        ": " +
+        cortarComoAntes(escenario.raw_text.replace(/\n/g, " "), 80);
+
+      expect(opciones[i]!.value).toBe(escenario.id);
+      expect(opciones[i]!.textContent!.replace(/\s+/g, " ").trim()).toBe(
+        esperado.replace(/\s+/g, " ").trim()
+      );
+    }
+  });
+
 
   it("calls onClose when Cancelar button is clicked", async () => {
     const user = userEvent.setup();

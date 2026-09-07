@@ -60,6 +60,21 @@ export interface ComposeReplyInput {
    * option, only the easy one.
    */
   question?: string | null;
+  /**
+   * Los datos que no coinciden, YA enmascarados.
+   *
+   * Sin esto la intención `conflict` era la única cuya instrucción
+   * —«Señalar la diferencia entre los dos valores»— hablaba de algo que el
+   * prompt no contenía. El redactor tampoco recibe `fallback`, así que no
+   * tenía de dónde sacarlos: salía un párrafo diciendo que había una
+   * diferencia sin decir en qué dato ni entre qué valores, y la persona se
+   * quedaba sin nada que contestar con el caso trabado esperándola.
+   *
+   * Enmascarados porque AC24 sigue valiendo: para señalar que dos valores
+   * no coinciden no hace falta un DNI entero, y lo que el modelo no ve no
+   * lo puede repetir.
+   */
+  conflicts?: Array<{ fieldKey: string; proposed: string; stored: string }>;
   /** The claimant's most recent message, for tone only. */
   lastMessage?: string;
   /** The deterministic text. The model is asked to do better, not different. */
@@ -101,6 +116,41 @@ function maxChars(input: ComposeReplyInput): number {
   return input.question ? Math.round(base * 1.4) : base;
 }
 
+/**
+ * El mensaje de la persona, sin los números que no hay que repetir.
+ *
+ * `lastMessage` entra al prompt para dar tono, y es el correo que escribió
+ * un asegurado: adentro viene su DNI entero, porque se lo pedimos nosotros.
+ * Mientras el cuerpo lo armó la plantilla eso no salía a ningún lado — la
+ * plantilla enmascara al renderizar. Desde que la prosa del modelo reemplaza
+ * el cuerpo, lo que el modelo leyó puede terminar en el mail, y AC24 pasa a
+ * depender de que al modelo no se le ocurra copiarlo.
+ *
+ * Siete a ocho dígitos seguidos es un DNI argentino; los puntos y espacios se
+ * aceptan porque así lo escribe la gente. Un año o un monto no llegan a
+ * siete, y una patente lleva letras.
+ */
+function sinNumerosEnteros(texto: string): string {
+  const ultimosCuatro = (m: string): string => {
+    const digitos = m.replace(/\D/g, "");
+    return digitos.length >= 7 && digitos.length <= 10
+      ? "****" + digitos.slice(-4)
+      : m;
+  };
+
+  return (
+    texto
+      // Un DNI suelto, con o sin los puntos con que lo escribe la gente.
+      .replace(/\b\d[\d.\s]{5,}\d\b/g, ultimosCuatro)
+      // Una póliza, que lleva prefijo de letras: POL-2024-001. La patente
+      // no entra — ABC-321 no llega a seis dígitos.
+      .replace(/\b([A-Za-z]{2,4})-([\d.-]{6,})\b/g, (m, pre: string, resto: string) => {
+        const digitos = resto.replace(/\D/g, "");
+        return digitos.length >= 6 ? `${pre}-****${digitos.slice(-4)}` : m;
+      })
+  );
+}
+
 function buildPrompt(input: ComposeReplyInput): string {
   const items = (input.fields ?? []).map((key) => {
     const { label, instruction, kind } = labelForField(key);
@@ -108,6 +158,11 @@ function buildPrompt(input: ComposeReplyInput): string {
     return known
       ? `- ${label} (ya entendimos "${known}", pedir corrección sólo si no es correcto)`
       : `- ${label} — ${instruction} (${kind === "documento" ? "archivo o foto" : "dato"})`;
+  });
+
+  const conflictos = (input.conflicts ?? []).map((c) => {
+    const { label } = labelForField(c.fieldKey);
+    return `- ${label}: la persona dice "${c.proposed}" y nosotros tenemos "${c.stored}"`;
   });
 
   const intentBrief: Record<ReplyIntent, string> = {
@@ -147,11 +202,12 @@ LO QUE HAY QUE DECIR (no lo cambies, no agregues ni saques temas):
 ${intentBrief[input.intent]}
 
 ${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}` : ""}
+${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de cada uno, copiados tal cual):\n${conflictos.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${input.claimantName}. Podés llamarla por su nombre de pila.` : ""}
 ${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${input.question}"\nContestá con lo que sabemos de verdad: en qué estado está su denuncia y qué falta para avanzar. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder.` : ""}
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}
-${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto):\n"""${input.lastMessage.slice(0, 600)}"""` : ""}
+${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto):\n"""${sinNumerosEnteros(input.lastMessage).slice(0, 600)}"""` : ""}
 
 ${channelBrief}
 
@@ -187,6 +243,18 @@ function violation(text: string, input: ComposeReplyInput): string | null {
       const { label } = labelForField(key);
       const head = label.split(" ")[0].toLowerCase();
       if (!trimmed.toLowerCase().includes(head)) return `dropped_field:${key}`;
+    }
+  }
+
+  // Lo mismo para el conflicto, donde más se nota: un mensaje que dice que
+  // hay una diferencia sin decir entre qué valores deja a la persona sin nada
+  // que contestar, y el caso trabado esperando esa respuesta. La plantilla sí
+  // los decía — el redactor no puede decir menos que el piso que reemplaza.
+  if (input.intent === "conflict") {
+    for (const c of input.conflicts ?? []) {
+      if (!trimmed.includes(c.proposed) || !trimmed.includes(c.stored)) {
+        return `dropped_conflict:${c.fieldKey}`;
+      }
     }
   }
 
@@ -239,6 +307,10 @@ function explain(problem: string): string {
   if (problem.startsWith("dropped_field:")) {
     const key = problem.slice("dropped_field:".length);
     return `te olvidaste de pedir "${labelForField(key).label}". Tienen que estar TODOS los ítems de la lista.`;
+  }
+  if (problem.startsWith("dropped_conflict:")) {
+    const key = problem.slice("dropped_conflict:".length);
+    return `no dijiste los dos valores de "${labelForField(key).label}". Hay que nombrar el que dio la persona Y el que tenemos nosotros, copiados tal cual te los pasé.`;
   }
   if (problem.startsWith("forbidden:")) {
     return "prometiste algo sobre cobertura, pagos o plazos. Nadie evaluó el siniestro todavía.";

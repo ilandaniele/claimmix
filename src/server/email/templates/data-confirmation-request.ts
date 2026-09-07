@@ -38,9 +38,16 @@ export interface DataConfirmationRequestData extends CampoAConfirmar {
   /**
    * La prosa ya redactada. Reemplaza el cuerpo y nada más.
    *
-   * El cuerpo que se le entrega al redactor sale de `armarBloque`, o sea con
-   * `maskDni`/`maskPolicyNumber` YA aplicados: el modelo nunca ve un DNI ni un
-   * número de póliza entero, y el enmascarado de AC24 sobrevive a la redacción.
+   * El enmascarado de AC24 no lo sostiene esta plantilla: cuando viene
+   * `cuerpo`, lo que se muestra es prosa del modelo y `armarBloque` no
+   * llega a correr. Lo sostiene lo que entra al prompt, en
+   * `compose-reply`: los valores del conflicto le llegan al redactor ya
+   * enmascarados (`conflictosParaElRedactor`, en el mensajero) y el mensaje
+   * crudo de la persona pasa por `sinNumerosEnteros` antes de entrar.
+   *
+   * O sea que la garantía es "el modelo nunca ve un número entero", no "la
+   * plantilla lo enmascara después". Decirlo al revés hacía que este
+   * comentario afirmara algo que el código dejó de hacer.
    */
   cuerpo?: string | null;
 }

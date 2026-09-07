@@ -86,12 +86,26 @@ describe("recordUsage sobrevive a un usuario desconocido", () => {
     expect(FUENTE).toContain("budget.usuario_desconocido");
   });
 
-  it("el reintento es sólo para ESE error, no para cualquiera", () => {
+  it("también cuando el usuario ni siquiera es un uuid", () => {
+    /*
+     * 22P02 es el mismo problema con otra cara, y costaba más caro.
+     *
+     * /api/demo/public-analyze pasaba "demo-public" como usuario. `user_id` es
+     * una columna uuid, así que Postgres rechazaba con 22P02 —no con 23503— y
+     * el reintento no lo agarraba: la fila se perdía entera. Como
+     * `checkDemoBudget` suma sobre `ai_usage` del inquilino de la demo, ahí
+     * nunca había nada que sumar y el tope diario del único endpoint anónimo
+     * del producto no podía dispararse nunca.
+     */
+    expect(FUENTE).toContain('code === "22P02"');
+  });
+
+  it("el reintento es sólo para ESOS errores, no para cualquiera", () => {
     /*
      * El control. Un `catch` que reintentara sin usuario ante cualquier fallo
      * volvería a grabar todo sin atribuir en cuanto la base tosa — o sea, el
      * defecto original con más pasos.
      */
-    expect(FUENTE).toContain('if (code === "23503" && userId)');
+    expect(FUENTE).toContain('if ((code === "23503" || code === "22P02") && userId)');
   });
 });

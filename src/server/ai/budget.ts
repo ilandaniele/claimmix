@@ -422,7 +422,15 @@ export async function recordUsage(
      * gasto. Y queda dicho, porque un usuario que no existe es algo que alguien
      * debería mirar.
      */
-    if (code === "23503" && userId) {
+    /*
+     * 22P02 va con 23503: las dos son "el usuario que llego no sirve".
+     *
+     * 23503 es un uuid bien formado que no esta en `users`; 22P02 es algo que
+     * ni siquiera es un uuid. En los dos casos lo que no puede pasar es que se
+     * pierda el gasto, que es lo que alimenta los topes. Se reintenta sin
+     * usuario: se pierde la atribucion de esa llamada, no el consumo.
+     */
+    if ((code === "23503" || code === "22P02") && userId) {
       console.warn(
         JSON.stringify({
           level: "warn",

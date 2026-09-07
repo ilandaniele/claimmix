@@ -80,13 +80,15 @@ function str(args: Record<string, unknown>, key: string): string | null {
 async function hasPolicyData(tenantId: string): Promise<boolean> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
-  const [row] = await enTenant(tenantCtx, (db) =>
-    db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(policies)
-      
+  /*
+   * Una fila alcanza. Contaba TODAS las pólizas del inquilino para contestar
+   * «¿hay al menos una?»: con un padrón grande eso lee la tabla entera para
+   * decidir un booleano, y lo hace en cada consulta del agente.
+   */
+  const filas = await enTenant(tenantCtx, (db) =>
+    db.select({ hay: sql<number>`1` }).from(policies).limit(1)
   );
-  return (row?.n ?? 0) > 0;
+  return filas.length > 0;
 }
 
 /** The answer when there is nothing to look in. */

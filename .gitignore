@@ -130,3 +130,8 @@ tests/e2e/.sesiones/
 # base: se guardan como artefacto del deploy, no en el repo.
 /carga.json
 /carga.html
+
+# Prompts de agentes que Ilan copia a mano para correr auditorias.
+# Viven en la carpeta pero no son del proyecto: los trae de
+# Desktop\Desarrollo\Security y cambian por fuera de este repo.
+/prompts for performance and security/

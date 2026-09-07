@@ -35,8 +35,14 @@ export const ExtractedFieldSchema = z.object({
    * 'ai' — extracted by LLM from email body (default)
    * 'memory' — recalled from claim_memory for this sender (AC13)
    * 'confirmed' — previously confirmed by analyst
+   * 'canal' — lo que trae el sobre: el nombre visible del `From`, el nombre de
+   *   perfil de WhatsApp. Alcanza para saludar y para no volver a preguntar, y
+   *   NO para volverse un hecho del caso: el worker excluye estas claves del
+   *   conjunto que cruza contra el padrón y de la copia a
+   *   `cases.policyholder_name`. Vive sólo en memoria — `extracted_fields` no
+   *   tiene columna `source`, así que no hay migración que aplicar a mano.
    */
-  source: z.enum(["ai", "memory", "confirmed"]).default("ai"),
+  source: z.enum(["ai", "memory", "confirmed", "canal"]).default("ai"),
 });
 
 export type ExtractedField = z.infer<typeof ExtractedFieldSchema>;

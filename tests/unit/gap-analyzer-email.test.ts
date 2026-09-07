@@ -178,6 +178,27 @@ describe("analyzeEmailClaimGaps — missing required field", () => {
     expect(result.missingRequiredFields).toContain("full_name");
   });
 
+  it("no le pide el nombre a alguien que lo trae en el sobre", async () => {
+    /*
+     * La otra mitad del caso real del 7 de septiembre: el `From` decia
+     * «Ilan Daniele <ilan…>» y el correo que salio pedia «Nombre completo».
+     *
+     * El nombre del sobre entra con 0.70 —banda media a proposito— y desde
+     * 0.60 esto lo cuenta como presente: deja de pedirse. Que por debajo de
+     * 0.85 ademas caiga en confirmacion es lo correcto: nadie verifica un
+     * nombre visible, asi que se usa y se ofrece corregir.
+     */
+    const conNombreDelSobre: ExtractedField[] = [
+      ...FULL_HIGH_CONFIDENCE_FIELDS.filter((f) => f.field_key !== "full_name"),
+      { field_key: "full_name", field_value: "Ilan Daniele", confidence: 0.70, source: "canal" },
+    ];
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, conNombreDelSobre, TENANT_ID);
+
+    expect(result.missingRequiredFields).not.toContain("full_name");
+    expect(result.fieldsNeedingConfirmation.map((f) => f.fieldName)).toContain("full_name");
+  });
+
   it("returns info_faltante when contact (email + phone) both absent", async () => {
     const fieldsNoContact: ExtractedField[] = FULL_HIGH_CONFIDENCE_FIELDS.filter(
       (f) => f.field_key !== "email" && f.field_key !== "phone"

@@ -21,6 +21,7 @@
 
 import { displayFieldValue, labelForField } from "@/lib/labels/claim-fields";
 import { escapeHtml, maskDni, maskPolicyNumber } from "@/server/email/render";
+import { textoAHtml } from "@/core/email/html";
 
 /** Un dato sobre el que se pregunta. */
 export interface CampoAConfirmar {
@@ -34,6 +35,14 @@ export interface DataConfirmationRequestData extends CampoAConfirmar {
   caseId: string;
   /** Varios datos en un solo mensaje. Si falta, se usa el campo suelto. */
   fields?: CampoAConfirmar[];
+  /**
+   * La prosa ya redactada. Reemplaza el cuerpo y nada más.
+   *
+   * El cuerpo que se le entrega al redactor sale de `armarBloque`, o sea con
+   * `maskDni`/`maskPolicyNumber` YA aplicados: el modelo nunca ve un DNI ni un
+   * número de póliza entero, y el enmascarado de AC24 sobrevive a la redacción.
+   */
+  cuerpo?: string | null;
 }
 
 const SENSITIVE_FIELDS = new Set(["dni", "policy_number"]);
@@ -107,6 +116,7 @@ export function renderDataConfirmationRequest(
   subject: string;
   html: string;
   text: string;
+  cuerpo: string;
 } {
   const campos: CampoAConfirmar[] =
     data.fields && data.fields.length > 0
@@ -171,14 +181,27 @@ export function renderDataConfirmationRequest(
         `- O bien, escribí ${varios ? "los valores correctos" : "el valor correcto"} directamente en tu respuesta.`,
       ].join("\n");
 
+  const cuerpo = [
+    introText,
+    "",
+    bloques.map((b) => b.text).join("\n\n"),
+    "",
+    actionText,
+  ].join("\n");
+  const redactado = data.cuerpo?.trim();
+
+  const prosaHtml = redactado
+    ? textoAHtml(redactado)
+    : `${introHtml}
+  ${bloques.map((b) => b.html).join("\n  ")}
+  ${actionHtml}`;
+
   const html = `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><title>${escapeHtml(subject)}</title></head>
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #1a56db;">${escapeHtml(heading)}</h1>
-  ${introHtml}
-  ${bloques.map((b) => b.html).join("\n  ")}
-  ${actionHtml}
+  ${prosaHtml}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
   <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${escapeHtml(data.caseId)}. Este mensaje fue generado automáticamente.</p>
 </body>
@@ -187,15 +210,11 @@ export function renderDataConfirmationRequest(
   const text = [
     heading,
     "",
-    introText,
-    "",
-    bloques.map((b) => b.text).join("\n\n"),
-    "",
-    actionText,
+    redactado ?? cuerpo,
     "",
     "---",
     `Caso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente.`,
   ].join("\n");
 
-  return { subject, html, text };
+  return { subject, html, text, cuerpo };
 }

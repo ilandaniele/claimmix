@@ -584,6 +584,7 @@ export async function runEmailExtractionWorker(
   let emailSubject = "";
   let latestInboundText = "";
   let senderEmail = "";
+  let senderName: string | null = null;
   let claimMessageId: string | null = null;
   let providerMessageId: string | null = null;
   let leaseHeld = false;
@@ -741,6 +742,7 @@ export async function runEmailExtractionWorker(
       emailBody = conversation.body;
       emailSubject = conversation.subject;
       senderEmail = conversation.senderEmail;
+      senderName = conversation.senderName;
       latestInboundText = conversation.latestText;
       claimMessageId = conversation.claimMessageId;
       providerMessageId = conversation.providerMessageId;
@@ -838,6 +840,7 @@ export async function runEmailExtractionWorker(
       subject: emailSubject,
       body: emailBody,
       senderEmail,
+      senderName,
     });
     const hydratedFields = hydrateFieldsFromExtracted(extractedClaim);
     const aiClaimType =
@@ -1025,8 +1028,23 @@ export async function runEmailExtractionWorker(
      * Las reglas (el alias no pisa a la canónica; `extracted_fields` va último
      * y sólo con valor) están en `@/core/case/campos-canonicos`, con sus tests.
      */
+    /*
+     * Y sin lo que trae el sobre, que sirve para hablarle a alguien y no para
+     * afirmar quién es.
+     *
+     * El nombre visible del `From` —o el de perfil de WhatsApp— entra como
+     * `full_name` para saludar y para no volver a pedirlo. De acá en adelante
+     * no puede seguir: `cases.policyholder_name` es primera-escritura-gana para
+     * siempre y es la columna del `ilike` de la bandeja, del CSV y del sync al
+     * core; y `detectConflicts` compara `full_name` contra el padrón sin mirar
+     * confianza, así que un familiar, un productor o una casilla corporativa
+     * fabricarían un conflicto y un correo entero diciendo «vos nos decís X y
+     * en nuestro sistema figura Y» sobre un nombre que la persona nunca
+     * escribió. Lo que mostramos no se pierde: la bandeja ya hace coalesce
+     * contra `extracted_fields.full_name`.
+     */
     const extractedClaimFields = canonizarCampos(
-      extractedClaim.fields,
+      extractedClaim.fields.filter((f) => f.source !== "canal"),
       extractedClaim.extracted_fields,
       CLAIM_FIELD_KEYS
     );
@@ -1653,6 +1671,15 @@ interface LoadedConversation {
   body: string;
   subject: string;
   senderEmail: string;
+  /**
+   * El nombre que el canal entrega aparte de la dirección.
+   *
+   * Por WhatsApp `from_addr` es el telefono pelado y el nombre de perfil viaja
+   * en `raw_payload`. Se lee como columna ESCALAR y nunca el jsonb entero: por
+   * mail esa misma columna guarda el Message completo de Gmail, y esta consulta
+   * devuelve TODOS los entrantes del caso.
+   */
+  senderName: string | null;
   latestText: string;
   claimMessageId: string | null;
   providerMessageId: string | null;
@@ -1676,6 +1703,7 @@ export async function loadInboundConversation(
       body_text: claimMessages.body_text,
       subject: claimMessages.subject,
       from_addr: claimMessages.from_addr,
+      profile_name: sql<string | null>`${claimMessages.raw_payload}->>'profile_name'`,
       received_at: claimMessages.received_at,
     })
     .from(claimMessages)
@@ -1701,6 +1729,7 @@ export async function loadInboundConversation(
     // replied to, and its subject is what the claimant last saw.
     subject: latest.subject ?? "",
     senderEmail: latest.from_addr ?? "",
+    senderName: latest.profile_name ?? null,
     latestText: stripQuotedReply(latest.body_text ?? ""),
     claimMessageId: latest.id ?? null,
     providerMessageId: latest.provider_message_id ?? null,

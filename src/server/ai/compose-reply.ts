@@ -316,7 +316,11 @@ export async function composeReply(input: ComposeReplyInput): Promise<string> {
  */
 function withUnansweredQuestion(input: ComposeReplyInput): string {
   if (!input.question) return input.fallback;
-  // La misma frase que usa el correo. Vivía sólo acá, y el mail —que no pasa
-  // por este redactor— no tenía ninguna: la pregunta se perdía entera.
+  // El piso del correo ya la trae: la plantilla de datos faltantes la agrega
+  // cuando hay pregunta. Pegarla otra vez mandaba la misma frase dos veces
+  // seguidas, salida del archivo cuya razón de existir es que viva una sola
+  // vez — y además rompía la comparación del mensajero contra el piso, que es
+  // cómo se sabe que un rechazo devuelve la plantilla intacta.
+  if (input.fallback.includes(RESPUESTA_PENDIENTE)) return input.fallback;
   return `${input.fallback}\n\n${RESPUESTA_PENDIENTE}`;
 }

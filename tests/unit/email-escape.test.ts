@@ -127,6 +127,40 @@ describe("las plantillas no dejan pasar marcado ajeno", () => {
   });
 });
 
+describe("el cuerpo redactado tampoco pasa marcado", () => {
+  /*
+   * La vía nueva, y la peligrosa.
+   *
+   * Desde que el correo pasa por el redactor hay dos entradas y no una. La
+   * segunda está condicionada por `lastMessage` —o sea, por lo que escribió un
+   * desconocido— y el destinatario lo elige ese mismo desconocido con el `From`
+   * del entrante, que nadie verifica. Y `readable()` del ensayo borra las
+   * etiquetas: si esto se rompe, el transcripto no lo muestra.
+   */
+  it.each(CARGAS)("missing_information_request con %s adentro de la prosa", (carga) => {
+    const r = renderTemplate("missing_information_request", {
+      caseId: "caso-1",
+      missingFields: ["policy_number"],
+      cuerpo: `Necesitamos el número de póliza. ${carga}`,
+    });
+
+    expect(r.html).not.toContain(carga);
+    expect(r.html).not.toContain("<script>");
+    expect(r.html).not.toContain('evil.tld">');
+    expect(r.html).toContain("&lt;");
+  });
+
+  it("y en texto plano sale literal, como el resto", () => {
+    const r = renderTemplate("confirmation_received", {
+      caseId: "caso-1",
+      cuerpo: "Tu reclamo quedó completo, Juan & Asociados.",
+    });
+
+    expect(r.text).toContain("Juan & Asociados");
+    expect(r.html).toContain("Juan &amp; Asociados");
+  });
+});
+
 describe("la versión en texto plano NO se escapa", () => {
   it("porque ahí las entidades se leerían literales", () => {
     const r = renderTemplate("data_confirmation_request", {

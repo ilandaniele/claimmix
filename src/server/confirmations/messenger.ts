@@ -23,7 +23,7 @@ import { db } from "@/lib/db";
 import { outboundMessages } from "@/lib/db/schema";
 import { labelForField, labelForClaimType, displayFieldValue } from "@/lib/labels/claim-fields";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
-import type { EmailTemplate } from "@/server/email/render";
+import { renderTemplate, type EmailTemplate } from "@/server/email/render";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
 import { isReservedTestNumber } from "@/core/phone/reserved";
@@ -45,10 +45,55 @@ export interface AgentMessenger {
   send(message: AgentMessage): Promise<void>;
 }
 
-/** Email: the templates in server/email/templates own the wording. */
+/**
+ * Email: the template is the floor here too.
+ *
+ * It was not: `emailMessenger` handed the message straight to the dispatcher,
+ * so a claimant read the deterministic HTML verbatim while a WhatsApp claimant
+ * read something a person could have written. Same brain, two products.
+ *
+ * The composition happens HERE and not inside `dispatch`, and that is the whole
+ * design. Dispatch builds the mail twice — the preview it records for a
+ * reserved test address, and the real send — and both call the same
+ * `renderTemplate(template, data)`. Sending the written prose inside `data`
+ * means the two get the same string by construction, not because someone
+ * remembered to change both. The rehearsal reads the first; a claimant reads
+ * the second.
+ *
+ * The fallback handed to the writer is `piso.cuerpo`, never `piso.text`: the
+ * whole document would have the model rewriting the footer and the reference
+ * line, spending the 1400-character budget on chrome and collecting `too_long`
+ * rejections for no real reason.
+ *
+ * And when the writer gives back exactly the floor — switch off, two
+ * rejections, an exception — nothing is passed at all, so the output is byte
+ * for byte what it was before this existed.
+ */
 export const emailMessenger: AgentMessenger = {
   async send(message) {
-    await dispatchOutboundEmail(message);
+    let cuerpo: string | null = null;
+    try {
+      const piso = renderTemplate(message.template, message.data);
+      const prosa = await writeReply(message, piso.cuerpo, "email");
+      if (prosa !== piso.cuerpo) cuerpo = prosa;
+    } catch (err) {
+      // Este módulo promete que nada acá tira: una denuncia ya extraída y
+      // guardada no se puede perder porque el redactor falló.
+      console.error(
+        JSON.stringify({
+          level: "error",
+          service: "claimmix",
+          msg: "email.messenger.compose_failed",
+          case_id: message.caseId,
+          template: message.template,
+          error: err instanceof Error ? err.name : "UnknownError",
+        })
+      );
+    }
+
+    await dispatchOutboundEmail(
+      cuerpo === null ? message : { ...message, data: { ...message.data, cuerpo } }
+    );
   },
 };
 
@@ -213,11 +258,14 @@ function renderClosing(data: Record<string, unknown>): string {
  * redactor no puede mejorarlo, esto es lo que sale — y dicho así ya es
  * suficiente. Lo que no puede hacer, ni acá ni en la versión redactada, es
  * volver a enumerar lo que pedimos hace un minuto.
+ *
+ * (Leía un `data.noted` que nadie seteó nunca — el detalle que se iba a
+ * nombrar—, declarado igual en los dos canales. Un parámetro muerto en dos
+ * escritores es cómo el próximo lo «pasa» y no cambia nada.)
  */
-function renderNoted(data: Record<string, unknown>): string {
-  const noted = typeof data.noted === "string" && data.noted ? ` de ${data.noted}` : " de lo que nos contaste";
+function renderNoted(): string {
   return (
-    `Gracias, tomamos nota${noted}. ` +
+    "Gracias, tomamos nota de lo que nos contaste. " +
     "Seguimos a la espera de lo que te pedimos antes para poder avanzar."
   );
 }
@@ -247,7 +295,7 @@ function renderForWhatsApp(message: AgentMessage): string | null {
     case "data_confirmation_request":
       return renderConflict(message.data);
     case "information_received":
-      return renderNoted(message.data);
+      return renderNoted();
     case "confirmation_received":
       return renderClosing(message.data);
     default:
@@ -270,12 +318,19 @@ const WHATSAPP_TEMPLATE_NAMES: Record<string, string> = {
  * The template is the floor: composeReply is asked to say the same thing
  * better, and anything failing its guardrails comes back as the template
  * unchanged. Shared by the real messenger and the simulated one so a rehearsal
- * exercises the same writer as production.
+ * exercises the same writer as production — and, since the channel is an
+ * argument, by email too. Nothing below this line was ever WhatsApp-specific:
+ * `intentFor` and the mapping out of `message.data` read the orchestrator's
+ * decision, which is the same decision either way.
  */
-async function writeWhatsAppReply(message: AgentMessage, fallback: string): Promise<string> {
+async function writeReply(
+  message: AgentMessage,
+  fallback: string,
+  channel: "email" | "whatsapp"
+): Promise<string> {
   return composeReply({
     intent: intentFor(message.template),
-    channel: "whatsapp",
+    channel,
     fields: Array.isArray(message.data.missingFields)
       ? (message.data.missingFields as string[]).map(String)
       : undefined,
@@ -324,7 +379,7 @@ export const whatsappMessenger: AgentMessenger = {
         return;
       }
 
-      const finalBody = await writeWhatsAppReply(message, body);
+      const finalBody = await writeReply(message, body, "whatsapp");
 
       const res = await sendWhatsAppText(message.to, finalBody);
       await recordOutbound(message, finalBody, res.ok ? "sent" : "failed");
@@ -411,7 +466,7 @@ export const simulatedWhatsappMessenger: AgentMessenger = {
     // Compose, then do not send. A rehearsal that skipped the writer would be
     // rehearsing a different script: the template is the floor, and what a
     // claimant actually reads is whatever the model made of it.
-    const finalBody = await writeWhatsAppReply(message, body);
+    const finalBody = await writeReply(message, body, "whatsapp");
     await recordOutbound(message, finalBody, "skipped_simulated");
     console.info(
       JSON.stringify({

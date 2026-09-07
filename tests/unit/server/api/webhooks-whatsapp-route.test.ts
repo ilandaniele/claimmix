@@ -140,4 +140,31 @@ describe("/api/webhooks/whatsapp", () => {
       expect.objectContaining({ from: "5492916426930", body: "Choque en la ruta 3" })
     );
   });
+
+  // ── El nombre de perfil ─────────────────────────────────────────────────────
+
+  it("el nombre de perfil llega al intake en vez de morir acá", async () => {
+    // `parseCloudApiMessages` ya lo leía —hay un test que lo prueba— y `ingest`
+    // lo tiraba: el agente no sabía con quién hablaba y le pedía el nombre a
+    // alguien que lo trae en el sobre.
+    await POST(metaReq(TEXT_PAYLOAD, sign(TEXT_PAYLOAD)));
+
+    expect(mockCreateWhatsAppIntake).toHaveBeenCalledWith(
+      expect.objectContaining({ senderName: "Ilan" })
+    );
+  });
+
+  it("y el payload normalizado también lo puede mandar", async () => {
+    // Para que el adaptador BSP y el ensayo recorran el mismo camino.
+    const req = new NextRequest("http://localhost/api/webhooks/whatsapp", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer bearer-secret" },
+      body: JSON.stringify({ from: "5492916426930", body: "Choqué ayer", name: "Martín Sosa" }),
+    });
+
+    expect((await POST(req)).status).toBe(202);
+    expect(mockCreateWhatsAppIntake).toHaveBeenCalledWith(
+      expect.objectContaining({ senderName: "Martín Sosa" })
+    );
+  });
 });

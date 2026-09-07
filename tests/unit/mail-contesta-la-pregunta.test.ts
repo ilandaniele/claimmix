@@ -74,14 +74,14 @@ describe("el mail no saluda como si fuera el primero, cuando no lo es", () => {
     const { text } = armar({ isFollowUp: true });
 
     expect(text).not.toContain("Gracias por tu reclamo");
-    expect(text).toContain("para poder seguir con el caso");
+    expect(text).toContain("Para poder seguir con tu reclamo");
   });
 
   it("pero el primero sí agradece", () => {
     // El control: no se pierde la apertura del primer contacto.
     const { text } = armar({ isFollowUp: false });
 
-    expect(text).toContain("gracias por tu reclamo");
+    expect(text).toContain("Gracias por tu reclamo");
   });
 
   it("y usa el nombre cuando el caso ya lo tiene", () => {
@@ -89,10 +89,48 @@ describe("el mail no saluda como si fuera el primero, cuando no lo es", () => {
 
     expect(text).toContain("Diego,");
   });
+});
 
-  it("sin nombre no deja una coma huérfana", () => {
-    const { text } = armar({ isFollowUp: true });
+/**
+ * La apertura descabezada.
+ *
+ * Un caso real (7 de septiembre, 18:10) recibió un mail que abría «gracias por
+ * tu reclamo.», en minúscula y sin saludo: la apertura era `nombre + ", "` y
+ * detrás una frase en minúscula pensada para venir pegada al nombre. Sin nombre
+ * quedaba una oración sin cabeza.
+ *
+ * El test anterior —«sin nombre no deja una coma huérfana»— pasaba por el
+ * motivo equivocado: pasaba porque el texto arrancaba descabezado, no porque
+ * estuviera bien.
+ */
+describe("sin nombre, la apertura la escribió una persona", () => {
+  for (const esVuelta of [false, true]) {
+    it(`empieza en mayúscula y no arranca con coma (isFollowUp: ${esVuelta})`, () => {
+      const { text, html } = armar({ isFollowUp: esVuelta });
+      const primeraLinea = text.split("\n\n")[1];
 
-    expect(text).not.toMatch(/^\s*,/m);
+      expect(primeraLinea).toMatch(/^[A-ZÁÉÍÓÚÑ]/);
+      expect(text).not.toMatch(/^\s*,/m);
+      expect(text).not.toMatch(/\n\s*gracias por tu reclamo/);
+      expect(html).not.toContain(">gracias");
+    });
+  }
+
+  it("y con nombre, el nombre va delante y la frase sigue entera", () => {
+    const { text } = armar({ claimantName: "Diego", isFollowUp: false });
+
+    expect(text).toContain("Diego, gracias por tu reclamo.");
+  });
+});
+
+describe("la frase de la pregunta pendiente vive una sola vez", () => {
+  it("no aparece dos veces cuando el piso ya la trae", () => {
+    // `withUnansweredQuestion` se la pegaba encima al piso, y el piso ya la
+    // agrega cuando hay pregunta: la misma frase dos veces seguidas, salida del
+    // archivo cuya razón de existir es que viva una sola vez.
+    const { text } = armar({ question: "¿cuánto tarda esto?" });
+    const veces = text.split(RESPUESTA_PENDIENTE).length - 1;
+
+    expect(veces).toBe(1);
   });
 });

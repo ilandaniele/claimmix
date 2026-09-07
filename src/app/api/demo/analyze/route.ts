@@ -4,7 +4,7 @@
  *
  * Auth: required (any authenticated user).
  * Rate limit: 10/min per user (reuses INTAKE_SIMULATE config).
- * No DB writes — extraction result is returned directly.
+ * Presupuesto: pasa por `checkBudget`, como toda ruta que llama al modelo.
  */
 
 import "server-only";
@@ -18,7 +18,10 @@ import {
   rateLimit,
   RATE_LIMIT_CONFIGS,
   buildUserKey,
+  getClientIp,
 } from "@/lib/rate-limit/index";
+import { checkBudget } from "@/server/ai/budget";
+import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 export const maxDuration = 60;
 
@@ -77,7 +80,41 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  // ── 4. Run extraction (no DB writes) ─────────────────────────────────────────
+  /*
+   * ── 4. Tope de gasto ───────────────────────────────────────────────────────
+   *
+   * Esta ruta llamaba al modelo sin preguntarle nada al presupuesto. Era la
+   * única de las cuatro que gastan: simular, reanalizar y el lote en tanda
+   * pasan todas por acá. El límite de tasa acota la RÁFAGA —diez por minuto por
+   * persona— pero no el TOTAL: con una sesión, diez llamadas por minuto durante
+   * una tarde se comen el presupuesto de la aseguradora, y el tope diario que
+   * existe para impedirlo no se enteraba.
+   *
+   * Importa por dónde entra: `checkBudget` es el único límite que, al llegar,
+   * frena las denuncias de verdad. Una demo que lo vacía deja sin atender a los
+   * asegurados de esa aseguradora.
+   */
+  const ip = getClientIp(request);
+  const budgetResult = await checkBudget(userRow.tenant_id, userRow.id);
+  if (budgetResult.exceeded) {
+    await writeAuditLog({
+      tenant_id: userRow.tenant_id,
+      actor_id: userRow.id,
+      event_type: AuditEvent.AI_BUDGET_EXCEEDED,
+      target_type: null,
+      target_id: null,
+      payload: { reason: budgetResult.reason, ruta: "demo-analyze" },
+      ip,
+      ua: request.headers.get("user-agent") ?? undefined,
+    });
+    return err(
+      new AppError("AI_BUDGET_EXCEEDED", budgetResult.reason, {
+        reason: budgetResult.reason,
+      })
+    );
+  }
+
+  // ── 5. Run extraction (no DB writes) ─────────────────────────────────────────
   let result;
   try {
     result = await extractEmailClaimGemini(

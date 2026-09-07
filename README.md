@@ -72,6 +72,7 @@ Optional seed data lives in `neon/seed.sql`.
 | `CRON_SECRET` | prod | Cron/internal route secret |
 | `PUBSUB_TOPIC` | push | Gmail push topic |
 | `PUBSUB_AUDIENCE` | push | Expected Pub/Sub OIDC audience |
+| `PUBSUB_SERVICE_ACCOUNT` | push | Service account of our push subscription; the token's `email` must match it. Required wherever `PUBSUB_AUDIENCE` is set |
 | `S3_ENDPOINT` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_BUCKET` | attachments | S3-compatible storage |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | no | Observability |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | no | Durable rate limiting |

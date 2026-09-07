@@ -340,6 +340,49 @@ const SCENARIOS: Scenario[] = [
   },
 
   {
+    id: "mail-que-no-coincide-con-el-padron",
+    channel: "email",
+    what: "Escribe un familiar del titular: el mensaje tiene que decir los dos valores",
+    /*
+     * El único mensaje del producto cuyo piso ES un dato.
+     *
+     * Los otros cuatro son una frase que el redactor puede decir mejor; éste
+     * dice cuáles son los dos valores que no coinciden, y sin eso la persona
+     * no tiene qué contestar y el caso queda esperando una respuesta que no
+     * puede dar. Es AC7 y AC9.
+     *
+     * No estaba ensayado, y por eso se rompió sin que nadie lo viera: el
+     * redactor recibía la instrucción «Señalar la diferencia entre los dos
+     * valores» sin ningún valor. Las pruebas unitarias lo agarran ahora, pero
+     * la mitad del valor de este ensayo es que una persona LEA el mensaje: un
+     * texto que nombra los dos datos y suena a interrogatorio pasa igual todas
+     * las verificaciones.
+     */
+    policy: {
+      numero: "POL-3390-F",
+      dni: "26.880.140",
+      nombre: "Roberto Paz",
+    },
+    turns: [
+      {
+        say: [
+          "Hola, buenas.",
+          "",
+          "Escribo por el auto de mi viejo, que ayer lo chocaron estacionado en",
+          "Belgrano al 1500. La póliza es POL-3390-F.",
+          "",
+          "Soy Lucía Paz, DNI 41.207.663.",
+        ].join("\n"),
+        // Que nombre los dos valores no depende de cómo redacte ese día: si el
+        // mensaje no los dice, `violation()` lo rechaza y sale la plantilla,
+        // que también los dice. Lo que SÍ depende del modelo —si suena a
+        // acusación o a pregunta— es lo que hay que leer en el transcripto.
+        expect: { replies: 1, mentions: ["Roberto Paz"] },
+      },
+    ],
+  },
+
+  {
     id: "poliza-vencida",
     what: "Una póliza vencida es para una persona, no para seguir pidiendo papeles",
     policy: {

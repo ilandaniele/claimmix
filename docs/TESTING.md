@@ -55,7 +55,7 @@ de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
 
 ### 2. `pnpm rehearse` — minutos, gasta tokens
 
-Trece denuncias enteras, de punta a punta, contra el mismo código, la misma base
+Catorce denuncias enteras, de punta a punta, contra el mismo código, la misma base
 y el mismo modelo que producción. Por los canales simulados: en los dos el
 mensajero redacta la respuesta exactamente como lo haría; WhatsApp la guarda en
 vez de enviarla, y mail hace lo mismo con cualquier dirección `@example.com`.
@@ -72,8 +72,13 @@ Escenarios: la denuncia completa hasta quedar lista, el incendio con heridos que
 se deriva, la cotización que no es un reclamo, los datos que llegan de a uno, el
 mensaje que no aporta nada y no merece respuesta, la pregunta que hay que
 contestar, la póliza que hay que buscar por DNI, la póliza vencida, la foto que
-no es ningún documento, y los cuatro equivalentes por mail — uno de ellos, el
-nombre que viene en el sobre y no en el cuerpo.
+no es ningún documento, y los cinco equivalentes por mail — entre ellos el
+nombre que viene en el sobre y no en el cuerpo, y el familiar del titular cuyos
+datos no coinciden con el padrón.
+
+Ese último está porque no estaba: es el único mensaje del producto cuyo piso ES
+un dato —dice cuáles son los dos valores que no coinciden— y se rompió sin que
+nadie lo viera, porque no había un ensayo que lo imprimiera.
 
 Imprime la conversación completa. **Leela.** La mitad del valor está en que una
 persona note una respuesta que pasa todas las verificaciones y suena mal.

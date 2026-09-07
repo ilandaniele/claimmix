@@ -1,0 +1,5 @@
+# Los workflows guardados se mandan tal cual al diálogo de aprobación, y un CR
+# ahí adentro es un carácter de control: el diálogo lo rechaza y el workflow no
+# corre. En Windows `core.autocrlf` los reescribe a CRLF en cada checkout, así
+# que la única forma de que sobrevivan es pedir LF explícitamente.
+.claude/workflows/*.js text eol=lf

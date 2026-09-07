@@ -76,11 +76,24 @@ function readMigrations() {
     seen.add(version);
 
     const sql = readFileSync(path.join(MIGRATIONS_DIR, filename), "utf8");
+    // El hash no puede depender de con qué final de línea quedó el archivo.
+    //
+    // Se hasheaban los bytes crudos, y en Windows `core.autocrlf` reescribe los
+    // .sql a CRLF en cada checkout. Un clon recién hecho mostraba veintidós
+    // migraciones «editadas después de aplicarse» sin que nadie hubiera tocado
+    // una letra, y el runner se negaba a aplicar cualquier cosa. La alarma que
+    // avisa de un cambio a mano es inútil si grita en cada máquina nueva.
+    //
+    // `checksum` normaliza; `checksumCrudo` es el hash viejo, que se sigue
+    // aceptando para las filas que el ledger ya guardó así. No debilita nada:
+    // editar una migración de verdad cambia los dos.
+    const normalizado = sql.split(String.fromCharCode(13, 10)).join(String.fromCharCode(10));
     return {
       version,
       filename,
       sql,
-      checksum: createHash("sha256").update(sql).digest("hex"),
+      checksum: createHash("sha256").update(normalizado).digest("hex"),
+      checksumCrudo: createHash("sha256").update(sql).digest("hex"),
     };
   });
 }
@@ -137,9 +150,11 @@ try {
   // Drift check first: if the repo and the database disagree about what an
   // already-applied migration contained, nothing else this script says is
   // trustworthy.
-  const drifted = migrations.filter(
-    (m) => applied.has(m.version) && applied.get(m.version).checksum !== m.checksum
-  );
+  const drifted = migrations.filter((m) => {
+    if (!applied.has(m.version)) return false;
+    const guardado = applied.get(m.version).checksum;
+    return guardado !== m.checksum && guardado !== m.checksumCrudo;
+  });
   if (drifted.length > 0) {
     console.error("✖ DRIFT: these migrations were edited after being applied:");
     for (const m of drifted) console.error(`    ${m.filename}`);

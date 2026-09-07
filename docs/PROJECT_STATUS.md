@@ -1719,9 +1719,11 @@ inquilino. Costaba una escritura por cada llamada de IA a cambio de nada. Los
 otros dos índices de la 0023 se quedan.
 
 Comprobado contra la base de producción el 2026-09-07, que es la única
-respuesta que vale en este proyecto:  sobre  devuelve
-,  e ,
-y **no** el cubridor. El reparto sigue igual de torcido: 9.896 filas, 2
+respuesta que vale en este proyecto —acá las migraciones se aplicaron a mano
+más de una vez, así que el archivo dice lo que se quiso hacer y el catálogo
+dice lo que pasó—. `pg_indexes` sobre `ai_usage` devuelve
+`ai_usage_pkey`, `idx_ai_usage_tenant_created` e `idx_ai_usage_user_created`, y **no** el cubridor.
+El reparto que motivó sacarlo sigue igual de torcido: 9.896 filas, 2
 inquilinos, 9.891 contra 5.
 
 ⚠️ **El endpoint público de la demo no registraba su gasto.** `DEMO_USER_ID` era

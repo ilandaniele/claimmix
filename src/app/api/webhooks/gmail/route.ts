@@ -6,9 +6,10 @@
  * We decode the payload, then call pollGmail() to ingest any new emails.
  *
  * Security model:
- * - When PUBSUB_AUDIENCE is set: verify Google-issued OIDC token via
- *   OAuth2Client.verifyIdToken(). Only Google's Pub/Sub push service produces
- *   valid tokens for our specific audience URL.
+ * - Con PUBSUB_AUDIENCE puesta: se verifica el token OIDC de Google con
+ *   OAuth2Client.verifyIdToken() Y se exige que lo haya pedido NUESTRA cuenta
+ *   de servicio (PUBSUB_SERVICE_ACCOUNT). Las dos cosas: la firma dice que el
+ *   token es de Google, el `email` dice de quién.
  * - When PUBSUB_AUDIENCE is unset FUERA de producción (dev local): skip OIDC
  *   verification; log a
  *   single startup warning per process. NEVER use this mode in production.
@@ -142,13 +143,59 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const bearerToken = authHeader.slice("Bearer ".length);
     const oidcClient = getOidcClient();
 
+    /*
+     * La firma dice que el token es de Google. No dice de QUIÉN.
+     *
+     * `verifyIdToken` valida firma, vencimiento, emisor y `aud`. Faltaba lo
+     * único que identifica al remitente. Y el `aud` de un push de Pub/Sub no es
+     * un secreto ni lo elige Google: lo elige quien crea la suscripción, y acá
+     * es la URL del propio endpoint. O sea, adivinable desde afuera.
+     *
+     * Con eso, cualquiera con una cuenta de GCP podía crear una suscripción
+     * push con autenticación OIDC, apuntarla a esta URL, poner esa audiencia, y
+     * Google le firmaba un token con SU cuenta de servicio que acá pasaba. Lo
+     * que se dispara del otro lado es una lectura de la casilla de la
+     * aseguradora, todas las veces que quiera.
+     *
+     * Google documenta este paso: comparar `email` y `email_verified` contra la
+     * cuenta de servicio esperada. Es lo que hace el bloque de abajo.
+     */
+    const cuentaEsperada = process.env.PUBSUB_SERVICE_ACCOUNT;
+    if (!cuentaEsperada) {
+      // Mismo criterio que la falta de PUBSUB_AUDIENCE: mal configurado
+      // rechaza, no degrada a aceptar sin mirar.
+      console.error(
+        JSON.stringify({
+          level: "error",
+          service: "claimmix",
+          msg: "webhooks.gmail.sin_cuenta_de_servicio_esperada",
+          detalle:
+            "PUBSUB_SERVICE_ACCOUNT no está configurada: no hay contra qué " +
+            "comparar el remitente del token, así que el webhook rechaza.",
+        })
+      );
+      return NextResponse.json(
+        {
+          error: {
+            code: "INVALID_TOKEN",
+            message: "Bearer token is invalid or has incorrect audience.",
+          },
+        },
+        { status: 401 }
+      );
+    }
+
     try {
       // verifyIdToken validates: signature, expiry, issuer (accounts.google.com),
       // and audience. Throws if any check fails.
-      await oidcClient!.verifyIdToken({
+      const ticket = await oidcClient!.verifyIdToken({
         idToken: bearerToken,
         audience,
       });
+      const payload = ticket.getPayload();
+      if (!payload?.email_verified || payload.email !== cuentaEsperada) {
+        throw new Error("remitente inesperado");
+      }
     } catch {
       // Do NOT log the token or the error message — they may contain token contents.
       // Only log the error name for debugging. crew-debug-ok

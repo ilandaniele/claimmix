@@ -104,6 +104,7 @@ describe("POST /api/webhooks/gmail", () => {
     vi.clearAllMocks();
     // Restore default env state.
     delete process.env.PUBSUB_AUDIENCE;
+    delete process.env.PUBSUB_SERVICE_ACCOUNT;
     // Default: pollGmail resolves successfully with a result object.
     mockPollGmail.mockResolvedValue({
       processed: 1,
@@ -116,6 +117,7 @@ describe("POST /api/webhooks/gmail", () => {
 
   afterEach(() => {
     delete process.env.PUBSUB_AUDIENCE;
+    delete process.env.PUBSUB_SERVICE_ACCOUNT;
     // Clear module cache so next describe block gets a fresh module with
     // reset singleton state (_oidcClient, _warnedSkipVerify).
     vi.resetModules();
@@ -206,6 +208,14 @@ describe("POST /api/webhooks/gmail", () => {
     });
   });
 
+  /** La cuenta de servicio de NUESTRA suscripción de Pub/Sub. */
+  const CUENTA = "pubsub-push@proyecto.iam.gserviceaccount.com";
+
+  /** Un ticket como el que devuelve verifyIdToken, con el remitente que se le pida. */
+  function ticketDe(email: string, email_verified = true) {
+    return { getPayload: () => ({ aud: "https://app.test/api/webhooks/gmail", email, email_verified }) };
+  }
+
   // ── AC5: PUBSUB_AUDIENCE set + no auth header → 401 MISSING_TOKEN ─────────────
 
   describe("AC5: PUBSUB_AUDIENCE set, no Authorization header", () => {
@@ -255,6 +265,7 @@ describe("POST /api/webhooks/gmail", () => {
 
     it("AC6: verifyIdToken is called with the bearer token and correct audience", async () => {
       process.env.PUBSUB_AUDIENCE = "https://app.test/api/webhooks/gmail";
+      process.env.PUBSUB_SERVICE_ACCOUNT = CUENTA;
       mockVerifyIdToken.mockRejectedValue(new Error("Token has wrong audience."));
       const { POST } = await import("@/app/api/webhooks/gmail/route");
       const bearerToken = "a.valid.looking.jwt";
@@ -301,8 +312,9 @@ describe("POST /api/webhooks/gmail", () => {
 
     it("AC6: valid token passes verification and calls pollGmail", async () => {
       process.env.PUBSUB_AUDIENCE = "https://app.test/api/webhooks/gmail";
-      // verifyIdToken resolves — token is valid.
-      mockVerifyIdToken.mockResolvedValue({ payload: { aud: "https://app.test/api/webhooks/gmail" } });
+      process.env.PUBSUB_SERVICE_ACCOUNT = CUENTA;
+      // Token válido Y pedido por nuestra cuenta de servicio.
+      mockVerifyIdToken.mockResolvedValue(ticketDe(CUENTA));
       const { POST } = await import("@/app/api/webhooks/gmail/route");
       const req = buildRequest(buildEnvelope(), {
         Authorization: "Bearer valid.google.signed.jwt",
@@ -314,6 +326,57 @@ describe("POST /api/webhooks/gmail", () => {
       expect(res.status).toBe(200);
       expect(body.ok).toBe(true);
       expect(mockPollGmail).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /*
+   * El agujero que cerró el arreglo: la firma de Google decía que el token era
+   * de Google, y nadie preguntaba de QUIÉN. La audiencia de un push de Pub/Sub
+   * es la URL del endpoint —adivinable— y cualquiera con una cuenta de GCP
+   * podía apuntar una suscripción acá y hacernos leer la casilla del cliente.
+   */
+  describe("quién pidió el token, no sólo que Google lo haya firmado", () => {
+    it("un token de OTRA cuenta de servicio, firmado por Google y con la audiencia correcta, se rechaza", async () => {
+      process.env.PUBSUB_AUDIENCE = "https://app.test/api/webhooks/gmail";
+      process.env.PUBSUB_SERVICE_ACCOUNT = CUENTA;
+      mockVerifyIdToken.mockResolvedValue(ticketDe("cualquiera@proyecto-ajeno.iam.gserviceaccount.com"));
+      const { POST } = await import("@/app/api/webhooks/gmail/route");
+
+      const res = await POST(
+        buildRequest(buildEnvelope(), { Authorization: "Bearer firmado.por.google" })
+      );
+
+      expect(res.status).toBe(401);
+      expect((await res.json()).error.code).toBe("INVALID_TOKEN");
+      expect(mockPollGmail).not.toHaveBeenCalled();
+    });
+
+    it("nuestra propia cuenta pero con el mail sin verificar tampoco pasa", async () => {
+      process.env.PUBSUB_AUDIENCE = "https://app.test/api/webhooks/gmail";
+      process.env.PUBSUB_SERVICE_ACCOUNT = CUENTA;
+      mockVerifyIdToken.mockResolvedValue(ticketDe(CUENTA, false));
+      const { POST } = await import("@/app/api/webhooks/gmail/route");
+
+      const res = await POST(
+        buildRequest(buildEnvelope(), { Authorization: "Bearer firmado.por.google" })
+      );
+
+      expect(res.status).toBe(401);
+      expect(mockPollGmail).not.toHaveBeenCalled();
+    });
+
+    it("sin PUBSUB_SERVICE_ACCOUNT rechaza, no degrada a aceptar sin mirar", async () => {
+      process.env.PUBSUB_AUDIENCE = "https://app.test/api/webhooks/gmail";
+      // PUBSUB_SERVICE_ACCOUNT deliberadamente ausente.
+      const { POST } = await import("@/app/api/webhooks/gmail/route");
+
+      const res = await POST(
+        buildRequest(buildEnvelope(), { Authorization: "Bearer firmado.por.google" })
+      );
+
+      expect(res.status).toBe(401);
+      expect(mockVerifyIdToken).not.toHaveBeenCalled();
+      expect(mockPollGmail).not.toHaveBeenCalled();
     });
   });
 

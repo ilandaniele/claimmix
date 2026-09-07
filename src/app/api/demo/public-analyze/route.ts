@@ -16,7 +16,21 @@ import { AppError } from "@/lib/errors";
 
 export const maxDuration = 60;
 
-const DEMO_USER_ID = "demo-public";
+/*
+ * No hay usuario: la demo publica es anonima, y eso hay que decirlo con null.
+ *
+ * Decia "demo-public", que parece un identificador y no lo es: `ai_usage.user_id`
+ * es una columna uuid, asi que Postgres rechazaba el INSERT con 22P02. El catch
+ * de `recordUsage` reintenta sin usuario solo cuando el codigo es 23503 (clave
+ * foranea), asi que 22P02 caia en el console.error generico y la fila se perdia.
+ *
+ * Consecuencia: `checkDemoBudget` suma sobre `ai_usage` del inquilino de la
+ * demo, ahi nunca habia una fila, y el tope diario del unico endpoint anonimo
+ * del producto no podia dispararse nunca. El tope mensual tampoco lo agarra,
+ * porque excluye a proposito a ese inquilino. El limite por IP se esquiva
+ * rotando IPs, que cuesta centavos.
+ */
+const DEMO_USER_ID = null;
 
 const AnalyzeSchema = z.object({
   subject: z.string().min(1).max(500),

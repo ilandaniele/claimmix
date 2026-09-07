@@ -171,29 +171,145 @@ siempre hay un solo usuario.
 Son dos mitades con costos muy distintos.
 
 ```bash
-pnpm load                          # sólo lectura: gratis, no escribe nada
+pnpm load                          # forma «carga»: gratis, la que corre en cada deploy
+pnpm load --forma pico             # ráfaga y recuperación
+pnpm load --forma resistencia      # sostenida, 3 minutos (--minutos N)
+pnpm load --forma estres           # rampa hasta encontrar el techo
+pnpm load --forma todas            # las cuatro
+pnpm load --reporte carga.json     # escribe carga.json y carga.html
 pnpm load --write                  # + 10 asegurados simultáneos (gasta tokens)
 pnpm load --write --claimants 100  # la tormenta
 ```
 
 **La mitad de lectura** mide las consultas del tablero contra la base de
-producción con 1, 5 y 20 analistas a la vez, y muestra el plan que Postgres
-elige para cada una. Corre sola después de cada deploy. Lo que busca no es una
-latencia bonita: es la regresión silenciosa. Un filtro nuevo o un orden distinto
-pueden dejar el índice afuera y convertir el listado en un recorrido de la tabla
-entera — con cuatrocientos casos no se nota, con cuatrocientos mil es la
-pantalla que no abre, y para entonces nadie se acuerda del commit que lo causó.
-Por eso falla si el listado deja de usar su índice.
+producción y muestra el plan que Postgres elige para cada una. Lo que busca no
+es una latencia bonita: es la regresión silenciosa. Un filtro nuevo o un orden
+distinto pueden dejar el índice afuera y convertir el listado en un recorrido de
+la tabla entera — con cuatrocientos casos no se nota, con cuatrocientos mil es
+la pantalla que no abre, y para entonces nadie se acuerda del commit que lo
+causó. Por eso falla si el listado deja de usar su índice.
+
+El plan que se explica es el de **las consultas que corren**: se arman con los
+mismos armadores que usa `listCases` (`consultaListado`, `consultaConteo`,
+`consultaPorEstado`, exportados de `src/server/cases/list.ts`) y se explican por
+la capa de datos, con el rol `claimmix_app` y el filtro por inquilino puesto por
+RLS. Hasta septiembre de 2026 explicaba un `select id from cases where tenant_id
+= '…'` escrito a mano adentro del script y ejecutado con el rol dueño: otro rol,
+otro predicado y otra forma, así que se podía cambiar el orden o los filtros del
+listado y el chequeo seguía verde. Si el EXPLAIN no se puede correr, la forma
+falla: un chequeo que no corrió no es un chequeo que pasó.
+
+Y mide lo que cuesta **abrir la bandeja**, no la mitad: el listado con LIMIT 25
+más los contadores por estado, que son un agregado sin límite sobre toda la
+tabla del inquilino. El agregado es justamente lo que se degrada linealmente; el
+listado con LIMIT no.
+
+Sobre esa mitad hay **cuatro formas**, y cada una contesta una pregunta
+distinta. Que sean cuatro y no una repetida con otro nombre es el punto: si las
+cuatro miran el mismo p95 con otra etiqueta, tres son decoración.
+
+| forma | la pregunta | el número que decide | falla si |
+|---|---|---|---|
+| `carga` | ¿cuánto tarda una consulta con la mesa llena? | p95 con 1, 5 y 20 analistas | p95 > 500 ms |
+| `pico` | ¿vuelve a la normalidad cuando la ráfaga pasó? | p95 después ÷ p95 antes | > 1,5× o algo falló en la ráfaga o en la base |
+| `resistencia` | ¿se degrada sola con el tiempo? | p95 del último tercio ÷ el del primero | > 1,5×, o la sonda de vida se cae |
+| `estres` | ¿dónde está el techo? | la concurrencia más alta que responde como la base | el techo aparece por debajo de 20 |
+
+Todas las celdas juntan **la misma cantidad de muestras** (120, `--muestras`);
+la resistencia es la excepción porque se mide por tiempo y no por operaciones.
+No es un detalle de implementación: `percentile(…, 95)` sobre 20 muestras
+devuelve el segundo peor valor y sobre 320 devuelve un p95 de verdad, así que
+una rampa con 20 muestras abajo y 320 arriba cambia el sesgo del estimador justo
+a lo largo del eje que compara — y el techo que reporta es del estimador, no del
+sistema. Lo mismo un cociente «después ÷ antes» decidido contra 1,5× entre dos
+casi-máximos de 20 muestras: eso es ruido con nombre de métrica.
+
+Los tercios de la resistencia se cortan **por reloj y no por posición** en el
+arreglo. La cantidad de muestras por unidad de tiempo es inversamente
+proporcional a la latencia, así que un tramo degradado achica su propia
+representación exactamente en la proporción en que degrada: cortando por índice,
+25 segundos malos sobre tres minutos daban 1,00× — verde — y el problema que se
+acumula y estalla al final es justo el que esta forma existe para encontrar.
+
+El reporte trae dos columnas al lado, **muestras** y **medidas**: los
+percentiles se calculan sólo sobre las que no fallaron. Un sistema que rechaza
+el 40% de las consultas puede mostrar un p95 mejor que uno sano, y sin las dos
+columnas eso no se ve.
+
+La resistencia y el estrés usan la sonda de vida a `/api/health`, que pide
+`CRON_SECRET`. Sin la llave la sonda no se toma, y entonces el umbral que se
+publica **no la nombra**: antes decía «sin caídas de la sonda» sobre una sonda
+que nunca corrió. Y un 503 de `/api/health` cuenta como caída sólo si lo que
+está caído es la base o la capa de datos: el endpoint también devuelve 503 por
+un token de WhatsApp vencido o el presupuesto agotado, y eso ponía la prueba de
+carga en rojo apuntando a la carga cuando lo que venció fue una credencial.
+
+Sólo `carga` corre después de cada deploy: es la que contesta la pregunta de un
+deploy — *¿esto quedó más lento que ayer?*. Las otras tres miden minutos contra
+la base de producción para contestar cosas que no cambian de un commit al otro,
+así que van a mano.
+
+La resistencia dura **3 minutos**, no dos horas. Dos horas contra la base que
+atiende asegurados no es una prueba, es carga sostenida sobre producción, y en
+la práctica esa forma no existiría porque nadie la corre. Lo que se acumula
+—conexiones que no vuelven, memoria, un plan que se degrada— aparece temprano o
+no aparece. Lo que **no** ve, dicho de frente: el autosuspend de Neon necesita
+silencio, no carga.
+
+Las cuatro llaman a `listCases` y `getCaseDetail` como funciones, no por HTTP.
+Eso aísla la base, que es lo que hace falta para cazar la regresión de índice, y
+deja afuera tres cosas que en producción pegan antes que la consulta: la
+resolución de sesión, el limitador (que también consulta Postgres) y el arranque
+en frío. La versión por HTTP necesita N sesiones sembradas y no una — 20
+analistas simultáneos sobre la misma cuenta agotan `CASES_API` (100/min) en unos
+diez segundos, y a partir de ahí se estaría midiendo el limitador y llamándolo
+latencia.
+
+Las dos rutas que la prueba **sí** pide por HTTP están escritas con su archivo y
+se comprueban contra `src/app/api` antes de medir nada: si alguien renombra
+`/api/webhooks/whatsapp` o `/api/health`, el script se planta y lo dice, en vez
+de contar un 404 como una falla de carga. Las dos piden Bearer, y sin la llave
+esa parte no se mide y se avisa — que es distinto de darla por medida.
+
+**El resumen se guarda.** `--reporte carga.json` escribe el JSON y, al lado, el
+mismo objeto como `carga.html`. El post-deploy lo sube como artefacto del
+trabajo *Carga (lectura)*, que es lo que hacía falta para que «comparalo con la
+corrida del deploy anterior» quiera decir algo.
 
 **La mitad de escritura** manda N asegurados inventados al webhook del deploy de
 verdad, todos al mismo tiempo, sin escalonar —escalonar es lo que convierte una
 prueba de carga en una que siempre pasa— y mide tres cosas que no son la misma:
 
-| | Por qué importa |
-|---|---|
-| Acuse del webhook | Si tarda demasiado, Meta reintenta y el asegurado recibe todo dos veces |
-| Hasta la respuesta | Lo único que el asegurado percibe |
-| El tablero, mientras tanto | El analista no trabaja en un sistema en reposo |
+| | Por qué importa | Umbral |
+|---|---|---|
+| Acuse del webhook | Si tarda demasiado, Meta reintenta y el asegurado recibe todo dos veces | p95 < 5 s |
+| Hasta la respuesta | Lo único que el asegurado percibe | ninguna sin respuesta |
+| El tablero antes, durante y después | El analista no trabaja en un sistema en reposo — y la tormenta no puede dejarlo lento cuando ya pasó | sin consultas falladas, y después ≤ 1,5× antes |
+
+**Qué cuenta como «respuesta», exactamente.** Una fila de `outbound_messages`
+con estado `sent` o `skipped_simulated`, que es lo que escribe el mensajero
+después de redactar. Antes contaba cualquier fila, y el worker inserta durante
+la extracción un stub con estado `queued` cada vez que falta documentación —o
+sea casi siempre—, así que el cronómetro paraba en «el worker decidió que faltan
+papeles» y eso se publicaba como la percepción del asegurado. Peor: «ninguna sin
+respuesta» no podía dar rojo aunque el mensajero fallara entero.
+
+La latencia se fecha con el `created_at` de esa fila y con el instante en que
+salió **ese** pedido, no con el arranque de la ráfaga ni con la vuelta del
+sondeo: antes tenía piso y resolución de 3 segundos, todos los de una misma
+vuelta compartían el valor, y a cada asegurado se le cargaba la cola de los
+otros veintinueve.
+
+El número **no incluye el último tramo**, la llamada a Graph: el caso entra
+marcado como simulado y por eso nada le llega a nadie. Y mide el canal de
+WhatsApp; el de mail hace cola aparte —`extract.ts` serializa las extracciones
+de mail en `GEMINI_WORKER_CONCURRENCY`, por omisión una a la vez— así que las
+«denuncias por minuto» de esta prueba no son la capacidad del sistema por mail.
+
+El acuse no tenía umbral y era el agujero más caro del archivo: es la latencia
+que decide si Meta reintenta. Medido, va de 1,6 s a 2,9 s entre 10 y 100
+asegurados simultáneos, así que 5 s deja aire sobre lo medido y no deja pasar
+una duplicación.
 
 Nada le llega a una persona: el camino Bearer del webhook marca el caso como
 simulado, igual que el ensayo. Los casos se borran al terminar, también con
@@ -410,7 +526,7 @@ es la misma IP.
 | Antes de mostrárselo a un cliente | `pnpm check --deep` |
 | "Algo raro está pasando en producción" | `pnpm smoke --deep` |
 | Dudás de si el bot puede mandar mensajes | `pnpm prove --whatsapp <número>` |
-| Antes de un piloto con volumen real | `pnpm load --write --claimants 100` |
+| Antes de un piloto con volumen real | `pnpm load --forma todas` y `pnpm load --write --claimants 100` |
 | Después de tocar el agente o los prompts | `pnpm pentest --agent` |
 | Después de cambiar la casilla, el número o sus credenciales | `pnpm knock` |
 | **Antes de desplegar la capa de datos** | `pnpm listo` |
@@ -437,8 +553,11 @@ de carga y la mitad gratis del pen test.
 2. `pnpm rehearse`: las doce conversaciones enteras contra el agente real.
    Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
-3. `pnpm load`: las consultas del tablero, y el plan que Postgres elige para
-   cada una. Gratis, no escribe nada. Falla si el listado perdió su índice.
+3. `pnpm load --reporte carga.json`: las consultas del tablero con la mesa
+   llena, y el plan que Postgres elige para cada una. Gratis, no escribe nada.
+   Falla si el listado perdió su índice o si el p95 se pasa de 500 ms, y deja
+   `carga.json` y `carga.html` como artefacto para comparar con el deploy
+   anterior.
 4. `pnpm knock`: un mail depositado en la casilla de verdad y un payload
    firmado al webhook, para que el primer metro de la cadena tenga prueba. Dos
    extracciones, y borra los casos al terminar.
@@ -530,9 +649,11 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
 - **La entrega en sí.** `pnpm prove` confirma que el proveedor aceptó el
   mensaje. Que haya llegado al teléfono o a la bandeja lo mira una persona —
   aunque un rechazo del proveedor es el 95% de las formas de fallar.
-- **La carga sostenida.** `pnpm load --write` mide una ráfaga de un minuto, que
-  es la forma en que llegan las denuncias. Ocho horas seguidas al tope es otra
-  pregunta, y la que se contesta mirando la factura, no un script.
+- **La escritura sostenida.** `pnpm load --forma resistencia` sostiene la
+  LECTURA por minutos, que es gratis; la escritura sigue midiéndose como una
+  ráfaga de un minuto, que es la forma en que llegan las denuncias. Ocho horas
+  seguidas de llamadas al modelo no es una prueba, es una factura, y esa
+  pregunta se contesta mirándola.
 - **La búsqueda por texto del tablero**, que recorre la tabla entera: `ilike
   '%texto%'` no puede usar un índice común. Con los casos de hoy tarda 100ms y
   no vale la pena arreglarlo — un índice trigram cuesta escritura en cada

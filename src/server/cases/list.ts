@@ -14,7 +14,12 @@
 import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { countRows, ilikeAny } from "@/lib/db/helpers";
-import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
+import {
+  enTenant,
+  enTenantVarias,
+  type ClienteDatos,
+  type TenantContext,
+} from "@/data/scope";
 import { cases } from "@/lib/db/schema";
 import type { CaseRow } from "@/lib/db/types";
 import type { CaseQuery, SortColumn } from "@/lib/schemas/cases";
@@ -88,6 +93,123 @@ function buildCaseFilters(
 }
 
 /**
+ * Las consultas que abre la bandeja, como consultas y no como resultados.
+ *
+ * Se exportan porque la prueba de carga necesita pedirle a Postgres el plan de
+ * ÉSTAS. Antes explicaba un `select id from cases where tenant_id = '…' order by
+ * created_at desc limit 25` escrito a mano adentro del script: otro rol, otro
+ * predicado —acá el filtro por inquilino lo pone RLS— y sin las tres
+ * subconsultas correlacionadas ni el conteo. O sea que el listado podía pasar a
+ * recorrer la tabla entera con el chequeo en verde.
+ *
+ * Un armador compartido es la única forma de que el plan que se explica sea el
+ * plan que corre.
+ */
+export function consultaListado(datos: ClienteDatos, query: CaseQuery) {
+  const { page, per_page, sort, order } = query;
+  const sortColumn = SORT_COLUMNS[sort];
+  return datos
+    .select({
+      id: cases.id,
+      tenant_id: cases.tenant_id,
+      // Fallback inline: a second round-trip fired on nearly every render.
+      policy_number: sql<string | null>`coalesce(${cases.policy_number}, (
+          select ef.field_value from extracted_fields ef
+           where ef.case_id = ${cases.id}
+             and ef.tenant_id = ${cases.tenant_id}
+             and ef.field_key = 'policy_number'
+        ))`,
+      policyholder_name: sql<string | null>`coalesce(${cases.policyholder_name}, (
+          select ef.field_value from extracted_fields ef
+           where ef.case_id = ${cases.id}
+             and ef.tenant_id = ${cases.tenant_id}
+             and ef.field_key = 'full_name'
+        ))`,
+      claim_type: cases.claim_type,
+      status: cases.status,
+      confidence_min: cases.confidence_min,
+      assigned_to: cases.assigned_to,
+      channel: cases.channel,
+      created_at: cases.created_at,
+      updated_at: cases.updated_at,
+      closed_at: cases.closed_at,
+      // Email-intake columns (0005, 0006)
+      severity: cases.severity,
+      customer_id: cases.customer_id,
+      policy_id: cases.policy_id,
+      is_claim: cases.is_claim,
+      requires_specialist: cases.requires_specialist,
+      /*
+       * Seis columnas que este listado devolvía y nadie leía.
+       *
+       * `email_message_id`, `email_thread_id`, `not_relevant_reason`,
+       * `core_external_id`, `core_error_message` y `core_sent_at` salían en
+       * cada fila de cada página. Los dos únicos consumidores del listado —la
+       * bandeja y `/api/cases`— no tocan ninguna: se usan en el detalle de un
+       * caso y en el worker, que las consultan por su cuenta.
+       *
+       * No era una fuga, y tampoco es sólo peso. `core_error_message` guarda
+       * lo que devolvió el sistema del asegurador cuando falló un envío: texto
+       * que escribió un tercero, en una respuesta que la pantalla no muestra y
+       * nadie mira. Una columna que sale y no se usa es superficie regalada.
+       *
+       * Si alguna vuelve a hacer falta acá, se agrega — pero que sea porque
+       * alguien la va a leer.
+       */
+      // Whether the claimant has actually been written back to, on whichever
+      // channel they used. Computed from the outbound ledger instead of a
+      // column on `cases` so it cannot drift from what was really sent, and
+      // so it covers email and WhatsApp with one expression.
+      // Only 'sent' counts — a queued or failed message is not a reply.
+      replied_at: sql<string | null>`(
+          select max(om.created_at)
+            from outbound_messages om
+           where om.case_id = ${cases.id}
+             and om.tenant_id = ${cases.tenant_id}
+             and om.status = 'sent'
+        )`,
+    })
+    .from(cases)
+    .where(buildCaseFilters(query))
+    .orderBy(order === "asc" ? asc(sortColumn) : desc(sortColumn))
+    // Pagination — max 100 per page (enforced in CaseQuerySchema)
+    .limit(per_page)
+    .offset((page - 1) * per_page);
+}
+
+/** El `count(*)` que viaja con el listado. Sin LIMIT: es el que crece. */
+export function consultaConteo(datos: ClienteDatos, query: CaseQuery) {
+  return datos
+    .select({ n: sql<number>`count(*)::int` })
+    .from(cases)
+    .where(buildCaseFilters(query));
+}
+
+/** Los contadores por estado de la bandeja. Tampoco lleva LIMIT. */
+export function consultaPorEstado(datos: ClienteDatos) {
+  return datos
+    .select({ status: cases.status, n: sql<number>`count(*)::int` })
+    .from(cases)
+    .groupBy(cases.status);
+}
+
+/**
+ * Los contadores de las pestañas de la bandeja.
+ *
+ * Vive acá y no en la pantalla porque es la otra mitad de lo que cuesta abrir
+ * la bandeja: la prueba de carga medía sólo `listCases` y llamaba a eso «el
+ * listado», dejando afuera un agregado sin LIMIT — justamente lo que se degrada
+ * cuando la tabla crece.
+ */
+export async function contarPorEstado(
+  ctx: TenantContext
+): Promise<Array<{ status: string; n: number }>> {
+  return enTenant<Array<{ status: string; n: number }>>(ctx, (db) =>
+    consultaPorEstado(db)
+  );
+}
+
+/**
  * Query cases with filtering, sorting, and pagination.
  *
  * **Ninguna consulta de acá filtra por inquilino.** No es un olvido: el filtro
@@ -109,26 +231,7 @@ export async function listCases(
   ctx: TenantContext,
   query: CaseQuery
 ): Promise<CaseListResult> {
-  const {
-    status,
-    type,
-    q,
-    page,
-    per_page,
-    sort,
-    order,
-    // AC18: New email-intake filters
-    severity,
-    customer_id,
-    policy_id,
-    channel,
-    is_claim,
-  } = query;
-
-  const where = buildCaseFilters(query);
-
-  const sortColumn = SORT_COLUMNS[sort];
-  const from = (page - 1) * per_page;
+  const { page, per_page } = query;
 
   // ── Conteo y datos, en un solo viaje ───────────────────────────────────────
   let total: number;
@@ -136,76 +239,7 @@ export async function listCases(
   try {
     const [conteo, filas] = await enTenantVarias<
       [Array<{ n: number }>, Record<string, unknown>[]]
-    >(ctx, (db) => [
-      db.select({ n: sql<number>`count(*)::int` }).from(cases).where(where),
-      db
-        .select({
-        id: cases.id,
-        tenant_id: cases.tenant_id,
-        // Fallback inline: a second round-trip fired on nearly every render.
-        policy_number: sql<string | null>`coalesce(${cases.policy_number}, (
-          select ef.field_value from extracted_fields ef
-           where ef.case_id = ${cases.id}
-             and ef.tenant_id = ${cases.tenant_id}
-             and ef.field_key = 'policy_number'
-        ))`,
-        policyholder_name: sql<string | null>`coalesce(${cases.policyholder_name}, (
-          select ef.field_value from extracted_fields ef
-           where ef.case_id = ${cases.id}
-             and ef.tenant_id = ${cases.tenant_id}
-             and ef.field_key = 'full_name'
-        ))`,
-        claim_type: cases.claim_type,
-        status: cases.status,
-        confidence_min: cases.confidence_min,
-        assigned_to: cases.assigned_to,
-        channel: cases.channel,
-        created_at: cases.created_at,
-        updated_at: cases.updated_at,
-        closed_at: cases.closed_at,
-        // Email-intake columns (0005, 0006)
-        severity: cases.severity,
-        customer_id: cases.customer_id,
-        policy_id: cases.policy_id,
-        is_claim: cases.is_claim,
-        requires_specialist: cases.requires_specialist,
-        /*
-         * Seis columnas que este listado devolvía y nadie leía.
-         *
-         * `email_message_id`, `email_thread_id`, `not_relevant_reason`,
-         * `core_external_id`, `core_error_message` y `core_sent_at` salían en
-         * cada fila de cada página. Los dos únicos consumidores del listado —la
-         * bandeja y `/api/cases`— no tocan ninguna: se usan en el detalle de un
-         * caso y en el worker, que las consultan por su cuenta.
-         *
-         * No era una fuga, y tampoco es sólo peso. `core_error_message` guarda
-         * lo que devolvió el sistema del asegurador cuando falló un envío: texto
-         * que escribió un tercero, en una respuesta que la pantalla no muestra y
-         * nadie mira. Una columna que sale y no se usa es superficie regalada.
-         *
-         * Si alguna vuelve a hacer falta acá, se agrega — pero que sea porque
-         * alguien la va a leer.
-         */
-        // Whether the claimant has actually been written back to, on whichever
-        // channel they used. Computed from the outbound ledger instead of a
-        // column on `cases` so it cannot drift from what was really sent, and
-        // so it covers email and WhatsApp with one expression.
-        // Only 'sent' counts — a queued or failed message is not a reply.
-        replied_at: sql<string | null>`(
-          select max(om.created_at)
-            from outbound_messages om
-           where om.case_id = ${cases.id}
-             and om.tenant_id = ${cases.tenant_id}
-             and om.status = 'sent'
-        )`,
-        })
-        .from(cases)
-        .where(where)
-        .orderBy(order === "asc" ? asc(sortColumn) : desc(sortColumn))
-        // Pagination — max 100 per page (enforced in CaseQuerySchema)
-        .limit(per_page)
-        .offset(from),
-    ]);
+    >(ctx, (db) => [consultaConteo(db, query), consultaListado(db, query)]);
     total = conteo[0]?.n ?? 0;
     data = filas;
   } catch (err) {

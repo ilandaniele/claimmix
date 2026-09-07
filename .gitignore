@@ -125,3 +125,8 @@ src/app/.well-known/workflow/
 tests/e2e/.sesiones/
 .e2e-env.sh
 .dev.log
+
+# El reporte de la prueba de carga. Son los números de UNA corrida contra UNA
+# base: se guardan como artefacto del deploy, no en el repo.
+/carga.json
+/carga.html

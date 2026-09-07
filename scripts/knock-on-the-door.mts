@@ -162,8 +162,34 @@ async function waitForCase(
  * vez apenas cambiaba el estado y reportaba «sin registro» por medio segundo
  * de diferencia: una falla inventada por el reloj, que es la peor clase de
  * rojo — manda a buscar un bug que no existe.
+ *
+ * ── Por qué 120 y no 20 ────────────────────────────────────────────────────
+ *
+ * Volvió a pasar, tres veces seguidas el 7 de septiembre, y otra vez costó
+ * media hora de buscar un defecto que no existía. Entre que el caso aparece
+ * y que la respuesta se graba hay TRES llamadas al modelo —extracción,
+ * deliberación y redacción— y ninguna tiene un techo de latencia. El
+ * `audit_log` de esos tres casos dice que el agente contestó siempre, apenas
+ * después de que este guión dejara de mirar:
+ *
+ *   dcb9384  dejó de esperar 22:25:10  ·  contestó 22:25:11  (+1,1 s)
+ *   e7346ec  dejó de esperar 22:37:36  ·  contestó 22:37:40  (+4,8 s)
+ *   72c4fdd  dejó de esperar 23:02:40  ·  contestó 23:02:47  (+6,2 s)
+ *
+ * En la corrida verde de las 21:46 esas tres llamadas tardaron 4,2 s en
+ * total; en la de las 23:02, 29,5 s. Es el modelo yendo más lento, no el
+ * producto: mismo código, mismo camino, mismo resultado final.
+ *
+ * 120 es holgado a propósito. No cuesta nada cuando pasa —sale en cuanto
+ * encuentra la fila— y lo único que compra un margen corto es un rojo que no
+ * significa nada. Es el mismo razonamiento por el que `waitForCase` pasó de
+ * 90 a 300, escrito acá arriba.
+ *
+ * Lo que SÍ hay que mirar si esto empieza a agotarse de verdad: que las tres
+ * llamadas no tienen timeout de proveedor. Un modelo que no contesta nunca
+ * deja al asegurado esperando, y eso no lo arregla esperarlo más tiempo acá.
  */
-async function replyFor(caseId: string, seconds = 20) {
+async function replyFor(caseId: string, seconds = 120) {
   for (let i = 0; i < seconds; i++) {
     const rows = await db
       .select({ status: outboundMessages.status, template: outboundMessages.template })

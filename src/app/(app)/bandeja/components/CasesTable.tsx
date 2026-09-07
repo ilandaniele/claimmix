@@ -28,10 +28,11 @@ interface CasesTableProps {
   /** Modo seleccion: las filas se marcan en vez de abrirse. */
   seleccionando?: boolean;
   /**
-   * Called with the IDs to delete and a callback to clear the selection
-   * once the parent has finished (or started) the operation.
+   * Los ids a borrar, nada más. No hay aviso de vuelta: cuando el padre saca
+   * la fila de `cases`, la poda de abajo la saca de lo marcado en el mismo
+   * render.
    */
-  onDeleteMany?: (ids: string[], onDone: () => void) => void;
+  onDeleteMany?: (ids: string[]) => void;
 }
 
 export function CasesTable({
@@ -73,8 +74,6 @@ export function CasesTable({
       return next;
     });
   }, []);
-
-  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
   const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
     choque: t("type.choque"),
@@ -303,13 +302,7 @@ export function CasesTable({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onDeleteMany([row.original.id], () =>
-                      setSelectedIds((prev) => {
-                        const next = new Set(prev);
-                        next.delete(row.original.id);
-                        return next;
-                      })
-                    );
+                    onDeleteMany([row.original.id]);
                   }}
                   className="rounded p-1.5 text-slate-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
                   aria-label={t("bandeja.delete")}
@@ -385,7 +378,7 @@ export function CasesTable({
           {selectedIds.size > 0 && (
             <button
               type="button"
-              onClick={() => onDeleteMany([...selectedIds], clearSelection)}
+              onClick={() => onDeleteMany([...selectedIds])}
               className="ml-auto rounded-md border border-red-300 px-3 py-1.5 text-[13px] font-medium text-red-700 transition-colors hover:bg-red-50"
             >
               {t("bandeja.deleteSelected")} ({selectedIds.size})

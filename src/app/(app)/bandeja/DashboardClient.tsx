@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { PER_PAGE_OPTIONS } from "./per-page";
 import { FilterTabs } from "./components/FilterTabs";
@@ -307,11 +307,10 @@ function DashboardClientInterno({
 
   // ── Delete confirmation state ───────────────────────────────────────────────
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
-  const pendingOnDoneRef = useRef<(() => void) | null>(null);
 
   // ── Execute actual deletes ─────────────────────────────────────────────────
   const executeDelete = useCallback(
-    async (ids: string[], onDone: () => void) => {
+    async (ids: string[]) => {
       try {
         const deletedRows = cases.filter((c) => ids.includes(c.id));
 
@@ -371,10 +370,6 @@ function DashboardClientInterno({
             "error"
           );
         }
-
-        if (failedCount === 0) {
-          onDone();
-        }
       } catch {
         addToast(t("bandeja.deleteError"), "error");
       }
@@ -384,15 +379,14 @@ function DashboardClientInterno({
 
   // ── Entry point called by CasesTable ──────────────────────────────────────
   const handleDeleteMany = useCallback(
-    (ids: string[], onDone: () => void) => {
+    (ids: string[]) => {
       const skip =
         typeof window !== "undefined" &&
         localStorage.getItem(SKIP_CONFIRM_KEY) === "true";
 
       if (skip) {
-        executeDelete(ids, onDone);
+        executeDelete(ids);
       } else {
-        pendingOnDoneRef.current = onDone;
         setPendingDeleteIds(ids);
       }
     },
@@ -405,17 +399,14 @@ function DashboardClientInterno({
         localStorage.setItem(SKIP_CONFIRM_KEY, "true");
       }
       const ids = pendingDeleteIds;
-      const onDone = pendingOnDoneRef.current ?? (() => {});
       setPendingDeleteIds([]);
-      pendingOnDoneRef.current = null;
-      executeDelete(ids, onDone);
+      executeDelete(ids);
     },
     [pendingDeleteIds, executeDelete]
   );
 
   const handleCancelDelete = useCallback(() => {
     setPendingDeleteIds([]);
-    pendingOnDoneRef.current = null;
   }, []);
 
   // ── Realtime handlers ──────────────────────────────────────────────────────
@@ -623,7 +614,15 @@ function DashboardClientInterno({
         )}
       </div>
 
-      {/* Delete confirmation dialog */}
+      {/*
+        * El diálogo tapa el mouse, no el teclado: es un overlay sin trampa de
+        * foco, sin `inert` sobre el fondo y sin mover el foco al abrirse, así
+        * que tabulando se siguen marcando filas mientras está abierto. Por eso
+        * qué queda marcado después de borrar no lo decide este camino: lo
+        * decide la poda de `CasesTable`, que saca de lo marcado lo que ya no
+        * está en la lista y deja el resto. Vale igual con confirmación y sin
+        * ella.
+        */}
       {pendingDeleteIds.length > 0 && (
         <DeleteConfirmDialog
           count={pendingDeleteIds.length}

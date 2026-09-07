@@ -121,6 +121,24 @@ export async function orchestratePostExtraction(
 
   let confirmationEmailDispatched = false;
 
+  /*
+   * Who we are writing to.
+   *
+   * The claimant said their name in the first message and the model greeted
+   * them by it; the second round arrived as a photo with no caption, so the
+   * only text we handed the composer was "[Imagen adjunta sin texto]" and the
+   * reply opened with a bare "¡Hola!". A name we already hold should not be
+   * forgotten because the last thing said was a picture.
+   *
+   * Se calcula acá arriba, y no más abajo con el resto, porque la derivación
+   * por severidad manda su mensaje antes que nadie: alguien cuya pareja está
+   * internada recibía el único mensaje del caso sin su nombre mientras el
+   * siguiente sí lo usaba.
+   */
+  const claimantName =
+    extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === "full_name")
+      ?.field_value?.trim() || null;
+
   // ── B. Severity escalation — AC11 ────────────────────────────────────────
   const severity = extractedClaim.severity;
   const isHighSeverity = severity === "high" || severity === "critical";
@@ -134,6 +152,7 @@ export async function orchestratePostExtraction(
       inReplyToMessageId,
       messenger,
       severity,
+      claimantName,
       claimTypeValue: extractedClaim.fields.find(
         (f) => canonicalFieldKey(f.field_key) === "claim_type"
       )?.field_value ?? null,
@@ -173,15 +192,6 @@ export async function orchestratePostExtraction(
   const claimTypeValue =
     extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === "claim_type")
       ?.field_value ?? null;
-
-  // Who we are writing to. The claimant said their name in the first message
-  // and the model greeted them by it; the second round arrived as a photo with
-  // no caption, so the only text we handed the composer was "[Imagen adjunta
-  // sin texto]" and the reply opened with a bare "¡Hola!". A name we already
-  // hold should not be forgotten because the last thing said was a picture.
-  const claimantName =
-    extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === "full_name")
-      ?.field_value?.trim() || null;
 
   // What we have actually put in front of this person. Read before the
   // documents block, which needs it to know what could possibly be refused.
@@ -339,6 +349,7 @@ export async function orchestratePostExtraction(
         template: "data_confirmation_request",
         data: {
           caseId,
+          claimantName,
           fields: conflictos.map((c) => ({
             fieldKey: c.fieldKey,
             proposedValue: c.proposedValue,
@@ -497,6 +508,7 @@ export async function orchestratePostExtraction(
       inReplyToMessageId,
       messenger,
       severity: extractedClaim.severity,
+      claimantName,
       claimTypeValue,
       reason: plan.reasoning,
     });
@@ -1105,6 +1117,8 @@ async function escalate(opts: {
   inReplyToMessageId?: string;
   messenger: AgentMessenger;
   severity: string | null | undefined;
+  /** El nombre de pila, para que el redactor no salude a un desconocido. */
+  claimantName?: string | null;
   claimTypeValue: string | null;
   summary?: string | null;
   reason: string;
@@ -1122,7 +1136,7 @@ async function escalate(opts: {
     to: opts.senderEmail,
     lastMessage: opts.latestMessageText,
     template: "specialist_escalation",
-    data: { caseId, severity },
+    data: { caseId, severity, claimantName: opts.claimantName ?? null },
     inReplyToMessageId: opts.inReplyToMessageId,
   });
 

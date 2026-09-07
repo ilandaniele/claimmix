@@ -12,6 +12,8 @@
 
 import { displayFieldValue, labelForField } from "@/lib/labels/claim-fields";
 import { escapeHtml } from "@/server/email/render";
+import { textoAHtml } from "@/core/email/html";
+import { apertura } from "@/core/mensajes/apertura";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 
 export interface MissingInformationRequestData {
@@ -44,6 +46,15 @@ export interface MissingInformationRequestData {
   isFollowUp?: boolean;
   /** El nombre de pila, cuando el caso ya lo tiene. */
   claimantName?: string | null;
+  /**
+   * La prosa ya redactada, cuando el redactor pudo mejorar el piso.
+   *
+   * Reemplaza el cuerpo y nada más: el asunto, el título, el número de caso y
+   * el pie siguen siendo los de la plantilla. Sin esto la salida es byte a byte
+   * la de siempre, que es lo que hace verdadera la promesa de que lo que no
+   * pasa una guarda vuelve a ser la plantilla intacta.
+   */
+  cuerpo?: string | null;
 }
 
 /**
@@ -63,26 +74,26 @@ export function renderMissingInformationRequest(
   subject: string;
   html: string;
   text: string;
+  cuerpo: string;
 } {
   const subject = `Información adicional requerida - Caso #${data.caseId}`;
 
   const known = data.knownValues ?? {};
 
   /*
-   * La apertura, que dejó de ser siempre la misma.
+   * La apertura, que ahora se escribe una sola vez y vive en `@/core/mensajes`.
    *
    * «Gracias por tu reclamo» en la cuarta vuelta es la frase que delata que del
-   * otro lado no hay nadie. Con nombre y sin agradecer de nuevo, lee como
-   * alguien que ya venía en la conversación.
+   * otro lado no hay nadie. Y sin nombre, la versión anterior —un saludo vacío
+   * seguido de la frase en minúscula, pensada para venir detrás del nombre— le
+   * mandaba a la persona un correo que abría «gracias por tu reclamo.»,
+   * descabezado. Estaba escrita cuatro veces: HTML y texto, por primera vuelta
+   * y por vuelta posterior.
    */
-  const nombre = data.claimantName?.trim();
-  const saludo = nombre ? `${nombre}, ` : "";
-  const apertura = data.isFollowUp
-    ? `${escapeHtml(saludo)}para poder seguir con el <strong>caso #${escapeHtml(data.caseId)}</strong>, nos falta:`
-    : `${escapeHtml(saludo)}gracias por tu reclamo. Para poder continuar con el procesamiento del <strong>caso #${escapeHtml(data.caseId)}</strong>, necesitamos que nos proporciones la siguiente información:`;
-  const aperturaText = data.isFollowUp
-    ? `${saludo}para poder seguir con el caso #${data.caseId}, nos falta:`
-    : `${saludo}gracias por tu reclamo. Para poder continuar con el procesamiento del caso #${data.caseId}, necesitamos que nos proporciones la siguiente información:`;
+  const aperturaText = apertura({
+    nombre: data.claimantName,
+    esVuelta: data.isFollowUp,
+  });
 
   /*
    * Y la respuesta a lo que preguntó, si preguntó algo.
@@ -127,23 +138,33 @@ export function renderMissingInformationRequest(
     })
     .join("\n");
 
+  const cierre =
+    "Por favor respondé este correo con los datos solicitados. Una vez que los recibamos, continuaremos con el análisis de tu reclamo.";
+
+  const cuerpo = `${aperturaText}\n\n${fieldItemsText}${respuestaText}\n\n${cierre}`;
+  const redactado = data.cuerpo?.trim();
+
+  const prosaHtml = redactado
+    ? textoAHtml(redactado)
+    : `<p>${escapeHtml(aperturaText)}</p>
+  <ul style="line-height: 1.8;">
+    ${fieldItemsHtml}
+  </ul>
+  ${respuestaHtml}
+  <p>${escapeHtml(cierre)}</p>`;
+
   const html = `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><title>${escapeHtml(subject)}</title></head>
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #1a56db;">Información adicional requerida</h1>
-  <p>${apertura}</p>
-  <ul style="line-height: 1.8;">
-    ${fieldItemsHtml}
-  </ul>
-  ${respuestaHtml}
-  <p>Por favor respondé este correo con los datos solicitados. Una vez que los recibamos, continuaremos con el análisis de tu reclamo.</p>
+  ${prosaHtml}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
   <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${escapeHtml(data.caseId)}. Este mensaje fue generado automáticamente.</p>
 </body>
 </html>`;
 
-  const text = `Información adicional requerida\n\n${aperturaText}\n\n${fieldItemsText}${respuestaText}\n\nPor favor respondé este correo con los datos solicitados. Una vez que los recibamos, continuaremos con el análisis de tu reclamo.\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente.`;
+  const text = `Información adicional requerida\n\n${redactado ?? cuerpo}\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente.`;
 
-  return { subject, html, text };
+  return { subject, html, text, cuerpo };
 }

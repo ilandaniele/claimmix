@@ -18,6 +18,13 @@ import { renderDataConfirmationRequest } from "./templates/data-confirmation-req
 import { renderSpecialistEscalation } from "./templates/specialist-escalation";
 import { renderInformationReceived } from "./templates/information-received";
 
+/**
+ * Se re-exporta desde acá porque es de donde lo importan las cinco plantillas.
+ * Vive en el núcleo desde que hay dos entradas para escapar y no una: los datos
+ * de la plantilla, y la prosa que devuelve el redactor.
+ */
+export { escapeHtml } from "@/core/email/html";
+
 /** All supported outbound email template keys. */
 export type EmailTemplate =
   | "confirmation_received"
@@ -32,42 +39,18 @@ export interface RenderedEmail {
   subject: string;
   html: string;
   text: string;
-}
-
-/**
- * Escapa un valor para meterlo adentro de HTML.
- *
- * ── Por qué hace falta, y qué se podía hacer sin esto ───────────────────────
- *
- * Todo lo que estas plantillas interpolan viene, directa o indirectamente, de
- * un correo que escribió un desconocido: el nombre del asegurado, el lugar del
- * siniestro, la patente, y hasta el NOMBRE de un campo —el modelo puede
- * inventar una clave, y `humanizeKey` la muestra tal cual—.
- *
- * Un nombre como `Juan <a href="https://evil.tld">Cobrá tu indemnización acá</a>`
- * salía entero adentro de un `<strong>`. Y el destinatario lo elige el mismo
- * atacante: el mail sale a la dirección del `From` del correo entrante, que
- * nadie verifica. O sea que alcanza con escribirle al buzón de ingreso poniendo
- * en el From la casilla de la víctima, y la aseguradora le manda —desde su
- * propio dominio, firmado con su DKIM— el enlace que el atacante eligió.
- *
- * Eso es phishing con la reputación de la aseguradora. En los clientes de
- * correo que todavía ejecutan script además es XSS; en los demás es inyección
- * de HTML, que para este producto es igual de grave.
- *
- * ── Sólo para el HTML ───────────────────────────────────────────────────────
- *
- * La versión `text` de cada plantilla NO se escapa, y no es un olvido: ahí
- * `&amp;` se leería literal. Un correo en texto plano no interpreta marcado, así
- * que no hay nada de qué escaparse.
- */
-export function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+  /**
+   * La prosa, sin el cromo.
+   *
+   * Es lo que va entre el título y la línea de corte: ni el DOCTYPE, ni el
+   * encabezado, ni el pie, ni el «Caso de referencia». El mensajero se la
+   * entrega al redactor como piso —«decí esto mejor»— y le devuelve la versión
+   * redactada por `data.cuerpo`, que es lo único que la plantilla reemplaza.
+   *
+   * Pasarle el documento entero haría que el modelo reescriba el pie, queme los
+   * 1400 caracteres en cromo y coseche rechazos por largo sin motivo real.
+   */
+  cuerpo: string;
 }
 
 // ── PII masking (AC24) ────────────────────────────────────────────────────────
@@ -113,7 +96,13 @@ export function maskPolicyNumber(policyNumber: string): string {
  *
  * @param template - Template key
  * @param data     - Template data (varies per template — validated at call site)
- * @returns { subject, html, text }
+ * @returns { subject, html, text, cuerpo }
+ *
+ * `data.cuerpo` es la prosa ya redactada. Cuando viene, reemplaza la prosa de
+ * la plantilla y NADA más: el asunto, el encabezado, el número de caso, el pie
+ * y el enmascarado siguen siendo los de siempre. Cuando no viene —el redactor
+ * apagado, una guarda que rebotó— la salida es byte a byte la de antes, y por
+ * eso el mensajero no pasa el argumento en vez de pasar el piso otra vez.
  * @throws  Error if an unknown template key is provided
  */
 export function renderTemplate(
@@ -124,7 +113,22 @@ export function renderTemplate(
     case "information_received":
       return renderInformationReceived({
         caseId: String(data.caseId ?? ""),
-        noted: data.noted != null ? String(data.noted) : null,
+        /*
+         * El que el orquestador manda y este `case` descartaba.
+         *
+         * Con los dos canales pasando por el redactor el modelo lo recibe igual
+         * desde `message.data`, pero el PISO es lo que sale con el interruptor
+         * en off y cuando rebota una guarda: dejarlo así era arreglar el techo
+         * y no el piso.
+         *
+         * (Acá vivía `noted`, que nadie seteaba nunca — ni por mail ni por
+         * WhatsApp— y estaba declarado en los dos escritores. Un parámetro
+         * muerto en dos lados es exactamente cómo el próximo lo «pasa» y no
+         * cambia nada. `isFollowUp` no se agrega por lo mismo: esta plantilla
+         * sólo sale en una vuelta posterior, así que no tendría qué decidir.)
+         */
+        claimantName: data.claimantName != null ? String(data.claimantName) : null,
+        cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
       });
 
     case "confirmation_received":
@@ -132,7 +136,9 @@ export function renderTemplate(
         caseId: String(data.caseId ?? ""),
         claimType: data.claimType != null ? String(data.claimType) : null,
         policyNumber: data.policyNumber != null ? String(data.policyNumber) : null,
-              isFollowUp: data.isFollowUp === true,
+        isFollowUp: data.isFollowUp === true,
+        claimantName: data.claimantName != null ? String(data.claimantName) : null,
+        cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
       });
 
     case "missing_information_request":
@@ -157,6 +163,7 @@ export function renderTemplate(
         question: data.question != null ? String(data.question) : null,
         isFollowUp: data.isFollowUp === true,
         claimantName: data.claimantName != null ? String(data.claimantName) : null,
+        cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
       });
 
     case "data_confirmation_request":
@@ -176,12 +183,14 @@ export function renderTemplate(
                 c.conflictWithValue != null ? String(c.conflictWithValue) : null,
             }))
           : undefined,
+        cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
       });
 
     case "specialist_escalation":
       return renderSpecialistEscalation({
         caseId: String(data.caseId ?? ""),
         severity: data.severity != null ? String(data.severity) : undefined,
+        cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
       });
 
     default: {

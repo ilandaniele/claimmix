@@ -42,6 +42,13 @@ const WhatsAppWebhookSchema = z.object({
   provider_message_id: z.string().max(200).optional().nullable(),
   thread_id: z.string().max(200).optional().nullable(),
   tenant_id: z.string().uuid().optional(),
+  /**
+   * El nombre de perfil, para que el adaptador BSP y el ensayo puedan recorrer
+   * el mismo camino que el webhook de Meta. Quien escribe lo elige y nadie lo
+   * verifica: el juicio de si es el nombre de una persona está en
+   * `@/core/nombres`, no acá.
+   */
+  name: z.string().max(200).optional().nullable(),
 });
 
 function hasBearer(request: NextRequest): boolean {
@@ -200,6 +207,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       body: parsed.data.body,
       providerMessageId: parsed.data.provider_message_id,
       threadId: parsed.data.thread_id,
+      senderName: parsed.data.name,
       // Simulation and BSP adapters invent their phone numbers. The case is
       // marked so the messenger records what it would have said instead of
       // sending it — messaging a made-up number is how a WhatsApp Business
@@ -231,5 +239,8 @@ function ingest(tenantId: string, msg: NormalizedWhatsAppMessage) {
     providerMessageId: msg.providerMessageId,
     threadId: msg.from, // thread per sender phone number
     media: msg.media,
+    // Ya se parseaba y se tiraba acá: el agente no sabía con quién hablaba y
+    // le pedía el nombre a alguien que lo trae en el sobre.
+    senderName: msg.name ?? null,
   });
 }

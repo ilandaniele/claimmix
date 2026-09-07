@@ -12,14 +12,16 @@
  * numbers.
  *
  * This runs the same code on the same database with the same model, on the
- * simulated channels. On WhatsApp the messenger composes the reply exactly as
- * it would and records it instead of sending it; on email the dispatcher does
- * the same for any `@example.com` address. Nothing reaches a phone or an inbox.
+ * simulated channels. On both channels the messenger composes the reply exactly
+ * as it would; WhatsApp records it instead of sending, and email does the same
+ * for any `@example.com` address. Nothing reaches a phone or an inbox.
  *
  * Both channels matter and they are genuinely different code: email threads by
  * subject and header, runs a prefilter that decides a message is a newsletter,
- * strips the quoted copy of our own mail out of a reply, and renders HTML
- * templates. None of that exists on WhatsApp, and all of it has broken.
+ * strips the quoted copy of our own mail out of a reply, and wraps the written
+ * prose in HTML. None of that exists on WhatsApp, and all of it has broken.
+ * The writer itself is now shared, so what the transcript prints for an email
+ * is what a claimant reads — not the deterministic template it used to be.
  *
  * It is a rehearsal, not a unit test. It spends real tokens and writes real
  * rows, and it is the only thing here that can catch a regression in the
@@ -53,6 +55,7 @@ const { db } = await import("@/lib/db");
 const {
   cases,
   claimAttachments,
+  claimFieldConfirmations,
   customers,
   insuredAssets,
   missingDocs,
@@ -150,6 +153,27 @@ interface Turn {
      */
     prefiltered?: boolean;
     status?: string;
+    /**
+     * Claves que el mensaje NO tiene que haber pedido.
+     *
+     * Sobre `outbound_messages.asked_keys`, que es la lista que el propio
+     * producto usa para no repetir un pedido. Afirmar sobre la prosa sería
+     * afirmar sobre lo que escribió el modelo, y eso falla al azar.
+     *
+     * Ojo con lo que esta lista NO distingue: un dato de confianza media
+     * aparece acá igual, porque el mensaje lo nombra para que lo confirmen. Para
+     * eso está `confirma`.
+     */
+    noAsked?: string[];
+    /**
+     * Datos que se propusieron para confirmar en vez de preguntarse a secas.
+     *
+     * Es el mecanismo de la confianza media, y la diferencia entre «¿cómo te
+     * llamás?» y «entendimos Ilan Daniele, ¿es correcto?». Sale de
+     * `claim_field_confirmations`, que lo escribe la banda de confianza y no el
+     * modelo, así que no depende de cómo redacte ese día.
+     */
+    confirma?: string[];
   };
 }
 
@@ -158,6 +182,15 @@ interface Scenario {
   what: string;
   /** Which door the claim comes in through. Defaults to WhatsApp. */
   channel?: "whatsapp" | "email";
+  /**
+   * El nombre visible del sobre, como lo manda un cliente de correo.
+   *
+   * Por omisión el ensayo entrega la dirección pelada, y producción entrega
+   * `Nombre <dirección>`: eso lo acerca a lo que pasa de verdad, y es la única
+   * forma de ejercitar que el agente no le pida el nombre a alguien que lo trae
+   * en el sobre.
+   */
+  remitente?: string;
   /**
    * A policy to put on file before the conversation starts, and take off
    * afterwards.
@@ -354,8 +387,8 @@ const SCENARIOS: Scenario[] = [
   //
   // Genuinely different code from here down: threading by subject, a prefilter
   // that decides a message is a newsletter before anyone reads it, stripping
-  // the quoted copy of our own mail out of a reply, and HTML templates instead
-  // of the composer. All of it has broken at least once.
+  // the quoted copy of our own mail out of a reply, and wrapping the written
+  // prose in HTML. All of it has broken at least once.
 
   {
     id: "mail-completo",
@@ -393,6 +426,52 @@ const SCENARIOS: Scenario[] = [
       docsDeclined: ["parte_amistoso"],
       knows: ["policy_number", "full_name"],
     },
+  },
+
+  {
+    id: "mail-sin-nombre-en-el-cuerpo",
+    channel: "email",
+    what: "El nombre viene en el sobre y no en el mensaje: no se lo pedimos",
+    /*
+     * El caso real 9f7e8c3a, entero.
+     *
+     * El `From` decía «Ilan Daniele <ilan…>» y el correo que salió pedía
+     * «Nombre completo». No se puede reemplazar cambiándole el remitente a
+     * `mail-completo` ni a `mail-grave`: los dos dicen el nombre en el CUERPO,
+     * así que el saludo saldría igual venga de donde venga y el escenario
+     * quedaría verde sin ejercitar nada — la misma trampa que este archivo ya
+     * documenta con el asunto del newsletter.
+     *
+     * El nombre del fixture no puede contener «no-reply» ni «notificaciones»:
+     * el prefiltro normaliza el `fromAddr` ENTERO y descartaría el mensaje, lo
+     * que se leería como una regresión del agente y sería el nombre inventado.
+     */
+    remitente: "Ilan Daniele",
+    turns: [
+      {
+        say: [
+          "Buenas, ayer choqué en Alem al 2300, en Bahía Blanca.",
+          "No hubo heridos. La póliza es POL-4471-A.",
+        ].join("\n"),
+        // Sobre `asked_keys` y no sobre la prosa: lo que escribe el modelo
+        // cambia en cada corrida, y un ensayo que falla al azar se deja de
+        // mirar.
+        /*
+         * Las dos mitades del mismo criterio, y las dos determinísticas.
+         *
+         * `confirma`: el nombre se propone para confirmar en vez de
+         * preguntarse de cero. Sobre `asked_keys` NO se puede afirmar: un dato
+         * de confianza media aparece igual en esa lista, porque el mensaje lo
+         * nombra.
+         *
+         * `noAsked`: la dirección del sobre tampoco se pide. Es el mismo
+         * principio ya escrito para el teléfono en WhatsApp — no le pidas a
+         * alguien el dato desde el que te está escribiendo.
+         */
+        expect: { replies: 1, confirma: ["full_name"], noAsked: ["email"] },
+      },
+    ],
+    finally: { knows: ["policy_number", "full_name"] },
   },
 
   {
@@ -639,10 +718,16 @@ async function deliverEmail(
     turn.subject ??
     (caseId ? `Re: Denuncia de siniestro — caso #${caseId}` : "Denuncia de siniestro");
 
+  // La dirección queda ADENTRO de los ángulos: `isReservedTestAddress` la
+  // resuelve con `bareAddress`, el barrido de huérfanos va por
+  // `cases.email_thread_id` y la limpieza final por id de caso, así que poner
+  // nombre visible no rompe ninguna de las dos.
+  const fromAddr = scenario.remitente ? `${scenario.remitente} <${address}>` : address;
+
   const result = await ingestInboundEmail({
     tenantId: TENANT_ID!,
     channel: "email_sim",
-    fromAddr: address,
+    fromAddr,
     toAddr: "siniestros@example.com",
     subject,
     bodyText: turn.say,
@@ -670,6 +755,20 @@ async function deliverEmail(
  * a transcript nobody reads — which defeats half the point, since a person
  * skimming the output is how you notice a reply that passes every assertion
  * and still sounds wrong.
+ *
+ * Desde que el cuerpo del mail lo escribe el redactor, esto además tiene que
+ * cuidarse de TAPAR. Dos arreglos concretos:
+ *
+ *   · el ampersand se decodifica AL FINAL y no al principio. Iba primero, así
+ *     que un `&amp;lt;` —o sea, un `<` que escribió un desconocido y el escape
+ *     convirtió bien— volvía a `<` en el transcripto: se leía igual de
+ *     tranquilizador estuviera bien o mal escapado.
+ *   · `&quot;` y `&#39;` se decodifican, que ya se veían crudos en el
+ *     transcripto («entendimos &quot;16/08/2026&quot;»).
+ *
+ * Lo que sigue sin poder mostrar es marcado que NO puso la plantilla: las
+ * etiquetas se borran sin distinguir. Por eso el escape del cuerpo redactado se
+ * prueba en `tests/unit/email-escape.test.ts` y no acá.
  */
 function readable(body: string): string {
   if (!/<[a-z!]/i.test(body)) return body;
@@ -681,9 +780,11 @@ function readable(body: string): string {
     .replace(/<li[^>]*>/gi, "• ")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
     .split("\n")
     .map((line) => line.trim())
     .filter((line, i, all) => line.length > 0 || (i > 0 && all[i - 1].length > 0))
@@ -691,13 +792,23 @@ function readable(body: string): string {
     .trim();
 }
 
-async function repliesSince(caseId: string, seen: number): Promise<string[]> {
+/** Lo que salió, y qué claves pidió. La misma consulta, una columna más. */
+async function repliesSince(
+  caseId: string,
+  seen: number
+): Promise<Array<{ body: string; askedKeys: string[] }>> {
   const rows = await db
-    .select({ body: outboundMessages.rendered_body })
+    .select({
+      body: outboundMessages.rendered_body,
+      asked_keys: outboundMessages.asked_keys,
+    })
     .from(outboundMessages)
     .where(and(eq(outboundMessages.case_id, caseId), eq(outboundMessages.tenant_id, TENANT_ID!)))
     .orderBy(asc(outboundMessages.created_at));
-  return rows.slice(seen).map((r) => r.body);
+  return rows.slice(seen).map((r) => ({
+    body: r.body,
+    askedKeys: Array.isArray(r.asked_keys) ? (r.asked_keys as unknown[]).map(String) : [],
+  }));
 }
 
 async function runScenario(scenario: Scenario): Promise<string | null> {
@@ -759,7 +870,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
 
       if (said.length === 0) console.log("       🤖 (silencio)");
       for (const reply of said) {
-        console.log(`       🤖 ${readable(reply).replace(/\n/g, "\n          ")}`);
+        console.log(`       🤖 ${readable(reply.body).replace(/\n/g, "\n          ")}`);
       }
 
       const want = turn.expect;
@@ -769,7 +880,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         note(scenario.id, i + 1, `esperaba ${want.replies} respuesta(s), hubo ${said.length}`);
       }
 
-      const all = said.join("\n").toLowerCase();
+      // Sobre el texto legible, no sobre el HTML crudo: una frase con comilla o
+      // con `&` está ahí como entidad y no machearía nunca, así que la
+      // afirmación daría verde sin haber mirado nada.
+      const all = said.map((r) => readable(r.body)).join("\n").toLowerCase();
+      const pedidas = new Set(said.flatMap((r) => r.askedKeys));
+
       for (const phrase of want.mentions ?? []) {
         if (!all.includes(phrase.toLowerCase())) {
           note(scenario.id, i + 1, `no menciona "${phrase}"`);
@@ -778,6 +894,21 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
       for (const phrase of want.avoids ?? []) {
         if (all.includes(phrase.toLowerCase())) {
           note(scenario.id, i + 1, `no debería decir "${phrase}"`);
+        }
+      }
+      for (const key of want.noAsked ?? []) {
+        if (pedidas.has(key)) note(scenario.id, i + 1, `pidió ${key} y no debía`);
+      }
+      if (want.confirma?.length) {
+        const filas = await db
+          .select({ campo: claimFieldConfirmations.field_name })
+          .from(claimFieldConfirmations)
+          .where(eq(claimFieldConfirmations.case_id, active));
+        const propuestos = new Set(filas.map((f) => f.campo));
+        for (const key of want.confirma) {
+          if (!propuestos.has(key)) {
+            note(scenario.id, i + 1, `no propuso confirmar ${key}: se lo preguntó de cero`);
+          }
         }
       }
       if (want.attachments !== undefined) {

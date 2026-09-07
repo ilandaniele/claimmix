@@ -1,10 +1,9 @@
 /**
  * El acuse de recibo por mail.
  *
- * El correo no pasa por el redactor: arma HTML con la plantilla, así que lo
- * que diga la plantilla es literalmente lo que lee la persona. Las dos cosas
- * que tiene que hacer son opuestas entre sí y las dos importan: decir que
- * tomamos nota, y no volver a pedir lo que pedimos hace un minuto.
+ * Es el PISO: lo que sale con el redactor apagado y cuando una guarda rebota.
+ * Las dos cosas que tiene que hacer son opuestas entre sí y las dos importan:
+ * decir que tomamos nota, y no volver a pedir lo que pedimos hace un minuto.
  */
 
 import { describe, it, expect } from "vitest";
@@ -19,16 +18,26 @@ describe("renderInformationReceived", () => {
     expect(mail.html.toLowerCase()).toContain("tomamos nota");
   });
 
-  it("nombra lo que anotó cuando lo sabe", () => {
-    const mail = renderInformationReceived({ caseId: CASE, noted: "un choque de ayer a la tarde" });
-    expect(mail.text).toContain("un choque de ayer a la tarde");
+  it("no inventa un detalle que no tiene", () => {
+    // Inventar un detalle para que la frase suene más atenta es la forma más
+    // barata de que un mensaje deje de ser creíble. Acá vivía `noted` —el
+    // detalle a nombrar— y nadie lo seteó nunca: era un parámetro muerto
+    // declarado en los dos canales.
+    const mail = renderInformationReceived({ caseId: CASE });
+    expect(mail.text).toContain("de lo que nos contaste");
   });
 
-  it("sin dato concreto no inventa uno", () => {
-    // Inventar un detalle para que la frase suene más atenta es la forma más
-    // barata de que un mensaje deje de ser creíble.
-    const mail = renderInformationReceived({ caseId: CASE, noted: null });
-    expect(mail.text).toContain("de lo que nos contaste");
+  it("saluda por su nombre cuando el caso ya lo tiene", () => {
+    // El orquestador lo mandaba y este armador lo descartaba: el producto
+    // saludaba por nombre en un mensaje y en el siguiente no.
+    const mail = renderInformationReceived({ caseId: CASE, claimantName: "Diego" });
+    expect(mail.text).toContain("Diego, gracias");
+    expect(mail.html).toContain("Diego, gracias");
+  });
+
+  it("y sin nombre la oración sigue empezando en mayúscula", () => {
+    const mail = renderInformationReceived({ caseId: CASE });
+    expect(mail.text.startsWith("Gracias, tomamos nota")).toBe(true);
   });
 
   it("no repite el pedido ni dice que está completo", () => {

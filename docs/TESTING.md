@@ -55,23 +55,25 @@ de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
 
 ### 2. `pnpm rehearse` — minutos, gasta tokens
 
-Doce denuncias enteras, de punta a punta, contra el mismo código, la misma base
-y el mismo modelo que producción. Por los canales simulados: en WhatsApp el
-mensajero redacta la respuesta exactamente como lo haría y la guarda en vez de
-enviarla; en mail el despachador hace lo mismo con cualquier dirección
-`@example.com`.
+Trece denuncias enteras, de punta a punta, contra el mismo código, la misma base
+y el mismo modelo que producción. Por los canales simulados: en los dos el
+mensajero redacta la respuesta exactamente como lo haría; WhatsApp la guarda en
+vez de enviarla, y mail hace lo mismo con cualquier dirección `@example.com`.
 
 Los dos canales importan y son código distinto. El mail hila por asunto y por
 cabecera, corre un filtro que decide que un mensaje es un newsletter antes de
 que nadie lo lea, saca la copia citada de nuestro propio mail de la respuesta,
-y arma HTML en vez de usar el redactor. Nada de eso existe en WhatsApp, y todo
-eso se rompió alguna vez.
+y envuelve la prosa en HTML. Nada de eso existe en WhatsApp, y todo eso se
+rompió alguna vez. Lo que ya NO los diferencia es quién escribe: el correo pasa
+por el mismo redactor desde que un asegurado recibió la plantilla determinista
+tal cual, abriendo con «gracias por tu reclamo.» en minúscula.
 
 Escenarios: la denuncia completa hasta quedar lista, el incendio con heridos que
 se deriva, la cotización que no es un reclamo, los datos que llegan de a uno, el
 mensaje que no aporta nada y no merece respuesta, la pregunta que hay que
 contestar, la póliza que hay que buscar por DNI, la póliza vencida, la foto que
-no es ningún documento, y los tres equivalentes por mail.
+no es ningún documento, y los cuatro equivalentes por mail — uno de ellos, el
+nombre que viene en el sobre y no en el cuerpo.
 
 Imprime la conversación completa. **Leela.** La mitad del valor está en que una
 persona note una respuesta que pasa todas las verificaciones y suena mal.

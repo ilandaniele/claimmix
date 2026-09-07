@@ -542,7 +542,9 @@ function checkAgentConfig(): Check {
 
   const parts = [
     `deliberación ${deliberation ? "on" : "OFF"}`,
-    `redacción ${composing ? "on" : "OFF"}`,
+    // Gobierna los DOS canales desde que el correo también pasa por el
+    // redactor: apagarlo devuelve al asegurado la plantilla determinista.
+    `redacción ${composing ? "on" : "OFF"} (mail y WhatsApp)`,
   ];
 
   return deliberation && composing

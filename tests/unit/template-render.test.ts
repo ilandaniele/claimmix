@@ -338,10 +338,21 @@ describe("renderTemplate — specialist_escalation", () => {
     expect(result.text).toContain("esc-1");
   });
 
-  it("mentions 24h response time", () => {
+  it("dice que un especialista se comunica, sin prometer un plazo", () => {
+    /*
+     * Este caso exigía «24» y ahora exige lo contrario, a propósito.
+     *
+     * Nadie evaluó el siniestro todavía, así que las 24 horas hábiles eran una
+     * promesa que el producto no puede hacer — el piso de WhatsApp nunca la
+     * hizo. Y desde que el correo pasa por el redactor tenía además un costo:
+     * la reescritura natural de la frase («en 24 horas hábiles») es justo lo
+     * que las guardas de `compose-reply` rechazan, así que el piso invitaba a
+     * dos llamadas al modelo tiradas por escalada.
+     */
     const result = renderTemplate("specialist_escalation", { caseId: "esc-2" });
-    expect(result.html).toContain("24");
-    expect(result.text).toContain("24");
+    expect(result.text).toContain("se va a comunicar con vos a la brevedad");
+    expect(result.text).not.toMatch(/\d+\s*(?:horas?|d[íi]as?|semanas?)/i);
+    expect(result.html).not.toMatch(/\d+\s*(?:horas?|d[íi]as?|semanas?)/i);
   });
 
   it("uses urgent language for critical severity", () => {
@@ -590,5 +601,101 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
     expect(result.text).toContain("Tipo de siniestro");
     // Y sigue habiendo algo que confirmar, así que el asunto es el de confirmar.
     expect(result.subject).toContain("Confirmar datos");
+  });
+});
+
+/**
+ * El cuerpo redactado reemplaza la prosa, y nada más.
+ *
+ * Todo lo que las guardas de `compose-reply` NO miran vive en el cromo: el
+ * asunto, el número de caso, el pie, y el enmascarado de AC24. Si un cuerpo
+ * redactado se llevara puesto algo de eso, esta batería no lo vería —afirma
+ * sobre `renderTemplate`, que seguiría limpia mientras lo enviado no lo está—,
+ * así que la comprobación tiene que entrar por acá.
+ */
+describe("renderTemplate — con la prosa ya redactada", () => {
+  const REDACTADO = "Ilan, tomamos nota de lo que nos contaste y seguimos con tu caso.";
+
+  it("missing_information_request conserva asunto, número de caso y pie", () => {
+    const r = renderTemplate("missing_information_request", {
+      caseId: "case-red-1",
+      missingFields: ["policy_number"],
+      cuerpo: REDACTADO,
+    });
+
+    expect(r.html).toContain("Ilan, tomamos nota");
+    expect(r.subject).toContain("case-red-1");
+    expect(r.html).toContain("Caso de referencia: #case-red-1");
+    expect(r.html).toContain("Este mensaje fue generado automáticamente");
+    expect(r.html).toContain("<hr");
+  });
+
+  it("confirmation_received no pierde el número de caso, que sólo vivía en la prosa", () => {
+    const r = renderTemplate("confirmation_received", {
+      caseId: "case-red-2",
+      policyNumber: "POL-12345678",
+      cuerpo: REDACTADO,
+    });
+
+    expect(r.html).toContain("case-red-2");
+    expect(r.text).toContain("case-red-2");
+    // Y la póliza sigue enmascarada.
+    expect(r.html).toContain("****5678");
+    expect(r.html).not.toContain("POL-12345678");
+  });
+
+  it("information_received tampoco, y sigue siendo un fragmento", () => {
+    const r = renderTemplate("information_received", {
+      caseId: "case-red-3",
+      cuerpo: REDACTADO,
+    });
+
+    expect(r.html).toContain("case-red-3");
+    expect(r.text).toContain("case-red-3");
+    expect(r.html).not.toContain("<!DOCTYPE");
+  });
+
+  it("el piso que se le entrega al redactor ya viene enmascarado", () => {
+    /*
+     * AC24 por la vía nueva. El modelo recibe `cuerpo`, así que si el dato
+     * entrara sin enmascarar el DNI entero viajaría al prompt y podría volver
+     * en la respuesta — y las guardas de `compose-reply` miran largo, campos
+     * caídos, promesas y escalación: nada de PII.
+     */
+    const r = renderTemplate("data_confirmation_request", {
+      caseId: "case-red-4",
+      fieldKey: "dni",
+      proposedValue: "20345678",
+    });
+
+    expect(r.cuerpo).toContain("****5678");
+    expect(r.cuerpo).not.toContain("20345678");
+  });
+
+  it("el html y el texto dicen lo mismo", () => {
+    // Si la versión texto se quedara con la plantilla mientras el HTML lleva la
+    // prosa, la pantalla del caso le mostraría al analista un mensaje que el
+    // asegurado nunca recibió.
+    const r = renderTemplate("specialist_escalation", {
+      caseId: "case-red-5",
+      severity: "critical",
+      cuerpo: REDACTADO,
+    });
+
+    expect(r.html).toContain("Ilan, tomamos nota");
+    expect(r.text).toContain("Ilan, tomamos nota");
+    expect(r.text).not.toContain("<p>");
+  });
+
+  it("y sin cuerpo, nada de esto cambia", () => {
+    // El control que hace verdadera la promesa: lo que no pasa una guarda
+    // vuelve a ser la plantilla intacta.
+    const datos = { caseId: "case-red-6", missingFields: ["policy_number"] };
+    const conNada = renderTemplate("missing_information_request", datos);
+    const conVacio = renderTemplate("missing_information_request", { ...datos, cuerpo: null });
+
+    expect(conVacio.html).toBe(conNada.html);
+    expect(conVacio.text).toBe(conNada.text);
+    expect(conNada.html).toContain("<li><strong>Número de póliza:</strong>");
   });
 });

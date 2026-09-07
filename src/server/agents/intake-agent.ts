@@ -40,6 +40,15 @@ export interface WhatsAppIntakeInput {
   /** Photos, documents or audio the message carried, not yet downloaded. */
   media?: WhatsAppMediaRef[];
   /**
+   * El nombre de perfil del remitente.
+   *
+   * Meta lo manda en cada webhook y `parseCloudApiMessages` ya lo leía; moría
+   * acá. Va a `raw_payload` y NUNCA a `from_addr`: ahí rompe el `to` del
+   * mensajero, la clave de hilo, el freno del número reservado —que saca los
+   * no-dígitos— y la derivación del teléfono de contacto.
+   */
+  senderName?: string | null;
+  /**
    * True for the simulation and BSP-adapter path, whose phone numbers are
    * invented.
    *
@@ -184,6 +193,7 @@ export async function createWhatsAppIntake(
     body: input.body,
     providerMessageId,
     threadId,
+    senderName: input.senderName ?? null,
   });
 
   if (claimMessageId && input.media?.length) {
@@ -390,6 +400,7 @@ async function insertWhatsAppMessage(
     body: string;
     providerMessageId: string | null;
     threadId: string;
+    senderName: string | null;
   }
 ): Promise<string | null> {
   const now = new Date().toISOString();
@@ -410,7 +421,9 @@ async function insertWhatsAppMessage(
         body_text: input.body,
         body_html: null,
         headers: {},
-        raw_payload: {},
+        // El nombre de perfil, en el INSERT que ya ocurre. Lo lee el worker
+        // como columna escalar (`raw_payload->>'profile_name'`).
+        raw_payload: input.senderName ? { profile_name: input.senderName } : {},
         status: "received",
         received_at: now,
       }).returning({ id: tables.claimMessages.id })

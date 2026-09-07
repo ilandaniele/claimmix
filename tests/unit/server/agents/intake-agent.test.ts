@@ -402,3 +402,52 @@ describe("createWhatsAppIntake — simulated numbers never reach WhatsApp", () =
     expect(insertedCase()?.channel).toBe("whatsapp");
   });
 });
+
+/**
+ * El nombre de perfil, guardado en el INSERT que ya ocurre.
+ *
+ * Meta lo manda en cada webhook, `parseCloudApiMessages` ya lo leia y moria en
+ * `ingest`. Va a `raw_payload` y NUNCA a `from_addr`: ahi es el `to` del
+ * mensajero, la clave de hilo, la entrada del freno del numero reservado —que
+ * saca los no-digitos— y la del telefono de contacto.
+ */
+describe("createWhatsAppIntake — el nombre de perfil", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRunEmailExtractionWorker.mockResolvedValue(undefined);
+    mockWriteAuditLog.mockResolvedValue(undefined);
+    setupSelectResults([
+      [],
+      [{ id: "case-n-1", tenant_id: "tenant-001", channel: "whatsapp", status: "recibido" }],
+    ]);
+    setupInsertResults([{ rows: [{ id: "case-n-1" }] }, { rows: [] }, { rows: [] }]);
+  });
+
+  /** La fila que se le pasa al insert de claim_messages. */
+  function mensaje(): Record<string, unknown> {
+    const chain = mockDbInsert.mock.results[1].value as { values: ReturnType<typeof vi.fn> };
+    return chain.values.mock.calls[0][0] as Record<string, unknown>;
+  }
+
+  it("viaja en raw_payload y no en from_addr", async () => {
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "5491100000000",
+      body: "Choque en Alem",
+      senderName: "Martin Sosa",
+    });
+
+    expect(mensaje().raw_payload).toEqual({ profile_name: "Martin Sosa" });
+    expect(mensaje().from_addr).toBe("5491100000000");
+  });
+
+  it("sin nombre, raw_payload queda como estaba", async () => {
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "5491100000000",
+      body: "Choque en Alem",
+    });
+
+    expect(mensaje().raw_payload).toEqual({});
+  });
+});

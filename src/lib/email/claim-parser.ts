@@ -1,10 +1,19 @@
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 import { bareAddress } from "@/lib/email/reserved";
+import { nombreDePersona, nombreVisibleDelSobre } from "@/core/nombres/nombre-de-persona";
 
 type ParseInput = {
   subject?: string | null;
   body?: string | null;
   senderEmail?: string | null;
+  /**
+   * El nombre que el canal entrega aparte de la dirección.
+   *
+   * Por WhatsApp es el `profile.name` del payload, que no viaja adentro de
+   * `senderEmail` porque ahí va el teléfono pelado. Por mail no hace falta: el
+   * nombre visible ya viene pegado al `From`.
+   */
+  senderName?: string | null;
 };
 
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
@@ -56,7 +65,20 @@ export function parseEmailClaimFields(input: ParseInput): ExtractedField[] {
   const text = `${subject}\n${body}`;
   const fields: ExtractedField[] = [];
 
-  addField(fields, "full_name", extractFullName(text));
+  // Lo que escribió la persona siempre gana; el sobre es el último recurso, y
+  // entra con su propia confianza y su propio origen.
+  const nombreEscrito = extractFullName(text);
+  if (nombreEscrito) {
+    addField(fields, "full_name", nombreEscrito);
+  } else {
+    addField(
+      fields,
+      "full_name",
+      nombreDelCanal(input.senderName, input.senderEmail),
+      CONFIANZA_DEL_SOBRE,
+      "canal"
+    );
+  }
   addField(fields, "email", extractEmail(text, input.senderEmail));
   addField(fields, "phone", matchValue(PHONE_RE, text) ?? phoneFromSender(input.senderEmail));
   addField(fields, "dni", normalizeDni(matchValue(DNI_RE, text) ?? matchValue(LABELED_DNI_RE, text)));
@@ -105,16 +127,51 @@ export function mergeExtractedFields(
   return [...byKey.values()];
 }
 
-function addField(fields: ExtractedField[], key: string, value: string | null | undefined): void {
+function addField(
+  fields: ExtractedField[],
+  key: string,
+  value: string | null | undefined,
+  confidence?: number,
+  source: ExtractedField["source"] = "ai"
+): void {
   const trimmed = value?.trim();
   if (!trimmed) return;
 
   fields.push({
     field_key: key,
     field_value: trimmed.slice(0, 2000),
-    confidence: FIELD_CONFIDENCE[key] ?? 0.8,
-    source: "ai",
+    confidence: confidence ?? FIELD_CONFIDENCE[key] ?? 0.8,
+    source,
   });
+}
+
+/**
+ * Cuánto vale un nombre que trae el sobre.
+ *
+ * En la banda media a propósito, y ese es todo el punto. Un nombre visible es
+ * lo que la persona configuró en su cliente de correo o en su perfil: nadie lo
+ * verifica, y quien escribe lo elige. Alcanza para saludarla y para dejar de
+ * pedirle el nombre que ya nos está diciendo —desde 0.60 el analizador de
+ * huecos lo cuenta como presente— y no alcanza para darlo por cierto: por
+ * debajo de 0.85 cae solo en `claim_field_confirmations` y sale en el mismo
+ * pedido como «entendimos "X"; si no es así, escribinos el dato correcto».
+ *
+ * `FIELD_CONFIDENCE.full_name` (0.92) lo habría vuelto incuestionable: nunca
+ * más se pregunta y nunca más se puede corregir.
+ */
+const CONFIANZA_DEL_SOBRE = 0.7;
+
+/**
+ * El nombre que el canal ya entrega, si es el nombre de una persona.
+ *
+ * El juicio vive en `@/core/nombres` para que los dos canales usen el mismo, y
+ * `titleCase` lo formatea como al que sale del texto: un perfil que grita
+ * «MARTIN SOSA» no tiene por qué gritarle a nadie en la respuesta.
+ */
+function nombreDelCanal(senderName?: string | null, senderEmail?: string | null): string | null {
+  const visible =
+    nombreDePersona(senderName) ?? nombreDePersona(nombreVisibleDelSobre(senderEmail));
+  return visible ? titleCase(visible) : null;
 }
 
 function cleanText(value: string): string {

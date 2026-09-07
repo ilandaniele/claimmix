@@ -176,3 +176,94 @@ describe("contactDocsToClose", () => {
     expect(out).toContain("email");
   });
 });
+
+/**
+ * El nombre que el canal ya entrega.
+ *
+ * Un caso real (7 de septiembre) recibió un mail que pedía «Nombre completo»
+ * teniendo el nombre en el sobre: el `From` decía `Ilan Daniele <ilan…>` y el
+ * único lugar de donde salía `full_name` era el texto del mensaje.
+ *
+ * Entra con confianza de banda media a propósito: desde 0.60 el analizador de
+ * huecos lo cuenta como presente —o sea, deja de pedirse— y por debajo de 0.85
+ * cae solo en `claim_field_confirmations` y sale como «entendimos "X"». Un
+ * nombre visible lo configura quien escribe y no lo verifica nadie: alcanza
+ * para saludar, no para darlo por cierto.
+ */
+describe("parseEmailClaimFields — el nombre del sobre", () => {
+  function nombre(fields: ReturnType<typeof parseEmailClaimFields>) {
+    return fields.find((f) => f.field_key === "full_name");
+  }
+
+  it("usa el nombre visible del From cuando el cuerpo no lo dice", () => {
+    const campos = parseEmailClaimFields({
+      subject: "Denuncia",
+      body: "Buenas, ayer choqué en Alem al 2300. No hubo heridos. Póliza POL-4471-A.",
+      senderEmail: "Ilan Daniele <ilan.daniele@gmail.com>",
+    });
+
+    expect(nombre(campos)?.field_value).toBe("Ilan Daniele");
+  });
+
+  it("con una confianza que lo hace preguntable y no incuestionable", () => {
+    const campos = parseEmailClaimFields({
+      subject: "",
+      body: "Choqué ayer.",
+      senderEmail: "Ilan Daniele <ilan.daniele@gmail.com>",
+    });
+
+    const campo = nombre(campos)!;
+    expect(campo.confidence).toBeGreaterThanOrEqual(0.6);
+    expect(campo.confidence).toBeLessThan(0.85);
+    expect(campo.source).toBe("canal");
+  });
+
+  it("lo que escribió la persona le gana al sobre", () => {
+    const campos = parseEmailClaimFields({
+      subject: "",
+      body: "Nombre completo: Martín Sosa - DNI: 30.145.882",
+      senderEmail: "Ilan Daniele <ilan.daniele@gmail.com>",
+    });
+
+    expect(nombre(campos)?.field_value).toBe("Martín Sosa");
+    expect(nombre(campos)?.source).toBe("ai");
+  });
+
+  it("un sobre que no trae un nombre de persona no produce campo", () => {
+    // Peor que no tener nombre es tener uno malo: saluda mal, entra al prompt
+    // del redactor y puede fabricar un conflicto contra el padrón.
+    for (const sobre of [
+      "iPhone de Juan <x@y.com>",
+      "Transportes del Sur S.R.L. <ventas@sur.com>",
+      "ana.ruiz@correo.com.ar",
+    ]) {
+      const campos = parseEmailClaimFields({ subject: "", body: "Choqué ayer.", senderEmail: sobre });
+      expect(nombre(campos), sobre).toBeUndefined();
+    }
+  });
+
+  it("por WhatsApp entra por el mismo camino, con el nombre de perfil", () => {
+    // Ahí `senderEmail` es el teléfono pelado: el nombre viaja aparte.
+    const campos = parseEmailClaimFields({
+      subject: "WhatsApp",
+      body: "Choqué ayer en Alem.",
+      senderEmail: "5491100000000",
+      senderName: "MARTIN SOSA",
+    });
+
+    // `titleCase` lo formatea: un perfil que grita no le grita al asegurado.
+    expect(nombre(campos)?.field_value).toBe("Martin Sosa");
+    expect(nombre(campos)?.source).toBe("canal");
+  });
+
+  it("y un nombre de perfil basura tampoco", () => {
+    const campos = parseEmailClaimFields({
+      subject: "WhatsApp",
+      body: "Choqué ayer en Alem.",
+      senderEmail: "5491100000000",
+      senderName: "iPhone",
+    });
+
+    expect(nombre(campos)).toBeUndefined();
+  });
+});

@@ -197,6 +197,7 @@ import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
+import { mergeExtractedFields } from "@/lib/email/claim-parser";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { extraccion } from "../helpers/extraccion";
 
@@ -549,5 +550,81 @@ describe("AC14 — reject empty/whitespace extracted values", () => {
       expect(payload.policyholder_name).toBeUndefined();
       expect(payload.policy_number).toBeUndefined();
     }
+  });
+});
+
+/**
+ * Un nombre que trae el sobre no puede volverse un hecho del caso.
+ *
+ * Desde que el nombre visible del `From` —y el de perfil de WhatsApp— entra
+ * como `full_name`, hay dos caminos por los que se convertiria en algo que
+ * nadie escribio:
+ *
+ *   · `cases.policyholder_name` es primera-escritura-gana para siempre, y es la
+ *     columna del `ilike` de la bandeja, del CSV y del sync al core;
+ *   · `detectConflicts` compara `full_name` contra el padron sin mirar
+ *     confianza, asi que un familiar, un productor o una casilla corporativa
+ *     fabricarian una rama D y un correo entero diciendo «vos nos decis X y en
+ *     nuestro sistema figura Y».
+ *
+ * Los dos se frenan en el mismo lugar: el conjunto canonizado que sale del
+ * worker excluye lo que vino con origen `canal`. Lo que se muestra no se
+ * pierde: la bandeja ya hace coalesce contra `extracted_fields.full_name`.
+ */
+describe("un nombre de origen `canal` no se vuelve un dato del caso", () => {
+  /** Corre el worker con un `full_name` que vino del sobre. */
+  async function correrConNombreDelSobre(): Promise<Array<Record<string, unknown>>> {
+    vi.mocked(mergeExtractedFields).mockReturnValue([
+      {
+        field_key: "full_name",
+        field_value: "Ilan Daniele",
+        confidence: 0.7,
+        source: "canal",
+      },
+      {
+        field_key: "dni",
+        field_value: "30145882",
+        confidence: 0.94,
+        source: "ai",
+      },
+    ]);
+
+    return runWorker(baseCaseRow({ policyholder_name: null }), { dni: "30145882" });
+  }
+
+  it("no se copia a cases.policyholder_name", async () => {
+    const payloads = await correrConNombreDelSobre();
+
+    for (const payload of payloads) {
+      expect(payload.policyholder_name).toBeUndefined();
+    }
+  });
+
+  it("y no entra al cruce contra el padron", async () => {
+    await correrConNombreDelSobre();
+
+    expect(findCustomerMatches).toHaveBeenCalled();
+    const campos = vi.mocked(findCustomerMatches).mock.calls[0][1] as Record<string, unknown>;
+    expect(campos.full_name).toBeUndefined();
+    // El control: lo que la persona SI escribio sigue cruzandose.
+    expect(campos.dni).toBe("30145882");
+  });
+
+  it("pero un nombre que escribio la persona si", async () => {
+    vi.mocked(mergeExtractedFields).mockReturnValue([
+      {
+        field_key: "full_name",
+        field_value: "Martin Sosa",
+        confidence: 0.92,
+        source: "ai",
+      },
+    ]);
+
+    const payloads = await runWorker(baseCaseRow({ policyholder_name: null }), {});
+
+    const update = payloads.find((p) => p.policyholder_name !== undefined);
+    expect(update?.policyholder_name).toBe("Martin Sosa");
+    const campos = vi.mocked(findCustomerMatches).mock.calls[0][1] as Record<string, unknown>;
+    expect(campos.full_name).toBe("Martin Sosa");
   });
 });

@@ -1,5 +1,6 @@
 
-import { escapeHtml } from "@/server/email/render";/**
+import { escapeHtml } from "@/server/email/render";
+import { textoAHtml } from "@/core/email/html";/**
  * Email template: information_received
  *
  * El mensaje corto que va cuando la persona contó algo nuevo y lo que falta
@@ -24,35 +25,52 @@ import { escapeHtml } from "@/server/email/render";/**
 
 export interface InformationReceivedData {
   caseId: string;
-  /** En castellano y en palabras de la persona: "un choque de ayer a la tarde". */
-  noted?: string | null;
+  /**
+   * El nombre de pila, cuando el caso ya lo tiene.
+   *
+   * El orquestador lo mandaba y este armador lo descartaba. (Acá vivía `noted`,
+   * el detalle que se iba a nombrar: nadie lo seteó nunca, ni por mail ni por
+   * WhatsApp, y estaba declarado en los dos escritores.)
+   */
+  claimantName?: string | null;
+  /** La prosa ya redactada. Reemplaza el cuerpo y nada más. */
+  cuerpo?: string | null;
 }
 
 export function renderInformationReceived(data: InformationReceivedData): {
   subject: string;
   html: string;
   text: string;
+  cuerpo: string;
 } {
   const subject = `Tomamos nota - Caso #${data.caseId}`;
 
-  // Sin dato concreto que nombrar, "tomamos nota de lo que nos contaste" sigue
-  // siendo verdad y sigue siendo mejor que el silencio. Lo que no se hace es
-  // inventar un detalle para que la frase suene más atenta.
-  const notedPhrase = data.noted ? ` de ${data.noted}` : " de lo que nos contaste";
+  // El nombre delante y la mayúscula en la misma expresión: sin nombre la
+  // oración empieza igual de entera.
+  const nombre = data.claimantName?.trim();
+  const saludo = nombre ? `${nombre}, ` : "";
+  const gracias = nombre ? "gracias" : "Gracias";
+
+  const cuerpo = [
+    `${saludo}${gracias}, tomamos nota de lo que nos contaste.`,
+    "",
+    "Seguimos a la espera de lo que te pedimos antes para poder avanzar con tu reclamo.",
+  ].join("\n");
+  const redactado = data.cuerpo?.trim();
+
+  // Sigue siendo un FRAGMENTO de `<p>`, sin DOCTYPE: convertirlo en documento
+  // entero cambiaría lo que Gmail recibe hoy en esta rama sin que nadie lo pida.
+  const prosaHtml = redactado
+    ? textoAHtml(redactado)
+    : `<p>${escapeHtml(`${saludo}${gracias}, tomamos nota de lo que nos contaste.`)}</p>
+    <p>Seguimos a la espera de lo que te pedimos antes para poder avanzar con tu reclamo.</p>`;
 
   const html = `
-    <p>Gracias, tomamos nota${escapeHtml(notedPhrase)}.</p>
-    <p>Seguimos a la espera de lo que te pedimos antes para poder avanzar con tu reclamo.</p>
+    ${prosaHtml}
     <p>Caso #${escapeHtml(data.caseId)}</p>
   `.trim();
 
-  const text = [
-    `Gracias, tomamos nota${notedPhrase}.`,
-    "",
-    "Seguimos a la espera de lo que te pedimos antes para poder avanzar con tu reclamo.",
-    "",
-    `Caso #${data.caseId}`,
-  ].join("\n");
+  const text = [redactado ?? cuerpo, "", `Caso #${data.caseId}`].join("\n");
 
-  return { subject, html, text };
+  return { subject, html, text, cuerpo };
 }

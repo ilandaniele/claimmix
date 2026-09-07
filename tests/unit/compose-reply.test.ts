@@ -17,6 +17,7 @@ vi.mock("@/server/ai/gemini-extractor", () => ({
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { composeReply } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
+import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 
 const mockCall = callGemini as unknown as ReturnType<typeof vi.fn>;
 
@@ -185,5 +186,71 @@ describe("composeReply — the brief it hands the model", () => {
     replies("Recibimos tu denuncia, ya quedó registrada.");
     await composeReply(base({ intent: "closing" }));
     expect(mockCall.mock.calls[0][0] as string).toContain("primer mensaje");
+  });
+});
+
+/**
+ * El canal de correo, que hasta hoy nadie ejercitaba.
+ *
+ * Todos los casos de arriba usan WhatsApp salvo el único de largo: el tope de
+ * 1400, el ×1.4 con pregunta y el brief de mail estaban escritos y sin probar
+ * porque el correo no pasaba por acá.
+ */
+describe("composeReply — por correo", () => {
+  it("le pide un cuerpo de email, no un mensaje de chat", async () => {
+    replies("Necesito el número de póliza para poder seguir con tu reclamo.");
+
+    await composeReply(base({ channel: "email", fields: ["policy_number"] }));
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).toContain("Es el cuerpo de un email");
+    expect(prompt).not.toContain("mensaje de WhatsApp");
+  });
+
+  it("contestar una pregunta necesita más lugar que pedir a secas", async () => {
+    // 1400 con el tope de mail; 1960 cuando además hay que contestar algo.
+    const largo = "Necesito tu número de póliza. " + "Explicación útil. ".repeat(85);
+    expect(largo.length).toBeGreaterThan(1400);
+    expect(largo.length).toBeLessThan(1960);
+    replies(largo);
+
+    const sinPregunta = await composeReply(base({ channel: "email", fields: ["policy_number"] }));
+    expect(sinPregunta).toBe(FALLBACK);
+
+    vi.clearAllMocks();
+    replies(largo);
+    const conPregunta = await composeReply(
+      base({ channel: "email", fields: ["policy_number"], question: "¿cuánto tarda?" })
+    );
+    expect(conPregunta).toBe(largo.trim());
+  });
+});
+
+describe("la respuesta pendiente vive una sola vez", () => {
+  it("no se pega otra vez si el piso ya la trae", async () => {
+    /*
+     * La plantilla de datos faltantes ya agrega la frase cuando hay pregunta, y
+     * este camino la volvía a pegar: la misma oración dos veces seguidas,
+     * salida del archivo cuya razón de existir es que viva una sola vez. Y
+     * rompía además la comparación del mensajero contra el piso, que es cómo se
+     * sabe que un rechazo devuelve la plantilla intacta.
+     */
+    const piso = `${FALLBACK}\n\n${RESPUESTA_PENDIENTE}`;
+    mockCall.mockRejectedValue(new Error("sin modelo"));
+
+    const out = await composeReply(
+      base({ fallback: piso, question: "¿cuánto tarda esto?" })
+    );
+
+    expect(out).toBe(piso);
+    expect(out.split(RESPUESTA_PENDIENTE).length - 1).toBe(1);
+  });
+
+  it("pero se sigue agregando cuando el piso no la tiene", async () => {
+    mockCall.mockRejectedValue(new Error("sin modelo"));
+
+    const out = await composeReply(base({ question: "¿cuánto tarda esto?" }));
+
+    expect(out).toContain(RESPUESTA_PENDIENTE);
   });
 });

@@ -191,6 +191,28 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
+    # Una corrida por vez contra la base de ensayo, aunque sean ramas distintas.
+    #
+    # Los contadores del limitador de intentos de login viven EN esa base y no
+    # en memoria del proceso, asi que los comparte cualquiera que entre por
+    # localhost. Este workflow ya serializa `integration-tests` y `e2e-tests`
+    # entre si con `needs:` por exactamente ese motivo (ver el comentario del
+    # job de e2e) — pero el `concurrency` de arriba agrupa por `github.ref`, o
+    # sea que dos corridas de ramas distintas no se serializan entre ellas y
+    # vuelven a pelearse el mismo cupo.
+    #
+    # Paso de verdad el 2026-09-07: main (22:39-22:45) y un PR de documentacion
+    # (22:43-22:46) corrieron encimados; a las 22:45:25 un test de e2e en main
+    # rebotaba a /login y el caso redirigia a /bandeja. El arbol de ese commit
+    # era IDENTICO al del PR que habia pasado en verde cuatro minutos antes
+    # (0953e32), asi que no era el codigo: era el cupo.
+    #
+    # `cancel-in-progress: false` es la mitad que importa: se hace cola, no se
+    # cancela. Cancelar la corrida de otra rama para que esta pase cambia un
+    # rojo al azar por un verde al azar, que es peor.
+    concurrency:
+      group: base-de-ensayo
+      cancel-in-progress: false
     env:
       # Un secreto no se puede leer desde un `if:`; una variable de entorno sí.
       HAY_ENSAYO: ${{ secrets.STAGING_DATABASE_URL }}
@@ -387,6 +409,12 @@ jobs:
   e2e-tests:
     name: E2E tests (Playwright)
     runs-on: ubuntu-latest
+    # El mismo grupo que `integration-tests`: comparten la base y su cupo.
+    # Adentro de una corrida ya van en serie por el `needs:` de mas abajo;
+    # esto es lo que falta para que tampoco se encimen entre corridas.
+    concurrency:
+      group: base-de-ensayo
+      cancel-in-progress: false
     permissions:
       contents: read
     # Después de los de integración, y no en paralelo.

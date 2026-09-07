@@ -1,0 +1,46 @@
+-- =============================================================================
+-- 0024 — Se saca el índice cubridor de ai_usage, que la 0023 agregó hace un día
+-- =============================================================================
+--
+-- La 0023 lo puso con un razonamiento que sonaba bien y que no comprobó: que la
+-- suma histórica de /metricas "ubica las filas y después va al heap por cada
+-- una", y que con INCLUDE se resolvería dentro del índice. La propia 0023 dejó
+-- escrito qué había que mirar después —«un índice que el planificador ignora
+-- cuesta disco y escrituras a cambio de nada»— y al mirarlo, lo ignora.
+--
+-- Lo que dice la base, un día después de crearlo:
+--
+--   idx_ai_usage_tenant_created    704 kB   17885 usos
+--   idx_ai_usage_tenant_cubridor   496 kB       1 uso
+--   ai_usage (la tabla)           1184 kB
+--
+-- Ese único uso fue un EXPLAIN con enable_seqscan=off, hecho a mano para
+-- comprobar que el índice al menos estuviera bien formado. En tráfico real:
+-- ninguno. Ocupa el 42% de lo que ocupa la tabla entera.
+--
+-- Por qué el planificador tiene razón, y no es una cuestión de esperar volumen:
+--
+-- 1. 9616 de las 9621 filas son del mismo inquilino. Filtrar por tenant_id no
+--    descarta nada, así que recorrer la tabla sale más barato que entrar por un
+--    índice. Forzado, tarda MÁS: 2,79 ms contra 1,98 ms.
+--
+-- 2. La columna que lidera ya está indexada por idx_ai_usage_tenant_created,
+--    que se usa 17885 veces. La búsqueda por inquilino nunca necesitó esto.
+--
+-- 3. Lo único que este índice aportaba por encima de aquél era el Index Only
+--    Scan, y ai_usage es una tabla que sólo crece: cada llamada de IA le agrega
+--    una fila. Las filas nuevas no están en el mapa de visibilidad hasta que
+--    pase un vacuum, así que el scan "sólo índice" vuelve al heap igual. Medido
+--    recién creado: 2871 Heap Fetches sobre 9616 filas. El beneficio no es que
+--    todavía no llegó: es que esta tabla lo desarma por cómo se escribe.
+--
+-- Que haya varios inquilinos mañana no cambia (2) ni (3). Si algún día la suma
+-- histórica aparece lenta de verdad, crear un índice toma segundos y para
+-- entonces habrá una medición que lo justifique en vez de una hipótesis.
+--
+-- Los otros dos de la 0023 se quedan: están sobre customers y policies, que hoy
+-- tienen cero filas, así que no cuestan nada, y la consulta que sirven
+-- (tenant_id + ORDER BY created_at DESC LIMIT 25) no tiene hoy por dónde entrar.
+-- =============================================================================
+
+DROP INDEX IF EXISTS public.idx_ai_usage_tenant_cubridor;

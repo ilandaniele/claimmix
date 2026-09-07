@@ -21,7 +21,7 @@ import {
   formatCaseNumber,
 } from "./components/useCasesRealtime";
 import type { CaseRow, CaseListResult } from "@/server/cases/list";
-import type { SimulationScenario } from "@/server/intake/scenarios";
+import type { OpcionDeEscenario } from "@/server/intake/scenarios";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { CardHeader } from "../_components/ui";
@@ -249,7 +249,7 @@ function Pagination({ page, perPage, total, onPageChange, onPerPageChange }: Pag
 
 interface DashboardClientProps {
   initialData: CaseListResult;
-  scenarios: SimulationScenario[];
+  scenarios: readonly OpcionDeEscenario[];
   allStatusCounts: { status: CaseStatus | "todos"; count: number }[];
 }
 

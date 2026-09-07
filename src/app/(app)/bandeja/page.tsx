@@ -18,7 +18,7 @@ import { redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { contarPorEstado, listCases } from "@/server/cases/list";
-import { SCENARIOS } from "@/server/intake/scenarios";
+import { OPCIONES_DE_ESCENARIO } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
 import { PER_PAGE_OPTIONS } from "./per-page";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
@@ -239,7 +239,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
         <Card className="flex h-full flex-col overflow-hidden">
           <DashboardClient
             initialData={initialData}
-            scenarios={SCENARIOS}
+            scenarios={OPCIONES_DE_ESCENARIO}
             allStatusCounts={allStatusCounts}
           />
         </Card>

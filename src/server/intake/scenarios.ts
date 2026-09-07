@@ -2738,6 +2738,63 @@ export const SCENARIOS: SimulationScenario[] = [
   ...NEGATIVE_SCENARIOS,
 ];
 
+/**
+ * Lo que el selector de la bandeja necesita saber de un escenario.
+ *
+ * ── Por qué existe un tipo aparte ──────────────────────────────────────────
+ *
+ * `page.tsx` es un componente de servidor y le pasaba `SCENARIOS` entero como
+ * prop a `DashboardClient`, que es de cliente. Una prop que cruza esa frontera
+ * viaja serializada adentro del HTML de la página: 145,9 KB de texto de
+ * denuncias —los 163 escenarios completos, con su `raw_text` de varios
+ * párrafos y su `expected_fields`— en cada carga de la bandeja.
+ *
+ * El selector muestra el tipo, el nombre del titular y los primeros 80
+ * caracteres del texto. Nunca lee `policy_number` ni `expected_fields`, y del
+ * `raw_text` descarta todo menos ese arranque. Se mandaba el expediente entero
+ * para mostrar un renglón.
+ *
+ * Recortarlo deja 29,1 KB: un 80% menos, y el desplegable sale idéntico. El
+ * resto no baja porque son 163 renglones que sí se muestran; para bajar de ahí
+ * habría que cambiar la pantalla, y eso es otra decisión.
+ *
+ * ── Por qué el recorte vive acá ────────────────────────────────────────────
+ *
+ * Al lado de los datos, no en la página. Quien agregue un escenario ve en el
+ * mismo archivo qué parte de lo que escribe llega al navegador, en vez de
+ * enterarse de que el `raw_text` que redactó viaja entero.
+ */
+export interface OpcionDeEscenario {
+  id: string;
+  case_type: ClaimType;
+  policyholder_name: string;
+  /** El arranque del texto, ya cortado: el modal no recibe de dónde salió. */
+  preview: string;
+}
+
+/** Cuántos caracteres del texto entran en el renglón del desplegable. */
+const LARGO_DEL_ADELANTO = 80;
+
+/**
+ * Los escenarios como los ve el selector.
+ *
+ * El corte reproduce exactamente el `truncate` que hacía el modal —cortar en
+ * 80 y agregar tres puntos— para que la etiqueta salga byte por byte igual
+ * que antes de este cambio.
+ */
+export const OPCIONES_DE_ESCENARIO: readonly OpcionDeEscenario[] = SCENARIOS.map((s) => {
+  const renglon = s.raw_text.replace(/\n/g, " ");
+  return {
+    id: s.id,
+    case_type: s.case_type,
+    policyholder_name: s.policyholder_name,
+    preview:
+      renglon.length <= LARGO_DEL_ADELANTO
+        ? renglon
+        : renglon.slice(0, LARGO_DEL_ADELANTO) + "...",
+  };
+});
+
 /** Lookup map for O(1) access by scenario ID. */
 export const SCENARIOS_BY_ID: ReadonlyMap<string, SimulationScenario> = new Map(
   SCENARIOS.map((s) => [s.id, s])

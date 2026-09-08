@@ -37,6 +37,17 @@
 # minutos, que es fabricar tráfico falso contra el camino de producción. Esto
 # ataca la consecuencia —el caso trabado— y no la causa, a propósito.
 
+# -- Y de paso, la salud ------------------------------------------------------
+#
+# El mismo cron sirve para la otra cosa que nadie miraba. `/api/health` solo se
+# consultaba despues de un deploy, desde `pnpm smoke` y el pen test; entre dos
+# deploys, nadie. Y lo que ese endpoint ve se rompe SOLO: el token de WhatsApp
+# vence, el aviso de push de Gmail se cae al reconectar la casilla, el
+# presupuesto de IA se acaba.
+#
+# Va como job aparte y no como paso del barrido para que el rojo diga cual de
+# las dos cosas fallo.
+
 name: Barrer trabados
 
 on:
@@ -110,3 +121,34 @@ jobs:
           echo "::error::El barredor no contestó 200 en tres intentos (último: ${codigo})."
           cat respuesta.json 2>/dev/null || true
           exit 1
+
+  salud:
+    name: Mirar la salud del deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+
+      # Sin `pnpm install`: el guion usa solo `fetch` y modulos nativos, como
+      # `comparar-ensayos.mjs`. Instalar dependencias noventa y seis veces por
+      # dia para pegarle a una URL seria el gasto mas tonto del repositorio.
+      - name: Preguntarle al deploy que alcanza a ver
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
+        run: node scripts/mirar-salud.mjs
+
+      - name: Que significa que esto falle
+        if: failure()
+        run: |
+          echo "::error::Produccion no esta sana, y no hubo ningun deploy que lo causara."
+          echo ""
+          echo "  El detalle esta en la salida de arriba: cada chequeo con su nombre."
+          echo "  Lo que este endpoint ve se rompe solo — token de WhatsApp vencido,"
+          echo "  push de Gmail caido, R2 sin credenciales, presupuesto de IA agotado."

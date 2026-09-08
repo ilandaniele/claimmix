@@ -64,6 +64,36 @@ export default async function AppLayout({
          * acepta `style=` — ver `globals.css`.
          */}
         <div className="lienzo flex h-screen overflow-hidden">
+          {/*
+           * La primera parada de teclado de todas las pantallas del turno.
+           *
+           * Antes de esto, llegar al contenido costaba recorrer la barra
+           * entera en CADA navegación: entre once y catorce paradas según el
+           * rol —la barra, los dos idiomas, el tema y «Cerrar sesión»—. Es el
+           * bloque repetido del que habla el criterio 2.4.1 de WCAG, que es
+           * nivel A.
+           *
+           * Va arriba de todo porque lo único que lo hace servir es ser el
+           * PRIMER elemento enfocable del documento: cualquier control que se
+           * meta antes lo vuelve decorativo.
+           *
+           * `<a>` pelado y no `<Link>`: el salto tiene que ser navegación de
+           * fragmento del navegador, que es lo que además mueve el foco al
+           * destino. Con `<Link>` la ruta la maneja el cliente, la URL cambia
+           * y el foco se queda donde estaba.
+           *
+           * Escondido fuera de pantalla y no con `hidden` ni `display:none`:
+           * tiene que existir para el lector de pantalla. Se destapa con
+           * `focus:translate-y-0`. `fixed` y no `absolute` porque el
+           * contenedor de al lado tiene `overflow-hidden`.
+           */}
+          <a
+            href="#contenido"
+            className="fixed top-3 left-3 z-50 -translate-y-[200%] rounded-xl bg-violet-600 px-4 py-2 text-[13.5px] font-semibold text-white shadow-lg transition-transform focus:translate-y-0"
+          >
+            {t("nav.saltarAlContenido")}
+          </a>
+
           {/* Left sidebar */}
           <Sidebar role={role} isOperator={isOperator} />
 
@@ -73,7 +103,15 @@ export default async function AppLayout({
             <TopBar fullName={fullName} role={role} />
 
             {/* Page content */}
-            <main className="flex-1 overflow-auto">
+            {/*
+             * `tabIndex={-1}` para que el salto TERMINE acá: sin él, el
+             * navegador mueve el scroll pero el foco se queda en la barra y
+             * el siguiente Tab vuelve al principio. No entra en el orden de
+             * tabulación —es -1, no 0—. El anillo que dibuja el navegador al
+             * llegar se deja a propósito: es la única señal de que el salto
+             * ocurrió.
+             */}
+            <main id="contenido" tabIndex={-1} className="flex-1 overflow-auto">
               {children}
             </main>
           </div>

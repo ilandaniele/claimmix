@@ -168,7 +168,7 @@ function FieldCard({
         visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
       }`}
     >
-      <div className="text-xs text-slate-400 mb-0.5">{label}</div>
+      <div className="text-xs text-slate-500 mb-0.5">{label}</div>
       <div className="text-sm font-semibold text-slate-800">{value}</div>
       {confidence !== null && (
         <div className="mt-1.5">
@@ -216,7 +216,7 @@ function FNOLFlow() {
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 mt-8">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">
         Flujo FNOL — Cómo funciona
       </h3>
       <div className="flex flex-wrap items-center gap-2">
@@ -232,7 +232,7 @@ function FNOLFlow() {
           </div>
         ))}
       </div>
-      <p className="mt-4 text-xs text-slate-400">
+      <p className="mt-4 text-xs text-slate-500">
         Todo el flujo ocurre automáticamente desde que llega el email hasta que el ajustador tiene el caso listo para revisar.
         Tiempo típico: 4-6 horas vs 2-3 días sin automatización.
       </p>
@@ -255,13 +255,20 @@ function ResultPanel({ result, elapsed }: { result: ExtractedClaim; elapsed: num
     <div className="space-y-4">
       {/* Status bar */}
       <div className="flex flex-wrap items-center gap-2">
+        {/*
+          `bg-indigo-100` está reasignado en oscuro y `text-indigo-800` no:
+          1,15:1, invisible, en la chapa que dice de qué tipo es el siniestro.
+          El violeta del producto tiene el par completo: 5,01:1.
+        */}
         {claimTypeLabel && (
-          <span className="rounded-lg bg-indigo-100 px-3 py-1 text-sm font-bold text-indigo-800">
+          <span className="rounded-lg bg-violet-100 px-3 py-1 text-sm font-bold text-violet-700">
             Tipo: {claimTypeLabel}
           </span>
         )}
+        {/* Ámbar y no naranja: `bg-orange-100` no tiene par oscuro y quedaba
+            como una isla clara en la página. Ámbar sí: 7,28:1. */}
         {result.injury_severity && result.injury_severity !== "none" && (
-          <span className="rounded-lg bg-orange-100 px-3 py-1 text-sm font-bold text-orange-700">
+          <span className="rounded-lg bg-amber-100 px-3 py-1 text-sm font-bold text-amber-700">
             Severidad:{" "}
             {{ fatal: "FATAL", severe: "GRAVE", minor: "LEVE" }[result.injury_severity] ?? result.injury_severity.toUpperCase()}
           </span>
@@ -271,7 +278,14 @@ function ResultPanel({ result, elapsed }: { result: ExtractedClaim; elapsed: num
             No es siniestro
           </span>
         )}
-        <span className="ml-auto text-xs text-slate-400">
+        {/*
+         * Acá va slate-600 y no el slate-500 del resto: estas tres no
+         * están sobre una tarjeta blanca sino sobre el fondo de la página.
+         * Contra el extremo más claro el 500 da 4,26:1 y no llega al 4,5:1
+         * que pide texto; el 600 da 6,78:1 en el peor punto. El 400 que
+         * había daba 2,29:1.
+         */}
+        <span className="ml-auto text-xs text-slate-600">
           Procesado en {(elapsed / 1000).toFixed(1)}s · Confianza {Math.round(result.confidence * 100)}%
         </span>
       </div>
@@ -327,6 +341,54 @@ function ResultPanel({ result, elapsed }: { result: ExtractedClaim; elapsed: num
 // ── Main component ────────────────────────────────────────────────────────────
 
 type Stage = "idle" | "loading" | "done" | "error";
+
+/**
+ * Lo único que un lector de pantalla escucha de esta pantalla.
+ *
+ * /demo es pública y anónima, y es el primer contacto de un prospecto con el
+ * producto. Entre el clic y el resultado hay una llamada al modelo sin techo
+ * bajo —la propia pantalla imprime «Procesado en X,Xs»— y durante esos
+ * segundos acá no había una sola región viva, contra cuarenta y pico de
+ * `role="status"` y `role="alert"` en el resto del producto. Eran varios
+ * segundos de nada, y el resultado aparecía sin que nadie lo dijera.
+ *
+ * El error va aparte, con `role="alert"` en el panel rojo que ya existe. Por
+ * eso acá devuelve cadena vacía: el mismo texto en los dos lugares se
+ * anunciaría dos veces.
+ */
+function anuncioDeEtapa(
+  stage: Stage,
+  result: ExtractedClaim | null,
+  elapsed: number
+): string {
+  if (stage === "loading") {
+    return "Analizando el email con IA. Puede demorar unos segundos.";
+  }
+  if (stage !== "done" || !result) return "";
+
+  const tipo = result.extracted_fields?.claim_type
+    ? (CLAIM_TYPE_LABELS[result.extracted_fields.claim_type] ??
+      String(result.extracted_fields.claim_type).toUpperCase())
+    : null;
+  const campos = Object.values(result.extracted_fields ?? {}).filter(Boolean).length;
+  const faltantes = result.missing_fields?.length ?? 0;
+
+  return [
+    "Análisis listo.",
+    // Espeja el cartel visible, que dice «No es siniestro» con `!is_claim`.
+    // Si acá se usara `is_claim === false`, con `is_claim` en null la voz
+    // diría una cosa y la pantalla otra.
+    result.is_claim
+      ? (tipo ? `Tipo ${tipo}.` : "Es un siniestro.")
+      : "No es un siniestro.",
+    `${campos} ${campos === 1 ? "campo extraído" : "campos extraídos"}.`,
+    faltantes > 0
+      ? `${faltantes} ${faltantes === 1 ? "campo faltante" : "campos faltantes"}.`
+      : "Sin campos faltantes.",
+    `Confianza ${Math.round(result.confidence * 100)} por ciento.`,
+    `En ${(elapsed / 1000).toFixed(1)} segundos.`,
+  ].join(" ");
+}
 
 export function DemoPublic() {
   const [activeExample, setActiveExample] = useState<ExampleKey>("choque");
@@ -403,7 +465,7 @@ export function DemoPublic() {
           </button>
         ))}
         <span className="text-slate-300 mx-1">|</span>
-        <span className="text-xs text-slate-400">o pegá tu propio email</span>
+        <span className="text-xs text-slate-600">o pegá tu propio email</span>
       </div>
 
       {/* Two-column grid */}
@@ -459,7 +521,7 @@ export function DemoPublic() {
             {(stage === "done" || stage === "error") && (
               <button
                 onClick={handleReset}
-                className="text-sm text-slate-400 hover:text-slate-600 underline"
+                className="text-sm text-slate-600 hover:text-slate-900 underline"
               >
                 Limpiar
               </button>
@@ -469,12 +531,26 @@ export function DemoPublic() {
 
         {/* Right: results */}
         <div>
+          {/*
+            Persistente a propósito: siempre está en el DOM y lo que cambia es
+            su texto. Un `role="status"` que se monta junto con su contenido no
+            se anuncia de forma confiable, y acá el contenido llega justo cuando
+            aparecería el nodo.
+
+            Y no va sobre el panel de resultados: sus tarjetas se montan
+            escalonadas, así que una región viva encima leería las trece de a
+            una.
+          */}
+          <p role="status" aria-live="polite" className="sr-only">
+            {anuncioDeEtapa(stage, result, elapsed)}
+          </p>
+
           {stage === "idle" && (
-            <div className="flex h-full min-h-72 items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-white/60">
+            <div className="flex h-full min-h-72 items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-[var(--card-bg)]/60">
               <div className="text-center">
                 <div className="text-3xl mb-3">🤖</div>
                 <p className="text-sm font-medium text-slate-500">Seleccioná un ejemplo o pegá un email</p>
-                <p className="text-xs text-slate-400 mt-1">y hacé clic en &quot;Analizar con IA&quot;</p>
+                <p className="text-xs text-slate-500 mt-1">y hacé clic en &quot;Analizar con IA&quot;</p>
               </div>
             </div>
           )}
@@ -484,13 +560,19 @@ export function DemoPublic() {
               <div className="text-center">
                 <Spinner size={8} />
                 <p className="mt-3 text-sm font-semibold text-slate-700">Procesando con Gemini...</p>
-                <p className="mt-1 text-xs text-slate-400">Extrayendo campos del siniestro</p>
+                <p className="mt-1 text-xs text-slate-500">Extrayendo campos del siniestro</p>
               </div>
             </div>
           )}
 
+          {/*
+            El 429 del tope por IP —cinco por hora— llegaba hasta acá con su
+            mensaje y se quedaba en píxeles rojos. `role="alert"` es lo que usa
+            el resto del producto para lo mismo, y se anuncia al insertarse, que
+            es justamente el caso que `status` no garantiza.
+          */}
           {stage === "error" && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-5">
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-5">
               <p className="text-sm font-semibold text-red-700">Error al analizar</p>
               <p className="mt-1 text-sm text-red-600">{errorMsg}</p>
             </div>

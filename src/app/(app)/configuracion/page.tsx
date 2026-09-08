@@ -155,7 +155,7 @@ export default async function ConfiguracionPage({
               {isAdmin ? (
                 <span className="font-mono text-sm font-medium text-slate-800">
                   {confidenceThreshold.toFixed(2)}
-                  <span className="ml-2 text-xs text-slate-400">
+                  <span className="ml-2 text-xs text-slate-500">
                     (ajustable vía variable CONFIDENCE_THRESHOLD)
                   </span>
                 </span>
@@ -169,7 +169,7 @@ export default async function ConfiguracionPage({
               {isAdmin ? (
                 <span className="font-mono text-sm font-medium text-slate-800">
                   USD {monthlyBudgetCap}
-                  <span className="ml-2 text-xs text-slate-400">
+                  <span className="ml-2 text-xs text-slate-500">
                     (configurado en el plan de despliegue)
                   </span>
                 </span>
@@ -181,7 +181,7 @@ export default async function ConfiguracionPage({
             </Field>
           </div>
           {!isAdmin && (
-            <p className="mt-3 text-xs text-slate-400">
+            <p className="mt-3 text-xs text-slate-500">
               Solo los administradores pueden modificar los umbrales de IA.
             </p>
           )}

@@ -304,7 +304,24 @@ export function CasesTable({
                     e.stopPropagation();
                     onDeleteMany([row.original.id]);
                   }}
-                  className="rounded p-1.5 text-slate-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                  /*
+                   * `opacity-0` esconde la papelera, pero NO la saca del
+                   * orden de tabulación. La fila también es tabulable, así
+                   * que recorrer la bandeja con teclado era fila, botón
+                   * invisible, fila, botón invisible: el foco caía en
+                   * «Eliminar caso» sin que se viera nada, ni el botón ni su
+                   * anillo, porque `opacity` apaga el elemento entero. Son
+                   * hasta cien controles destructivos invisibles intercalados
+                   * en el recorrido.
+                   *
+                   * Y `group-hover` compila adentro de `@media (hover: hover)`:
+                   * sin mouse no aparecía nunca, y se tabulaba igual.
+                   *
+                   * `focus-visible` la trae cuando el foco cae en ella;
+                   * `group-focus-within` cuando cae en la fila, que es el
+                   * mismo momento en que el mouse la revelaría.
+                   */
+                  className="rounded p-1.5 text-slate-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
                   aria-label={t("bandeja.delete")}
                   title={t("bandeja.delete")}
                 >

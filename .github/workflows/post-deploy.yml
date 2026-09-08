@@ -336,12 +336,21 @@ jobs:
   # está corriendo no es un presupuesto, es un sorteo. Y un rojo que sale por
   # sorteo se deja de mirar.
   #
-  # `always()` porque esto es orden y no dependencia: si el ensayo o el timbre
-  # fallan, la medición tiene que correr igual — de hecho ahí interesa más.
+  # `always()` porque esto es orden y no dependencia: si alguno falla, la
+  # medición tiene que correr igual — de hecho ahí interesa más.
+  #
+  # La primera versión de esto esperaba sólo al ensayo y al timbre, y quedó
+  # corta: el pen test también entra a la misma base —le pega a los endpoints
+  # de producción, y cada uno consulta— y seguía corriendo al mismo tiempo. La
+  # corrida de `fe1d0b8` volvió a pasarse del presupuesto con `búsqueda por
+  # texto` en 611 ms mientras el pen test estaba encima.
+  #
+  # La regla, entonces, es la simple: esta medición va ÚLTIMA. Si mañana
+  # aparece otro job que toque la base, va en esta lista.
   carga:
     name: Carga (lectura)
     runs-on: ubuntu-latest
-    needs: [smoke, rehearse, timbre]
+    needs: [smoke, rehearse, timbre, pentest, listas-parejas, permisos]
     if: always() && needs.smoke.result == 'success'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

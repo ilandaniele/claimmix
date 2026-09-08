@@ -24,6 +24,7 @@ export const enUS: Record<TranslationKey, string> = {
   "nav.operation": "Operation",
   "nav.demo": "Demo",
   "nav.principal": "Main navigation",
+  "nav.saltarAlContenido": "Skip to content",
   "nav.agente": "Agent",
   "nav.agenteBloqueado": "Only administrators can open the agent console.",
   "nav.facturacion": "Billing",

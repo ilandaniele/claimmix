@@ -25,6 +25,7 @@ export const esAR = {
   "nav.operation": "Operación",
   "nav.demo": "Demo",
   "nav.principal": "Navegación principal",
+  "nav.saltarAlContenido": "Saltar al contenido",
   "nav.agente": "Agente",
   "nav.agenteBloqueado": "Solo administradores pueden abrir la consola del agente.",
   "nav.facturacion": "Facturación",

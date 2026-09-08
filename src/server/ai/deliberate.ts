@@ -32,6 +32,7 @@ import { callGemini } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { describeTools, runTool, type ToolContext } from "@/server/ai/agent-tools";
 import { redactObject, redactString } from "@/lib/audit/redact";
+import { registrarConsumoDelModelo } from "@/server/ai/budget";
 
 export type AgentIntent =
   | "ask"
@@ -205,10 +206,17 @@ async function think(
         ? `\n\nLO QUE AVERIGUASTE:\n${transcript.join("\n")}`
         : "");
 
-    const { text } = await callGemini(
+    const { text, usage, model } = await callGemini(
       prompt,
       "Decidí qué corresponde hacer con este mensaje y devolvé el JSON pedido."
     );
+
+    // Antes del `if (!text)`, y ADENTRO del bucle: una respuesta inservible
+    // se pagó igual, y una consulta a una herramienta gasta una pasada entera
+    // que no es la que trae el plan. Registrar sólo la última contaría una de
+    // cuatro.
+    await registrarConsumoDelModelo(input.tenantId, model, usage);
+
     if (!text) return { plan: null, toolCalls, lookupResults: transcript };
 
     const parsed = JSON.parse(text) as Record<string, unknown>;

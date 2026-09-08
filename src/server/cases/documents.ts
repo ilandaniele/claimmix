@@ -27,6 +27,7 @@ import { claimAttachments, missingDocs, requiredDocsConfig } from "@/lib/db/sche
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { registrarConsumoDelModelo } from "@/server/ai/budget";
 
 /**
  * Register the documents this kind of claim needs.
@@ -177,7 +178,7 @@ export async function reconcileAttachments(
       const remaining = pending.filter((k) => !satisfied.has(k));
       if (remaining.length === 0) break;
 
-      const key = await identifyDocument(attachment, remaining, claimTypeLabel);
+      const key = await identifyDocument(tenantId, attachment, remaining, claimTypeLabel);
       if (key) {
         satisfied.add(key);
         marcados.push([attachment.id, key]);
@@ -294,6 +295,7 @@ async function unmatchedAttachments(
  * enough.
  */
 async function identifyDocument(
+  tenantId: string,
   attachment: AttachmentRow,
   pending: string[],
   claimTypeLabel: string | null
@@ -324,13 +326,19 @@ Devolvé JSON: {"doc_key": "<clave exacta de la lista>" | null}`;
       ? await inlineFor(attachment)
       : undefined;
 
-    const { text } = await callGemini(
+    const { text, usage, model } = await callGemini(
       prompt,
       "Mirá el archivo y respondé con la clave del documento, o null.",
       undefined,
       undefined,
       media ? [media] : undefined
     );
+
+    // La llamada más cara que hace el producto: el adjunto viaja entero en
+    // `inlineData`, así que una foto son miles de tokens de ENTRADA. Era la
+    // que más pesaba y la que menos rastro dejaba.
+    await registrarConsumoDelModelo(tenantId, model, usage);
+
     if (!text) return null;
 
     const parsed = JSON.parse(text) as { doc_key?: unknown };
@@ -437,7 +445,7 @@ export async function resolveDeclinedDocs(
     if (pending.length === 0) return;
     if (!MIGHT_BE_DECLINING.test(said)) return;
 
-    const declined = await identifyDeclined(said, pending);
+    const declined = await identifyDeclined(tenantId, said, pending);
     if (declined.length === 0) return;
 
     await enTenant(tenantCtx, (db) =>
@@ -493,7 +501,11 @@ function normalize(text: string): string {
  * Closed question, known answer set — the kind a model is reliable at. Anything
  * it returns that we were not waiting for is dropped.
  */
-async function identifyDeclined(said: string, pending: string[]): Promise<string[]> {
+async function identifyDeclined(
+  tenantId: string,
+  said: string,
+  pending: string[]
+): Promise<string[]> {
   const options = pending
     .map((key) => `- ${key}: ${labelForField(key).label}`)
     .join("\n");
@@ -527,10 +539,13 @@ Devolvé JSON:
 Lista vacía si no niega ninguno.`;
 
   try {
-    const { text } = await callGemini(
+    const { text, usage, model } = await callGemini(
       prompt,
       "Respondé sólo con las claves de los documentos que la persona dice no tener."
     );
+
+    await registrarConsumoDelModelo(tenantId, model, usage);
+
     if (!text) return [];
 
     const parsed = JSON.parse(text) as { declined?: unknown };

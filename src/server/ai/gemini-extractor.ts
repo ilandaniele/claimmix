@@ -55,6 +55,27 @@ const DEFAULT_GEMINI_RETRY_BASE_MS =
   process.env.NODE_ENV === "test" ? 0 : 1_000;
 const DEFAULT_GEMINI_MAX_RETRIES = 3;
 
+/**
+ * Cuánto se espera una respuesta antes de darla por perdida.
+ *
+ * No es 60/3. Es unas dos veces la llamada sana más lenta que hay medida:
+ * en el ensayo del 2026-08-20 hubo 23 extracciones reales, la más rápida
+ * 3,0 s, la mediana 6,5 s y la más lenta 9,0 s. La única que se fue a 32 s
+ * trajo `completion_tokens: 8192` —el tope— así que no era lenta: era una
+ * respuesta desbocada, la misma que rechaza la guarda de MAX_TOKENS.
+ *
+ * Hasta acá no había corte ninguno: el default de undici son 300 s, cinco
+ * veces el `maxDuration` de 60 s que `vercel.json` le da al webhook y al
+ * worker. O sea que Vercel mataba la función ANTES de que el `catch` que
+ * escala el caso llegara a correr: el caso quedaba como estaba, la persona
+ * sin respuesta, y la única red era el lease de tres minutos más un
+ * barredor que en la práctica pasa en horas.
+ *
+ * En 0 no se corta nada. Está para el ensayo y para una emergencia, no
+ * para producción.
+ */
+const DEFAULT_GEMINI_TIMEOUT_MS = 20_000;
+
 let geminiRequestQueue: Promise<void> = Promise.resolve();
 let lastGeminiRequestAt = 0;
 
@@ -139,6 +160,13 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
     DEFAULT_GEMINI_MAX_RETRIES,
     5
   );
+  // El tope es 55 s a propósito: un corte más largo que la función (60 s en
+  // vercel.json) no corta nada, sólo lo mira desde afuera.
+  const timeoutMs = getNumberEnv(
+    "GEMINI_TIMEOUT_MS",
+    DEFAULT_GEMINI_TIMEOUT_MS,
+    55_000
+  );
 
   let lastNetworkError: unknown;
 
@@ -152,8 +180,42 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
     // repeatedly in a single afternoon of rehearsals.
     let res: Response;
     try {
-      res = await fetch(url, init);
+      res = await fetch(url, {
+        ...init,
+        ...(timeoutMs > 0 ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+      });
     } catch (err) {
+      /*
+       * Un corte por tiempo no se reintenta acá.
+       *
+       * Una conexión que se cae falla en milisegundos y volver a intentarla
+       * sale gratis; eso es lo que justifica el bucle de abajo. Esperar 20 s
+       * cuatro veces son 80 s contra una función de 60: el reintento
+       * garantizaría justo lo que este corte viene a evitar.
+       *
+       * El reintento que corresponde es el del extractor, que además manda
+       * una corrección. Se tira con code TIMEOUT y no como error de red
+       * porque son cosas distintas: un `fetch` abortado rechaza con un
+       * DOMException de `name: TimeoutError` y `cause` vacío, así que el
+       * `cause.code` de abajo lo registraría como «network» y quedaría
+       * indistinguible de un socket caído.
+       */
+      if ((err as { name?: string })?.name === "TimeoutError") {
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            service: "claimmix",
+            msg: "ai.transport_timeout",
+            attempt: attempt + 1,
+            timeout_ms: timeoutMs,
+          })
+        );
+        throw new GeminiExtractionError(
+          `El modelo no contestó en ${timeoutMs} ms`,
+          { code: "TIMEOUT" }
+        );
+      }
+
       lastNetworkError = err;
       if (attempt >= maxRetries) break;
       console.warn(
@@ -250,7 +312,7 @@ export async function callGemini(
   modelOverride?: string,
   /** Images or documents to look at alongside the text. */
   media?: InlineMedia[]
-): Promise<{ text: string | null; usage: GeminiUsage }> {
+): Promise<{ text: string | null; usage: GeminiUsage; model: string }> {
   const vertex = isVertexTransport();
   // Vertex has its own model catalog (no *-latest aliases) — never forward the
   // AI-Studio-flavoured model name to it, it would 404.
@@ -368,12 +430,24 @@ export async function callGemini(
       ?.map((p) => p.text ?? "")
       .join("") ?? null;
 
+  /*
+   * Devuelve el modelo, y no es adorno.
+   *
+   * Lo resuelve esta misma función —`getVertexModel()` o el override— y
+   * quien la llama sin pasar override no tiene cómo saberlo. Sin esto, el
+   * que quiera registrar el consumo tiene que adivinar el nombre, y
+   * `ratesFor` cobra POR NOMBRE: un nombre que no coincide cae al precio de
+   * otro modelo y el costo sale a la mitad. Un tope en dólares calculado
+   * con el precio equivocado es la misma clase de defecto que un costo en
+   * cero, con más pasos.
+   */
   return {
     text: text && text.trim() ? text : null,
     usage: {
       promptTokens: data.usageMetadata?.promptTokenCount ?? 0,
       completionTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
     },
+    model,
   };
 }
 
@@ -471,7 +545,14 @@ export async function extractEmailClaimGemini(
     const latency1 = Date.now() - t1;
     const meta = errMeta(e);
     lastErrMeta = meta;
-    const errStatus = meta.status === 429 ? "rate_limited" : "error";
+    // `timeout` ya estaba previsto en la columna desde el día uno y nunca se
+    // escribió, porque no había nada que cortara por tiempo.
+    const errStatus =
+      meta.code === "TIMEOUT"
+        ? "timeout"
+        : meta.status === 429
+          ? "rate_limited"
+          : "error";
     if (tenantId) {
       await logProviderUsage({
         tenantId, provider: "gemini", model, operation: "email_extraction",
@@ -556,7 +637,13 @@ export async function extractEmailClaimGemini(
       const latency2 = Date.now() - t2;
       const meta = errMeta(e);
       lastErrMeta = meta;
-      const errStatus2 = meta.status === 429 ? "rate_limited" : "error";
+      // Idem el primer intento: un corte por tiempo se registra como tal.
+      const errStatus2 =
+        meta.code === "TIMEOUT"
+          ? "timeout"
+          : meta.status === 429
+            ? "rate_limited"
+            : "error";
       if (tenantId) {
         await logProviderUsage({
           tenantId, provider: "gemini", model, operation: "email_extraction",

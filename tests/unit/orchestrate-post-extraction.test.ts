@@ -3079,3 +3079,105 @@ describe("orchestratePostExtraction — el valor del padrón llega al pedido", (
     );
   });
 });
+
+// ── Un mensaje por vuelta ─────────────────────────────────────────────────────
+
+describe("orchestratePostExtraction — la derivación no manda un segundo mensaje", () => {
+  /*
+   * El caso real: escribe un familiar del titular.
+   *
+   * El padrón le encuentra la póliza y no le coinciden ni el nombre ni el
+   * documento, así que sale el pedido de confirmación —correcto, es AC7/AC9—.
+   * Después el agente delibera, ve que el titular no coincide, y decide bien
+   * que esto lo tiene que mirar una persona.
+   *
+   * Los dos mensajes son razonables. Juntos son el problema: al asegurado le
+   * llegaban con segundos de diferencia, uno pidiéndole que conteste cuál dato
+   * es el correcto y el otro diciéndole que espere a que lo llamen.
+   *
+   * Lo encontró el ensayo, dos corridas seguidas. Estas pruebas son la versión
+   * barata: corren sin modelo y sin red.
+   */
+  function conflictoDeTitular(): CustomerMatch {
+    return {
+      customerId: "cust-003",
+      matchType: "policy_number",
+      storedValues: {},
+      confidence: 0.9,
+      customerName: "Roberto Paz",
+      conflictsWithExtracted: ["full_name"],
+    };
+  }
+
+  function claimDeUnFamiliar() {
+    return extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "full_name"),
+        { field_key: "full_name", field_value: "Lucía Paz", confidence: 0.93, source: "ai" as const },
+      ],
+    });
+  }
+
+  beforeEach(() => {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "escalate",
+      reasoning: "el titular de la póliza no es quien escribe",
+      askFor: [],
+      resolved: [],
+    } as unknown as Awaited<ReturnType<typeof deliberate>>);
+  });
+
+  it("le llega el pedido de confirmación y NADA más", async () => {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claimDeUnFamiliar(), senderEmail: SENDER_EMAIL },
+      [conflictoDeTitular()]
+    );
+
+    const templates = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.map((c) => c[0].template);
+
+    expect(templates).toContain("data_confirmation_request");
+    expect(templates).not.toContain("specialist_escalation");
+    expect(templates).toHaveLength(1);
+  });
+
+  it("pero la derivación ocurre igual: queda registrada", async () => {
+    // Lo que se suprime es el mensaje al asegurado, no la derivación. Sin esto,
+    // «un mensaje por vuelta» se podría cumplir no derivando nunca.
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claimDeUnFamiliar(), senderEmail: SENDER_EMAIL },
+      [conflictoDeTitular()]
+    );
+
+    const derivacion = vi
+      .mocked(writeAuditLog)
+      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
+
+    expect(derivacion).toBeDefined();
+    expect(derivacion?.[0].payload).toMatchObject({
+      reason: "el titular de la póliza no es quien escribe",
+    });
+  });
+
+  it("y sin conflicto previo, la derivación sí le escribe", async () => {
+    // La supresión es condicional, no un apagado. Alguien que no recibió nada
+    // en esta vuelta tiene que enterarse de que su caso pasó a una persona.
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const templates = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.map((c) => c[0].template);
+
+    expect(templates).toContain("specialist_escalation");
+  });
+});

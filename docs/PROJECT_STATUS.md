@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-07. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-08. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -1744,6 +1744,96 @@ Gmail, que nadie consulta `/api/health`, los KPIs de la bandeja, el mensaje de
 cierre duplicado, la pantalla de caso que dice «no existe» ante un error de
 base, el adjunto de WhatsApp que se bufferea entero antes de mirar el tamaño, y
 siete de accesibilidad.
+
+### 🧯 El día que casi todas las guardas resultaron ser adornos (2026-09-08)
+
+Doce cambios en un día, y once de ellos son la misma forma: **algo que decía
+estar vigilando y no vigilaba nada**. Vale la pena leerlos juntos, porque la
+lección no está en ninguno por separado.
+
+| lo que prometía | lo que hacía |
+|---|---|
+| `check-architecture.mjs` — guarda contra fugas entre inquilinos | no corría en CI: vivía sólo en `pnpm verify` y `pnpm listo` |
+| `find-raw-db.mjs` — encuentra consultas fuera de la capa | sólo veía `db.select(`; no `db.query.*` ni `getDb().*` |
+| `pnpm peso` — «cuánto le llega al navegador» | medía JavaScript, y los 145,9 KB de la bandeja no eran JavaScript |
+| `replyFor` del timbre — «el agente contestó» | dejaba de mirar a los 20 s, con tres llamadas al modelo por delante |
+| `reap-stuck` — la red del intake real | filtraba `procesando`, un estado que los casos reales no tienen |
+| `Carga (lectura)` — presupuesto de p95 | medía a sus hermanos: ensayo y timbre en la misma base |
+| el encabezado de `gmail-poller` | decía «fire-and-forget» y esperaba al worker |
+
+Y dos que escribí yo mismo ese día, con el mismo defecto: una prueba que
+afirmaba sobre `\n` a mano y no coincidía nunca en Windows —pasaba sin
+comprobar nada, y fallaba recién en CI— y un `echo "[tsc $?]"` que leía la
+salida de `head` y no la de `tsc`, así que informé «tsc 0» dos veces con
+errores en pantalla.
+
+**El costo real de esto no es el defecto, es el rojo que no significa nada.**
+Tres post-deploy seguidos en rojo con el sistema sano —el agente había
+contestado las tres veces, 1,1 / 4,8 / 6,2 s después de que el guión dejara de
+mirar— y en el medio acusé al PR #68 de una regresión que no existía, antes de
+mirar el `audit_log`. El `waitForCase` de ese mismo archivo ya tenía escrito el
+comentario de la vez anterior que pasó lo mismo, el 1º de septiembre.
+
+#### Lo que cambió de comportamiento, no de vigilancia
+
+- **El correo pasa por el mismo redactor que WhatsApp.** Un asegurado recibió
+  un mail que abría «gracias por tu reclamo.», en minúscula: por mail salía la
+  plantilla determinista y por WhatsApp `composeReply`. Mismo cerebro, dos
+  productos.
+- **El mail de conflicto volvió a decir los dos valores.** La revisión
+  adversarial del propio PR encontró que `writeReply` mapeaba `fields` desde
+  `data.missingFields` y la rama de conflictos manda `data.fields`: el redactor
+  recibía «señalá la diferencia entre los dos valores» sin ningún valor, y nada
+  lo frenaba porque la verificación de campos caídos sólo corría para `ask`.
+  Es AC7 y AC9.
+- **Un mensaje por vuelta.** Un familiar del titular recibía el pedido de
+  confirmación y, segundos después, «tu reclamo fue asignado a un especialista»
+  — uno le pide que conteste y el otro que espere. La derivación por
+  deliberación era el único emisor que no consultaba
+  `confirmationEmailDispatched`.
+- **AC24 se sostiene donde se puede sostener.** El enmascarado lo hacía la
+  plantilla al renderizar, o sea DESPUÉS; con la prosa del modelo reemplazando
+  el cuerpo eso dejó de estar en el camino. Ahora se enmascara lo que ENTRA al
+  prompt: un modelo no repite un número que nunca vio.
+- **El poller larga la extracción y sigue.** Esperaba al worker con `await
+  fetch`, gastando su techo de 60 s en el trabajo de otra función con su propio
+  techo de 60 s. Los dos se morían juntos: 504 y un caso con los campos
+  extraídos y sin respuesta.
+- **La bandeja manda 29,1 KB y no 145,9 KB.** Pasaba los 163 escenarios
+  completos como prop a un componente de cliente, para dibujar un desplegable.
+
+#### Lo que quedó comprobado contra la base, no contra el archivo
+
+- `idx_ai_usage_tenant_cubridor` **no está** en producción (`pg_indexes`), y el
+  reparto que motivó sacarlo sigue igual: 9.896 filas, 2 inquilinos, 9.891 / 5.
+- Los 62 hallazgos de la auditoría pasaron por verificación adversarial de dos
+  lentes: **116 veredictos**, 36 refutados, 26 en pie, 23 distintos.
+- Antes de tocar el barredor: 356 casos reales salieron de `recibido` con
+  **mediana de 8 s**; 0 en `procesando`; **1 en `recibido` de hacía más de un
+  día**. Después del arreglo, disparado a mano:
+  `{"ok":true,"reaped":1,"caseIds":["e8520a83…"]}` y `recibido` vacío. Ese caso
+  era una persona que escribió y no recibió nunca una respuesta.
+
+#### Lo que NO se hizo, y por qué
+
+- **Tres de las cuatro consultas del tablero recorren `cases` entera** (Seq
+  Scan). Con 484 casos no se nota; el reporte de `pnpm load` lo imprime en cada
+  corrida para cuando sí. Es otro cambio, con su propia medición.
+- **`renderConflict` de WhatsApp muestra los valores sin enmascarar**, y
+  siempre lo hizo — AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee
+  un asegurado: es una decisión de producto.
+- **El barredor no corre cada quince minutos en la práctica.** El `schedule`
+  dice `*/15`, y las corridas reales del 8 de septiembre fueron 11:42, 15:22 y
+  18:55. GitHub demora las tareas programadas cuando está cargado, cosa que el
+  propio encabezado del workflow admite. Un caso trabado se ve en horas, no en
+  media hora. Mejor que nunca, que es lo que era hasta ese día.
+- **Quedan once puntos del informe de verificación**, en su orden: timeouts de
+  proveedor, la mayoría de las llamadas al modelo sin registrar, la marca de
+  agua del poller de Gmail, la reentrega que trata el 200 como leído, que nadie
+  consulta `/api/health`, los KPIs de la bandeja, el mensaje de cierre
+  duplicado, la pantalla de caso que dice «no existe» ante un error de base, el
+  adjunto de WhatsApp que se bufferea entero antes de mirar el tamaño, y siete
+  de accesibilidad.
 
 ### 🙋 Waiting on you (not code)
 

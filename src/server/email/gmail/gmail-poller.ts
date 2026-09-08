@@ -40,6 +40,7 @@
  * GMAIL_TENANT_ID env var OR the sentinel UUID '00000000-0000-0000-0000-000000000000'.
  */
 
+import { after } from "next/server";
 import "server-only";
 import { db } from "@/lib/db";
 import { cases, claimAttachments, claimMessages } from "@/lib/db/schema";
@@ -174,10 +175,49 @@ function resolveTenantId(): string | null {
   return MVP_SENTINEL_TENANT_ID;
 }
 
+/**
+ * Larga la extracción y sigue. El encabezado de este archivo dice
+ * «fire-and-forget» desde siempre; el código la esperaba.
+ *
+ * ── Qué costaba esperarla ──────────────────────────────────────────────────
+ *
+ * `/api/worker/extract` corre `runIntakeAgent` entero y recién ahí contesta,
+ * y tiene su propio techo de 60 s. El poller lo esperaba con `await fetch`,
+ * o sea que gastaba SU techo de 60 s en el trabajo del otro. Los dos se
+ * morían juntos.
+ *
+ * Pasó el 2026-09-08 con el correo del timbre: el poller devolvió 504 a los
+ * sesenta segundos exactos, y el caso quedó con los campos extraídos y sin
+ * un solo evento después de `intake.agent_decision`. Al asegurado no le
+ * contestó nadie. En WhatsApp, que ya usaba `after()`, el mismo minuto
+ * anduvo bien.
+ *
+ * ── Por qué `after()` y no soltar la promesa ───────────────────────────────
+ *
+ * Soltarla sin esperarla no sirve: la plataforma congela la función en
+ * cuanto el handler devuelve, y el pedido se puede perder antes de salir.
+ * `after()` es lo que mantiene viva la invocación DESPUÉS de responder, y es
+ * lo mismo que hace el webhook de WhatsApp.
+ *
+ * El worker es otra invocación, con su propio reloj: que a este poller se le
+ * acabe el tiempo ya no lo interrumpe.
+ *
+ * Fuera de un pedido —una prueba, un script— `after()` tira, y ahí se espera
+ * como antes. Es lo que quiere una prueba: que al terminar la llamada el
+ * trabajo esté hecho.
+ */
 async function dispatchExtractionWorker(
   caseId: string,
   tenantId: string
 ): Promise<void> {
+  try {
+    after(() => llamarAlWorker(caseId, tenantId));
+  } catch {
+    await llamarAlWorker(caseId, tenantId);
+  }
+}
+
+async function llamarAlWorker(caseId: string, tenantId: string): Promise<void> {
   try {
     const response = await fetch(`${getWorkerBaseUrl()}/api/worker/extract`, {
       method: "POST",

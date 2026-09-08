@@ -370,6 +370,8 @@ async function writeReply(
   channel: "email" | "whatsapp"
 ): Promise<string> {
   return composeReply({
+    // Cubre los tres mensajeros y el ensayo: los tres pasan por acá.
+    tenantId: message.tenantId,
     intent: intentFor(message.template),
     channel,
     fields: Array.isArray(message.data.missingFields)

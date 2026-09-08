@@ -457,3 +457,46 @@ export async function recordUsage(
     console.error("[budget] Exception recording AI usage:", name);
   }
 }
+
+/**
+ * El consumo de una llamada al modelo que no es la extracción.
+ *
+ * `recordUsage` existe desde el principio y la única que lo llamaba era la
+ * extracción. Todo lo demás que habla con Gemini no dejaba rastro:
+ * `deliberate` hace hasta cuatro llamadas por mensaje entrante, `composeReply`
+ * hasta dos, y reconocer un adjunto una por archivo —ésa mandando la foto
+ * entera adentro del prompt—. Contra una o dos de extracción, que eran las
+ * únicas que se anotaban: `ai_usage` veía entre un cuarto y un tercio del
+ * gasto.
+ *
+ * Los tres topes leen esa tabla, y `/api/admin/billing` calcula el costo de
+ * IA y el MARGEN con ella. O sea que el techo no cortaba cuando tenía que
+ * cortar, y el margen que muestra la pantalla es sistemáticamente alto.
+ *
+ * Sin usuario a propósito. Estas llamadas las dispara un mensaje que entró
+ * por el webhook, no una persona sentada en la aplicación: no hay a quién
+ * atribuirlas y `null` es la verdad. El cupo por usuario no las cuenta; el
+ * del inquilino y el mensual, sí, que es donde faltaban.
+ */
+export async function registrarConsumoDelModelo(
+  tenantId: string,
+  model: string,
+  usage: { promptTokens?: number; completionTokens?: number } | undefined
+): Promise<void> {
+  // `usage` puede venir incompleto —Gemini omite `usageMetadata` a veces, y
+  // las pruebas que simulan el modelo devuelven `usage: {}`—. `undefined <= 0`
+  // es false, así que sin normalizar acá entrarían tokens `undefined` al
+  // INSERT.
+  const prompt = Math.max(0, Math.trunc(usage?.promptTokens ?? 0));
+  const completion = Math.max(0, Math.trunc(usage?.completionTokens ?? 0));
+  if (prompt === 0 && completion === 0) return;
+
+  await recordUsage(
+    tenantId,
+    null,
+    model,
+    prompt,
+    completion,
+    computeCostUsd(prompt, completion, model)
+  );
+}

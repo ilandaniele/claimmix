@@ -21,6 +21,7 @@ import "server-only";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
+import { registrarConsumoDelModelo } from "@/server/ai/budget";
 
 export type ReplyIntent =
   | "ask" // we need things from them
@@ -32,6 +33,14 @@ export type ReplyIntent =
 export interface ComposeReplyInput {
   intent: ReplyIntent;
   channel: "email" | "whatsapp";
+  /**
+   * De quién es este gasto.
+   *
+   * Obligatorio y no opcional a propósito: un campo opcional es cómo esto
+   * se pudre de vuelta —el próximo que llame lo omite, la fila desaparece y
+   * no falla nada—. Requerido, lo pide el compilador.
+   */
+  tenantId: string;
   /** Field keys we are asking about, in the order the orchestrator chose. */
   fields?: string[];
   /** Values we already hold for some of those fields. */
@@ -288,10 +297,14 @@ Tu intento anterior fue rechazado por: ${explain(previousProblem)}
 Corregilo y devolvé el mensaje entero de nuevo.`
     : "";
 
-  const { text } = await callGemini(
+  const { text, usage, model } = await callGemini(
     buildPrompt(input) + correction,
     "Escribí el mensaje y devolvelo como JSON."
   );
+
+  // Acá y no en `composeReply`: el reintento tras una guarda rechazada es
+  // una segunda llamada, facturada igual que la primera.
+  await registrarConsumoDelModelo(input.tenantId, model, usage);
   if (!text) return { ok: false, problem: "no_output" };
 
   const parsed = JSON.parse(text) as { message?: unknown };

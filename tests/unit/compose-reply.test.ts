@@ -27,6 +27,9 @@ function base(over: Partial<Parameters<typeof composeReply>[0]> = {}) {
   return {
     intent: "ask" as const,
     channel: "whatsapp" as const,
+    // De quien es el gasto. Requerido desde que composeReply registra su
+    // consumo: las llamadas del redactor no aparecian en `ai_usage`.
+    tenantId: "10000000-0000-0000-0000-000000000001",
     fallback: FALLBACK,
     ...over,
   };

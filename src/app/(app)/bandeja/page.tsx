@@ -26,6 +26,7 @@ import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 import { Card, KpiTile } from "../_components/ui";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
+import { kpisDeLaBandeja } from "@/core/case/kpis-de-la-bandeja";
 
 const VALID_STATUSES: CaseStatus[] = [
   "procesando",
@@ -182,13 +183,21 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     ...VALID_STATUSES.map((s) => ({ status: s, count: cuenta.get(s) ?? 0 })),
   ];
 
-  const criticalCount = allStatusCounts.find(s => s.status === "escalado")?.count ?? 0;
-  const pendingCount =
-    (allStatusCounts.find(s => s.status === "esperando")?.count ?? 0) +
-    (allStatusCounts.find(s => s.status === "info_faltante")?.count ?? 0);
-  const resolvedCount =
-    (allStatusCounts.find(s => s.status === "listo")?.count ?? 0) +
-    (allStatusCounts.find(s => s.status === "cerrado")?.count ?? 0);
+  /*
+   * Los tres de arriba salen de los conjuntos canónicos, no de nombres
+   * sueltos escritos acá.
+   *
+   * Estaban contra el vocabulario del flujo simulado: `escalado` sin
+   * `requiere_especialista`, y `listo` sin `listo_para_core` ni
+   * `enviado_a_core`, que es donde termina todo caso completado por mail o
+   * por WhatsApp. La baldosa que existe para decir «esto necesita a alguien»
+   * no contaba los siniestros derivados a un especialista, que es
+   * literalmente su definición.
+   */
+  const kpis = kpisDeLaBandeja(allStatusCounts);
+  const criticalCount = kpis.escalados;
+  const pendingCount = kpis.esperando;
+  const resolvedCount = kpis.resueltos;
 
   return (
     <div className="flex h-full flex-col">

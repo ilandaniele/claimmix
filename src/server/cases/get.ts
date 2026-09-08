@@ -79,7 +79,29 @@ export async function fetchCaseRow(
         db.select().from(cases).where(eq(cases.id, caseId)).limit(1)
       )
     );
-  } catch {
+  } catch (err) {
+    /*
+     * `null` es el ÚNICO camino al 404 de la pantalla del caso.
+     *
+     * Que degrade está decidido y tiene pruebas: una consulta que falla no
+     * tira abajo la pantalla entera. Que el log sea mudo no era parte de esa
+     * decisión. Cuando el rol de base quedó sin autenticar unos minutos —al
+     * rotar la contraseña—, cada analista vio «El caso no existe» y en los
+     * registros de esos minutos no había una sola línea con qué correlacionarlo.
+     * El reporte que llega es «desaparecieron todos mis casos».
+     *
+     * No cambia lo que devuelve. Sólo deja de ser mudo.
+     */
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "cases.fetchCaseRow.query_failed",
+        error_code:
+          (err as { code?: string })?.code ??
+          (err instanceof Error ? err.name : "UnknownError"),
+      })
+    );
     return null;
   }
 }
@@ -110,7 +132,21 @@ export async function fetchExtractedFields(
         .where(eq(extractedFields.case_id, caseId))
         .orderBy(asc(extractedFields.extracted_at))
     )) as ExtractedFieldRow[];
-  } catch {
+  } catch (err) {
+    // Degrada a propósito —la pantalla no se cae porque falle una consulta—
+    // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
+    // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
+    // persona no mandó nada.
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "cases.fetchExtractedFields.query_failed",
+        error_code:
+          (err as { code?: string })?.code ??
+          (err instanceof Error ? err.name : "UnknownError"),
+      })
+    );
     return [];
   }
 }
@@ -128,7 +164,21 @@ export async function fetchMissingDocs(
         .where(eq(missingDocs.case_id, caseId))
         .orderBy(asc(missingDocs.requested_at))
     )) as MissingDocRow[];
-  } catch {
+  } catch (err) {
+    // Degrada a propósito —la pantalla no se cae porque falle una consulta—
+    // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
+    // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
+    // persona no mandó nada.
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "cases.fetchMissingDocs.query_failed",
+        error_code:
+          (err as { code?: string })?.code ??
+          (err instanceof Error ? err.name : "UnknownError"),
+      })
+    );
     return [];
   }
 }
@@ -182,7 +232,21 @@ export async function fetchAuditLog(
           ? String((f.payload as Record<string, unknown>).reason)
           : null,
     }));
-  } catch {
+  } catch (err) {
+    // Degrada a propósito —la pantalla no se cae porque falle una consulta—
+    // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
+    // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
+    // persona no mandó nada.
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "cases.fetchAuditLog.query_failed",
+        error_code:
+          (err as { code?: string })?.code ??
+          (err instanceof Error ? err.name : "UnknownError"),
+      })
+    );
     return [];
   }
 }

@@ -318,6 +318,27 @@ const WHATSAPP_TEMPLATE_NAMES: Record<string, string> = {
 };
 
 /**
+ * Cómo se llama esta plantilla en el libro, en todos los canales.
+ *
+ * El libro no guarda el mismo nombre para los dos: el mail escribe
+ * `confirmation_received` y WhatsApp `wa_confirmation_received` —el mapa de
+ * acá arriba, aplicado en `recordOutbound`—. Quien pregunte «¿esto ya
+ * salió?» tiene que preguntar por TODOS los nombres, y la guarda del cierre
+ * preguntaba sólo por el del mail: en WhatsApp, un caso ya completo podía
+ * recibir el cierre otra vez, porque la fila que lo tenía que frenar se
+ * llamaba distinto.
+ *
+ * Vive acá y no en el orquestador a propósito: el renombre pasa en este
+ * archivo, así que un canal nuevo que agregue su prefijo queda cubierto sin
+ * que nadie se acuerde de ir a tocar la guarda.
+ */
+export function nombresEnElLibro(template: EmailTemplate): string[] {
+  return [
+    ...new Set<string>([template, WHATSAPP_TEMPLATE_NAMES[template] ?? template]),
+  ];
+}
+
+/**
  * Turn the deterministic template into the message a person reads.
  *
  * The template is the floor: composeReply is asked to say the same thing

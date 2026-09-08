@@ -265,6 +265,46 @@ export const ESTADOS_ESCALADO: ReadonlySet<CaseStatus> =
   new Set<CaseStatus>(["escalado", "requiere_especialista"]);
 
 /**
+ * Los estados en los que la pelota la tiene el DENUNCIANTE.
+ *
+ * Es la baldosa «Esperando» de la bandeja, y su pie dice «Esperando al
+ * denunciante»: eso define quién entra. `info_faltante` es el del canal
+ * real —le pedimos por correo el dato que falta—; `esperando` es el mismo
+ * caso en el vocabulario del flujo simulado.
+ *
+ * `confirmacion_pendiente` NO entra, aunque el nombre invite: ahí la espera
+ * es NUESTRA, la de un analista que tiene que confirmar un campo de
+ * confianza media. Contar las dos esperas bajo un rótulo que promete una es
+ * cómo se arruina un tablero: el número sube y nadie sabe a quién hay que
+ * ir a buscar.
+ */
+export const ESTADOS_ESPERANDO_AL_DENUNCIANTE: ReadonlySet<CaseStatus> =
+  new Set<CaseStatus>(["esperando", "info_faltante"]);
+
+/**
+ * Los estados de un caso que ya no pide trabajo: la baldosa «Listos».
+ *
+ * NO es `ESTADOS_COMPLETADO_SIN_PERSONA`, y la diferencia es la pregunta:
+ *
+ *   · aquél — ¿lo terminó el agente solo? Es la tasa de las métricas, y por
+ *     eso `cerrado` no cuenta: adentro está el cierre por abandono, que es
+ *     lo contrario de completarse solo.
+ *   · éste  — ¿me lo puedo sacar del tablero? Un caso cerrado por abandono
+ *     tampoco pide trabajo. Y es lo que la baldosa YA contaba antes de este
+ *     cambio: usar el otro conjunto le bajaría el número, o sea arreglar un
+ *     contador rompiendo otro.
+ *
+ * `no_relevante` no entra: es el balde más grande de la base y no son
+ * denuncias resueltas sino mensajes que no eran denuncias. Sumarlos haría
+ * que «Listos» fuera la mayoría del tablero sin que nadie hubiera resuelto
+ * nada.
+ */
+export const ESTADOS_RESUELTOS: ReadonlySet<CaseStatus> = new Set<CaseStatus>([
+  ...ESTADOS_COMPLETADO_SIN_PERSONA,
+  "cerrado",
+]);
+
+/**
  * Statuses that the AI worker is allowed to set directly.
  * Enforces LLM08: AI cannot set terminal states or core-sync states.
  */

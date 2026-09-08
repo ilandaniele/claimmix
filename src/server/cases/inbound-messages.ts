@@ -99,7 +99,21 @@ export async function mensajesEntrantes(
       from_addr: m.from_addr ?? "",
       received_at: m.received_at,
     }));
-  } catch {
+  } catch (err) {
+    // Degrada a propósito —la pantalla no se cae porque falle una consulta—
+    // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
+    // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
+    // persona no mandó nada.
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "cases.inbound_messages.query_failed",
+        error_code:
+          (err as { code?: string })?.code ??
+          (err instanceof Error ? err.name : "UnknownError"),
+      })
+    );
     return [];
   }
 }

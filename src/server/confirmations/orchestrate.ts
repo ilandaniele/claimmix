@@ -64,7 +64,11 @@ import {
   isWorthConfirming,
   labelForClaimType,
 } from "@/lib/labels/claim-fields";
-import { emailMessenger, type AgentMessenger } from "@/server/confirmations/messenger";
+import {
+  emailMessenger,
+  nombresEnElLibro,
+  type AgentMessenger,
+} from "@/server/confirmations/messenger";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { redactObject } from "@/lib/audit/redact";
 
@@ -1682,8 +1686,12 @@ async function hasPriorOutbound(caseId: string, tenantId: string): Promise<boole
 }
 
 /**
- * Check whether a confirmation_received email has already been dispatched
- * for this case. Used to enforce the AC12 "always send, but only once" rule.
+ * ¿Ya salió el mensaje de cierre para este caso?
+ *
+ * Es la regla AC12: mandalo siempre, pero una sola vez. Preguntaba por el
+ * nombre del mail y nada más, así que en WhatsApp no frenaba nada: un
+ * analista tocaba «Re-analizar» sobre un caso ya completo y al asegurado
+ * le llegaba por segunda vez el mensaje de que su denuncia está lista.
  */
 async function checkConfirmationAlreadySent(
   caseId: string,
@@ -1699,7 +1707,12 @@ async function checkConfirmationAlreadySent(
         .where(
           and(
             eq(outboundMessages.case_id, caseId),
-            eq(outboundMessages.template, "confirmation_received")
+            // Los dos nombres: el mail guarda `confirmation_received` y
+            // WhatsApp `wa_confirmation_received`. Preguntando sólo por el
+            // primero, esta consulta devolvía 0 filas para todo caso de
+            // WhatsApp y la regla «mandalo siempre, pero una sola vez»
+            // quedaba viva sólo para correo.
+            inArray(outboundMessages.template, nombresEnElLibro("confirmation_received"))
           )
         )
         .limit(1)

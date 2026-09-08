@@ -127,7 +127,21 @@ async function fetchConfirmaciones(
       confidence: Number(f.confidence),
       status: aEstadoDeConfirmacion(f.status),
     }));
-  } catch {
+  } catch (err) {
+    // Degrada a propósito —la pantalla no se cae porque falle una consulta—
+    // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
+    // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
+    // persona no mandó nada.
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "cases.detail_view.query_failed",
+        error_code:
+          (err as { code?: string })?.code ??
+          (err instanceof Error ? err.name : "UnknownError"),
+      })
+    );
     return [];
   }
 }
@@ -153,7 +167,21 @@ async function fetchAdjuntos(
     );
 
     return filas.map((f) => ({ ...f, external_url: f.external_url ?? "" }));
-  } catch {
+  } catch (err) {
+    // Degrada a propósito —la pantalla no se cae porque falle una consulta—
+    // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
+    // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
+    // persona no mandó nada.
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "cases.detail_view.query_failed",
+        error_code:
+          (err as { code?: string })?.code ??
+          (err instanceof Error ? err.name : "UnknownError"),
+      })
+    );
     return [];
   }
 }

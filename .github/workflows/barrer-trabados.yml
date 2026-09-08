@@ -98,7 +98,7 @@ jobs:
               # es el barrido sino lo que traba los casos.
               reaped=$(grep -o '"reaped":[0-9]*' respuesta.json | head -1 | cut -d: -f2)
               if [ -n "${reaped:-}" ] && [ "${reaped}" != "0" ]; then
-                echo "::warning::Se escalaron ${reaped} caso(s) trabado(s) en procesando."
+                echo "::warning::Se escalaron ${reaped} caso(s) trabado(s)."
               fi
               exit 0
             fi

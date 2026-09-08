@@ -511,6 +511,8 @@ export async function orchestratePostExtraction(
       claimantName,
       claimTypeValue,
       reason: plan.reasoning,
+      // Si el conflicto ya salió, el asegurado no recibe además esto.
+      yaLeEscribimos: confirmationEmailDispatched,
     });
     return;
   }
@@ -1122,6 +1124,15 @@ async function escalate(opts: {
   claimTypeValue: string | null;
   summary?: string | null;
   reason: string;
+  /**
+   * Ya le mandamos un mensaje a esta persona en esta vuelta.
+   *
+   * Suprime SÓLO el mensaje al asegurado. El estado, el registro de
+   * auditoría y el aviso al especialista pasan igual: la garantía que este
+   * camino promete es que un especialista se entere, y eso no depende de lo
+   * que lea el asegurado.
+   */
+  yaLeEscribimos?: boolean;
 }): Promise<void> {
   const { caseId, tenantId, severity } = opts;
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
@@ -1130,15 +1141,52 @@ async function escalate(opts: {
 
   await setStatus(caseId, tenantId, "requiere_especialista");
 
-  await opts.messenger.send({
-    caseId,
-    tenantId,
-    to: opts.senderEmail,
-    lastMessage: opts.latestMessageText,
-    template: "specialist_escalation",
-    data: { caseId, severity, claimantName: opts.claimantName ?? null },
-    inReplyToMessageId: opts.inReplyToMessageId,
-  });
+  /*
+   * Un mensaje por vuelta, y no dos que se contradicen.
+   *
+   * Un familiar del titular escribe por el auto del padre. El padrón le
+   * encuentra la póliza, no le coinciden ni el nombre ni el documento, y
+   * sale el pedido de confirmación —que es correcto y es AC7/AC9—. Después
+   * el agente delibera, ve `titular_coincide: false`, y decide con razón que
+   * esto lo tiene que mirar una persona.
+   *
+   * Hasta acá todo bien. Lo que estaba mal es que le llegaban las DOS cosas,
+   * con segundos de diferencia y tirando para lados opuestos: una le pide
+   * que conteste cuál dato es el correcto, la otra le dice que espere a que
+   * lo llamen. La persona no sabe si contestar o esperar.
+   *
+   * Gana el que ya salió. No por ser mejor —decirle que su caso pasó a una
+   * persona es buena información— sino porque cuando llegamos acá ese
+   * mensaje ya se fue, y elegir al otro obligaría a deliberar ANTES de
+   * responder el conflicto: otra llamada al modelo en el camino caliente,
+   * para elegir entre dos mensajes razonables. No lo vale.
+   *
+   * Lo que NO se suprime es nada de lo de abajo. El caso queda en
+   * `requiere_especialista`, el evento se registra, y al especialista se le
+   * avisa: la pregunta que le hicimos al asegurado es justamente la que ese
+   * especialista necesita contestada.
+   */
+  if (opts.yaLeEscribimos) {
+    console.info(
+      JSON.stringify({
+        level: "info",
+        service: "claimmix",
+        msg: "escalation.claimant_message_skipped",
+        case_id: caseId,
+        reason: "already_written_this_round",
+      })
+    );
+  } else {
+    await opts.messenger.send({
+      caseId,
+      tenantId,
+      to: opts.senderEmail,
+      lastMessage: opts.latestMessageText,
+      template: "specialist_escalation",
+      data: { caseId, severity, claimantName: opts.claimantName ?? null },
+      inReplyToMessageId: opts.inReplyToMessageId,
+    });
+  }
 
   await writeAuditLog({
     tenant_id: tenantId,

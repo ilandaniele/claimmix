@@ -494,11 +494,30 @@ export async function extractEmailClaimGemini(
     );
   }
 
-  // ── Attempt 2 (retry with stricter prompt) ───────────────────────────────
+  // ── Attempt 2 (retry with a correction that matches what went wrong) ─────
+  //
+  // La corrección decía SIEMPRE «tu respuesta anterior fue JSON inválido»,
+  // aunque el motivo hubiera sido otro. El código ya sabe cuál fue —lo guarda
+  // en `lastErrMeta` unas líneas más arriba— y no lo miraba.
+  //
+  // Donde más se nota es con MAX_TOKENS: la respuesta se cortó por LARGA, y
+  // el reintento le pedía que devolviera JSON válido. Es un consejo correcto
+  // para otro problema, así que el modelo volvía a escribir de más y el
+  // segundo intento fallaba igual que el primero. Pasó en el ensayo del
+  // 2026-09-08 con el escenario del familiar del titular: los dos intentos
+  // MAX_TOKENS, el caso a `escalado` y la persona sin respuesta.
+  //
+  // Esto no garantiza que el segundo intento entre —el modelo puede volver a
+  // pasarse—; lo que arregla es que la corrección hable del problema que
+  // hubo. Un reintento que da el consejo equivocado no es un reintento: es
+  // la misma llamada, más cara.
   if (!result) {
-    const stricterSystem =
-      systemPrompt +
-      "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
+    const correccion =
+      lastErrMeta?.code === "MAX_TOKENS"
+        ? "\n\nIMPORTANT: Your previous response was cut off because it exceeded the length limit. Be concise: emit each field once, do not repeat yourself, and omit fields you have no value for. Return ONLY valid JSON matching the schema."
+        : "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
+
+    const stricterSystem = systemPrompt + correccion;
 
     const t2 = Date.now();
     try {

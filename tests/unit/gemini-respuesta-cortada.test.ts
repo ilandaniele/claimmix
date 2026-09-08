@@ -109,3 +109,83 @@ describe("callGemini con la respuesta cortada", () => {
     expect(text).toContain("is_claim");
   });
 });
+
+/**
+ * Y el reintento, que le daba el consejo equivocado.
+ *
+ * `extractEmailClaim` reintenta una vez con una corrección pegada al prompt.
+ * La corrección decía SIEMPRE «tu respuesta anterior fue JSON inválido», sin
+ * mirar por qué había fallado — y el código ya lo sabe, lo guarda en
+ * `lastErrMeta`.
+ *
+ * Con MAX_TOKENS eso es un consejo correcto para otro problema: la respuesta
+ * se cortó por LARGA y se le pedía que devolviera JSON válido. El modelo
+ * volvía a escribir de más y el segundo intento fallaba igual que el primero.
+ *
+ * Pasó en el ensayo del 2026-09-08, dos corridas seguidas: los dos intentos
+ * MAX_TOKENS, el caso a `escalado` y la persona sin ninguna respuesta. Y no es
+ * raro — el encabezado de este archivo lo mide: 71 de 3.627 extracciones en
+ * producción, un 2%.
+ *
+ * Lo que esto NO promete es que el segundo intento entre. El modelo puede
+ * volver a pasarse. Lo que arregla es que la corrección hable del problema que
+ * hubo.
+ */
+describe("el reintento dice qué salió mal", () => {
+  /** Los prompts de sistema de cada llamada, en orden. */
+  function espiarPrompts(finishReasons: Array<string | undefined>) {
+    const prompts: string[] = [];
+    let i = 0;
+    globalThis.fetch = vi.fn(async (_url: unknown, init: unknown) => {
+      const body = JSON.parse((init as { body: string }).body);
+      prompts.push(body.systemInstruction?.parts?.[0]?.text ?? "");
+      const motivo = finishReasons[Math.min(i, finishReasons.length - 1)];
+      i += 1;
+      return respuesta(motivo, '{"is_claim":true,"fields":[]}');
+    }) as unknown as typeof fetch;
+    return prompts;
+  }
+
+  it("con MAX_TOKENS le dice que se pasó de largo, no que el JSON estaba mal", async () => {
+    const prompts = espiarPrompts(["MAX_TOKENS", "STOP"]);
+
+    const { extractEmailClaimGemini } = await import("@/server/ai/gemini-extractor");
+    await extractEmailClaimGemini({
+      subject: "choque",
+      body: "Tuve un choque ayer.",
+      memoryHints: [],
+      knownPatterns: [],
+    });
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("exceeded the length limit");
+    expect(prompts[1]).toContain("Be concise");
+    // Y NO el consejo de la otra falla, que es el que estaba antes.
+    expect(prompts[1]).not.toContain("was invalid JSON");
+  });
+
+  it("con JSON inválido sigue diciendo lo de siempre", async () => {
+    // La corrección vieja no se va: sigue siendo la correcta para su falla.
+    const prompts: string[] = [];
+    let i = 0;
+    globalThis.fetch = vi.fn(async (_url: unknown, init: unknown) => {
+      const body = JSON.parse((init as { body: string }).body);
+      prompts.push(body.systemInstruction?.parts?.[0]?.text ?? "");
+      const texto = i === 0 ? "esto no es json" : '{"is_claim":true,"fields":[]}';
+      i += 1;
+      return respuesta("STOP", texto);
+    }) as unknown as typeof fetch;
+
+    const { extractEmailClaimGemini } = await import("@/server/ai/gemini-extractor");
+    await extractEmailClaimGemini({
+      subject: "choque",
+      body: "Tuve un choque ayer.",
+      memoryHints: [],
+      knownPatterns: [],
+    });
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("was invalid JSON");
+    expect(prompts[1]).not.toContain("exceeded the length limit");
+  });
+});

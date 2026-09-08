@@ -42,7 +42,11 @@ name: Barrer trabados
 on:
   schedule:
     # Cada quince minutos. El barredor escala lo que lleva más de veinte minutos
-    # en `procesando`, así que un caso trabado se ve en menos de media hora en
+    # en `procesando` o en `recibido` —el segundo es donde entran las denuncias
+    # de verdad, y hasta el 2026-09-08 el barredor no lo miraba: corría, decía
+    # `reaped: 0` y quedaba en verde mientras un caso real de hacía más de un
+    # día seguía sin contestar— así que un caso trabado se ve en menos de media
+    # hora en
     # vez de al otro día.
     - cron: "*/15 * * * *"
   workflow_dispatch:
@@ -59,7 +63,7 @@ concurrency:
 
 jobs:
   barrer:
-    name: Escalar lo que quedó en procesando
+    name: Escalar lo que quedó trabado
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

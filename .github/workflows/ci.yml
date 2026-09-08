@@ -210,9 +210,27 @@ jobs:
     # `cancel-in-progress: false` es la mitad que importa: se hace cola, no se
     # cancela. Cancelar la corrida de otra rama para que esta pase cambia un
     # rojo al azar por un verde al azar, que es peor.
-    concurrency:
-      group: base-de-ensayo
-      cancel-in-progress: false
+    # NO lleva un grupo de concurrencia compartido entre ramas, y eso es una
+    # corrección de un intento anterior que salió peor que el problema.
+    #
+    # El problema es real: los contadores del limitador de intentos de login
+    # viven en la base de ensayo, así que dos corridas de ramas distintas se
+    # pelean el mismo cupo y una se cae con «Demasiados intentos». Adentro de
+    # una corrida eso ya está resuelto con el `needs:` de más abajo.
+    #
+    # El intento de extenderlo entre corridas con
+    #     concurrency: { group: base-de-ensayo, cancel-in-progress: false }
+    # parecía hacer cola. No la hace: GitHub guarda UNA sola tarea pendiente
+    # por grupo, y cuando llega otra «any previously pending job in the
+    # concurrency group will be cancelled». Con dos PR abiertos alcanza; con
+    # cinco, los del medio se cancelan solos y el PR queda bloqueado sin que
+    # nada esté roto. Pasó el 2026-09-08 con tres PR a la vez.
+    #
+    # Cambiar un rojo al azar por una cancelación al azar no es un arreglo. Lo
+    # que de verdad lo cierra es que el limitador deje de ser compartido —que
+    # el test que lo agota a propósito use otra identidad, o que el e2e
+    # reutilice la sesión en vez de volver a entrar—, y eso es un cambio
+    # aparte, con su propia medición.
     env:
       # Un secreto no se puede leer desde un `if:`; una variable de entorno sí.
       HAY_ENSAYO: ${{ secrets.STAGING_DATABASE_URL }}
@@ -412,9 +430,8 @@ jobs:
     # El mismo grupo que `integration-tests`: comparten la base y su cupo.
     # Adentro de una corrida ya van en serie por el `needs:` de mas abajo;
     # esto es lo que falta para que tampoco se encimen entre corridas.
-    concurrency:
-      group: base-de-ensayo
-      cancel-in-progress: false
+    # Idem el de integración: sin grupo compartido entre ramas. El porqué está
+    # escrito arriba, en `integration-tests`.
     permissions:
       contents: read
     # Después de los de integración, y no en paralelo.

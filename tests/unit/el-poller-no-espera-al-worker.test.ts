@@ -32,23 +32,44 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const FUENTE = readFileSync("src/server/email/gmail/gmail-poller.ts", "utf8");
+/*
+ * Normalizado, porque el archivo llega con CRLF en Windows y con LF en el
+ * checkout de CI. Una afirmación sobre el texto no puede depender de eso: la
+ * primera versión de esta prueba pasaba acá y fallaba en CI por ese motivo.
+ */
+const FUENTE = readFileSync("src/server/email/gmail/gmail-poller.ts", "utf8").replace(
+  /\r\n/g,
+  "\n"
+);
 
 describe("el poller no espera al worker", () => {
   it("dispara con after() en vez de esperar la respuesta", () => {
     expect(FUENTE).toContain("after(() => llamarAlWorker(caseId, tenantId));");
   });
 
-  it("y no quedó ningún await sobre el fetch del worker", () => {
-    // El `await fetch(...)` de adentro de `llamarAlWorker` es correcto: ahí
-    // ya estamos del otro lado de `after()`. Lo que no puede volver es que
-    // `dispatchExtractionWorker` espere a `llamarAlWorker`.
+  it("y el único await al worker es el del respaldo", () => {
+    /*
+     * La primera versión de esta prueba prohibía `await llamarAlWorker` a
+     * secas, y estaba mal en dos sentidos: dependía de los finales de línea
+     * —pasaba en Windows y fallaba en CI— y prohibía justamente el respaldo
+     * que el cambio agrega a propósito.
+     *
+     * Lo que hay que fijar es el ORDEN: primero se agenda con `after()`, y
+     * el `await` sólo aparece después, adentro del `catch`. Así se ve la
+     * diferencia entre el respaldo y una vuelta atrás.
+     */
     const cuerpo = FUENTE.slice(
       FUENTE.indexOf("async function dispatchExtractionWorker"),
       FUENTE.indexOf("async function llamarAlWorker")
     );
-    expect(cuerpo).not.toContain("await llamarAlWorker(caseId, tenantId);\n  }\n}");
-    expect(cuerpo).toContain("after(");
+
+    expect(cuerpo).toMatch(
+      /after\(\(\) => llamarAlWorker\([^)]*\)\);\s*\}\s*catch\s*\{\s*await llamarAlWorker\(/
+    );
+
+    // Y una sola vez cada uno: nada de esperarlo además de agendarlo.
+    expect(cuerpo.split("await llamarAlWorker(").length - 1).toBe(1);
+    expect(cuerpo.split("after(() => llamarAlWorker(").length - 1).toBe(1);
   });
 
   it("el encabezado del archivo ya prometía esto", () => {

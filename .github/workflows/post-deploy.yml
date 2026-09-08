@@ -314,10 +314,35 @@ jobs:
   # El reporte se guarda como artefacto porque, cuando esto falla, el mensaje de
   # abajo pide compararlo con la corrida anterior — y hasta ahora esa corrida no
   # quedaba en ningún lado.
+  # ── Y por qué espera a los otros dos ────────────────────────────────────────
+  #
+  # Esto mide p95 con 1, 5 y 20 analistas simultáneos contra la base de
+  # producción. El ensayo y el timbre entran a ESA misma base al mismo tiempo:
+  # el ensayo abre trece conversaciones enteras con extracción incluida, y el
+  # timbre crea casos y consulta en bucle. Con todos arrancando juntos, este
+  # job no medía las consultas del tablero — medía a sus hermanos.
+  #
+  # Pasó el 2026-09-08, dos corridas seguidas con la MISMA cantidad de filas:
+  #
+  #     56b5ff4   486 casos   p95 peor caso 435 ms   ✓
+  #     5f0bba5   484 casos   p95 peor caso 835 ms   ✗
+  #
+  # Las columnas de 1 y 5 simultáneos casi no se movieron; sólo se duplicó la
+  # de 20, que es justo donde la contención se nota. Ninguna consulta cambió
+  # entre esos dos commits.
+  #
+  # Es el mismo error que ya se arregló en `ci.yml` entre los tests de
+  # integración y los e2e, y entre corridas: un número que depende de qué más
+  # está corriendo no es un presupuesto, es un sorteo. Y un rojo que sale por
+  # sorteo se deja de mirar.
+  #
+  # `always()` porque esto es orden y no dependencia: si el ensayo o el timbre
+  # fallan, la medición tiene que correr igual — de hecho ahí interesa más.
   carga:
     name: Carga (lectura)
     runs-on: ubuntu-latest
-    needs: [smoke]
+    needs: [smoke, rehearse, timbre]
+    if: always() && needs.smoke.result == 'success'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 

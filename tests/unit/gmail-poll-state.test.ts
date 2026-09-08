@@ -5,7 +5,8 @@
  * No real DB calls are made.
  *
  * AC7:  getOrCreatePollState → creates/returns row; advancePollState → updates
- *       history_id + timestamps + clears last_error.
+ *       history_id + timestamps. NO toca last_error: es el rastro del
+ *       mensaje que se perdio.
  * AC8:  recordPollError → updates last_error only; does NOT change history_id.
  * AC13: advancePollState is only called after a successful batch; recordPollError
  *       is called for non-fatal per-message errors (tested indirectly here via
@@ -144,7 +145,16 @@ describe("advancePollState", () => {
     vi.setSystemTime(new Date("2024-01-15T10:00:00.000Z"));
   });
 
-  it("updates history_id, timestamps, and clears last_error on success", async () => {
+  /*
+   * Antes esta prueba exigia `last_error: null`, o sea que fijaba el defecto.
+   *
+   * La marca avanza aunque los mensajes hayan fallado, y eso esta decidido y
+   * defendido en `shouldAdvance`. Lo que no estaba decidido es que en la MISMA
+   * corrida se borrara el rastro: `recordPollError` escribia el id del mensaje
+   * perdido en el bucle y este UPDATE lo borraba milisegundos despues. Del mail
+   * de denuncia que no entro no quedaba nada, salvo un console.error en Vercel.
+   */
+  it("mueve la marca y NO borra el rastro del mensaje perdido", async () => {
     const whereMock = vi.fn().mockResolvedValue(undefined);
     const setMock = vi.fn().mockReturnValue({ where: whereMock });
     vi.mocked(db.update).mockReturnValue({ set: setMock } as any);
@@ -157,9 +167,12 @@ describe("advancePollState", () => {
         history_id: "12399",
         last_polled_at: "2024-01-15T10:00:00.000Z",
         updated_at: "2024-01-15T10:00:00.000Z",
-        last_error: null,
       })
     );
+
+    // Lo que importa: que `last_error` no aparezca en el UPDATE. Si vuelve a
+    // aparecer con null, el rastro se pierde otra vez.
+    expect(setMock.mock.calls[0][0]).not.toHaveProperty("last_error");
     expect(whereMock).toHaveBeenCalled();
   });
 

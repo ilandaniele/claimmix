@@ -156,3 +156,83 @@ describe("downloadWhatsAppMedia", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Un adjunto enorme no entra al proceso.
+ *
+ * El tope de guardado son 10 MB y se aplicaba DESPUÉS de tener los bytes en
+ * memoria. La Cloud API acepta documentos de hasta 100 MB, el número es
+ * público, y esto corre adentro del tiempo del webhook: un PDF de 100 MB
+ * pasaba por el Buffer (100 MB), por el base64 del intake (~133 MB) y por el
+ * Buffer que rehost vuelve a decodificar. Unos 330 MB de pico para un archivo
+ * que nunca se iba a guardar — repetible sin credencial, con sólo escribirle
+ * al número.
+ */
+describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete process.env.WHATSAPP_ACCESS_TOKEN;
+  });
+
+  /** Las URL que se pidieron, para ver si la del CDN llegó a abrirse. */
+  function espiar(fileSize: number | undefined, bytes = "bytes") {
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes("/media-1")) {
+        return new Response(
+          JSON.stringify({
+            url: "https://cdn.example/file",
+            mime_type: "application/pdf",
+            ...(fileSize === undefined ? {} : { file_size: fileSize }),
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response(Buffer.from(bytes), { status: 200 });
+    }) as unknown as typeof fetch;
+    return urls;
+  }
+
+  it("con file_size de 100 MB ni abre la conexión con el CDN", async () => {
+    const urls = espiar(100 * 1024 * 1024);
+
+    const file = await downloadWhatsAppMedia("media-1");
+
+    expect(file).toBeNull();
+    // La que importa: una sola llamada, la de la metadata. La del archivo no.
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("/media-1");
+  });
+
+  it("uno que entra en el tope se baja como siempre", async () => {
+    // El control que impide que el arreglo sea «rechazar todo».
+    const urls = espiar(1024);
+
+    const file = await downloadWhatsAppMedia("media-1");
+
+    expect(file?.data.toString()).toBe("bytes");
+    expect(urls).toHaveLength(2);
+  });
+
+  it("y sin file_size, el cuerpo se corta igual al pasarse", async () => {
+    // El cinturón además de los tiradores: si Meta deja de mandar el campo,
+    // `arrayBuffer()` no tiene forma de rendirse a la mitad.
+    const enorme = "x".repeat(11 * 1024 * 1024);
+    const urls = espiar(undefined, enorme);
+
+    const file = await downloadWhatsAppMedia("media-1");
+
+    expect(file).toBeNull();
+    // Acá sí se abrió: no había con qué saberlo antes. Lo que no pasó es que
+    // los once megas terminaran en un Buffer.
+    expect(urls).toHaveLength(2);
+  });
+});

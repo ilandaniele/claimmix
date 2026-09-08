@@ -119,7 +119,28 @@ export async function runIntakeAgent(input: IntakeAgentInput): Promise<IntakeAge
           .limit(1)
       )
     ) as CaseRow | null);
-  } catch {
+  } catch (err) {
+    /*
+     * Un error de base no es «el caso no existe», pero sale por la misma
+     * puerta: abajo se devuelve `case_not_found`, y quien llamó no puede
+     * distinguir una fila borrada de una base que no contestó.
+     *
+     * Cambiar lo que devuelve arrastraría el `action` que va al registro de
+     * auditoría y tres pruebas que fijan justamente que la fila vacía y la
+     * excepción den el mismo resultado. Dejar el código del error en el log
+     * —sin nada de la persona— cierra la diferencia sin tocar eso.
+     */
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "intake_agent.case_lookup_error",
+        case_id: input.caseId,
+        error_code:
+          (err as { code?: string })?.code ??
+          (err instanceof Error ? err.name : "UnknownError"),
+      })
+    );
     caseRow = null;
   }
 

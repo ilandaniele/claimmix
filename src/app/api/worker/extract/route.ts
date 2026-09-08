@@ -11,6 +11,8 @@
  * lo tapara. Ver internal-auth.ts.
  *
  * Returns 200 on success, 500 on error (for fire-and-forget callers).
+ * «Success» es que el agente haya extraído: si `runIntakeAgent` devuelve
+ * ok:false —el caso no aparece, el canal no se reconoce— también es 500.
  *
  * W3: AC5, AC6, AC8, AC11, AC15, AC22.
  */
@@ -64,9 +66,40 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const { caseId, tenantId } = parsed.data;
 
-  // ── Run worker ────────────────────────────────────────────────────────────────
+  // ── Correr el worker ──────────────────────────────────────────────────────────
   try {
     const result = await runIntakeAgent({ caseId, tenantId, source: "worker" });
+
+    /*
+     * El `ok` de la respuesta es el del agente, no una constante.
+     *
+     * Estaba escrito a mano en `true` y el resultado de verdad quedaba anidado
+     * en `agent`, que no mira nadie. Quien decide con esto es el redespacho de
+     * `worker/extract.ts` (`llegó = res.ok`), y para cuando corre, la bandera
+     * `extraction_pending` YA se limpió: un 200 que no extrajo nada deja el
+     * mensaje guardado y sin leer, sin nada que lo recuerde. Alguien manda dos
+     * mensajes seguidos y el segundo —donde puede estar la póliza que le
+     * pedimos— se pierde para siempre.
+     *
+     * El encabezado de este archivo ya prometía «200 on success, 500 on
+     * error». Esto lo cumple; no cambia el contrato, lo empieza a respetar.
+     */
+    if (!result.ok) {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          service: "claimmix",
+          msg: "worker_route.el_agente_no_extrajo",
+          case_id: caseId,
+          action: result.action,
+        })
+      );
+      return NextResponse.json(
+        { ok: false, case_id: caseId, agent: result },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({ ok: true, case_id: caseId, agent: result }, { status: 200 });
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";

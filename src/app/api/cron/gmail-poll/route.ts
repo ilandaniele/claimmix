@@ -18,8 +18,11 @@
  *       response includes watch_renewed:false.
  * AC11: PUBSUB_TOPIC unset → skip watch renewal; response includes
  *       watch_renewed:false and watch_skipped_reason:'PUBSUB_TOPIC_UNSET'.
- * AC13: Per-message errors are caught inside pollGmail; watermark only advances
- *       past successfully processed messages. Returns 200 with errors count.
+ * AC13: Los errores por mensaje se atrapan adentro de pollGmail y NO frenan la
+ *       marca: el mensaje que falló se pierde de la tanda y su id queda en
+ *       gmail_poll_state.last_error. Devuelve 200 con el contador de errors.
+ *       Esta corrida diaria NO relee lo perdido —arranca desde la marca ya
+ *       avanzada—; sólo vuelve a barrer newer_than:1d si el historyId venció.
  *
  * Seguridad: el Bearer CRON_SECRET se compara en tiempo constante, y esa
  * comparación vive en `isInternalRequest` — una sola vez para todo el

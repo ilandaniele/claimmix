@@ -22,18 +22,21 @@
  *      g. Mark message as read (best-effort — IC9).
  *      h. Write audit log.
  *      i. Fire extraction worker (fire-and-forget).
- *   4. Advance watermark only after a clean or partially successful batch (AC7/AC8).
+ *   4. Avanzar la marca cuando el historyId se movió, hayan fallado mensajes o no (AC7/AC8/AC13).
  *   5. Return { processed, skipped, errors, fallback?, history_id }.
  *
  * AC1:  Inbound message → claim_messages row with correct fields.
  * AC2:  Duplicate messageId → skipped (no new row).
  * AC3:  In-Reply-To thread match → claim_messages.case_id = existing case.
  * AC4:  headers, raw_payload persisted as jsonb; body_text/body_html decoded.
- * AC7:  Watermark advances to latest historyId after successful batch.
- * AC8:  Watermark does NOT advance on error (recordPollError called instead).
+ * AC7:  La marca avanza hasta el último historyId leído en la corrida.
+ * AC8:  La marca avanza IGUAL si los mensajes fallan — el porqué está en
+ *       `shouldAdvance`, más abajo en este archivo. El rastro del que se
+ *       perdió queda en gmail_poll_state.last_error, que ya no se borra al
+ *       avanzar.
  * AC10: No PII (from_addr, body, subject) in logs — only message IDs and error codes.
- * AC13: Per-message error → error counter incremented; watermark only advances past
- *       the last successfully processed message.
+ * AC13: Un error por mensaje suma a `errors` y NO frena la marca: ese mensaje
+ *       se pierde de la tanda y lo que queda de él es su id en last_error.
  * AC14: Mark-as-read is best-effort; failure is non-fatal.
  *
  * Tenant routing (IC4): MVP uses a fixed sentinel tenant_id.
@@ -700,7 +703,14 @@ export async function pollGmail(
   // Always advance when latestHistoryId moved forward — even if all messages
   // errored. Staying stuck on the same historyId creates a permanent retry loop
   // where the same failing messages are re-attempted on every Pub/Sub push.
-  // The daily cron fallback provides a second-chance recovery path.
+  //
+  // Acá decía que el cron diario era una segunda chance. No lo es: ese cron
+  // llama a este mismo `pollGmail` y arranca desde esta marca ya avanzada.
+  // Sólo relee con messages.list(newer_than:1d) si el historyId venció (404)
+  // o en la primera corrida. El mensaje que falló no se vuelve a mirar.
+  //
+  // Lo que queda de él es su id en `last_error`, y por eso advancePollState
+  // ya no lo borra.
   const shouldAdvance = true;
 
   if (shouldAdvance && latestHistoryId !== pollState.historyId) {

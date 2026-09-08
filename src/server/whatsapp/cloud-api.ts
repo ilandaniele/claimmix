@@ -20,6 +20,7 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "crypto";
 import { timingSafeStringEqual } from "@/lib/security/compare";
+import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
 
 const GRAPH_API_BASE = "https://graph.facebook.com";
 
@@ -220,6 +221,48 @@ function extensionFor(mimeType: string): string {
  * Returns null rather than throwing. A photo that fails to download is a gap
  * in the claim, not a reason to lose the message that carried it.
  */
+/**
+ * Lee el cuerpo contando bytes y corta apenas se pasa del tope.
+ *
+ * `file_size` es lo que Meta DICE que pesa, y con eso alcanza para el caso
+ * normal. Esto es el cinturón además de los tiradores: si el campo no viene
+ * —cambia la versión de la API, o el tipo de media no lo trae— nadie más
+ * frena la descarga, y `arrayBuffer()` no tiene forma de rendirse a la
+ * mitad.
+ */
+async function leerHastaElTope(res: Response, tope: number): Promise<Buffer | null> {
+  if (!res.body) return null;
+  const lector = res.body.getReader();
+  const partes: Buffer[] = [];
+  let total = 0;
+
+  try {
+    for (;;) {
+      const { done, value } = await lector.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > tope) {
+        await lector.cancel();
+        console.error(
+          JSON.stringify({
+            level: "error",
+            service: "claimmix",
+            msg: "whatsapp.media.descartada_por_tamano",
+            detectado_en: "el cuerpo",
+            tope_bytes: tope,
+          })
+        ); // crew-debug-ok
+        return null;
+      }
+      partes.push(Buffer.from(value));
+    }
+  } catch {
+    return null;
+  }
+
+  return Buffer.concat(partes);
+}
+
 export async function downloadWhatsAppMedia(
   mediaId: string,
   opts?: { accessToken?: string }
@@ -239,8 +282,56 @@ export async function downloadWhatsAppMedia(
       return null;
     }
 
-    const meta = (await metaRes.json()) as { url?: string; mime_type?: string };
+    const meta = (await metaRes.json()) as {
+      url?: string;
+      mime_type?: string;
+      file_size?: number | string;
+    };
     if (!meta.url) return null;
+
+    const mimeType = meta.mime_type || "application/octet-stream";
+
+    /*
+     * Mirar cuánto pesa ANTES de bajarlo.
+     *
+     * El tope de guardado son 10 MB y se aplicaba DESPUÉS de tener los bytes
+     * en el proceso. La Cloud API acepta documentos de hasta 100 MB, el
+     * número es público, y esto corre adentro del tiempo del webhook: un PDF
+     * de 100 MB pasaba por el Buffer (100 MB), por el base64 que arma el
+     * intake (~133 MB) y por el Buffer que rehost vuelve a decodificar (100
+     * MB otra vez). Unos 330 MB de pico para un archivo que nunca se iba a
+     * guardar, en una función de Vercel Hobby — y repetible a voluntad, sin
+     * credencial, con sólo escribirle al número.
+     *
+     * La metadata que ya se pedía trae `file_size`; sólo no se leía. Con
+     * esto el archivo grande ni siquiera abre la conexión con el CDN.
+     *
+     * El tope se importa de `attachment-validator` en vez de repetir el
+     * número: si el de descarga y el de guardado se separan, o bajás bytes
+     * que se van a rechazar o rechazás bytes que se iban a guardar.
+     *
+     * Lo que se pierde, y va aparte: hasta ahora un archivo demasiado grande
+     * llegaba a `rehostAttachments` y dejaba una fila con `rejected_reason`,
+     * que es lo que le dice a un analista «mandaron algo y no entró». Acá
+     * devolvemos null, que es el mismo camino que ya tienen las otras fallas
+     * de descarga (`if (!file) continue`), así que queda en el log y no en
+     * la pantalla. Devolver el rastro pide tocar el que llama y
+     * `rehost-attachments`; es un cambio aparte y con su propia decisión.
+     */
+    const declarado = Number(meta.file_size);
+    if (Number.isFinite(declarado) && declarado > MAX_ATTACHMENT_SIZE_BYTES) {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          service: "claimmix",
+          msg: "whatsapp.media.descartada_por_tamano",
+          detectado_en: "la metadata",
+          bytes: declarado,
+          tope_bytes: MAX_ATTACHMENT_SIZE_BYTES,
+        })
+      ); // crew-debug-ok
+      return null;
+    }
 
     const fileRes = await fetch(meta.url, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -250,10 +341,10 @@ export async function downloadWhatsAppMedia(
       return null;
     }
 
-    return {
-      data: Buffer.from(await fileRes.arrayBuffer()),
-      mimeType: meta.mime_type || "application/octet-stream",
-    };
+    const data = await leerHastaElTope(fileRes, MAX_ATTACHMENT_SIZE_BYTES);
+    if (!data) return null;
+
+    return { data, mimeType };
   } catch (err) {
     const name = err instanceof Error ? err.name : "UnknownError";
     console.error("[whatsapp] media download error:", name); // crew-debug-ok

@@ -4,11 +4,12 @@
  * The gmail_poll_state table is operational state owned by the cron/webhook
  * system paths — it has no tenant column and is never exposed to tenant users.
  *
- * AC7:  Watermark advances only after all messages in a history batch succeed.
- * AC8:  recordPollError() updates last_error without advancing history_id,
- *       so the next cron run retries from the same watermark position.
- * AC13: advancePollState() is called only after a successful batch; a per-message
- *       error calls recordPollError() instead, leaving history_id unchanged.
+ * AC7:  advancePollState() mueve la marca hasta donde se leyó, con mensajes
+ *       fallados o sin ellos (ver `shouldAdvance` en gmail-poller.ts).
+ * AC8:  recordPollError() escribe last_error y no toca history_id. Ojo: NO
+ *       frena la marca — el que la mueve es advancePollState, que corre igual.
+ * AC13: last_error es el rastro del mensaje que se perdió. advancePollState ya
+ *       no lo borra; si lo volviera a borrar, no quedaría nada del mensaje.
  * AC2:  getWatchExpiration() returns null when no row exists or watch_expiration
  *       is null — safe sentinel for "watch never registered or already cleaned up".
  * AC3:  getWatchExpiration() returns the ISO timestamp string when set.
@@ -93,16 +94,27 @@ export async function getOrCreatePollState(
 }
 
 /**
- * Advance the watermark after a successful history batch.
+ * Avanza la marca después de una tanda.
  *
- * Sets history_id = newHistoryId, updated_at = now(), last_polled_at = now(),
- * and clears any previous last_error.
+ * Pone history_id, last_polled_at y updated_at. NO toca last_error, a
+ * propósito.
  *
- * MUST be called only after ALL messages in the batch have been successfully
- * processed (AC13 — per-message error isolation).
+ * La marca avanza aunque los mensajes hayan fallado —`shouldAdvance` en
+ * `gmail-poller.ts`, y ahí está el porqué: quedarse clavada reintenta el
+ * mismo mensaje venenoso en cada empuje de Pub/Sub y detrás de él no entra
+ * ninguno más—. Mientras acá se borraba `last_error`, el mensaje que no
+ * entró no dejaba ningún rastro: `recordPollError` lo escribía en el bucle
+ * de mensajes y este UPDATE, en la MISMA corrida, lo borraba milisegundos
+ * después. Lo único que quedaba era un `console.error` en los logs de
+ * Vercel, que se van.
  *
- * @param id            PK of the gmail_poll_state row.
- * @param newHistoryId  The historyId returned by Gmail for this batch.
+ * Lo que sobrevive ahora es «el último error que vimos», no «hay un error
+ * ahora»: nadie limpia el campo. Trae el gmail_message_id, que es con lo
+ * que se vuelve a buscar el mensaje a mano. Si en una corrida fallan
+ * varios, queda sólo el último, porque `recordPollError` pisa el campo.
+ *
+ * @param id            PK de la fila de gmail_poll_state.
+ * @param newHistoryId  Hasta qué historyId se leyó en esta corrida.
  */
 export async function advancePollState(
   id: string,
@@ -117,7 +129,6 @@ export async function advancePollState(
         history_id: newHistoryId,
         last_polled_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-        last_error: null,
       })
       .where(eq(gmailPollState.id, id));
   } catch (err) {

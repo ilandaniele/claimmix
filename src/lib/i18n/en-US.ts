@@ -365,6 +365,7 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.linked": "Linked",
   "case.detail.pendingCount": "pending",
   "case.detail.coreReadyDescription": "This case is ready to be sent to the core system. Review the confirmed fields before proceeding.",
+  "case.detail.coreSyncSinConfigurar": "The case is ready, but the integration with the insurer core system is not connected yet. Nothing is waiting for it on the other side.",
   "case.detail.noRawEmail": "No original text available.",
   "case.detail.agentAnalysis": "Agent analysis",
   "case.detail.auditReason": "Reason",

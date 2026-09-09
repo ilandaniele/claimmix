@@ -20,7 +20,7 @@ import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, extractedFields } from "@/lib/db/schema";
 import { SyncToCoreSchema } from "@/lib/schemas/cases";
-import { getCoreSyncClient } from "@/server/core-sync/client";
+import { CoreSyncSinConfigurar, getCoreSyncClient } from "@/server/core-sync/client";
 import type { CoreSyncPayload } from "@/server/core-sync/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { ok, err } from "@/lib/api/respond";
@@ -126,7 +126,38 @@ export async function POST(
   };
 
   // ── 8. Call CoreSyncClient ────────────────────────────────────────────────────
-  const syncClient = getCoreSyncClient();
+  /*
+   * Si no hay cliente, no se toca el caso.
+   *
+   * Antes esto no podía pasar porque la fábrica devolvía el simulador siempre,
+   * y por eso un caso terminaba en `enviado_a_core` con un
+   * `core_external_id` inventado. El 501 sale ANTES de cualquier escritura: ni
+   * estado, ni identificador, ni fila de auditoría diciendo que se envió.
+   */
+  let syncClient;
+  try {
+    syncClient = getCoreSyncClient();
+  } catch (e) {
+    if (e instanceof CoreSyncSinConfigurar) {
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          service: "claimmix",
+          msg: "core_sync.sin_configurar",
+          case_id: caseId,
+          modo: e.modo,
+        })
+      );
+      return err(
+        new AppError(
+          "NOT_IMPLEMENTED",
+          "La integración con el sistema del asegurador no está configurada. El caso queda como está."
+        )
+      );
+    }
+    throw e;
+  }
+
   const result = await syncClient.syncCase(payload);
   const now = new Date().toISOString();
 

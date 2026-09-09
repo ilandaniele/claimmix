@@ -2113,6 +2113,129 @@ solo lado de la llave.
 - **Diez PR de Dependabot** abiertos desde junio, cuatro de ellos saltos de
   major (typescript 6, @types/node 26, @vitejs/plugin-react 6, actions/checkout 7).
 
+### 🧵 Las doce MEDIA de la auditoría, cerradas (2026-09-09)
+
+Los trece agentes de `prompts for performance and security` dejaron nueve ALTA
+—ya cerradas y anotadas arriba— y doce MEDIA. Estas son las doce, con lo que se
+hizo y, en un caso, lo que se decidió NO hacer.
+
+Cada una comprobada contra el código antes de tocarla. Dos cambiaron de forma al
+mirarlas de cerca, y una se dio vuelta entera.
+
+#### Lo que costaba latencia, medido
+
+| | qué pasaba | medido |
+|---|---|---|
+| `/metricas` | nueve `enTenant` en un `Promise.all`. En paralelo pero no juntas: cada una abre su transacción HTTP con su `set_config` adelante | 9 pedidos → 1 |
+| El prompt del worker | siete cargas antes de llamar al modelo, con la misma forma | p50 **873 → 288 ms**, quince corridas intercaladas contra producción |
+| Toda ruta de la API | sesión, fila de `users` y cupo, en fila. Las dos últimas sólo necesitan el id del usuario | 3 viajes → 2, en catorce archivos |
+| Arranque en frío | `instrumentation.ts` importaba `@sentry/nextjs` siempre: 22 paquetes, 43 MB, **260 ms** — y adentro un `if (SENTRY_DSN)` que nunca se cumple | 260 ms → 0 |
+
+Del lote del prompt vale la pena anotar el método: con **cinco** corridas daba
+354 contra 383 ms y parecía ruido. Con quince se separan solas. La primera
+medición decía «no vale la pena» y era la medición, no el cambio.
+
+Y el lote tiene reserva. Cada cargador tenía su `catch` con un valor por
+omisión —sin reglas se extrae igual— y en un lote no hay errores parciales: una
+tabla que falta tumbaría la transacción entera. Si el lote se cae, se vuelve por
+el camino de a uno. El rápido es el normal; el lento es el raro y deja su línea.
+
+#### Lo que estaba mal, no lento
+
+**Un webhook de WhatsApp es de la APP, no de un número.** La firma prueba que el
+evento viene de Meta; no dice a quién le escribieron. Con la app suscripta a más
+de una WABA, los mensajes de todas llegaban a la misma ruta y el inquilino salía
+de una constante: la denuncia de la otra aseguradora terminaba en esta bandeja,
+con sus fotos y su DNI. `metadata.phone_number_id` venía en el payload desde
+siempre y el parser lo tiraba.
+
+**Dos mensajes juntos abrían dos casos.** Buscar-y-crear son dos transacciones y
+en el medio hay una ventana; Meta entrega dos eventos sin prometer orden. La
+conversación quedaba partida y el agente contestaba dos veces por el mismo
+choque. El índice de la 0029 lo cierra — sobre `recibido`, que es el estado con
+el que un caso nace, y no sobre «abierto», porque el buscador tiene una ventana
+de siete días y `now()` no entra en un predicado de índice.
+
+**El barrido cerraba conversaciones culpando a quien nunca recibió la
+pregunta.** Salir de `info_faltante` no depende de que el envío funcione: el
+orquestador manda y en la línea siguiente escribe el estado, sin mirar el
+resultado. Un mail rechazado, una plantilla de WhatsApp fuera de la ventana de
+24 h, y catorce días después el caso se cierra con «sin respuesta del
+denunciante». Ahora se mira el último saliente. Los que no salieron **no se
+cierran**: quedan en el tablero y se cuentan con sus ids, una línea por barrido.
+
+**La corrida no tenía reloj.** Una extracción son 10-20 s y la función tiene 60,
+así que sola llega. Pero antes se bajaron los adjuntos (hasta cuatro, 10 s cada
+uno) y después puede venir un redespacho, que corre otra corrida ENTERA adentro
+de la misma invocación esperando su respuesta. La cadena no tenía tope: cuando
+se acababa el tiempo morían todas juntas, la de más adentro a mitad de una
+escritura.
+
+#### Dos guardas que no veían lo que decían ver
+
+**La intersección del ensayo se comía las regresiones peores.** Cuando algo
+difiere, el post-deploy repite e intersecta: lo que falla dos veces es
+regresión, lo que falla una es el modelo. La intersección iba sobre el TEXTO del
+motivo, y ese texto lleva adentro lo que el modelo contestó — «estado
+info_faltante, esperaba listo». O sea que pedía que el modelo se equivocara dos
+veces IGUAL, no dos veces. Una regresión inestable se escondía mejor que una
+determinista.
+
+Se arregló el 09/09 y **atrapó su propio caso en la primera salida**: la misma
+afirmación rota en las dos corridas, `confirmacion_pendiente` una vez y
+`escalado` la otra. Con la clave vieja, verde.
+
+**El escenario «detalle de un caso» de la prueba de carga no podía fallar.**
+`getCaseDetail` se traga los errores de base y devuelve `null` — deliberado, un
+404 es mejor que un 500 para el analista. En la prueba eso significaba que la
+operación nunca tiraba. Y peor: al devolver `null` temprano se saltea las tres
+consultas siguientes, así que **una base caída se leía como una mejora de
+rendimiento**.
+
+#### Y una que se dio vuelta
+
+El informe pedía prohibir dos casos abiertos por hilo con un índice único. No se
+puede, y averiguarlo cambió el arreglo: el buscador mira tres estados DENTRO de
+una ventana de siete días, y a propósito deja que un mensaje muy posterior abra
+un caso nuevo. Un índice sobre los tres estados prohibiría eso.
+
+Lo que sí se puede es `recibido`, y sólo porque `reap-stuck` saca de ahí
+cualquier caso de más de 20 minutos: el único escenario donde el índice
+cambiaría una decisión del buscador —un `recibido` más viejo que la ventana— no
+existe. Sin ese barredor, este arreglo estaría mal.
+
+#### La guarda de arquitectura aprendió a leer
+
+Partir los cargadores en «armar la consulta» y «ejecutarla» hizo que siete
+consultas quedaran fuera de un `enTenant` literal, y `find-raw-db.mjs` las
+reportó como sueltas. No lo eran: el `db` que usan se los pasa la capa.
+
+Ahora reconoce un armador por el **tipo** del parámetro —`db: ClienteDatos`, que
+sale de `@/data/scope` y no se llega a él de otra forma— y no por el nombre, que
+lo escribe cualquiera. Se probaron las dos direcciones: una consulta suelta de
+verdad sigue saliendo reportada, y un `db` sin ese tipo también.
+
+#### Lo que NO se hizo
+
+- **Prender Sentry.** Se sacó el andamiaje que nunca estuvo conectado —el config
+  del cliente que no carga nadie, dos helpers con cero llamadas— y el import
+  quedó detrás del DSN. Pero en producción sigue sin haber quien avise cuando
+  algo explota: eso pide una cuenta y un DSN, y es una decisión de quien opera
+  el producto. Lo que cambia es que el repo ya no aparenta tenerlo.
+- **La carrera del correo.** Tiene la misma forma que la de WhatsApp y otro
+  camino de ingreso, que no sabe recuperarse de un choque de clave. Una cosa por
+  vez.
+
+#### Una nota sobre cómo se aplicó la 0029
+
+El índice se creó en producción **antes** que el código que lo maneja, por un
+error mío: el ensayo iba a ser `BEGIN` / crear / `ROLLBACK`, y el driver HTTP de
+Neon manda cada sentencia como su propia transacción, así que el `ROLLBACK` no
+envolvía nada. Se había verificado antes que no hubiera duplicados, así que no
+rompió nada, y el código entró enseguida — pero el ensayo con rollback contra
+Neon por HTTP **no existe**. Para eso hay que mandar el bloque entero en un solo
+`sql.query`, o no ensayar.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

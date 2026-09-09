@@ -75,7 +75,15 @@ function resolveTenantId(bodyTenantId?: string): string | null {
  * serialises the runs, and the run that loses re-runs afterwards over the
  * whole conversation rather than answering its own fragment.
  */
-function scheduleAgent(caseId: string, tenantId: string): void {
+function scheduleAgent(
+  caseId: string,
+  tenantId: string,
+  /**
+   * False para el camino simulado. Decide UNA cosa: si despues del agente se
+   * pasa el barrido de casos trabados.
+   */
+  trafficoReal: boolean
+): void {
   after(async () => {
     try {
       await runIntakeAgent({ caseId, tenantId, source: "whatsapp" });
@@ -107,6 +115,21 @@ function scheduleAgent(caseId: string, tenantId: string): void {
      * respuesta del webhook, y si falla no arrastra nada — el barrido es
      * idempotente y el cron sigue existiendo como respaldo.
      */
+    /*
+     * El barrido NO corre en la simulacion.
+     *
+     * El ensayo de conversaciones (`pnpm rehearse`) entra por el camino con
+     * Bearer y manda muchos mensajes seguidos. Con el barrido colgado de cada
+     * uno, cada mensaje del ensayo sumaba una consulta sobre `cases` entera
+     * contra la MISMA base, y el ensayo corre en paralelo con la prueba de
+     * carga del post-deploy: la medicion terminaba midiendo, en parte, al
+     * ensayo.
+     *
+     * Y ademas es lo correcto por si mismo: una conversacion inventada no es
+     * motivo para correr mantenimiento de produccion.
+     */
+    if (!trafficoReal) return;
+
     try {
       const barridos = await reapStuckProcessingCases({ tenantId });
       if (barridos.reaped > 0) {
@@ -193,7 +216,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         // esto se llamaba igual: cada reintento de Meta era otra extracción
         // contra Vertex y un segundo mensaje al asegurado diciendo lo mismo.
         // Meta reintenta cuando el acuse tarda, y el acuse mide 2,9 s p95.
-        if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId);
+        if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId, true);
       } catch (err) {
         sinGuardar++;
         // El mensaje del error, no su nombre: `insertWhatsAppMessage` se toma
@@ -297,7 +320,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       simulated: true,
     });
     // Igual que arriba: un adaptador que reintenta no dispara otra extracción.
-    if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId);
+    if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId, false);
 
     return NextResponse.json(
       { ok: true, case_id: stored.caseId, created: stored.created, status: "received" },

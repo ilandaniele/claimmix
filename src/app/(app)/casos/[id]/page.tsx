@@ -39,6 +39,7 @@ import {
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
+import { modoDeCoreSync } from "@/server/core-sync/client";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
 import { formatAge, formatDate } from "@/lib/utils";
 import { getT } from "@/lib/i18n";
@@ -466,18 +467,37 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                 <AttachmentsPanel attachments={attachments} />
               </PanelSection>
 
-              {/* Section D: Core sync action (AC17) */}
-              {caseRow.status === "listo_para_core" && (
-                <PanelSection id="core-sync" tono="exito" titulo={t("case.detail.coreSyncAction")}>
-                  <p className="mb-4 text-[13.5px] text-emerald-700">
-                    {t("case.detail.coreReadyDescription")}
-                  </p>
-                  <CoreSyncButton
-                    caseId={caseRow.id}
-                    currentStatus={caseRow.status}
-                  />
-                </PanelSection>
-              )}
+              {/*
+                * Section D: el envío al sistema del asegurador (AC17).
+                *
+                * El botón sale sólo si hay a quién mandarle. Sin integración
+                * configurada aparece el mismo panel, en gris y sin botón,
+                * diciendo que el caso está listo pero que el canal no existe.
+                *
+                * Antes el botón salía siempre y la ruta contestaba que sí:
+                * guardaba un `core_external_id` inventado y dejaba el caso en
+                * `enviado_a_core`. Esconder el botón es la mitad del arreglo;
+                * la otra mitad está en `getCoreSyncClient`, que ahora tira en
+                * vez de devolver el simulador.
+                */}
+              {caseRow.status === "listo_para_core" &&
+                (modoDeCoreSync() === "sin_configurar" ? (
+                  <PanelSection id="core-sync" titulo={t("case.detail.coreSyncAction")}>
+                    <p className="text-[13.5px] text-slate-500">
+                      {t("case.detail.coreSyncSinConfigurar")}
+                    </p>
+                  </PanelSection>
+                ) : (
+                  <PanelSection id="core-sync" tono="exito" titulo={t("case.detail.coreSyncAction")}>
+                    <p className="mb-4 text-[13.5px] text-emerald-700">
+                      {t("case.detail.coreReadyDescription")}
+                    </p>
+                    <CoreSyncButton
+                      caseId={caseRow.id}
+                      currentStatus={caseRow.status}
+                    />
+                  </PanelSection>
+                ))}
             </>
           )}
         </div>

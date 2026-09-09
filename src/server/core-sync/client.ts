@@ -75,25 +75,61 @@ export interface ICoreSyncClient {
 import { MockCoreSyncClient } from "./mock";
 
 /**
- * Return the appropriate CoreSyncClient based on environment configuration.
+ * En qué modo está la integración con el sistema del asegurador.
  *
- * CORE_SYNC_MODE=mock (or unset) → MockCoreSyncClient (default, safe for all environments).
- * CORE_SYNC_MODE=real            → logs warning, falls back to mock (not built in this PR).
+ * `sin_configurar` es el default, y ése es el cambio: antes el default era
+ * `mock`.
+ */
+export type ModoDeCoreSync = "mock" | "real" | "sin_configurar";
+
+export function modoDeCoreSync(): ModoDeCoreSync {
+  const crudo = process.env.CORE_SYNC_MODE?.trim();
+  if (crudo === "mock") return "mock";
+  if (crudo === "real") return "real";
+  return "sin_configurar";
+}
+
+/** No hay a quién mandarle el caso. La tira `getCoreSyncClient`. */
+export class CoreSyncSinConfigurar extends Error {
+  constructor(readonly modo: ModoDeCoreSync) {
+    super(`core-sync sin cliente real (modo=${modo})`);
+    this.name = "CoreSyncSinConfigurar";
+  }
+}
+
+/**
+ * El cliente que corresponde, o una excepción si no hay ninguno.
  *
- * IC7: Mock is the default and only implementation for this PR.
+ * ── Lo que hacía antes, y por qué era grave ─────────────────────────────────
+ *
+ * Devolvía `new MockCoreSyncClient()` SIEMPRE. `CORE_SYNC_MODE=real` sólo
+ * escribía un `console.warn` y seguía de largo hasta el mismo `return`. Y
+ * `CORE_SYNC_MODE` no está puesta en ningún lado —ni en `.env.local`, ni en la
+ * CI, ni en Vercel— así que el default es el que corría en producción.
+ *
+ * El resultado no era «la función no anda». Era peor: el botón «Enviar al
+ * sistema central» aparece en el detalle de cualquier caso en
+ * `listo_para_core`, y al apretarlo la ruta guardaba
+ * `core_external_id = 'CORE-' + los primeros 8 caracteres del id`, ponía el
+ * caso en `enviado_a_core` y escribía un `CORE_SYNC_SUCCESS` en la auditoría.
+ * Un identificador inventado, un estado que dice «entregado» y un registro de
+ * auditoría de algo que no pasó. Y los ids que terminan en `0` —uno de cada
+ * dieciséis, porque son UUID— devolvían un «Core timeout» igual de inventado,
+ * que es un error que el analista sale a investigar.
+ *
+ * Fabricar el comprobante de una entrega que nunca ocurrió es lo peor que
+ * puede hacer este archivo, así que ahora el default es no hacer nada y
+ * decirlo.
+ *
+ * `mock` sigue existiendo y hay que pedirlo por su nombre: lo usan los tests y
+ * sirve para probar la pantalla sin un sistema del otro lado.
  */
 export function getCoreSyncClient(): ICoreSyncClient {
-  const mode = process.env.CORE_SYNC_MODE ?? "mock";
+  const modo = modoDeCoreSync();
 
-  if (mode === "real") {
-    // Real implementation is out of scope for this PR (IC7).
-    // Returning the mock with a console warning so a misconfigured prod environment
-    // doesn't silently fail — the warning will surface in Vercel logs.
-    console.warn(
-      "[core-sync] CORE_SYNC_MODE=real is not implemented. Falling back to mock. " +
-        "Implement RealCoreSyncClient in src/server/core-sync/real.ts to enable real sync."
-    );
-  }
+  if (modo === "mock") return new MockCoreSyncClient();
 
-  return new MockCoreSyncClient();
+  // `real` todavía no existe. Cuando exista, acá va
+  // `return new RealCoreSyncClient()` y esta rama desaparece sola.
+  throw new CoreSyncSinConfigurar(modo);
 }

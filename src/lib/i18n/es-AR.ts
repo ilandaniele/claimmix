@@ -380,6 +380,7 @@ export const esAR = {
   "case.detail.linked": "Vinculada",
   "case.detail.pendingCount": "pendiente(s)",
   "case.detail.coreReadyDescription": "Este caso está listo para ser enviado al sistema central. Revisá los campos confirmados antes de proceder.",
+  "case.detail.coreSyncSinConfigurar": "El caso quedó listo, pero la integración con el sistema del asegurador todavía no está conectada. Nadie lo está esperando del otro lado.",
   "case.detail.noRawEmail": "Sin texto original disponible.",
   "case.detail.agentAnalysis": "Análisis del agente",
   "case.detail.auditReason": "Motivo",

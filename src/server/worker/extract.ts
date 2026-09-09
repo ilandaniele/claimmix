@@ -680,16 +680,28 @@ export async function runEmailExtractionWorker(
       return;
     }
 
-    // One run per case at a time. Everything below reads the conversation and
-    // writes back to it, so two runs overlapping corrupt each other.
-    if (!(await acquireExtractionLease(caseId, tenantCtx))) return;
-    leaseHeld = true;
-
-    // ── Throttle real email extractions ──────────────────────────────────────
-    // Prevents burst of 30+ simultaneous Gemini calls when many emails arrive
-    // at once (e.g. Monday morning). Uses GEMINI_WORKER_CONCURRENCY (default 1)
-    // to limit how many run in parallel. Simulation already has its own semaphore;
-    // this covers channel="email" (real Gmail intake only).
+    /*
+     * ── El freno va ANTES de la reserva, y si se vence el caso vuelve a la cola
+     *
+     * Estaba al reves: se tomaba la reserva y RECIEN DESPUES se entraba a
+     * esperar el turno, hasta cinco minutos, adentro de una funcion que dura
+     * sesenta segundos.
+     *
+     * En una rafaga de correos reales —un lunes a la mañana— el caso numero
+     * tres en adelante se moria esperando: nunca llamaba a Gemini, nunca
+     * escribia nada, y quedaba en `recibido` con `extraction_lease_at` puesto y
+     * `extraction_pending` en false. O sea que NADIE lo volvia a despachar. La
+     * unica red era el barredor, que lo manda a `escalado` — un estado del que
+     * este worker no arranca. Hacia falta que una persona tocara «Re-analizar».
+     *
+     * Dos cambios y el agujero se cierra:
+     *
+     *   · esperar SIN la reserva tomada. Sostenerla mientras se duerme bloquea
+     *     a los demas y, como dura tres minutos contra los sesenta segundos de
+     *     la funcion, sobrevive a quien la tomo;
+     *   · si el turno no llega, marcar el caso como pendiente y devolver. Vuelve
+     *     a la cola en vez de morirse.
+     */
     if (caseRow.channel === "email") {
       const throttle = await waitForEmailExtractionTurn({
         tenantId,
@@ -705,10 +717,23 @@ export async function runEmailExtractionWorker(
             case_id: caseId,
             waited_ms: throttle.waitedMs,
             blockers: throttle.blockers,
+            nota: "Se devuelve a la cola en vez de seguir sin turno.",
           })
         );
+        await enTenant(tenantCtx, (db) =>
+          db
+            .update(cases)
+            .set({ extraction_pending: true })
+            .where(eq(cases.id, caseId))
+        );
+        return;
       }
     }
+
+    // One run per case at a time. Everything below reads the conversation and
+    // writes back to it, so two runs overlapping corrupt each other.
+    if (!(await acquireExtractionLease(caseId, tenantCtx))) return;
+    leaseHeld = true;
 
     // Fetch the message body.
     //
@@ -1534,6 +1559,26 @@ async function upsertExtractedFields(
           else excluded.confidence
         end`,
       },
+      /*
+       * ── Lo que confirmo una persona no lo pisa el modelo ─────────────────
+       *
+       * `confirm-field` escribe el valor corregido por el analista con
+       * `confidence: "1.00"`, y el comentario de esa linea dice por que: «lo
+       * confirmo una persona, no hay incertidumbre».
+       *
+       * Este upsert pisaba `field_value` incondicionalmente y, cuando el valor
+       * CAMBIABA, se quedaba con la confianza del modelo. Como la conversacion
+       * entera se re-extrae en cada mensaje, el modelo volvia a leer el DNI
+       * equivocado del primer mensaje a 0,85 y borraba el 1,00 del analista.
+       * Sin dejar rastro, y sin que nadie se enterara hasta ver el dato mal en
+       * la pantalla.
+       *
+       * El 1,00 ya ES de hecho el sello de «lo toco una persona»: ninguna
+       * extraccion lo produce. Asi que alcanza con no pisarlo. Lo correcto de
+       * verdad seria una columna `confirmed_at`, pero eso pide migracion y
+       * tocar la pantalla; esto cierra el agujero hoy.
+       */
+      where: sql`${extractedFields.confidence} < 1.00`,
     })
   );
 }

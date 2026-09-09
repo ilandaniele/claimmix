@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-08. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-09. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -26,7 +26,9 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
   Postgres, Better Auth, pnpm. Deployed on **Vercel (Hobby plan)**.
 - **Prod URL:** https://claimmix.vercel.app
 - **AI:** Gemini `gemini-2.5-flash` **via Vertex AI** (`GEMINI_TRANSPORT=vertex`),
-  OpenAI optional fallback (currently an invalid key), `MOCK_AI=true` for local.
+  `MOCK_AI=true` para local. **No hay fallback de OpenAI**: el extractor se borró
+  y `OPENAI_API_KEY` no se lee en ningún archivo. El selector real es
+  `resolverAiMode` (`MOCK_AI`, `AI_MOCK`, o Gemini sin configurar).
 
 ## Cómo probar que todo anda
 
@@ -50,7 +52,7 @@ Corrélo después de cada deploy. Detalle completo en
 
 | Area | Path |
 |---|---|
-| AI extraction | `src/server/ai/` (`gemini-extractor.ts`, `openai-extractor.ts`, `prompt.ts`, `provider.ts`) |
+| AI extraction | `src/server/ai/` (`gemini-extractor.ts`, `mock-extractor.ts`, `prompt.ts`, `provider.ts`, `ai-mode.ts`) |
 | Output contract (Zod + JSON schema, keep in sync) | `src/lib/schemas/extracted-claim.ts` |
 | Worker / orchestration | `src/server/worker/extract.ts` (`runEmailExtractionWorker`) |
 | Simulation throttle + reaper | `src/server/intake/simulation-throttle.ts`, `reap-stuck.ts` |
@@ -1396,13 +1398,28 @@ verde aunque la tabla de clientes se hubiera pintado entera para alguien que no
 tiene que verla. **Una guarda que se aprueba sola es peor que no tenerla**, y una
 afirmación negativa sobre texto es la forma más fácil de escribir una.
 
-**Pendiente, medido y no hecho.** OpenAI sigue nombrado en 24 archivos —un
-extractor entero, el camino de fine-tuning, valores guardados en la columna
-`provider` y la política de privacidad—. El selector lo sigue ofreciendo, así que
-esos textos son ciertos mientras se pueda elegir. Se sacó sólo la frase que era
-falsa: los ejemplos aprobados vuelven como contexto del agente, no «del agente
-Gemini/OpenAI». Sacarlo del producto es una decisión de producto, no una
-corrección de texto.
+~~**Pendiente, medido y no hecho.** OpenAI sigue nombrado en 24 archivos — un
+extractor entero, el selector lo sigue ofreciendo…~~
+
+**Hecho el 2026-09-09.** Ya no es cierto casi nada de eso: el extractor se borró,
+`OPENAI_API_KEY` no se lee en ningún archivo de `src/`, y el selector real
+(`resolverAiMode`) mira `MOCK_AI`, `AI_MOCK` y si Gemini está configurado, nada
+más. Quedan ocho archivos que lo NOMBRAN, y lo que quedaba de verdad se cerró:
+
+- La política de privacidad pública declaraba «OpenAI / Google Gemini» y omitía
+  los dos destinos que sí reciben lo más sensible — **Cloudflare R2**, donde
+  viven las fotos de los daños y las licencias, y **Meta**, por donde entran y
+  salen los WhatsApp. Corregida.
+- `tenant_ai_settings.openai_model` (`NOT NULL DEFAULT 'gpt-4o-mini'`) no la leía
+  nadie y parecía configuración viva. Borrada en la migración 0027.
+- `model_training_jobs.provider` tenía `DEFAULT 'openai'` mientras el código
+  escribe `vertex_ai_gemini` y `vertex-ai-fine-tuning.ts` tira `WRONG_PROVIDER`
+  con cualquier otro valor. Alineado en la 0027.
+- Tres comentarios de cabecera decían que `OPENAI_API_KEY` elegía el extractor
+  mock. No elige nada.
+
+Lo que se queda, con su nota: `openai_fine_tuning_job_id` guarda el nombre del
+recurso de Vertex y renombrarla pide una migración sobre datos vivos.
 
 ### 🔑 Google entra, salir se ve, y el registro está cerrado (2026-09-03)
 
@@ -2276,16 +2293,20 @@ consultas todavía se apoyan en ellos y otras ya no llevan ninguno. Con el rol
 restringido, las primeras seguirían andando y las segundas devolverían cero. La
 cadena está en `DATABASE_URL_APP`, ya cargada en Vercel.
 
-**Lo que quedó pendiente, con motivo.** `agent-tools` y `customer-matcher`
-rompen sus tests de una forma que no es el puente ni el contexto: piden entender
-el mock a fondo. Los 44 filtros restantes son los que el análisis marcó como no
-mecánicos — joins que pueden estar acotando la tabla del otro lado, y `or(` que
-pueden ser el caso de las filas globales.
+**Lo que quedó pendiente, con motivo.** ~~`agent-tools` y `customer-matcher`
+rompen sus tests… Los 44 filtros restantes…~~ **Desactualizado, corregido el
+2026-09-09.** Los dos módulos ya migraron enteros, y `check-architecture.mjs`
+dice hoy «10 de 10 permitidos» y «41 declaradas con su motivo»: los filtros
+escritos a mano bajaron de 44 a 10. Alguien que retomara por este párrafo iba a
+ir a hacer trabajo que ya está hecho.
 
 **Y algo que conviene saber antes de confiar en `pnpm rehearse`:** falla con
 diferencias distintas en cada corrida, porque conversa con el modelo real. Al
 comparar dos versiones del orquestador, una tenía 3 diferencias y la otra 4, y
-ninguna de las dos las mismas. Sirve para leer transcriptos —para eso está— pero
-**no sirve como portón de CI tal como está**: un chequeo que falla al azar se
-deja de mirar, que es exactamente cómo se perdieron las 28 políticas de RLS
-durante meses.
+ninguna de las dos las mismas.
+
+~~**No sirve como portón de CI tal como está.**~~ **Desactualizado, corregido el
+2026-09-09.** Hoy SÍ es un portón: el job `rehearse` de `post-deploy.yml` depende
+de `smoke` y bloquea a los que vienen después. La aleatoriedad se resolvió
+corriéndolo dos veces y comparando con `comparar-ensayos.mjs`, así que lo que
+falla es lo que falla en las dos.

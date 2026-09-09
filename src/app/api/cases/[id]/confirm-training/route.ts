@@ -142,7 +142,6 @@ export async function POST(
       {
         training_example_id: result.exampleId,
         agent_run_id: agentRunId,
-        queued_finetune_job_id: result.queuedFineTuneJobId,
       },
       201
     );

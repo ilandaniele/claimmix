@@ -130,7 +130,7 @@ export function formatApprovedExamples(examples: ApprovedExample[]): string {
 // ── Human approval (the ONLY way an example is created) ───────────────────────
 
 export type ApproveResult =
-  | { ok: true; exampleId: string; queuedFineTuneJobId: string | null }
+  | { ok: true; exampleId: string }
   | {
       ok: false;
       reason: "run_not_found" | "duplicate" | "unsafe_run" | "insert_failed";
@@ -316,97 +316,23 @@ export async function approveTrainingExample(
     payload: { agent_run_id: agentRunId, training_example_id: exampleId },
   });
 
-  // Fine-tuning is optional/manual; approved examples are prompt context now.
-  const queuedFineTuneJobId = null;
-
-  return { ok: true, exampleId, queuedFineTuneJobId };
-}
-
-// ── Batched fine-tuning queue ─────────────────────────────────────────────────
-
-/** Minimum approved examples before a training package is drafted. */
-function getFineTuneMinExamples(): number {
-  const raw = Number(process.env.FINETUNE_MIN_EXAMPLES);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 20;
-}
-
-/** Job states that count as "already in flight" — prevents duplicate drafts. */
-const OPEN_JOB_STATUSES = ["draft", "queued", "running", "eval_pending"];
-
-/**
- * Create a DRAFT model_training_jobs row when the approved-example count
- * reaches the batch threshold and no job is already open. Returns the new
- * job id, or null when below threshold / job already open / on error.
- *
- * Deliberately does NOT call any fine-tuning API: too much noisy/duplicated
- * training data makes the agent worse, so jobs require human curation,
- * evals, and explicit approval before anything is trained or deployed.
- */
-export async function maybeQueueFineTuneJob(
-  tenantId: string,
-  createdBy: string | null
-): Promise<string | null> {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
-  try {
-    const te = tables.trainingExamples;
-    const approvedCount = await countRows(
-      tenantCtx,
-      te,
-      eq(te.status, "approved")
-    );
-
-    const threshold = getFineTuneMinExamples();
-    if (approvedCount < threshold) return null;
-
-    const mtj = tables.modelTrainingJobs;
-    const openJobs = await enTenant(tenantCtx, (db) =>
-      db
-        .select({ id: mtj.id })
-        .from(mtj)
-        .where(
-          and( inArray(mtj.status, OPEN_JOB_STATUSES))
-        )
-        .limit(1)
-    );
-
-    if (openJobs.length > 0) return null;
-
-    const job = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .insert(mtj)
-          .values({
-            tenant_id: tenantId,
-            status: "draft",
-            provider: "gemini",
-            base_model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
-            training_example_count: approvedCount,
-            created_by: createdBy,
-          })
-          .returning({ id: mtj.id })
-      )
-    );
-
-    if (!job) return null;
-
-    const jobId = job.id;
-
-    await writeAuditLog({
-      tenant_id: tenantId,
-      actor_id: createdBy,
-      event_type: AuditEvent.FINETUNE_JOB_QUEUED,
-      target_type: "model_training_job",
-      target_id: jobId,
-      payload: {
-        job_id: jobId,
-        provider: "gemini",
-        training_example_count: approvedCount,
-      },
-    });
-
-    return jobId;
-  } catch {
-    return null;
-  }
+  /*
+   * Acá vivían `const queuedFineTuneJobId = null;` escrito a mano y, ochenta
+   * líneas más abajo, `maybeQueueFineTuneJob` entera sin un solo llamador. La
+   * respuesta de `/api/cases/:id/confirm-training` traía un
+   * `queued_finetune_job_id` que era `null` siempre, por construcción.
+   *
+   * La tentación era conectarla. NO se conectó, y por una razón concreta:
+   * insertaba `provider: "gemini"`, y todo el camino de Vertex
+   * (`vertex-ai-fine-tuning.ts`) tira `WRONG_PROVIDER` para cualquier trabajo
+   * cuyo provider no sea `vertex_ai_gemini` — que es lo que tienen las dos
+   * filas reales. Cablearla habría empezado a fabricar borradores que ningún
+   * paso posterior podía tomar.
+   *
+   * Era un duplicado viejo: el que anda es `createVertexAiTuningDraft`, que
+   * hace lo mismo con el provider correcto y ya lo llama
+   * `/api/admin/fine-tuning/vertex`. Así que se borra el duplicado y se saca el
+   * campo que mentía.
+   */
+  return { ok: true, exampleId };
 }

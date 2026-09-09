@@ -31,7 +31,8 @@ import { firstRow } from "@/lib/db/helpers";
 export type AiProvider = "gemini";
 export type ExtractionEngine = AiProvider | "mock";
 
-export const AI_PROVIDERS: readonly AiProvider[] = ["gemini"] as const;
+// `AI_PROVIDERS` vivía acá: un arreglo de un solo elemento, sin llamadores, que
+// repetía lo que el tipo `AiProvider` ya dice. Se saca.
 const DEFAULT_AI_PROVIDER: AiProvider = "gemini";
 
 function isAiProvider(value: unknown): value is AiProvider {

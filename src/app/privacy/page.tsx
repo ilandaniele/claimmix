@@ -123,9 +123,19 @@ export default function PrivacyPage() {
                 <strong>Neon</strong> (base de datos PostgreSQL) — Estados Unidos.
               </li>
               <li>
-                <strong>OpenAI / Google Gemini</strong> (extracción de campos con IA) — el texto
-                del correo es enviado para análisis; no se almacena por el proveedor de IA más
-                allá de la solicitud.
+                <strong>Google Cloud (Vertex AI / Gemini)</strong> (extracción de campos con IA) —
+                el texto del mensaje, y las fotos que lo acompañen, se envían para su análisis; el
+                proveedor no los conserva más allá de la solicitud.
+              </li>
+              <li>
+                <strong>Cloudflare R2</strong> (almacenamiento de archivos adjuntos) — Estados
+                Unidos. Acá viven las fotos de los daños, las licencias de conducir y las cédulas
+                que el asegurado envía.
+              </li>
+              <li>
+                <strong>Meta Platforms</strong> (WhatsApp Business Cloud API) — Estados Unidos.
+                Interviene únicamente cuando la denuncia entra o se responde por WhatsApp, y ve el
+                número de teléfono y el contenido de esos mensajes.
               </li>
             </ul>
             <p className="mt-2">

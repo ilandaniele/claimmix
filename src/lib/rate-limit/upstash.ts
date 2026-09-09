@@ -5,9 +5,19 @@
  *   1. Installing: pnpm add @upstash/ratelimit @upstash/redis
  *   2. Setting env vars: RATE_LIMIT_PROVIDER=upstash, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
  *
- * Until the packages are installed, RATE_LIMIT_PROVIDER must remain "memory"
- * (the default). This file intentionally avoids any top-level imports of
- * optional packages so the build succeeds without them.
+ * Hasta que los paquetes esten instalados, no pongas RATE_LIMIT_PROVIDER en
+ * nada: el default se resuelve solo en `resolveProvider()` y es `postgres`
+ * cuando hay DATABASE_URL.
+ *
+ * Aca decia que el default era "memory" y que la variable tenia que quedar en
+ * ese valor. Es al reves y es peligroso: contar en memoria EN PRODUCCION es no
+ * contar —cada invocacion serverless arranca con su propio mapa vacio, asi que
+ * el sexto intento casi nunca cae en la misma instancia que los cinco
+ * anteriores— y el propio `index.ts` avisa de eso a los gritos. Seguir esta
+ * instruccion apagaba el tope del login sin que fallara nada.
+ *
+ * Este archivo evita a proposito cualquier import de nivel superior de los
+ * paquetes opcionales, para que el build ande sin ellos.
  */
 
 type RateLimitResult = { allowed: boolean; remaining: number; resetAt: number };

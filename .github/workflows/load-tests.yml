@@ -1,0 +1,153 @@
+name: Carga
+
+# ── Qué corre solo y qué se pide a mano ─────────────────────────────────────
+#
+# Cuando Vercel termina una vista previa, corre el SMOKE contra ella: un VU,
+# treinta segundos. Alcanza para lo que se rompe de verdad —una ruta que se
+# renombró, un login que cambió de forma— y no gasta nada.
+#
+# Los perfiles pesados van a mano, y contra donde diga quien los lanza.
+#
+# NO hay soak semanal, y es una decisión, no un olvido: dos horas a 30 VUs
+# sondeando cada cinco segundos son unas cuarenta y tres mil invocaciones, casi
+# la mitad de la cuota mensual del plan Hobby. Un perfil de resistencia contra
+# el deploy real de este proyecto no mide resistencia: mide el plan. Cuando haga
+# falta, se lanza a mano contra una vista previa.
+#
+# Ver también `tests/load/config/base.js`, que se niega a correr un perfil
+# pesado fuera de localhost salvo que se lo pida explícitamente.
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      escenario:
+        description: "Cuál correr"
+        required: true
+        default: smoke
+        type: choice
+        options: [smoke, load, stress, spike, soak, peak]
+      base_url:
+        description: "Contra qué URL"
+        required: true
+        type: string
+      permitir_remoto:
+        description: "Dejar que un perfil pesado apunte fuera de localhost"
+        required: false
+        default: false
+        type: boolean
+
+# Sólo leer. Este trabajo maneja credenciales de una cuenta real; no tiene por
+# qué poder escribir nada. El default del repo es `read` hoy, pero eso es un
+# ajuste a un clic de distancia de ser `write`.
+permissions:
+  contents: read
+
+concurrency:
+  group: carga-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  carga:
+    name: k6
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    # El evento `deployment_status` llega también para estados intermedios y
+    # para producción. Acá sólo interesa una vista previa que terminó bien:
+    # contra producción esto no corre solo nunca.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.environment != 'Production')
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Instalar k6
+        uses: grafana/setup-k6-action@ffe7d7290dfa715e48c2ccc924d068444c94bde2 # v1.1.0
+
+      - name: Elegir escenario
+        id: plan
+        run: |
+          if [ "${{ github.event_name }}" = "deployment_status" ]; then
+            echo "escenario=smoke" >> "$GITHUB_OUTPUT"
+          else
+            echo "escenario=${{ inputs.escenario }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── A dónde se mandan las credenciales ─────────────────────────────────
+      #
+      # `target_url` lo pone quien crea el deployment, y el `if:` de arriba sólo
+      # mira el ESTADO y el ENTORNO, no el host. Abajo, `helpers/auth.js` hace un
+      # POST con el correo y la contraseña de la cuenta de pruebas a
+      # `${BASE_URL}/api/auth/sign-in/email`.
+      #
+      # O sea que cualquiera que pueda crear un `deployment_status` en este repo
+      # —un colaborador con escritura, o una integración con más permisos de los
+      # que necesita— apunta la URL a un host suyo y se lleva una credencial viva.
+      #
+      # El host se comprueba antes de que la credencial exista en el entorno.
+      - name: ¿A dónde apunta esto?
+        id: destino
+        env:
+          URL: ${{ inputs.base_url || github.event.deployment_status.target_url }}
+        run: |
+          # El sufijo de la organización, no sólo el nombre del proyecto: con
+          # `claimmix*` alcanzaba con crear un proyecto llamado `claimmix-x` en
+          # cualquier cuenta de Vercel para quedar del lado bueno del filtro.
+          case "$URL" in
+            https://claimmix.vercel.app|            https://claimmix-*-ilandaniele-3471s-projects.vercel.app)
+              echo "url=$URL" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error title=Destino no reconocido::La corrida iba a mandar las credenciales de la cuenta de pruebas a $URL, que no es un despliegue de este proyecto. Se corta."
+              exit 1 ;;
+          esac
+
+      # ── La puerta de Vercel ────────────────────────────────────────────────
+      #
+      # Las vistas previas están detrás de Deployment Protection: contestan 401
+      # con `{"error":{"message":"Protected deployment"}}` ANTES de que el pedido
+      # llegue a Next. Medir contra eso mide la puerta.
+      #
+      # Vercel da un secreto de automatización para pasar. Hay que crearlo en el
+      # proyecto (Settings → Deployment Protection → Protection Bypass for
+      # Automation) y ponerlo acá como `VERCEL_AUTOMATION_BYPASS_SECRET`.
+      #
+      # Mientras no esté, esto NO corre y lo dice. No sale verde —un verde que no
+      # midió es peor que un rojo— y no sale rojo en cada PR, que enseña a no
+      # mirar la CI. Queda como aviso, con lo que hay que hacer.
+      - name: ¿Hay llave para la vista previa?
+        id: llave
+        run: |
+          if [ -n "${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" ]; then
+            echo "hay=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "hay=0" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Carga sin medir::Falta VERCEL_AUTOMATION_BYPASS_SECRET. La vista previa está protegida y k6 mediría la pantalla de Vercel, no la aplicación. Crealo en Vercel (Settings → Deployment Protection → Protection Bypass for Automation) y agregalo como secreto del repo."
+          fi
+
+      - name: Correr ${{ steps.plan.outputs.escenario }}
+        if: steps.llave.outputs.hay == '1'
+        run: |
+          mkdir -p resultados
+          k6 run "tests/load/scenarios/${{ steps.plan.outputs.escenario }}.js"
+        env:
+          BASE_URL: ${{ steps.destino.outputs.url }}
+          # La vista previa no es localhost, así que un perfil pesado pide
+          # permiso explícito. El smoke del deploy no lo necesita.
+          PERMITIR_REMOTO: ${{ inputs.permitir_remoto && '1' || '0' }}
+          # La misma cuenta de pruebas que usa Playwright. UNA sesión para todos
+          # los VUs: el login tiene tope de cinco intentos cada diez segundos y
+          # doscientos VUs logueándose miden ese tope. Ver `helpers/auth.js`.
+          LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_TEST_EMAIL }}
+          LOAD_TEST_PASSWORD: ${{ secrets.PLAYWRIGHT_TEST_PASSWORD }}
+          VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+      # `always()`: el reporte de la corrida que FALLÓ es el que hay que mirar.
+      - name: Guardar el reporte
+        if: always() && steps.llave.outputs.hay == '1' 
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: carga-${{ steps.plan.outputs.escenario }}
+          path: resultados/
+          retention-days: 30

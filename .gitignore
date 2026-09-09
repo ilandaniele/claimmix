@@ -135,3 +135,6 @@ tests/e2e/.sesiones/
 # Viven en la carpeta pero no son del proyecto: los trae de
 # Desktop\Desarrollo\Security y cambian por fuera de este repo.
 /prompts for performance and security/
+
+# Los reportes de las corridas de carga (k6 handleSummary).
+resultados/

@@ -848,11 +848,25 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
    * `extracted_fields` y `outbound_messages` veinticinco veces cada una.
    *
    * Por eso se comprueba la existencia y no el uso.
+   *
+   * ── El que se vigilaba no era el que se usa ────────────────────────────
+   *
+   * Acá decía `idx_cases_tenant_created`, y el listado NO entra por ése:
+   * entra por `idx_cases_tenant_created_at`, escaneándolo hacia atrás. Lo dice
+   * el EXPLAIN de este mismo archivo, veinte líneas más arriba —«listado: usa
+   * idx_cases_tenant_created_at»—, así que la contradicción estaba impresa en
+   * la misma salida.
+   *
+   * O sea que esta guarda cuidaba un índice que a nadie le hacía falta,
+   * mientras el que sostiene la consulta que abre todo el mundo no estaba en
+   * la lista. Se cambió al borrar el duplicado en la migración 0025: son las
+   * mismas dos columnas, uno ASC y otro DESC, y un btree se recorre en los dos
+   * sentidos.
    */
   const declarados = [
     "idx_cases_policyholder_name_trgm",
     "idx_cases_policy_number_trgm",
-    "idx_cases_tenant_created",
+    "idx_cases_tenant_created_at",
     "idx_extracted_fields_case_id",
     "idx_outbound_messages_case_id",
   ];

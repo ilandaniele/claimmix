@@ -19,7 +19,7 @@
 
 import "server-only";
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
@@ -156,6 +156,23 @@ interface AttachmentRow {
  * document wrongly marked as received disappears from the analyst's list and
  * nobody finds out until the claim stalls; one asked for twice is a nuisance.
  */
+/**
+ * Cuantas veces se le pregunta al modelo por el MISMO archivo, en toda su vida.
+ *
+ * Ver el comentario de `unmatchedAttachments`: no es uno porque la lista de
+ * documentos pendientes cambia entre mensajes, y una foto que hoy no clasifica
+ * puede clasificar manana.
+ */
+const MAX_MIRADAS_POR_ADJUNTO = 3;
+
+/**
+ * Cuantos archivos se miran por mensaje entrante.
+ *
+ * Esto corre en el camino de respuesta al asegurado. Una tanda con quince
+ * adjuntos no puede gastar quince llamadas de vision antes de contestarle.
+ */
+const MAX_ADJUNTOS_POR_CORRIDA = 4;
+
 export async function reconcileAttachments(
   caseId: string,
   tenantId: string,
@@ -174,15 +191,35 @@ export async function reconcileAttachments(
     /** Qué adjunto cerró qué documento, para poder anotarlo después. */
     const marcados: Array<[string, string]> = [];
 
+    /** A los que se les pregunto en esta corrida, hayan coincidido o no. */
+    const mirados: string[] = [];
+
     for (const attachment of attachments) {
       const remaining = pending.filter((k) => !satisfied.has(k));
       if (remaining.length === 0) break;
 
+      mirados.push(attachment.id);
       const key = await identifyDocument(tenantId, attachment, remaining, claimTypeLabel);
       if (key) {
         satisfied.add(key);
         marcados.push([attachment.id, key]);
       }
+    }
+
+    /*
+     * El contador sube por CADA mirada, coincida o no. Es justamente el intento
+     * fallido el que no dejaba rastro y hacia que el archivo volviera a
+     * mirarse en el mensaje siguiente.
+     */
+    if (mirados.length > 0) {
+      await enTenant(tenantCtx, (db) =>
+        db
+          .update(claimAttachments)
+          .set({
+            intentos_de_identificacion: sql`${claimAttachments.intentos_de_identificacion} + 1`,
+          })
+          .where(inArray(claimAttachments.id, mirados))
+      );
     }
 
     if (satisfied.size === 0) return;
@@ -274,9 +311,28 @@ async function unmatchedAttachments(
            * ofreciendo, que es el comportamiento de siempre: nadie puede
            * reconstruir qué cerraron.
            */
-          isNull(claimAttachments.matched_doc_key)
+          isNull(claimAttachments.matched_doc_key),
+          /*
+           * Y a los que no se les pregunto ya tres veces.
+           *
+           * `matched_doc_key` sigue en NULL cuando el modelo NO reconoce nada,
+           * que es el comportamiento conservador que este archivo pide a
+           * proposito. El efecto era que el mismo archivo se volvia a ofrecer
+           * en CADA mensaje entrante, para siempre: una llamada de vision por
+           * archivo por mensaje, con la imagen entera adentro del prompt.
+           *
+           * No se cierra en el primer intento porque `identifyDocument` recibe
+           * los documentos que TODAVIA faltan: una foto que no clasifico
+           * cuando faltaban dos puede clasificar despues, cuando la lista
+           * cambio. Tres miradas dan lugar a eso sin dejar el gasto abierto.
+           */
+          lt(claimAttachments.intentos_de_identificacion, MAX_MIRADAS_POR_ADJUNTO)
         )
       )
+      // Tope por corrida, aparte del tope por archivo: una tanda con quince
+      // adjuntos no puede gastar quince llamadas de vision en el camino de
+      // respuesta al asegurado. Los que sobran entran en el mensaje siguiente.
+      .limit(MAX_ADJUNTOS_POR_CORRIDA)
   );
 
   return rows.map((r) => ({

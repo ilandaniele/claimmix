@@ -81,16 +81,41 @@ function actualizacionCon(campo: string): Record<string, unknown> | null {
   return actualizaciones.find((u) => campo in u) ?? null;
 }
 
-/** Las escrituras que NO son la marca del adjunto: lo que estos tests miran. */
+/**
+ * Las escrituras que NO son contabilidad del adjunto: lo que estos tests miran.
+ *
+ * Son dos: `matched_doc_key` —cual documento cerro— y
+ * `intentos_de_identificacion` —cuantas veces se le pregunto al modelo—. La
+ * segunda existe porque un archivo que el modelo no reconocia se volvia a
+ * mirar en cada mensaje entrante, para siempre.
+ */
 function actualizacionesDePedidos(): Record<string, unknown>[] {
-  return actualizaciones.filter((u) => !("matched_doc_key" in u));
+  return actualizaciones.filter(
+    (u) => !("matched_doc_key" in u) && !("intentos_de_identificacion" in u)
+  );
 }
 
 /** Queue results for the selects, in the order the module issues them. */
 function queueSelects(...results: unknown[][]) {
   const queue = [...results];
   (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-    from: () => ({ where: () => Promise.resolve(queue.shift() ?? []) }),
+    from: () => ({
+      /*
+       * `where()` devuelve algo que se puede esperar Y que ademas tiene
+       * `.limit()`. Las dos formas conviven en este archivo: la mayoria de las
+       * consultas cierra en `where`, y la de adjuntos sin clasificar lleva
+       * `.limit(MAX_ADJUNTOS_POR_CORRIDA)` para no gastar una llamada de vision
+       * por archivo en el camino de respuesta al asegurado.
+       */
+      where: () => {
+        const filas = queue.shift() ?? [];
+        const esperable = Promise.resolve(filas) as Promise<unknown[]> & {
+          limit?: () => Promise<unknown[]>;
+        };
+        esperable.limit = () => Promise.resolve(filas);
+        return esperable;
+      },
+    }),
   }));
 }
 

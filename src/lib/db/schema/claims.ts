@@ -87,6 +87,16 @@ export const claimAttachments = pgTable("claim_attachments", {
    * comportamiento de siempre.
    */
   matched_doc_key: text("matched_doc_key"),
+  /**
+   * Cuantas veces se le pregunto al modelo que documento es este archivo.
+   *
+   * Sin esto, un adjunto que el modelo no reconocia se volvia a mirar en CADA
+   * mensaje entrante, para siempre: una llamada de vision por archivo por
+   * mensaje, con la imagen entera adentro del prompt. Migracion 0028.
+   */
+  intentos_de_identificacion: integer("intentos_de_identificacion")
+    .notNull()
+    .default(0),
 });
 
 export const claimFieldConfirmations = pgTable("claim_field_confirmations", {

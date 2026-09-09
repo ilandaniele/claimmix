@@ -18,13 +18,13 @@ import { type NextRequest } from "next/server";
 import { z } from "zod";
 
 import { ok, err } from "@/lib/api/respond";
-import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { AppError } from "@/lib/errors";
 import {
-  rateLimit,
   RATE_LIMIT_CONFIGS,
-  buildUserKey,
   getClientIp,
+  type RateLimitResult,
 } from "@/lib/rate-limit/index";
 import { ConfirmFieldSchema } from "@/lib/schemas/cases";
 import { resolveFieldConfirmation } from "@/server/cases/confirm-field";
@@ -39,8 +39,9 @@ export async function PATCH(
 ) {
   // ── 1. Sesión y rol ───────────────────────────────────────────────────────
   let ctx: RoleContext;
+  let rl: RateLimitResult;
   try {
-    ctx = await requireRole(...ALL_ROLES);
+    ({ ctx, rl } = await entrar("confirm-field", RATE_LIMIT_CONFIGS.CONFIRM_FIELD, ...ALL_ROLES));
   } catch {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
@@ -51,12 +52,8 @@ export async function PATCH(
     return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
   }
 
-  // ── 2. Límite de tráfico ──────────────────────────────────────────────────
   const ip = getClientIp(request);
-  const rl = await rateLimit(
-    buildUserKey(userRow.id, "confirm-field"),
-    RATE_LIMIT_CONFIGS.CONFIRM_FIELD
-  );
+
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes. Esperá un momento."));
   }

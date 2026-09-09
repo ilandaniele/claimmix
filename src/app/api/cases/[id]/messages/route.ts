@@ -17,7 +17,8 @@
 
 import { type NextRequest } from "next/server";
 import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
-import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -25,9 +26,8 @@ import { cases, claimAttachments, claimMessages } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
-  rateLimit,
   RATE_LIMIT_CONFIGS,
-  buildUserKey,
+  type RateLimitResult,
 } from "@/lib/rate-limit/index";
 import { z } from "zod";
 
@@ -58,8 +58,9 @@ export async function GET(
 ) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
   let ctx: RoleContext;
+  let rl: RateLimitResult;
   try {
-    ctx = await requireRole(...ALL_ROLES);
+    ({ ctx, rl } = await entrar("cases-messages-get", RATE_LIMIT_CONFIGS.CASES_API, ...ALL_ROLES));
   } catch {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
@@ -69,9 +70,6 @@ export async function GET(
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: tenantId };
 
-  // ── 2. Rate limit ─────────────────────────────────────────────────────────
-  const rlKey = buildUserKey(userRow.id, "cases-messages-get");
-  const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CASES_API);
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes."));
   }

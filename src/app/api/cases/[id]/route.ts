@@ -11,7 +11,8 @@
 
 import { type NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { ALL_ROLES } from "@/lib/auth/require-role";
+import { entrar, type Entrada } from "@/lib/api/entrada";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -22,9 +23,7 @@ import { patchCase } from "@/server/cases/patch";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
-  rateLimit,
   RATE_LIMIT_CONFIGS,
-  buildUserKey,
   getClientIp,
 } from "@/lib/rate-limit/index";
 import type { CaseRow } from "@/lib/db/types";
@@ -32,9 +31,10 @@ import { z } from "zod";
 
 // ── Shared: resolve authenticated user + their public.users row ───────────────
 
-async function resolveContext(): Promise<RoleContext | null> {
+/** `null` cuando no hay sesión, que es lo único que los tres handlers miran. */
+async function resolveContext(etiqueta: string): Promise<Entrada | null> {
   try {
-    return await requireRole(...ALL_ROLES);
+    return await entrar(etiqueta, RATE_LIMIT_CONFIGS.CASES_API, ...ALL_ROLES);
   } catch {
     return null;
   }
@@ -62,15 +62,13 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
-  const ctx = await resolveContext();
-  if (!ctx) {
+  const entrada = await resolveContext("cases-get");
+  if (!entrada) {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
+  const { ctx, rl } = entrada;
   const { userRow } = ctx;
 
-  // ── 2. Rate limit ─────────────────────────────────────────────────────────
-  const rlKey = buildUserKey(userRow.id, "cases-get");
-  const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CASES_API);
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes."));
   }
@@ -115,10 +113,11 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> }
 ) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
-  const ctx = await resolveContext();
-  if (!ctx) {
+  const entrada = await resolveContext("cases-delete");
+  if (!entrada) {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
+  const { ctx, rl } = entrada;
   const { userRow } = ctx;
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   // Este contexto es lo único que le dice de quién son los datos.
@@ -129,9 +128,6 @@ export async function DELETE(
     return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
   }
 
-  // ── 2. Rate limit ─────────────────────────────────────────────────────────
-  const rlKey = buildUserKey(userRow.id, "cases-delete");
-  const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CASES_API);
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes."));
   }
@@ -188,10 +184,11 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
-  const ctx = await resolveContext();
-  if (!ctx) {
+  const entrada = await resolveContext("cases-patch");
+  if (!entrada) {
     return err(new AppError("MISSING_SESSION", "Se requiere autenticación."));
   }
+  const { ctx, rl } = entrada;
   const { userRow } = ctx;
 
   // Viewers are read-only.
@@ -199,10 +196,8 @@ export async function PATCH(
     return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
   }
 
-  // ── 2. Rate limit ─────────────────────────────────────────────────────────
   const ip = getClientIp(request);
-  const rlKey = buildUserKey(userRow.id, "cases-patch");
-  const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CASES_API);
+
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes."));
   }

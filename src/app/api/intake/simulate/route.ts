@@ -19,11 +19,11 @@ import { type NextRequest, after } from "next/server";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, rawMessages } from "@/lib/db/schema";
-import {
-  requireRole,
+import {
   CASE_EDITOR_ROLES,
   type RoleContext,
 } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { SimulateIntakeSchema } from "@/lib/schemas/intake";
 import { getScenarioById } from "@/server/intake/scenarios";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
@@ -34,9 +34,8 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
-  rateLimit,
   RATE_LIMIT_CONFIGS,
-  buildUserKey,
+  type RateLimitResult,
   getClientIp,
 } from "@/lib/rate-limit/index";
 import type { ClaimType } from "@/lib/schemas/cases";
@@ -78,17 +77,19 @@ export async function POST(request: NextRequest): Promise<Response> {
    * guarda estaba.
    */
   let ctx: RoleContext;
+  let rlResult: RateLimitResult;
   try {
-    ctx = await requireRole(...CASE_EDITOR_ROLES);
+    ({ ctx, rl: rlResult } = await entrar(
+      "intake-simulate",
+      RATE_LIMIT_CONFIGS.INTAKE_SIMULATE,
+      ...CASE_EDITOR_ROLES
+    ));
   } catch (e) {
     return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));
   }
   const { userRow } = ctx;
 
-  // ── 2. Rate limit ────────────────────────────────────────────────────────────
   const ip = getClientIp(request);
-  const rlKey = buildUserKey(userRow.id, "intake-simulate");
-  const rlResult = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.INTAKE_SIMULATE);
 
   if (!rlResult.allowed) {
     // El `Retry-After` es la razón por la que esto se armaba a mano: `err()`

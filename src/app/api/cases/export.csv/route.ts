@@ -13,7 +13,8 @@
  */
 
 import { type NextRequest, NextResponse } from "next/server";
-import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { CaseQuerySchema, type CaseStatus, type ClaimType } from "@/lib/schemas/cases";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
@@ -23,9 +24,8 @@ import { buildCsv } from "@/lib/csv/safe-encode";
 import { err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
-  rateLimit,
   RATE_LIMIT_CONFIGS,
-  buildUserKey,
+  type RateLimitResult,
   getClientIp,
 } from "@/lib/rate-limit/index";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
@@ -123,17 +123,15 @@ function formatConfidence(score: number | null): string {
 export async function GET(request: NextRequest) {
   // ── 1. Auth ───────────────────────────────────────────────────────────────
   let ctx: RoleContext;
+  let rl: RateLimitResult;
   try {
-    ctx = await requireRole(...ALL_ROLES);
+    ({ ctx, rl } = await entrar("cases-export", RATE_LIMIT_CONFIGS.CASES_API, ...ALL_ROLES));
   } catch (e) {
     return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));
   }
-  const { user, userRow } = ctx;
-
-  // ── 2. Rate limit ─────────────────────────────────────────────────────────
+  const { userRow } = ctx;
   const ip = getClientIp(request);
-  const rlKey = buildUserKey(user.id, "cases-export");
-  const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CASES_API);
+
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes."));
   }

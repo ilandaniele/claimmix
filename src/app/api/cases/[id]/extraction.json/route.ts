@@ -15,7 +15,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
+import { ALL_ROLES } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -24,9 +25,7 @@ import { err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { getLatestAgentRun } from "@/server/training/agent-runs";
 import {
-  rateLimit,
   RATE_LIMIT_CONFIGS,
-  buildUserKey,
 } from "@/lib/rate-limit/index";
 
 export const dynamic = "force-dynamic";
@@ -44,17 +43,17 @@ export async function GET(
 ) {
   try {
     // ── 1. Auth ──────────────────────────────────────────────────────────────
-    const { user, userRow } = await requireRole(...ALL_ROLES);
+    const { ctx, rl } = await entrar(
+      "extraction-download",
+      RATE_LIMIT_CONFIGS.CASES_API,
+      ...ALL_ROLES
+    );
+    const { userRow } = ctx;
     const tenantId = userRow.tenant_id;
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: tenantId };
 
-    // ── 2. Rate limit ────────────────────────────────────────────────────────
-    const rl = await rateLimit(
-      buildUserKey(user.id, "extraction-download"),
-      RATE_LIMIT_CONFIGS.CASES_API
-    );
     if (!rl.allowed) return err(new AppError("RATE_LIMITED"));
 
     // ── 3. Params ────────────────────────────────────────────────────────────

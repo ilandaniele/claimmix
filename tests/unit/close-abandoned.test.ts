@@ -234,8 +234,31 @@ describe("el silencio de alguien a quien nunca le preguntamos", () => {
   });
 
   it("y el predicado está en el filtro del UPDATE, no sólo declarado", () => {
-    const i = FUENTE.indexOf("inArray(cases.status, [...AWAITING_CLAIMANT])");
+    // La subconsulta es la SEGUNDA aparición del filtro de estado: la primera
+    // es la guarda del UPDATE de afuera (ver el test que sigue).
+    const primera = FUENTE.indexOf("inArray(cases.status, [...AWAITING_CLAIMANT])");
+    const i = FUENTE.indexOf("inArray(cases.status, [...AWAITING_CLAIMANT])", primera + 1);
+    expect(i).toBeGreaterThan(-1);
     expect(FUENTE.slice(i, i + 400)).toContain("leLlegoLaPregunta");
+  });
+
+  it("el estado se comprueba TAMBIÉN en el where del UPDATE, no sólo en el IN", () => {
+    /*
+     * El encabezado del archivo promete que cada UPDATE está guardado por el
+     * estado que hizo elegible a la fila, y no lo estaba: el predicado vivía
+     * sólo adentro de la subconsulta. Bajo READ COMMITTED, cuando el UPDATE
+     * encuentra una fila que cambió mientras tanto, lo único que puede volver a
+     * evaluar es «el id sigue en el conjunto» — y el id no cambia nunca.
+     *
+     * El caso concreto: alguien contesta a los catorce días, el agente pasa el
+     * caso a `listo_para_core`, y el cron lo pisa con `cerrado`.
+     */
+    const update = FUENTE.slice(
+      FUENTE.indexOf("const closed = await db"),
+      FUENTE.indexOf(".returning({ id: cases.id, tenant_id: cases.tenant_id })")
+    );
+    const veces = update.split("inArray(cases.status, [...AWAITING_CLAIMANT])").length - 1;
+    expect(veces).toBe(2);
   });
 
   it("un caso sin ningún mensaje saliente tampoco se cierra", () => {

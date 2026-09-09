@@ -22,6 +22,40 @@ const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
 /** Una hora. Ver el comentario en `resetPasswordTokenExpiresIn`. */
 const RESET_DURA_SEGUNDOS = 60 * 60;
 
+/**
+ * El secreto de sesión, o nada.
+ *
+ * `secret: process.env.BETTER_AUTH_SECRET` sin más era un fallo abierto: si la
+ * variable falta o queda vacía, better-auth NO rompe — usa un secreto de
+ * relleno que está publicado en su propio código y escribe un aviso por
+ * consola, que en un deploy verde no lee nadie.
+ *
+ * Con ese secreto conocido se firman cookies de sesión válidas, incluida la
+ * caché de sesión de 60 s. Y el inquilino sale de la sesión, así que la capa de
+ * datos la sirve obedientemente: RLS no ve un ataque, ve un inquilino.
+ * Suplantación completa, cualquier usuario, cualquier aseguradora.
+ *
+ * ── Por qué NO se comprueba al cargar el módulo ─────────────────────────────
+ *
+ * Ahí fue el primer intento y rompió el build: `next build` importa este módulo
+ * para juntar la configuración de las rutas, y en esa etapa la variable no está
+ * —es sensible en Vercel—. El deploy falló con «Failed to collect page data
+ * for /api/admin/gmail-accounts/callback», que no se parece en nada al
+ * problema que describe.
+ *
+ * Es un requisito de EJECUCIÓN, no de compilación. Se exige en
+ * `instrumentation.ts`, que Next llama una vez por arranque del servidor y no
+ * durante el build: sin secreto, la instancia no atiende un solo pedido.
+ */
+export function exigirSecretoDeSesion(): void {
+  if (process.env.BETTER_AUTH_SECRET?.trim()) return;
+  throw new Error(
+    "Falta BETTER_AUTH_SECRET. Sin él, better-auth firma las sesiones con un " +
+      "secreto de relleno que está publicado en su código: cualquiera puede " +
+      "fabricar una cookie válida para cualquier usuario de cualquier inquilino."
+  );
+}
+
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",

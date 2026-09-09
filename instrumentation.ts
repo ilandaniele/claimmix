@@ -11,6 +11,25 @@
 
 export async function register() {
   /*
+   * Sin secreto de sesión, esta instancia no atiende nada.
+   *
+   * `betterAuth({ secret })` no rompe si falta: usa uno de relleno publicado en
+   * su propio código y avisa por consola, que en un deploy verde no lee nadie.
+   * Con ese secreto se firman cookies válidas, y el inquilino sale de la
+   * sesión — la capa de datos las sirve obedientemente.
+   *
+   * Va acá y no al cargar `@/lib/auth` porque `next build` importa ese módulo
+   * para juntar la configuración de las rutas, y en esa etapa la variable no
+   * está: comprobarlo allá rompía el deploy con un error que hablaba de otra
+   * cosa. `register()` corre una vez por arranque del servidor y no durante el
+   * build, que es exactamente cuando este requisito empieza a regir.
+   */
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { exigirSecretoDeSesion } = await import("@/lib/auth");
+    exigirSecretoDeSesion();
+  }
+
+  /*
    * Sentry SÓLO si hay a dónde mandar los errores.
    *
    * Antes se importaba siempre. `sentry.server.config.ts` arranca con

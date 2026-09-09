@@ -121,25 +121,46 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
        * queda para la corrida siguiente. Es el mismo principio que la marca de
        * agua del poller de Gmail: no avanzar más allá de lo que se procesó.
        */
+      /*
+       * El estado va TAMBIÉN acá, no sólo adentro de la subconsulta.
+       *
+       * El encabezado de este archivo promete que «every UPDATE is guarded on
+       * the row still being in the status that made it eligible», y no lo
+       * estaba: el predicado vivía sólo en el `IN`. Bajo READ COMMITTED,
+       * cuando el UPDATE encuentra una fila que alguien modificó mientras
+       * tanto, lo único que puede volver a evaluar es «el id sigue en el
+       * conjunto» — y el id no cambia nunca.
+       *
+       * El caso: alguien contesta después de catorce días de silencio, que es
+       * justo la población que este barrido apunta. El webhook guarda el
+       * mensaje, el agente corre y escribe `listo_para_core`, y el cron —con
+       * su foto vieja— lo pisa con `cerrado` y le estampa la fecha. Es
+       * exactamente lo que las primeras líneas dicen que no puede pasar.
+       *
+       * `reap-stuck` lo hace bien desde siempre. Este no.
+       */
       .where(
-        inArray(
-          cases.id,
-          // sin-inquilino: la subconsulta que elige QUÉ cerrar, del mismo barrido
-          // de sistema que el UPDATE que la contiene. No se ejecuta sola.
-          db
-            .select({ id: cases.id })
-            .from(cases)
-            .where(
-              and(
-                inArray(cases.status, [...AWAITING_CLAIMANT]),
-                lt(
-                  sql`coalesce(${cases.updated_at}, ${cases.created_at})`,
-                  sql`now() - interval '${sql.raw(String(days))} days'`
-                ),
-                leLlegoLaPregunta
+        and(
+          inArray(cases.status, [...AWAITING_CLAIMANT]),
+          inArray(
+            cases.id,
+            // sin-inquilino: la subconsulta que elige QUÉ cerrar, del mismo barrido
+            // de sistema que el UPDATE que la contiene. No se ejecuta sola.
+            db
+              .select({ id: cases.id })
+              .from(cases)
+              .where(
+                and(
+                  inArray(cases.status, [...AWAITING_CLAIMANT]),
+                  lt(
+                    sql`coalesce(${cases.updated_at}, ${cases.created_at})`,
+                    sql`now() - interval '${sql.raw(String(days))} days'`
+                  ),
+                  leLlegoLaPregunta
+                )
               )
-            )
-            .limit(CLOSE_LIMIT)
+              .limit(CLOSE_LIMIT)
+          )
         )
       )
       .returning({ id: cases.id, tenant_id: cases.tenant_id });

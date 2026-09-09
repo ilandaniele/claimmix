@@ -465,6 +465,15 @@ const PRESUPUESTO_DE_CORRIDA_MS = 40_000;
 const MINIMO_PARA_REDESPACHAR_MS = 15_000;
 
 /**
+ * Qué pasó con la reserva.
+ *
+ * `no_se_pudo` no es `ocupada`: la corrida sigue igual —no correr es peor que
+ * correr dos veces— pero NO puede decir que la tomó, porque el `finally` libera
+ * basándose en eso y liberaría la de otro.
+ */
+type Reserva = "tomada" | "ocupada" | "no_se_pudo";
+
+/**
  * Take the case, or record that it needs running again.
  *
  * Two replies a second apart produced two concurrent runs on the same case.
@@ -479,7 +488,7 @@ const MINIMO_PARA_REDESPACHAR_MS = 15_000;
 async function acquireExtractionLease(
   caseId: string,
   tenantCtx: TenantContext
-): Promise<boolean> {
+): Promise<Reserva> {
   try {
     const taken = await enTenant(tenantCtx, (db) =>
       db
@@ -497,7 +506,7 @@ async function acquireExtractionLease(
         .returning({ id: cases.id })
     );
 
-    if (taken.length > 0) return true;
+    if (taken.length > 0) return "tomada";
 
     // Someone else holds it. Their run started before this message was stored,
     // so it cannot see it — flag the case so the holder runs again rather than
@@ -517,12 +526,35 @@ async function acquireExtractionLease(
         case_id: caseId,
       })
     );
-    return false;
+    return "ocupada";
   } catch (err) {
-    // Never block intake on the lease itself. Running twice is the bug we are
-    // fixing; not running at all is worse.
-    console.error("[email-worker] lease acquire error:", dbErrCode(err));
-    return true;
+    /*
+     * No se pudo tomar la reserva. Se sigue igual, PERO sin decir que se tomó.
+     *
+     * El razonamiento de antes era correcto y la salida no: «correr dos veces
+     * es el bug que estamos arreglando, no correr es peor» → `return true`. El
+     * problema es que quien llama marca `leaseHeld` con eso, y el `finally`
+     * después LIBERA una reserva que esta corrida nunca tomó: le rompe el lock
+     * al que sí lo tenía y le borra su marca de mensaje pendiente.
+     *
+     * O sea que durante un hipo de Neon reproducía exactamente el incidente que
+     * el lease existe para evitar —dos mails al asegurado con medio segundo de
+     * diferencia, y los upserts pisándose— justo cuando la base está mal, que es
+     * cuando hay más concurrencia.
+     *
+     * `no_se_pudo` es la tercera respuesta que faltaba: seguí, pero no toques
+     * la reserva de nadie al salir.
+     */
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "email_worker.lease_indeterminado",
+        case_id: caseId,
+        code: dbErrCode(err),
+      })
+    ); // crew-debug-ok
+    return "no_se_pudo";
   }
 }
 
@@ -822,8 +854,11 @@ export async function runEmailExtractionWorker(
 
     // One run per case at a time. Everything below reads the conversation and
     // writes back to it, so two runs overlapping corrupt each other.
-    if (!(await acquireExtractionLease(caseId, tenantCtx))) return;
-    leaseHeld = true;
+    const reserva = await acquireExtractionLease(caseId, tenantCtx);
+    if (reserva === "ocupada") return;
+    // Sólo cuando la tomamos de verdad: el `finally` libera basándose en esto,
+    // y liberar una que no es nuestra es peor que no haberla tomado.
+    leaseHeld = reserva === "tomada";
 
     // Fetch the message body.
     //

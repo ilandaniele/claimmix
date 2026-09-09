@@ -219,6 +219,61 @@ describe("whatsappMessenger — what it says", () => {
    * Por WhatsApp era peor que por mail: tres notificaciones seguidas en el
    * teléfono de la persona, cada una diciendo casi lo mismo.
    */
+
+  /*
+   * ── El DNI no sale entero por WhatsApp ──────────────────────────────────
+   *
+   * `renderConflict` es el PISO de la respuesta: el texto que sale byte por
+   * byte cuando el redactor está apagado, cuando las guardas lo rechazan o
+   * cuando tira excepción. Interpolaba `c.proposed` y `c.stored` en crudo, así
+   * que el documento completo del asegurado quedaba visible en la notificación
+   * de la pantalla bloqueada.
+   *
+   * El enmascarado existía, pero vivía adentro de la función que arma el prompt
+   * del modelo: se aplicaba a lo que LEE el modelo y no a lo que LEE la persona.
+   */
+  it("enmascara el DNI y la póliza en el mensaje de conflicto", async () => {
+    await send("data_confirmation_request", {
+      caseId: CASE,
+      fields: [
+        { fieldKey: "dni", proposedValue: "30123456", conflictWithValue: "30987654" },
+        {
+          fieldKey: "policy_number",
+          proposedValue: "POL-12345678",
+          conflictWithValue: "POL-87654321",
+        },
+      ],
+    });
+
+    const body = sentBody();
+
+    // Ninguno de los cuatro valores sale entero.
+    expect(body).not.toContain("30123456");
+    expect(body).not.toContain("30987654");
+    expect(body).not.toContain("12345678");
+    expect(body).not.toContain("87654321");
+
+    // Pero sí los últimos cuatro dígitos, que son con los que la persona
+    // reconoce cuál es cuál.
+    expect(body).toContain("****3456");
+    expect(body).toContain("****7654");
+  });
+
+  it("lo que no es sensible sigue saliendo entero", async () => {
+    // El control que impide que el arreglo sea «enmascarar todo»: sin el
+    // nombre a la vista, el mensaje no dice qué hay que corregir.
+    await send("data_confirmation_request", {
+      caseId: CASE,
+      fieldKey: "full_name",
+      proposedValue: "Pedro García",
+      conflictWithValue: "Juan Pérez",
+    });
+
+    const body = sentBody();
+    expect(body).toContain("Pedro García");
+    expect(body).toContain("Juan Pérez");
+  });
+
   it("lista los tres datos en un solo mensaje", async () => {
     await send("data_confirmation_request", {
       caseId: CASE,

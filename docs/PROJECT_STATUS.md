@@ -1852,6 +1852,130 @@ comentario de la vez anterior que pasó lo mismo, el 1º de septiembre.
   adjunto de WhatsApp que se bufferea entero antes de mirar el tamaño, y siete
   de accesibilidad.
 
+### 🧹 La lista de pendientes, cerrada (2026-09-09)
+
+Una auditoría con tres lentes —lo que el documento declara abierto, lo que el
+código confiesa, y lo que vive afuera del repo— devolvió 49 hallazgos. Se
+comprobó cada uno contra el código antes de tocarlo, y varios no se sostuvieron.
+Lo que sigue es qué cambió y qué NO, con el porqué.
+
+#### Lo peor que había, y no estaba anotado en ningún lado
+
+**«Enviar al sistema central» dejaba el comprobante de una entrega que nunca
+ocurrió.** `getCoreSyncClient()` devolvía `MockCoreSyncClient` SIEMPRE: la rama
+`CORE_SYNC_MODE=real` sólo escribía un `console.warn` y seguía de largo hasta el
+mismo `return`. Y `CORE_SYNC_MODE` no estaba puesta en ningún lado —ni
+`.env.local`, ni la CI, ni Vercel— así que el default es el que corría en
+producción.
+
+El botón aparece en cualquier caso en `listo_para_core`. Al apretarlo, la ruta
+guardaba `core_external_id = 'CORE-' + los primeros ocho caracteres del id`,
+ponía el caso en `enviado_a_core` y escribía un `CORE_SYNC_SUCCESS` en la
+auditoría. Un identificador inventado, un estado que dice «entregado» y un
+registro de algo que no pasó. Y los ids terminados en `0` —uno de cada
+dieciséis, porque son UUID— devolvían un «Core timeout» igual de inventado, que
+es un error que el analista sale a investigar.
+
+Ahora el default es no tener cliente: 501 antes de cualquier escritura, y la
+pantalla dice que el caso quedó listo pero que del otro lado no hay nadie.
+
+#### Lo que se perdía en silencio
+
+| | qué pasaba |
+|---|---|
+| Correo | Un mensaje que fallaba una vez **no se volvía a leer nunca**: la marca de agua avanza siempre (y hace bien: frenarla es el bucle de veneno), y el cron arranca desde ahí. La tercera salida es `mensajes_pendientes` (0026): la marca avanza **y** el mensaje se reintenta, hasta tres veces |
+| WhatsApp | Un adjunto de más de 10 MB devolvía `null`, igual que una falla de descarga, y no quedaba fila. El asegurado mandaba la foto de los daños, creía que la había mandado, y el pedido seguía abierto sin explicación |
+| WhatsApp | `renderConflict` mandaba el DNI entero. El enmascarado existía pero sólo se aplicaba a lo que entra al prompt del modelo |
+| WhatsApp | Un `catch` vacío podía tragarse el cuerpo de un mensaje entrante, con un comentario que describía código que ya no existe |
+| Barredor | Dice cada 15 minutos y corre cada 3 horas: el 08/09 disparó 7 veces de 96, con huecos de más de cinco. Ahora barre también en el `after()` del webhook, que es tráfico real |
+
+#### Un duplicado que habría roto el fine-tuning
+
+`maybeQueueFineTuneJob` parecía código muerto para conectar. **No se conectó**:
+insertaba `provider: "gemini"`, y todo el camino de Vertex tira `WRONG_PROVIDER`
+—en tres lugares— para cualquier trabajo cuyo provider no sea
+`vertex_ai_gemini`, que es lo que tienen las dos filas reales. Cablearla habría
+fabricado borradores que ningún paso posterior podía tomar.
+
+El que anda es `createVertexAiTuningDraft`. Se borró el duplicado.
+
+#### Lo que vive afuera del repo
+
+- **La guarda de aislamiento entre aseguradoras no era un check requerido.**
+  `check-architecture.mjs` comprueba que ninguna consulta se salga de la capa que
+  pone el contexto de inquilino. Ahora es requerida, y `strict: true`, así que un
+  PR con 486 commits de atraso ya no se mergea con checks de junio.
+- **Las alertas de Dependabot estaban apagadas** en un repo público. Activadas,
+  junto con las actualizaciones de seguridad automáticas.
+- **`sha_pinning_required`** pasó a true: la convención de pinear por SHA ahora
+  es una regla y no disciplina.
+- **Los diez PR de Dependabot**, resueltos de a uno (ver «Los bumps», abajo).
+- **Dos cuentas de más con rol admin** bajaron a `analyst` — privilegio mínimo
+  sobre un producto que guarda DNIs y fotos. Quedan `veltra.claimmix` (la cuenta
+  de producción) e `ilan.daniele`. Nota: el motivo anotado en el informe era
+  incorrecto; los avisos `[Urgente]` se deciden por rol `specialist` con respaldo
+  en un `owner`, y los admin no están en ninguna de las dos listas.
+
+#### Los índices de `cases`: la pregunta era al revés
+
+No faltaba ninguno. **Sobraban dos**, y se sacaron en la 0025:
+
+- `idx_cases_tenant_created (tenant_id, created_at DESC)` duplicaba a
+  `idx_cases_tenant_created_at`. El planificador ya elegía el ASC **para el orden
+  descendente**, escaneándolo hacia atrás. Borrado en una transacción con
+  ROLLBACK contra producción: ningún plan cambió. Eran 184 kB y una escritura de
+  índice más por fila.
+- `idx_cases_extraction_lease` es parcial `WHERE ... IS NOT NULL` y la única
+  consulta que toca esa columna pregunta `IS NULL OR < now()-interval`. Ni
+  forzando con `enable_seqscan = off` lo elige. Estaba muerto por construcción.
+
+#### Hallazgos que NO se sostuvieron
+
+Vale anotarlos para que no vuelvan a la lista:
+
+- El `TODO` del webhook de flujos vive bajo `.gitignore`: es andamiaje generado
+  por el paquete `workflow`, no código del repo.
+- Los exports de `rate-limit/index.ts` están todos usados.
+- El comentario de `batch-simulate` es correcto: sigue usando `after()` y el tope
+  coincide con el código.
+
+#### Lo que NO se hizo, por decisión
+
+- **Dominio propio**, **plan pago de Vercel y Neon** y **verificación de negocio
+  de Meta**: quedan como están.
+- **Rotar las credenciales** (WhatsApp, Google y cuatro más): más adelante.
+
+#### Lo que NO se hizo, por otras razones
+
+- **`--config=auto` de semgrep** sigue bajándose las reglas de semgrep.dev en cada
+  corrida, y de paso le manda la URL del repositorio. Se pineó la HERRAMIENTA,
+  que es por donde se ejecuta código; fijar el conjunto de reglas pide
+  vendorearlo y cambia qué reglas corren.
+- **Los CHECK que aceptan `'openai'`** en `tenant_ai_settings` se dejaron: son
+  permisivos, no incorrectos, y apretarlos sobre datos vivos es otra
+  conversación.
+- **`@types/node` 26** y **`@vitejs/plugin-react` 6**: el primero describiría APIs
+  de Node 26 mientras la CI corre 22 —y pasa verde, que lo hace peor—, y el
+  segundo pide vite 8 contra el vite 7 que trae vitest.
+
+#### El `DATABASE_URL` con rol dueño: la condición escrita era inalcanzable
+
+El documento planteaba cambiar `DATABASE_URL` al rol restringido «cuando no
+queden filtros por inquilino escritos a mano». Quedan 10, y al mirarlos uno por
+uno **no se pueden sacar**: viven en código de sistema que es cross-tenant por
+diseño. El comentario del barredor lo dice con todas las letras — «recorre los
+casos de TODOS los inquilinos, que es para lo que existe; el cron no corre en
+nombre de ninguno»— y lo mismo vale para `/api/health`, la facturación, el
+export del agente, la memoria y la administración de casillas de Gmail.
+
+O sea que el cliente dueño no es un resto por eliminar: **es el actor de
+sistema**. Lo que importa no es hacerlo desaparecer sino que sólo lo usen
+caminos declarados, y de eso ya se ocupa `check-architecture.mjs` — que a partir
+de hoy es un **check requerido de `main`**, que era lo que faltaba de verdad.
+
+Cambiar `DATABASE_URL` al rol restringido, tal como está escrito el plan,
+rompería el barredor, la salud, la facturación y el alta de casillas.
+
 ### 🔎 El índice de `cases`: medido, y la respuesta es que no va (2026-09-08)
 
 Quedaba abierto «los tres Seq Scan del tablero, 226 / 187 / 340 ms contra un

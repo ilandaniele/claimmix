@@ -403,6 +403,36 @@ export async function runExtractionWorker(
 const EXTRACTION_LEASE_MS = 3 * 60 * 1000;
 
 /**
+ * Cuánto puede durar una corrida antes de que la corte alguien más.
+ *
+ * La función tiene 60 s (`vercel.json`) y cuando se acaban no hay aviso: el
+ * proceso se corta donde esté. Una corrida real tarda 10-20 s, así que sola no
+ * llega — el problema es que no corre sola. Antes de esta corrida ya se
+ * bajaron los adjuntos del mensaje (hasta cuatro, 10 s cada uno) y después de
+ * ella puede venir un redespacho, que corre OTRA corrida entera adentro de
+ * esta misma invocación.
+ *
+ * Cuarenta segundos es lo que queda para lo caro dejando margen para cerrar.
+ * Pasado eso la corrida no empieza la llamada al modelo: marca el caso para
+ * que lo tome la próxima y se va ordenada, que es lo contrario de que la maten
+ * a mitad de una escritura.
+ */
+const PRESUPUESTO_DE_CORRIDA_MS = 40_000;
+
+/**
+ * Lo mínimo que hace falta para que valga la pena redespachar.
+ *
+ * El redespacho no es un aviso: `POST /api/worker/extract` corre la extracción
+ * ENTERA y recién ahí contesta, y `redispatchExtraction` lo espera. O sea que
+ * la corrida hija se paga con lo que le quede a la invocación de la madre.
+ *
+ * Con menos de esto no alcanza ni para la llamada al modelo, así que empezarla
+ * sólo garantiza que la maten en el medio. Se marca el caso y lo toma la
+ * próxima corrida.
+ */
+const MINIMO_PARA_REDESPACHAR_MS = 15_000;
+
+/**
  * Take the case, or record that it needs running again.
  *
  * Two replies a second apart produced two concurrent runs on the same case.
@@ -525,21 +555,46 @@ async function releaseExtractionLease(
 async function redispatchExtraction(
   caseId: string,
   tenantId: string,
-  tenantCtx: TenantContext
+  tenantCtx: TenantContext,
+  restanteMs: number
 ): Promise<void> {
   let llegó = false;
   let detalle = "";
 
-  try {
-    const res = await fetch(`${getWorkerBaseUrl()}/api/worker/extract`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...internalAuthHeaders() },
-      body: JSON.stringify({ caseId, tenantId }),
-    });
-    llegó = res.ok;
-    if (!res.ok) detalle = `http_${res.status}`;
-  } catch (err) {
-    detalle = err instanceof Error ? err.name : "UnknownError";
+  /*
+   * Con el tiempo justo NO se intenta.
+   *
+   * Esto parece un aviso y no lo es: la ruta corre la extracción entera antes
+   * de contestar, y acá se la espera. La corrida hija se paga con lo que le
+   * quede a la invocación de la madre, y la madre ya gastó lo suyo.
+   *
+   * Dos corridas de 10-20 s dentro de una función de 60 s entran; tres no. Y
+   * la cadena no tiene tope: cada mensaje que llega a mitad de corrida agrega
+   * un eslabón, todos anidados adentro de la misma invocación. Cuando se
+   * acaba el tiempo mueren TODAS juntas, la de más adentro a mitad de una
+   * escritura.
+   *
+   * Abajo, el mismo camino que ya existe para el redespacho que no llegó: se
+   * remarca el caso y lo toma la próxima corrida.
+   */
+  if (restanteMs < MINIMO_PARA_REDESPACHAR_MS) {
+    detalle = `sin_tiempo_${Math.max(0, Math.round(restanteMs))}ms`;
+  } else {
+    try {
+      const res = await fetch(`${getWorkerBaseUrl()}/api/worker/extract`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...internalAuthHeaders() },
+        body: JSON.stringify({ caseId, tenantId }),
+        // Y si contesta tarde, tampoco se la espera para siempre: lo que
+        // quede es el techo. Un `fetch` sin plazo acá es la función entera
+        // colgada de una respuesta que ya no va a llegar a tiempo.
+        signal: AbortSignal.timeout(restanteMs),
+      });
+      llegó = res.ok;
+      if (!res.ok) detalle = `http_${res.status}`;
+    } catch (err) {
+      detalle = err instanceof Error ? err.name : "UnknownError";
+    }
   }
 
   if (llegó) return;
@@ -579,6 +634,9 @@ export async function runEmailExtractionWorker(
   // firma. Todo lo que consulte o escriba abajo lo recibe: esa es la única
   // forma de que la base sepa de quién es lo que se está tocando.
   const tenantCtx: TenantContext = { tenantId };
+  // El reloj de esta corrida. Ver PRESUPUESTO_DE_CORRIDA_MS.
+  const arrancó = Date.now();
+  const restanteMs = () => PRESUPUESTO_DE_CORRIDA_MS - (Date.now() - arrancó);
   // Declared before try so the catch block can log them if Gemini fails mid-extraction.
   let emailBody = "";
   let emailSubject = "";
@@ -833,6 +891,34 @@ export async function runEmailExtractionWorker(
         db
           .update(cases)
           .set({ status: "escalado", updated_at: new Date().toISOString() })
+          .where(eq(cases.id, caseId))
+      );
+      return;
+    }
+
+    // ── d2) ¿Queda tiempo para lo caro? ──────────────────────────────────────
+    //
+    // Lo de abajo llama al modelo, y eso son diez a veinte segundos. Si ya no
+    // entran, empezarlo sólo consigue que maten la función en el medio: a esa
+    // altura ya hay campos escritos y estado sin actualizar, y nadie se entera
+    // porque no queda proceso que lo cuente.
+    //
+    // Se marca el caso como pendiente —la misma marca que usa el mensaje que
+    // llega a mitad de corrida— y la próxima corrida lo retoma desde acá.
+    if (restanteMs() <= 0) {
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          service: "claimmix",
+          msg: "email_worker.sin_tiempo_para_extraer",
+          case_id: caseId,
+          presupuesto_ms: PRESUPUESTO_DE_CORRIDA_MS,
+        })
+      ); // crew-debug-ok
+      await enTenant(tenantCtx, (db) =>
+        db
+          .update(cases)
+          .set({ extraction_pending: true })
           .where(eq(cases.id, caseId))
       );
       return;
@@ -1436,7 +1522,7 @@ export async function runEmailExtractionWorker(
             case_id: caseId,
           })
         );
-        await redispatchExtraction(caseId, tenantId, tenantCtx);
+        await redispatchExtraction(caseId, tenantId, tenantCtx, restanteMs());
       }
     }
   }

@@ -53,3 +53,36 @@ describe("y cuando SÍ llega, no toca nada", () => {
     expect(FUENTE).toContain("if (llegó) return;");
   });
 });
+
+describe("y no se paga con el tiempo de la corrida que lo lanza", () => {
+  /*
+   * `POST /api/worker/extract` no es un aviso: corre la extracción ENTERA y
+   * recién ahí contesta, y acá se la espera. La corrida hija sale del tiempo
+   * que le quede a la invocación de la madre.
+   *
+   * Dos corridas de 10-20 s adentro de una función de 60 s entran; tres no. Y
+   * la cadena no tiene tope: cada mensaje que llega a mitad de corrida agrega
+   * un eslabón, todos anidados en la misma invocación. Cuando se acaba el
+   * tiempo mueren todas juntas, la de más adentro a mitad de una escritura.
+   */
+  it("recibe cuánto queda, no lo adivina", () => {
+    expect(FUENTE).toContain("restanteMs: number");
+    expect(FUENTE).toContain("redispatchExtraction(caseId, tenantId, tenantCtx, restanteMs())");
+  });
+
+  it("por debajo del piso ni lo intenta", () => {
+    expect(FUENTE).toContain("restanteMs < MINIMO_PARA_REDESPACHAR_MS");
+  });
+
+  it("y si contesta tarde, tampoco lo espera para siempre", () => {
+    expect(FUENTE).toContain("AbortSignal.timeout(restanteMs)");
+  });
+
+  it("las dos salidas caen en el mismo camino que ya existía", () => {
+    // Ni el piso ni el plazo inventan una recuperación nueva: dejan `llegó` en
+    // false y siguen por donde ya sale el redespacho que no llegó.
+    const i = FUENTE.indexOf("if (llegó) return;");
+    const antes = FUENTE.slice(0, i);
+    expect(antes).toContain("sin_tiempo_");
+  });
+});

@@ -102,6 +102,10 @@ vi.mock("@/server/ai/budget", () => ({
 
 vi.mock("@/server/matching/customer-matcher", () => ({
   findCustomerMatches: vi.fn().mockResolvedValue([]),
+  // El piso que decide si una coincidencia alcanza para vincular. Va en el mock
+  // con el mismo valor que el modulo real: un mock que lo afloje probaria otra
+  // cosa que la que corre.
+  MATCH_QUE_VINCULA: new Set(["policy_number", "dni"]),
 }));
 
 vi.mock("@/server/matching/policy-matcher", () => ({
@@ -217,6 +221,22 @@ const HIGH_CONFIDENCE_MATCH: CustomerMatch = {
   matchType:  "policy_number",
   confidence: 0.95,
   customerName: "Juan Pérez",
+  conflictsWithExtracted: [],
+};
+
+/**
+ * La misma persona, encontrada por un telefono escrito en el texto.
+ *
+ * El canal es anonimo y lo que se compara sale del mensaje, no del remitente
+ * verificado: tipear el telefono de un tercero es gratis.
+ */
+const MATCH_POR_TELEFONO: CustomerMatch = {
+  customerId: "customer-de-otra-persona",
+  policyId:   "policy-de-otra-persona",
+  storedValues: { full_name: "Juana Gómez", dni: "30987654" },
+  matchType:  "phone",
+  confidence: 0.60,
+  customerName: "Juana Gómez",
   conflictsWithExtracted: [],
 };
 
@@ -374,6 +394,92 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
       expect(caseUpdatePayload).toBeDefined();
       expect(caseUpdatePayload![0].customer_id).toBe("customer-uuid-001");
       expect(caseUpdatePayload![0].policy_id).toBe("policy-uuid-001");
+    },
+    30_000
+  );
+
+  it(
+    "una coincidencia por telefono NO vincula el caso a esa persona",
+    async () => {
+      const caseRow = {
+        id: CASE_ID,
+        status: "recibido",
+        claim_type: "choque",
+        tenant_id: TENANT_ID,
+        channel: "email",
+        email_thread_id: "thread-001",
+        policyholder_name: null,
+        policy_number: null,
+      };
+
+      const caseUpdateSpy = vi.fn();
+
+      // db.select: return appropriate data per call order
+      // 1: cases row, 2: raw_messages, 3+: everything else empty
+      let selectCallCount = 0;
+      vi.mocked(db.select).mockImplementation(() => {
+        selectCallCount++;
+        const call = selectCallCount;
+
+        if (call === 1) {
+          return makeSelectChain([caseRow]);
+        }
+        if (call === 2) {
+          return makeSelectChain([{
+            body: "Tuve un choque. Poliza: POL-1234.",
+            subject: "Siniestro",
+            from_addr: SENDER_EMAIL,
+          }]);
+        }
+        return makeSelectChain([]);
+      });
+
+      vi.mocked(db.update).mockReturnValue(makeUpdateChain(caseUpdateSpy) as any);
+      vi.mocked(db.insert).mockReturnValue(makeInsertChain() as any);
+
+      // El telefono lo escribio quien mando el mensaje. No prueba nada.
+      vi.mocked(findCustomerMatches).mockResolvedValue([MATCH_POR_TELEFONO]);
+
+      // Sin numero de poliza en el texto, no hay match de poliza tampoco.
+      vi.mocked(findPolicyMatches).mockResolvedValue([]);
+
+      // Set up extractEmailClaimMock to return a valid claim.
+      vi.mocked(extractEmailClaimMock).mockReturnValue(extraccion({
+        extraction_model: "mock-email-v1",
+        fields: [
+          { field_key: "phone",         field_value: "1155551234", confidence: 0.92, source: "ai" as const },
+          { field_key: "full_name",     field_value: "Juan Pérez", confidence: 0.92, source: "ai" as const },
+        ],
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        cost_usd: 0,
+        is_claim: true,
+        confidence: 0.92,
+        extracted_fields: { phone: "1155551234", full_name: "Juan Pérez" },
+        field_confidences: {},
+        missing_fields: [],
+        fields_pending_confirmation: [],
+        possible_customer_matches: [],
+        possible_policy_matches: [],
+        severity: "medium",
+        requires_specialist: false,
+        not_relevant_reason: undefined,
+        summary: "Choque claim",
+        suggested_reply: "",
+      }));
+
+      await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
+
+      /*
+       * NINGUNA escritura puede llevar el customer_id ni el policy_id de la otra
+       * persona. Es la mitad que importa: enganchar el reclamo de un desconocido
+       * a la poliza de un tercero.
+       */
+      const vinculo = caseUpdateSpy.mock.calls.find(
+        (call: any[]) =>
+          call[0]?.customer_id !== undefined || call[0]?.policy_id !== undefined
+      );
+      expect(vinculo).toBeUndefined();
     },
     30_000
   );

@@ -66,6 +66,26 @@ export interface CustomerMatch {
   storedValues: Record<string, string>;
 }
 
+/**
+ * Los tipos de coincidencia que alcanzan para VINCULAR el caso a un cliente.
+ *
+ * El canal de entrada es anonimo: cualquiera le escribe al numero de WhatsApp o
+ * a la casilla. Y lo que se compara sale del TEXTO que esa persona escribio, no
+ * del remitente verificado. Un telefono o un correo ajenos son publicos o
+ * faciles de conseguir, asi que coincidir por ahi no prueba nada.
+ *
+ * Un numero de poliza o un DNI tampoco son secretos, pero son los
+ * identificadores que el producto necesita para poder trabajar, y el conflicto
+ * que se le pregunta al asegurado cierra el resto. La linea se traza ahi.
+ *
+ * Lo usa `runEmailExtractionWorker`, y NO solo para decidir el vinculo: filtra
+ * tambien lo que viaja al orquestador, porque el mensaje de conflicto le dice
+ * al que escribio «en nuestro sistema figura Y» — y con una coincidencia floja
+ * esa Y es el dato de otra persona.
+ */
+export const MATCH_QUE_VINCULA: ReadonlySet<CustomerMatch["matchType"]> =
+  new Set(["policy_number", "dni"]);
+
 /** Confidence scores by match type. */
 const MATCH_CONFIDENCE: Record<CustomerMatch["matchType"], number> = {
   policy_number: 0.95,

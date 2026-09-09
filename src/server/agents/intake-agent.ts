@@ -419,9 +419,37 @@ async function findExistingWhatsAppCase(
     );
 
     return data?.id ?? null;
-  } catch {
-    // Neon swallowed query errors here (data would be null) — preserve that.
-    return null;
+  } catch (err) {
+    /*
+     * «No encontré» y «no pude buscar» NO son lo mismo.
+     *
+     * Esto devolvía `null` en los dos casos, y arriba el `null` significa «no
+     * hay caso abierto para este teléfono», así que se abre uno nuevo. Un hipo
+     * de Neon terminaba en dos conversaciones sobre el mismo choque, sin una
+     * sola línea de log.
+     *
+     * El índice único de la 0029 no lo tapa: cubre `recibido`, y el caso vivo
+     * puede estar en `info_faltante` o `confirmacion_pendiente` — que es
+     * justamente la conversación en curso.
+     *
+     * Tirar es lo correcto acá: el webhook contesta 500, Meta reentrega, y el
+     * guard de `duplicado` hace que reentregar sea seguro. Ese camino ya existe.
+     */
+    const code =
+      (err as { code?: string })?.code ??
+      (err instanceof Error ? err.name : "UnknownError");
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "whatsapp.busqueda_de_caso_fallo",
+        code,
+        nota:
+          "No se pudo mirar si ya había un caso abierto. Se corta para no abrir " +
+          "uno duplicado; Meta reentrega.",
+      })
+    ); // crew-debug-ok
+    throw new Error(`whatsapp_case_lookup_failed:${code}`);
   }
 }
 

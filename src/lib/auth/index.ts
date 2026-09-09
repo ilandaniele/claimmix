@@ -22,6 +22,34 @@ const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
 /** Una hora. Ver el comentario en `resetPasswordTokenExpiresIn`. */
 const RESET_DURA_SEGUNDOS = 60 * 60;
 
+/**
+ * El secreto de sesión, o nada.
+ *
+ * `secret: process.env.BETTER_AUTH_SECRET` sin más era un fallo abierto: si la
+ * variable falta o queda vacía, better-auth NO rompe — usa un secreto de
+ * relleno que está publicado en su propio código y escribe un aviso por
+ * consola, que en un deploy verde no lee nadie.
+ *
+ * Con ese secreto conocido se firman cookies de sesión válidas, incluida la
+ * caché de sesión de 60 s. Y el inquilino sale de la sesión, así que la capa de
+ * datos la sirve obedientemente: RLS no ve un ataque, ve un inquilino.
+ * Suplantación completa, cualquier usuario, cualquier aseguradora.
+ *
+ * Es el único secreto del producto que degradaba. `DATABASE_URL_APP` tira,
+ * `PUBSUB_AUDIENCE` rechaza, `CRON_SECRET` falla cerrado, y
+ * `GMAIL_TOKEN_ENCRYPTION_KEY` hace exactamente esto.
+ */
+function exigirSecreto(): string {
+  const secreto = process.env.BETTER_AUTH_SECRET?.trim();
+  if (!secreto) {
+    throw new Error(
+      "Falta BETTER_AUTH_SECRET. Sin él, better-auth firma las sesiones con un " +
+        "secreto de relleno que está publicado en su código: cualquiera puede " +
+        "fabricar una cookie válida para cualquier usuario de cualquier inquilino."
+    );
+  }
+  return secreto;
+}
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -32,7 +60,7 @@ export const auth = betterAuth({
       verification: verifications,
     },
   }),
-  secret: process.env.BETTER_AUTH_SECRET,
+  secret: exigirSecreto(),
   baseURL: resolveBaseURL(),
   advanced: {
     // The whole schema uses uuid FKs onto users.id (cases.assigned_to,

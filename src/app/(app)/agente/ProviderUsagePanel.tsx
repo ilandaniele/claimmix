@@ -248,7 +248,7 @@ export function ProviderUsagePanel() {
                       {e.error_code}
                     </span>
                   )}
-                  <span className="ml-auto text-slate-400 dark:text-slate-500">
+                  <span className="ml-auto text-slate-500 dark:text-slate-500">
                     {/*
                       * La hora se dice en el idioma de quien mira y en la
                       * zona del negocio. Sin argumentos tomaba las dos del

@@ -227,7 +227,7 @@ export function AiProviderPanel() {
                 )}
               </div>
               <p className="mt-1 text-xs text-slate-500">{labels[id].helper}</p>
-              <p className="mt-2 font-mono text-[11px] text-slate-400">
+              <p className="mt-2 font-mono text-[11px] text-slate-500">
                 {info?.model ?? "—"}
               </p>
               {!configured && (

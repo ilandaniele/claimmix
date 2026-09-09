@@ -56,7 +56,7 @@ export function MissingDocsList({ docs }: MissingDocsListProps) {
 
   if (docs.length === 0) {
     return (
-      <p className="text-sm text-slate-400" role="status">
+      <p className="text-sm text-slate-500" role="status">
         {t("case.detail.noMissingDocs")}
       </p>
     );

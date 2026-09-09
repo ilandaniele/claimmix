@@ -541,7 +541,7 @@ function RawEmailAccordion({
 
   if (!messages || messages.length === 0) {
     return (
-      <p className="text-[13.5px] text-slate-400">{t("case.detail.noRawEmail")}</p>
+      <p className="text-[13.5px] text-slate-500">{t("case.detail.noRawEmail")}</p>
     );
   }
 

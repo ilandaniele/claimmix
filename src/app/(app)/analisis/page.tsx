@@ -153,7 +153,7 @@ function StatCard({
         {label}
       </p>
       <p className="mt-2 text-3xl font-bold text-slate-900">{value}</p>
-      {sub && <p className="mt-1 text-xs text-slate-400">{sub}</p>}
+      {sub && <p className="mt-1 text-xs text-slate-500">{sub}</p>}
     </div>
   );
 }

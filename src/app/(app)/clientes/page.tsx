@@ -139,7 +139,7 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
               name="search"
               defaultValue={search}
               placeholder={t("clientes.search")}
-              className="w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              className="w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400"
               aria-label={t("clientes.search")}
             />
           </div>

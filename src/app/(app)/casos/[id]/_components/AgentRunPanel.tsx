@@ -221,7 +221,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
   if (!run) {
     const processing = PROCESSING_STATUSES.has(data.case_status);
     return (
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-slate-500">
         {processing ? t("agente.procesando") : t("agente.sinAnalisis")}
       </p>
     );
@@ -333,7 +333,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
           </div>
         )}
 
-        <p className="mt-2 text-xs text-slate-400">{t("agente.avisoAprendizaje")}</p>
+        <p className="mt-2 text-xs text-slate-500">{t("agente.avisoAprendizaje")}</p>
       </div>
 
       {/* ── Extracted values + confidence bars ───────────────────────────────── */}
@@ -362,7 +362,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
           </ul>
         </div>
       ) : (
-        <p className="text-sm text-slate-400">{t("agente.sinValores")}</p>
+        <p className="text-sm text-slate-500">{t("agente.sinValores")}</p>
       )}
 
       {/* ── Pending confirmation + missing fields ────────────────────────────── */}
@@ -372,7 +372,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
             {t("agente.pendientes")}
           </h3>
           {pendingKeys.length === 0 ? (
-            <p className="text-xs text-slate-400">{t("agente.sinPendientes")}</p>
+            <p className="text-xs text-slate-500">{t("agente.sinPendientes")}</p>
           ) : (
             <ul className="space-y-1">
               {pendingKeys.map((key) => (
@@ -391,7 +391,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
             {t("agente.faltantes")}
           </h3>
           {missingKeys.length === 0 ? (
-            <p className="text-xs text-slate-400">{t("agente.sinFaltantes")}</p>
+            <p className="text-xs text-slate-500">{t("agente.sinFaltantes")}</p>
           ) : (
             <ul className="space-y-1">
               {missingKeys.map((key) => (

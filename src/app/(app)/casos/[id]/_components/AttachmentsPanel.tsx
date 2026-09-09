@@ -71,7 +71,7 @@ export function AttachmentsPanel({ attachments }: AttachmentsPanelProps) {
   const t = useT();
   if (attachments.length === 0) {
     return (
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-slate-500">
         {t("case.detail.noAttachments")}
       </p>
     );
@@ -105,7 +105,7 @@ export function AttachmentsPanel({ attachments }: AttachmentsPanelProps) {
                   {attachment.filename}
                 </span>
                 {/* File size */}
-                <span className="text-xs text-slate-400 flex-shrink-0 hidden sm:inline">
+                <span className="text-xs text-slate-500 flex-shrink-0 hidden sm:inline">
                   {formatBytes(attachment.size_bytes)}
                 </span>
               </div>

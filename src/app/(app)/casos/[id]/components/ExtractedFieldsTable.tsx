@@ -82,7 +82,7 @@ export function ExtractedFieldsTable({ fields }: ExtractedFieldsTableProps) {
 
   if (fields.length === 0) {
     return (
-      <p className="text-sm text-slate-400" role="status">
+      <p className="text-sm text-slate-500" role="status">
         {t("case.detail.noFields")}
       </p>
     );
@@ -98,19 +98,19 @@ export function ExtractedFieldsTable({ fields }: ExtractedFieldsTableProps) {
           <tr>
             <th
               scope="col"
-              className="pb-3 pt-1 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 pr-4"
+              className="pb-3 pt-1 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 pr-4"
             >
               {t("case.detail.field")}
             </th>
             <th
               scope="col"
-              className="pb-3 pt-1 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 pr-4"
+              className="pb-3 pt-1 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 pr-4"
             >
               {t("case.detail.value")}
             </th>
             <th
               scope="col"
-              className="pb-3 pt-1 text-left text-xs font-semibold uppercase tracking-wide text-slate-400"
+              className="pb-3 pt-1 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
             >
               {t("case.detail.confidence.col")}
             </th>

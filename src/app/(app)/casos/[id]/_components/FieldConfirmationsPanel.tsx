@@ -137,7 +137,7 @@ export function FieldConfirmationsPanel({
 
   if (confirmations.length === 0) {
     return (
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-slate-500">
         {t("case.detail.noConfirmations")}
       </p>
     );
@@ -236,7 +236,7 @@ export function FieldConfirmationsPanel({
       {/* Resolved confirmations — read-only history */}
       {resolved.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
             Historial de confirmaciones
           </p>
           <div className="space-y-2">

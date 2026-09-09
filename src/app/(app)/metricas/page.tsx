@@ -242,7 +242,7 @@ export default async function MetricasPage() {
                   </h3>
                 </div>
                 {data!.ai_usage.by_user.length === 0 ? (
-                  <div className="px-5 py-8 text-center text-sm text-slate-400">
+                  <div className="px-5 py-8 text-center text-sm text-slate-500">
                     {t("metricas.ia.vacio")}
                   </div>
                 ) : (
@@ -278,7 +278,7 @@ export default async function MetricasPage() {
                           </td>
                           <td className="px-5 py-3 text-right text-slate-700 dark:text-slate-200">
                             {formatNumber(row.total_tokens)}
-                            <div className="text-xs text-slate-400">
+                            <div className="text-xs text-slate-500">
                               {formatNumber(row.calls)} {t("metricas.ia.ejecAbrev")}
                             </div>
                           </td>
@@ -299,7 +299,7 @@ export default async function MetricasPage() {
                   </h3>
                 </div>
                 {data!.ai_usage.by_model.length === 0 ? (
-                  <div className="px-5 py-8 text-center text-sm text-slate-400">
+                  <div className="px-5 py-8 text-center text-sm text-slate-500">
                     {t("metricas.ia.vacio")}
                   </div>
                 ) : (
@@ -328,7 +328,7 @@ export default async function MetricasPage() {
                           </td>
                           <td className="px-5 py-3 text-right text-slate-700 dark:text-slate-200">
                             {formatNumber(row.total_tokens)}
-                            <div className="text-xs text-slate-400">
+                            <div className="text-xs text-slate-500">
                               {formatNumber(row.calls)} {t("metricas.ia.ejecAbrev")}
                             </div>
                           </td>
@@ -351,7 +351,7 @@ export default async function MetricasPage() {
                 {t("metricas.porEstado")}
               </h2>
               {totalByStatus === 0 ? (
-                <p className="text-sm text-slate-400">{t("metricas.sinDatos")}</p>
+                <p className="text-sm text-slate-500">{t("metricas.sinDatos")}</p>
               ) : (
                 <div className="space-y-3">
                   {Object.entries(STATUS_LABEL_KEYS).map(([key, labelKey]) => {
@@ -392,7 +392,7 @@ export default async function MetricasPage() {
                 {t("metricas.porTipo")}
               </h2>
               {totalByType === 0 ? (
-                <p className="text-sm text-slate-400">{t("metricas.sinDatos")}</p>
+                <p className="text-sm text-slate-500">{t("metricas.sinDatos")}</p>
               ) : (
                 <div className="space-y-3">
                   {Object.entries(TYPE_LABEL_KEYS).map(([key, labelKey]) => {
@@ -436,7 +436,7 @@ export default async function MetricasPage() {
               </h2>
             </div>
             {data!.top_analysts.length === 0 ? (
-              <div className="px-5 py-8 text-center text-sm text-slate-400">
+              <div className="px-5 py-8 text-center text-sm text-slate-500">
                 {t("metricas.sinCasosCerrados")}
               </div>
             ) : (
@@ -456,7 +456,7 @@ export default async function MetricasPage() {
                       key={analyst.full_name}
                       className="border-b border-slate-50 last:border-0"
                     >
-                      <td className="px-5 py-3 text-slate-400">
+                      <td className="px-5 py-3 text-slate-500">
                         {index + 1}
                       </td>
                       <td className="px-5 py-3 font-medium text-slate-800">

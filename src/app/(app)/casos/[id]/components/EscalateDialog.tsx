@@ -101,7 +101,7 @@ export function EscalateDialog({
             className="block text-sm font-medium text-slate-700 mb-1.5"
           >
             {t("escalate.reason")}{" "}
-            <span className="text-slate-400 font-normal">(opcional)</span>
+            <span className="text-slate-500 font-normal">(opcional)</span>
           </label>
           <textarea
             ref={textareaRef}
@@ -113,12 +113,12 @@ export function EscalateDialog({
             placeholder={t("escalate.reasonPlaceholder")}
             disabled={loading}
             rows={4}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400 disabled:bg-slate-50 resize-none"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-400 disabled:bg-slate-50 resize-none"
             aria-describedby="escalate-chars-left"
           />
           <p
             id="escalate-chars-left"
-            className="mt-1 text-xs text-slate-400 text-right"
+            className="mt-1 text-xs text-slate-500 text-right"
             aria-live="polite"
           >
             {charsLeft} caracteres restantes

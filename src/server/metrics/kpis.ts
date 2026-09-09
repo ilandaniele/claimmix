@@ -97,6 +97,13 @@ export async function getTenantKpis(
    */
   const { inicio: monthStart, fin: monthEnd } = mesArgentino();
 
+  type Usos = {
+    calls: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    cost_usd: number;
+  };
+
   const [
     [resumenMes],
     byStatusRows,
@@ -107,7 +114,34 @@ export async function getTenantKpis(
     [usageAllTimeRow],
     usageByUserRows,
     usageByModelRows,
-  ] = await Promise.all([
+  /*
+   * Nueve consultas en UN viaje, no en nueve.
+   *
+   * Estaba en `Promise.all([enTenant(...), enTenant(...), ...])`, que las pone
+   * en paralelo pero NO las junta: cada `enTenant` abre su propio `batch()` con
+   * su `set_config` adelante, o sea una transaccion HTTP entera contra Neon por
+   * consulta. Nueve idas y vueltas para armar una pantalla.
+   *
+   * `enTenantVarias` las manda en un solo lote. La ejecucion de estas consultas
+   * se mide en milisegundos; lo que se paga es la distancia, y ahora se paga
+   * una vez.
+   *
+   * Las formas van escritas porque `enTenantVarias` no las puede inferir del
+   * armador: sin la tupla, todo vuelve como `unknown`.
+   */
+  ] = await enTenantVarias<
+    [
+      [{ total: number; listo: number; cerrados: number; minutos: number }],
+      Array<{ status: string; n: number }>,
+      Array<{ claim_type: string | null; n: number }>,
+      [{ n: number }],
+      Array<{ assigned_to: string | null; full_name: string | null; n: number }>,
+      [Usos],
+      [Usos],
+      Array<Usos & { user_id: string | null; full_name: string | null; email: string | null }>,
+      Array<Usos & { model: string }>,
+    ]
+  >(tenantCtx, (db) => [
       /*
        * Los tres números del mes en una fila, en vez de traer los casos.
        *
@@ -119,8 +153,7 @@ export async function getTenantKpis(
        * redondeo es exactamente el mismo `Math.round(total / n)` de antes, y
        * el número que ve la pantalla no se mueve.
        */
-      enTenant(tenantCtx, (db) =>
-        db
+      db
           .select({
             total: sql<number>`count(*)::int`,
             // Los DOS vocabularios: el canal real termina en `listo_para_core`,
@@ -135,26 +168,20 @@ export async function getTenantKpis(
           .where(and(
             gte(cases.created_at, monthStart),
             lt(cases.created_at, monthEnd),
-          ))
-      ),
+          )),
       // Agrupado en la base: traía las 458 filas de `cases` para contarlas.
-      enTenant(tenantCtx, (db) =>
-        db
+      db
           .select({ status: cases.status, n: sql<number>`count(*)::int` })
           .from(cases)
-          .groupBy(cases.status)
-      ),
+          .groupBy(cases.status),
       // Idem, y el `is not null` reemplaza al `if (row.claim_type)` que
       // descartaba esas filas después de haberlas traído.
-      enTenant(tenantCtx, (db) =>
-        db
+      db
           .select({ claim_type: cases.claim_type, n: sql<number>`count(*)::int` })
           .from(cases)
           .where(isNotNull(cases.claim_type))
-          .groupBy(cases.claim_type)
-      ),
-      enTenant(tenantCtx, (db) =>
-        db
+          .groupBy(cases.claim_type),
+      db
           .select({ n: count() })
           .from(cases)
           .where(and(
@@ -162,8 +189,7 @@ export async function getTenantKpis(
             inArray(cases.status, [...ESTADOS_ESCALADO]),
             gte(cases.created_at, monthStart),
             lt(cases.created_at, monthEnd),
-          ))
-      ),
+          )),
       /*
        * Los cinco de arriba, contados y ordenados por la base.
        *
@@ -172,8 +198,7 @@ export async function getTenantKpis(
        * sin criterio secundario no. Sin esto, dos analistas con la misma
        * cantidad podían intercambiarse entre dos cargas de la pantalla.
        */
-      enTenant(tenantCtx, (db) =>
-        db
+      db
           .select({
             assigned_to: cases.assigned_to,
             full_name: users.full_name,
@@ -189,10 +214,8 @@ export async function getTenantKpis(
           ))
           .groupBy(cases.assigned_to, users.full_name)
           .orderBy(sql`count(*) desc, ${users.full_name} asc`)
-          .limit(5)
-      ),
-      enTenant(tenantCtx, (db) =>
-        db
+          .limit(5),
+      db
           .select({
             calls: count(),
             prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
@@ -203,21 +226,16 @@ export async function getTenantKpis(
           .where(and(
             gte(aiUsage.created_at, monthStart),
             lt(aiUsage.created_at, monthEnd),
-          ))
-      ),
-      enTenant(tenantCtx, (db) =>
-        db
+          )),
+      db
           .select({
             calls: count(),
             prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
             completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
             cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
           })
-          .from(aiUsage)
-          
-      ),
-      enTenant(tenantCtx, (db) =>
-        db
+          .from(aiUsage),
+      db
           .select({
             user_id: aiUsage.user_id,
             full_name: users.full_name,
@@ -234,10 +252,8 @@ export async function getTenantKpis(
             gte(aiUsage.created_at, monthStart),
             lt(aiUsage.created_at, monthEnd),
           ))
-          .groupBy(aiUsage.user_id, users.full_name, authUsers.email)
-      ),
-      enTenant(tenantCtx, (db) =>
-        db
+          .groupBy(aiUsage.user_id, users.full_name, authUsers.email),
+      db
           .select({
             model: aiUsage.model,
             calls: count(),
@@ -250,8 +266,7 @@ export async function getTenantKpis(
             gte(aiUsage.created_at, monthStart),
             lt(aiUsage.created_at, monthEnd),
           ))
-          .groupBy(aiUsage.model)
-      ),
+          .groupBy(aiUsage.model),
     ]);
 
   const totalCasesMonth = resumenMes?.total ?? 0;

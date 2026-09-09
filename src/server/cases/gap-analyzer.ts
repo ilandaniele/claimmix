@@ -162,14 +162,30 @@ export async function analyzeEmailClaimGaps(
     }
   }
 
-  // Check contact pair — need at least email OR phone
-  const hasEmail = fieldMap.get("email") && (fieldMap.get("email")!.confidence >= MEDIUM_CONFIDENCE_LOW);
-  const hasPhone = fieldMap.get("phone") && (fieldMap.get("phone")!.confidence >= MEDIUM_CONFIDENCE_LOW);
-  const hasEmailMissing = missingDocKeys.includes("email") && !hasEmail;
-  const hasPhoneMissing = missingDocKeys.includes("phone") && !hasPhone;
+  /*
+   * Hace falta AL MENOS UNO de los campos de contacto.
+   *
+   * Recorre `REQUIRED_CONTACT_FIELDS` en vez de escribir "email" y "phone" a
+   * mano cuatro veces, que es como estaba: la constante se exportaba con el
+   * comentario «al menos uno de estos tiene que estar» y no la usaba nadie, ni
+   * siquiera esta comprobación. Agregarle un tercer canal —WhatsApp, por
+   * ejemplo— no cambiaba absolutamente nada, y el que la agregara no tenía
+   * forma de enterarse.
+   */
+  const tieneAlguno = REQUIRED_CONTACT_FIELDS.some((clave) => {
+    const campo = fieldMap.get(clave);
+    return campo !== undefined && campo.confidence >= MEDIUM_CONFIDENCE_LOW;
+  });
 
-  if (!hasEmail && !hasPhone && (hasEmailMissing || hasPhoneMissing || (!fieldMap.has("email") && !fieldMap.has("phone")))) {
-    // Need at least one contact field
+  // Se pidió y no llegó, o nunca lo mencionaron: en los dos casos falta.
+  const algunoPedidoYSinValor = REQUIRED_CONTACT_FIELDS.some((clave) =>
+    missingDocKeys.includes(clave)
+  );
+  const ningunoMencionado = REQUIRED_CONTACT_FIELDS.every(
+    (clave) => !fieldMap.has(clave)
+  );
+
+  if (!tieneAlguno && (algunoPedidoYSinValor || ningunoMencionado)) {
     missingRequiredFields.push("email_or_phone");
   }
 

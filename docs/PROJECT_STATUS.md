@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-08. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-09. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -1834,6 +1834,76 @@ comentario de la vez anterior que pasó lo mismo, el 1º de septiembre.
   duplicado, la pantalla de caso que dice «no existe» ante un error de base, el
   adjunto de WhatsApp que se bufferea entero antes de mirar el tamaño, y siete
   de accesibilidad.
+
+### 🧾 Los dieciséis puntos del informe, cerrados (2026-09-09)
+
+Quedaban dieciséis de los veintitrés del informe de verificación. Están todos
+hechos y desplegados; `main` en `767efa5` con CI, CodeQL, secretos y los siete
+jobs del post-deploy en verde. Lo que sigue es qué cambió para una persona que
+denuncia, y qué NO se hizo.
+
+#### Lo que cambia para el asegurado
+
+| # | qué pasaba |
+|---|---|
+| 5 | `/api/worker/extract` contestaba **200 siempre** — el `ok:true` estaba escrito a mano y el resultado real quedaba anidado en `agent`. El redespacho decide con `res.ok`, y para cuando corre `extraction_pending` ya se limpió: el segundo mensaje de alguien se perdía sin rastro |
+| 15 | El adjunto se bajaba **entero** antes de mirar cuánto pesaba. Un PDF de 100 MB eran ~330 MB de pico contando el base64 del intake, adentro del tiempo del webhook, repetible sin credencial |
+| 8 | `advancePollState` borraba `last_error` en la MISMA corrida en que `recordPollError` acababa de escribir el id del mail perdido |
+| 7 | Ninguna llamada al proveedor tenía timeout: 300 s de undici contra 60 s de función. Vertex se quedaba callado y Vercel mataba la función antes de que corriera el `catch` que escala |
+| 6 | `ai_usage` veía entre un cuarto y un tercio del gasto. Los tres topes leen esa tabla, y `/api/admin/billing` calcula el margen con ella |
+| 12 | Con 43 casos en `requiere_especialista` la baldosa «Escalados» decía **0** |
+| 13 | El cierre se podía mandar dos veces por WhatsApp: la guarda buscaba `confirmation_received` y el libro guarda `wa_confirmation_received` |
+| 14 | Siete `catch` mudos. El de `fetchCaseRow` es el peor: `null` es el único camino al 404, así que un rol sin autenticar mostraba «El caso no existe» sin una línea en el log |
+| 11 | `/api/health` sólo se consultaba después de un deploy. El token de WhatsApp vence un martes y el canal está caído hasta que alguien se queje |
+| 17-23 | Escape no cerraba los diálogos; /demo era ilegible en oscuro (1,05:1) y no anunciaba nada; 2,56:1 en once etiquetas; no había «saltar al contenido»; Ctrl+clic en una fila abría el caso en la misma pestaña |
+
+#### Lo que apareció y no estaba en el informe
+
+- **Dos RCE no autenticadas en Next.js** (Image Optimization y windows-hosted).
+  16.2.12 → 16.3.3. `pnpm audit` se puso en rojo sin que nadie tocara una
+  dependencia: salieron advisories nuevas.
+- **Las dos llamadas al modelo de `documents.ts`.** Reconocer un adjunto manda
+  la foto entera adentro del prompt: era la llamada más cara del producto y la
+  que menos rastro dejaba.
+
+#### El error que costó tres PR
+
+En `#73` traté un problema de **estado compartido** como si fuera de **orden**.
+El techo de intentos de login se llavea por (IP, dirección) y los contadores
+viven en la base compartida; puse un grupo de concurrencia con
+`cancel-in-progress: false` creyendo que hacía cola.
+
+No la hace: GitHub guarda **una sola** tarea pendiente por grupo y «any
+previously pending job will be cancelled». Con tres PR abiertos los del medio
+se cancelan solos, quedan bloqueados para mergear, y `gh pr checks` los muestra
+como `fail` — así que además parece un test caído. Se ven «fallando» en tres
+segundos.
+
+`#89` lo revirtió y `#91` hizo el arreglo de verdad: que cada prueba de login
+use su propia IP. La regla ya estaba escrita en el encabezado de ese archivo
+—«cada prueba que toca el techo usa una clave propia»— y estaba aplicada de un
+solo lado de la llave.
+
+#### Lo que NO se hizo, y por qué
+
+- **Los tres Seq Scan del tablero** sobre `cases` entera. Medidos sin ruido:
+  226 / 187 / 340 ms contra un presupuesto de 500, con 483 casos. La pregunta
+  es si el índice va ahora o cuando haya volumen.
+- **`renderConflict` de WhatsApp muestra los valores sin enmascarar**, y siempre
+  lo hizo. AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee un
+  asegurado: es decisión de producto.
+- **Un adjunto rechazado por tamaño ya no deja fila con `rejected_reason`** — el
+  camino es `null`, el mismo de las otras fallas de descarga, así que queda en
+  el log y no en la pantalla del analista. Devolver ese rastro pide tocar el que
+  llama y `rehost-attachments`.
+- **El hueco de foco de los dos diálogos de caso**: mientras `loading` es true
+  todos los enfocables quedan deshabilitados, la lista sale vacía y el Tab
+  escapa por un segundo. Ya pasaba con las dos copias del bloque.
+- **La política de la marca del poller.** El arreglo ingenuo (`errors === 0`)
+  reintroduce el bucle de veneno que el comentario de esa línea advierte. O un
+  contador de fallos consecutivos, o un barrido de no-leídos: hay que decidirlo.
+- **Diez PR de Dependabot** abiertos desde junio, cuatro de ellos saltos de
+  major (typescript 6, @types/node 26, @vitejs/plugin-react 6, actions/checkout 7).
 
 ### 🙋 Waiting on you (not code)
 

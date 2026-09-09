@@ -9,8 +9,8 @@
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { db } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
-import { and, gte, count } from "drizzle-orm";
+import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
+import { and, gte, count, sql } from "drizzle-orm";
 import { cases } from "@/lib/db/schema";
 import { statusOptions, claimTypeOptions } from "@/lib/labels/case-catalog";
 import { AppError } from "@/lib/errors";
@@ -72,46 +72,59 @@ async function fetchAnalisis(): Promise<AnalisisData | null> {
     const day7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const day30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    const [allCasesRows, [recent7Row], [recent30Row]] = await Promise.all([
-      enTenant(tenantCtx, (db) =>
+    /*
+     * Contar en la base, no en JavaScript, y en UN viaje.
+     *
+     * Aca se traia `cases` ENTERA —sin WHERE y sin LIMIT— para recorrerla con
+     * un `for` y armar dos diccionarios y un promedio. Con 484 casos no se
+     * nota; con doscientos mil son doscientas mil filas cruzando la red para
+     * producir veinte numeros. Postgres los produce en una pasada.
+     *
+     * Y las cinco consultas van en un solo lote: `Promise.all` sobre tres
+     * `enTenant` son tres transacciones HTTP contra Neon, o sea tres viajes.
+     * `enTenantVarias` las manda juntas.
+     */
+    const [porEstado, porTipo, [totales], [recent7Row], [recent30Row]] =
+      await enTenantVarias<
+        [
+          Array<{ status: string; n: number }>,
+          Array<{ claim_type: string | null; n: number }>,
+          Array<{ n: number; promedio: string | null }>,
+          Array<{ n: number }>,
+          Array<{ n: number }>,
+        ]
+      >(tenantCtx, (db) => [
+        db.select({ status: cases.status, n: count() }).from(cases).groupBy(cases.status),
         db
-          .select({ status: cases.status, claim_type: cases.claim_type, confidence_min: cases.confidence_min })
+          .select({ claim_type: cases.claim_type, n: count() })
           .from(cases)
-          
-      ),
-      enTenant(tenantCtx, (db) =>
+          .groupBy(cases.claim_type),
         db
-          .select({ n: count() })
-          .from(cases)
-          .where(and( gte(cases.created_at, day7)))
-      ),
-      enTenant(tenantCtx, (db) =>
-        db
-          .select({ n: count() })
-          .from(cases)
-          .where(and( gte(cases.created_at, day30)))
-      ),
-    ]);
+          .select({
+            n: count(),
+            promedio: sql<string | null>`avg(${cases.confidence_min})`,
+          })
+          .from(cases),
+        db.select({ n: count() }).from(cases).where(and(gte(cases.created_at, day7))),
+        db.select({ n: count() }).from(cases).where(and(gte(cases.created_at, day30))),
+      ]);
 
     const byStatus: Record<string, number> = {};
-    const byType: Record<string, number> = {};
-    let confSum = 0;
-    let confCount = 0;
+    for (const f of porEstado) byStatus[f.status] = f.n;
 
-    for (const c of allCasesRows) {
-      byStatus[c.status] = (byStatus[c.status] ?? 0) + 1;
-      if (c.claim_type) byType[c.claim_type] = (byType[c.claim_type] ?? 0) + 1;
-      if (c.confidence_min !== null) {
-        confSum += parseFloat(String(c.confidence_min));
-        confCount++;
-      }
-    }
+    const byType: Record<string, number> = {};
+    for (const f of porTipo) if (f.claim_type) byType[f.claim_type] = f.n;
+
+    const promedio = totales?.promedio;
 
     return {
-      total: allCasesRows.length,
+      total: totales?.n ?? 0,
       by_status: byStatus,
       by_type: byType,
-      avg_confidence: confCount > 0 ? Math.round((confSum / confCount) * 100) / 100 : null,
+      avg_confidence:
+        promedio === null || promedio === undefined
+          ? null
+          : Math.round(parseFloat(promedio) * 100) / 100,
       recent_7_days: recent7Row?.n ?? 0,
       recent_30_days: recent30Row?.n ?? 0,
     };

@@ -37,6 +37,37 @@ export function useFilterParam(): (clave: string, valor: string | null) => void 
 }
 
 /**
+ * Sacar VARIOS filtros de una vez, que no es sacarlos de a uno en un bucle.
+ *
+ * «Limpiar» llamando a `setFilter(p, null)` cuatro veces empuja cuatro
+ * navegaciones. Cada una arma su URL a partir del `searchParams` que este
+ * render tenía, que es el de ANTES de las otras tres: las cuatro compiten y la
+ * última que llega deja puestos los tres filtros que ella no borró. Es el mismo
+ * bug que tendría un `setState` en bucle leyendo el valor viejo.
+ *
+ * Acá se borra todo sobre una sola copia y se empuja una sola vez.
+ */
+export function useLimpiarFiltros(): (params: string[]) => void {
+  const { empujar } = useNavegacion();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  return useCallback(
+    (params: string[]) => {
+      const siguientes = new URLSearchParams(searchParams.toString());
+      for (const clave of params) siguientes.delete(clave);
+
+      // Lo mismo que al filtrar: el conjunto es otro, la página vuelve a la 1.
+      siguientes.delete("page");
+
+      const query = siguientes.toString();
+      empujar(query ? `${pathname}?${query}` : pathname);
+    },
+    [empujar, pathname, searchParams]
+  );
+}
+
+/**
  * Moverse por las páginas, que NO es lo mismo que filtrar.
  *
  * Comparte con `useFilterParam` el mismo bloque de clonar los parámetros y

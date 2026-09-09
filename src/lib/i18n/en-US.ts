@@ -329,6 +329,11 @@ export const enUS: Record<TranslationKey, string> = {
   "filter.todos": "All",
   "filter.reclamos": "Claims",
   "filter.no_relevantes": "Not relevant",
+  "filter.tipo": "Type",
+  "filter.titulo": "Filters",
+  "filter.limpiar": "Clear",
+  "filter.limpiarTodo": "Clear all",
+  "filter.quitar": "Remove filter",
 
   // ── Case detail email sections ──────────────────────────────────────────────
   "case.detail.parsedEmail": "Email data",

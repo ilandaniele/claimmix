@@ -18,6 +18,7 @@
 
 import "server-only";
 
+import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
@@ -213,10 +214,10 @@ ${intentBrief[input.intent]}
 ${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}` : ""}
 ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de cada uno, copiados tal cual):\n${conflictos.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
-${input.claimantName ? `\nLa persona se llama ${input.claimantName}. Podés llamarla por su nombre de pila.` : ""}
-${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${input.question}"\nContestá con lo que sabemos de verdad: en qué estado está su denuncia y qué falta para avanzar. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder.` : ""}
+${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName)}. Podés llamarla por su nombre de pila.` : ""}
+${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(input.question)}"\nContestá con lo que sabemos de verdad: en qué estado está su denuncia y qué falta para avanzar. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder.` : ""}
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}
-${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto):\n"""${sinNumerosEnteros(input.lastMessage).slice(0, 600)}"""` : ""}
+${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto):\n"""${sinCentinelas(sinNumerosEnteros(input.lastMessage)).slice(0, 600)}"""` : ""}
 
 ${channelBrief}
 

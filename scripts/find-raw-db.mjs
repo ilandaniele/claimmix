@@ -18,6 +18,46 @@ import { execSync } from "node:child_process";
 const SALTO = String.fromCharCode(10);
 
 /**
+ * Los tramos de los ARMADORES, como pares [inicio, fin).
+ *
+ * Un armador es una función que recibe el cliente de la capa:
+ *
+ *   function consultaPromptRules(db: ClienteDatos) { return db.select()… }
+ *
+ * No ejecuta nada. Devuelve la consulta armada para que `enTenant` o
+ * `enTenantVarias` la manden, y el `db` que usa es el que la capa le pasó —
+ * el del rol restringido, con el contexto de inquilino ya puesto.
+ *
+ * Existen porque siete cargas del prompt iban en siete viajes: separar el
+ * armado de la ejecución las deja ir en un lote sin copiar la consulta en dos
+ * lugares. La regla no las veía y las reportaba como crudas, que es al revés
+ * de lo que son.
+ *
+ * Lo que hace de firma es el TIPO del parámetro, no el nombre: `db` a secas lo
+ * escribe cualquiera, `ClienteDatos` sale de `@/data/scope` y no se llega a él
+ * de otra forma.
+ */
+function tramosDeArmadores(s) {
+  const tramos = [];
+  const re = /\(\s*db\s*:\s*ClienteDatos\b/g;
+  let m;
+  while ((m = re.exec(s))) {
+    const abre = s.indexOf("{", s.indexOf(")", m.index));
+    if (abre === -1) continue;
+    let prof = 0;
+    let i = abre;
+    for (; i < s.length; i++) {
+      const c = s[i];
+      if (c === "{") prof++;
+      else if (c === "}") {
+        if (--prof === 0) break;
+      }
+    }
+    tramos.push([abre, i]);
+  }
+  return tramos;
+}
+/**
  * Los tramos de la capa de datos de un archivo, como pares [inicio, fin).
  *
  * `paginarEnTenant` cuenta igual que `enTenant`: es un envoltorio que arma las
@@ -96,7 +136,8 @@ const crudas = [];
 let declaradas = 0;
 for (const f of archivos) {
   const s = readFileSync(f, "utf8");
-  const tramos = tramosDeLaCapa(s);
+  // La capa, y los armadores que la capa manda. Los dos cuentan como adentro.
+  const tramos = [...tramosDeLaCapa(s), ...tramosDeArmadores(s)];
   // Un `db.$count` nombrado en un comentario no es una consulta. Sin esto la
   // regla reportaba trabajo inexistente, que es la manera más rápida de que
   // alguien deje de mirarla.

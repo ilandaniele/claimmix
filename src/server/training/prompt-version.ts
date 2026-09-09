@@ -11,7 +11,7 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 
 /** Version label recorded when no tenant prompt_versions row is active. */
@@ -32,6 +32,29 @@ const BUILTIN: ActivePromptVersion = {
   systemPrompt: null,
 };
 
+/** La consulta sola, para poder mandarla en un lote. Ver `consultaAgentTraining`. */
+export function consultaPromptVersion(db: ClienteDatos) {
+  const t = tables.promptVersions;
+  return db
+    .select({ id: t.id, version: t.version, system_prompt: t.system_prompt })
+    .from(t)
+    .where(eq(t.active, true))
+    .limit(1);
+}
+
+/** La versión activa, o la que trae el código, de la fila de arriba. */
+export function dePromptVersion(
+  filas: Array<{ id: string; version: string; system_prompt: string | null }>
+): ActivePromptVersion {
+  const row = firstRow(filas);
+  if (!row) return BUILTIN;
+  return {
+    id: row.id,
+    version: row.version,
+    systemPrompt: row.system_prompt?.trim() ? row.system_prompt : null,
+  };
+}
+
 /**
  * Load the active prompt version for a tenant.
  * Falls back to the built-in version on any error or when none is active.
@@ -42,24 +65,7 @@ export async function getActivePromptVersion(
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
-    const t = tables.promptVersions;
-    const row = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select({ id: t.id, version: t.version, system_prompt: t.system_prompt })
-          .from(t)
-          .where(eq(t.active, true))
-          .limit(1)
-      )
-    );
-
-    if (!row) return BUILTIN;
-
-    return {
-      id: row.id,
-      version: row.version,
-      systemPrompt: row.system_prompt?.trim() ? row.system_prompt : null,
-    };
+    return dePromptVersion(await enTenant(tenantCtx, consultaPromptVersion));
   } catch (e) {
     const code = (e as { code?: string })?.code;
     if (code && code !== "42P01") {

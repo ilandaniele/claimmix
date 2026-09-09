@@ -11,7 +11,7 @@
  * These tests mock @/lib/db (Drizzle) and @/lib/auth/require-role directly.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -151,12 +151,62 @@ function buildDbMocks(opts: {
   };
 }
 
+/**
+ * Las dos lecturas que hace la ruta antes de llamar al cliente: el caso y sus
+ * campos extraidos. Se usa un contador compartido, igual que los casos de mas
+ * arriba: `buildDbMocks` arma la cadena de nuevo en cada llamada y su contador
+ * vuelve a cero, asi que la segunda lectura nunca devuelve las filas.
+ *
+ * Devuelve el espia de `update` para poder afirmar que NO se llamo.
+ */
+function montarLecturaDelCaso(db: any) {
+  let n = 0;
+  db.select.mockImplementation(() => {
+    n += 1;
+    if (n === 1) {
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([DEFAULT_CASE_ROW]),
+          }),
+        }),
+      };
+    }
+    return {
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(DEFAULT_EXTRACTED_FIELDS),
+      }),
+    };
+  });
+
+  const update = vi.fn().mockReturnValue({
+    set: vi.fn().mockReturnValue({
+      where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+    }),
+  });
+  db.update.mockImplementation(update);
+  return update;
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("POST /api/cases/:id/sync-to-core", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
+    /*
+     * El simulador hay que pedirlo por su nombre.
+     *
+     * Antes `getCoreSyncClient()` lo devolvía con `CORE_SYNC_MODE` sin definir,
+     * que es exactamente como corría en producción: el botón contestaba que sí
+     * y guardaba un identificador inventado. Ahora el default es no tener
+     * cliente, así que los casos de abajo —que prueban el simulador— lo piden.
+     */
+    vi.stubEnv("CORE_SYNC_MODE", "mock");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("listo_para_core → enviado_a_core (mock success)", async () => {
@@ -474,5 +524,66 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     const response = await POST(makeRequest(), makeContext(VALID_CASE_ID));
 
     expect(response.status).toBe(401);
+  });
+
+  /*
+   * El caso que importa: sin integración configurada NO se inventa nada.
+   *
+   * Esto es lo que corría en producción. `CORE_SYNC_MODE` no está puesta ni en
+   * `.env.local`, ni en la CI, ni en Vercel, y la fábrica devolvía el simulador
+   * igual: el caso terminaba en `enviado_a_core` con un `core_external_id`
+   * armado con los primeros ocho caracteres del id, y la auditoría guardaba un
+   * CORE_SYNC_SUCCESS de algo que no pasó.
+   *
+   * Se afirma sobre las tres consecuencias por separado —el código, que no se
+   * escribió el caso, y que no se auditó un éxito— porque cada una se puede
+   * romper sin las otras.
+   */
+  it("sin integración configurada: 501, y el caso queda intacto", async () => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+    const { writeAuditLog } = await import("@/lib/audit/log");
+
+    vi.stubEnv("CORE_SYNC_MODE", "");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    } as never);
+
+    const update = montarLecturaDelCaso(db);
+
+    const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+    const response = await POST(makeRequest(), makeContext(VALID_CASE_ID));
+    const body = await response.json();
+
+    expect(response.status).toBe(501);
+    expect(body.error.code).toBe("NOT_IMPLEMENTED");
+
+    // Ni el estado ni el identificador: no se tocó la fila.
+    expect(update).not.toHaveBeenCalled();
+
+    // Y no quedó escrito que se envió.
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("CORE_SYNC_MODE=real tampoco inventa: todavía no hay cliente real", async () => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+
+    vi.stubEnv("CORE_SYNC_MODE", "real");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    } as never);
+
+    const update = montarLecturaDelCaso(db);
+
+    const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+    const response = await POST(makeRequest(), makeContext(VALID_CASE_ID));
+
+    expect(response.status).toBe(501);
+    expect(update).not.toHaveBeenCalled();
   });
 });

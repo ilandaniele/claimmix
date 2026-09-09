@@ -230,7 +230,10 @@ function extensionFor(mimeType: string): string {
  * frena la descarga, y `arrayBuffer()` no tiene forma de rendirse a la
  * mitad.
  */
-async function leerHastaElTope(res: Response, tope: number): Promise<Buffer | null> {
+async function leerHastaElTope(
+  res: Response,
+  tope: number
+): Promise<Buffer | "demasiado_grande" | null> {
   if (!res.body) return null;
   const lector = res.body.getReader();
   const partes: Buffer[] = [];
@@ -252,7 +255,7 @@ async function leerHastaElTope(res: Response, tope: number): Promise<Buffer | nu
             tope_bytes: tope,
           })
         ); // crew-debug-ok
-        return null;
+        return "demasiado_grande";
       }
       partes.push(Buffer.from(value));
     }
@@ -263,10 +266,26 @@ async function leerHastaElTope(res: Response, tope: number): Promise<Buffer | nu
   return Buffer.concat(partes);
 }
 
+/**
+ * Lo que devuelve bajar un adjunto.
+ *
+ * `null` es «no se pudo», que ya existia. Lo nuevo es poder decir «no lo baje
+ * PORQUE es demasiado grande», que no es lo mismo: uno es una falla nuestra y
+ * el otro es algo que el asegurado mando y hay que contarle al analista.
+ *
+ * Antes los dos eran `null`, el que llama hacia `if (!file) continue`, y no
+ * quedaba fila en `claim_attachments`: el asegurado mandaba la foto de los
+ * daños, creia que la habia mandado, y en la pantalla el pedido de documento
+ * seguia abierto sin ninguna explicacion.
+ */
+export type MediaDeWhatsApp =
+  | { data: Buffer; mimeType: string }
+  | { demasiadoGrande: true; bytes: number | null };
+
 export async function downloadWhatsAppMedia(
   mediaId: string,
   opts?: { accessToken?: string }
-): Promise<{ data: Buffer; mimeType: string } | null> {
+): Promise<MediaDeWhatsApp | null> {
   const accessToken = opts?.accessToken ?? process.env.WHATSAPP_ACCESS_TOKEN;
   if (!accessToken) {
     console.error("[whatsapp] media download skipped: no access token"); // crew-debug-ok
@@ -330,7 +349,7 @@ export async function downloadWhatsAppMedia(
           tope_bytes: MAX_ATTACHMENT_SIZE_BYTES,
         })
       ); // crew-debug-ok
-      return null;
+      return { demasiadoGrande: true, bytes: declarado };
     }
 
     const fileRes = await fetch(meta.url, {
@@ -342,6 +361,11 @@ export async function downloadWhatsAppMedia(
     }
 
     const data = await leerHastaElTope(fileRes, MAX_ATTACHMENT_SIZE_BYTES);
+    if (data === "demasiado_grande") {
+      // Sin `bytes`: se corto a mitad de la descarga, asi que no sabemos cuanto
+      // pesaba de verdad. Lo unico cierto es que pasaba el tope.
+      return { demasiadoGrande: true, bytes: null };
+    }
     if (!data) return null;
 
     return { data, mimeType };

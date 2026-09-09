@@ -32,6 +32,23 @@ function payloadWith(message: Record<string, unknown>) {
   };
 }
 
+/**
+ * Lo que se bajó, acotando el tipo.
+ *
+ * `downloadWhatsAppMedia` ahora puede devolver «demasiado grande», que no es lo
+ * mismo que «no se pudo»: uno deja fila rechazada en la pantalla del analista y
+ * el otro es una falla nuestra. Estos casos esperan bytes, así que si vuelve
+ * cualquier otra cosa el test tiene que decir cuál.
+ */
+function loBajado(
+  file: Awaited<ReturnType<typeof downloadWhatsAppMedia>>
+): { data: Buffer; mimeType: string } {
+  if (!file || "demasiadoGrande" in file) {
+    throw new Error(`se esperaban bytes y vino: ${JSON.stringify(file)}`);
+  }
+  return file;
+}
+
 describe("parseCloudApiMessages — media", () => {
   it("keeps a photo that came with no caption at all", () => {
     // The message used to be dropped or reduced to a placeholder; the photo is
@@ -124,8 +141,9 @@ describe("downloadWhatsAppMedia", () => {
 
     const file = await downloadWhatsAppMedia("media-1");
 
-    expect(file?.mimeType).toBe("image/jpeg");
-    expect(file?.data.toString()).toBe("bytes");
+    const bajado = loBajado(file);
+    expect(bajado.mimeType).toBe("image/jpeg");
+    expect(bajado.data.toString()).toBe("bytes");
     expect(calls).toHaveLength(2);
     expect(calls[1].url).toBe("https://cdn.example/file");
     expect(calls[1].auth).toBe("Bearer test-token");
@@ -206,7 +224,8 @@ describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
 
     const file = await downloadWhatsAppMedia("media-1");
 
-    expect(file).toBeNull();
+    // Con los bytes que declaro Meta: el analista ve cuanto pesaba.
+    expect(file).toEqual({ demasiadoGrande: true, bytes: 100 * 1024 * 1024 });
     // La que importa: una sola llamada, la de la metadata. La del archivo no.
     expect(urls).toHaveLength(1);
     expect(urls[0]).toContain("/media-1");
@@ -218,7 +237,7 @@ describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
 
     const file = await downloadWhatsAppMedia("media-1");
 
-    expect(file?.data.toString()).toBe("bytes");
+    expect(loBajado(file).data.toString()).toBe("bytes");
     expect(urls).toHaveLength(2);
   });
 
@@ -230,7 +249,10 @@ describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
 
     const file = await downloadWhatsAppMedia("media-1");
 
-    expect(file).toBeNull();
+    // No es `null`: `null` es «no se pudo bajar» y el que llama lo saltea sin
+    // dejar rastro. Esto dice POR QUE, y con eso queda una fila rechazada que
+    // el analista ve.
+    expect(file).toEqual({ demasiadoGrande: true, bytes: null });
     // Acá sí se abrió: no había con qué saberlo antes. Lo que no pasó es que
     // los once megas terminaran en un Buffer.
     expect(urls).toHaveLength(2);

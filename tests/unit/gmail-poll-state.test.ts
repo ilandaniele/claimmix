@@ -58,7 +58,8 @@ describe("getOrCreatePollState", () => {
 
     const result = await getOrCreatePollState("test@gmail.com");
 
-    expect(result).toEqual({ id: "uuid-001", historyId: "1" });
+    // `pendientes` viene de la 0026: los mensajes que fallaron y hay que reintentar.
+    expect(result).toEqual({ id: "uuid-001", historyId: "1", pendientes: [] });
   });
 
   it("returns the existing row without overwriting history_id on conflict", async () => {
@@ -79,7 +80,7 @@ describe("getOrCreatePollState", () => {
 
     const result = await getOrCreatePollState("test@gmail.com");
 
-    expect(result).toEqual({ id: "uuid-002", historyId: "99999" });
+    expect(result).toEqual({ id: "uuid-002", historyId: "99999", pendientes: [] });
   });
 
   it("propagates non-conflict insert errors as thrown exceptions", async () => {

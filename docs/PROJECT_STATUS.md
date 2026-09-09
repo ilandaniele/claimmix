@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-09. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-08. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -1835,7 +1835,75 @@ comentario de la vez anterior que pasó lo mismo, el 1º de septiembre.
   adjunto de WhatsApp que se bufferea entero antes de mirar el tamaño, y siete
   de accesibilidad.
 
-### 🧾 Los dieciséis puntos del informe, cerrados (2026-09-09)
+### 🔎 El índice de `cases`: medido, y la respuesta es que no va (2026-09-08)
+
+Quedaba abierto «los tres Seq Scan del tablero, 226 / 187 / 340 ms contra un
+presupuesto de 500 — ¿el índice va ahora o cuando haya volumen?». Se midió
+contra producción, sólo lectura, con el rol de la aplicación y RLS puesta, que
+es la única forma de ver el plan que realmente corre.
+
+**Ya no son tres. Es uno, y cuesta 0,36 ms.**
+
+| consulta | cómo la resuelve | tiempo |
+|---|---|---|
+| listado (LIMIT 25) | `Index: idx_cases_tenant_created_at` | 19,6 ms en frío |
+| conteo del listado | `Index Only Scan: idx_cases_tenant_type`, 0 heap fetches | 0,08 ms |
+| **contadores por estado** | **Seq Scan, 483 filas** | **0,36 ms** |
+| listado + `status=listo` | `Index: idx_cases_tenant_status` | 0,75 ms |
+| conteo + `status=listo` | `Index: idx_cases_tenant_status` | 0,09 ms |
+
+Los 226 / 187 / 340 ms de la medición vieja eran ida y vuelta a Neon, no tiempo
+de ejecución. El presupuesto de 500 ms mide viajes; los Seq Scan nunca fueron
+el problema.
+
+**De paso queda contestada la pregunta que abrió `medir-rls-indices.mts`: la
+política SÍ se inlinea.** El plan muestra el predicado como
+`tenant_id = (NULLIF(current_setting('claimmix.tenant_id', true), ''))::uuid`,
+o sea una igualdad sobre la columna y no `f(columna)`. Los índices que empiezan
+por `tenant_id` siguen sirviendo después del refactor a RLS. Es SQL y STABLE y
+no es security definer, que son las tres condiciones.
+
+**Por qué no se agrega un índice.** El único Seq Scan que queda es
+`select status, count(*) from cases group by status`, y el índice que lo
+serviría —`(tenant_id, status)`— **ya existe**: es `idx_cases_tenant_status`, con
+7180 usos. El planificador no lo elige porque a este tamaño estima 36,89 contra
+40,61, un 10% de diferencia.
+
+Forzándolo con `enable_seqscan = off` se ve que el índice es mejor de lo que el
+planificador cree:
+
+```
+ELEGIDO   Seq Scan            0,36 ms   26 buffers
+FORZADO   Index Only Scan     0,10 ms    2 buffers, Heap Fetches: 0
+```
+
+Tres veces y media más rápido. Pero **crear otro índice no cambiaría nada**: el
+que sirve ya está, y agregar uno más caería exactamente en el error de la 0023,
+que la 0024 tuvo que revertir un día después. La diferencia con aquel caso es
+que acá forzado es más *rápido* (allá era más lento: 2,79 contra 1,98 ms) y hay
+cero heap fetches (allá 2871 sobre 9616). O sea: el índice está bien, la
+estimación está apenas corrida, y el cruce lo va a hacer el planificador solo
+cuando la tabla crezca, porque el costo del Seq Scan crece con la tabla entera y
+el del índice no.
+
+Con 483 filas de 484 del mismo inquilino, filtrar por `tenant_id` no descarta
+nada — el mismo argumento (1) de la 0024.
+
+**Lo que sí apareció y vale mirar cuando haya ganas:**
+
+- **Dos índices que se pisan.** `idx_cases_tenant_created (tenant_id, created_at
+  DESC)` de 184 kB y `idx_cases_tenant_created_at (tenant_id, created_at)` de
+  40 kB. Un btree se recorre en los dos sentidos, así que sirven para lo mismo;
+  los dos se usan (11461 y 26564). Sobra uno, y cada escritura paga los dos.
+- **Cuatro índices con cero usos:** `idx_cases_tenant_severity`,
+  `idx_cases_extraction_lease`, `idx_cases_policy_number_trgm` y
+  `idx_cases_policyholder_name_trgm`. Los dos de trigramas están a propósito
+  (`load-test.mts` explica que el planificador los va a elegir recién con
+  volumen). Los otros dos no tienen esa nota: el de severidad es parcial
+  (`WHERE severity IS NOT NULL`) y el del lease también
+  (`WHERE extraction_lease_at IS NOT NULL`), y ninguno se usó nunca.
+
+### 🧾 Los dieciséis puntos del informe, cerrados (2026-09-08)
 
 Quedaban dieciséis de los veintitrés del informe de verificación. Están todos
 hechos y desplegados; `main` en `767efa5` con CI, CodeQL, secretos y los siete
@@ -1886,9 +1954,8 @@ solo lado de la llave.
 
 #### Lo que NO se hizo, y por qué
 
-- **Los tres Seq Scan del tablero** sobre `cases` entera. Medidos sin ruido:
-  226 / 187 / 340 ms contra un presupuesto de 500, con 483 casos. La pregunta
-  es si el índice va ahora o cuando haya volumen.
+- ~~**Los tres Seq Scan del tablero**~~ — **medido el 2026-09-08: no hacen falta
+  índices nuevos, y ya no son tres sino uno.** Ver abajo.
 - **`renderConflict` de WhatsApp muestra los valores sin enmascarar**, y siempre
   lo hizo. AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee un
   asegurado: es decisión de producto.

@@ -6,12 +6,7 @@ import { PER_PAGE_OPTIONS } from "./per-page";
 import { FilterTabs } from "./components/FilterTabs";
 import { usePaginacion } from "./components/useFilterParam";
 import { NavegacionPendienteProvider, useNavegacion } from "./components/navegacion-pendiente";
-import { TypeFilterChips } from "./components/TypeFilterChips";
-import {
-  ChannelFilterChips,
-  SeverityFilterChips,
-  IsClaimFilterChips,
-} from "./components/EmailFilterChips";
+import { PanelDeFiltros } from "./components/PanelDeFiltros";
 import { CasesTable } from "./components/CasesTable";
 import { SimulateModal } from "./components/SimulateModal";
 import { ToastContainer, useToast } from "./components/Toast";
@@ -556,29 +551,22 @@ function DashboardClientInterno({
         </CardHeader>
 
         {/*
-          * Los filtros: una sola franja, no tres.
+          * Dos franjas, y cada una hace algo distinto.
           *
-          * Eran tres tiras apiladas, cada una con su `border-b` y su `bg-white`
-          * propio, metidas adentro de una tarjeta que ya tiene fondo y borde.
-          * Tres líneas duras cruzando una tarjeta redondeada se ven como tres
-          * tarjetas mal apiladas, que es de dónde venía lo de «medio fea».
+          * Arriba, el estado: son las pestañas de siempre, con su contador.
+          * Se quedan a la vista porque no son un filtro más sino por dónde se
+          * navega la bandeja, y porque «Escalados 43» es trabajo pendiente que
+          * no puede vivir detrás de un ícono.
           *
-          * Ahora hay UNA línea —la de las pestañas, que separa el encabezado de
-          * la lista— y los chips viven en la misma franja, agrupados con aire en
-          * vez de con bordes. Ningún control se fue: están los mismos veinte.
+          * Abajo, el resto: veinte chips que estaban todos desplegados y ahora
+          * viven en un panel, con lo que está puesto a la vista al lado del
+          * botón. El porqué largo está en `PanelDeFiltros`.
           */}
         <div className="border-b border-slate-100 px-5">
           <FilterTabs counts={tabCounts} activeStatus={activeStatus} />
         </div>
 
-        <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3">
-          <TypeFilterChips activeType={activeType} />
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <ChannelFilterChips activeChannel={activeChannel} />
-            <SeverityFilterChips activeSeverity={activeSeverity} />
-            <IsClaimFilterChips activeIsClaim={activeIsClaim} />
-          </div>
-        </div>
+        <PanelDeFiltros />
 
         {/*
           * `min-h-0` en este hijo y en el flex de arriba: sin eso un hijo de

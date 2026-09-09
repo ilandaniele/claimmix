@@ -344,6 +344,11 @@ export const esAR = {
   "filter.todos": "Todos",
   "filter.reclamos": "Reclamos",
   "filter.no_relevantes": "No relevantes",
+  "filter.tipo": "Tipo",
+  "filter.titulo": "Filtros",
+  "filter.limpiar": "Limpiar",
+  "filter.limpiarTodo": "Limpiar todo",
+  "filter.quitar": "Quitar filtro",
 
   // ── Case detail email sections ──────────────────────────────────────────────
   "case.detail.parsedEmail": "Datos del email",

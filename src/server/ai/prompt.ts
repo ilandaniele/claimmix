@@ -19,6 +19,7 @@
  *       XML sentinel tags so injection inside either tag cannot escape.
  */
 
+import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import type { ClaimType } from "@/lib/schemas/cases";
 
 /** Memory hint injected into the email prompt for returning senders (AC13). */
@@ -231,11 +232,13 @@ Set confidence lower (0.5–0.7) if you inferred the value rather than finding i
  * @returns The user message string.
  */
 export function buildUserMessage(rawText: string): string {
+  // El centinela primero, el corte despues: cortar no puede volver a abrir uno.
+  const limpio = sinCentinelas(rawText);
   // Truncate to 2 MB per spec payload cap (already enforced in schema but belt+suspenders).
   const truncated =
-    rawText.length > 2_097_152
-      ? rawText.slice(0, 2_097_152) + "\n[TRUNCADO — texto demasiado largo]"
-      : rawText;
+    limpio.length > 2_097_152
+      ? limpio.slice(0, 2_097_152) + "\n[TRUNCADO — texto demasiado largo]"
+      : limpio;
 
   return `<claim_text>
 ${truncated}
@@ -286,17 +289,31 @@ export function buildEmailClaimPrompt(
   agentTraining?: string,
   learning?: PromptLearningContext
 ): string {
+  /*
+   * Lo que escribió la persona NO puede escribir los centinelas.
+   *
+   * Abajo, el asunto y el cuerpo se interpolan entre `<email_subject>` y
+   * `<email_body>`, y eso entero se manda como `systemInstruction`. Un cuerpo
+   * con un `</email_body>` adentro sigue con instrucciones que al modelo le
+   * llegan exactamente en el mismo lugar que las de la casa — y quien lo manda
+   * no está autenticado.
+   *
+   * Ver `src/core/ai/sin-centinelas.ts`.
+   */
+  const cuerpoLimpio = sinCentinelas(emailBody);
+  const asuntoLimpio = sinCentinelas(emailSubject);
+
   // Truncate body to 2 MB cap.
   const truncatedBody =
-    emailBody.length > 2_097_152
-      ? emailBody.slice(0, 2_097_152) + "\n[TRUNCADO — texto demasiado largo]"
-      : emailBody;
+    cuerpoLimpio.length > 2_097_152
+      ? cuerpoLimpio.slice(0, 2_097_152) + "\n[TRUNCADO — texto demasiado largo]"
+      : cuerpoLimpio;
 
   // Truncate subject to 500 chars.
   const truncatedSubject =
-    emailSubject.length > 500
-      ? emailSubject.slice(0, 500) + "[TRUNCADO]"
-      : emailSubject;
+    asuntoLimpio.length > 500
+      ? asuntoLimpio.slice(0, 500) + "[TRUNCADO]"
+      : asuntoLimpio;
 
   // Format memory hints for injection.
   const memoryHintsJson =

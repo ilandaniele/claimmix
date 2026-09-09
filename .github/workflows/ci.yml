@@ -483,6 +483,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # `--with-deps` corre `apt-get update`, y eso golpea TODOS los repos
+      # configurados en la imagen del runner — incluido el de Google, que viene
+      # de fábrica. El 09/09 ese repo sirvió un índice que no coincidía con el
+      # hash de su propio Release y apt abortó entero, dos corridas seguidas.
+      #
+      # De ahí no sacamos nada: Playwright se baja su propio chromium. Lo único
+      # que necesitamos de apt son las bibliotecas del sistema, que están en
+      # Ubuntu. La fuente se va antes de mirar.
+      - name: Sacar el repo de Chrome que no usamos
+        run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 

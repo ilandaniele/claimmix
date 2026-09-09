@@ -26,7 +26,31 @@ import { firstRow } from "@/lib/db/helpers";
 export interface PollStateRow {
   id: string;
   historyId: string;
+  /** Lo que quedó por reintentar de corridas anteriores. Migración 0026. */
+  pendientes: MensajePendiente[];
 }
+
+/** Un mensaje que falló y hay que volver a leer. */
+export interface MensajePendiente {
+  id: string;
+  intentos: number;
+  /** ISO. Sólo para poder ver hace cuánto que uno viene fallando. */
+  visto: string;
+}
+
+/**
+ * Cuántas veces se reintenta un mensaje antes de soltarlo.
+ *
+ * No es infinito a propósito: un mensaje que falla por lo que es —un adjunto
+ * corrupto, un MIME que la librería no parsea— fallaría en cada corrida para
+ * siempre, y la lista crecería sin techo. Tres intentos cubren lo que se
+ * arregla solo (un hipo de red, la base ocupada, un timeout del proveedor) sin
+ * arrastrar para siempre lo que no.
+ *
+ * Al soltarlo se escribe un log con nivel `error` nombrando el id: es el único
+ * momento en que un correo se da por perdido, y tiene que dejar rastro.
+ */
+export const MAX_INTENTOS_POR_MENSAJE = 3;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -63,13 +87,17 @@ export async function getOrCreatePollState(
   }
 
   // Always fetch the current row (whether just inserted or pre-existing).
-  let data: { id: string; history_id: string } | null;
+  let data: { id: string; history_id: string; pendientes: MensajePendiente[] } | null;
   try {
     data = firstRow(
       // sin-inquilino: `gmail_poll_state` no tiene columna de inquilino: es estado del
       // poller, uno por casilla, del sistema y no de un inquilino.
       await db
-        .select({ id: gmailPollState.id, history_id: gmailPollState.history_id })
+        .select({
+          id: gmailPollState.id,
+          history_id: gmailPollState.history_id,
+          pendientes: gmailPollState.mensajes_pendientes,
+        })
         .from(gmailPollState)
         .where(eq(gmailPollState.gmail_account_email, gmailEmail))
         .limit(1)
@@ -90,6 +118,8 @@ export async function getOrCreatePollState(
   return {
     id: data.id,
     historyId: data.history_id,
+    // Una fila vieja, de antes de la 0026, puede traer null.
+    pendientes: data.pendientes ?? [],
   };
 }
 
@@ -136,6 +166,47 @@ export async function advancePollState(
     const code = (err as { code?: string })?.code ?? "unknown";
     throw new Error(
       `[poll-state] Failed to advance watermark: ${code}`
+    );
+  }
+}
+
+/**
+ * Guardar qué mensajes quedaron por reintentar.
+ *
+ * Se escribe la lista entera y no un delta: el poller ya la tiene armada en
+ * memoria —los que siguen fallando con un intento más, menos los que entraron,
+ * menos los que agotaron los intentos— y dos escrituras parciales sobre un
+ * jsonb desde dos corridas simultáneas se pisarían de formas difíciles de
+ * seguir.
+ *
+ * No tira: si esto falla, el poller ya hizo su trabajo y lo peor que pasa es
+ * que un mensaje se reintente una vez de más. Tirar acá sí sería grave, porque
+ * abortaría la corrida DESPUÉS de haber procesado mensajes.
+ */
+export async function guardarPendientes(
+  id: string,
+  pendientes: MensajePendiente[]
+): Promise<void> {
+  try {
+    // sin-inquilino: `gmail_poll_state` no tiene columna de inquilino: es estado del
+    // poller, uno por casilla, del sistema y no de un inquilino.
+    await db
+      .update(gmailPollState)
+      .set({
+        mensajes_pendientes: pendientes,
+        updated_at: new Date().toISOString(),
+      })
+      .where(eq(gmailPollState.id, id));
+  } catch (err) {
+    const code = (err as { code?: string })?.code ?? "unknown";
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "poll_state.no_se_pudieron_guardar_los_pendientes",
+        error_code: code,
+        cuantos: pendientes.length,
+      })
     );
   }
 }

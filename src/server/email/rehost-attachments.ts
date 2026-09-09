@@ -38,6 +38,16 @@ export interface EmailAttachment {
   ContentType: string;
   /** Byte length of the decoded content. */
   ContentLength: number;
+  /**
+   * Ya se sabe que este adjunto no entra, y por que.
+   *
+   * Lo usa WhatsApp cuando la descarga se corto por tamano: no tenemos los
+   * bytes —justamente por eso se corto— pero si el nombre, el tipo y el
+   * motivo, que es lo que necesita ver el analista. Sin esto el archivo
+   * desaparecia sin dejar fila, y el pedido de documento quedaba abierto en la
+   * pantalla sin explicacion.
+   */
+  rechazoPrevio?: string;
 }
 
 export type RehostResult =
@@ -135,6 +145,15 @@ export async function rehostAttachments(
     // AC11: budget exhausted — mark remaining attachments without attempting upload.
     if (remaining <= 0) {
       results.push({ stored: false, reason: "rehost_timeout" });
+      continue;
+    }
+
+    /*
+     * El que ya viene rechazado no se decodifica ni se sube: se anota y listo.
+     * Va ANTES de decodificar porque su `Content` esta vacio a proposito.
+     */
+    if (attachment.rechazoPrevio) {
+      results.push({ stored: false, reason: attachment.rechazoPrevio });
       continue;
     }
 

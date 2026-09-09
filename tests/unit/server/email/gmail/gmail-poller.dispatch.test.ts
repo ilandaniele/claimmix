@@ -32,6 +32,7 @@ const {
   mockRehostAttachments,
   mockWriteAuditLog,
   mockListEnabledGmailAccounts,
+  mockGuardarPendientes,
 } = vi.hoisted(() => ({
   mockGetWorkerBaseUrl: vi.fn().mockReturnValue("http://localhost:3000"),
   mockGetGmailClient: vi.fn(),
@@ -44,6 +45,7 @@ const {
   mockRehostAttachments: vi.fn().mockResolvedValue([]),
   mockWriteAuditLog: vi.fn().mockResolvedValue(undefined),
   mockListEnabledGmailAccounts: vi.fn().mockResolvedValue([]),
+  mockGuardarPendientes: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
@@ -98,6 +100,8 @@ vi.mock("@/server/email/gmail/poll-state", () => ({
   getOrCreatePollState: mockGetOrCreatePollState,
   advancePollState: mockAdvancePollState,
   recordPollError: mockRecordPollError,
+  guardarPendientes: mockGuardarPendientes,
+  MAX_INTENTOS_POR_MENSAJE: 3,
 }));
 
 vi.mock("@/server/email/gmail/gmail-attachment-adapter", () => ({
@@ -238,8 +242,11 @@ function makeGmailMock(messageId = MSG_ID) {
 }
 
 /** Build a minimal poll state mock. */
-function makePollState(historyId = "12345") {
-  return { id: "poll-state-uuid", historyId };
+function makePollState(
+  historyId = "12345",
+  pendientes: Array<{ id: string; intentos: number; visto: string }> = []
+) {
+  return { id: "poll-state-uuid", historyId, pendientes };
 }
 
 // ── Shared setup ──────────────────────────────────────────────────────────────
@@ -632,5 +639,77 @@ describe("NB3 — initial case insert uses claim_type: null", () => {
     // The insert payload must NOT carry a hard-coded claim_type value.
     expect(capturedInsertPayload).toBeDefined();
     expect((capturedInsertPayload as Record<string, unknown>).claim_type).toBeNull();
+  });
+});
+
+// ── El correo que falló se vuelve a leer (migración 0026) ─────────────────────
+
+/**
+ * La marca de agua avanza siempre, y hace bien: si se frenara, un mensaje roto
+ * bloquearía la casilla entera y no entraría ningún correo nuevo. El precio era
+ * que el mensaje que falló no se volvía a mirar NUNCA, porque el cron arranca
+ * desde la marca ya avanzada.
+ *
+ * `mensajes_pendientes` es la tercera salida: la marca avanza igual y el
+ * mensaje vuelve a intentarse en la corrida siguiente.
+ */
+describe("los mensajes que fallaron se reintentan", () => {
+  const PENDIENTE = "msg-que-fallo-antes";
+
+  /** Un poll state que ya trae un pendiente de antes. */
+  function conPendiente(intentos = 1) {
+    mockGetOrCreatePollState.mockResolvedValue(
+      makePollState("12345", [
+        { id: PENDIENTE, intentos, visto: "2026-09-09T00:00:00.000Z" },
+      ])
+    );
+  }
+
+  /** Gmail sin novedades: el history no trae ningún mensaje nuevo. */
+  function sinNovedades(devuelve = PENDIENTE) {
+    const gmail = makeGmailMock(devuelve);
+    gmail.users.history.list = vi
+      .fn()
+      .mockResolvedValue({ data: { historyId: "99999", history: [] } });
+    mockGetGmailClient.mockReturnValue(gmail);
+    return gmail;
+  }
+
+  it("un pendiente de una corrida anterior se vuelve a pedir a Gmail", async () => {
+    conPendiente();
+    const gmail = sinNovedades();
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true }) as never;
+    setupDbMock();
+
+    await pollGmail();
+
+    const pedidos = (gmail.users.messages.get as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => (c[0] as { id: string }).id
+    );
+    expect(pedidos).toContain(PENDIENTE);
+  });
+
+  it("si el reintento anda, el pendiente se borra de la lista", async () => {
+    conPendiente();
+    sinNovedades();
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true }) as never;
+    setupDbMock();
+
+    await pollGmail();
+
+    // Entró bien, así que ya no hay nada que reintentar.
+    expect(mockGuardarPendientes).toHaveBeenCalledWith("poll-state-uuid", []);
+  });
+
+  it("la marca de agua avanza igual, con pendientes o sin ellos", async () => {
+    conPendiente(2);
+    mockGetGmailClient.mockReturnValue(makeGmailMock());
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true }) as never;
+    setupDbMock();
+
+    await pollGmail();
+
+    // Es la mitad del arreglo que NO cambia: quedarse clavado es el bucle de veneno.
+    expect(mockAdvancePollState).toHaveBeenCalledWith("poll-state-uuid", "99999");
   });
 });

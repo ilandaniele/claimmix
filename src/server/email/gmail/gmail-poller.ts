@@ -54,6 +54,9 @@ import {
   getOrCreatePollState,
   advancePollState,
   recordPollError,
+  guardarPendientes,
+  MAX_INTENTOS_POR_MENSAJE,
+  type MensajePendiente,
 } from "./poll-state";
 import { adaptGmailAttachments } from "./gmail-attachment-adapter";
 import { checkDuplicate } from "@/server/email/dedupe";
@@ -674,8 +677,38 @@ export async function pollGmail(
   let errors = 0;
   const newCaseIds: string[] = [];
 
+  /*
+   * Los que fallaron antes van PRIMERO, y con su cuenta de intentos.
+   *
+   * La marca de agua avanza siempre (ver `shouldAdvance` más abajo), así que
+   * sin esto un mensaje que falla una vez no se vuelve a mirar nunca: el cron
+   * arranca desde la marca ya avanzada. Ésta es la tercera salida, la que no
+   * estaba: la marca sigue avanzando —no hay bucle de veneno— y el mensaje
+   * perdido vuelve a intentarse acá.
+   *
+   * Se ponen adelante porque son los más viejos, y porque si la tanda nueva
+   * llena `MAX_MESSAGES_PER_RUN` el que ya venía esperando no puede quedar
+   * atrás otra vez.
+   *
+   * `intentosPrevios` los indexa por id; un mensaje que ya está en la tanda
+   * nueva no se agrega dos veces.
+   */
+  // `?? []` porque una fila anterior a la 0026 trae null, y porque el campo es
+  // nuevo: no todos los que arman este objeto lo conocen todavia.
+  const pendientesPrevios = pollState.pendientes ?? [];
+  const intentosPrevios = new Map<string, number>(
+    pendientesPrevios.map((p) => [p.id, p.intentos])
+  );
+  const aReintentar = pendientesPrevios
+    .map((p) => p.id)
+    .filter((id) => !messageIds.includes(id));
+  const aProcesar = [...aReintentar, ...messageIds];
+
+  /** Los que siguen fallando después de esta corrida. */
+  const siguenFallando: MensajePendiente[] = [];
+
   // Process in order (oldest first — messageIds from history are in order).
-  for (const messageId of messageIds) {
+  for (const messageId of aProcesar) {
     try {
       const result = await processMessage(gmail, messageId, tenantId);
       if (result.outcome === "processed") {
@@ -695,8 +728,45 @@ export async function pollGmail(
         pollState.id,
         `message_failed: ${messageId}: ${code}`
       );
+
+      /*
+       * Anotarlo para la corrida siguiente, salvo que ya haya agotado los
+       * intentos. Soltarlo es el único momento en que un correo se da por
+       * perdido, así que va con nivel `error` y con el id adelante: es con eso
+       * con lo que alguien lo busca a mano en la casilla.
+       */
+      const intentos = (intentosPrevios.get(messageId) ?? 0) + 1;
+      if (intentos >= MAX_INTENTOS_POR_MENSAJE) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            service: "claimmix",
+            msg: "gmail_poller.mensaje_abandonado",
+            gmail_message_id: messageId,
+            intentos,
+            error_code: code,
+            nota: "Se agotaron los reintentos. Si era una denuncia, hay que abrirla a mano.",
+          })
+        );
+      } else {
+        siguenFallando.push({
+          id: messageId,
+          intentos,
+          visto: new Date().toISOString(),
+        });
+      }
       // Do NOT throw — continue processing remaining messages.
     }
+  }
+
+  /*
+   * La lista queda con lo que sigue fallando y nada más: los que entraron bien
+   * en esta corrida simplemente no se vuelven a agregar, así que se limpian
+   * solos. Se escribe siempre, incluso vacía, porque vaciarla es justamente lo
+   * que pasa cuando un reintento funciona.
+   */
+  if (siguenFallando.length > 0 || pendientesPrevios.length > 0) {
+    await guardarPendientes(pollState.id, siguenFallando);
   }
 
   // ── Advance watermark (AC7/AC8/AC13) ──────────────────────────────────────
@@ -704,13 +774,18 @@ export async function pollGmail(
   // errored. Staying stuck on the same historyId creates a permanent retry loop
   // where the same failing messages are re-attempted on every Pub/Sub push.
   //
-  // Acá decía que el cron diario era una segunda chance. No lo es: ese cron
-  // llama a este mismo `pollGmail` y arranca desde esta marca ya avanzada.
-  // Sólo relee con messages.list(newer_than:1d) si el historyId venció (404)
-  // o en la primera corrida. El mensaje que falló no se vuelve a mirar.
+  // El cron diario NO es una segunda chance: llama a este mismo `pollGmail` y
+  // arranca desde esta marca ya avanzada. Sólo relee con
+  // messages.list(newer_than:1d) si el historyId venció (404) o en la primera
+  // corrida.
   //
-  // Lo que queda de él es su id en `last_error`, y por eso advancePollState
-  // ya no lo borra.
+  // La segunda chance es `mensajes_pendientes` (migración 0026): el mensaje que
+  // falla queda anotado arriba y se reintenta al principio de la corrida
+  // siguiente, hasta MAX_INTENTOS_POR_MENSAJE. Así la marca avanza —no hay
+  // bucle de veneno— y el correo no se pierde, que era la disyuntiva que este
+  // comentario daba por irresoluble.
+  //
+  // Su id también queda en `last_error`, y por eso advancePollState no lo borra.
   const shouldAdvance = true;
 
   if (shouldAdvance && latestHistoryId !== pollState.historyId) {

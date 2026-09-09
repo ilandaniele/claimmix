@@ -27,6 +27,7 @@ import { after, type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 import { createWhatsAppIntake, runIntakeAgent } from "@/server/agents/intake-agent";
+import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import {
   parseCloudApiMessages,
   resolveWebhookChallenge,
@@ -88,6 +89,41 @@ function scheduleAgent(caseId: string, tenantId: string): void {
     // post-extraction orchestrator email uses, and that decides what to say
     // and says it — including on follow-up messages, which this path only ever
     // answered when they happened to create a new case.
+
+    /*
+     * ── Barrer trabados con el tráfico, no sólo con el reloj ────────────────
+     *
+     * El barredor promete correr cada quince minutos
+     * (`.github/workflows/barrer-trabados.yml`). GitHub no cumple ese cron en
+     * un repositorio público: el 2026-09-08 disparó 7 veces en todo el día
+     * contra las 96 que corresponderían, con huecos de más de cinco horas. Un
+     * caso trabado puede quedarse trabado media jornada.
+     *
+     * Los otros dos llamadores oportunistas son `simulate` y `batch-simulate`,
+     * o sea caminos de administración: no corren cuando entra una denuncia de
+     * verdad. Éste sí.
+     *
+     * Va DESPUÉS del agente y en el mismo `after()`: no le roba tiempo a la
+     * respuesta del webhook, y si falla no arrastra nada — el barrido es
+     * idempotente y el cron sigue existiendo como respaldo.
+     */
+    try {
+      const barridos = await reapStuckProcessingCases({ tenantId });
+      if (barridos.reaped > 0) {
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            service: "claimmix",
+            msg: "webhook.barrio_trabados",
+            cuantos: barridos.reaped,
+            nota: "Los encontró el tráfico, no el cron.",
+          })
+        );
+      }
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "UnknownError";
+      console.error("[webhooks/whatsapp] barrido error:", name); // crew-debug-ok
+    }
   });
 }
 

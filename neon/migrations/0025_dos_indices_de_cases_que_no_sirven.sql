@@ -1,0 +1,81 @@
+-- =============================================================================
+-- 0025 — Se sacan dos índices de `cases`: uno duplicado y otro imposible
+-- =============================================================================
+--
+-- Los dos se midieron antes de tocarlos, que es lo que la 0024 dejó escrito
+-- como regla después de que la 0023 agregara un índice por hipótesis y hubiera
+-- que revertirlo al día siguiente. No se agrega ninguno: la pregunta abierta
+-- era si a `cases` le faltaba uno, y la respuesta medida es que no.
+--
+-- ── 1) idx_cases_tenant_created — el duplicado ──────────────────────────────
+--
+-- Conviven dos índices sobre las mismas dos columnas:
+--
+--   idx_cases_tenant_created      (tenant_id, created_at DESC)   184 kB   11461 usos
+--   idx_cases_tenant_created_at   (tenant_id, created_at)         40 kB   26564 usos
+--
+-- Un btree se recorre en los dos sentidos, así que para `ORDER BY created_at
+-- DESC` sirven los dos. Y de hecho el planificador ya venía eligiendo el ASC
+-- **para el orden descendente**, escaneándolo hacia atrás, teniendo el DESC al
+-- lado: el listado de la bandeja entra por
+-- `Index Scan Backward using idx_cases_tenant_created_at`.
+--
+-- Medido borrándolo de verdad, adentro de una transacción con ROLLBACK, contra
+-- producción. Ningún plan cambió:
+--
+--   listado ORDER BY created_at DESC LIMIT 25   Backward idx_cases_tenant_created_at
+--   listado ORDER BY created_at ASC  LIMIT 25   idx_cases_tenant_created_at
+--   conteo del listado                          Seq Scan   (era Seq Scan antes)
+--   listado + status                            idx_cases_tenant_status
+--
+-- O sea que son 184 kB —el 4,6 veces del que se queda— y una escritura de
+-- índice más por cada `INSERT` y por cada `UPDATE` que toque `created_at`, a
+-- cambio de nada. Se queda el más chico y más usado.
+--
+-- ── 2) idx_cases_extraction_lease — imposible de usar ───────────────────────
+--
+--   CREATE INDEX idx_cases_extraction_lease ON cases (extraction_lease_at)
+--     WHERE extraction_lease_at IS NOT NULL;
+--
+-- Cero usos, y no es que le falte volumen: **no lo puede usar la única
+-- consulta que toca esa columna.** El worker toma trabajo con
+-- (`src/server/worker/extract.ts`):
+--
+--   where extraction_pending = true
+--     and (extraction_lease_at is null
+--          or extraction_lease_at < now() - interval '…')
+--
+-- Un índice parcial que excluye los NULL no puede resolver una rama que pide
+-- justamente los NULL, y las filas sin lease son la mayoría: son las que
+-- todavía nadie tomó, o sea las que el worker busca.
+--
+-- Comprobado con `SET LOCAL enable_seqscan = off`, que es lo más lejos que se
+-- puede empujar al planificador. Ni así lo elige:
+--
+--   Seq Scan on cases  (Disabled: true)
+--     Filter: (extraction_pending AND ((extraction_lease_at IS NULL) OR …))
+--
+-- Un índice que no se puede usar ni forzándolo no está esperando volumen: está
+-- mal formado para la consulta que dice servir. Si algún día hace falta uno
+-- acá, el que sirve es sobre `extraction_pending` con el lease incluido, y para
+-- entonces habrá una medición que lo justifique.
+--
+-- ── Lo que se queda, y por qué ──────────────────────────────────────────────
+--
+-- · idx_cases_tenant_severity — 0 usos, 16 kB, parcial sobre severity NOT NULL.
+--   A diferencia del del lease, éste SÍ puede servir a su consulta
+--   (`tenant_id = X and severity = 'critical'` implica NOT NULL): no se usa
+--   porque con 484 filas recorrer la tabla sale más barato, y eso se da vuelta
+--   solo con volumen. Además el panel de filtros nuevo lo expone más.
+--
+-- · idx_cases_policy_number_trgm e idx_cases_policyholder_name_trgm — 0 usos y
+--   está documentado por qué en `scripts/load-test.mts`: con 460 casos recorrer
+--   la tabla es genuinamente más barato, y a 200.000 el cambio ocurre solo
+--   (5 ms con índice contra 97 sin él).
+--
+-- Los dos DROP son reversibles: recrear cualquiera de los dos toma segundos.
+-- =============================================================================
+
+DROP INDEX IF EXISTS public.idx_cases_tenant_created;
+
+DROP INDEX IF EXISTS public.idx_cases_extraction_lease;

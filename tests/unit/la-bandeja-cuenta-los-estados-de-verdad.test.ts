@@ -18,6 +18,18 @@
 import { describe, expect, it } from "vitest";
 
 import { kpisDeLaBandeja } from "@/core/case/kpis-de-la-bandeja";
+/*
+ * Import estatico, no `await import()` adentro del caso.
+ *
+ * Con el dinamico este archivo fallaba de a ratos —una vez de cada tres, sin
+ * tocar nada— porque resolvia el modulo mientras otro archivo de tests estaba
+ * mockeando su grafo. `nombresEnElLibro` es una funcion pura sobre una tabla
+ * constante: no tiene forma de dar dos resultados distintos, asi que el
+ * problema nunca estuvo en lo que se prueba sino en cuando se carga.
+ *
+ * `server-only` no molesta: vitest.config lo aliasea a un stub para todos.
+ */
+import { nombresEnElLibro } from "@/server/confirmations/messenger";
 
 describe("kpisDeLaBandeja", () => {
   it("cuenta como escalado lo que el canal real escribe", () => {
@@ -84,17 +96,13 @@ describe("kpisDeLaBandeja", () => {
  * segunda vez el mensaje de que su denuncia está lista.
  */
 describe("nombresEnElLibro", () => {
-  it("trae los dos nombres de una plantilla que WhatsApp renombra", async () => {
-    const { nombresEnElLibro } = await import("@/server/confirmations/messenger");
-
+  it("trae los dos nombres de una plantilla que WhatsApp renombra", () => {
     expect(nombresEnElLibro("confirmation_received")).toEqual(
       expect.arrayContaining(["confirmation_received", "wa_confirmation_received"])
     );
   });
 
-  it("y uno solo cuando no hay renombre, sin duplicarlo", async () => {
-    const { nombresEnElLibro } = await import("@/server/confirmations/messenger");
-
+  it("y uno solo cuando no hay renombre, sin duplicarlo", () => {
     // La derivación sale del mapa que usa `recordOutbound`: si un canal nuevo
     // agrega su prefijo, queda cubierto sin tocar la guarda.
     const nombres = nombresEnElLibro("confirmation_received");

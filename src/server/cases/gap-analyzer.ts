@@ -19,7 +19,7 @@
  */
 
 import "server-only";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import {
@@ -203,8 +203,17 @@ export async function analyzeEmailClaimGaps(
   );
 
   // ── 6. Also check current extracted fields for medium confidence ──────────
-  // (fields not yet in claim_field_confirmations for this run)
-  const existingConfirmationKeys = new Set(fieldsNeedingConfirmation.map((f) => f.fieldName));
+  //
+  // El conjunto se arma con TODAS las filas del caso, no solo con las
+  // pendientes. Estaba armado con `fieldsNeedingConfirmation`, que sale de
+  // `fetchPendingConfirmations`: una fila en `confirmed` o `corrected` no
+  // estaba ahi, asi que el campo entraba igual por este paso y se volvia a
+  // preguntar algo que el analista ya habia resuelto.
+  const yaResueltas = await fetchClavesConfirmadas(caseId, tenantId);
+  const existingConfirmationKeys = new Set([
+    ...fieldsNeedingConfirmation.map((f) => f.fieldName),
+    ...yaResueltas,
+  ]);
 
   for (const f of extractedFields) {
     if (existingConfirmationKeys.has(f.field_key)) continue;
@@ -367,6 +376,44 @@ async function fetchPendingConfirmations(
       (err as { code?: string })?.code ??
       (err instanceof Error ? err.name : "UnknownError");
     console.error("[gap-analyzer] claim_field_confirmations fetch error:", code);
+    return [];
+  }
+}
+
+/**
+ * Los campos de este caso que una persona ya cerro.
+ *
+ * `confirmed` y `corrected` son los dos estados que escribe `confirm-field`
+ * cuando un analista decide. Un campo ahi no vuelve a la lista de cosas por
+ * preguntar, aunque el modelo lo relea con confianza media en el mensaje
+ * siguiente.
+ */
+async function fetchClavesConfirmadas(
+  caseId: string,
+  tenantId: string
+): Promise<string[]> {
+  // Las consultas de aca ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
+  try {
+    const data = await enTenant(tenantCtx, (db) =>
+      db
+        .select({ field_key: claimFieldConfirmations.field_name })
+        .from(claimFieldConfirmations)
+        .where(
+          and(
+            eq(claimFieldConfirmations.case_id, caseId),
+            inArray(claimFieldConfirmations.status, ["confirmed", "corrected"])
+          )
+        )
+    );
+    return data.map((r) => r.field_key);
+  } catch (err) {
+    const code =
+      (err as { code?: string })?.code ??
+      (err instanceof Error ? err.name : "UnknownError");
+    console.error("[gap-analyzer] confirmaciones cerradas fetch error:", code);
+    // Vacio = se comporta como antes. Preferible a tirar: el analisis de huecos
+    // corre en el camino de respuesta al asegurado.
     return [];
   }
 }

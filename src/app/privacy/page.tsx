@@ -204,7 +204,7 @@ export default function PrivacyPage() {
           </section>
         </div>
 
-        <div className="mt-16 border-t border-slate-100 pt-6 text-center text-xs text-slate-400">
+        <div className="mt-16 border-t border-slate-100 pt-6 text-center text-xs text-slate-500">
           © {new Date().getFullYear()} ClaimMix — Todos los derechos reservados
         </div>
       </div>

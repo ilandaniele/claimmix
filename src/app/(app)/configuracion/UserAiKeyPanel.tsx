@@ -65,12 +65,12 @@ export function UserAiKeyPanel({ initialHasKey }: Props) {
         <div>
           <p className="text-sm text-slate-700">
             Gemini API Key{" "}
-            <span className="text-xs text-slate-400">{t("claveIa.personal")}</span>
+            <span className="text-xs text-slate-500">{t("claveIa.personal")}</span>
           </p>
           {hasKey ? (
             <p className="mt-0.5 text-xs text-emerald-600">✓ {t("claveIa.configurada")}</p>
           ) : (
-            <p className="mt-0.5 text-xs text-slate-400">{t("claveIa.noConfigurada")}</p>
+            <p className="mt-0.5 text-xs text-slate-500">{t("claveIa.noConfigurada")}</p>
           )}
         </div>
         <div className="flex gap-2">
@@ -104,7 +104,7 @@ export function UserAiKeyPanel({ initialHasKey }: Props) {
             placeholder="AIza..."
             className="w-full rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 focus:border-blue-500 focus:outline-none"
           />
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-500">
             {t("claveIa.obtene")}{" "}
             <a
               href="https://aistudio.google.com/app/apikey"

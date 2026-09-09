@@ -403,7 +403,20 @@ async function prepararLectura(): Promise<{
     escenarios.push({
       name: "detalle de un caso",
       run: async () => {
-        await getCaseDetail(TENANT_ID!, someCase);
+        /*
+         * Se afirma sobre el resultado, no se llama y listo.
+         *
+         * `getCaseDetail` se traga TODOS los errores de base y devuelve `null`
+         * — es deliberado: un 404 es mejor que un 500 para el analista. Pero
+         * acá eso significaba que la operacion no podia fallar: `measure()` la
+         * registraba siempre como `ok: true`.
+         *
+         * Y peor: cuando la base falla, el detalle devuelve `null` ANTES de
+         * hacer las tres consultas siguientes, asi que la columna se pone MAS
+         * RAPIDA. Una base caida se leia como una mejora de rendimiento.
+         */
+        const detalle = await getCaseDetail(TENANT_ID!, someCase);
+        if (!detalle) throw new Error("getCaseDetail devolvio null");
       },
     });
     notas.push("El detalle mide siempre el caso más viejo, para que dos corridas se comparen.");

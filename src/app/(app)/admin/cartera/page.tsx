@@ -127,7 +127,7 @@ export default async function CarteraPage({
                 </td>
                 <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
                   {nombreDePlan(fila.plan, fila.plan_label, t)}
-                  <span className="block text-xs text-slate-400">
+                  <span className="block text-xs text-slate-500">
                     {money(fila.monthly_fee_usd)} · {fila.included_claims.toLocaleString("es-AR")}{" "}
                     {t("cartera.incluidas")}
                   </span>
@@ -143,7 +143,7 @@ export default async function CarteraPage({
                       : fila.billing_status}
                   </span>
                   {fila.billing_status === "trial" && fila.trial_ends_at && (
-                    <span className="block text-xs text-slate-400">
+                    <span className="block text-xs text-slate-500">
                       {t("cartera.hasta")}{" "}
                       {formatDate(fila.trial_ends_at, locale, {
                         hour: undefined,
@@ -155,7 +155,7 @@ export default async function CarteraPage({
                 <td className="px-4 py-3 text-right tabular-nums text-slate-900 dark:text-slate-100">
                   {fila.billable_claims.toLocaleString("es-AR")}
                   {fila.total_cases > fila.billable_claims && (
-                    <span className="block text-xs text-slate-400">
+                    <span className="block text-xs text-slate-500">
                       {t("pagination.of")} {fila.total_cases.toLocaleString("es-AR")}{" "}
                       {t("cartera.mensajes")}
                     </span>
@@ -203,7 +203,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
         {value}
       </p>
       <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
-      {hint && <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">{hint}</p>}
+      {hint && <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-500">{hint}</p>}
     </div>
   );
 }

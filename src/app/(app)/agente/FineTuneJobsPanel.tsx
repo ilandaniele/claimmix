@@ -291,7 +291,7 @@ function VertexAiSection() {
                     <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                       <span className="font-mono">{job.base_model}</span>
                       {job.vertex_tuning_job_name && (
-                        <span className="ml-2 font-mono text-slate-400 dark:text-slate-500">
+                        <span className="ml-2 font-mono text-slate-500 dark:text-slate-500">
                           {job.vertex_tuning_job_name.split("/").at(-1)}
                         </span>
                       )}

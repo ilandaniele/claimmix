@@ -393,13 +393,13 @@ export function AdminUsersClient({
           <tbody>
             {loading && users.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
+                <td colSpan={5} className="px-5 py-8 text-center text-slate-500">
                   {t("usuarios.cargando")}
                 </td>
               </tr>
             ) : users.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
+                <td colSpan={5} className="px-5 py-8 text-center text-slate-500">
                   {t("usuarios.vacio")}
                 </td>
               </tr>
@@ -446,7 +446,7 @@ export function AdminUsersClient({
                           ))}
                         </select>
                         {!canChangeRole && (
-                          <span className="text-xs text-slate-400">
+                          <span className="text-xs text-slate-500">
                             {isSelf ? t("usuarios.propio") : t("usuarios.bloqueado")}
                           </span>
                         )}

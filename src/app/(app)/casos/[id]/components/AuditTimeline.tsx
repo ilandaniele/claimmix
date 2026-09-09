@@ -53,7 +53,7 @@ export function AuditTimeline({ events }: AuditTimelineProps) {
 
   if (events.length === 0) {
     return (
-      <p className="text-sm text-slate-400" role="status">
+      <p className="text-sm text-slate-500" role="status">
         {t("case.detail.noAuditEvents")}
       </p>
     );
@@ -76,7 +76,7 @@ export function AuditTimeline({ events }: AuditTimelineProps) {
             </p>
             <time
               dateTime={event.created_at}
-              className="text-xs text-slate-400"
+              className="text-xs text-slate-500"
             >
               {formatDate(event.created_at, locale)}
             </time>

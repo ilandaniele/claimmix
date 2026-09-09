@@ -275,12 +275,12 @@ export default async function CustomerDetailPage({
             className="text-sm font-semibold text-slate-900 mb-4"
           >
             {t("clientes.detail.policies")}
-            <span className="ml-2 text-slate-400 font-normal">
+            <span className="ml-2 text-slate-500 font-normal">
               ({customerPolicies.length})
             </span>
           </h2>
           {customerPolicies.length === 0 ? (
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-500">
               {t("clientes.detail.noPolicies")}
             </p>
           ) : (
@@ -358,7 +358,7 @@ export default async function CustomerDetailPage({
             className="text-sm font-semibold text-slate-900 mb-4"
           >
             {t("clientes.detail.cases")}
-            <span className="ml-2 text-slate-400 font-normal">
+            <span className="ml-2 text-slate-500 font-normal">
               ({totalCasos})
             </span>
           </h2>
@@ -371,7 +371,7 @@ export default async function CustomerDetailPage({
             </p>
           )}
           {customerCases.length === 0 ? (
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-500">
               {t("clientes.detail.noCases")}
             </p>
           ) : (

@@ -167,7 +167,7 @@ export function PromptRulesPanel() {
             onChange={(e) => setTitle(e.target.value)}
             placeholder={t("reglas.phTitulo")}
             maxLength={200}
-            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500"
+            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:border-slate-400 focus:outline-none dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500"
           />
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t("reglas.tipoRegla")}>
             {Object.entries(RULE_TYPE_LABELS).map(([value, clave]) => (
@@ -193,7 +193,7 @@ export function PromptRulesPanel() {
           onChange={(e) => setRuleText(e.target.value)}
           placeholder={t("reglas.placeholder")}
           maxLength={2000}
-          className="min-h-24 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500"
+          className="min-h-24 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-900 placeholder:text-slate-500 focus:border-slate-400 focus:outline-none dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500"
         />
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -222,7 +222,7 @@ export function PromptRulesPanel() {
 
       {/* Rules list */}
       {rules.length === 0 ? (
-        <p className="text-sm text-slate-400 dark:text-slate-500">
+        <p className="text-sm text-slate-500 dark:text-slate-500">
           {t("reglas.vacio")}
         </p>
       ) : (

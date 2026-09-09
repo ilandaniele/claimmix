@@ -13,6 +13,7 @@ import type { OpcionDeEscenario } from "@/server/intake/scenarios";
 import type { ClaimType } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
+import { useDialogoModal } from "../../_components/dialogo-modal";
 
 interface SimulateModalProps {
   scenarios: readonly OpcionDeEscenario[];
@@ -72,6 +73,9 @@ export function SimulateModal({
   const [customType, setCustomType] = useState<ClaimType>("choque");
   const [submitting, setSubmitting] = useState(false);
   const t = useT();
+  // Sin foco inicial: lo primero enfocable del panel es el selector de
+  // escenario, que es un buen lugar para empezar.
+  const panelRef = useDialogoModal<HTMLDivElement>(onClose);
 
   const handleSubmit = useCallback(async () => {
     setSubmitting(true);
@@ -143,7 +147,7 @@ export function SimulateModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={handleBackdropClick}
     >
-      <div className="relative w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+      <div ref={panelRef} className="relative w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
         {/* Title */}
         <h2
           id="simulate-modal-title"

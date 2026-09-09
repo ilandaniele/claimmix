@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { PER_PAGE_OPTIONS } from "./per-page";
 import { FilterTabs } from "./components/FilterTabs";
@@ -25,6 +25,7 @@ import type { OpcionDeEscenario } from "@/server/intake/scenarios";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { CardHeader } from "../_components/ui";
+import { useDialogoModal } from "../_components/dialogo-modal";
 
 const SKIP_CONFIRM_KEY = "claimmix:skip-delete-confirm";
 
@@ -40,14 +41,27 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }: DeleteConfirmDialog
   const t = useT();
   const [remember, setRemember] = useState(false);
 
+  /*
+   * El foco arranca en «Cancelar» y no en lo primero del panel, que es la
+   * casilla de «no volver a preguntar». Este diálogo BORRA: llegar al botón
+   * rojo pide un Tab a propósito.
+   */
+  const cancelarRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useDialogoModal<HTMLDivElement>(onCancel, cancelarRef);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       role="dialog"
       aria-modal="true"
       aria-labelledby="delete-confirm-title"
+      // Cerrar tocando afuera: es lo único de los cuatro diálogos que a éste
+      // le faltaba; los otros tres ya lo tenían.
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
     >
-      <div className="w-full max-w-sm rounded-xl bg-white shadow-xl p-6 mx-4">
+      <div ref={panelRef} className="w-full max-w-sm rounded-xl bg-white shadow-xl p-6 mx-4">
         {/* Icon */}
         <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
           <svg
@@ -87,6 +101,7 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }: DeleteConfirmDialog
 
         <div className="flex gap-3">
           <button
+            ref={cancelarRef}
             type="button"
             onClick={onCancel}
             className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
@@ -615,13 +630,14 @@ function DashboardClientInterno({
       </div>
 
       {/*
-        * El diálogo tapa el mouse, no el teclado: es un overlay sin trampa de
-        * foco, sin `inert` sobre el fondo y sin mover el foco al abrirse, así
-        * que tabulando se siguen marcando filas mientras está abierto. Por eso
-        * qué queda marcado después de borrar no lo decide este camino: lo
-        * decide la poda de `CasesTable`, que saca de lo marcado lo que ya no
-        * está en la lista y deja el resto. Vale igual con confirmación y sin
-        * ella.
+        * El diálogo ya atrapa el foco y cierra con Escape, así que tabulando
+        * no se llega más a las filas de atrás. Pero el fondo NO es `inert`:
+        * sigue respondiendo a lo que no pasa por el orden de tabulación.
+        *
+        * Por eso qué queda marcado después de borrar lo sigue decidiendo la
+        * poda de `CasesTable` —saca de lo marcado lo que ya no está en la
+        * lista y deja el resto— y no este camino. Vale igual con confirmación
+        * y sin ella.
         */}
       {pendingDeleteIds.length > 0 && (
         <DeleteConfirmDialog

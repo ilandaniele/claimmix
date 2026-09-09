@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useCallback, useRef } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   useReactTable,
@@ -135,21 +136,73 @@ export function CasesTable({
       {
         accessorKey: "id",
         header: t("table.col.id"),
-        cell: ({ getValue }) => (
+        cell: ({ getValue }) => {
+          const id = getValue<string>();
+
           /*
            * `whitespace-nowrap`: «SIN-91DB-1A14» se partia en dos lineas por el
            * guion, y una tabla con la primera columna de doble altura se lee
            * como si cada fila fuera dos.
-           */
-          /*
+           *
            * Violeta y no gris: es el identificador de la entidad, lo que en la
            * referencia se dibuja como enlace. Es el UNICO acento de la fila —
            * el estado y la severidad llevan color semantico, no de marca.
            */
-          <span className="whitespace-nowrap font-mono text-[12.5px] font-medium text-violet-700">
-            {formatCaseId(getValue<string>())}
-          </span>
-        ),
+          const pinta =
+            "whitespace-nowrap font-mono text-[12.5px] font-medium text-violet-700";
+
+          /*
+           * En modo seleccion NO va el enlace: ahi tocar la fila la MARCA, y un
+           * <a> en el medio se llevaria ese click a otra pantalla.
+           */
+          if (seleccionando) {
+            return <span className={pinta}>{formatCaseId(id)}</span>;
+          }
+
+          /*
+           * El numero era un <span> y la fila navegaba con `router.push`. Con
+           * eso Ctrl+click abria el caso en la MISMA pestaña —el onClick de la
+           * fila ni recibe el evento, asi que no mira las teclas—, el boton del
+           * medio no hacia nada, y no habia «copiar direccion del enlace»
+           * porque no habia direccion. Un <a href> de verdad devuelve las tres,
+           * y las pone el navegador, no nosotros.
+           *
+           * Un analista que revisa veinte casos abre varios en pestañas: era lo
+           * que mas se sentia de este defecto, mas que el rol del <tr>.
+           *
+           * La fila queda intacta: mismo click, mismo Enter, misma seleccion.
+           */
+          return (
+            <Link
+              href={`/casos/${id}`}
+              /*
+               * Sin esto el click sube al <tr> y se empuja DOS veces al mismo
+               * caso —el <Link> y el onClick de la fila—: dos entradas de
+               * historial, y el «atras» pidiendo dos toques para volver a la
+               * bandeja. `stopPropagation` no marca el evento como prevenido,
+               * asi que el <Link> navega igual.
+               */
+              onClick={(e) => e.stopPropagation()}
+              /*
+               * La bandeja muestra hasta 100 filas. Con el prefetch por
+               * defecto, abrir la lista dispara hasta 100 pedidos RSC de
+               * /casos/[id] antes de que nadie toque nada. El plan es Hobby.
+               */
+              prefetch={false}
+              /*
+               * Fuera del recorrido del Tab a proposito: el punto de foco sigue
+               * siendo la FILA, y con 100 filas un enlace tabulable por fila
+               * sumaria 100 saltos para llegar al mismo lugar. `tabIndex={-1}`
+               * no lo esconde del lector: lo sigue anunciando como enlace y
+               * aparece en su lista de enlaces.
+               */
+              tabIndex={-1}
+              className={`${pinta} hover:underline`}
+            >
+              {formatCaseId(id)}
+            </Link>
+          );
+        },
       },
       /*
        * Asegurado y poliza en la misma celda, uno sobre el otro.

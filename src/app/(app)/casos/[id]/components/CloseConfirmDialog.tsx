@@ -11,7 +11,9 @@
 
 "use client";
 
-import { useState, useRef, useEffect, useId } from "react";
+import { useState, useRef, useId } from "react";
+
+import { useDialogoModal } from "../../../_components/dialogo-modal";
 import { useT } from "@/lib/i18n/LocaleContext";
 
 interface CloseConfirmDialogProps {
@@ -42,42 +44,13 @@ export function CloseConfirmDialog({
   const [reason, setReason] = useState<CloseReason>("paid_out");
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useDialogoModal<HTMLDivElement>(onClose, inputRef);
   const titleId = useId();
   const descId = useId();
 
   const isConfirmEnabled = typedNumber === caseNumber && !loading;
 
-  // Focus the input when dialog opens
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
-  // Trap focus within dialog and handle Escape
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (e.key === "Tab" && dialogRef.current) {
-        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input, select, [tabindex]:not([tabindex="-1"])'
-        );
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last?.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first?.focus();
-        }
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
   async function handleConfirm() {
     if (!isConfirmEnabled) return;

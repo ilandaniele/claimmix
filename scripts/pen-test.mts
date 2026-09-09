@@ -612,6 +612,24 @@ async function attackTenantWall(): Promise<void> {
   if (!process.env.DATABASE_URL || !process.env.DATABASE_URL_APP || !TENANT_A || !TENANT_B) {
     console.log("");
     console.log(`(falta ${faltantes.join(", ")}: no se prueba la pared)`);
+    /*
+     * Y ADEMAS falla. Antes esto solo imprimia la linea de arriba y devolvia,
+     * sin tocar `findings`, asi que el guion terminaba en 0 y el job salia
+     * verde diciendo «ningun intento consiguio nada» sin haber probado NUNCA la
+     * fuga entre aseguradoras.
+     *
+     * En GitHub Actions un secreto que no existe se interpola como cadena
+     * vacia. O sea que borrar o renombrar DEMO_TENANT_ID apagaba en silencio la
+     * comprobacion mas cara de perder — la que el encabezado de este archivo
+     * describe como la que termina el negocio.
+     *
+     * Es lo que ya hace `attackAgent` doscientas lineas mas abajo. La
+     * diferencia entre las dos era el bug.
+     */
+    findings.push({
+      what: `la pared entre inquilinos NO se probo (falta ${faltantes.join(", ")})`,
+      gain: "—",
+    });
     return;
   }
 

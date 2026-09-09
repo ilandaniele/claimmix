@@ -11,7 +11,7 @@
 import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 
 export type PromptRuleType =
   | "extraction"
@@ -34,6 +34,22 @@ const MAX_ACTIVE_RULES = 50;
 /** Max total characters of rule text injected per run. */
 const MAX_RULES_CHARS = 6_000;
 
+/** La consulta sola, para poder mandarla en un lote. Ver `consultaAgentTraining`. */
+export function consultaPromptRules(db: ClienteDatos) {
+  const t = tables.agentPromptRules;
+  return db
+    .select({
+      id: t.id,
+      title: t.title,
+      rule_text: t.rule_text,
+      rule_type: t.rule_type,
+    })
+    .from(t)
+    .where(eq(t.active, true))
+    .orderBy(asc(t.created_at))
+    .limit(MAX_ACTIVE_RULES);
+}
+
 /**
  * Load active prompt rules for a tenant, oldest first (stable order so the
  * prompt is deterministic for caching/debugging).
@@ -44,22 +60,7 @@ export async function loadActivePromptRules(
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
-    const t = tables.agentPromptRules;
-    const data = await enTenant(tenantCtx, (db) =>
-      db
-        .select({
-          id: t.id,
-          title: t.title,
-          rule_text: t.rule_text,
-          rule_type: t.rule_type,
-        })
-        .from(t)
-        .where(eq(t.active, true))
-        .orderBy(asc(t.created_at))
-        .limit(MAX_ACTIVE_RULES)
-    );
-
-    return data as PromptRule[];
+    return (await enTenant(tenantCtx, consultaPromptRules)) as PromptRule[];
   } catch (e) {
     const code = (e as { code?: string })?.code;
     if (code && code !== "42P01") {

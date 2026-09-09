@@ -20,7 +20,12 @@
 import "server-only";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import {
+  enTenant,
+  enTenantVarias,
+  type ClienteDatos,
+  type TenantContext,
+} from "@/data/scope";
 import { countRows, firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { UNSAFE_BLOCKING_REASONS } from "./trainability";
@@ -40,6 +45,71 @@ const MAX_EXAMPLES = 3;
 /** Body excerpt size per example — keeps prompt growth bounded. */
 const EXAMPLE_BODY_CHARS = 1_200;
 
+/** Una fila cruda de `training_examples`, antes de recortarla para el prompt. */
+export interface FilaDeEjemplo {
+  id: string;
+  input_payload: { subject?: string; body?: string };
+  expected_output: Record<string, unknown>;
+}
+
+/**
+ * Las DOS consultas, para poder mandarlas en un lote. Ver `consultaAgentTraining`.
+ *
+ * La segunda se hacía sólo si la primera no llenaba el cupo, y para saberlo
+ * había que esperarla: dos viajes en fila. Van juntas y se decide después —
+ * la de relleno es la misma consulta sin el filtro por tipo, así que traerla
+ * de más cuesta un poco de trabajo en la base y ahorra una ida entera.
+ */
+export function consultasDeEjemplos(db: ClienteDatos, claimType?: string | null) {
+  const t = tables.trainingExamples;
+  const columnas = {
+    id: t.id,
+    input_payload: t.input_payload,
+    expected_output: t.expected_output,
+  };
+
+  const delTipo = db
+    .select(columnas)
+    .from(t)
+    .where(and(eq(t.status, "approved"), eq(t.claim_type, claimType ?? "")))
+    .orderBy(desc(t.approved_at))
+    .limit(MAX_EXAMPLES);
+
+  const relleno = db
+    .select(columnas)
+    .from(t)
+    .where(eq(t.status, "approved"))
+    .orderBy(desc(t.approved_at))
+    .limit(MAX_EXAMPLES * 2);
+
+  return { delTipo, relleno };
+}
+
+/**
+ * Primero los del mismo tipo, después se completa con los más nuevos de
+ * cualquiera. Es la heurística de parecido que había: sin vectores, el tipo
+ * de siniestro es lo más cerca que estamos de «un caso como éste».
+ */
+export function deEjemplos(
+  delTipo: FilaDeEjemplo[],
+  relleno: FilaDeEjemplo[]
+): ApprovedExample[] {
+  const collected: FilaDeEjemplo[] = [...delTipo.slice(0, MAX_EXAMPLES)];
+
+  for (const row of relleno) {
+    if (collected.length >= MAX_EXAMPLES) break;
+    if (!collected.some((c) => c.id === row.id)) collected.push(row);
+  }
+
+  return collected.slice(0, MAX_EXAMPLES).map((row) => ({
+    input: {
+      subject: (row.input_payload?.subject ?? "").slice(0, 300),
+      body: (row.input_payload?.body ?? "").slice(0, EXAMPLE_BODY_CHARS),
+    },
+    expectedOutput: row.expected_output ?? {},
+  }));
+}
+
 /**
  * Retrieve approved training examples for few-shot injection.
  *
@@ -54,60 +124,13 @@ export async function loadApprovedExamples(
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
-    const t = tables.trainingExamples;
-    const collected: Array<{
-      id: string;
-      input_payload: { subject?: string; body?: string };
-      expected_output: Record<string, unknown>;
-    }> = [];
-
-    if (claimType) {
-      const data = (await enTenant(tenantCtx, (db) =>
-        db
-          .select({
-            id: t.id,
-            input_payload: t.input_payload,
-            expected_output: t.expected_output,
-          })
-          .from(t)
-          .where(
-            and(
-              eq(t.status, "approved"),
-              eq(t.claim_type, claimType)
-            )
-          )
-          .orderBy(desc(t.approved_at))
-          .limit(MAX_EXAMPLES)) as typeof collected
-      );
-      collected.push(...data);
-    }
-
-    if (collected.length < MAX_EXAMPLES) {
-      const data = (await enTenant(tenantCtx, (db) =>
-        db
-          .select({
-            id: t.id,
-            input_payload: t.input_payload,
-            expected_output: t.expected_output,
-          })
-          .from(t)
-          .where(eq(t.status, "approved"))
-          .orderBy(desc(t.approved_at))
-          .limit(MAX_EXAMPLES * 2)) as typeof collected
-      );
-      for (const row of data) {
-        if (collected.length >= MAX_EXAMPLES) break;
-        if (!collected.some((c) => c.id === row.id)) collected.push(row);
-      }
-    }
-
-    return collected.slice(0, MAX_EXAMPLES).map((row) => ({
-      input: {
-        subject: (row.input_payload?.subject ?? "").slice(0, 300),
-        body: (row.input_payload?.body ?? "").slice(0, EXAMPLE_BODY_CHARS),
-      },
-      expectedOutput: row.expected_output ?? {},
-    }));
+    const [delTipo, relleno] = await enTenantVarias<
+      [FilaDeEjemplo[], FilaDeEjemplo[]]
+    >(tenantCtx, (db) => {
+      const c = consultasDeEjemplos(db, claimType);
+      return [c.delTipo, c.relleno];
+    });
+    return deEjemplos(claimType ? delTipo : [], relleno);
   } catch {
     return [];
   }

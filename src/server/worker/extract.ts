@@ -38,7 +38,12 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
+import {
+  enTenant,
+  enTenantVarias,
+  type ClienteDatos,
+  type TenantContext,
+} from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {
   cases,
@@ -71,11 +76,38 @@ import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { messengerFor } from "@/server/confirmations/messenger";
-import { loadAgentTraining } from "@/server/agents/training";
-import { loadActivePromptRules, formatPromptRules } from "@/server/training/prompt-rules";
-import { loadApprovedExamples, formatApprovedExamples } from "@/server/training/examples";
-import { loadActiveCustomFields, formatCustomFields } from "@/server/training/custom-fields";
-import { getActivePromptVersion } from "@/server/training/prompt-version";
+import {
+  consultaAgentTraining,
+  deAgentTraining,
+  loadAgentTraining,
+  type FilaDeEntrenamiento,
+} from "@/server/agents/training";
+import {
+  consultaPromptRules,
+  formatPromptRules,
+  loadActivePromptRules,
+  type PromptRule,
+} from "@/server/training/prompt-rules";
+import {
+  consultasDeEjemplos,
+  deEjemplos,
+  formatApprovedExamples,
+  loadApprovedExamples,
+  type ApprovedExample,
+  type FilaDeEjemplo,
+} from "@/server/training/examples";
+import {
+  consultaCustomFields,
+  formatCustomFields,
+  loadActiveCustomFields,
+  type AgentCustomField,
+} from "@/server/training/custom-fields";
+import {
+  consultaPromptVersion,
+  dePromptVersion,
+  getActivePromptVersion,
+  type ActivePromptVersion,
+} from "@/server/training/prompt-version";
 import { assessTrainability } from "@/server/training/trainability";
 import { logAgentRun, logAgentRunError } from "@/server/training/agent-runs";
 import { loadMemoryHints as loadClaimMemoryHints } from "@/server/memory/load";
@@ -846,18 +878,9 @@ export async function runEmailExtractionWorker(
     );
     const memoryApplied = memoryHints.length > 0;
 
-    // ── c) Load known_claim_patterns + operator learning context ─────────────
-    // Learning context = freeform training blob + active prompt rules +
-    // human-approved few-shot examples + active versioned tenant prompt.
-    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields] =
-      await Promise.all([
-        loadKnownPatterns(tenantCtx),
-        loadAgentTraining(tenantId),
-        loadActivePromptRules(tenantId),
-        loadApprovedExamples(tenantId, caseRow.claim_type),
-        getActivePromptVersion(tenantId),
-        loadActiveCustomFields(tenantId, caseRow.claim_type),
-      ]);
+    // ── c) Todo lo que arma el prompt, en un solo viaje ──────────────────────
+    const { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields } =
+      await cargarLoDelPrompt(tenantId, tenantCtx, caseRow.claim_type);
 
     const learning = {
       rules: formatPromptRules(promptRules),
@@ -1558,31 +1581,133 @@ function toPromptMemoryHints(
 
 // ── Helper: load known_claim_patterns ────────────────────────────────────────
 
+/**
+ * Todo lo que arma el prompt, en un viaje.
+ *
+ * Eran seis llamadas dentro de un `Promise.all` —y siete consultas, porque los
+ * ejemplos hacen dos—. En paralelo, sí, pero NO juntas: cada una abría su
+ * propia transacción HTTP con su `set_config` adelante. Siete idas a Neon, y la
+ * ida es lo que se paga: las consultas se ejecutan en milisegundos y el viaje
+ * son unos 65 ms cada uno.
+ *
+ * ── El reserva, y por qué existe ────────────────────────────────────────────
+ *
+ * Cada cargador tenía su `try/catch` y su valor por omisión: sin reglas se
+ * extrae igual, sin ejemplos también. Es deliberado y no se toca. Pero en un
+ * lote no hay errores parciales: si una consulta falla, falla la transacción
+ * entera, y una tabla que todavía no existe en un entorno —el `42P01` que
+ * varios de esos `catch` nombran— dejaría de degradar y pasaría a apagar la
+ * carga completa.
+ *
+ * Así que si el lote se cae, se vuelve por el camino de antes. Siete viajes,
+ * pero cada uno con su red. El rápido es el normal; el lento es el raro.
+ */
+async function cargarLoDelPrompt(
+  tenantId: string,
+  tenantCtx: TenantContext,
+  claimType: string | null
+): Promise<LoDelPrompt> {
+  try {
+    const [patrones, entrenamiento, reglas, ejemploDelTipo, ejemploRelleno, version, campos] =
+      await enTenantVarias<[
+        Parameters<typeof deKnownPatterns>[0],
+        FilaDeEntrenamiento[],
+        PromptRule[],
+        FilaDeEjemplo[],
+        FilaDeEjemplo[],
+        Parameters<typeof dePromptVersion>[0],
+        AgentCustomField[],
+      ]>(tenantCtx, (db) => {
+        const ejemplos = consultasDeEjemplos(db, claimType);
+        return [
+          consultaKnownPatterns(db),
+          consultaAgentTraining(db),
+          consultaPromptRules(db),
+          ejemplos.delTipo,
+          ejemplos.relleno,
+          consultaPromptVersion(db),
+          consultaCustomFields(db, claimType),
+        ];
+      });
+
+    return {
+      knownPatterns: deKnownPatterns(patrones),
+      agentTraining: deAgentTraining(entrenamiento),
+      promptRules: reglas,
+      approvedExamples: deEjemplos(claimType ? ejemploDelTipo : [], ejemploRelleno),
+      promptVersion: dePromptVersion(version),
+      customFields: campos,
+    };
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "warn",
+        service: "claimmix",
+        msg: "email_worker.lote_del_prompt_fallo",
+        code: dbErrCode(err),
+        nota: "Se vuelve al camino de a uno, donde cada carga degrada sola.",
+      })
+    ); // crew-debug-ok
+
+    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields] =
+      await Promise.all([
+        loadKnownPatterns(tenantCtx),
+        loadAgentTraining(tenantId),
+        loadActivePromptRules(tenantId),
+        loadApprovedExamples(tenantId, claimType),
+        getActivePromptVersion(tenantId),
+        loadActiveCustomFields(tenantId, claimType),
+      ]);
+
+    return { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields };
+  }
+}
+
+interface LoDelPrompt {
+  knownPatterns: KnownPattern[];
+  agentTraining: string;
+  promptRules: PromptRule[];
+  approvedExamples: ApprovedExample[];
+  promptVersion: ActivePromptVersion;
+  customFields: AgentCustomField[];
+}
+/** La consulta sola, para poder mandarla en un lote. Ver `cargarLoDelPrompt`. */
+function consultaKnownPatterns(db: ClienteDatos) {
+  return db
+    .select({
+      pattern_text: knownClaimPatterns.pattern_text,
+      pattern_type: knownClaimPatterns.pattern_type,
+      severity_hint: knownClaimPatterns.severity_hint,
+      language: knownClaimPatterns.language,
+    })
+    .from(knownClaimPatterns)
+    // Sin el `or(isNull(...), eq(...))` que había acá: la política de la
+    // tabla (migración 0019) ya deja ver lo propio Y lo global. Escribirlo
+    // otra vez no agregaría nada y haría pensar que sin eso las reglas
+    // globales se perderían — que es justo lo que 0019 vino a evitar.
+    .where(eq(knownClaimPatterns.enabled, true))
+    .limit(200);
+}
+
+function deKnownPatterns(
+  filas: Array<{
+    pattern_text: string | null;
+    pattern_type: string | null;
+    severity_hint: string | null;
+    language: string | null;
+  }>
+): KnownPattern[] {
+  return filas.map((row) => ({
+    pattern_text: row.pattern_text ?? "",
+    pattern_type: row.pattern_type ?? "keyword",
+    severity_hint: row.severity_hint ?? "medium",
+    language: row.language ?? "es-AR",
+  }));
+}
+
 async function loadKnownPatterns(tenantCtx: TenantContext): Promise<KnownPattern[]> {
   try {
-    const data = await enTenant(tenantCtx, (db) =>
-      db
-      .select({
-        pattern_text: knownClaimPatterns.pattern_text,
-        pattern_type: knownClaimPatterns.pattern_type,
-        severity_hint: knownClaimPatterns.severity_hint,
-        language: knownClaimPatterns.language,
-      })
-      .from(knownClaimPatterns)
-      // Sin el `or(isNull(...), eq(...))` que había acá: la política de la
-      // tabla (migración 0019) ya deja ver lo propio Y lo global. Escribirlo
-      // otra vez no agregaría nada y haría pensar que sin eso las reglas
-      // globales se perderían — que es justo lo que 0019 vino a evitar.
-      .where(eq(knownClaimPatterns.enabled, true))
-      .limit(200)
-    );
-
-    return data.map((row) => ({
-      pattern_text: row.pattern_text ?? "",
-      pattern_type: row.pattern_type ?? "keyword",
-      severity_hint: row.severity_hint ?? "medium",
-      language: row.language ?? "es-AR",
-    }));
+    return deKnownPatterns(await enTenant(tenantCtx, consultaKnownPatterns));
   } catch (err) {
     console.error("[email-worker] known_claim_patterns load error:", dbErrCode(err));
     return [];

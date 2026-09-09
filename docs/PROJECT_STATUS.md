@@ -2236,6 +2236,168 @@ rompió nada, y el código entró enseguida — pero el ensayo con rollback cont
 Neon por HTTP **no existe**. Para eso hay que mandar el bloque entero en un solo
 `sql.query`, o no ensayar.
 
+### 🔬 Los catorce prompts, corridos (2026-09-09)
+
+Doce agentes sobre el código de hoy, más `/configure-load-tests` ejecutado a
+mano. `load-testing-reference` es el documento de plantillas, no un agente.
+
+Lo que sigue es **el inventario**, no el trabajo hecho: se arreglaron seis cosas
+en el momento y el resto queda anotado con archivo y línea. Cada agente tenía
+instrucción de decir también qué NO se sostenía al verificarlo, y esa parte vale
+tanto como la otra.
+
+#### Lo que se arregló en la misma corrida
+
+| | qué era |
+|---|---|
+| **Inyección por centinela** | el asunto y el cuerpo del denunciante se interpolaban entre `<email_body>` y su cierre, y todo eso se manda como `systemInstruction`. Un cuerpo que cierra el centinela le escribe al modelo donde le escribe el operador. Y quien lo manda no está autenticado |
+| **`deliberate` sin regla** | el prompt que elige entre pedir, contestar, escalar o esperar no tenía ninguna línea diciendo que el bloque del usuario es un dato |
+| **El pen test no lo probaba** | los cuatro ataques eran persuasión; ninguno cerraba el centinela, que es el fuerte. Ahora hay un quinto |
+| **Credenciales al host que diga el evento** | `deployment_status.target_url` sin validar, y abajo un POST con el correo y la contraseña de la cuenta de pruebas. Cualquiera que pueda crear un deployment se las lleva |
+| **Los tests de carga medían el limitador** | una sesión compartida contra un cupo de 100/min por usuario: 50 VUs son ~510 pedidos/min. La corrida salía roja por el limitador y el p95 salía verde, porque un 429 se contesta rápido |
+| **Cuatro verdes sin haber medido** | `checks` sin umbral, umbrales sobre métricas sin muestras, `peak` salteando dos tercios del trabajo en silencio, y el medidor del punto de quiebre leyendo el máximo donde iba el mínimo |
+
+#### ALTA, sin arreglar
+
+- **`BETTER_AUTH_SECRET` falla abierto.** Si falta, better-auth usa un secreto
+  público y sólo avisa por consola. Con eso se firman cookies válidas, y el
+  inquilino sale de la sesión: RLS no ve un ataque, ve un inquilino. Es el único
+  secreto del producto sin aserción — `DATABASE_URL_APP`, `PUBSUB_AUDIENCE` y
+  `CRON_SECRET` fallan cerrado.
+- **El `where` del barrido de abandonados no tiene la guarda que su encabezado
+  promete.** El predicado de estado vive sólo en la subconsulta del `IN`, así que
+  bajo READ COMMITTED re-evaluar «el id sigue en el conjunto» no protege nada.
+  Alguien contesta a los catorce días, el agente pasa el caso a
+  `listo_para_core`, y el cron lo pisa con `cerrado`. `reap-stuck` lo hace bien;
+  éste no.
+- **`findExistingWhatsAppCase` no distingue «no hay» de «no pude buscar».** Un
+  hipo de Neon devuelve `null` y el llamador abre un caso nuevo. El índice de la
+  0029 no lo tapa: cubre `recibido`, y el caso vivo puede estar en
+  `info_faltante`.
+- **`extraction_pending` es una marca sin lector.** Cuatro escrituras, y el único
+  que la lee es el proceso que la escribió. Los comentarios de los tres caminos
+  nuevos describen un consumidor que no existe. Sumado a que el ingreso no toca
+  `updated_at`, una respuesta guardada y sin leer termina cerrada a los catorce
+  días como «sin respuesta del denunciante».
+- **La reserva de extracción falla abierta y después libera la de otro.** El
+  `catch` devuelve `true`, el llamador marca la reserva como tomada, y el
+  `finally` borra el lease del que sí lo tenía junto con su marca de mensaje
+  pendiente. Reproduce el incidente que el lease existe para evitar, justo cuando
+  la base está mal.
+- **`.env.example` apaga el limitador.** Trae `RATE_LIMIT_PROVIDER=memory`, y esa
+  variable gana sobre la detección de `DATABASE_URL`. Sembrar Vercel desde la
+  plantilla deja el tope del login contando en memoria, o sea por instancia, o
+  sea nada.
+- **El armador abrió una puerta al costado de la pared entre inquilinos.**
+  `ClienteDatos` y `Db` son el mismo tipo estructural, la guarda exime por firma
+  sin comprobar que el armador llegue a la capa, y los cinco archivos del
+  refactor **siguen importando `db` sin usarlo**. Pasarle ese `db` a un armador
+  compila, corre con el rol dueño y devuelve las filas de todos los inquilinos,
+  en verde.
+- **La invariante «enTenant no se anida» no matchea el estilo del repo.** La
+  expresión no cruza el paréntesis de `(db) =>`, que es como se escribe en los
+  doscientos lugares. Hoy imprime que no hay ninguno anidado sin vigilar nada —
+  el mismo defecto que el commit que la agregó vino a arreglar en otro lado.
+- **Gmail colapsa todos los errores a una constante.** 115 fallos en producción
+  entre el 24 y el 28 de junio, los 115 con el mismo payload. Ciento quince
+  personas sin respuesta durante cuatro días, y el motivo es hoy
+  irreconstruible.
+- **`/api/health` mira las dependencias, no el trabajo.** Los nueve chequeos
+  preguntan «¿alcanzo a X?». Con 71 timeouts de modelo hoy y 189 adjuntos que R2
+  perdió, estuvo verde todo el tiempo.
+- **El timeout del modelo está puesto en el p97.** 20 s contra un p95 medido de
+  14,7 s: 71 timeouts el 09/09 y 0 los trece días previos. Y el reintento manda
+  «tu respuesta anterior no era JSON válido», que para un timeout es el consejo
+  equivocado, y reenvía el mismo prompt de 10,6 k tokens. Un timeout se come los
+  40 s del presupuesto entero.
+- **`deliberate` gasta hasta cuatro llamadas al modelo para buscar lo que el
+  worker ya tiene.** Sus tres herramientas contestan preguntas que el matcheo de
+  cliente, el de póliza y la carga de la conversación respondieron doscientas
+  líneas antes, en la misma invocación.
+
+#### MEDIA, lo más señalado
+
+- **La frontera de PII existe en dos rutas y se esquiva por cuatro.** Un `viewer`
+  llega al mail entero del denunciante por `/api/cases/:id/agent-run`.
+- **Un `analyst` puede borrar cualquier caso del inquilino** pero no editar uno
+  que no tiene asignado: la operación irreversible es más permisiva que la otra.
+  Y **ningún borrado deja auditoría** — la única operación irreversible del
+  producto es la única sin registro de quién la hizo.
+- **El inquilino entra por el cuerpo del pedido** en el webhook de WhatsApp y en
+  `batch-simulate`, contra la regla que la propia capa de datos enuncia.
+- **~55-70 viajes secuenciales a Neon por mensaje entrante**, de los cuales ~20
+  son escrituras de contabilidad que nadie relee y podrían ir en un `after()`.
+  `outbound_messages` se lee seis o siete veces para el mismo caso; el analizador
+  de huecos hace cuatro lecturas independientes en fila.
+- **`googleapis` son 568 ms de arranque en frío** en las dos rutas calientes, y
+  el emisor de Gmail no se instancia nunca en el camino de WhatsApp. Es más
+  grande que los 260 ms de Sentry que ya se sacaron.
+- **1,2 s de sueño incondicional en cada mail**, incluso sin contención.
+- **La concurrencia del worker es 1 y la cola no la drena nadie.** Por encima de
+  un mail cada 20 s el freno vence, el caso queda pendiente, y sólo lo levanta un
+  cron que en Hobby corre una vez por día.
+- **El quinto modal nunca recibió el arreglo de foco** — el que crea usuarios con
+  su rol: sin foco inicial, sin trampa de Tab, sin Escape.
+- **`lang="es-AR"` fijo en el layout raíz**, con la interfaz también en inglés.
+- **Siete pestañas sin ninguna semántica de pestaña** en la consola del agente, y
+  un solo encabezado en toda la pantalla.
+- **Seis controles de formulario sin etiqueta**, dos de ellos con nombre
+  accesible vacío.
+- **Las métricas se prueban contra una copia del código**, y esa copia todavía
+  tiene el bug que se documentó como arreglado. El módulo real tiene 0 % de
+  cobertura.
+- **La cartera —la plata— tiene 0 % y su único test es una búsqueda de texto
+  sobre el archivo fuente**: pasa si se invierten los ternarios o si una
+  aseguradora ve la factura de otra.
+- **El trinquete de cobertura quedó siete puntos por debajo de lo medido**, y
+  tres de sus exclusiones dicen «sólo se cubre por integración» sobre archivos
+  que tienen 69-82 % de cobertura unitaria.
+- **`page` sin tope superior** (OFFSET ilimitado) y **`q` sin largo mínimo** (dos
+  caracteres recorren el índice trigram entero). Dos líneas.
+- **`audit_log` crece 142 filas por caso** y no tiene retención: a 100 k casos son
+  14,2 M filas y ~5,9 GB. Y **`claim_messages` pesa 31 kB por fila** porque guarda
+  el payload entero del proveedor: ~24 GB a la misma escala.
+- **El agregado sin ventana de `/metricas` y el tope mensual del presupuesto** son
+  O(historia) y O(llamadas²) respectivamente. Ningún índice los arregla.
+
+#### Lo que se persiguió y NO se sostuvo
+
+Vale anotarlo para que no vuelva a la lista:
+
+- **Ni un IDOR.** Las doce rutas con `[id]` resuelven por la capa y devuelven 404,
+  nunca 403.
+- **Ni una consulta fuera de la capa sin declarar.** Las 42 declaradas se leyeron
+  una por una: arranque de sesión, tablas sin inquilino, o barridos de sistema.
+- **Ni inyección SQL.** Los tres `sql.raw()` interpolan constantes de módulo o un
+  entero acotado.
+- **El nonce de la CSP funciona**, aunque los comentarios describan un mecanismo
+  que no es el que opera.
+- **El prompt ya está bien formado para el caché de Vertex** — la parte variable
+  está al final. Lo que falta es leer el contador de tokens cacheados para saber
+  si pega.
+- **Los índices trigram con cero escaneos sirven**: el cero es artefacto de 483
+  filas, no un índice mal formado. No borrarlos.
+- **El barrido de `text-slate-400` respetó sus exenciones**: las diez restantes
+  son iconos. Quedaron dos afuera del criterio —una hora relativa y una equis de
+  12 px— y los placeholders, que no entraron.
+- **El modo oscuro no se rompió** con el cambio a `slate-500`: mejora los dos.
+- **Imágenes, `next/font`, los barriles de iconos, `zod` en el cliente y los 26
+  `force-dynamic`**: todos callejones sin salida, medidos.
+
+#### La cuenta de la disciplina de logs
+
+223 líneas con formato estructurado contra **173 con texto libre**. El 44 % de
+los logs del servidor no se puede filtrar por evento ni agrupar por caso. Y el
+logger estructurado ya existe: casi nadie lo usa.
+
+#### Sobre Sentry, otra vez
+
+Nada de lo de arriba lo necesita. Lo que no se recupera sin él es la agrupación
+automática, los stack traces y la alerta en el minuto cero. Lo más cerca que se
+llega gratis: ampliar `/api/health` con cuatro consultas sobre índices que ya
+existen, y persistir los errores en `audit_log` en vez de en stdout. Se pasa de
+«me entero el jueves» a «me entero en la próxima corrida del cron».
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada

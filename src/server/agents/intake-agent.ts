@@ -216,8 +216,17 @@ export async function createWhatsAppIntake(
 
   const channel = input.simulated ? "whatsapp_sim" : "whatsapp";
   const existingCaseId = await findExistingWhatsAppCase(input.tenantId, threadId, channel);
-  const caseId =
-    existingCaseId ?? (await createWhatsAppCase(input.tenantId, threadId, channel));
+  /*
+   * `creado` no es lo mismo que «no lo encontré antes».
+   *
+   * El que pierde la carrera contra el índice de la 0029 se suma al caso del
+   * que ganó: no encontró nada al buscar y aun así no creó nada. Decir
+   * `new_case` en la auditoría de ése sería anotar un caso que no abrió.
+   */
+  const abierto = existingCaseId
+    ? { id: existingCaseId, creado: false }
+    : await createWhatsAppCase(input.tenantId, threadId, channel);
+  const caseId = abierto.id;
 
   const guardado = await insertWhatsAppMessage({
     caseId,
@@ -241,7 +250,7 @@ export async function createWhatsAppIntake(
     target_id: caseId,
     payload: {
       channel: "whatsapp",
-      action: existingCaseId ? "thread_update" : "new_case",
+      action: abierto.creado ? "new_case" : "thread_update",
       provider: "whatsapp",
     },
   });
@@ -249,7 +258,7 @@ export async function createWhatsAppIntake(
   return {
     caseId,
     tenantId: input.tenantId,
-    created: !existingCaseId,
+    created: abierto.creado,
     duplicado: guardado.duplicado,
   };
 }
@@ -416,11 +425,47 @@ async function findExistingWhatsAppCase(
   }
 }
 
+/**
+ * El caso que ya existe para ese hilo, recién nacido.
+ *
+ * Igual que `findExistingWhatsAppCase` pero sin la ventana de siete días ni la
+ * lista de estados: acá se busca EXACTAMENTE lo que el índice único bloqueó,
+ * que es un caso en `recibido` para este hilo. Buscar con las condiciones del
+ * otro sería buscar algo distinto de lo que chocó.
+ */
+async function casoRecienAbierto(
+  tenantId: string,
+  threadId: string,
+  channel: string
+): Promise<string | null> {
+  try {
+    const c = tables.cases;
+    const fila = firstRow(
+      await enTenant({ tenantId }, (db) =>
+        db
+          .select({ id: c.id })
+          .from(c)
+          .where(
+            and(
+              eq(c.channel, channel),
+              eq(c.email_thread_id, threadId),
+              eq(c.status, "recibido")
+            )
+          )
+          .limit(1)
+      )
+    );
+    return fila?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function createWhatsAppCase(
   tenantId: string,
   threadId: string,
   channel: "whatsapp" | "whatsapp_sim" = "whatsapp"
-): Promise<string> {
+): Promise<{ id: string; creado: boolean }> {
   let data: { id: string } | null;
   try {
     data = firstRow(
@@ -441,6 +486,24 @@ async function createWhatsAppCase(
     );
   } catch (e) {
     const code = (e as { code?: string })?.code;
+
+    /*
+     * 23505: alguien abrió este mismo caso mientras buscábamos.
+     *
+     * Es la carrera que el índice de la 0029 existe para atrapar. Dos mensajes
+     * de la misma persona con un segundo de diferencia llegan en dos pedidos
+     * de Meta que no prometen orden: los dos buscan, los dos no encuentran
+     * nada, y los dos insertan. Antes salían dos casos y el agente contestaba
+     * dos veces por el mismo choque.
+     *
+     * El que pierde no falla: se suma al que ganó, que es lo que la persona
+     * cree que está pasando.
+     */
+    if (code === "23505") {
+      const existente = await casoRecienAbierto(tenantId, threadId, channel);
+      if (existente) return { id: existente, creado: false };
+    }
+
     throw new Error(`whatsapp_case_insert_failed:${code ?? "no_data"}`);
   }
 
@@ -448,7 +511,7 @@ async function createWhatsAppCase(
     throw new Error(`whatsapp_case_insert_failed:no_data`);
   }
 
-  return data.id;
+  return { id: data.id, creado: true };
 }
 
 async function insertWhatsAppMessage(

@@ -7,6 +7,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { downloadWhatsAppMedia, type WhatsAppMediaRef } from "@/server/whatsapp/cloud-api";
 import { rehostAndRecordAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
+import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 
 type IntakeChannel = "email" | "email_sim" | "whatsapp" | "whatsapp_sim";
@@ -284,6 +285,31 @@ async function storeWhatsAppMedia(
         ? { data: ref.data, mimeType: ref.mimeType }
         : await downloadWhatsAppMedia(ref.id);
       if (!file) continue;
+
+      /*
+       * Demasiado grande NO es lo mismo que no se pudo bajar.
+       *
+       * Los dos devolvían `null` y los dos caían en el `continue` de arriba,
+       * así que no quedaba fila en `claim_attachments`. El asegurado mandaba la
+       * foto de los daños, creía que la había mandado, y en la pantalla del
+       * analista el pedido de documento seguía abierto sin explicación.
+       *
+       * Acá se anota como rechazado: sin bytes —no los tenemos, y justamente
+       * por eso se rechazó— pero con su nombre, su tipo y su motivo, que es lo
+       * que el analista necesita para pedirle al asegurado que lo mande más
+       * chico.
+       */
+      if ("demasiadoGrande" in file) {
+        downloaded.push({
+          Name: ref.filename,
+          Content: "",
+          ContentType: ref.mimeType,
+          ContentLength: file.bytes ?? MAX_ATTACHMENT_SIZE_BYTES + 1,
+          rechazoPrevio: "size_exceeded",
+        });
+        continue;
+      }
+
       downloaded.push({
         Name: ref.filename,
         Content: file.data.toString("base64"),
@@ -484,8 +510,33 @@ async function insertWhatsAppMessage(
         received_at: now,
       })
     );
-  } catch {
-    // The Neon call ignored insert errors here — preserve that behaviour.
+  } catch (err) {
+    /*
+     * `raw_messages` es la copia del mensaje tal como llegó, y no es el camino
+     * principal: el mensaje ya se guardó arriba en `claim_messages`, que es de
+     * donde sale el hilo que ve el analista. Por eso esto no tira.
+     *
+     * Lo que sí cambia es que deje rastro. El comentario que había acá
+     * —«The Neon call ignored insert errors here, preserve that behaviour»—
+     * describía código que ya no existe, y mientras tanto un fallo de este
+     * insert (una columna nueva, una restricción, la base con un hipo) se
+     * tragaba el cuerpo del mensaje sin que nadie se enterara nunca.
+     *
+     * Sólo el código del error: el cuerpo de un WhatsApp es lo más personal
+     * que pasa por acá y no va a un log.
+     */
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "intake.raw_message_no_guardado",
+        case_id: input.caseId,
+        canal: "whatsapp",
+        error_code:
+          (err as { code?: string })?.code ??
+          (err instanceof Error ? err.name : "UnknownError"),
+      })
+    );
   }
 
   return { claimMessageId, duplicado: false };

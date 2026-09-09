@@ -279,6 +279,9 @@ vi.mock("@/server/email/gmail/poll-state", () => ({
   getOrCreatePollState: vi.fn(),
   advancePollState: vi.fn().mockResolvedValue(undefined),
   recordPollError: vi.fn().mockResolvedValue(undefined),
+  // Migracion 0026: lo que falla queda anotado para reintentarlo.
+  guardarPendientes: vi.fn().mockResolvedValue(undefined),
+  MAX_INTENTOS_POR_MENSAJE: 3,
   getWatchExpiration: mockGetWatchExpiration,
 }));
 

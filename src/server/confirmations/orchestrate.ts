@@ -1460,7 +1460,21 @@ async function guardarConfirmaciones(
             status: "pending",
             created_at: ahora,
           })
-          .where(eq(claimFieldConfirmations.id, porClave.get(c.fieldKey)!))
+          /*
+           * `status = "pending"` en el WHERE, no solo el id.
+           *
+           * Pisar una fila que el asegurado todavia no contesto esta bien.
+           * RESUCITAR una que el analista ya cerro —confirmed o corrected— no:
+           * el UPDATE la devolvia a `pending` y el pedido salia de nuevo, asi
+           * que a la persona se le preguntaba dos veces por un dato que ya
+           * habia dado y que alguien ya habia validado.
+           */
+          .where(
+            and(
+              eq(claimFieldConfirmations.id, porClave.get(c.fieldKey)!),
+              eq(claimFieldConfirmations.status, "pending")
+            )
+          )
       );
     }
   } catch (err) {

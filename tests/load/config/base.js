@@ -76,6 +76,7 @@ export function umbrales(extra = {}) {
   return {
     http_req_failed: ["rate<0.01"],
     "http_req_duration{escenario:lectura}": [`p(95)<${PRESUPUESTO_P95_MS}`],
+    ...umbralesComunes(),
     ...extra,
   };
 }
@@ -132,3 +133,35 @@ export const PERCENTILES = ["avg", "min", "med", "p(90)", "p(95)", "p(99)", "max
 
 /** Cuánto espera un analista entre dos acciones. La bandeja sondea cada 5 s. */
 export const PAUSA_S = 5;
+
+/**
+ * Cuántos pedidos por minuto aguanta UNA sesión contra `/api/cases`.
+ *
+ * Es `RATE_LIMIT_CONFIGS.CASES_API` del producto: 100 por minuto, con la clave
+ * POR USUARIO. Y las tres rutas más pesadas de la mezcla comparten esa
+ * etiqueta, o sea el mismo balde.
+ *
+ * Está acá para que los escenarios avisen cuando los VUs que piden no entran
+ * en las cuentas que hay. Si allá cambia, acá también.
+ */
+export function cupoPorSesion() {
+  return Number(__ENV.CUPO_POR_SESION || 100);
+}
+
+/**
+ * Los umbrales que TODO escenario comparte, aparte de los suyos.
+ *
+ * `checks: rate==1.00` es el que faltaba y el que más importa: sin él, un
+ * `check()` que falla no falla NADA. Con la API contestando 307 hacia `/login`
+ * y el login devolviendo un HTML 200, el smoke salía verde con la mitad de los
+ * checks en rojo, midiendo la pantalla de login.
+ *
+ * `rechazados_por_cupo` es la otra mitad: una corrida que se comió el cupo
+ * tiene que decir eso, y no «la aplicación se cae con cincuenta analistas».
+ */
+export function umbralesComunes(maxRechazos = 0) {
+  return {
+    checks: ["rate==1.00"],
+    rechazados_por_cupo: [`count<=${maxRechazos}`],
+  };
+}

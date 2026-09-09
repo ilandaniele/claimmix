@@ -17,7 +17,7 @@ import http from "k6/http";
 import { check, sleep } from "k6";
 
 import { BASE_URL, PAUSA_S, PERCENTILES, RUTAS, umbrales } from "../config/base.js";
-import { comoAnalista, iniciarSesion } from "../helpers/auth.js";
+import { comoAnalista, esRechazoDeCupo, iniciarSesiones } from "../helpers/auth.js";
 import { guardar } from "../helpers/reporte.js";
 
 export const options = {
@@ -31,7 +31,10 @@ export const options = {
 };
 
 export function setup() {
-  return iniciarSesion();
+  // 50 VUs sondeando cada 5 s son ~600 pedidos/min a `/api/cases`. Se avisa
+  // fuerte si las cuentas que hay no dan ese cupo: sin eso, esto mide el
+  // limitador y el diagnóstico sale al revés.
+  return iniciarSesiones(50, 60 / PAUSA_S);
 }
 
 /**
@@ -51,6 +54,7 @@ export default function (sesion) {
     : RUTAS.polizas;
 
   const res = http.get(`${BASE_URL}${ruta}`, comoAnalista(sesion));
+  esRechazoDeCupo(res);
   check(res, { "200": (r) => r.status === 200 });
 
   sleep(PAUSA_S);

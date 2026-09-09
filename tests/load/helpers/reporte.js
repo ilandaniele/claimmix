@@ -21,7 +21,21 @@ function ms(valor) {
  * medir, y son distintos entre sí a propósito.
  */
 export function resumen(datos, escenario, notas = {}) {
-  const dur = datos.metrics.http_req_duration || { values: {} };
+  /*
+   * El p95 de las LECTURAS, no el de todo.
+   *
+   * `http_req_duration` a secas incluye el login de `setup()`, que es un pedido
+   * lento y uno solo — y el umbral, a propósito, mira sólo `{escenario:lectura}`
+   * (ver `config/base.js`). Publicar el otro hacía que el reporte y el umbral
+   * hablaran de números distintos: con un login de 800 ms y lecturas de 20, el
+   * reporte mostraba un p99 de 530 ms que era el login, y mandaba a buscar una
+   * cola de latencia en `/api/cases` que no existe.
+   *
+   * El respaldo hace falta: una submétrica sin umbral no aparece en `metrics`.
+   */
+  const dur =
+    datos.metrics["http_req_duration{escenario:lectura}"] ||
+    datos.metrics.http_req_duration || { values: {} };
   const fallos = datos.metrics.http_req_failed || { values: {} };
   const pedidos = datos.metrics.http_reqs || { values: {} };
 

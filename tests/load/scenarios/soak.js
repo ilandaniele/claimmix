@@ -17,10 +17,10 @@
 
 import http from "k6/http";
 import { check, sleep } from "k6";
-import { Trend } from "k6/metrics";
+import { Counter, Trend } from "k6/metrics";
 
 import { BASE_URL, PAUSA_S, PERCENTILES, RUTAS, exigirDestinoSeguro } from "../config/base.js";
-import { comoAnalista, iniciarSesion } from "../helpers/auth.js";
+import { comoAnalista, esRechazoDeCupo, iniciarSesiones } from "../helpers/auth.js";
 import { guardar } from "../helpers/reporte.js";
 
 exigirDestinoSeguro("soak");
@@ -33,6 +33,9 @@ const RAMPA_MIN = Number(__ENV.SOAK_RAMPA_MIN || 2);
 const VENTANA = Math.max(1, Math.round(MINUTOS / 10));
 
 const primeraVentana = new Trend("soak_primera_ventana_ms", true);
+/** Cuántas muestras cayó en cada ventana. Ver el umbral, abajo. */
+const muestrasPrimera = new Counter("soak_muestras_primera");
+const muestrasUltima = new Counter("soak_muestras_ultima");
 const ultimaVentana = new Trend("soak_ultima_ventana_ms", true);
 
 export const options = {
@@ -52,17 +55,33 @@ export const options = {
      * —la última ventana no puede duplicar el presupuesto— y la comparación
      * fina se calcula en `handleSummary`, que es donde se lee.
      */
+    /*
+     * Un contador aparte, y no `min>0` sobre el Trend.
+     *
+     * En k6, un umbral sobre una métrica SIN MUESTRAS pasa: un Trend vacío da
+     * p(95)=0 y nadie se queja. Así que una fase que nunca se llenó salía
+     * verde, que es el peor de los verdes.
+     *
+     * `min>0` parecía la guarda barata y no lo es: contra un servidor local
+     * una respuesta puede tardar menos de un milisegundo, `min` da 0, y el
+     * umbral rompe con las fases perfectamente llenas. Lo comprobé.
+     *
+     * Un contador no tiene esa ambigüedad: o hubo muestras o no hubo.
+     */
     soak_ultima_ventana_ms: ["p(95)<1000"],
+    soak_muestras_primera: ["count>0"],
+    soak_muestras_ultima: ["count>0"],
   },
 };
 
 export function setup() {
-  return { ...iniciarSesion(), arranque: Date.now() };
+  return { ...iniciarSesiones(30, 60 / PAUSA_S), arranque: Date.now() };
 }
 
 export default function (sesion) {
   const minutos = (Date.now() - sesion.arranque) / 60000;
   const res = http.get(`${BASE_URL}${RUTAS.bandeja}`, comoAnalista(sesion));
+  esRechazoDeCupo(res);
   check(res, { "200": (r) => r.status === 200 });
 
   /*
@@ -76,9 +95,11 @@ export default function (sesion) {
    */
   if (minutos > RAMPA_MIN && minutos <= RAMPA_MIN + VENTANA) {
     primeraVentana.add(res.timings.duration);
+    muestrasPrimera.add(1);
   }
   if (minutos >= RAMPA_MIN + MINUTOS - VENTANA && minutos < RAMPA_MIN + MINUTOS) {
     ultimaVentana.add(res.timings.duration);
+    muestrasUltima.add(1);
   }
 
   sleep(PAUSA_S);
@@ -106,7 +127,7 @@ export function handleSummary(datos) {
 
   return guardar(datos, "soak", {
     "qué mide": "la deriva: cuánto empeora sola la latencia con el tiempo",
-    "perfil": `30 VUs · ${RAMPA_MIN} min de subida + ${MINUTOS} min planos · ventanas de ${VENTANA} min`,
+    "perfil": `${datos.metrics.vus_max ? datos.metrics.vus_max.values.max : "?"} VUs · ${RAMPA_MIN} min de subida + ${MINUTOS} min planos · ventanas de ${VENTANA} min`,
     "p95 primera ventana": inicio ? `${Math.round(inicio)} ms` : "sin muestras",
     "p95 última ventana": fin ? `${Math.round(fin)} ms` : "sin muestras",
     "deriva": deriva ? `${deriva.toFixed(2)}×` : "—",

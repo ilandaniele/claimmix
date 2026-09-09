@@ -21,7 +21,7 @@
  */
 
 import http from "k6/http";
-import { check, sleep } from "k6";
+import { check, fail, sleep } from "k6";
 import { Trend } from "k6/metrics";
 
 import {
@@ -32,7 +32,7 @@ import {
   RUTAS_DE_CASO,
   exigirDestinoSeguro,
 } from "../config/base.js";
-import { comoAnalista, iniciarSesion } from "../helpers/auth.js";
+import { comoAnalista, esRechazoDeCupo, iniciarSesiones } from "../helpers/auth.js";
 import { guardar } from "../helpers/reporte.js";
 
 exigirDestinoSeguro("peak");
@@ -56,7 +56,7 @@ export const options = {
 };
 
 export function setup() {
-  const sesion = iniciarSesion();
+  const sesion = iniciarSesiones(150, 60 / 4);
 
   /*
    * Un caso de verdad para abrir, tomado de la bandeja.
@@ -66,19 +66,38 @@ export function setup() {
    * 404s dice que todo anda bárbaro.
    */
   const res = http.get(`${BASE_URL}${RUTAS.bandeja}`, comoAnalista(sesion));
+  /*
+   * Sin caso, este perfil NO corre.
+   *
+   * El `if (sesion.caseId)` de abajo salteaba el detalle y los mensajes en
+   * silencio: dos tercios del trabajo desaparecían, el p95 mejoraba porque se
+   * salteaba justo el tramo caro, y el reporte seguía afirmando «bandeja →
+   * caso → mensajes». Se dispara con un inquilino sin casos, con el filtro sin
+   * filas, o con la bandeja contestando 401/429/500 con cuerpo JSON.
+   */
+  if (res.status !== 200) {
+    fail(`La bandeja contestó ${res.status} en el setup. Sin ella no hay caso que abrir.`);
+  }
   const cuerpo = res.json();
   const primero = cuerpo && cuerpo.data && cuerpo.data[0];
+  if (!primero) {
+    fail(
+      "La bandeja no devolvió ningún caso. Sin uno, este perfil mide un tercio " +
+        "del trabajo y sale verde por haberse salteado lo caro."
+    );
+  }
 
-  return { ...sesion, caseId: primero ? primero.id : null };
+  return { ...sesion, caseId: primero.id };
 }
 
 export default function (sesion) {
   const t0 = Date.now();
 
   const lista = http.get(`${BASE_URL}${RUTAS.bandejaFiltrada}`, comoAnalista(sesion));
+  esRechazoDeCupo(lista);
   check(lista, { "bandeja 200": (r) => r.status === 200 });
 
-  if (sesion.caseId) {
+  {
     const detalle = http.get(`${BASE_URL}${RUTAS_DE_CASO.detalle(sesion.caseId)}`, comoAnalista(sesion));
     check(detalle, { "detalle 200": (r) => r.status === 200 });
 

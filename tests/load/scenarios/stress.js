@@ -20,7 +20,7 @@ import { Gauge } from "k6/metrics";
 import exec from "k6/execution";
 
 import { BASE_URL, PERCENTILES, PRESUPUESTO_P95_MS, RUTAS, exigirDestinoSeguro } from "../config/base.js";
-import { comoAnalista, iniciarSesion } from "../helpers/auth.js";
+import { comoAnalista, esRechazoDeCupo, iniciarSesiones } from "../helpers/auth.js";
 import { guardar } from "../helpers/reporte.js";
 
 exigirDestinoSeguro("stress");
@@ -49,11 +49,13 @@ export const options = {
 };
 
 export function setup() {
-  return iniciarSesion();
+  // Sin pausa: 200 VUs martillando. El cupo de una cuenta es 100/min.
+  return iniciarSesiones(200, 600);
 }
 
 export default function (sesion) {
   const res = http.get(`${BASE_URL}${RUTAS.bandeja}`, comoAnalista(sesion));
+  const rechazado = esRechazoDeCupo(res);
   const ok = check(res, { "200": (r) => r.status === 200 });
 
   // Los VUs activos AHORA, que es el escalón en el que estamos.
@@ -85,8 +87,10 @@ export function handleSummary(datos) {
       "el punto de quiebre — en qué carga se sale del presupuesto y en cuál empiezan los errores",
     "VUs máximos de esta corrida": techo ?? "—",
     "último VU con latencia sana": sano ? sano.values.max : "—",
+    // `.min`, no `.max`: es el PRIMER escalón que rompió. Con `.max` decía el
+    // último, que es literalmente lo contrario y siempre hacia el lado bueno.
     "primer VU con errores": roto
-      ? roto.values.max
+      ? roto.values.min
       : `ninguno: el techo está más arriba de ${techo ?? "lo probado"}`,
     "por qué el umbral de latencia está flojo": "acá tardar es el dato, no la falla",
   });

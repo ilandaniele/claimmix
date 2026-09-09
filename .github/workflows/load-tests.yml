@@ -37,6 +37,12 @@ on:
         default: false
         type: boolean
 
+# Sólo leer. Este trabajo maneja credenciales de una cuenta real; no tiene por
+# qué poder escribir nada. El default del repo es `read` hoy, pero eso es un
+# ajuste a un clic de distancia de ser `write`.
+permissions:
+  contents: read
+
 concurrency:
   group: carga-${{ github.ref }}
   cancel-in-progress: true
@@ -69,6 +75,34 @@ jobs:
             echo "escenario=${{ inputs.escenario }}" >> "$GITHUB_OUTPUT"
           fi
 
+      # ── A dónde se mandan las credenciales ─────────────────────────────────
+      #
+      # `target_url` lo pone quien crea el deployment, y el `if:` de arriba sólo
+      # mira el ESTADO y el ENTORNO, no el host. Abajo, `helpers/auth.js` hace un
+      # POST con el correo y la contraseña de la cuenta de pruebas a
+      # `${BASE_URL}/api/auth/sign-in/email`.
+      #
+      # O sea que cualquiera que pueda crear un `deployment_status` en este repo
+      # —un colaborador con escritura, o una integración con más permisos de los
+      # que necesita— apunta la URL a un host suyo y se lleva una credencial viva.
+      #
+      # El host se comprueba antes de que la credencial exista en el entorno.
+      - name: ¿A dónde apunta esto?
+        id: destino
+        env:
+          URL: ${{ inputs.base_url || github.event.deployment_status.target_url }}
+        run: |
+          # El sufijo de la organización, no sólo el nombre del proyecto: con
+          # `claimmix*` alcanzaba con crear un proyecto llamado `claimmix-x` en
+          # cualquier cuenta de Vercel para quedar del lado bueno del filtro.
+          case "$URL" in
+            https://claimmix.vercel.app|            https://claimmix-*-ilandaniele-3471s-projects.vercel.app)
+              echo "url=$URL" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error title=Destino no reconocido::La corrida iba a mandar las credenciales de la cuenta de pruebas a $URL, que no es un despliegue de este proyecto. Se corta."
+              exit 1 ;;
+          esac
+
       # ── La puerta de Vercel ────────────────────────────────────────────────
       #
       # Las vistas previas están detrás de Deployment Protection: contestan 401
@@ -98,7 +132,7 @@ jobs:
           mkdir -p resultados
           k6 run "tests/load/scenarios/${{ steps.plan.outputs.escenario }}.js"
         env:
-          BASE_URL: ${{ inputs.base_url || github.event.deployment_status.target_url }}
+          BASE_URL: ${{ steps.destino.outputs.url }}
           # La vista previa no es localhost, así que un perfil pesado pide
           # permiso explícito. El smoke del deploy no lo necesita.
           PERMITIR_REMOTO: ${{ inputs.permitir_remoto && '1' || '0' }}

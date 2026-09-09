@@ -86,6 +86,7 @@ export const enUS: Record<TranslationKey, string> = {
   "tabs.escalado": "Escalated",
   "tabs.procesando": "Processing",
   "tabs.cerrado": "Closed",
+  "tabs.filtrarPorEstado": "Filter by status",
 
   // ── Case table columns ─────────────────────────────────────────────────────
   "table.col.id": "ID",

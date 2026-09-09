@@ -78,6 +78,29 @@ export function useDialogoModal<T extends HTMLElement = HTMLDivElement>(
       if (e.key !== "Tab" || !panel.current) return;
 
       const enfocables = panel.current.querySelectorAll<HTMLElement>(ENFOCABLES);
+
+      /*
+       * El hueco que se abría justo mientras se guardaba.
+       *
+       * `ENFOCABLES` excluye lo deshabilitado, y `EscalateDialog` y
+       * `CloseConfirmDialog` deshabilitan el textarea y los dos botones
+       * mientras `loading` es true. En esa ventana la lista sale VACÍA:
+       * `primero` y `ultimo` quedaban `undefined`, ninguna de las dos ramas de
+       * abajo disparaba `preventDefault`, y el Tab se escapaba del diálogo a la
+       * bandeja de atrás, que tiene filas enfocables.
+       *
+       * Con la lista vacía no hay a dónde ir adentro, así que el Tab no va a
+       * ningún lado. El foco se queda en el panel, que se hace enfocable sólo
+       * para esto: es el único momento en que un diálogo no tiene nada que
+       * ofrecer, y dura lo que tarda el guardado.
+       */
+      if (enfocables.length === 0) {
+        e.preventDefault();
+        panel.current.tabIndex = -1;
+        panel.current.focus({ preventScroll: true });
+        return;
+      }
+
       const primero = enfocables[0];
       const ultimo = enfocables[enfocables.length - 1];
 

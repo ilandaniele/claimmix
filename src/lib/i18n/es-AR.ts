@@ -95,6 +95,7 @@ export const esAR = {
   "tabs.escalado": "Escalados",
   "tabs.procesando": "Procesando",
   "tabs.cerrado": "Cerrados",
+  "tabs.filtrarPorEstado": "Filtrar por estado",
 
   // ── Case table columns ─────────────────────────────────────────────────────
   "table.col.id": "ID",

@@ -24,6 +24,7 @@
 import { useEffect, useRef } from "react";
 import type { CaseRow } from "@/server/cases/list";
 import type { CaseStatus } from "@/lib/schemas/cases";
+import { PARAMS_DE_FILTRO } from "./grupos-de-filtro";
 
 interface RealtimeHandlers {
   onInsert: (newCase: CaseRow) => void;
@@ -44,8 +45,19 @@ interface RealtimeHandlers {
 const POLL_MIN_MS = 5000;
 const POLL_MAX_MS = 30000;
 
-/** URL filters forwarded to /api/cases (the ones the dashboard supports). */
-const FILTER_PARAMS = ["status", "type", "channel", "severity", "is_claim"] as const;
+/**
+ * Los filtros que el sondeo reenvía a /api/cases.
+ *
+ * Se arma desde `PARAMS_DE_FILTRO` en vez de repetir la lista, que es lo que
+ * estaba: había TRES listas de parámetros —ésta, la de `page.tsx` y la del
+ * esquema— y las tres podían separarse sin que nada fallara. El síntoma de que
+ * se separen no es un error: es que cada cinco a treinta segundos el sondeo
+ * trae filas que no cumplen el filtro nuevo y las inyecta en la lista, así que
+ * la pantalla se contradice sola y hay que estar mirándola para verlo.
+ *
+ * `status` va aparte porque no vive en el panel: son las pestañas.
+ */
+export const FILTER_PARAMS = ["status", ...PARAMS_DE_FILTRO] as const;
 
 /** Build the /api/cases query string from the current location filters. */
 function buildQuery(): string {

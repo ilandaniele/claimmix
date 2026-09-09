@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { PER_PAGE_OPTIONS } from "./per-page";
-import { FilterTabs } from "./components/FilterTabs";
+import { FilterTabs, ID_PANEL_DE_LA_LISTA } from "./components/FilterTabs";
 import { usePaginacion } from "./components/useFilterParam";
 import { NavegacionPendienteProvider, useNavegacion } from "./components/navegacion-pendiente";
 import { PanelDeFiltros } from "./components/PanelDeFiltros";
@@ -588,7 +588,15 @@ function DashboardClientInterno({
               <span className="sr-only">{t("bandeja.actualizando")}</span>
             </div>
           )}
+          {/*
+            * `role="tabpanel"` y el id: son la otra mitad del `role="tablist"`
+            * de las pestañas. Sin esto, un lector anuncia «pestaña 2 de 6» y no
+            * hay ningún panel al que esa pestaña lleve.
+            */}
           <div
+            id={ID_PANEL_DE_LA_LISTA}
+            role="tabpanel"
+            aria-label={t("bandeja.tableLabel")}
             className={`scroll-fino h-full overflow-auto transition-opacity ${pending ? "pointer-events-none opacity-60" : ""}`}
             data-scroll="lista"
             aria-busy={pending}

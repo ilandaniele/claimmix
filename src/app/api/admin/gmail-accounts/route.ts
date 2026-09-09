@@ -72,20 +72,14 @@ export async function PATCH(request: NextRequest) {
     try {
       data = firstRow(
         await enTenant(tenantCtx, (db) =>
-          enTenant(tenantCtx, (db) =>
-            db
-              .update(t)
-              .set({
-                enabled: parsed.data.enabled,
-                updated_at: new Date().toISOString(),
-              })
-              .where(
-                isAdmin
-                  ? eq(t.id, parsed.data.id)
-                  : and(eq(t.id, parsed.data.id), eq(t.connected_by, user.id))
-              )
-              .returning(ACCOUNT_COLUMNS)
-          )
+          db
+            .update(t)
+            .set({
+              enabled: parsed.data.enabled,
+              updated_at: new Date().toISOString(),
+            })
+            .where(eq(t.id, parsed.data.id))
+            .returning(ACCOUNT_COLUMNS)
         )
       );
     } catch (e) {
@@ -119,15 +113,7 @@ export async function DELETE(request: NextRequest) {
 
     try {
       await enTenant(tenantCtx, (db) =>
-        enTenant(tenantCtx, (db) =>
-          db
-            .delete(t)
-            .where(
-              isAdmin
-                ? eq(t.id, id)
-                : and(eq(t.id, id), eq(t.connected_by, user.id))
-            )
-        )
+        db.delete(t).where(eq(t.id, id))
       );
     } catch (e) {
       console.error(

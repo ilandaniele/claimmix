@@ -339,6 +339,42 @@ console.log("\n▸ nadie usa db.$count (la capa no lo puede armar)");
   }
 }
 
+// ── enTenant no se anida ────────────────────────────────────
+//
+// `enTenant(ctx, (db) => enTenant(ctx, (db) => ...))` compila: la firma de
+// `armar` es `(db) => Promise<T>` y el enTenant de adentro devuelve
+// exactamente eso. Pero en tiempo de ejecucion la capa lo rechaza —
+// `exigirConsulta` tira si le llega una promesa en vez de una consulta — asi
+// que el handler contesta 500 SIEMPRE.
+//
+// Estuvo asi en PATCH y DELETE de /api/admin/gmail-accounts: un admin no podia
+// apagar ni borrar una casilla conectada, o sea no podia revocar el refresh
+// token de una casilla comprometida. Y peor: la mutacion de adentro arrancaba
+// sin que nadie la esperara, asi que a veces se aplicaba y la respuesta era 500
+// igual.
+//
+// TypeScript no lo ve y ningun test lo cubria. Es un grep de una linea y cubre
+// la clase entera.
+console.log("\n▸ enTenant no se anida");
+{
+  const anidados = [];
+  for (const ruta of archivos("src")) {
+    const txt = sinComentarios(readFileSync(ruta, "utf8"));
+    // `enTenant(` seguido, dentro de la misma llamada, de otro `enTenant(`
+    // antes de cerrar. Se busca el patron de la flecha, que es como se escribe.
+    if (/enTenant(?:Varias)?\s*\([^)]*?=>\s*enTenant\s*\(/s.test(txt)) {
+      anidados.push(ruta);
+    }
+  }
+  if (anidados.length === 0) {
+    bien("ninguno anidado");
+  } else {
+    mal(`${anidados.length} archivo(s) anidan enTenant`);
+    for (const c of anidados) console.log(`     ${c}`);
+    console.log("     Uno solo alcanza: el de adentro devuelve una promesa y la capa la rechaza.");
+  }
+}
+
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(66));
 if (problemas.length === 0) {

@@ -18,12 +18,21 @@
  * 1» — el mock devolvía undefined donde iba la subconsulta. Es andamio, no
  * producto: la subconsulta no se ejecuta sola, se compila adentro del UPDATE.
  */
+/*
+ * Y ahora también es `await`-able.
+ *
+ * El barrido usa `db.select()` para dos cosas distintas: la subconsulta que se
+ * compila DENTRO del UPDATE —que no se ejecuta sola— y la consulta aparte que
+ * cuenta los que quedaron abiertos porque el mensaje no salió, que sí se
+ * espera. El mismo objeto sirve para las dos si además de encadenar resuelve.
+ */
 vi.mock("@/lib/db", () => {
   const subconsulta: Record<string, unknown> = {};
   Object.assign(subconsulta, {
     from: () => subconsulta,
     where: () => subconsulta,
     limit: () => subconsulta,
+    then: (r: (v: unknown) => void) => r(filasDelSelect),
   });
   return { db: { update: vi.fn(), select: () => subconsulta } };
 });
@@ -32,6 +41,8 @@ vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: vi.fn().mockResolvedValue(undefined),
   AuditEvent: { CASE_CLOSED_ABANDONED: "claim.closed_abandoned" },
 }));
+
+import { readFileSync } from "node:fs";
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -43,6 +54,9 @@ import { db } from "@/lib/db";
 import { writeAuditLog } from "@/lib/audit/log";
 
 let updatedWith: Record<string, unknown> | null;
+
+/** Lo que devuelve el `select` que sí se espera. Lo lee el mock de arriba. */
+let filasDelSelect: Array<{ id: string }> = [];
 
 function updateReturns(rows: Array<{ id: string; tenant_id: string }>) {
   (db.update as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -56,6 +70,7 @@ function updateReturns(rows: Array<{ id: string; tenant_id: string }>) {
 beforeEach(() => {
   vi.clearAllMocks();
   updatedWith = null;
+  filasDelSelect = [];
   delete process.env.CONVERSATION_ABANDON_AFTER_DAYS;
 });
 
@@ -197,5 +212,69 @@ describe("closeAbandonedConversations — cerrar y auditar son el mismo conjunto
     // código viejo para explicar qué se cambió, y buscar la cita se chocaba con
     // la explicación. La variable sólo puede estar si el recorte volvió.
     expect(fuente).not.toContain("const capped");
+  });
+});
+
+describe("el silencio de alguien a quien nunca le preguntamos", () => {
+  const FUENTE = readFileSync("src/server/intake/close-abandoned.ts", "utf8");
+
+  /*
+   * Salir del `info_faltante` no depende de que el envío haya funcionado: el
+   * orquestador llama al mensajero y en la línea siguiente escribe el estado,
+   * sin mirar el resultado. Un mail rechazado, una plantilla de WhatsApp fuera
+   * de la ventana de 24 h, y el caso queda esperando una pregunta que nunca
+   * salió. Catorce días después se cerraba con «sin respuesta del denunciante».
+   */
+  it("el cierre exige que el ÚLTIMO mensaje haya salido", () => {
+    // El último, no cualquiera: con uno viejo que sí salió alcanzaba para
+    // cerrar un caso cuya última pregunta se cayó.
+    expect(FUENTE).toContain("order by ${outboundMessages.created_at} desc");
+    expect(FUENTE).toContain("limit 1");
+    expect(FUENTE).toContain("in ('sent', 'skipped_simulated')");
+  });
+
+  it("y el predicado está en el filtro del UPDATE, no sólo declarado", () => {
+    const i = FUENTE.indexOf("inArray(cases.status, [...AWAITING_CLAIMANT])");
+    expect(FUENTE.slice(i, i + 400)).toContain("leLlegoLaPregunta");
+  });
+
+  it("un caso sin ningún mensaje saliente tampoco se cierra", () => {
+    // `(subconsulta) in (...)` con la subconsulta vacía da NULL, y un NULL en
+    // un WHERE no pasa. El `coalesce` lo vuelve explícito en vez de dejarlo
+    // dependiendo de eso: sin mensaje, no le preguntamos.
+    expect(FUENTE).toContain("coalesce((");
+    expect(FUENTE).toContain("), false)");
+  });
+
+  it("los que quedan abiertos se cuentan, con sus ids", async () => {
+    updateReturns([]);
+    filasDelSelect = [{ id: "caso-1" }, { id: "caso-2" }];
+    const avisos: string[] = [];
+    const espia = vi
+      .spyOn(console, "warn")
+      .mockImplementation((...a: unknown[]) => { avisos.push(a.map(String).join(" ")); });
+
+    await closeAbandonedConversations();
+    espia.mockRestore();
+
+    const todo = avisos.join(" ");
+    expect(todo).toContain("close_abandoned.sin_preguntar");
+    expect(todo).toContain("caso-1");
+    expect(todo).toContain("caso-2");
+  });
+
+  it("y cuando no hay ninguno, no dice nada", async () => {
+    // El control: un aviso que sale siempre es un aviso que nadie mira.
+    updateReturns([]);
+    filasDelSelect = [];
+    const avisos: string[] = [];
+    const espia = vi
+      .spyOn(console, "warn")
+      .mockImplementation((...a: unknown[]) => { avisos.push(a.map(String).join(" ")); });
+
+    await closeAbandonedConversations();
+    espia.mockRestore();
+
+    expect(avisos.join(" ")).not.toContain("close_abandoned.sin_preguntar");
   });
 });

@@ -22,7 +22,7 @@ import "server-only";
 import { and, inArray, lt, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { cases } from "@/lib/db/schema";
+import { cases, outboundMessages } from "@/lib/db/schema";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 /**
@@ -55,6 +55,37 @@ export interface CloseAbandonedResult {
   closed: number;
   caseIds: string[];
 }
+
+/**
+ * ¿Llegamos a preguntar?
+ *
+ * El barrido cierra por silencio y anota «sin respuesta del denunciante». Pero
+ * el silencio de alguien a quien nunca le preguntamos no es una respuesta que
+ * falta: es un mensaje nuestro que no salió.
+ *
+ * Y salir del `info_faltante` no depende de que el envío haya funcionado. El
+ * orquestador llama al mensajero y en la línea siguiente escribe el estado, sin
+ * mirar el resultado. Un mail rechazado, una plantilla de WhatsApp fuera de la
+ * ventana de 24 h, y el caso queda igual esperando una pregunta que nunca
+ * llegó. Catorce días después se cerraba culpando a la persona.
+ *
+ * `outbound_messages` es el libro de los dos canales: lo escribe el despacho de
+ * correo y lo escribe el mensajero de WhatsApp. Mira el ÚLTIMO, que es el que
+ * habría pedido la respuesta que estamos esperando — con uno viejo que sí salió
+ * alcanzaba para cerrar un caso cuya última pregunta se cayó.
+ *
+ * `skipped_simulated` cuenta como alcanzado a propósito: en una simulación el
+ * mensaje hizo exactamente lo que tenía que hacer. Dejarlas afuera devolvería
+ * el problema que este barrido existe para resolver — diecinueve casos a medias
+ * en una tarde de pruebas, cerrados a mano.
+ */
+const leLlegoLaPregunta = sql`coalesce((
+  select ${outboundMessages.status}
+    from ${outboundMessages}
+   where ${outboundMessages.case_id} = ${cases.id}
+   order by ${outboundMessages.created_at} desc
+   limit 1
+) in ('sent', 'skipped_simulated'), false)`;
 
 /**
  * Close conversations that have gone quiet.
@@ -104,7 +135,8 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
                 lt(
                   sql`coalesce(${cases.updated_at}, ${cases.created_at})`,
                   sql`now() - interval '${sql.raw(String(days))} days'`
-                )
+                ),
+                leLlegoLaPregunta
               )
             )
             .limit(CLOSE_LIMIT)
@@ -135,6 +167,20 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
       );
     }
 
+    /*
+     * Y los que se quedaron abiertos porque el mensaje no salió.
+     *
+     * Antes se cerraban acá arriba y no había nada más que decir. Ahora se
+     * quedan en el tablero, que es donde tienen que estar: lo que corresponde
+     * es volver a mandar la pregunta, no dar la conversación por terminada.
+     *
+     * Pero quedarse callado los vuelve invisibles otra vez, con la diferencia
+     * de que ahora encima no se cierran. Se cuentan, con sus ids, una línea por
+     * barrido. Si esto sale con un número grande, no es que la gente no
+     * conteste: es que no estamos preguntando.
+     */
+    await avisarDeLosQueNoRecibieron(days);
+
     return { closed: closed.length, caseIds: closed.map((r) => r.id) };
   } catch (err) {
     const code =
@@ -154,3 +200,59 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
 
 /** Exported for the FSM and tests: the statuses this sweep is allowed to close. */
 export const ABANDONABLE_STATUSES = AWAITING_CLAIMANT;
+
+/**
+ * Cuenta los casos vencidos a los que nunca les llegó la pregunta.
+ *
+ * Aparte del UPDATE y no adentro: son los que NO se tocan, así que no hay nada
+ * que devolver de la escritura. Y va en su propio `try` porque es un aviso — si
+ * falla no puede llevarse puesto un barrido que ya cerró lo que tenía que
+ * cerrar.
+ */
+async function avisarDeLosQueNoRecibieron(days: number): Promise<void> {
+  try {
+    // sin-inquilino: el mismo barrido de sistema de arriba, mirando lo que dejó abierto.
+    const retenidos = await db
+      .select({ id: cases.id })
+      .from(cases)
+      .where(
+        and(
+          inArray(cases.status, [...AWAITING_CLAIMANT]),
+          lt(
+            sql`coalesce(${cases.updated_at}, ${cases.created_at})`,
+            sql`now() - interval '${sql.raw(String(days))} days'`
+          ),
+          sql`not ${leLlegoLaPregunta}`
+        )
+      )
+      .limit(CLOSE_LIMIT);
+
+    if (retenidos.length === 0) return;
+
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        service: "claimmix",
+        msg: "close_abandoned.sin_preguntar",
+        casos: retenidos.length,
+        after_days: days,
+        case_ids: retenidos.map((r) => r.id),
+        nota:
+          "Vencidos y sin cerrar: el último mensaje al denunciante no salió. " +
+          "No es silencio de la persona, es una pregunta que no llegó.",
+      })
+    );
+  } catch (err) {
+    const code =
+      (err as { code?: string })?.code ??
+      (err instanceof Error ? err.name : "UnknownError");
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "close_abandoned.aviso_fallo",
+        code,
+      })
+    );
+  }
+}

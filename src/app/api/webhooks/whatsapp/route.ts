@@ -58,6 +58,34 @@ function hasBearer(request: NextRequest): boolean {
   return timingSafeStringEqual(request.headers.get("authorization"), `Bearer ${secret}`);
 }
 
+/**
+ * Este mensaje, ¿es para el número que atendemos?
+ *
+ * La firma dice que el evento viene de Meta. NO dice a quién le hablaron: un
+ * webhook es de la APP, y una app puede quedar suscripta a más de una WABA —
+ * una segunda aseguradora, un número de prueba, uno viejo que nadie dio de
+ * baja. Todos esos mensajes llegan acá, firmados y válidos.
+ *
+ * Y abajo el inquilino sale de `WHATSAPP_TENANT_ID`, que es una constante. O
+ * sea que la denuncia de la otra aseguradora se guardaba en la bandeja de
+ * ésta, con sus fotos y su DNI. Es exactamente lo que el aislamiento por
+ * inquilino existe para impedir, entrando por la única puerta que no lo
+ * miraba.
+ *
+ * Deja pasar cuando falta cualquiera de los dos lados, y eso es a propósito.
+ * Sin `WHATSAPP_PHONE_NUMBER_ID` no hay con qué comparar; y si algún día Meta
+ * deja de mandar `metadata`, ser estricto acá tiraría TODAS las denuncias en
+ * vez de una. La comparación protege del número de más, no del payload raro.
+ *
+ * Un mensaje descartado no se reintenta: el evento está bien, el destinatario
+ * no somos nosotros, y reintentarlo no lo va a cambiar.
+ */
+function esParaNuestroNumero(toPhoneNumberId: string | undefined): boolean {
+  const nuestro = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
+  if (!nuestro || !toPhoneNumberId) return true;
+  return toPhoneNumberId.trim() === nuestro;
+}
+
 function resolveTenantId(bodyTenantId?: string): string | null {
   return bodyTenantId ?? process.env.WHATSAPP_TENANT_ID ?? process.env.GMAIL_TENANT_ID ?? null;
 }
@@ -204,8 +232,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const messages = parseCloudApiMessages(payload);
     const caseIds: string[] = [];
     let sinGuardar = 0;
+    let deOtroNumero = 0;
 
     for (const msg of messages) {
+      if (!esParaNuestroNumero(msg.toPhoneNumberId)) {
+        deOtroNumero++;
+        console.error(
+          JSON.stringify({
+            level: "error",
+            service: "claimmix",
+            msg: "whatsapp.webhook.numero_ajeno",
+            to_phone_number_id: msg.toPhoneNumberId ?? null,
+          })
+        ); // crew-debug-ok
+        continue;
+      }
       try {
         const stored = await ingest(tenantId, msg);
         caseIds.push(stored.caseId);
@@ -262,7 +303,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // 200 para un evento bien firmado que se guardó entero —incluidos los de
     // estado y lectura, que no traen mensajes— para que Meta lo marque
     // entregado y deje de reintentar.
-    return NextResponse.json({ ok: true, received: caseIds.length, case_ids: caseIds }, { status: 200 });
+    return NextResponse.json(
+      {
+        ok: true,
+        received: caseIds.length,
+        case_ids: caseIds,
+        ...(deOtroNumero > 0 ? { ignored_other_number: deOtroNumero } : {}),
+      },
+      { status: 200 }
+    );
   }
 
   // ── Path 2: normalized + Bearer (simulation / BSP adapters) ──────────────────

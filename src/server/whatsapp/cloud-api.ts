@@ -104,6 +104,16 @@ export interface NormalizedWhatsAppMessage {
    * reply was telling people to send exactly that.
    */
   media?: WhatsAppMediaRef[];
+  /**
+   * El numero DE ESTA CASA al que le escribieron (`metadata.phone_number_id`).
+   *
+   * Se parseaba y se tiraba. Un webhook de Meta es de la APP, no de un numero:
+   * si la app queda suscripta a dos WABA —una segunda aseguradora, una prueba,
+   * un numero viejo que nadie dio de baja— los mensajes de las dos llegan a
+   * esta misma ruta, con firma valida, y sin esto no habia forma de
+   * distinguirlos.
+   */
+  toPhoneNumberId?: string;
 }
 
 export interface WhatsAppMediaRef {
@@ -391,6 +401,7 @@ export function parseCloudApiMessages(payload: unknown): NormalizedWhatsAppMessa
         value?: {
           messages?: CloudApiTextMessage[];
           contacts?: Array<{ profile?: { name?: string }; wa_id?: string }>;
+          metadata?: { phone_number_id?: string };
         };
       }>;
     }>;
@@ -405,6 +416,7 @@ export function parseCloudApiMessages(payload: unknown): NormalizedWhatsAppMessa
       const value = change.value;
       const messages = value?.messages;
       if (!Array.isArray(messages)) continue; // status/other events → skip
+      const toPhoneNumberId = value?.metadata?.phone_number_id;
 
       const nameByWaId = new Map<string, string>();
       for (const c of value?.contacts ?? []) {
@@ -424,6 +436,7 @@ export function parseCloudApiMessages(payload: unknown): NormalizedWhatsAppMessa
           providerMessageId: msg.id,
           name: nameByWaId.get(msg.from),
           ...(media.length > 0 ? { media } : {}),
+          ...(toPhoneNumberId ? { toPhoneNumberId } : {}),
         });
       }
     }

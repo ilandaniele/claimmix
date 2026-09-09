@@ -259,3 +259,66 @@ describe("/api/webhooks/whatsapp — reentregas de Meta", () => {
     expect(todo).toContain("53300");
   });
 });
+
+describe("/api/webhooks/whatsapp — a qué número le hablaron", () => {
+  const NUESTRO = "111111111111111";
+
+  function payload(phoneNumberId: string | null): string {
+    return JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ changes: [{ value: {
+        ...(phoneNumberId ? { metadata: { phone_number_id: phoneNumberId } } : {}),
+        contacts: [{ wa_id: "5492916426930", profile: { name: "Ilan" } }],
+        messages: [{ from: "5492916426930", id: "wamid.9", type: "text", text: { body: "Choqué" } }],
+      } }] }],
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterCallbacks.length = 0;
+    process.env.WHATSAPP_APP_SECRET = APP_SECRET;
+    process.env.WHATSAPP_TENANT_ID = TENANT;
+    process.env.WHATSAPP_PHONE_NUMBER_ID = NUESTRO;
+    mockCreateWhatsAppIntake.mockResolvedValue({
+      caseId: "case-1", tenantId: TENANT, created: true, duplicado: false,
+    });
+  });
+  afterEach(() => {
+    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+    vi.clearAllMocks();
+  });
+
+  it("el mensaje al número que atendemos entra", async () => {
+    const cuerpo = payload(NUESTRO);
+    const res = await POST(metaReq(cuerpo, sign(cuerpo)));
+
+    expect(res.status).toBe(200);
+    expect(mockCreateWhatsAppIntake).toHaveBeenCalledTimes(1);
+  });
+
+  it("el de OTRA WABA no se guarda en la bandeja de ésta", async () => {
+    // Firma válida, evento real, y aún así no es nuestro: una app de Meta puede
+    // estar suscripta a varios números. El inquilino sale de una constante, así
+    // que sin esto la denuncia de la otra aseguradora terminaba acá adentro.
+    const espia = vi.spyOn(console, "error").mockImplementation(() => {});
+    const cuerpo = payload("999999999999999");
+    const res = await POST(metaReq(cuerpo, sign(cuerpo)));
+    espia.mockRestore();
+
+    expect(mockCreateWhatsAppIntake).not.toHaveBeenCalled();
+    // 200: el evento está bien, el destinatario no somos nosotros. Reintentarlo
+    // no lo va a cambiar.
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ignored_other_number: 1 });
+  });
+
+  it("sin número configurado pasa todo, como antes", async () => {
+    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const cuerpo = payload("999999999999999");
+    const res = await POST(metaReq(cuerpo, sign(cuerpo)));
+
+    expect(res.status).toBe(200);
+    expect(mockCreateWhatsAppIntake).toHaveBeenCalledTimes(1);
+  });
+});

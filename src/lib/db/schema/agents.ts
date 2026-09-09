@@ -180,9 +180,17 @@ export const modelTrainingJobs = pgTable("model_training_jobs", {
     .notNull()
     .references(() => tenants.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("draft"),
-  // El default del esquema. La base viva sigue con `openai` hasta que corra
-  // una migración; no importa, porque el código SIEMPRE escribe el valor.
-  provider: text("provider").notNull().default("gemini"),
+  /*
+   * `vertex_ai_gemini`, que es lo que escribe `createVertexAiTuningDraft` y lo
+   * que tienen las filas reales. Decía `gemini`, y la base viva decía `openai`:
+   * tres valores para la misma columna, ninguno igual al otro.
+   *
+   * No da lo mismo cuál: `vertex-ai-fine-tuning.ts` tira `WRONG_PROVIDER` para
+   * cualquier trabajo cuyo provider no sea `vertex_ai_gemini`, así que una fila
+   * que tomara otro default no se podría arrancar, ni sincronizar, ni activar.
+   * La base se alineó en la migración 0027.
+   */
+  provider: text("provider").notNull().default("vertex_ai_gemini"),
   base_model: text("base_model").notNull().default(""),
   fine_tuned_model_id: text("fine_tuned_model_id"),
   // Guarda el nombre del recurso del job de Vertex AI. El nombre quedó de
@@ -216,7 +224,9 @@ export const tenantAiSettings = pgTable("tenant_ai_settings", {
     .primaryKey()
     .references(() => tenants.id, { onDelete: "cascade" }),
   provider: text("provider").notNull().default("gemini"),
-  openai_model: text("openai_model").notNull().default("gpt-4o-mini"),
+  // `openai_model` se borró en la migración 0027: no la leía nadie y su default
+  // —'gpt-4o-mini'— la hacía parecer configuración viva de un proveedor que ya
+  // no está en el producto.
   gemini_model: text("gemini_model").notNull().default("gemini-flash-latest"),
   active_model_provider: text("active_model_provider").notNull().default("gemini"),
   active_model: text("active_model"),

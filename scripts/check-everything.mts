@@ -11,8 +11,18 @@
  *
  * Three layers, in the order that fails fastest and cheapest:
  *
- *   1. verify   — types, lint, unit and integration tests. Seconds. Free.
+ *   1. verify   — types, lint and unit tests. Seconds. Free.
  *                 Catches anything that is wrong on its own terms.
+ *
+ *                 Decía «unit AND INTEGRATION tests», y en una máquina de
+ *                 desarrollo eso era falso: `vitest run` incluye
+ *                 `tests/integration`, pero cada archivo de ahí está envuelto
+ *                 en `describe.skipIf(shouldSkip)` con
+ *                 `shouldSkip = !TEST_BASE_URL && !INTEGRATION_ENABLED`. Sin
+ *                 una de las dos variables no corre ni una aserción, y el
+ *                 resumen dice «skipped» en una línea que nadie lee.
+ *
+ *                 Los de integración corren en la CI, donde el secreto existe.
  *
  *   2. rehearse — whole claims driven through the real agent on the simulated
  *                 channels, both WhatsApp and email. Minutes, and real tokens.

@@ -4,7 +4,11 @@
  * Uses the Generative Language REST API directly (no SDK dependency):
  *   POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
  *
- * Defaults to gemini-2.5-flash (GEMINI_MODEL to override). El costo se estima
+ * El modelo por defecto depende del camino: AI Studio usa
+ * `gemini-flash-latest` (getDefaultGeminiModel, con GEMINI_MODEL para
+ * pisarlo) y Vertex usa `gemini-2.5-flash` (VERTEX_EXTRACTION_MODEL para
+ * pisarlo). Aca decia «defaults to gemini-2.5-flash» a secas, que es cierto
+ * para uno de los dos. El costo se estima
  * con el precio de lista: registrarlo en 0 fue correcto mientras corría por el
  * tier gratis de AI Studio, y dejó de serlo al pasar a Vertex postpago. Un tope
  * mensual en dólares contra una suma que siempre da cero no salta nunca.

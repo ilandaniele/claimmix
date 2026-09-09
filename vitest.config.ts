@@ -60,8 +60,10 @@ export default defineConfig({
         "src/server/email/dedupe.ts",
         // AI budget guard — requires live DB; covered by integration tests only.
         "src/server/ai/budget.ts",
-        // OpenAI SDK wrapper — requires OPENAI_API_KEY at runtime.
-        "src/server/ai/openai-extractor.ts",
+        // Aca se excluia "src/server/ai/openai-extractor.ts", un archivo que ya
+        // no existe: el extractor de OpenAI se borro cuando el producto quedo
+        // solo con Gemini. La linea no hacia nada y sugeria que el archivo
+        // seguia ahi.
         // Extraction worker orchestrator — DB-orchestration pipeline.
         // All constituent modules are individually unit-tested.
         // Covered end-to-end via integration tests.

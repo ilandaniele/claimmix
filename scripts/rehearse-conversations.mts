@@ -595,7 +595,10 @@ const SCENARIOS: Scenario[] = [
 interface Failure {
   scenario: string;
   turn: number;
+  /** Para leer: qué se esperaba y qué pasó. Lleva adentro lo que contestó el modelo. */
   why: string;
+  /** Para comparar: QUÉ se estaba mirando. Se arma con datos del escenario, nunca con la respuesta. */
+  comprobacion: string;
 }
 
 const failures: Failure[] = [];
@@ -656,8 +659,29 @@ async function closedDocKeys(id: string): Promise<Set<string>> {
   return new Set(rows.map((r) => r.key));
 }
 
-function note(scenario: string, turn: number, why: string) {
-  failures.push({ scenario, turn, why });
+/**
+ * Anota una diferencia, y CÓMO se la va a reconocer en la corrida siguiente.
+ *
+ * `why` es para leer: dice qué se esperaba y qué pasó. `comprobacion` es para
+ * comparar: dice QUÉ se estaba mirando, sin lo que se vio.
+ *
+ * La distinción no es cosmética. El post-deploy, cuando algo difiere, corre el
+ * ensayo de nuevo e intersecta las dos listas: lo que falló las dos veces es
+ * una regresión, lo que falló una es el modelo eligiendo distinto. Esa
+ * intersección se hacía sobre `why`, y `why` LLEVA ADENTRO lo que el modelo
+ * contestó — «estado info_faltante, esperaba listo», «esperaba 1 respuesta(s),
+ * hubo 2».
+ *
+ * O sea que la misma afirmación rota dos veces, con dos valores distintos,
+ * daba dos claves distintas y la intersección salía vacía. Verde. Justo el
+ * caso que el reintento existe para atrapar: una regresión que además es
+ * inestable se escondía mejor que una determinista.
+ *
+ * Las claves se arman con datos del ESCENARIO —la clave del campo, la frase
+ * esperada— nunca con la respuesta.
+ */
+function note(scenario: string, turn: number, why: string, comprobacion: string) {
+  failures.push({ scenario, turn, why, comprobacion });
   console.log(`      ✗ ${why}`);
 }
 
@@ -903,7 +927,8 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         note(
           scenario.id,
           i + 1,
-          "el filtro de entrada NO lo descartó: se abrió una denuncia con esto"
+          "el filtro de entrada NO lo descartó: se abrió una denuncia con esto",
+          "prefiltro"
         );
       }
 
@@ -912,7 +937,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         // one scenario exists precisely to check that it does.
         console.log("       ⊘ (el filtro de entrada lo descartó)");
         if (turn.expect?.replies !== undefined && turn.expect.replies !== 0) {
-          note(scenario.id, i + 1, "el filtro de entrada lo descartó y no debía");
+          note(scenario.id, i + 1, "el filtro de entrada lo descartó y no debía", "prefiltro");
         }
         continue;
       }
@@ -931,7 +956,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
       if (!want) continue;
 
       if (want.replies !== undefined && said.length !== want.replies) {
-        note(scenario.id, i + 1, `esperaba ${want.replies} respuesta(s), hubo ${said.length}`);
+        note(
+          scenario.id,
+          i + 1,
+          `esperaba ${want.replies} respuesta(s), hubo ${said.length}`,
+          "cantidad-de-respuestas"
+        );
       }
 
       // Sobre el texto legible, no sobre el HTML crudo: una frase con comilla o
@@ -942,16 +972,16 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
 
       for (const phrase of want.mentions ?? []) {
         if (!all.includes(phrase.toLowerCase())) {
-          note(scenario.id, i + 1, `no menciona "${phrase}"`);
+          note(scenario.id, i + 1, `no menciona "${phrase}"`, `menciona:${phrase}`);
         }
       }
       for (const phrase of want.avoids ?? []) {
         if (all.includes(phrase.toLowerCase())) {
-          note(scenario.id, i + 1, `no debería decir "${phrase}"`);
+          note(scenario.id, i + 1, `no debería decir "${phrase}"`, `no-menciona:${phrase}`);
         }
       }
       for (const key of want.noAsked ?? []) {
-        if (pedidas.has(key)) note(scenario.id, i + 1, `pidió ${key} y no debía`);
+        if (pedidas.has(key)) note(scenario.id, i + 1, `pidió ${key} y no debía`, `pidio:${key}`);
       }
       if (want.confirma?.length) {
         const filas = await db
@@ -961,7 +991,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         const propuestos = new Set(filas.map((f) => f.campo));
         for (const key of want.confirma) {
           if (!propuestos.has(key)) {
-            note(scenario.id, i + 1, `no propuso confirmar ${key}: se lo preguntó de cero`);
+            note(
+              scenario.id,
+              i + 1,
+              `no propuso confirmar ${key}: se lo preguntó de cero`,
+              `propone-confirmar:${key}`
+            );
           }
         }
       }
@@ -971,7 +1006,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           .from(claimAttachments)
           .where(eq(claimAttachments.case_id, active));
         if (rows.length !== want.attachments) {
-          note(scenario.id, i + 1, `${rows.length} adjunto(s) guardado(s), esperaba ${want.attachments}`);
+          note(
+            scenario.id,
+            i + 1,
+            `${rows.length} adjunto(s) guardado(s), esperaba ${want.attachments}`,
+            "adjuntos"
+          );
         }
       }
       if (want.status) {
@@ -980,7 +1020,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           .from(cases)
           .where(eq(cases.id, active));
         if (row[0]?.status !== want.status) {
-          note(scenario.id, i + 1, `estado ${row[0]?.status}, esperaba ${want.status}`);
+          note(
+            scenario.id,
+            i + 1,
+            `estado ${row[0]?.status}, esperaba ${want.status}`,
+            "estado"
+          );
         }
       }
 
@@ -1003,7 +1048,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         const cerroAhora = [...ahora].filter((k) => !cerradosAntes.has(k));
 
         if (want.recognisesNothing && cerroAhora.length > 0) {
-          note(scenario.id, i + 1, `dio por recibido ${cerroAhora.join(", ")} y no debía cerrar nada`);
+          note(
+            scenario.id,
+            i + 1,
+            `dio por recibido ${cerroAhora.join(", ")} y no debía cerrar nada`,
+            "cerro-de-mas"
+          );
         }
 
         if (want.recognises?.length) {
@@ -1016,7 +1066,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           } else {
             for (const key of want.recognises) {
               if (!cerroAhora.includes(key)) {
-                note(scenario.id, i + 1, `no reconoció ${key} en la foto`);
+                note(scenario.id, i + 1, `no reconoció ${key} en la foto`, `reconoce-en-foto:${key}`);
               }
             }
           }
@@ -1028,7 +1078,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
       const want = scenario.finally;
       const [row] = await db.select({ status: cases.status }).from(cases).where(eq(cases.id, caseId));
       if (want.status && row?.status !== want.status) {
-        note(scenario.id, 0, `estado final ${row?.status}, esperaba ${want.status}`);
+        note(
+          scenario.id,
+          0,
+          `estado final ${row?.status}, esperaba ${want.status}`,
+          "estado-final"
+        );
       }
 
       const docs = await db
@@ -1042,12 +1097,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
 
       for (const key of want.docsReceived ?? []) {
         if (!docs.find((d) => d.key === key && d.satisfied)) {
-          note(scenario.id, 0, `${key} debería figurar como recibido`);
+          note(scenario.id, 0, `${key} debería figurar como recibido`, `recibido:${key}`);
         }
       }
       for (const key of want.docsDeclined ?? []) {
         if (!docs.find((d) => d.key === key && d.declined)) {
-          note(scenario.id, 0, `${key} debería figurar como rechazado`);
+          note(scenario.id, 0, `${key} debería figurar como rechazado`, `rechazado:${key}`);
         }
       }
 
@@ -1058,7 +1113,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           .where(eq(extractedFields.case_id, caseId));
         const keys = new Set(known.map((k) => k.key));
         for (const key of want.knows) {
-          if (!keys.has(key)) note(scenario.id, 0, `perdió el dato ${key}`);
+          if (!keys.has(key)) note(scenario.id, 0, `perdió el dato ${key}`, `perdio-dato:${key}`);
         }
       }
 
@@ -1275,7 +1330,12 @@ for (const scenario of chosen) {
     const id = await runScenario(scenario);
     if (id) created.push(id);
   } catch (err) {
-    note(scenario.id, 0, `se cayó: ${err instanceof Error ? err.message : String(err)}`);
+    note(
+      scenario.id,
+      0,
+      `se cayó: ${err instanceof Error ? err.message : String(err)}`,
+      "se-cayo"
+    );
   }
 }
 

@@ -56,7 +56,7 @@ import { checkBudget, recordUsage } from "@/server/ai/budget";
 import { ClaimAgentError, runClaimTextAgent, runEmailClaimAgent } from "@/server/ai/claim-agent";
 import { GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
-import { findCustomerMatches } from "@/server/matching/customer-matcher";
+import { findCustomerMatches, MATCH_QUE_VINCULA } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/core/case/fsm";
 import {
@@ -1073,10 +1073,51 @@ export async function runEmailExtractionWorker(
       extractedClaim.extracted_fields,
       CLAIM_FIELD_KEYS
     );
-    const customerMatches = await findCustomerMatches(
+    const todosLosMatches = await findCustomerMatches(
       tenantId,
       extractedClaimFields
     );
+
+    /*
+     * ── Un teléfono o un correo NO alcanzan para decir «sos vos» ─────────────
+     *
+     * El canal de entrada es anónimo por definición: cualquiera le escribe al
+     * número de WhatsApp o a la casilla de la aseguradora. Y los campos que se
+     * comparan acá salen del TEXTO que esa persona escribió —el filtro de
+     * arriba es `f.source !== "canal"`, o sea que ni siquiera es el remitente
+     * verificado—. Tipear el teléfono de un tercero es gratis.
+     *
+     * Antes se tomaba `customerMatches[0]` sin ningún piso, y un match por
+     * teléfono (0,60) terminaba igual que uno por póliza (0,95) en
+     * `customer_id` y `policy_id` del caso.
+     *
+     * Y el daño no era sólo el vínculo. Estos matches también viajan al
+     * orquestador, que arma el mensaje de conflicto: «vos nos decís X y en
+     * nuestro sistema figura Y». Con un match débil, esa Y es el dato de OTRA
+     * PERSONA, y se lo mandamos por WhatsApp a quien escribió. O sea que el
+     * match flojo no sólo enganchaba mal: filtraba.
+     *
+     * Así que el filtro va en el origen y no en el uso: lo débil no vincula y
+     * tampoco se le cuenta a nadie.
+     */
+    const customerMatches = todosLosMatches.filter((m) =>
+      MATCH_QUE_VINCULA.has(m.matchType)
+    );
+
+    const debiles = todosLosMatches.length - customerMatches.length;
+    if (debiles > 0 && customerMatches.length === 0) {
+      // Sin datos de nadie: sólo que pasó, para que se pueda mirar.
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          service: "claimmix",
+          msg: "matching.solo_coincidencias_debiles",
+          case_id: caseId,
+          cuantas: debiles,
+          nota: "Coincide por teléfono o correo escritos en el texto. No alcanza para vincular.",
+        })
+      );
+    }
 
     // Use the highest-confidence customer match for the case.
     const bestCustomer = customerMatches[0];

@@ -35,21 +35,27 @@ const RESET_DURA_SEGUNDOS = 60 * 60;
  * datos la sirve obedientemente: RLS no ve un ataque, ve un inquilino.
  * Suplantación completa, cualquier usuario, cualquier aseguradora.
  *
- * Es el único secreto del producto que degradaba. `DATABASE_URL_APP` tira,
- * `PUBSUB_AUDIENCE` rechaza, `CRON_SECRET` falla cerrado, y
- * `GMAIL_TOKEN_ENCRYPTION_KEY` hace exactamente esto.
+ * ── Por qué NO se comprueba al cargar el módulo ─────────────────────────────
+ *
+ * Ahí fue el primer intento y rompió el build: `next build` importa este módulo
+ * para juntar la configuración de las rutas, y en esa etapa la variable no está
+ * —es sensible en Vercel—. El deploy falló con «Failed to collect page data
+ * for /api/admin/gmail-accounts/callback», que no se parece en nada al
+ * problema que describe.
+ *
+ * Es un requisito de EJECUCIÓN, no de compilación. Se exige en
+ * `instrumentation.ts`, que Next llama una vez por arranque del servidor y no
+ * durante el build: sin secreto, la instancia no atiende un solo pedido.
  */
-function exigirSecreto(): string {
-  const secreto = process.env.BETTER_AUTH_SECRET?.trim();
-  if (!secreto) {
-    throw new Error(
-      "Falta BETTER_AUTH_SECRET. Sin él, better-auth firma las sesiones con un " +
-        "secreto de relleno que está publicado en su código: cualquiera puede " +
-        "fabricar una cookie válida para cualquier usuario de cualquier inquilino."
-    );
-  }
-  return secreto;
+export function exigirSecretoDeSesion(): void {
+  if (process.env.BETTER_AUTH_SECRET?.trim()) return;
+  throw new Error(
+    "Falta BETTER_AUTH_SECRET. Sin él, better-auth firma las sesiones con un " +
+      "secreto de relleno que está publicado en su código: cualquiera puede " +
+      "fabricar una cookie válida para cualquier usuario de cualquier inquilino."
+  );
 }
+
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -60,7 +66,7 @@ export const auth = betterAuth({
       verification: verifications,
     },
   }),
-  secret: exigirSecreto(),
+  secret: process.env.BETTER_AUTH_SECRET,
   baseURL: resolveBaseURL(),
   advanced: {
     // The whole schema uses uuid FKs onto users.id (cases.assigned_to,

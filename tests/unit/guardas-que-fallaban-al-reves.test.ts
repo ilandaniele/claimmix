@@ -29,6 +29,9 @@ const AUTH = soloCodigo("src/lib/auth/index.ts");
 const WORKER = soloCodigo("src/server/worker/extract.ts");
 const INTAKE = soloCodigo("src/server/agents/intake-agent.ts");
 const ENV = readFileSync(".env.example", "utf8");
+const INSTR = soloCodigo("instrumentation.ts");
+/** La llamada a `betterAuth`, para comprobar que la aserción NO vive ahí. */
+const SOLO_CODIGO_AUTH_CONFIG = AUTH.slice(AUTH.indexOf("export const auth"));
 
 describe("el secreto de sesión no puede faltar", () => {
   /*
@@ -38,17 +41,28 @@ describe("el secreto de sesión no puede faltar", () => {
    * válidas, y el inquilino sale de la sesión: la capa de datos las sirve
    * obedientemente.
    */
-  it("no se pasa la variable cruda a betterAuth", () => {
-    expect(AUTH).not.toContain("secret: process.env.BETTER_AUTH_SECRET");
-  });
-
-  it("y el que la exige tira, no devuelve un valor por omisión", () => {
+  it("hay quien la exija, y tira en vez de devolver algo", () => {
     const fn = AUTH.slice(
-      AUTH.indexOf("function exigirSecreto"),
+      AUTH.indexOf("export function exigirSecretoDeSesion"),
       AUTH.indexOf("export const auth")
     );
     expect(fn).toContain("throw new Error");
+    // Nada de devolver un valor por omisión: el punto es que no haya uno.
     expect(fn).not.toMatch(/return\s+"/);
+  });
+
+  it("y se exige al arrancar el servidor, no al cargar el módulo", () => {
+    /*
+     * Al cargar el módulo fue el primer intento y rompió el deploy: `next
+     * build` importa `@/lib/auth` para juntar la configuración de las rutas, y
+     * en esa etapa la variable no está. El error decía «Failed to collect page
+     * data for /api/admin/gmail-accounts/callback», que no se parece en nada.
+     *
+     * Es un requisito de ejecución. `register()` corre una vez por arranque y
+     * no durante el build.
+     */
+    expect(INSTR).toContain("exigirSecretoDeSesion");
+    expect(SOLO_CODIGO_AUTH_CONFIG).not.toContain("exigirSecretoDeSesion()");
   });
 });
 

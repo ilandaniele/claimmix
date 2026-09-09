@@ -56,7 +56,31 @@ export type TenantContext = {
   readonly tenantId: string;
 };
 
-export type ClienteDatos = ReturnType<typeof crearCliente>;
+/**
+ * El cliente QUE LA CAPA ENTREGA, no cualquiera.
+ *
+ * Era `ReturnType<typeof crearCliente>` a secas, o sea el mismo tipo
+ * estructural que el `db` que exporta `@/lib/db` — y ese corre con el rol
+ * dueño, que tiene BYPASSRLS.
+ *
+ * Con los dos iguales, esto compilaba:
+ *
+ *     import { db } from "@/lib/db";
+ *     const reglas = await consultaPromptRules(db);   // ← todos los inquilinos
+ *
+ * y pasaba los dos chequeos requeridos de `main` en verde: la guarda de
+ * consultas crudas exime el cuerpo de un armador, y una llamada a un armador
+ * no se parece a `db.select(`.
+ *
+ * La marca no existe en tiempo de ejecución —`cliente()` devuelve el mismo
+ * objeto— pero hace que el único lugar de donde puede salir un `ClienteDatos`
+ * sea la capa. Pasarle el crudo deja de compilar, que es donde se quiere que
+ * falle.
+ */
+declare const marcaDeLaCapa: unique symbol;
+export type ClienteDatos = ReturnType<typeof crearCliente> & {
+  readonly [marcaDeLaCapa]: true;
+};
 
 function crearCliente(connectionString: string) {
   return drizzle(neon(connectionString), { schema });
@@ -94,7 +118,17 @@ function cliente(): ClienteDatos {
 
   if (!cacheCliente || cacheCadena !== cadena) {
     cacheCadena = cadena;
-    cacheCliente = crearCliente(cadena);
+    /*
+     * El ÚNICO lugar donde nace un `ClienteDatos`.
+     *
+     * La marca no existe en tiempo de ejecución: es un tipo nominal para que
+     * pasarle a un armador el `db` del rol dueño no compile. Alguien tiene que
+     * ponerla, y ese alguien es la capa — acá, después de haber exigido
+     * `DATABASE_URL_APP` y antes de comprobar que el rol no saltee RLS.
+     *
+     * Es el único cast del archivo, y no debería haber otro.
+     */
+    cacheCliente = crearCliente(cadena) as ClienteDatos;
   }
   return cacheCliente;
 }

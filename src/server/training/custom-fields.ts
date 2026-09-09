@@ -8,7 +8,7 @@
 
 import "server-only";
 import { and, asc, eq, or, isNull } from "drizzle-orm";
-import { db, tables } from "@/lib/db";
+import { tables } from "@/lib/db";
 import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 
 export interface AgentCustomField {

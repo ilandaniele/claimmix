@@ -339,6 +339,47 @@ console.log("\n▸ nadie usa db.$count (la capa no lo puede armar)");
   }
 }
 
+/**
+ * ¿Hay un `enTenant` adentro de otro?
+ *
+ * Esto era una expresión regular y no veía el estilo del repo. `[^)]*?` no
+ * puede cruzar el `)` que cierra `(db)`, así que
+ *
+ *     enTenant(ctx, (db) => enTenant(ctx, (db) => …))   ← el que causó el bug
+ *
+ * no matcheaba, y el repo escribe `(db) =>` en los doscientos lugares. Tampoco
+ * veía `async (db) =>`, ni un `enTenant` adentro de la lista de
+ * `enTenantVarias`. Lo único que agarraba era `db =>` sin paréntesis, que acá
+ * no lo usa nadie.
+ *
+ * O sea que imprimía «ninguno anidado» sin vigilar nada — la misma clase de
+ * verde que el commit que la agregó vino a arreglar en otro lado.
+ *
+ * Ahora se emparejan los paréntesis: desde el `(` de la llamada hasta el que lo
+ * cierra, y si adentro aparece otro `enTenant(`, está anidado. Es lo mismo que
+ * hace `find-raw-db.mjs` para delimitar los tramos de la capa.
+ */
+function anidaEnTenant(txt) {
+  const re = /\benTenant(?:Varias)?\s*(?:<[^(]*>)?\s*\(/g;
+  let m;
+  while ((m = re.exec(txt))) {
+    const abre = txt.indexOf("(", m.index);
+    let prof = 0;
+    let i = abre;
+    for (; i < txt.length; i++) {
+      const c = txt[i];
+      if (c === "(") prof++;
+      else if (c === ")") {
+        if (--prof === 0) break;
+      }
+    }
+    // El cuerpo de la llamada, sin contar su propio nombre.
+    const adentro = txt.slice(abre + 1, i);
+    if (/\benTenant(?:Varias)?\s*(?:<[^(]*>)?\s*\(/.test(adentro)) return true;
+  }
+  return false;
+}
+
 // ── enTenant no se anida ────────────────────────────────────
 //
 // `enTenant(ctx, (db) => enTenant(ctx, (db) => ...))` compila: la firma de
@@ -360,11 +401,7 @@ console.log("\n▸ enTenant no se anida");
   const anidados = [];
   for (const ruta of archivos("src")) {
     const txt = sinComentarios(readFileSync(ruta, "utf8"));
-    // `enTenant(` seguido, dentro de la misma llamada, de otro `enTenant(`
-    // antes de cerrar. Se busca el patron de la flecha, que es como se escribe.
-    if (/enTenant(?:Varias)?\s*\([^)]*?=>\s*enTenant\s*\(/s.test(txt)) {
-      anidados.push(ruta);
-    }
+    if (anidaEnTenant(txt)) anidados.push(ruta);
   }
   if (anidados.length === 0) {
     bien("ninguno anidado");

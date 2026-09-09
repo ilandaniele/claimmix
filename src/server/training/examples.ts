@@ -19,7 +19,7 @@
 
 import "server-only";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { db, tables } from "@/lib/db";
+import { tables } from "@/lib/db";
 import {
   enTenant,
   enTenantVarias,

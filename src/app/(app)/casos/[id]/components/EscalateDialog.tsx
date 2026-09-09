@@ -8,7 +8,9 @@
 
 "use client";
 
-import { useState, useRef, useEffect, useId } from "react";
+import { useState, useRef, useId } from "react";
+
+import { useDialogoModal } from "../../../_components/dialogo-modal";
 import { useT } from "@/lib/i18n/LocaleContext";
 
 interface EscalateDialogProps {
@@ -30,40 +32,11 @@ export function EscalateDialog({
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useDialogoModal<HTMLDivElement>(onClose, textareaRef);
   const titleId = useId();
   const descId = useId();
 
-  // Focus textarea when dialog opens
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
 
-  // Escape closes the dialog; Tab is trapped
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (e.key === "Tab" && dialogRef.current) {
-        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last?.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first?.focus();
-        }
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
   async function handleConfirm() {
     setLoading(true);

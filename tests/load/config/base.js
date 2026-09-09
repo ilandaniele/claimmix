@@ -23,6 +23,29 @@ export const BASE_URL = __ENV.BASE_URL || "http://localhost:3000";
 /** `1` para dejar correr los perfiles pesados contra un destino que no es local. */
 export const PERMITIR_REMOTO = __ENV.PERMITIR_REMOTO === "1";
 
+/**
+ * La llave para entrar a una vista previa protegida.
+ *
+ * Las vistas previas de Vercel están detrás de Deployment Protection, y eso no
+ * es un 401 de la aplicación: es un 401 de Vercel, con
+ * `{"error":{"message":"Protected deployment"}}`, ANTES de que el pedido llegue
+ * a Next. Sin esto, medir contra una vista previa mide la puerta.
+ *
+ * Vercel da una llave para automatización justamente para esto. Va en cada
+ * pedido, no sólo en el login: la protección se aplica a todos.
+ */
+const BYPASS = __ENV.VERCEL_BYPASS || "";
+
+/** Las cabeceras que abren la puerta, o nada si no hay llave. */
+export function cabecerasDeVercel() {
+  if (!BYPASS) return {};
+  return {
+    "x-vercel-protection-bypass": BYPASS,
+    // Que la primera respuesta deje la cookie y las siguientes no revaliden.
+    "x-vercel-set-bypass-cookie": "true",
+  };
+}
+
 const ES_LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(BASE_URL);
 
 /**

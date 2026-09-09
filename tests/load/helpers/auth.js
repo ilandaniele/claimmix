@@ -21,7 +21,7 @@
 import http from "k6/http";
 import { fail } from "k6";
 
-import { BASE_URL } from "../config/base.js";
+import { BASE_URL, cabecerasDeVercel } from "../config/base.js";
 
 /**
  * Entra con el usuario de pruebas y devuelve la cabecera `Cookie` armada.
@@ -48,11 +48,25 @@ export function iniciarSesion() {
   const res = http.post(
     `${BASE_URL}/api/auth/sign-in/email`,
     JSON.stringify({ email: correo, password: clave }),
-    { headers: { "Content-Type": "application/json" }, tags: { escenario: "login" } }
+    {
+      headers: { "Content-Type": "application/json", ...cabecerasDeVercel() },
+      tags: { escenario: "login" },
+    }
   );
 
   if (res.status !== 200) {
-    fail(`El login contestó ${res.status}. Sin sesión no hay nada que medir.`);
+    /*
+     * Un 401 con `Protected deployment` no es una credencial mala: es la puerta
+     * de Vercel, que contesta antes de que el pedido llegue a la aplicación.
+     * Decirlo cambia dónde busca el que lee el error.
+     */
+    const puerta = (res.body || "").includes("Protected deployment");
+    fail(
+      puerta
+        ? "La vista previa está detrás de Deployment Protection y no hay llave. " +
+            "Poné VERCEL_BYPASS con el secreto de automatización de Vercel."
+        : `El login contestó ${res.status}. Sin sesión no hay nada que medir.`
+    );
   }
 
   const cookies = res.cookies || {};
@@ -68,7 +82,7 @@ export function iniciarSesion() {
 /** Las cabeceras de un pedido autenticado, con la etiqueta del escenario. */
 export function comoAnalista(sesion, etiqueta = "lectura") {
   return {
-    headers: { Cookie: sesion.cookie },
+    headers: { Cookie: sesion.cookie, ...cabecerasDeVercel() },
     tags: { escenario: etiqueta },
   };
 }

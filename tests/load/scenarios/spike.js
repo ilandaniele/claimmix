@@ -19,7 +19,14 @@ import http from "k6/http";
 import { check, sleep } from "k6";
 import { Trend } from "k6/metrics";
 
-import { BASE_URL, PERCENTILES, PRESUPUESTO_P95_MS, RUTAS, exigirDestinoSeguro } from "../config/base.js";
+import {
+  BASE_URL,
+  PERCENTILES,
+  PRESUPUESTO_P95_MS,
+  RUTAS,
+  cabecerasDeVercel,
+  exigirDestinoSeguro,
+} from "../config/base.js";
 import { comoAnalista, iniciarSesion } from "../helpers/auth.js";
 import { guardar } from "../helpers/reporte.js";
 
@@ -86,7 +93,7 @@ function fase(sesion) {
 export default function (sesion) {
   const enQue = fase(sesion);
   const res = http.get(`${BASE_URL}${RUTAS.bandeja}`, {
-    headers: { Cookie: sesion.cookie },
+    headers: { Cookie: sesion.cookie, ...cabecerasDeVercel() },
     tags: { escenario: "lectura", fase: enQue },
   });
   check(res, { "200": (r) => r.status === 200 });

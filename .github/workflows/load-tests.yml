@@ -69,7 +69,31 @@ jobs:
             echo "escenario=${{ inputs.escenario }}" >> "$GITHUB_OUTPUT"
           fi
 
+      # ── La puerta de Vercel ────────────────────────────────────────────────
+      #
+      # Las vistas previas están detrás de Deployment Protection: contestan 401
+      # con `{"error":{"message":"Protected deployment"}}` ANTES de que el pedido
+      # llegue a Next. Medir contra eso mide la puerta.
+      #
+      # Vercel da un secreto de automatización para pasar. Hay que crearlo en el
+      # proyecto (Settings → Deployment Protection → Protection Bypass for
+      # Automation) y ponerlo acá como `VERCEL_AUTOMATION_BYPASS_SECRET`.
+      #
+      # Mientras no esté, esto NO corre y lo dice. No sale verde —un verde que no
+      # midió es peor que un rojo— y no sale rojo en cada PR, que enseña a no
+      # mirar la CI. Queda como aviso, con lo que hay que hacer.
+      - name: ¿Hay llave para la vista previa?
+        id: llave
+        run: |
+          if [ -n "${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" ]; then
+            echo "hay=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "hay=0" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Carga sin medir::Falta VERCEL_AUTOMATION_BYPASS_SECRET. La vista previa está protegida y k6 mediría la pantalla de Vercel, no la aplicación. Crealo en Vercel (Settings → Deployment Protection → Protection Bypass for Automation) y agregalo como secreto del repo."
+          fi
+
       - name: Correr ${{ steps.plan.outputs.escenario }}
+        if: steps.llave.outputs.hay == '1'
         run: |
           mkdir -p resultados
           k6 run "tests/load/scenarios/${{ steps.plan.outputs.escenario }}.js"
@@ -83,10 +107,11 @@ jobs:
           # doscientos VUs logueándose miden ese tope. Ver `helpers/auth.js`.
           LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_TEST_EMAIL }}
           LOAD_TEST_PASSWORD: ${{ secrets.PLAYWRIGHT_TEST_PASSWORD }}
+          VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
       # `always()`: el reporte de la corrida que FALLÓ es el que hay que mirar.
       - name: Guardar el reporte
-        if: always()
+        if: always() && steps.llave.outputs.hay == '1' 
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: carga-${{ steps.plan.outputs.escenario }}

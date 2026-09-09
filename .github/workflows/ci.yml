@@ -19,9 +19,18 @@ permissions:
 # ── Reusable setup steps (defined as env defaults) ────────────────────────────
 env:
   NODE_VERSION: "22"
-  # pnpm 11.5 supply-chain policy: next@16.2.7 was published <24h before this CI run.
-  # Disabling the release-age hold — lockfile pins exact SHAs for supply-chain integrity.
-  npm_config_minimum_release_age: "0"
+  # Acá vivía `npm_config_minimum_release_age: "0"`, con un comentario que decía
+  # «pnpm 11.5 supply-chain policy». Dos cosas no cerraban:
+  #
+  #  · `packageManager` fija `pnpm@9.15.9` y `pnpm/action-setup` lo respeta. En
+  #    9.x `minimumReleaseAge` no existe, así que la variable no hacía nada.
+  #  · Y lo que apagaba, si alguna vez hubiera existido, es una protección de
+  #    cadena de suministro: la espera antes de instalar un paquete recién
+  #    publicado, que es justo la ventana en la que aparece uno comprometido.
+  #
+  # O sea: una línea inerte hoy, y una protección apagada en silencio el día que
+  # alguien suba pnpm. Se saca. Si vuelve a hacer falta desbloquear un paquete
+  # recién publicado, se pone en ese PR y se saca en el siguiente.
 
 jobs:
   # ── 1. Type check ────────────────────────────────────────────────────────────
@@ -604,7 +613,17 @@ jobs:
 
       - name: Semgrep SAST (OWASP Top 10 + secrets)
         run: |
-          pip install semgrep --quiet
+          # Pineado. Estaba `pip install semgrep` a secas, o sea que cada
+          # corrida de un check REQUERIDO de `main` instalaba la version que
+          # hubiera ese dia. Un paquete comprometido en PyPI entraba directo al
+          # runner, que tiene el codigo del repositorio.
+          #
+          # Lo que sigue sin pinear es `--config=auto`: se baja las reglas de
+          # semgrep.dev en cada corrida, y de paso le manda la URL del
+          # repositorio para elegirlas. Fijar el conjunto pide vendorearlo y
+          # cambia que reglas corren, asi que va aparte. Esto cierra el agujero
+          # de la HERRAMIENTA, que es por donde se ejecuta codigo.
+          pip install semgrep==1.176.1 --quiet
           semgrep --config=auto src/ \
             --error \
             --quiet \
@@ -755,8 +774,9 @@ jobs:
 
       - name: Check for GPL/AGPL/LGPL/SSPL licenses (deny list)
         run: |
-          # Install license checker
-          pnpm dlx license-checker-rseidelsohn --failOn 'GPL;AGPL;LGPL;SSPL' \
+          # Pineado, por lo mismo que semgrep: es un check requerido de `main` y
+          # `pnpm dlx` sin version se baja lo que haya ese dia.
+          pnpm dlx license-checker-rseidelsohn@5.0.1 --failOn 'GPL;AGPL;LGPL;SSPL' \
             --excludePrivatePackages \
             --production
         # Sin `|| echo` y sin `continue-on-error`. Eran tres redes sobre el mismo

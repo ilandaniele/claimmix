@@ -40,6 +40,27 @@ const shouldSkip = !process.env.TEST_BASE_URL && !process.env.INTEGRATION_ENABLE
  * Lo que sí funciona es no compartir cupo: cada prueba que toca el techo usa una
  * clave propia. Ver AC3.
  */
+/**
+ * Una IP distinta por pedido, para que cada prueba tenga su propio cupo.
+ *
+ * El techo de intentos se llavea por (IP, dirección) y los contadores viven
+ * en la base, que es compartida entre corridas. Estas pruebas usaban
+ * TEST_EMAIL y la IP que presenta el runner, así que dos corridas al mismo
+ * tiempo —dos PR, o un PR y main— se comían el cupo entre ellas y la
+ * afirmación de 401 volvía 429. Pasó el 2026-09-09, y no era un test roto:
+ * era otro test.
+ *
+ * El encabezado de este archivo ya decía la regla —«cada prueba que toca el
+ * techo usa una clave propia»— y estaba aplicada en AC3, la del limitador,
+ * con una DIRECCIÓN propia. Faltaba del otro lado de la llave.
+ *
+ * Serializar las corridas en CI no sirve como alternativa: GitHub guarda una
+ * sola tarea pendiente por grupo de concurrencia y cancela la anterior, así
+ * que con tres PR abiertos los del medio mueren. Se probó y se revirtió.
+ */
+let siguienteIp = 0;
+const ipPropia = () => `10.9.${process.pid % 250}.${(siguienteIp += 1) % 250}`;
+
 describe.skipIf(shouldSkip)("POST /api/auth/sign-in", () => {
 
   it("AC1: returns 200 with user data on valid credentials", async () => {
@@ -51,7 +72,9 @@ describe.skipIf(shouldSkip)("POST /api/auth/sign-in", () => {
         // —es su defensa contra CSRF— y sin ella responde
         // MISSING_OR_NULL_ORIGIN. Mandarla no debilita nada: es lo que hace
         // el navegador de un analista.
-        Origin: BASE_URL },
+        Origin: BASE_URL,
+        // Cupo propio: ver `ipPropia` arriba.
+        "X-Forwarded-For": ipPropia() },
       body: JSON.stringify({ email: TEST_EMAIL, password: TEST_PASSWORD }),
     });
 
@@ -76,7 +99,9 @@ describe.skipIf(shouldSkip)("POST /api/auth/sign-in", () => {
         // —es su defensa contra CSRF— y sin ella responde
         // MISSING_OR_NULL_ORIGIN. Mandarla no debilita nada: es lo que hace
         // el navegador de un analista.
-        Origin: BASE_URL },
+        Origin: BASE_URL,
+        // Cupo propio: ver `ipPropia` arriba.
+        "X-Forwarded-For": ipPropia() },
       body: JSON.stringify({ email: TEST_EMAIL, password: "wrongpassword!" }),
     });
 
@@ -98,7 +123,9 @@ describe.skipIf(shouldSkip)("POST /api/auth/sign-in", () => {
         // —es su defensa contra CSRF— y sin ella responde
         // MISSING_OR_NULL_ORIGIN. Mandarla no debilita nada: es lo que hace
         // el navegador de un analista.
-        Origin: BASE_URL },
+        Origin: BASE_URL,
+        // Cupo propio: ver `ipPropia` arriba.
+        "X-Forwarded-For": ipPropia() },
       body: JSON.stringify({ email: "not-an-email", password: "somepassword" }),
     });
 
@@ -116,7 +143,9 @@ describe.skipIf(shouldSkip)("POST /api/auth/sign-in", () => {
         // —es su defensa contra CSRF— y sin ella responde
         // MISSING_OR_NULL_ORIGIN. Mandarla no debilita nada: es lo que hace
         // el navegador de un analista.
-        Origin: BASE_URL },
+        Origin: BASE_URL,
+        // Cupo propio: ver `ipPropia` arriba.
+        "X-Forwarded-For": ipPropia() },
       body: JSON.stringify({ email: TEST_EMAIL }),
     });
 
@@ -202,7 +231,9 @@ describe.skipIf(shouldSkip)("GET /api/cases (auth guard — AC2)", () => {
         // —es su defensa contra CSRF— y sin ella responde
         // MISSING_OR_NULL_ORIGIN. Mandarla no debilita nada: es lo que hace
         // el navegador de un analista.
-        Origin: BASE_URL },
+        Origin: BASE_URL,
+        // Cupo propio: ver `ipPropia` arriba.
+        "X-Forwarded-For": ipPropia() },
       // No cookie header — unauthenticated request.
     });
 
@@ -226,7 +257,9 @@ describe.skipIf(shouldSkip)("POST /api/auth/sign-out", () => {
         // —es su defensa contra CSRF— y sin ella responde
         // MISSING_OR_NULL_ORIGIN. Mandarla no debilita nada: es lo que hace
         // el navegador de un analista.
-        Origin: BASE_URL },
+        Origin: BASE_URL,
+        // Cupo propio: ver `ipPropia` arriba.
+        "X-Forwarded-For": ipPropia() },
     });
 
     // sign-out is in PUBLIC_PREFIXES in proxy.ts — returns 401 from route handler

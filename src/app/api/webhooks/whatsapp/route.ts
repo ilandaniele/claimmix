@@ -28,6 +28,7 @@ import { z } from "zod";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 import { createWhatsAppIntake, runIntakeAgent } from "@/server/agents/intake-agent";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
+import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
 import {
   parseCloudApiMessages,
   resolveWebhookChallenge,
@@ -174,6 +175,36 @@ function scheduleAgent(
     } catch (err) {
       const name = err instanceof Error ? err.name : "UnknownError";
       console.error("[webhooks/whatsapp] barrido error:", name); // crew-debug-ok
+    }
+
+    /*
+     * Y lo que quedó marcado como pendiente y sin hacer.
+     *
+     * El cron nocturno también lo barre, pero en Hobby corre una vez por día y
+     * el de GitHub Actions dispara siete veces de noventa y seis. El tráfico de
+     * verdad es el único planificador confiable que hay.
+     *
+     * Con tope de DOS, que es lo que distingue esto del cron: cada retomado es
+     * una extracción entera, y esto corre en el `after()` de un webhook que
+     * comparte los 60 s de la función con la corrida del mensaje que acaba de
+     * llegar. Ese mensaje va primero.
+     */
+    try {
+      const retomados = await retomarExtraccionesPendientes({ tenantId, limit: 2 });
+      if (retomados.retomados > 0) {
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            service: "claimmix",
+            msg: "webhook.retomo_pendientes",
+            cuantos: retomados.retomados,
+            nota: "Los encontró el tráfico, no el cron.",
+          })
+        );
+      }
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "UnknownError";
+      console.error("[webhooks/whatsapp] retomar pendientes error:", name); // crew-debug-ok
     }
   });
 }

@@ -70,6 +70,17 @@ vi.mock("@/lib/db", () => ({
   tables: {},
 }));
 
+/*
+ * La sesión, que ahora la ruta mira antes que nada.
+ *
+ * `entrar()` la pide una sola vez y con ella lanza en paralelo la fila de
+ * `users` y el cupo. La lectura de la sesión salió de adentro de
+ * `require-role`, así que su mock ya no la arrastra.
+ */
+vi.mock("@/lib/auth/session", () => ({
+  getSessionContext: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
+}));
+
 vi.mock("@/lib/auth/require-role", () => ({
   requireRole: mockRequireRole,
   ALL_ROLES: ["owner", "admin", "specialist", "analyst", "viewer"],

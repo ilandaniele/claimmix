@@ -15,7 +15,8 @@ import { and, eq } from "drizzle-orm";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 
-import { requireRole } from "@/lib/auth/require-role";
+import { type RoleContext } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, extractedFields } from "@/lib/db/schema";
@@ -25,7 +26,7 @@ import type { CoreSyncPayload } from "@/server/core-sync/client";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
-import { rateLimit, RATE_LIMIT_CONFIGS, buildUserKey } from "@/lib/rate-limit/index";
+import { RATE_LIMIT_CONFIGS, type RateLimitResult } from "@/lib/rate-limit/index";
 
 const REQUIRED_STATUS = "listo_para_core";
 const SUCCESS_STATUS = "enviado_a_core" as const;
@@ -40,9 +41,10 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   // ── 1. Auth — admin or specialist only ───────────────────────────────────────
-  let ctx: Awaited<ReturnType<typeof requireRole>>;
+  let ctx: RoleContext;
+  let rl: RateLimitResult;
   try {
-    ctx = await requireRole("admin", "specialist");
+    ({ ctx, rl } = await entrar("sync-to-core", RATE_LIMIT_CONFIGS.SYNC_TO_CORE, "admin", "specialist"));
   } catch (e) {
     if (e instanceof AppError) return err(e);
     throw e;
@@ -52,9 +54,7 @@ export async function POST(
   // Este contexto es lo único que le dice de quién son los datos.
   const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
-  // ── 2. Rate limit ─────────────────────────────────────────────────────────────
-  const rlKey = buildUserKey(userRow.id, "sync-to-core");
-  const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.SYNC_TO_CORE);
+
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes. Esperá un momento."));
   }

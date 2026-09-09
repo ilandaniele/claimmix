@@ -10,14 +10,14 @@
 import "server-only";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
-import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
-  rateLimit,
   RATE_LIMIT_CONFIGS,
-  buildUserKey,
+  type RateLimitResult,
   getClientIp,
 } from "@/lib/rate-limit/index";
 import { checkBudget } from "@/server/ai/budget";
@@ -33,16 +33,18 @@ const DemoAnalyzeSchema = z.object({
 export async function POST(request: NextRequest): Promise<Response> {
   // ── 1. Auth ──────────────────────────────────────────────────────────────────
   let ctx: RoleContext;
+  let rlResult: RateLimitResult;
   try {
-    ctx = await requireRole(...ALL_ROLES);
+    ({ ctx, rl: rlResult } = await entrar(
+      "demo-analyze",
+      RATE_LIMIT_CONFIGS.INTAKE_SIMULATE,
+      ...ALL_ROLES
+    ));
   } catch (e) {
     return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));
   }
   const { user, userRow } = ctx;
 
-  // ── 2. Rate limit ─────────────────────────────────────────────────────────────
-  const rlKey = buildUserKey(user.id, "demo-analyze");
-  const rlResult = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.INTAKE_SIMULATE);
   if (!rlResult.allowed) {
     return new Response(
       JSON.stringify({

@@ -14,7 +14,8 @@
 import { type NextRequest, after } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -27,8 +28,8 @@ import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
-  rateLimit,
   getClientIp,
+  type RateLimitResult,
 } from "@/lib/rate-limit/index";
 
 const ParamsSchema = z.object({
@@ -49,10 +50,18 @@ export async function POST(
   }
   const caseId = paramsParsed.data.id;
 
-  // ── Auth ─────────────────────────────────────────────────────────────────────
+  // ── Quién sos, qué podés y cuánto venís pidiendo — en un solo viaje ─────────
+  //
+  // El cupo de acá es POR CASO, no por usuario: cinco re-análisis por hora sobre
+  // el mismo siniestro. Por eso la clave se arma a mano y no con `buildUserKey`.
   let ctx: RoleContext;
+  let rlResult: RateLimitResult;
   try {
-    ctx = await requireRole(...ALL_ROLES);
+    ({ ctx, rl: rlResult } = await entrar(
+      (userId) => `re-analyze:${caseId}:${userId}`,
+      RE_ANALYZE_LIMIT,
+      ...ALL_ROLES
+    ));
   } catch {
     return err(new AppError("MISSING_SESSION"));
   }
@@ -66,10 +75,8 @@ export async function POST(
     return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
   }
 
-  // ── Rate limit per case ───────────────────────────────────────────────────────
   const ip = getClientIp(request);
-  const rlKey = `re-analyze:${caseId}:${userRow.id}`;
-  const rlResult = await rateLimit(rlKey, RE_ANALYZE_LIMIT);
+
   if (!rlResult.allowed) {
     return new Response(
       JSON.stringify({

@@ -16,26 +16,23 @@
 import { type NextRequest } from "next/server";
 
 import { ok, err } from "@/lib/api/respond";
-import { requireRole, CUSTOMER_PII_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { CUSTOMER_PII_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { AppError } from "@/lib/errors";
-import { rateLimit, RATE_LIMIT_CONFIGS, buildUserKey } from "@/lib/rate-limit/index";
+import { RATE_LIMIT_CONFIGS, type RateLimitResult } from "@/lib/rate-limit/index";
 import { PolicyQuerySchema, listPolicies } from "@/server/policies/list";
 
 export async function GET(request: NextRequest) {
   // ── 1. Sesión y rol ───────────────────────────────────────────────────────
   let ctx: RoleContext;
+  let rl: RateLimitResult;
   try {
-    ctx = await requireRole(...CUSTOMER_PII_ROLES);
+    ({ ctx, rl } = await entrar("policies-list", RATE_LIMIT_CONFIGS.CASES_API, ...CUSTOMER_PII_ROLES));
   } catch (e) {
     return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));
   }
-  const { user, userRow } = ctx;
+  const { userRow } = ctx;
 
-  // ── 2. Límite de tráfico ──────────────────────────────────────────────────
-  const rl = await rateLimit(
-    buildUserKey(user.id, "policies-list"),
-    RATE_LIMIT_CONFIGS.CASES_API
-  );
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes. Esperá un momento."));
   }

@@ -21,7 +21,8 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { requireRole, TRAINING_APPROVER_ROLES } from "@/lib/auth/require-role";
+import { TRAINING_APPROVER_ROLES } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -31,9 +32,7 @@ import { AppError } from "@/lib/errors";
 import { approveTrainingExample } from "@/server/training/examples";
 import { getLatestAgentRun } from "@/server/training/agent-runs";
 import {
-  rateLimit,
   RATE_LIMIT_CONFIGS,
-  buildUserKey,
 } from "@/lib/rate-limit/index";
 
 const ParamsSchema = z.object({ id: z.string().uuid() });
@@ -48,16 +47,16 @@ export async function POST(
 ) {
   try {
     // ── 1. Auth + role (only admin/specialist/owner can confirm training) ───
-    const { user, userRow } = await requireRole(...TRAINING_APPROVER_ROLES);
+    const { ctx, rl } = await entrar(
+      "confirm-training",
+      RATE_LIMIT_CONFIGS.CASES_API,
+      ...TRAINING_APPROVER_ROLES
+    );
+    const { user, userRow } = ctx;
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
-    // ── 2. Rate limit ────────────────────────────────────────────────────────
-    const rl = await rateLimit(
-      buildUserKey(user.id, "confirm-training"),
-      RATE_LIMIT_CONFIGS.CASES_API
-    );
     if (!rl.allowed) return err(new AppError("RATE_LIMITED"));
 
     // ── 3. Params + body ─────────────────────────────────────────────────────

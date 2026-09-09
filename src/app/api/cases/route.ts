@@ -14,7 +14,8 @@
  */
 
 import { type NextRequest } from "next/server";
-import { requireRole, ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { CaseQuerySchema } from "@/lib/schemas/cases";
 import { listCases } from "@/server/cases/list";
 import { ok, err } from "@/lib/api/respond";
@@ -27,26 +28,25 @@ const BorradoSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(100),
 });
 import {
-  rateLimit,
   RATE_LIMIT_CONFIGS,
-  buildUserKey,
   getClientIp,
+  type RateLimitResult,
 } from "@/lib/rate-limit/index";
 
 export async function GET(request: NextRequest) {
-  // ── 1. Auth — Better Auth session + public.users row ──────────────────────
+  // ── 1. Quién sos, qué podés y cuánto venís pidiendo — en un solo viaje ────
+  //
+  // La bandeja sondea esta ruta cada 5 a 30 segundos por pestaña abierta, así
+  // que es la que más corre del producto. Ver `lib/api/entrada.ts`.
   let ctx: RoleContext;
+  let rl: RateLimitResult;
   try {
-    ctx = await requireRole(...ALL_ROLES);
+    ({ ctx, rl } = await entrar("cases-list", RATE_LIMIT_CONFIGS.CASES_API, ...ALL_ROLES));
   } catch (e) {
     return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));
   }
-  const { user, userRow } = ctx;
-
-  // ── 2. Rate limit — 100 req/min per user ──────────────────────────────────
+  const { userRow } = ctx;
   const ip = getClientIp(request);
-  const rlKey = buildUserKey(user.id, "cases-list");
-  const rl = await rateLimit(rlKey, RATE_LIMIT_CONFIGS.CASES_API);
 
   if (!rl.allowed) {
     return err(
@@ -122,8 +122,13 @@ export async function GET(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   let rol: RoleContext;
+  let rl: RateLimitResult;
   try {
-    rol = await requireRole(...ALL_ROLES);
+    ({ ctx: rol, rl } = await entrar(
+      "cases-delete",
+      RATE_LIMIT_CONFIGS.CASES_API,
+      ...ALL_ROLES
+    ));
   } catch (e) {
     return err(e);
   }
@@ -133,10 +138,6 @@ export async function DELETE(request: NextRequest) {
     return err(new AppError("FORBIDDEN_ROLE", "Tu rol es de solo lectura."));
   }
 
-  const rl = await rateLimit(
-    buildUserKey(userRow.id, "cases-delete"),
-    RATE_LIMIT_CONFIGS.CASES_API
-  );
   if (!rl.allowed) {
     return err(new AppError("RATE_LIMITED", "Demasiadas solicitudes."));
   }

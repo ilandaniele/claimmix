@@ -52,13 +52,26 @@ name: Barrer trabados
 
 on:
   schedule:
-    # Cada quince minutos. El barredor escala lo que lleva más de veinte minutos
-    # en `procesando` o en `recibido` —el segundo es donde entran las denuncias
-    # de verdad, y hasta el 2026-09-08 el barredor no lo miraba: corría, decía
-    # `reaped: 0` y quedaba en verde mientras un caso real de hacía más de un
-    # día seguía sin contestar— así que un caso trabado se ve en menos de media
-    # hora en
-    # vez de al otro día.
+    # El barredor escala lo que lleva más de veinte minutos en `procesando` o en
+    # `recibido` —el segundo es donde entran las denuncias de verdad, y hasta el
+    # 2026-09-08 el barredor no lo miraba: corría, decía `reaped: 0` y quedaba
+    # en verde mientras un caso real de hacía más de un día seguía sin
+    # contestar—.
+    #
+    # ── Este cron NO corre cada quince minutos, y decía que sí ────────────────
+    #
+    # Pedía `*/15`, o sea 96 corridas por día. Medido el 2026-09-08 en este
+    # repositorio: disparó SIETE, con huecos de 5h02m (01:27 → 06:29) y 5h13m
+    # (06:29 → 11:42). GitHub no garantiza los cron programados y los demora o
+    # los saltea bajo carga, más todavía en repositorios públicos. El comentario
+    # que había acá prometía «un caso trabado se ve en menos de media hora», y
+    # eso no era cierto ningún día.
+    #
+    # Se deja `*/15` igual —pedir más seguido no cuesta nada y GitHub da lo que
+    # puede— pero la garantía NO es este cron: es que el barrido corre también
+    # cuando entra un WhatsApp (`api/webhooks/whatsapp`), que es tráfico real y
+    # ocurre justo cuando hay algo que barrer. Este workflow es el respaldo para
+    # las horas sin tráfico.
     - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:

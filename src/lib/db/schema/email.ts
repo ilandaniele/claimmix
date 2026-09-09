@@ -9,7 +9,7 @@
  * names to preserve existing JSON response shapes.
  */
 import { sql } from "drizzle-orm";
-import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { tenants, users } from "./core";
 
 export const gmailPollState = pgTable("gmail_poll_state", {
@@ -18,6 +18,16 @@ export const gmailPollState = pgTable("gmail_poll_state", {
   history_id: text("history_id").notNull().default("1"),
   last_polled_at: timestamp("last_polled_at", { withTimezone: true, mode: "string" }),
   last_error: text("last_error"),
+  /**
+   * Los mensajes que fallaron y hay que volver a leer: [{id, intentos, visto}].
+   *
+   * La marca de agua avanza igual —si se frenara, un mensaje roto bloquearía la
+   * casilla entera— así que esto es lo único que impide perderlos. Migración 0026.
+   */
+  mensajes_pendientes: jsonb("mensajes_pendientes")
+    .$type<Array<{ id: string; intentos: number; visto: string }>>()
+    .notNull()
+    .default([]),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),

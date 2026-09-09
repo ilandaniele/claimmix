@@ -202,7 +202,11 @@ function renderConflict(data: Record<string, unknown>): string {
 
   const lineas = conValor.map((c) => {
     const label = labelForField(c.fieldKey).label;
-    return `${label}: vos nos decís "${c.proposed}" y en nuestro sistema figura "${c.stored}".`;
+    // Enmascarado, igual que lo que entra al prompt: éste es el texto que sale
+    // por WhatsApp cuando el redactor no está, y salía con el DNI entero.
+    const propuesto = enmascarar(c.fieldKey, c.proposed);
+    const guardado = enmascarar(c.fieldKey, c.stored);
+    return `${label}: vos nos decís "${propuesto}" y en nuestro sistema figura "${guardado}".`;
   });
 
   const encabezado =
@@ -366,16 +370,28 @@ export function nombresEnElLibro(template: EmailTemplate): string[] {
  * guardado no es un conflicto — es un dato que falta — y la guarda de
  * `composeReply` no tendría con qué comparar.
  */
+/**
+ * Un valor sensible, como se puede escribir.
+ *
+ * Vivía adentro de `conflictosParaElRedactor`, o sea que sólo se aplicaba a lo
+ * que entraba al prompt del modelo. `renderConflict` —el texto que se manda tal
+ * cual cuando el redactor está apagado, cuando las guardas lo rechazan o cuando
+ * tira excepción— interpolaba los valores en crudo, así que el DNI entero salía
+ * por WhatsApp y quedaba visible en la notificación de la pantalla bloqueada.
+ *
+ * Es la misma regla en los dos lados, así que es una sola función.
+ */
+function enmascarar(fieldKey: string, valor: string): string {
+  return fieldKey === "dni"
+    ? maskDni(valor)
+    : fieldKey === "policy_number"
+      ? maskPolicyNumber(valor)
+      : valor;
+}
+
 function conflictosParaElRedactor(
   data: Record<string, unknown>
 ): Array<{ fieldKey: string; proposed: string; stored: string }> {
-  const enmascarar = (fieldKey: string, valor: string): string =>
-    fieldKey === "dni"
-      ? maskDni(valor)
-      : fieldKey === "policy_number"
-        ? maskPolicyNumber(valor)
-        : valor;
-
   return camposDeConflicto(data)
     .filter((c) => c.proposed && c.stored)
     .map((c) => ({

@@ -78,7 +78,7 @@
     "zod": "^3.25.23"
   },
   "devDependencies": {
-    "@playwright/test": "^1.52.0",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
@@ -95,11 +95,11 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.7",
     "jsdom": "^26.1.0",
-    "pg": "^8.21.0",
+    "pg": "^8.23.0",
     "prettier": "^3.5.3",
     "tailwindcss": "^4",
     "tsx": "^4.22.4",
-    "typescript": "^5",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },
   "packageManager": "pnpm@9.15.9",

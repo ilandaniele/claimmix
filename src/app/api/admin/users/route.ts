@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
     // Better Auth existe y no sirve para nada: es peor que no haberla creado,
     // porque el admin cree que la persona ya tiene acceso.
     if (perfil.length === 0) {
-      logger.error({}, "admin_users_post.la_cuenta_se_creo_y_el");
+      logger.error({}, "admin_users.perfil_no_quedo");
       return err(
         new AppError(
           "INTERNAL_ERROR",

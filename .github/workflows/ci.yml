@@ -297,9 +297,15 @@ jobs:
       # existe para hacer visible un descuido, no para taparlo.
       - name: El ensayo está al día con las migraciones
         if: env.HAY_ENSAYO != ''
-        run: node scripts/migrate.mjs --url "$DATABASE_URL" --exigir-al-dia
+        # `ENSAYO_URL` y no `DATABASE_URL`: este paso no configura la
+        # aplicación, le apunta una base a un script. Con el nombre de siempre,
+        # la invariante «los jobs de CI conocen los dos roles» lo marca —y hace
+        # bien: ahí ese nombre significa «acá corre algo que habla con la base
+        # como la app», y entonces le falta el rol restringido. `migrate.mjs`
+        # corre DDL con el rol dueño y no pasa por `enTenant` ni una vez.
+        run: node scripts/migrate.mjs --url "$ENSAYO_URL" --exigir-al-dia
         env:
-          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          ENSAYO_URL: ${{ secrets.STAGING_DATABASE_URL }}
 
       - name: Sembrar la base del ensayo
         if: env.HAY_ENSAYO != ''
@@ -538,10 +544,12 @@ jobs:
       - name: El ensayo de los e2e está al día con las migraciones
         run: |
           if [ "${{ secrets.E2E_DATABASE_URL }}" != "" ]; then
-            node scripts/migrate.mjs --url "$DATABASE_URL" --exigir-al-dia
+            node scripts/migrate.mjs --url "$ENSAYO_URL" --exigir-al-dia
           fi
+        # Ver el paso equivalente de `integration-tests` para por qué el nombre
+        # no es `DATABASE_URL`.
         env:
-          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          ENSAYO_URL: ${{ secrets.E2E_DATABASE_URL }}
 
       - name: Run E2E tests
         run: |

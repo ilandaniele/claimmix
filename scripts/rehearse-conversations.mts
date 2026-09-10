@@ -875,22 +875,37 @@ function sinEtiquetas(texto: string): string {
   return antes;
 }
 
+/**
+ * Las entidades se decodifican ANTES de sacar las etiquetas, no después.
+ *
+ * Estaban al final, y esa es la tercera forma del mismo error: `&lt;script&gt;`
+ * atraviesa entero el borrado de etiquetas —no hay ninguna— y recién ahí se
+ * convierte en `<script>`. El paso que limpia corre antes que el paso que
+ * ensucia, así que limpiar no sirve de nada.
+ *
+ * `&amp;` va última entre las entidades para que `&amp;lt;` termine en `&lt;`
+ * y no en `<`.
+ */
+function sinEntidades(texto: string): string {
+  return texto
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
 function readable(body: string): string {
-  if (!/<[a-z!]/i.test(body)) return body;
+  if (!/<[a-z!]/i.test(body) && !/&[a-z#]/i.test(body)) return body;
   return sinEtiquetas(
-    body
+    sinEntidades(body)
       .replace(/<head[\s\S]*?<\/head[^>]*>/gi, "")
       .replace(/<(script|style)[\s\S]*?<\/\1[^>]*>/gi, "")
       .replace(/<\/(p|div|h1|h2|h3|li|tr)>/gi, "\n")
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<li[^>]*>/gi, "• ")
   )
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&")
     .split("\n")
     .map((line) => line.trim())
     .filter((line, i, all) => line.length > 0 || (i > 0 && all[i - 1].length > 0))

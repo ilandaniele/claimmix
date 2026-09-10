@@ -158,17 +158,17 @@ function MessageCard({ message }: MessageCardProps) {
               <span className="text-sm font-medium text-slate-800 truncate">
                 {message.from_addr ?? "—"}
               </span>
+              {/*
+                slate-500, no 400: esto es TEXTO, no un icono.
+
+                Se salvó del barrido de contraste porque lleva `flex-shrink-0`,
+                que era uno de los marcadores con los que se reconocía a los
+                iconos. Pero es la hora de cada mensaje del hilo, y 400 sobre
+                blanco da 2,56:1 contra el 4,5:1 que pide WCAG 1.4.3 para texto
+                normal.
+              */}
               <time
                 dateTime={message.received_at}
-                {/*
-                  slate-500, no 400: esto es TEXTO, no un icono.
-
-                  Se salvó del barrido de contraste porque lleva
-                  `flex-shrink-0`, que era uno de los marcadores con los que se
-                  reconocía a los iconos. Pero es la hora de cada mensaje del
-                  hilo, y 400 sobre blanco da 2,56:1 contra el 4,5:1 que pide
-                  WCAG 1.4.3 para texto normal.
-                */}
                 className="text-xs text-slate-500 flex-shrink-0"
                 title={new Date(message.received_at).toLocaleString(LOCALE)}
               >

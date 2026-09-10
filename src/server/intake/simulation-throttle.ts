@@ -334,6 +334,9 @@ export async function waitForSimulationTurn(input: {
   const pollMs = getSimulateWorkerTurnPollMs();
 
   let blockers = await getEarlierPendingSimulationCount(input);
+  /** Si hubo cola de verdad. Ver el gap, abajo. */
+  let hubo = blockers > 0;
+
   while (blockers > 0) {
     const elapsed = Date.now() - startedAt;
     if (maxWaitMs <= 0 || elapsed >= maxWaitMs) {
@@ -342,10 +345,26 @@ export async function waitForSimulationTurn(input: {
 
     await sleep(Math.min(Math.max(pollMs, 1), maxWaitMs - elapsed));
     blockers = await getEarlierPendingSimulationCount(input);
+    hubo = true;
   }
 
+  /*
+   * El mismo respiro condicional que el del correo, por el mismo motivo.
+   *
+   * Acá corría SIEMPRE: un segundo y medio de sueño por cada caso simulado,
+   * incluso con la cola vacía y el bucle sin dar una vuelta. Y no es un caso
+   * raro: `batch-simulate` procesa los casos EN SERIE y ya los espacia con su
+   * propio `delay_ms`, así que el primero de cada tanda —y todos, si van lo
+   * bastante separados— encontraban cero bloqueadores y dormían igual. Con los
+   * 108 escenarios eran ~162 s de sueño sobre una ruta que dura 60.
+   *
+   * Está para no pegarle a Gemini dos veces seguidas cuando venimos de una
+   * cola, no para espaciar contra el vacío. El ritmo global contra el proveedor
+   * ya lo cuida `GEMINI_MIN_REQUEST_INTERVAL_MS`, en el extractor, que sí corre
+   * siempre.
+   */
   const minGapMs = getSimulateWorkerMinGapMs();
-  if (minGapMs > 0) await sleep(minGapMs);
+  if (hubo && minGapMs > 0) await sleep(minGapMs);
 
   return {
     waitedMs: Date.now() - startedAt,

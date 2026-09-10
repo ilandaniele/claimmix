@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef } from "react";
 import { useFilterParam } from "./useFilterParam";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { CaseStatus } from "@/lib/schemas/cases";
+import { useTeclasDePestanas } from "@/lib/ui/pestanas";
 
 /**
  * El id del contenedor de la lista, que es el panel de estas pestañas.
@@ -80,30 +81,21 @@ export function FilterTabs({ counts, activeStatus }: FilterTabsProps) {
   );
 
   /*
-   * Las flechas mueven el foco Y eligen. Se busca el botón por posición en el
-   * DOM y no por ref por pestaña: son seis hermanos en un contenedor, y un
-   * arreglo de refs para eso es más máquina de la que hace falta.
+   * Las teclas viven en `@/lib/ui/pestanas`, compartidas con la consola del
+   * agente, que tenía siete botones diciendo ser pestañas sin serlo. Estaban
+   * escritas acá y copiarlas allá es cómo terminan dos tablist con teclados
+   * distintos.
    */
-  const alApretarTecla = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      const ultima = TABS.length - 1;
-      const desde = indiceActivo === -1 ? 0 : indiceActivo;
-
-      let destino: number | null = null;
-      if (e.key === "ArrowRight") destino = desde === ultima ? 0 : desde + 1;
-      else if (e.key === "ArrowLeft") destino = desde === 0 ? ultima : desde - 1;
-      else if (e.key === "Home") destino = 0;
-      else if (e.key === "End") destino = ultima;
-      if (destino === null) return;
-
-      e.preventDefault();
-      handleTabClick(TABS[destino].key);
-      listaRef.current
-        ?.querySelectorAll<HTMLElement>('[role="tab"]')
-        [destino]?.focus();
-    },
-    [TABS, indiceActivo, handleTabClick]
+  const elegir = useCallback(
+    (i: number) => handleTabClick(TABS[i]!.key),
+    [TABS, handleTabClick]
   );
+  const alApretarTecla = useTeclasDePestanas({
+    cantidad: TABS.length,
+    indiceActivo,
+    elegir,
+    lista: listaRef,
+  });
 
   const countMap = new Map(counts.map((c) => [c.status, c.count]));
 

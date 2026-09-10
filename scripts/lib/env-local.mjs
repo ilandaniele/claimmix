@@ -63,12 +63,21 @@ export function leerDeEnvLocal(nombre, archivo = "./.env.local") {
  * Conserva el final de línea del archivo. No imprime el valor: esto se usa para
  * guardar contraseñas.
  *
+ * El valor tampoco puede traer un salto de línea. Los dos que llaman guardan
+ * algo que no armaron ellos —una cadena de conexión con una contraseña
+ * generada, y la clave que devuelve la API de Neon— y `nombre=valor` con un
+ * salto adentro no escribe una variable: escribe dos. La segunda la pone quien
+ * haya elegido el valor.
+ *
  * @param {string} nombre
  * @param {string} valor
  * @param {string} [archivo]
  */
 export function escribirEnEnvLocal(nombre, valor, archivo = "./.env.local") {
   exigirNombre(nombre);
+  if (/[\r\n]/.test(valor)) {
+    throw new Error(`El valor de ${nombre} trae un salto de línea: serían dos variables.`);
+  }
 
   let contenido = "";
   try {

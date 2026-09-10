@@ -618,7 +618,14 @@ export async function orchestratePostExtraction(
   // Same for a file that just arrived. They went and photographed something;
   // getting nothing back reads as nobody looking, whether or not we managed to
   // recognise what it was.
-  const somethingArrived = await filesArrivedSinceWeLastSpoke(caseId, tenantId);
+  // Una sola lectura de «cuándo hablamos» para las dos preguntas de abajo: no
+  // hay ninguna escritura entre ellas. Ver `cuandoHablamosPorUltimaVez`.
+  const hablamos = await cuandoHablamosPorUltimaVez(caseId, tenantId);
+  const somethingArrived = await filesArrivedSinceWeLastSpoke(
+    caseId,
+    tenantId,
+    hablamos
+  );
 
   // La decisión se toma en el núcleo, que es puro y está probado con siete
   // booleanos: src/core/case/reply-decision.ts. Acá sólo se juntan las señales.
@@ -643,7 +650,7 @@ export async function orchestratePostExtraction(
   // perder eso: es una ida a la base por cada caso que no está en espera.
   const aprendimosAlgo =
     askOnHold && !agentIsWaiting && !isHighSeverity
-      ? await factsLearnedSinceWeLastSpoke(caseId, tenantId)
+      ? await factsLearnedSinceWeLastSpoke(caseId, tenantId, hablamos)
       : false;
 
   const decision = queHacer({ ...señalesBase, aprendimosAlgo });
@@ -1591,15 +1598,37 @@ async function lastAskedKeys(caseId: string, tenantId: string): Promise<string[]
  * question is only ever "since we last spoke", and both timestamps already
  * exist.
  */
-async function filesArrivedSinceWeLastSpoke(
+/**
+ * Cuándo salió lo último que dijimos. `null` si nunca dijimos nada.
+ *
+ * Las dos preguntas de «¿pasó algo desde que hablamos?» —un archivo que llegó
+ * y un dato que aprendimos— leían esta misma fila por separado, una detrás de
+ * la otra y sin nada que escriba en el medio. Es la ÚNICA de las lecturas de
+ * `outbound_messages` de este archivo que sobra.
+ *
+ * Las otras no: `hasPriorOutbound` se pregunta antes y después de mandar, y
+ * tiene que dar distinto —si diera lo de antes, el cuarto mensaje volvería a
+ * abrir con «gracias por contactarnos», que es el bug que su comentario
+ * describe—. Ahí la repetición no es un desperdicio: es el punto.
+ */
+async function cuandoHablamosPorUltimaVez(
   caseId: string,
   tenantId: string
-): Promise<boolean> {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
+): Promise<string | null> {
+  /*
+   * Atrapa acá, y no en quien llama.
+   *
+   * Esta lectura estaba adentro de las dos funciones que la usaban, cada una con
+   * su `catch`. Al sacarla afuera quedó por un momento sin ninguno, y un test la
+   * agarró: un hipo de la base dejaba de devolver «no sabemos» y pasaba a tirar
+   * abajo la orquestación entera.
+   *
+   * `null` es lo mismo que decía antes: las dos preguntas de «¿pasó algo desde
+   * que hablamos?» contestan que no, y el resto sigue.
+   */
   try {
-    const spoke = firstRow(
-      await enTenant(tenantCtx, (db) =>
+    const fila = firstRow(
+      await enTenant({ tenantId }, (db) =>
         db
           .select({ created_at: outboundMessages.created_at })
           .from(outboundMessages)
@@ -1613,7 +1642,25 @@ async function filesArrivedSinceWeLastSpoke(
           .limit(1)
       )
     );
-    if (!spoke?.created_at) return false;
+    return fila?.created_at ?? null;
+  } catch (err) {
+    logger.error(
+      { code: errCode(err) },
+      "orchestrate.ultimo_saliente_fallo"
+    );
+    return null;
+  }
+}
+
+async function filesArrivedSinceWeLastSpoke(
+  caseId: string,
+  tenantId: string,
+  hablamos: string | null
+): Promise<boolean> {
+  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
+  try {
+    if (!hablamos) return false;
 
     const since = firstRow(
       await enTenant(tenantCtx, (db) =>
@@ -1623,7 +1670,7 @@ async function filesArrivedSinceWeLastSpoke(
           .where(
             and(
               eq(claimAttachments.case_id, caseId),
-              gt(claimAttachments.created_at, spoke.created_at)
+              gt(claimAttachments.created_at, hablamos)
             )
           )
           .limit(1)
@@ -1654,27 +1701,13 @@ async function filesArrivedSinceWeLastSpoke(
  */
 async function factsLearnedSinceWeLastSpoke(
   caseId: string,
-  tenantId: string
+  tenantId: string,
+  hablamos: string | null
 ): Promise<boolean> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
-    const spoke = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select({ created_at: outboundMessages.created_at })
-          .from(outboundMessages)
-          .where(
-            and(
-              eq(outboundMessages.case_id, caseId),
-              inArray(outboundMessages.status, ["sent", "skipped_simulated"])
-            )
-          )
-          .orderBy(desc(outboundMessages.created_at))
-          .limit(1)
-      )
-    );
-    if (!spoke?.created_at) return false;
+    if (!hablamos) return false;
 
     const since = firstRow(
       await enTenant(tenantCtx, (db) =>
@@ -1684,7 +1717,7 @@ async function factsLearnedSinceWeLastSpoke(
           .where(
             and(
               eq(extractedFields.case_id, caseId),
-              gt(extractedFields.extracted_at, spoke.created_at)
+              gt(extractedFields.extracted_at, hablamos)
             )
           )
           .limit(1)

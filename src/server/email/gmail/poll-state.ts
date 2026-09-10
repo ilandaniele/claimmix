@@ -20,6 +20,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { gmailPollState } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
+import { logger } from "@/lib/observability/logger";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -199,15 +200,10 @@ export async function guardarPendientes(
       .where(eq(gmailPollState.id, id));
   } catch (err) {
     const code = (err as { code?: string })?.code ?? "unknown";
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "poll_state.no_se_pudieron_guardar_los_pendientes",
+    logger.error({
         error_code: code,
         cuantos: pendientes.length,
-      })
-    );
+      }, "poll_state.no_se_pudieron_guardar_los_pendientes");
   }
 }
 
@@ -242,7 +238,7 @@ export async function recordPollError(
   } catch (err) {
     // Non-fatal: log the code but do not throw — the cron should continue.
     const code = (err as { code?: string })?.code ?? "unknown";
-    console.error("[poll-state] Failed to record poll error:", code); // crew-debug-ok
+    logger.error({ code }, "poll_state.failed_to_record_poll_error");
   }
 }
 

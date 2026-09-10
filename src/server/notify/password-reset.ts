@@ -31,6 +31,7 @@ import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
 import { isSendSuccess } from "@/server/email/provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 
 export interface PasswordResetEmail {
   /** A quién. */
@@ -98,29 +99,19 @@ export async function sendPasswordResetEmail(
        * No hay casilla desde donde escribirle, y tampoco corresponde: no tiene
        * acceso a nada que recuperar.
        */
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "password_reset.sin_perfil",
-          // El id y no la dirección: esto es un registro.
+      logger.warn({
+        // El id y no la dirección: esto es un registro.
           user_id: input.userId,
-        })
-      );
+      }, "password_reset.sin_perfil");
       return;
     }
 
     const account = await getGmailAccountForTenant(perfil.tenant_id);
     if (!account) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "password_reset.sin_casilla",
-          tenant_id: perfil.tenant_id,
-          nota: "Nadie puede recuperar su contraseña en esta aseguradora hasta que haya una casilla conectada.",
-        })
-      );
+      logger.error({
+        tenant_id: perfil.tenant_id,
+        nota: "Nadie puede recuperar su contraseña en esta aseguradora hasta que haya una casilla conectada.",
+      }, "password_reset.sin_casilla");
       /*
        * Queda asentado igual, con `delivered: false`.
        *
@@ -161,22 +152,12 @@ export async function sendPasswordResetEmail(
       payload: { delivered: entregado },
     });
 
-    console.info(
-      JSON.stringify({
-        level: entregado ? "info" : "error",
-        service: "claimmix",
-        msg: entregado ? "password_reset.sent" : "password_reset.send_failed",
+    logger.info({
         user_id: input.userId,
-      })
-    );
+      }, entregado ? "password_reset.sent" : "password_reset.send_failed");
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "password_reset.error",
+    logger.error({
         error: err instanceof Error ? err.name : "UnknownError",
-      })
-    );
+      }, "password_reset.error");
   }
 }

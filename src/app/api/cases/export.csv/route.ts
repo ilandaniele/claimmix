@@ -29,6 +29,7 @@ import {
   getClientIp,
 } from "@/lib/rate-limit/index";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
+import { logger } from "@/lib/observability/logger";
 
 /** CSV column headers (es-AR labels as specified in AC13) */
 const CSV_HEADERS = [
@@ -186,7 +187,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
-    console.error("[GET /api/cases/export.csv] query error:", errName, ip);
+    logger.error({ error_name: errName, ip }, "get_api_cases_export_csv.query_error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 

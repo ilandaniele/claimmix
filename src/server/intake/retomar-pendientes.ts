@@ -34,6 +34,7 @@ import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { cases } from "@/lib/db/schema";
+import { logger } from "@/lib/observability/logger";
 
 /** Cuántos se retoman por corrida. El cron tiene 60 s y cada uno cuesta una extracción. */
 const TOPE_POR_CORRIDA = 20;
@@ -100,14 +101,9 @@ export async function retomarExtraccionesPendientes(opts?: {
      * convence. Acá el `catch` devuelve cero igual —no hay nada mejor que
      * devolver— pero lo dice.
      */
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "retomar_pendientes.consulta_fallo",
+    logger.error({
         code,
-      })
-    ); // crew-debug-ok
+      }, "retomar_pendientes.consulta_fallo");
     return { retomados: 0, caseIds: [] };
   }
 
@@ -133,28 +129,18 @@ export async function retomarExtraccionesPendientes(opts?: {
       });
       hechos.push(caso.id);
     } catch (e) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "retomar_pendientes.corrida_fallo",
-          case_id: caso.id,
-          error_name: e instanceof Error ? e.name : "UnknownError",
-        })
-      ); // crew-debug-ok
+      logger.error({
+        case_id: caso.id,
+        error_name: e instanceof Error ? e.name : "UnknownError",
+      }, "retomar_pendientes.corrida_fallo");
     }
   }
 
   if (hechos.length > 0) {
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "retomar_pendientes.retomados",
+    logger.info({
         retomados: hechos.length,
         de: pendientes.length,
-      })
-    );
+      }, "retomar_pendientes.retomados");
   }
 
   return { retomados: hechos.length, caseIds: hechos };

@@ -50,6 +50,7 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { isValidTransition } from "@/core/case/fsm";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Devuelve el caso a `recibido` si estaba dado por no-relevante.
@@ -99,14 +100,9 @@ export async function reabrirSiEraNoRelevante(
       payload: { desde: "no_relevante", motivo: "mensaje_entrante" },
     });
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "case.reabierto_por_mensaje",
+    logger.info({
         case_id: caseId,
-      })
-    );
+      }, "case.reabierto_por_mensaje");
 
     return true;
   } catch (err) {
@@ -115,12 +111,7 @@ export async function reabrirSiEraNoRelevante(
      * Fallar de este lado deja el caso como estaba —el defecto viejo— pero
      * tirar dejaría el mensaje sin entrar, que es peor.
      */
-    console.error(
-      "[reabrir-no-relevante] no se pudo reabrir:",
-      err instanceof Error ? err.name : "UnknownError",
-      "case:",
-      caseId
-    );
+    logger.error({ detalle: err instanceof Error ? err.name : "UnknownError", case_id: caseId }, "reabrir_no_relevante.no_se_pudo_reabrir");
     return false;
   }
 }

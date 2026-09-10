@@ -33,6 +33,7 @@ import { internalAuthHeaders, isInternalRequest } from "@/lib/security/internal-
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { BATCH_BUDGET_MS, MAX_CHAIN, fitsAnotherCase } from "@/server/intake/batch-budget";
 import { enTenant } from "@/data/scope";
+import { logger } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -101,24 +102,19 @@ async function processBatch(input: {
       });
     } catch (e) {
       const name = e instanceof Error ? e.name : "UnknownError";
-      console.error("[batch-simulate] worker error:", name, "case:", caseId);
+      logger.error({ error_name: name, case_id: caseId }, "batch_simulate.worker_error");
     }
     processed++;
     if (input.delayMs > 0 && pending.length > 0) await sleep(input.delayMs);
   }
 
-  console.info(
-    JSON.stringify({
-      level: "info",
-      service: "claimmix",
-      msg: "batch_simulate.slice_complete",
-      tenant_id: input.tenantId,
-      chain: input.chain,
-      processed,
-      pending: pending.length,
-      elapsed_ms: Date.now() - startedAt,
-    })
-  );
+  logger.info({
+        tenant_id: input.tenantId,
+        chain: input.chain,
+        processed,
+        pending: pending.length,
+        elapsed_ms: Date.now() - startedAt,
+      }, "batch_simulate.slice_complete");
 
   if (pending.length === 0) return;
 
@@ -126,15 +122,10 @@ async function processBatch(input: {
   // cada uno cubre de sobra el máximo de 50— sino porque una cadena sin tope es
   // una función que se llama a sí misma contra la tarjeta de alguien.
   if (input.chain >= MAX_CHAIN) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "batch_simulate.chain_exhausted",
+    logger.error({
         tenant_id: input.tenantId,
         abandoned: pending.length,
-      })
-    );
+      }, "batch_simulate.chain_exhausted");
     return;
   }
 
@@ -152,7 +143,7 @@ async function processBatch(input: {
     });
   } catch (e) {
     const name = e instanceof Error ? e.name : "UnknownError";
-    console.error("[batch-simulate] no pude pasar el resto:", name, "quedan:", pending.length);
+    logger.error({ error_name: name, quedan: pending.length }, "batch_simulate.no_pude_pasar_el_resto");
   }
 }
 
@@ -213,7 +204,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     try {
       const reaped = await reapStuckProcessingCases({ tenantId: userRow.tenant_id });
       if (reaped.reaped > 0) {
-        console.warn(`[batch-simulate] reaped ${reaped.reaped} stuck procesando case(s) before queuing`);
+        logger.warn(
+          { barridos: reaped.reaped },
+          "batch_simulate.casos_trabados_barridos"
+        );
       }
     } catch {
       // never block a new batch on reaper failure
@@ -296,14 +290,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           claim_type: finalClaimType,
           code,
         });
-        console.error(
-          "[batch-simulate] Failed to create case:",
-          code,
-          "claim_type:",
-          finalClaimType,
-          "scenario:",
-          scenario.id
-        );
+        logger.error({ code, claim_type: finalClaimType, scenario: scenario.id }, "batch_simulate.failed_to_create_case");
       }
     }
 

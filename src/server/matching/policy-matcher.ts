@@ -13,6 +13,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { normalizarNumeroPoliza } from "@/core/matching/normalizar";
+import { logger } from "@/lib/observability/logger";
 
 /** A single policy match result. */
 export interface PolicyMatch {
@@ -70,15 +71,10 @@ export async function findPolicyMatches(
     return b.confidence - a.confidence;
   });
 
-  console.info(
-    JSON.stringify({
-      level: "info",
-      service: "claimmix",
-      msg: "policy_matcher.matches_found",
-      tenant_id: tenantId,
-      match_count: results.length,
-    })
-  );
+  logger.info({
+        tenant_id: tenantId,
+        match_count: results.length,
+      }, "policy_matcher.matches_found");
 
   return results;
 }
@@ -127,7 +123,7 @@ async function matchByPolicyNumber(
         .limit(5)
     );
   } catch (e) {
-    console.error("[policy-matcher] Policy number lookup error:", (e as { code?: string })?.code);
+    logger.error({ detalle: (e as { code?: string })?.code }, "policy_matcher.policy_number_lookup_error");
     return [];
   }
 
@@ -178,7 +174,7 @@ async function matchByCustomerId(
         .limit(20)
     );
   } catch (e) {
-    console.error("[policy-matcher] Customer policy lookup error:", (e as { code?: string })?.code);
+    logger.error({ detalle: (e as { code?: string })?.code }, "policy_matcher.customer_policy_lookup_error");
     return [];
   }
 

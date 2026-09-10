@@ -24,6 +24,7 @@ import { and, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { cases, outboundMessages } from "@/lib/db/schema";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * The statuses that mean "we asked, they have not answered".
@@ -177,15 +178,10 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
     }
 
     if (closed.length > 0) {
-      console.info(
-        JSON.stringify({
-          level: "info",
-          service: "claimmix",
-          msg: "close_abandoned.swept",
-          closed: closed.length,
-          after_days: days,
-        })
-      );
+      logger.info({
+        closed: closed.length,
+        after_days: days,
+      }, "close_abandoned.swept");
     }
 
     /*
@@ -207,14 +203,9 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
     const code =
       (err as { code?: string })?.code ??
       (err instanceof Error ? err.name : "UnknownError");
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "close_abandoned.failed",
+    logger.error({
         code,
-      })
-    );
+      }, "close_abandoned.failed");
     return { closed: 0, caseIds: [] };
   }
 }
@@ -250,30 +241,20 @@ async function avisarDeLosQueNoRecibieron(days: number): Promise<void> {
 
     if (retenidos.length === 0) return;
 
-    console.warn(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "close_abandoned.sin_preguntar",
+    logger.warn({
         casos: retenidos.length,
         after_days: days,
         case_ids: retenidos.map((r) => r.id),
         nota:
           "Vencidos y sin cerrar: el último mensaje al denunciante no salió. " +
           "No es silencio de la persona, es una pregunta que no llegó.",
-      })
-    );
+      }, "close_abandoned.sin_preguntar");
   } catch (err) {
     const code =
       (err as { code?: string })?.code ??
       (err instanceof Error ? err.name : "UnknownError");
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "close_abandoned.aviso_fallo",
+    logger.error({
         code,
-      })
-    );
+      }, "close_abandoned.aviso_fallo");
   }
 }

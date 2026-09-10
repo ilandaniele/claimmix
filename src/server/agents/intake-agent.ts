@@ -9,6 +9,7 @@ import { downloadWhatsAppMedia, type WhatsAppMediaRef } from "@/server/whatsapp/
 import { rehostAndRecordAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
+import { logger } from "@/lib/observability/logger";
 
 type IntakeChannel = "email" | "email_sim" | "whatsapp" | "whatsapp_sim";
 
@@ -131,17 +132,12 @@ export async function runIntakeAgent(input: IntakeAgentInput): Promise<IntakeAge
      * excepción den el mismo resultado. Dejar el código del error en el log
      * —sin nada de la persona— cierra la diferencia sin tocar eso.
      */
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "intake_agent.case_lookup_error",
+    logger.error({
         case_id: input.caseId,
         error_code:
           (err as { code?: string })?.code ??
           (err instanceof Error ? err.name : "UnknownError"),
-      })
-    );
+      }, "intake_agent.case_lookup_error");
     caseRow = null;
   }
 
@@ -337,27 +333,17 @@ async function storeWhatsAppMedia(
       budgetMs: 10_000,
     });
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "whatsapp.media_stored",
+    logger.info({
         case_id: caseId,
         attempted: media.length,
         downloaded: downloaded.length,
         stored: results.filter((r) => r.stored).length,
-      })
-    );
+      }, "whatsapp.media_stored");
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "whatsapp.media_failed",
+    logger.error({
         case_id: caseId,
         error: err instanceof Error ? err.name : "UnknownError",
-      })
-    );
+      }, "whatsapp.media_failed");
   }
 }
 
@@ -438,17 +424,12 @@ async function findExistingWhatsAppCase(
     const code =
       (err as { code?: string })?.code ??
       (err instanceof Error ? err.name : "UnknownError");
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "whatsapp.busqueda_de_caso_fallo",
+    logger.error({
         code,
         nota:
           "No se pudo mirar si ya había un caso abierto. Se corta para no abrir " +
           "uno duplicado; Meta reentrega.",
-      })
-    ); // crew-debug-ok
+      }, "whatsapp.busqueda_de_caso_fallo");
     throw new Error(`whatsapp_case_lookup_failed:${code}`);
   }
 }
@@ -616,18 +597,13 @@ async function insertWhatsAppMessage(
      * Sólo el código del error: el cuerpo de un WhatsApp es lo más personal
      * que pasa por acá y no va a un log.
      */
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "intake.raw_message_no_guardado",
+    logger.error({
         case_id: input.caseId,
         canal: "whatsapp",
         error_code:
           (err as { code?: string })?.code ??
           (err instanceof Error ? err.name : "UnknownError"),
-      })
-    );
+      }, "intake.raw_message_no_guardado");
   }
 
   return { claimMessageId, duplicado: false };

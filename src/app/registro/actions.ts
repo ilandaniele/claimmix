@@ -33,6 +33,7 @@ import {
   rateLimit,
 } from "@/lib/rate-limit/index";
 import { SignUpSchema } from "@/lib/schemas/auth";
+import { logger } from "@/lib/observability/logger";
 
 type SignUpState = {
   error?: string;
@@ -142,12 +143,9 @@ export async function signUp(
          */
         redirect("/login?aviso=usa_tu_cuenta");
       }
-      console.error("[registro] auth.api.signUpEmail:", code ?? e.message);
+      logger.error({ detalle: code ?? e.message }, "registro.auth_api_signupemail");
     } else {
-      console.error(
-        "[registro] auth.api.signUpEmail:",
-        e instanceof Error ? e.name : "unknown"
-      );
+      logger.error({ detalle: e instanceof Error ? e.name : "unknown" }, "registro.auth_api_signupemail");
     }
     return { error: "No se pudo crear la cuenta. Intentá de nuevo." };
   }

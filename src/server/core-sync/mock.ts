@@ -13,6 +13,7 @@
  */
 
 import type { ICoreSyncClient, CoreSyncPayload, CoreSyncResult } from "./client";
+import { logger } from "@/lib/observability/logger";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -44,14 +45,9 @@ export class MockCoreSyncClient implements ICoreSyncClient {
 
     // Deterministic failure condition: caseId ends with '0'.
     if (caseId.endsWith("0")) {
-      console.info(
-        JSON.stringify({
-          level: "info",
-          service: "claimmix",
-          msg: "core_sync.mock_failure",
-          case_id: caseId,
-        })
-      );
+      logger.info({
+        case_id: caseId,
+      }, "core_sync.mock_failure");
       return {
         externalId: "",
         success: false,
@@ -63,15 +59,10 @@ export class MockCoreSyncClient implements ICoreSyncClient {
     const externalId =
       EXTERNAL_ID_PREFIX + caseId.slice(0, 8).toUpperCase();
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "core_sync.mock_success",
+    logger.info({
         case_id: caseId,
         external_id: externalId,
-      })
-    );
+      }, "core_sync.mock_success");
 
     return {
       externalId,

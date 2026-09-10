@@ -18,6 +18,7 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { logger } from "@/lib/observability/logger";
 
 // ── GET /api/admin/users ──────────────────────────────────────────────────────
 
@@ -151,7 +152,7 @@ export async function POST(request: NextRequest) {
     // Better Auth existe y no sirve para nada: es peor que no haberla creado,
     // porque el admin cree que la persona ya tiene acceso.
     if (perfil.length === 0) {
-      console.error("[admin/users POST] la cuenta se creó y el perfil no");
+      logger.error({}, "admin_users_post.la_cuenta_se_creo_y_el");
       return err(
         new AppError(
           "INTERNAL_ERROR",
@@ -173,7 +174,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (e) {
     if (e instanceof AppError) return err(e);
-    console.error("[admin/users POST]", e instanceof Error ? e.message : "unknown");
+    logger.error({ detalle: e instanceof Error ? e.message : "unknown" }, "admin_users_post");
     return err(new AppError("INTERNAL_ERROR", "No se pudo crear el usuario."));
   }
 }

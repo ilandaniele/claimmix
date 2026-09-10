@@ -22,6 +22,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 import {
   rateLimit,
   RATE_LIMIT_CONFIGS,
@@ -75,7 +76,7 @@ export async function GET() {
       const code = (e as { code?: string })?.code;
       // 42P01 = migration not applied yet — return empty list, not a 500.
       if (code === "42P01") return ok({ rules: [] });
-      console.error("[admin/prompt-rules GET]", code ?? "unknown");
+      logger.error({ detalle: code ?? "unknown" }, "admin_prompt_rules_get");
       return err(new AppError("INTERNAL_ERROR"));
     }
 
@@ -119,15 +120,12 @@ export async function POST(request: NextRequest) {
         )
       );
     } catch (e) {
-      console.error(
-        "[admin/prompt-rules POST]",
-        (e as { code?: string })?.code ?? "unknown"
-      );
+      logger.error({ detalle: (e as { code?: string })?.code ?? "unknown" }, "admin_prompt_rules_post");
       return err(new AppError("INTERNAL_ERROR"));
     }
 
     if (!data) {
-      console.error("[admin/prompt-rules POST]", "no_data");
+      logger.error({ detalle: "no_data" }, "admin_prompt_rules_post");
       return err(new AppError("INTERNAL_ERROR"));
     }
 

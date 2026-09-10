@@ -21,6 +21,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { isInternalRequest } from "@/lib/security/internal-auth";
+import { logger } from "@/lib/observability/logger";
 
 const WorkerBodySchema = z.object({
   caseId: z.string().uuid("caseId must be a valid UUID."),
@@ -85,15 +86,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
      * error». Esto lo cumple; no cambia el contrato, lo empieza a respetar.
      */
     if (!result.ok) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "worker_route.el_agente_no_extrajo",
-          case_id: caseId,
-          action: result.action,
-        })
-      );
+      logger.error({
+        case_id: caseId,
+        action: result.action,
+      }, "worker_route.el_agente_no_extrajo");
       return NextResponse.json(
         { ok: false, case_id: caseId, agent: result },
         { status: 500 }
@@ -103,15 +99,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, case_id: caseId, agent: result }, { status: 200 });
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "worker_route.unhandled_error",
+    logger.error({
         case_id: caseId,
         error_name: errName,
-      })
-    );
+      }, "worker_route.unhandled_error");
     return NextResponse.json(
       { error: { code: "INTERNAL_ERROR", message: "Error en el worker de extracción." } },
       { status: 500 }

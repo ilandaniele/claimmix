@@ -22,6 +22,7 @@ import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { z } from "zod";
 import { deleteCases } from "@/server/cases/delete";
+import { logger } from "@/lib/observability/logger";
 
 /** Hasta cien, que es el tope de la página: más no lo puede pedir la pantalla. */
 const BorradoSchema = z.object({
@@ -99,7 +100,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
-    console.error("[GET /api/cases] query error:", errName, ip);
+    logger.error({ error_name: errName, ip }, "get_api_cases.query_error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 }
@@ -162,10 +163,7 @@ export async function DELETE(request: NextRequest) {
     );
     return ok({ deleted });
   } catch (error) {
-    console.error(
-      "[DELETE /api/cases]",
-      error instanceof Error ? error.name : "UnknownError"
-    );
+    logger.error({ detalle: error instanceof Error ? error.name : "UnknownError" }, "delete_api_cases");
     return err(new AppError("INTERNAL_ERROR"));
   }
 }

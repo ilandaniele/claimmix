@@ -27,6 +27,7 @@ import { ESTADOS_QUE_NO_SE_REABREN_A_MANO } from "@/core/case/fsm";
 import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { logger } from "@/lib/observability/logger";
 import {
   getClientIp,
   type RateLimitResult,
@@ -158,7 +159,7 @@ export async function POST(
     }
   } catch (e) {
     const code = (e as { code?: string })?.code ?? (e instanceof Error ? e.name : "UnknownError");
-    console.error("[re-analyze] Failed to reset case:", code, caseId);
+    logger.error({ code, case_id: caseId }, "re_analyze.failed_to_reset_case");
     return err(new AppError("INTERNAL_ERROR"));
   }
 
@@ -186,7 +187,7 @@ export async function POST(
       });
     } catch (e: unknown) {
       const name = e instanceof Error ? e.name : "UnknownError";
-      console.error("[re-analyze] Worker error:", name, "case:", caseId);
+      logger.error({ error_name: name, case_id: caseId }, "re_analyze.worker_error");
     }
   });
 

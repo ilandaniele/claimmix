@@ -21,6 +21,7 @@ import "server-only";
 import { createHmac, timingSafeEqual } from "crypto";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
+import { logger } from "@/lib/observability/logger";
 
 const GRAPH_API_BASE = "https://graph.facebook.com";
 
@@ -256,15 +257,10 @@ async function leerHastaElTope(
       total += value.byteLength;
       if (total > tope) {
         await lector.cancel();
-        console.error(
-          JSON.stringify({
-            level: "error",
-            service: "claimmix",
-            msg: "whatsapp.media.descartada_por_tamano",
-            detectado_en: "el cuerpo",
-            tope_bytes: tope,
-          })
-        ); // crew-debug-ok
+        logger.error({
+        detectado_en: "el cuerpo",
+        tope_bytes: tope,
+      }, "whatsapp.media.descartada_por_tamano");
         return "demasiado_grande";
       }
       partes.push(Buffer.from(value));
@@ -298,7 +294,7 @@ export async function downloadWhatsAppMedia(
 ): Promise<MediaDeWhatsApp | null> {
   const accessToken = opts?.accessToken ?? process.env.WHATSAPP_ACCESS_TOKEN;
   if (!accessToken) {
-    console.error("[whatsapp] media download skipped: no access token"); // crew-debug-ok
+    logger.error({}, "whatsapp.media_download_skipped_no_access_token");
     return null;
   }
 
@@ -307,7 +303,7 @@ export async function downloadWhatsAppMedia(
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!metaRes.ok) {
-      console.error("[whatsapp] media metadata failed:", metaRes.status); // crew-debug-ok
+      logger.error({ detalle: metaRes.status }, "whatsapp.media_metadata_failed");
       return null;
     }
 
@@ -349,16 +345,11 @@ export async function downloadWhatsAppMedia(
      */
     const declarado = Number(meta.file_size);
     if (Number.isFinite(declarado) && declarado > MAX_ATTACHMENT_SIZE_BYTES) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "whatsapp.media.descartada_por_tamano",
-          detectado_en: "la metadata",
-          bytes: declarado,
-          tope_bytes: MAX_ATTACHMENT_SIZE_BYTES,
-        })
-      ); // crew-debug-ok
+      logger.error({
+        detectado_en: "la metadata",
+        bytes: declarado,
+        tope_bytes: MAX_ATTACHMENT_SIZE_BYTES,
+      }, "whatsapp.media.descartada_por_tamano");
       return { demasiadoGrande: true, bytes: declarado };
     }
 
@@ -366,7 +357,7 @@ export async function downloadWhatsAppMedia(
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!fileRes.ok) {
-      console.error("[whatsapp] media fetch failed:", fileRes.status); // crew-debug-ok
+      logger.error({ detalle: fileRes.status }, "whatsapp.media_fetch_failed");
       return null;
     }
 
@@ -381,7 +372,7 @@ export async function downloadWhatsAppMedia(
     return { data, mimeType };
   } catch (err) {
     const name = err instanceof Error ? err.name : "UnknownError";
-    console.error("[whatsapp] media download error:", name); // crew-debug-ok
+    logger.error({ error_name: name }, "whatsapp.media_download_error");
     return null;
   }
 }

@@ -13,6 +13,7 @@ import { checkDemoBudget, getDemoTenantId } from "@/server/ai/budget";
 import { rateLimit, getClientIp } from "@/lib/rate-limit/index";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { logger } from "@/lib/observability/logger";
 
 export const maxDuration = 60;
 
@@ -102,14 +103,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   } catch (e) {
     // Log detail server-side; never echo provider internals (quota state, model
     // names, key hints) to anonymous callers.
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "demo.public_analyze.provider_error",
+    logger.error({
         error_name: e instanceof Error ? e.name : "UnknownError",
-      })
-    );
+      }, "demo.public_analyze.provider_error");
     return err(new AppError("INTERNAL_ERROR", "No pudimos analizar el reclamo en este momento. Probá de nuevo en unos minutos."));
   }
 

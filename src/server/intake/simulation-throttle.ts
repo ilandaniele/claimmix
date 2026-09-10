@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
 import { enTenant } from "@/data/scope";
+import { logger } from "@/lib/observability/logger";
 
 const DEFAULT_SIMULATE_WORKER_DELAY_MS =
   process.env.NODE_ENV === "test" ? 0 : 5_000;
@@ -133,7 +134,7 @@ export async function getSimulationWorkerDelayMs(input: {
     return Math.min(queuedAhead * stepMs, getSimulateWorkerMaxDelayMs());
   } catch (e) {
     const code = (e as { code?: string })?.code ?? "unknown";
-    console.error("[intake/simulate] throttle lookup failed:", code);
+    logger.error({ code }, "intake_simulate.throttle_lookup_failed");
     return 0;
   }
 }
@@ -187,7 +188,7 @@ export async function getEarlierPendingSimulationCount(input: {
     return Math.max(0, Number(row?.queued_count ?? 0));
   } catch (e) {
     const code = (e as { code?: string })?.code ?? "unknown";
-    console.error("[intake/simulate] queue lookup failed:", code);
+    logger.error({ code }, "intake_simulate.queue_lookup_failed");
     return 0;
   }
 }
@@ -267,7 +268,7 @@ async function getEarlierPendingEmailCount(input: {
     return Math.max(0, Number(row?.count ?? 0));
   } catch (e) {
     const code = (e as { code?: string })?.code ?? "unknown";
-    console.error("[email-throttle] queue lookup failed:", code);
+    logger.error({ code }, "email_throttle.queue_lookup_failed");
     return 0; // never block on error
   }
 }

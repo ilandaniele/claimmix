@@ -28,6 +28,7 @@ import { and, asc, inArray, isNull, or } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders, isInternalRequest } from "@/lib/security/internal-auth";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Statuses considered "open" for reprocessing. Includes "escalado" so cases
@@ -76,14 +77,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .orderBy(asc(t.created_at))
       .limit(BATCH_LIMIT);
   } catch (e) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "reprocess_unclassified.query_error",
+    logger.error({
         error_code: (e as { code?: string })?.code ?? "unknown",
-      })
-    );
+      }, "reprocess_unclassified.query_error");
     return NextResponse.json(
       { error: { code: "INTERNAL_ERROR", message: "Error al consultar casos." } },
       { status: 500 }
@@ -110,14 +106,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .set({ status: "procesando", updated_at: new Date().toISOString() })
       .where(inArray(t.id, cases.map((row) => row.id)));
   } catch (e) {
-    console.error(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "reprocess_unclassified.reset_failed",
+    logger.error({
         error_code: (e as { code?: string })?.code ?? "unknown",
-      })
-    );
+      }, "reprocess_unclassified.reset_failed");
   }
 
   // ── Dispatch /api/worker/extract for each case ────────────────────────────────
@@ -143,15 +134,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
         if (!response.ok) {
           // Non-2xx responses are treated as dispatch failures.
-          console.error(
-            JSON.stringify({
-              level: "warn",
-              service: "claimmix",
-              msg: "reprocess_unclassified.dispatch_failed",
-              case_id: caseRow.id,
-              http_status: response.status,
-            })
-          );
+          logger.error({
+        case_id: caseRow.id,
+        http_status: response.status,
+      }, "reprocess_unclassified.dispatch_failed");
           failed.push(caseRow.id);
         } else {
           caseIds.push(caseRow.id);
@@ -159,15 +145,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       } catch (err) {
         // Network / fetch-level failure — isolate, do not crash the batch.
         const errName = err instanceof Error ? err.name : "UnknownError";
-        console.error(
-          JSON.stringify({
-            level: "error",
-            service: "claimmix",
-            msg: "reprocess_unclassified.dispatch_error",
-            case_id: caseRow.id,
-            error_name: errName,
-          })
-        );
+        logger.error({
+        case_id: caseRow.id,
+        error_name: errName,
+      }, "reprocess_unclassified.dispatch_error");
         failed.push(caseRow.id);
       }
     })

@@ -6,6 +6,7 @@ import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { MemoryHint, KnownPattern, PromptLearningContext } from "./prompt";
 import { getDefaultGeminiModel } from "./provider";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Extract balanced JSON object candidates from a model response.
@@ -143,13 +144,7 @@ export function parseResponse(content: string | null, claimType: ClaimType, mode
     }
 
     if (candidates.length > 0) {
-      console.error(
-        "[model-response] Schema validation failed:",
-        issueCount,
-        "issues across",
-        candidates.length,
-        "JSON candidate(s)"
-      );
+      logger.error({ issuecount: issueCount, issues_across: candidates.length, detalle: "JSON candidate(s)" }, "model_response.schema_validation_failed");
     }
     return null;
   } catch {
@@ -194,13 +189,7 @@ export function parseEmailResponse(content: string | null, model?: string): Extr
     }
 
     if (candidates.length > 0) {
-      console.error(
-        "[model-response] Email schema validation failed:",
-        issueCount,
-        "issues across",
-        candidates.length,
-        "JSON candidate(s)"
-      );
+      logger.error({ issuecount: issueCount, issues_across: candidates.length, detalle: "JSON candidate(s)" }, "model_response.email_schema_validation_failed");
     }
     return null;
   } catch {

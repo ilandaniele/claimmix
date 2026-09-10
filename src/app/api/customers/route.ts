@@ -23,6 +23,7 @@ import { entrar } from "@/lib/api/entrada";
 import { AppError } from "@/lib/errors";
 import { RATE_LIMIT_CONFIGS, type RateLimitResult } from "@/lib/rate-limit/index";
 import { CustomerQuerySchema, listCustomers } from "@/server/customers/list";
+import { logger } from "@/lib/observability/logger";
 
 export async function GET(request: NextRequest) {
   // ── 1. Sesión y rol ───────────────────────────────────────────────────────
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
     return ok(await listCustomers({ tenantId: userRow.tenant_id }, parsed.data));
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
-    console.error("[GET /api/customers] unhandled error:", errName);
+    logger.error({ error_name: errName }, "get_api_customers.unhandled_error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 }

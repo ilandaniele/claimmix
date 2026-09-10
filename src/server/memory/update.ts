@@ -21,6 +21,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { redactObject } from "@/lib/audit/redact";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
+import { logger } from "@/lib/observability/logger";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -94,7 +95,7 @@ export async function updateMemoryFromConfirmation(
         )
       );
     } catch (e) {
-      console.error("[memory/update] fetch error:", (e as { code?: string })?.code);
+      logger.error({ detalle: (e as { code?: string })?.code }, "memory_update.fetch_error");
       // Continue — we'll still attempt the upsert.
     }
 
@@ -139,7 +140,7 @@ export async function updateMemoryFromConfirmation(
           })
       );
     } catch (e) {
-      console.error("[memory/update] upsert error:", (e as { code?: string })?.code);
+      logger.error({ detalle: (e as { code?: string })?.code }, "memory_update.upsert_error");
       // Do not throw — audit log still attempted below.
     }
 
@@ -162,7 +163,7 @@ export async function updateMemoryFromConfirmation(
     });
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
-    console.error("[memory/update] updateMemoryFromConfirmation exception:", errName);
+    logger.error({ error_name: errName }, "memory_update.updatememoryfromconfirmation_exception");
     // Do not rethrow — memory update failures must not break the primary flow.
   }
 }
@@ -240,25 +241,17 @@ export async function seedMemoryFromExtraction(
           })
       );
     } catch (e) {
-      console.error(
-        "[memory/update] seedMemoryFromExtraction upsert error:",
-        (e as { code?: string })?.code
-      );
+      logger.error({ detalle: (e as { code?: string })?.code }, "memory_update.seedmemoryfromextraction_upsert_error");
     }
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "memory.seeded_from_extraction",
+    logger.info({
         case_id: caseId,
         fields_seeded: fieldsToSeed.map((f) => f.field_key),
         seed_confidence: seedConfidence,
-        // PII: senderEmail is NOT logged here
-      })
-    );
+        // PII: senderEmail is NOT logged here,
+      }, "memory.seeded_from_extraction");
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
-    console.error("[memory/update] seedMemoryFromExtraction exception:", errName);
+    logger.error({ error_name: errName }, "memory_update.seedmemoryfromextraction_exception");
   }
 }

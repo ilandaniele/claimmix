@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { enTenant } from "@/data/scope";
+import { logger } from "@/lib/observability/logger";
 
 interface NewAuthUser {
   id: string;
@@ -134,14 +135,12 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
   if (!isSignupAllowed(user.email, user.emailVerified)) {
     // No profile row → no tenant → no access to any claim. The Better Auth
     // account survives so an admin can approve the person from /admin/users.
-    console.warn(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "auth.signup.not_allowlisted",
+    logger.warn(
+      {
         // LLM06 / PII: log the domain only, never the full address.
         email_domain: user.email?.slice(user.email.indexOf("@")) ?? null,
-      }),
+      },
+      "auth.signup.not_allowlisted"
     );
     return;
   }

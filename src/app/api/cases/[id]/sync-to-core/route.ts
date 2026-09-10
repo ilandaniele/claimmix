@@ -27,6 +27,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { RATE_LIMIT_CONFIGS, type RateLimitResult } from "@/lib/rate-limit/index";
+import { logger } from "@/lib/observability/logger";
 
 const REQUIRED_STATUS = "listo_para_core";
 const SUCCESS_STATUS = "enviado_a_core" as const;
@@ -139,15 +140,10 @@ export async function POST(
     syncClient = getCoreSyncClient();
   } catch (e) {
     if (e instanceof CoreSyncSinConfigurar) {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "core_sync.sin_configurar",
-          case_id: caseId,
-          modo: e.modo,
-        })
-      );
+      logger.warn({
+        case_id: caseId,
+        modo: e.modo,
+      }, "core_sync.sin_configurar");
       return err(
         new AppError(
           "NOT_IMPLEMENTED",

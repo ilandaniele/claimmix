@@ -1,6 +1,7 @@
 import "server-only";
 import { GoogleAuth, type IdentityPoolClientOptions } from "google-auth-library";
 import { getVercelOidcToken } from "@vercel/oidc";
+import { logger } from "@/lib/observability/logger";
 
 export type ModoGcp = "oidc" | "clave" | "adc";
 
@@ -57,9 +58,9 @@ export async function tokenDeGcp(): Promise<string> {
           ? credencialesClave(process.env)
           : undefined;
     auth = new GoogleAuth({ credentials, scopes: SCOPES });
-    console.log(
-      JSON.stringify({ level: "info", service: "claimmix", msg: "gcp.credenciales", modo })
-    );
+    logger.info({
+        modo,
+      }, "gcp.credenciales");
   }
   const res = await (await auth.getClient()).getAccessToken();
   const token = typeof res === "string" ? res : res?.token;

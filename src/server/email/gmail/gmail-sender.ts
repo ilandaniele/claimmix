@@ -17,6 +17,7 @@
 import "server-only";
 import type { EmailProvider, SendEmailOptions, SendResult } from "../provider";
 import { getGmailClient } from "./gmail-client";
+import { logger } from "@/lib/observability/logger";
 
 // ── RFC 2822 helpers ──────────────────────────────────────────────────────────
 
@@ -156,7 +157,7 @@ async function fetchRfcMessageId(
     return header?.value?.trim() || undefined;
   } catch (err) {
     const code = err instanceof Error ? err.name : "UnknownError";
-    console.error("[GmailSender] could not read back Message-Id:", code); // crew-debug-ok
+    logger.error({ code }, "gmailsender.could_not_read_back_message_id");
     return undefined;
   }
 }
@@ -207,7 +208,7 @@ export class GmailSender implements EmailProvider {
       if (!providerMessageId) {
         // Treat a missing ID as a failure — the API call technically succeeded
         // but returned no identifier, so we cannot track the message.
-        console.error("[GmailSender] send returned no message id"); // crew-debug-ok
+        logger.error({}, "gmailsender.send_returned_no_message_id");
         return { errorCode: "GMAIL_SEND_FAILED" };
       }
 
@@ -239,15 +240,10 @@ export class GmailSender implements EmailProvider {
        */
       const status = errorStatus(err);
       const code = err instanceof Error ? err.name : "UnknownError";
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "gmail_sender.send_failed",
-          status: status ?? null,
-          error_name: code,
-        })
-      ); // crew-debug-ok
+      logger.error({
+        status: status ?? null,
+        error_name: code,
+      }, "gmail_sender.send_failed");
       return { errorCode: status ? `GMAIL_${status}` : "GMAIL_SEND_FAILED" };
     }
   }

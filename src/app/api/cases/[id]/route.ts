@@ -28,7 +28,7 @@ import {
 } from "@/lib/rate-limit/index";
 import type { CaseRow } from "@/lib/db/types";
 import { z } from "zod";
-
+
 import { deleteCases } from "@/server/cases/delete";
 // ── Shared: resolve authenticated user + their public.users row ───────────────
 
@@ -171,7 +171,7 @@ export async function DELETE(
      * dejar rastro. Borrar es la única operación irreversible del producto: que
      * quede quién la hizo no puede depender de por qué botón se entró.
      */
-    const borrados = await deleteCases(tenantCtx, [caseId], userRow.id);
+    const borrados = await deleteCases(tenantCtx, [caseId], userRow);
 
     return ok({ deleted: borrados.length > 0 });
   } catch (error) {

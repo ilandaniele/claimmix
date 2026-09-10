@@ -62,9 +62,15 @@ const FULL_HIGH_CONFIDENCE_FIELDS: ExtractedField[] = [
 ];
 
 /**
- * Configure db.select mock for two sequential calls:
- *   1st call → missing_docs (returns missingDocRows)
- *   2nd call → claim_field_confirmations (returns confirmationRows)
+ * Las tres consultas del lote, en el orden en que `leerElCaso` las arma:
+ *   1ª → extracted_fields
+ *   2ª → missing_docs
+ *   3ª → claim_field_confirmations
+ *
+ * Eran cuatro llamadas en cuatro viajes; ahora son tres en uno. Las filas de
+ * confirmación llevan `status` porque las pendientes y las ya cerradas vienen
+ * juntas y el analizador las separa: sin `status`, se asume `pending`, que es
+ * lo que estas filas significaban cuando había una consulta por estado.
  */
 function setupDbMocks(
   missingDocRows: Array<{ doc_key: string }>,
@@ -73,6 +79,7 @@ function setupDbMocks(
     proposed_value: string | null;
     conflict_with_value: string | null;
     confidence: number;
+    status?: string;
   }>,
   /** Rows already in extracted_fields from earlier runs on this case. */
   storedFieldRows: Array<{
@@ -81,12 +88,14 @@ function setupDbMocks(
     confidence: number;
   }> = []
 ) {
-  // Order matters: the analyzer reads missing_docs, then extracted_fields,
-  // then claim_field_confirmations.
-  const byCall = [missingDocRows, storedFieldRows, confirmationRows];
+  const conEstado = confirmationRows.map((r) => ({
+    status: "pending",
+    ...r,
+  }));
+  const byCall = [storedFieldRows, missingDocRows, conEstado];
   let callCount = 0;
   vi.mocked(db.select).mockImplementation(() => {
-    const rows = byCall[callCount] ?? confirmationRows;
+    const rows = byCall[callCount] ?? conEstado;
     callCount++;
     return {
       from: vi.fn().mockReturnValue({
@@ -353,6 +362,58 @@ describe("analyzeEmailClaimGaps — conflict rows (AC9)", () => {
     // info_faltante takes priority over conflict confirmations
     expect(result.status).toBe("info_faltante");
     expect(result.missingRequiredFields).toContain("accident_date");
+  });
+});
+
+// ── Test suite: lo que se le pregunta a la base ──────────────────────────────
+
+describe("analyzeEmailClaimGaps — un viaje, tres consultas", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("no pide cuatro veces lo que entra en tres", async () => {
+    // Eran cuatro `enTenant` seguidos —cuatro POST al driver HTTP— y ninguna
+    // de las cuatro consultas usaba el resultado de otra. Las dos de
+    // `claim_field_confirmations` eran la misma tabla y el mismo caso,
+    // partidas por `status`.
+    setupDbMocks([], []);
+    await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, TENANT_ID);
+
+    expect(vi.mocked(db.select)).toHaveBeenCalledTimes(3);
+  });
+
+  it("un campo que una persona ya cerró no se vuelve a preguntar", async () => {
+    // `confirmed` y `corrected` son lo que escribe `confirm-field` cuando un
+    // analista decide. Vienen en la misma consulta que las pendientes y se
+    // separan por `status`: si esa separación se rompe, el campo entra por el
+    // paso de confianza media y se pregunta algo ya resuelto.
+    setupDbMocks(
+      [],
+      [
+        {
+          field_key: "claim_type",
+          proposed_value: null,
+          conflict_with_value: null,
+          confidence: 0.9,
+          status: "confirmed",
+        },
+      ]
+    );
+
+    const result = await analyzeEmailClaimGaps(
+      CASE_ID,
+      [
+        ...FULL_HIGH_CONFIDENCE_FIELDS.filter((f) => f.field_key !== "claim_type"),
+        // Confianza media: sin la fila cerrada, este campo pediría confirmación.
+        { field_key: "claim_type", field_value: "choque", confidence: 0.8, source: "ai" },
+      ],
+      TENANT_ID
+    );
+
+    expect(
+      result.fieldsNeedingConfirmation.map((f) => f.fieldName)
+    ).not.toContain("claim_type");
   });
 });
 

@@ -193,7 +193,7 @@ async function attackSurface(): Promise<void> {
     const donde = r.headers.get("location") ?? "";
     const rebotado = [301, 302, 307, 308].includes(r.status) && /\/login/.test(donde);
     const esPagina = /^\s*<!DOCTYPE html|^\s*<html/i.test(r.body);
-    const arrancoAlgo = /wrun_[a-z0-9]/i.test(r.body) || /"runId"/.test(r.body);
+    const arrancoAlgo = /\bwrun_[a-z0-9]/i.test(r.body) || /"runId"/.test(r.body);
 
     probe(
       `${ruta} no acepta invocaciones de afuera`,

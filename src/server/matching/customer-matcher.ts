@@ -107,50 +107,46 @@ export async function findCustomerMatches(
   tenantId: string,
   fields: Partial<ClaimFields>
 ): Promise<CustomerMatch[]> {
+  /*
+   * Las cuatro búsquedas salen juntas.
+   *
+   * Eran cuatro `await` en fila —póliza, DNI, correo, teléfono— y ninguna
+   * mira el resultado de otra: la deduplicación pasa después, sobre las
+   * cuatro listas. O sea que se pagaban cuatro latencias de Neon en serie
+   * para juntar datos independientes, en el camino de contestarle a alguien.
+   *
+   * Cada una conserva su propio `enTenant` en vez de ir a un `batch()`: las
+   * cuatro consultas tienen formas distintas y cada matcher degrada solo
+   * —una búsqueda que falla devuelve vacío y las otras tres siguen sirviendo—.
+   * Un lote las ataría: la que falla se lleva puestas a las cuatro, y el
+   * caso queda sin cliente por un hipo de la base.
+   *
+   * El ORDEN de prioridad no cambia. La deduplicación de abajo recorre las
+   * listas en el mismo orden de siempre, así que quien aparece por póliza y
+   * por DNI sigue entrando como coincidencia de póliza.
+   */
+  const conValor = (v?: string) => (v && v.trim() !== "" ? v.trim() : null);
+  const numeroDePoliza = conValor(fields.policy_number);
+  const dni = conValor(fields.dni);
+  const correo = conValor(fields.email);
+  const telefono = conValor(fields.phone);
+
+  const porPrioridad = await Promise.all([
+    numeroDePoliza
+      ? matchByPolicyNumber(tenantId, numeroDePoliza, fields)
+      : Promise.resolve([]),
+    dni ? matchByDni(tenantId, dni, fields) : Promise.resolve([]),
+    correo ? matchByEmail(tenantId, correo, fields) : Promise.resolve([]),
+    telefono ? matchByPhone(tenantId, telefono, fields) : Promise.resolve([]),
+  ]);
+
   const matches: CustomerMatch[] = [];
   const seenCustomerIds = new Set<string>();
-
-  // ── 1. Policy number match (highest priority) ────────────────────────────────
-  if (fields.policy_number && fields.policy_number.trim() !== "") {
-    const policyMatches = await matchByPolicyNumber(tenantId, fields.policy_number.trim(), fields);
-    for (const m of policyMatches) {
-      if (!seenCustomerIds.has(m.customerId)) {
-        matches.push(m);
-        seenCustomerIds.add(m.customerId);
-      }
-    }
-  }
-
-  // ── 2. DNI match ──────────────────────────────────────────────────────────────
-  if (fields.dni && fields.dni.trim() !== "") {
-    const dniMatches = await matchByDni(tenantId, fields.dni.trim(), fields);
-    for (const m of dniMatches) {
-      if (!seenCustomerIds.has(m.customerId)) {
-        matches.push(m);
-        seenCustomerIds.add(m.customerId);
-      }
-    }
-  }
-
-  // ── 3. Email match ─────────────────────────────────────────────────────────────
-  if (fields.email && fields.email.trim() !== "") {
-    const emailMatches = await matchByEmail(tenantId, fields.email.trim(), fields);
-    for (const m of emailMatches) {
-      if (!seenCustomerIds.has(m.customerId)) {
-        matches.push(m);
-        seenCustomerIds.add(m.customerId);
-      }
-    }
-  }
-
-  // ── 4. Phone match via customer_contacts ──────────────────────────────────────
-  if (fields.phone && fields.phone.trim() !== "") {
-    const phoneMatches = await matchByPhone(tenantId, fields.phone.trim(), fields);
-    for (const m of phoneMatches) {
-      if (!seenCustomerIds.has(m.customerId)) {
-        matches.push(m);
-        seenCustomerIds.add(m.customerId);
-      }
+  for (const lista of porPrioridad) {
+    for (const m of lista) {
+      if (seenCustomerIds.has(m.customerId)) continue;
+      matches.push(m);
+      seenCustomerIds.add(m.customerId);
     }
   }
 

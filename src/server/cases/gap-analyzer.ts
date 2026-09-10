@@ -20,8 +20,12 @@
 
 import "server-only";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import {
+  enTenant,
+  enTenantVarias,
+  type ClienteDatos,
+  type TenantContext,
+} from "@/data/scope";
 import {
   claimFieldConfirmations,
   extractedFields as extractedFieldsTable,
@@ -110,7 +114,10 @@ export async function analyzeEmailClaimGaps(
   tenantId: string
 ): Promise<GapAnalysisResult> {
   // ── 1. Fetch unresolved missing_docs rows ──────────────────────────────────
-  const missingDocKeys = await fetchMissingDocKeys(caseId, tenantId);
+  const { storedFields, missingDocKeys, confirmaciones } = await leerElCaso(
+    caseId,
+    tenantId
+  );
 
   // Everything the case already holds, not just what this run returned.
   //
@@ -123,7 +130,9 @@ export async function analyzeEmailClaimGaps(
   // which were sitting in extracted_fields at 0.95.
   //
   // Completeness is a property of the case, not of the last thing said.
-  const storedFields = await fetchStoredFields(caseId, tenantId);
+  // `storedFields` sale del mismo viaje: es todo lo que el caso ya tiene, no
+  // sólo lo que esta corrida devolvió. La completitud es una propiedad del
+  // caso, no de lo último que se dijo.
 
   // ── 2. Build a map of extracted field values and confidences ──────────────
   //
@@ -190,7 +199,7 @@ export async function analyzeEmailClaimGaps(
   }
 
   // ── 4. Fetch pending claim_field_confirmations ────────────────────────────
-  const pendingConfirmations = await fetchPendingConfirmations(caseId, tenantId);
+  const pendingConfirmations = confirmaciones.filter((c) => c.status === "pending");
 
   // ── 5. Build fieldsNeedingConfirmation from pending rows ──────────────────
   const fieldsNeedingConfirmation: FieldNeedingConfirmation[] = pendingConfirmations.map(
@@ -209,7 +218,9 @@ export async function analyzeEmailClaimGaps(
   // `fetchPendingConfirmations`: una fila en `confirmed` o `corrected` no
   // estaba ahi, asi que el campo entraba igual por este paso y se volvia a
   // preguntar algo que el analista ya habia resuelto.
-  const yaResueltas = await fetchClavesConfirmadas(caseId, tenantId);
+  const yaResueltas = confirmaciones
+    .filter((c) => c.status !== "pending")
+    .map((c) => c.field_key);
   const existingConfirmationKeys = new Set([
     ...fieldsNeedingConfirmation.map((f) => f.fieldName),
     ...yaResueltas,
@@ -254,6 +265,185 @@ export async function analyzeEmailClaimGaps(
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 /**
+ * Todo lo que el análisis necesita de la base, en un viaje.
+ *
+ * Eran CUATRO `enTenant` seguidos, o sea cuatro POST al driver HTTP de Neon,
+ * cada uno esperando al anterior sin necesitarlo: ninguna de las cuatro
+ * consultas usa el resultado de otra. Y esto corre en el camino de contestarle
+ * al asegurado, detrás de una llamada al modelo que ya se comió buena parte del
+ * presupuesto de la corrida.
+ *
+ * Ahora son TRES —las dos de `claim_field_confirmations` eran la misma tabla y
+ * el mismo caso, partidas por `status`, así que se piden juntas y se separan
+ * acá— y las tres van en un `batch()`, que es una sola transacción y una sola
+ * ida y vuelta.
+ *
+ * ── Por qué el camino de a uno sigue existiendo ─────────────────────────────
+ *
+ * Porque cada lectura degrada distinto y eso importa. Que `extracted_fields`
+ * vuelva vacío es el bug que el encabezado de `fetchStoredFields` describe: se
+ * le pregunta al denunciante por cinco cosas que ya mandó. Con un lote, una
+ * consulta que falla se lleva puestas a las tres. Si el lote no sale, se vuelve
+ * al camino viejo, donde cada una cae sola y las otras dos siguen sirviendo.
+ */
+async function leerElCaso(
+  caseId: string,
+  tenantId: string
+): Promise<{
+  storedFields: ExtractedField[];
+  missingDocKeys: string[];
+  confirmaciones: FilaDeConfirmacion[];
+}> {
+  // Las consultas de acá no llevan filtro por inquilino: lo pone la base.
+  const tenantCtx: TenantContext = { tenantId };
+  try {
+    const [campos, huecos, confirmaciones] = await enTenantVarias<[
+      FilaDeCampo[],
+      Array<{ doc_key: string }>,
+      FilaDeConfirmacionCruda[],
+    ]>(tenantCtx, (db) => [
+      consultaCampos(db, caseId),
+      consultaHuecos(db, caseId),
+      consultaConfirmaciones(db, caseId),
+    ]);
+
+    return {
+      storedFields: deCampos(campos),
+      missingDocKeys: deHuecos(huecos),
+      confirmaciones: deConfirmaciones(confirmaciones),
+    };
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "warn",
+        service: "claimmix",
+        msg: "gap_analyzer.lote_fallo",
+        code: codigoDeError(err),
+        nota: "Se vuelve al camino de a uno, donde cada lectura degrada sola.",
+      })
+    ); // crew-debug-ok
+
+    const [storedFields, missingDocKeys, confirmaciones] = await Promise.all([
+      fetchStoredFields(caseId, tenantId),
+      fetchMissingDocKeys(caseId, tenantId),
+      fetchConfirmaciones(caseId, tenantId),
+    ]);
+    return { storedFields, missingDocKeys, confirmaciones };
+  }
+}
+
+function codigoDeError(err: unknown): string {
+  return (
+    (err as { code?: string })?.code ??
+    (err instanceof Error ? err.name : "UnknownError")
+  );
+}
+
+interface FilaDeCampo {
+  field_key: string;
+  field_value: string | null;
+  confidence: string | number;
+}
+
+interface FilaDeConfirmacionCruda {
+  field_key: string;
+  status: string | null;
+  proposed_value: string | null;
+  conflict_with_value: string | null;
+  confidence: string | number;
+}
+
+export interface FilaDeConfirmacion {
+  field_key: string;
+  status: string;
+  proposed_value: string | null;
+  conflict_with_value: string | null;
+  confidence: number;
+}
+
+const ESTADOS_QUE_IMPORTAN = ["pending", "confirmed", "corrected"];
+
+/** La consulta sola, para poder mandarla en un lote. Ver `leerElCaso`. */
+function consultaCampos(db: ClienteDatos, caseId: string) {
+  return db
+    .select({
+      field_key: extractedFieldsTable.field_key,
+      field_value: extractedFieldsTable.field_value,
+      confidence: extractedFieldsTable.confidence,
+    })
+    .from(extractedFieldsTable)
+    .where(eq(extractedFieldsTable.case_id, caseId));
+}
+
+/** La consulta sola, para poder mandarla en un lote. Ver `leerElCaso`. */
+function consultaHuecos(db: ClienteDatos, caseId: string) {
+  return db
+    .select({ doc_key: missingDocs.doc_key })
+    .from(missingDocs)
+    .where(
+      and(
+        eq(missingDocs.case_id, caseId),
+        isNull(missingDocs.satisfied_at),
+        isNull(missingDocs.declined_at)
+      )
+    );
+}
+
+/**
+ * La consulta sola, para poder mandarla en un lote. Ver `leerElCaso`.
+ *
+ * Los tres estados juntos: `pending` es lo que falta preguntar y
+ * `confirmed`/`corrected` es lo que una persona ya cerró. Eran dos consultas a
+ * la misma tabla por el mismo caso.
+ *
+ * Los nombres de columna en Neon son field_name / suggested_value; se renombran
+ * acá para conservar la forma interna field_key / proposed_value.
+ */
+function consultaConfirmaciones(db: ClienteDatos, caseId: string) {
+  return db
+    .select({
+      field_key: claimFieldConfirmations.field_name,
+      status: claimFieldConfirmations.status,
+      proposed_value: claimFieldConfirmations.suggested_value,
+      conflict_with_value: claimFieldConfirmations.conflict_with_value,
+      confidence: claimFieldConfirmations.confidence,
+    })
+    .from(claimFieldConfirmations)
+    .where(
+      and(
+        eq(claimFieldConfirmations.case_id, caseId),
+        inArray(claimFieldConfirmations.status, ESTADOS_QUE_IMPORTAN)
+      )
+    );
+}
+
+function deCampos(rows: FilaDeCampo[]): ExtractedField[] {
+  return rows.map((r) => ({
+    field_key: r.field_key,
+    field_value: r.field_value ?? "",
+    confidence: Number(r.confidence),
+    source: "ai" as const,
+  }));
+}
+
+/**
+ * Canónico, para que un hueco de `numero_poliza` y uno de `policy_number` sean
+ * el mismo hueco y no dos.
+ */
+function deHuecos(rows: Array<{ doc_key: string }>): string[] {
+  return rows.map((row) => canonicalFieldKey(row.doc_key));
+}
+
+/** Las columnas numéricas vuelven como texto desde Drizzle. */
+function deConfirmaciones(rows: FilaDeConfirmacionCruda[]): FilaDeConfirmacion[] {
+  return rows.map((row) => ({
+    ...row,
+    status: row.status ?? "",
+    confidence: Number(row.confidence),
+  }));
+}
+
+/**
  * Fields already persisted for this case by earlier extractions.
  *
  * Read-only: the orchestrator owns every write. Failure degrades to "we know
@@ -264,33 +454,12 @@ async function fetchStoredFields(
   caseId: string,
   tenantId: string
 ): Promise<ExtractedField[]> {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
   try {
-    const rows = await enTenant(tenantCtx, (db) =>
-      db
-        .select({
-          field_key: extractedFieldsTable.field_key,
-          field_value: extractedFieldsTable.field_value,
-          confidence: extractedFieldsTable.confidence,
-        })
-        .from(extractedFieldsTable)
-        .where(
-          eq(extractedFieldsTable.case_id, caseId)
-        )
+    return deCampos(
+      await enTenant<FilaDeCampo[]>({ tenantId }, (db) => consultaCampos(db, caseId))
     );
-
-    return rows.map((r) => ({
-      field_key: r.field_key,
-      field_value: r.field_value ?? "",
-      confidence: Number(r.confidence),
-      source: "ai" as const,
-    }));
   } catch (err) {
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
-    console.error("[gap-analyzer] extracted_fields fetch error:", code);
+    console.error("[gap-analyzer] extracted_fields fetch error:", codigoDeError(err));
     return [];
   }
 }
@@ -306,114 +475,41 @@ async function fetchMissingDocKeys(
   caseId: string,
   tenantId: string
 ): Promise<string[]> {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
   try {
-    const data = await enTenant(tenantCtx, (db) =>
-      db
-        .select({ doc_key: missingDocs.doc_key })
-        .from(missingDocs)
-        .where(
-          and(
-            eq(missingDocs.case_id, caseId),
-            isNull(missingDocs.satisfied_at),
-            isNull(missingDocs.declined_at)
-          )
-        )
+    return deHuecos(
+      await enTenant<Array<{ doc_key: string }>>({ tenantId }, (db) =>
+        consultaHuecos(db, caseId)
+      )
     );
-
-    // Canonical, so a `numero_poliza` gap and a `policy_number` gap are the
-    // same gap rather than two.
-    return data.map((row) => canonicalFieldKey(row.doc_key));
   } catch (err) {
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
-    console.error("[gap-analyzer] missing_docs fetch error:", code);
-    return [];
-  }
-}
-
-/** Fetch pending (status='pending') claim_field_confirmations for this case. */
-async function fetchPendingConfirmations(
-  caseId: string,
-  tenantId: string
-): Promise<Array<{
-  field_key: string;
-  proposed_value: string | null;
-  conflict_with_value: string | null;
-  confidence: number;
-}>> {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
-  try {
-    // Column names in the Neon schema are field_name / suggested_value —
-    // aliased here to preserve the internal field_key / proposed_value shape.
-    const data = await enTenant(tenantCtx, (db) =>
-      db
-        .select({
-          field_key: claimFieldConfirmations.field_name,
-          proposed_value: claimFieldConfirmations.suggested_value,
-          conflict_with_value: claimFieldConfirmations.conflict_with_value,
-          confidence: claimFieldConfirmations.confidence,
-        })
-        .from(claimFieldConfirmations)
-        .where(
-          and(
-            eq(claimFieldConfirmations.case_id, caseId),
-            eq(claimFieldConfirmations.status, "pending")
-          )
-        )
-    );
-
-    // numeric columns come back as strings from Drizzle — normalize to number.
-    return data.map((row) => ({
-      ...row,
-      confidence: Number(row.confidence),
-    }));
-  } catch (err) {
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
-    console.error("[gap-analyzer] claim_field_confirmations fetch error:", code);
+    console.error("[gap-analyzer] missing_docs fetch error:", codigoDeError(err));
     return [];
   }
 }
 
 /**
- * Los campos de este caso que una persona ya cerro.
+ * Las confirmaciones del caso que todavía dicen algo: las pendientes y las que
+ * una persona ya cerró.
  *
- * `confirmed` y `corrected` son los dos estados que escribe `confirm-field`
- * cuando un analista decide. Un campo ahi no vuelve a la lista de cosas por
- * preguntar, aunque el modelo lo relea con confianza media en el mensaje
- * siguiente.
+ * Vacío = se comporta como antes de que existiera el filtro por cerradas.
+ * Preferible a tirar: el análisis de huecos corre en el camino de respuesta al
+ * asegurado.
  */
-async function fetchClavesConfirmadas(
+async function fetchConfirmaciones(
   caseId: string,
   tenantId: string
-): Promise<string[]> {
-  // Las consultas de aca ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
+): Promise<FilaDeConfirmacion[]> {
   try {
-    const data = await enTenant(tenantCtx, (db) =>
-      db
-        .select({ field_key: claimFieldConfirmations.field_name })
-        .from(claimFieldConfirmations)
-        .where(
-          and(
-            eq(claimFieldConfirmations.case_id, caseId),
-            inArray(claimFieldConfirmations.status, ["confirmed", "corrected"])
-          )
-        )
+    return deConfirmaciones(
+      await enTenant<FilaDeConfirmacionCruda[]>({ tenantId }, (db) =>
+        consultaConfirmaciones(db, caseId)
+      )
     );
-    return data.map((r) => r.field_key);
   } catch (err) {
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
-    console.error("[gap-analyzer] confirmaciones cerradas fetch error:", code);
-    // Vacio = se comporta como antes. Preferible a tirar: el analisis de huecos
-    // corre en el camino de respuesta al asegurado.
+    console.error(
+      "[gap-analyzer] claim_field_confirmations fetch error:",
+      codigoDeError(err)
+    );
     return [];
   }
 }

@@ -20,7 +20,12 @@
 import "server-only";
 import { and, eq, gte, ne, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import {
+  enTenant,
+  enTenantVarias,
+  type ClienteDatos,
+  type TenantContext,
+} from "@/data/scope";
 
 /** @deprecated Legacy constants for gpt-4o-mini. Use computeCostUsd(tokens, tokens, model). */
 export const COST_PER_PROMPT_TOKEN = 0.00000015;
@@ -238,7 +243,7 @@ export async function checkBudget(
    */
   const userDailyTokenCap = readCap(process.env.AI_USER_DAILY_TOKEN_CAP, 2_000_000);
 
-  // ── 1. Monthly cost check (project-wide) ─────────────────────────────────────
+  // ── Los tres cupos: mensual del proyecto, diario del inquilino, diario de la persona ──
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
@@ -255,47 +260,38 @@ export async function checkBudget(
    */
   const demoTenantId = getDemoTenantId();
 
-  let monthlyCostUsd = 0;
-  try {
-    /*
-     * El tope mensual es del PROYECTO, no de cada aseguradora.
-     *
-     * Esta consulta corría dentro de `enTenant`, o sea acotada por RLS al
-     * inquilino que estaba pidiendo. Con eso, el tope de US$200 pasaba a ser
-     * US$200 POR aseguradora: con cuatro inquilinos activos gastando 199 cada
-     * uno, el gasto real es 796, ninguno de los cuatro se pasa de su propia
-     * cuenta, y los cuatro siguen extrayendo. El techo declarado es 200 y la
-     * tarjeta paga 796.
-     *
-     * El `ne(tenant_id, demoTenantId)` de abajo lo delata: descontar la demo
-     * sólo tiene sentido si la suma cruza inquilinos. Acotada por RLS, esa
-     * cláusula no podía hacer nada — descuenta filas que la consulta no veía.
-     *
-     * `/api/health` ya suma así, sin `enTenant`, y por eso el número que muestra
-     * y el que gobierna el corte no eran el mismo.
-     */
-    // sin-inquilino: el tope de gasto es del proyecto entero, así que la suma
-    // tiene que cruzar inquilinos. Ver el bloque de arriba.
-    const [monthly] = await db
-      .select({
-        total: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8`,
-      })
-      .from(tables.aiUsage)
-      .where(
-        demoTenantId
-          ? and(
-              gte(tables.aiUsage.created_at, monthStart.toISOString()),
-              ne(tables.aiUsage.tenant_id, demoTenantId)
-            )
-          : gte(tables.aiUsage.created_at, monthStart.toISOString())
-      );
-    monthlyCostUsd = monthly?.total ?? 0;
-  } catch (e) {
-    // Fail open on DB error (don't block users due to budget check failure).
-    console.error("[budget] Monthly check error:", (e as { code?: string })?.code);
-    return { exceeded: false };
-  }
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
 
+  /*
+   * Los tres cupos se preguntan a la vez.
+   *
+   * Eran tres `await` en fila, cada uno esperando al anterior sin necesitarlo:
+   * ninguna de las tres sumas usa el resultado de otra. Y esto corre ANTES de
+   * cada llamada al modelo, o sea en el camino donde el presupuesto de la
+   * corrida ya está contado.
+   *
+   * La primera va por fuera de `enTenant` a propósito —el tope mensual es del
+   * proyecto, no de cada aseguradora— así que no puede entrar al mismo lote;
+   * las otras dos sí, y son un `batch()`. Dos viajes en paralelo en lugar de
+   * tres en fila.
+   *
+   * El ORDEN en que se evalúan no cambia: mensual, después inquilino, después
+   * persona. Quien se pase de dos cupos a la vez recibe el mismo motivo que
+   * recibía antes. Lo único que se paga de más es cuando el mensual ya está
+   * agotado: ahí las dos sumas del día se piden igual y no se miran. Es el
+   * caso terminal, y a cambio el camino normal —el de siempre— pasa de tres
+   * latencias a una.
+   */
+  const [mensual, delDia] = await Promise.all([
+    sumaMensualDelProyecto(monthStart, demoTenantId),
+    sumasDelDia(tenantCtx, dayStart, userId),
+  ]);
+
+  // Falla abierta: un error del contador no puede frenar una denuncia.
+  if (!mensual.ok || !delDia.ok) return { exceeded: false };
+
+  const monthlyCostUsd = mensual.total;
   if (monthlyCostUsd >= monthlyCapUsd) {
     return {
       exceeded: true,
@@ -303,69 +299,111 @@ export async function checkBudget(
     };
   }
 
-  // ── 2. Tenant daily token cap ─────────────────────────────────────────────────
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
-
-  let tenantDayTokens = 0;
-  try {
-    const [tenantDay] = await enTenant(tenantCtx, (db) =>
-      db
-        .select({
-          total: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
-        })
-        .from(tables.aiUsage)
-        .where(
-          and(
-            gte(tables.aiUsage.created_at, dayStart.toISOString())
-          )
-        )
-    );
-    tenantDayTokens = tenantDay?.total ?? 0;
-  } catch (e) {
-    console.error("[budget] Tenant daily check error:", (e as { code?: string })?.code);
-    return { exceeded: false };
-  }
-
-  if (tenantDayTokens >= tenantDailyTokenCap) {
+  if (delDia.inquilino >= tenantDailyTokenCap) {
     return {
       exceeded: true,
-      reason: `Presupuesto diario de tokens agotado para el tenant (${tenantDayTokens.toLocaleString()} / ${tenantDailyTokenCap.toLocaleString()}).`,
+      reason: `Presupuesto diario de tokens agotado para el tenant (${delDia.inquilino.toLocaleString()} / ${tenantDailyTokenCap.toLocaleString()}).`,
     };
   }
 
-  // ── 3. Per-user daily token cap ───────────────────────────────────────────────
-  if (userId) {
-    let userDayTokens = 0;
-    try {
-      const [userDay] = await enTenant(tenantCtx, (db) =>
-        db
-          .select({
-            total: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
-          })
-          .from(tables.aiUsage)
-          .where(
-            and(
-              eq(tables.aiUsage.user_id, userId),
-              gte(tables.aiUsage.created_at, dayStart.toISOString())
-            )
-          )
-      );
-      userDayTokens = userDay?.total ?? 0;
-    } catch (e) {
-      console.error("[budget] User daily check error:", (e as { code?: string })?.code);
-      return { exceeded: false };
-    }
-
-    if (userDayTokens >= userDailyTokenCap) {
-      return {
-        exceeded: true,
-        reason: `Presupuesto diario de tokens agotado para el usuario (${userDayTokens.toLocaleString()} / ${userDailyTokenCap.toLocaleString()}).`,
-      };
-    }
+  if (userId && delDia.persona >= userDailyTokenCap) {
+    return {
+      exceeded: true,
+      reason: `Presupuesto diario de tokens agotado para el usuario (${delDia.persona.toLocaleString()} / ${userDailyTokenCap.toLocaleString()}).`,
+    };
   }
 
   return { exceeded: false };
+}
+
+/**
+ * Lo gastado en el mes por el PROYECTO entero, sin la demo.
+ *
+ * Fuera de `enTenant` a propósito, y el `ne(tenant_id, demo)` lo delata:
+ * descontar la demo sólo tiene sentido si la suma cruza inquilinos. Acotada por
+ * RLS, esta consulta convertía el tope de US$200 en US$200 POR aseguradora —
+ * con cuatro gastando 199 cada una, la tarjeta paga 796 y ninguna se pasa de su
+ * propia cuenta.
+ */
+async function sumaMensualDelProyecto(
+  desde: Date,
+  demoTenantId: string | null
+): Promise<{ ok: boolean; total: number }> {
+  try {
+    // sin-inquilino: el tope de gasto es del proyecto entero, así que la suma
+    // tiene que cruzar inquilinos. Ver el bloque de arriba.
+    const [fila] = await db
+      .select({
+        total: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8`,
+      })
+      .from(tables.aiUsage)
+      .where(
+        demoTenantId
+          ? and(
+              gte(tables.aiUsage.created_at, desde.toISOString()),
+              ne(tables.aiUsage.tenant_id, demoTenantId)
+            )
+          : gte(tables.aiUsage.created_at, desde.toISOString())
+      );
+    return { ok: true, total: fila?.total ?? 0 };
+  } catch (e) {
+    console.error("[budget] Monthly check error:", (e as { code?: string })?.code);
+    return { ok: false, total: 0 };
+  }
+}
+
+/**
+ * Los tokens del día: los del inquilino y los de la persona, en un lote.
+ *
+ * Sin `userId` se pide igual la del inquilino y la otra se salta: mandar una
+ * consulta cuyo resultado no se va a mirar es pagar por nada, y el camino sin
+ * persona lo usan los crons.
+ */
+async function sumasDelDia(
+  ctx: TenantContext,
+  desde: Date,
+  userId?: string | null
+): Promise<{ ok: boolean; inquilino: number; persona: number }> {
+  try {
+    if (!userId) {
+      const [fila] = await enTenant<Array<{ total: number }>>(ctx, (db) =>
+        consultaTokensDelDia(db, desde)
+      );
+      return { ok: true, inquilino: fila?.total ?? 0, persona: 0 };
+    }
+
+    const [[inquilino], [persona]] = await enTenantVarias<[
+      Array<{ total: number }>,
+      Array<{ total: number }>,
+    ]>(ctx, (db) => [
+      consultaTokensDelDia(db, desde),
+      consultaTokensDelDia(db, desde, userId),
+    ]);
+
+    return {
+      ok: true,
+      inquilino: inquilino?.total ?? 0,
+      persona: persona?.total ?? 0,
+    };
+  } catch (e) {
+    console.error("[budget] Daily check error:", (e as { code?: string })?.code);
+    return { ok: false, inquilino: 0, persona: 0 };
+  }
+}
+
+/** La consulta sola, para poder mandarla en un lote. Ver `sumasDelDia`. */
+function consultaTokensDelDia(db: ClienteDatos, desde: Date, userId?: string) {
+  return db
+    .select({
+      total: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
+    })
+    .from(tables.aiUsage)
+    .where(
+      and(
+        gte(tables.aiUsage.created_at, desde.toISOString()),
+        userId ? eq(tables.aiUsage.user_id, userId) : undefined
+      )
+    );
 }
 
 /**

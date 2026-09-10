@@ -36,9 +36,8 @@
  *   pnpm achicar-payloads --apply                # escribe
  */
 
-import { readFileSync } from "node:fs";
-
 import { connect } from "./lib/db-driver.mjs";
+import { leerDeEnvLocal } from "./lib/env-local.mjs";
 
 const APPLY = process.argv.includes("--apply");
 const envIdx = process.argv.indexOf("--env");
@@ -78,15 +77,14 @@ function limpiar(msg: unknown): unknown {
   return { ...msg, payload: limpiarParte(m.payload) };
 }
 
-const env = readFileSync("./.env.local", "utf8");
-const cadena = env.match(new RegExp("^" + VAR + '\\s*=\\s*"?([^"\\n]+)"?', "m"));
+const cadena = leerDeEnvLocal(VAR);
 if (!cadena) {
   console.error(`✖ ${VAR} no está en .env.local`);
   process.exit(1);
 }
 console.log(`▸ base: ${VAR}`);
 
-const c = await connect(cadena[1]!);
+const c = await connect(cadena);
 const kb = (n: number) => `${Math.round(n / 1024)} kB`;
 
 try {

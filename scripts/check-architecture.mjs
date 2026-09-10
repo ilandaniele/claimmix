@@ -29,7 +29,21 @@ import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
-const TOPE_FILTROS = 10;
+/**
+ * Cuántos filtros por inquilino escritos a mano se admiten.
+ *
+ * No es un límite de calidad: es un trinquete. Cada uno de estos vive en código
+ * de sistema que es cross-tenant por diseño —los barridos, la salud, la
+ * facturación, el alta de casillas— y ya se auditaron uno por uno. El tope
+ * existe para que agregar el número once sea un acto deliberado y no un
+ * descuido que nadie ve.
+ *
+ * El once es `retomarExtraccionesPendientes`: un barrido de sistema que recorre
+ * los casos de todos los inquilinos y acepta acotarse a uno cuando lo llama el
+ * `after()` de un webhook, que sí sabe de quién es el mensaje. Misma forma
+ * exacta que `reapStuckProcessingCases`, que es el diez.
+ */
+const TOPE_FILTROS = 11;
 
 function archivos(dir, ext = [".ts", ".tsx"]) {
   if (!existsSync(dir)) return [];

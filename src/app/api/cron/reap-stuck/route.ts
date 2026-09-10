@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isInternalRequest } from "@/lib/security/internal-auth";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
+import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const result = await reapStuckProcessingCases();
 
+  /*
+   * Y antes de escalar nada, retomar lo que quedó marcado y sin hacer.
+   *
+   * `extraction_pending` la escriben cuatro caminos del worker y hasta ahora la
+   * leía uno solo: el mismo proceso que la escribía. Sin este barrido, un
+   * mensaje que llegó a mitad de corrida quedaba guardado y sin leer hasta que
+   * la misma persona volviera a escribir — y a los catorce días el barrido de
+   * abandonados lo cerraba diciendo que la persona no contestó.
+   *
+   * Va acá y no en su propio cron porque Hobby da dos por día y los dos ya
+   * están usados. Va PRIMERO porque un caso que se retoma bien deja de ser
+   * candidato a que lo escalen.
+   */
+  const retomados = await retomarExtraccionesPendientes();
+
   // Same nightly pass, second sweep: conversations the claimant abandoned.
   // Piggybacking rather than adding a cron because the Hobby plan allows one
   // run a day and both jobs want exactly that cadence.
@@ -63,6 +79,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return NextResponse.json({
     ok: true,
     ...result,
+    retomados: retomados.retomados,
     abandoned_closed: abandoned.closed,
     rate_limit_rows_purged: purged,
   });

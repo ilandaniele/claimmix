@@ -94,10 +94,11 @@ export function UserAiKeyPanel({ initialHasKey }: Props) {
 
       {showForm && (
         <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-3">
-          <label className="block text-xs font-medium text-slate-600">
+          <label htmlFor="clave-gemini" className="block text-xs font-medium text-slate-600">
             Google Gemini API Key
           </label>
           <input
+            id="clave-gemini"
             type="password"
             value={keyValue}
             onChange={(e) => setKeyValue(e.target.value)}

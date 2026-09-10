@@ -91,10 +91,18 @@ export function BatchSimulatePanel() {
       {/* ── Config ── */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+          {/*
+            * `htmlFor` + `id`, no una etiqueta al lado.
+            *
+            * Un `<label>` que no envuelve al control ni lo apunta es texto
+            * suelto: se ve, y un lector de pantalla anuncia «cuadro de número»
+            * sin nombre. Las tres de este panel estaban así.
+            */}
+          <label htmlFor="lote-cantidad" className="text-xs font-medium text-slate-600 dark:text-slate-300">
             {t("lote.cantidad")}
           </label>
           <input
+            id="lote-cantidad"
             type="number"
             min={1}
             max={50}
@@ -105,10 +113,11 @@ export function BatchSimulatePanel() {
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+          <label htmlFor="lote-delay" className="text-xs font-medium text-slate-600 dark:text-slate-300">
             {t("lote.delay")}
           </label>
           <input
+            id="lote-delay"
             type="number"
             min={0}
             max={5000}
@@ -120,10 +129,11 @@ export function BatchSimulatePanel() {
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+          <label htmlFor="lote-tipo" className="text-xs font-medium text-slate-600 dark:text-slate-300">
             {t("lote.tipo")}
           </label>
           <select
+            id="lote-tipo"
             value={claimType}
             onChange={(e) => setClaimType(e.target.value as ClaimType | "")}
             className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
 
 /*
@@ -41,6 +41,8 @@ export function AiProviderPanel() {
   const [keyError, setKeyError] = useState("");
   const [keySaved, setKeySaved] = useState(false);
   const keyInputRef = useRef<HTMLInputElement>(null);
+  /** Une el rótulo con el campo. `useId` para que no choque si hay dos paneles. */
+  const idClave = useId();
 
   function applyPayload(payload: SettingsResponse) {
     setProvider(payload.provider);
@@ -265,11 +267,20 @@ export function AiProviderPanel() {
 
       {showKeyForm && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
-          <label className="block text-sm font-medium text-slate-700">
+          {/*
+            El `htmlFor` que faltaba.
+
+            El `<label>` y el `<input>` son hermanos —el campo vive adentro del
+            `div.flex` de abajo— así que sin `htmlFor` no los une nada: hacer
+            clic en el rótulo no enfocaba el campo, y la tecnología asistiva
+            anunciaba una contraseña sin nombre.
+          */}
+          <label htmlFor={idClave} className="block text-sm font-medium text-slate-700">
             {t("aiProvider.geminiKeyLabel")}
           </label>
           <div className="flex gap-2">
             <input
+              id={idClave}
               ref={keyInputRef}
               type="password"
               value={geminiKey}

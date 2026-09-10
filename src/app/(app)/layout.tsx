@@ -63,7 +63,19 @@ export default async function AppLayout({
          * tarjetas se lean como si flotaran. Va como clase porque la CSP no
          * acepta `style=` — ver `globals.css`.
          */}
-        <div className="lienzo flex h-screen overflow-hidden">
+        {/*
+          El idioma de ESTA parte, que no es el del documento.
+
+          El layout raíz escribe `lang="es-AR"` fijo, y está bien: `/login`,
+          `/registro` y `/recuperar` tienen el texto en castellano escrito a
+          mano. Pero acá adentro la interfaz puede estar en inglés —la
+          preferencia de la cuenta le gana a la cookie, unas líneas arriba— y
+          con el idioma equivocado un lector de pantalla lee todo con fonemas
+          castellanos.
+
+          Es SC 3.1.2, «Language of Parts»: la parte que cambia lo declara.
+        */}
+        <div lang={locale} className="lienzo flex h-screen overflow-hidden">
           {/*
            * La primera parada de teclado de todas las pantallas del turno.
            *

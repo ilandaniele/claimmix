@@ -2236,6 +2236,24 @@ rompió nada, y el código entró enseguida — pero el ensayo con rollback cont
 Neon por HTTP **no existe**. Para eso hay que mandar el bloque entero en un solo
 `sql.query`, o no ensayar.
 
+#### Y una nota sobre la 0030: el ensayo estaba ocho migraciones atrás
+
+El PR de la 0030 agregó `cases.intentos_de_extraccion`. La CI se cayó en dos
+jobs con `error_code: 42703` —columna inexistente— desde adentro de un test,
+o sea con el dedo apuntando al código del PR.
+
+No era el código. `E2E_DATABASE_URL` y `STAGING_DATABASE_URL` son secretos
+APARTE de producción, a propósito: los tests nunca tocan datos de clientes. Pero
+**nada aplica las migraciones ahí**, y nadie lo mira: el ensayo estaba en la
+0022, ocho atrás. Las ocho eran idempotentes y entraron sin ruido.
+
+El agujero no era la 0030: era que el desfasaje sólo se ve cuando un test se
+rompe con un error de Postgres que parece otra cosa. Ahora `migrate.mjs
+--exigir-al-dia` sale 1 si falta alguna, y los dos jobs lo corren antes de
+sembrar. **No las aplica**: aplicar migraciones desde la rama de un PR es dejar
+que cualquier PR escriba en el esquema del ensayo. Avisa, con el nombre del
+archivo y el comando.
+
 ### 🔬 Los catorce prompts, corridos (2026-09-09)
 
 Doce agentes sobre el código de hoy, más `/configure-load-tests` ejecutado a

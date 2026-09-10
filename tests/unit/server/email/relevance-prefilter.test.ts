@@ -125,3 +125,74 @@ describe("un newsletter que habla de seguros", () => {
     ).toEqual({ action: "allow" });
   });
 });
+
+/**
+ * El cuerpo de un `<script>` no es texto que escribió una persona.
+ *
+ * `visibleHtmlText` sacaba `<script>…</script>` con el `>` pegado al nombre.
+ * HTML acepta espacio, salto de línea y hasta atributos antes del cierre, así
+ * que un cuerpo que cierre de cualquiera de esas formas se escapaba del primer
+ * `replace`, y el segundo —el que borra etiquetas— dejaba el CÓDIGO adentro del
+ * texto sobre el que se decide si el correo parece una denuncia.
+ *
+ * Quien manda el mail elige qué palabras poner ahí. `js/bad-tag-filter`.
+ */
+describe("el cierre de <script> con espacio o atributos", () => {
+  const NEWSLETTER = {
+    fromAddr: "novedades@example.com",
+    subject: "Newsletter",
+    bodyText: "",
+    headers: [{ name: "Precedence", value: "bulk" }],
+  };
+
+  it("no deja pasar un newsletter que esconde la señal en un script", () => {
+    // Sin el arreglo, «siniestro» del cuerpo del script cuenta como señal de
+    // denuncia y el newsletter entra: una extracción pagada por mail.
+    expect(
+      classifyInboundEmailForIntake({
+        ...NEWSLETTER,
+        bodyHtml: '<script>var x = "siniestro poliza";</script >Promociones',
+      })
+    ).toMatchObject({ action: "skip" });
+  });
+
+  it("tampoco con atributos en la etiqueta de cierre", () => {
+    expect(
+      classifyInboundEmailForIntake({
+        ...NEWSLETTER,
+        bodyHtml: '<script>var x = "siniestro poliza";</script foo>Promociones',
+      })
+    ).toMatchObject({ action: "skip" });
+  });
+
+  it("ni con un salto de línea antes del mayor", () => {
+    expect(
+      classifyInboundEmailForIntake({
+        ...NEWSLETTER,
+        bodyHtml: '<script>var x = "siniestro poliza";</script\n>Promociones',
+      })
+    ).toMatchObject({ action: "skip" });
+  });
+
+  it("y el cierre normal sigue funcionando", () => {
+    // El control: si el primer `replace` dejara de matchear el caso común, los
+    // tres de arriba pasarían por el motivo equivocado.
+    expect(
+      classifyInboundEmailForIntake({
+        ...NEWSLETTER,
+        bodyHtml: '<script>var x = "siniestro poliza";</script>Promociones',
+      })
+    ).toMatchObject({ action: "skip" });
+  });
+
+  it("pero una denuncia de verdad en el cuerpo visible sí entra", () => {
+    // La otra dirección: sacar el script no puede llevarse el texto de al lado.
+    expect(
+      classifyInboundEmailForIntake({
+        ...NEWSLETTER,
+        headers: [],
+        bodyHtml: "<script>var x = 1;</script ><p>Tuve un siniestro con mi poliza</p>",
+      })
+    ).toEqual({ action: "allow" });
+  });
+});

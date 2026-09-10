@@ -426,6 +426,41 @@ console.log("\n▸ enTenant no se anida");
   }
 }
 
+// ── 9. El inquilino no entra por el cuerpo del pedido ──────────────────────
+//
+// El webhook de WhatsApp aceptaba un `tenant_id` en el cuerpo y le ganaba a la
+// configuración. Su credencial es `WHATSAPP_WEBHOOK_SECRET`: UNA sola, global, y
+// que un adaptador BSP tiene por definición. O sea que quien la tuviera escribía
+// una denuncia —con su teléfono y sus fotos— en la bandeja de cualquier
+// aseguradora del sistema, incluida una que nunca habilitó WhatsApp. Ninguno de
+// los llamadores lo mandaba: era una puerta abierta que nadie usaba.
+//
+// Las dos rutas que SÍ lo reciben son internas y las llama el propio deploy con
+// `CRON_SECRET`. Ahí el cuerpo no puede alcanzar un inquilino que el llamador no
+// controle ya, y el id hace falta porque no hay sesión de la que sacarlo.
+//
+// La regla, entonces, no es «nunca»: es que si el inquilino entra por el cuerpo,
+// la ruta tiene que estar cerrada con `isInternalRequest`.
+console.log("\n▸ El inquilino no entra por el cuerpo");
+{
+  const sospechosos = [];
+  for (const f of archivos("src/app/api").filter((x) => x.endsWith("/route.ts"))) {
+    const s = sinComentarios(readFileSync(f, "utf8"));
+    if (!/tenant_?[Ii]d:\s*z\./.test(s)) continue;
+    if (/isInternalRequest\s*\(/.test(s)) continue;
+    sospechosos.push(f);
+  }
+  if (sospechosos.length === 0) {
+    bien("las rutas que reciben el inquilino en el cuerpo son internas");
+  } else {
+    mal(`${sospechosos.length} ruta(s) toman el inquilino del cuerpo sin ser internas`);
+    for (const x of sospechosos) console.log(`     ${x}`);
+    console.log("     El que llama elige en qué aseguradora escribe. Si la ruta no");
+    console.log("     está cerrada con CRON_SECRET, el inquilino sale de la sesión");
+    console.log("     o de la configuración, nunca del cuerpo.");
+  }
+}
+
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(66));
 if (problemas.length === 0) {

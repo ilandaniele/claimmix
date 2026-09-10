@@ -851,8 +851,12 @@ async function deliverEmail(
 function readable(body: string): string {
   if (!/<[a-z!]/i.test(body)) return body;
   return body
-    .replace(/<head[\s\S]*?<\/head>/gi, "")
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
+    // El cierre acepta espacio, salto de línea y atributos antes del `>`:
+    // `</script >` no matcheaba, y el `.replace(/<[^>]+>/g)` de abajo dejaba el
+    // cuerpo del script adentro del transcripto que lee una persona.
+    // `js/incomplete-multi-character-sanitization`, en severidad alta.
+    .replace(/<head[\s\S]*?<\/head[^>]*>/gi, "")
+    .replace(/<(script|style)[\s\S]*?<\/\1[^>]*>/gi, "")
     .replace(/<\/(p|div|h1|h2|h3|li|tr)>/gi, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<li[^>]*>/gi, "• ")

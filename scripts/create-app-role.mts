@@ -164,10 +164,21 @@ try {
      * mire esta salida se entera de que se rotó y no de cuál es.
      */
     const CLAVE = VAR === "DATABASE_URL" ? "DATABASE_URL_APP" : `${VAR}_APP`;
-    const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
+    const { readFileSync, writeFileSync } = await import("node:fs");
 
     const archivo = ".env.local";
-    let contenido = existsSync(archivo) ? readFileSync(archivo, "utf8") : "";
+    /*
+     * Se intenta leer y se atrapa, en vez de preguntar `existsSync` y después
+     * abrir. Entre las dos operaciones hay un hueco —`js/file-system-race`,
+     * que CodeQL marcaba en severidad alta— y además `existsSync` ya hace la
+     * llamada al sistema que después se repite.
+     */
+    let contenido = "";
+    try {
+      contenido = readFileSync(archivo, "utf8");
+    } catch {
+      // No está: se crea abajo.
+    }
     const salto = contenido.includes("\r\n") ? "\r\n" : "\n";
     const patron = new RegExp(`^${CLAVE}=.*$`, "m");
     contenido = patron.test(contenido)

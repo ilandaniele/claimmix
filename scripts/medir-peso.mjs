@@ -22,7 +22,7 @@
  * Eso lo cubre `tests/unit/la-frontera-no-lleva-bultos.test.ts`, que corre con
  * los unitarios y no necesita build.
  */
-import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { join } from "node:path";
 
@@ -37,11 +37,20 @@ if (!existsSync(RAIZ)) {
 }
 
 /** Todos los .js debajo de un directorio, con su tamaño comprimido. */
+/*
+ * `withFileTypes` en vez de un `statSync` por entrada.
+ *
+ * Preguntar «¿es un directorio?» y después abrirlo son dos operaciones con un
+ * hueco en el medio: `js/file-system-race`, que CodeQL marcaba en severidad
+ * alta. Acá el hueco no lo va a aprovechar nadie —esto mide el tamaño de
+ * `.next` en la máquina de uno— pero el arreglo es además menos código y una
+ * llamada al sistema menos por archivo: `readdir` ya sabe qué es cada cosa.
+ */
 function archivos(dir) {
   const out = [];
-  for (const e of readdirSync(dir)) {
-    const p = join(dir, e);
-    if (statSync(p).isDirectory()) out.push(...archivos(p));
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...archivos(p));
     else if (p.endsWith(".js")) {
       out.push({ ruta: p.replace(/\\/g, "/"), kb: gzipSync(readFileSync(p)).length / 1024 });
     }

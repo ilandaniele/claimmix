@@ -851,8 +851,8 @@ async function deliverEmail(
 /**
  * Sacar etiquetas de a una pasada no alcanza, y CodeQL lo dice.
  *
- * `js/incomplete-multi-character-sanitization`, severidad alta. Dos motivos,
- * los dos reales acá:
+ * `js/incomplete-multi-character-sanitization`, severidad alta. Tres motivos,
+ * los tres reales acá:
  *
  *   · El cierre acepta espacio, salto de línea y atributos antes del `>`, así
  *     que `</script >` no matcheaba y el cuerpo del script terminaba adentro
@@ -861,14 +861,29 @@ async function deliverEmail(
  *   · Borrar `<…>` una vez deja `<<a>script>` convertido en `<script>`. Una
  *     sola pasada CONSTRUYE la etiqueta que venía a sacar.
  *
+ *   · Y lo mismo vale para el borrado de `<script>…</script>`, que también
+ *     corría una vez: por eso el bucle envuelve la pasada ENTERA y no sólo
+ *     el `<[^>]+>` del final.
+ *
  * Se repite hasta que deja de cambiar, con tope: es un transcripto, no una
  * frontera de seguridad, y un bucle sin tope sobre texto que escribió otro es
  * la forma de cambiar un problema por otro.
  */
+/** Una pasada de todo lo que hay que sacar o traducir. Ver `sinEtiquetas`. */
+function unaPasada(texto: string): string {
+  return texto
+    .replace(/<head[\s\S]*?<\/head[^>]*>/gi, "")
+    .replace(/<(script|style)[\s\S]*?<\/\1[^>]*>/gi, "")
+    .replace(/<\/(p|div|h1|h2|h3|li|tr)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<[^>]+>/g, "");
+}
+
 function sinEtiquetas(texto: string): string {
   let antes = texto;
   for (let i = 0; i < 8; i++) {
-    const despues = antes.replace(/<[^>]+>/g, "");
+    const despues = unaPasada(antes);
     if (despues === antes) return despues;
     antes = despues;
   }
@@ -898,14 +913,7 @@ function sinEntidades(texto: string): string {
 
 function readable(body: string): string {
   if (!/<[a-z!]/i.test(body) && !/&[a-z#]/i.test(body)) return body;
-  return sinEtiquetas(
-    sinEntidades(body)
-      .replace(/<head[\s\S]*?<\/head[^>]*>/gi, "")
-      .replace(/<(script|style)[\s\S]*?<\/\1[^>]*>/gi, "")
-      .replace(/<\/(p|div|h1|h2|h3|li|tr)>/gi, "\n")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<li[^>]*>/gi, "• ")
-  )
+  return sinEtiquetas(sinEntidades(body))
     .split("\n")
     .map((line) => line.trim())
     .filter((line, i, all) => line.length > 0 || (i > 0 && all[i - 1].length > 0))

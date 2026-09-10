@@ -10,10 +10,11 @@
 
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
+import { useDialogoModal } from "../../_components/dialogo-modal";
 import { useT, useLocale } from "@/lib/i18n/LocaleContext";
 import { formatDate } from "@/lib/utils";
 
@@ -156,6 +157,16 @@ function CreateUserDialog({
 
   const [state, action] = useActionState<FormState, FormData>(createUserAction, {});
 
+  /*
+   * El foco arranca en el correo, que es el primer campo que se llena.
+   *
+   * `useDialogoModal` se ocupa del resto: atrapa el Tab, cierra con Escape y
+   * devuelve el foco al botón que abrió. Los otros cuatro diálogos de la app lo
+   * usan desde hace tiempo; éste se quedó afuera.
+   */
+  const correoRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useDialogoModal<HTMLDivElement>(onClose, correoRef);
+
   useEffect(() => {
     if (state.success) {
       onCreated();
@@ -170,7 +181,16 @@ function CreateUserDialog({
       aria-modal="true"
       aria-label={t("usuarios.invitar")}
     >
-      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+      {/*
+        El quinto diálogo, que nunca recibió el arreglo de foco.
+
+        Los otros cuatro usan `useDialogoModal`; éste declaraba `aria-modal` y
+        no tenía nada: ni foco inicial, ni trampa de Tab, ni Escape, ni
+        devolución del foco al cerrar. Con `aria-modal` puesto el lector de
+        pantalla esconde todo lo de afuera, así que la persona quedaba parada
+        en la nada — y es el formulario que crea usuarios con su rol.
+      */}
+      <div ref={dialogRef} className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
         <h2 className="mb-4 text-base font-semibold text-slate-900">
           {t("usuarios.invitar")}
         </h2>
@@ -203,6 +223,7 @@ function CreateUserDialog({
               {t("usuarios.form.email")}
             </label>
             <input
+              ref={correoRef}
               id="email"
               name="email"
               type="email"

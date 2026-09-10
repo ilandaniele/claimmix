@@ -2650,6 +2650,42 @@ donde no espera ni echa a nadie. La serialización contra la base de producción
 Se ve recién en el próximo merge: el post-deploy de `main` tiene que llegar al
 final en vez de quedar `cancelled`.
 
+### 📏 Carga falla por el 2% y no siempre (2026-09-10)
+
+El post-deploy de `99fb6b6` se puso rojo en **Carga (lectura)**: «detalle de un
+caso» con 5 analistas dio **p95 510ms** contra un presupuesto de 500. Los otros
+seis jobs, verdes.
+
+Diez minutos después corrió el de `0adcfa9` —que sobre el código de la app **no
+cambia nada**: workflow, docs e invariante— contra la misma base de producción:
+
+| consulta (p95) | `99fb6b6` 1/5/20 | `0adcfa9` 1/5/20 |
+|---|---|---|
+| bandeja | 195 / 323 / 285 | 137 / 205 / 212 |
+| búsqueda por texto | 192 / 194 / 236 | 144 / 136 / **360** |
+| detalle de un caso | 387 / **510** / 409 | 276 / **262** / 287 |
+
+No es que una consulta se haya puesto lenta: **la corrida entera fue ~40% más
+lenta**, y la que la siguió pasó cómoda. El sospechoso es el arranque en frío
+del compute de Neon —la primera corrida en tocar la base después de un rato lo
+paga—, aunque medido está el efecto y no la causa.
+
+O sea que un job que corta el post-deploy entero se decide por 10ms sobre 500,
+y el mismo número diez minutos después es 262. Carga ya había fallado 2 veces
+en las últimas 6 corridas rojas (las otras 4 son el Ensayo).
+
+**Qué hacer con esto es una decisión, no un arreglo**, y son dos lecturas
+distintas de para qué está el presupuesto:
+
+- **Medir en régimen**: descartar las primeras consultas de cada celda y medir
+  con la base caliente. Es lo que siente un analista que lleva ocho horas
+  trabajando, que es de quien habla «el tablero se siente lento».
+- **Dejarlo como está**: 510ms en frío es lo que espera de verdad el primero
+  que entra a la mañana, y taparlo con un calentamiento es esconderlo.
+
+Lo que **no** corresponde es subir el número a 550: eso no cambia lo que pasa,
+sólo deja de avisarlo.
+
 ### 🙋 Waiting on you (not code)
 
 - **¿Corro `pnpm achicar-payloads --apply` contra producción?** Libera 10.290 kB

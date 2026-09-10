@@ -112,6 +112,23 @@ export interface DeliberationInput {
   isHighSeverity: boolean;
   /** True when nothing is outstanding and the claim is ready. */
   isComplete: boolean;
+  /**
+   * Lo que el worker YA averiguó, una línea por dato.
+   *
+   * Las tres herramientas del agente —`verificar_poliza`, `polizas_por_dni` y
+   * `historial_del_caso`— contestan preguntas que el worker respondió doscientas
+   * líneas antes, en la MISMA invocación: `findCustomerMatches` (que incluye el
+   * match por DNI), `findPolicyMatches` y `loadInboundConversation`.
+   *
+   * Cada herramienta que el modelo pide cuesta una pasada entera del bucle, o
+   * sea otra llamada a Gemini —seis segundos en la mediana— dentro de un
+   * presupuesto de cuarenta. Con hasta tres, es la diferencia entre una llamada
+   * y cuatro.
+   *
+   * Dárselo servido no le saca nada: las herramientas siguen ahí si igual
+   * quiere preguntar, y el plan se valida igual que siempre.
+   */
+  yaAveriguado?: string;
 }
 
 /** The deterministic tree remains the fallback, and the switch to reach it. */
@@ -300,6 +317,7 @@ SINIESTRO: ${input.claimTypeLabel ?? "todavía no sabemos de qué tipo"}
 
 NOS FALTA (esta es la única lista de la que podés pedir cosas):
 ${items.length > 0 ? items.join("\n") : "- (nada)"}
+${input.yaAveriguado ? `\nLO QUE YA AVERIGUAMOS (no hace falta que lo preguntes):\n${input.yaAveriguado}` : ""}
 
 LO ÚLTIMO QUE YA LE PEDIMOS EN UN MENSAJE:
 ${sinCentinelas(alreadyAsked)}

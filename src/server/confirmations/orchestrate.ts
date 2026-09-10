@@ -101,6 +101,46 @@ export interface ExtractedClaimOutput {
  * @param extractedOutput  - Extraction result + sender info.
  * @param customerMatches  - Customer matches from the customer-matcher module.
  */
+/**
+ * Lo que el worker ya buscó, en una línea por dato, para que el agente no lo
+ * vuelva a buscar.
+ *
+ * `verificar_poliza` y `polizas_por_dni` contestan exactamente esto, y cada
+ * una que el modelo pide cuesta otra pasada del bucle de deliberación: otra
+ * llamada a Gemini de seis segundos en la mediana, dentro de un presupuesto de
+ * cuarenta.
+ *
+ * Sin nombres ni números: el modelo no necesita el DNI para saber que la
+ * póliza existe y está vigente, y esto va a un prompt. Lo que necesita es si
+ * hay con qué seguir.
+ */
+export function loQueYaAveriguamos(matches: CustomerMatch[]): string | undefined {
+  if (matches.length === 0) {
+    return "- El padrón no devolvió ningún cliente para los datos de este mensaje.";
+  }
+
+  const lineas: string[] = [];
+  const porPoliza = matches.filter((m) => m.matchType === "policy_number");
+  const porDni = matches.filter((m) => m.matchType === "dni");
+
+  if (porPoliza.length > 0) {
+    lineas.push(`- La póliza que dio existe en el padrón (${porPoliza.length} coincidencia(s)).`);
+  }
+  if (porDni.length > 0) {
+    lineas.push(`- El DNI que dio tiene ${porDni.length} póliza(s) en el padrón.`);
+  }
+  if (lineas.length === 0) {
+    lineas.push(`- Hay ${matches.length} coincidencia(s) en el padrón, por contacto y no por póliza ni DNI.`);
+  }
+
+  const conflictos = matches.flatMap((m) => m.conflictsWithExtracted);
+  if (conflictos.length > 0) {
+    lineas.push(`- No coincide con lo que tenemos guardado: ${[...new Set(conflictos)].join(", ")}.`);
+  }
+
+  return lineas.join("\n");
+}
+
 export async function orchestratePostExtraction(
   caseId: string,
   tenantId: string,
@@ -424,6 +464,7 @@ export async function orchestratePostExtraction(
     claimTypeLabel: labelForClaimType(claimTypeValue),
     isHighSeverity,
     isComplete: everythingOutstanding.fields.length === 0,
+    yaAveriguado: loQueYaAveriguamos(customerMatches),
   });
 
   if (plan) {

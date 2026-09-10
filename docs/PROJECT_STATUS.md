@@ -2551,6 +2551,54 @@ Las tres guardas del 10/09 tienen ahora sus propios tests, cada una contra lo qu
 tiene que ver y contra lo que no. Reintroducir el bug exacto que se mergeó rompe
 uno.
 
+### 🧮 La bandeja contaba dos veces, y una estaba mal (2026-09-10)
+
+El pedido era de layout: sacar las cuatro baldosas, meter el estado en los
+filtros y subir el botón. Al hacerlo apareció que **los dos controles contaban
+distinto**. Medido en producción:
+
+| opción | la pestaña decía | la baldosa decía | casos de verdad |
+|---|---|---|---|
+| Escalado | **1** | **43** | `escalado` 1 + `requiere_especialista` 42 |
+| Listo | **0** | **27** | `listo_para_core` 27 |
+| Esperando | **0** | **6** | `info_faltante` 6 |
+
+Las baldosas agrupaban los estados canónicos y las pestañas contaban un estado
+suelto. **Tres de las cinco decían 0 sobre 483 casos**, porque el canal real
+nunca escribe `listo`, `esperando` ni `escalado` —ese es el vocabulario del
+flujo simulado—. El control con el que se navega la bandeja llevaba meses sin
+servir, con una baldosa al lado diciendo el número correcto.
+
+Es la **tercera copia** del mismo defecto: ya se había arreglado en las métricas
+(`estados-que-cuentan-las-metricas`) y en las propias baldosas
+(`kpisDeLaBandeja`). Cada arreglo tapó una copia y dejó la siguiente.
+
+#### Lo que hace ahora
+
+Las cinco opciones **son** su grupo, contando y filtrando: el chip dice 406 y la
+lista queda en 406. `src/core/case/filtro-de-estado.ts` define la partición —los
+cinco no se pisan, que es lo que `ESTADOS_RESUELTOS` no da porque incluye
+`cerrado`— y su test fija la propiedad de la que depende todo: **el contador y el
+filtro salen del mismo conjunto**. Un chip que diga 43 y devuelva un caso es peor
+que uno que diga 1.
+
+Un estado suelto sigue funcionando en la URL y en la API: el CSV y el sondeo en
+vivo piden `?status=requiere_especialista` y reciben eso exacto.
+
+#### Y el layout, que era el pedido
+
+Cuatro baldosas y seis pestañas menos, y el botón «Filtros» al lado del contador:
+~140 px menos de encabezado en la pantalla que se mira ocho horas por día. **Nueve
+filas donde antes entraban cinco.** Las marcas de lo puesto sólo existen cuando
+hay algo puesto, así que sin filtros la lista empieza una línea más arriba.
+
+Se fueron `FilterTabs` y `kpisDeLaBandeja`, sin un solo llamador, con sus tests. El
+patrón de pestañas accesibles no se pierde: vive en `@/lib/ui/pestanas` y lo usa
+la consola del agente.
+
+Verificado en el navegador contra el ensayo con Playwright —claro, oscuro y 900
+px— y con los 18 e2e de bandeja y selección.
+
 ### 🙋 Waiting on you (not code)
 
 - **¿Corro `pnpm achicar-payloads --apply` contra producción?** Libera 10.290 kB

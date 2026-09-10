@@ -51,25 +51,29 @@ export default defineConfig({
         "src/lib/observability/**",
         // Upstash rate-limit adapter — requires UPSTASH_* env vars at runtime.
         "src/lib/rate-limit/upstash.ts",
-        // Email infrastructure — require provider credentials at runtime.
-        // Covered by integration tests with mocked clients, not unit tests.
-        "src/server/email/dispatch.ts",
-        "src/server/email/thread-lookup.ts",
-        // Idempotency check — db query, no testable branch logic beyond DB call.
-        // Covered via integration tests.
-        "src/server/email/dedupe.ts",
-        // AI budget guard — requires live DB; covered by integration tests only.
-        "src/server/ai/budget.ts",
-        // Aca se excluia "src/server/ai/openai-extractor.ts", un archivo que ya
-        // no existe: el extractor de OpenAI se borro cuando el producto quedo
-        // solo con Gemini. La linea no hacia nada y sugeria que el archivo
-        // seguia ahi.
-        // Extraction worker orchestrator — DB-orchestration pipeline.
-        // All constituent modules are individually unit-tested.
-        // Covered end-to-end via integration tests.
-        "src/server/worker/extract.ts",
-        // Server-only i18n loader — uses `server-only` guard; intentionally excluded from
-        // client bundle. The shared logic lives in locale-shared.ts which is unit-tested.
+        // Acá se excluían cinco archivos con la explicación «sólo se cubre por
+        // integración». Medido, no era cierto en ninguno de los cinco:
+        //
+        //     budget.ts        82,6 % de líneas
+        //     dispatch.ts      79,8 %
+        //     extract.ts       68,5 %
+        //     dedupe.ts        31,0 %
+        //     thread-lookup.ts  6,8 %
+        //
+        // O sea que los tests que ya existían no contaban, y —peor— si mañana
+        // alguien borra el 82 % de `budget.ts`, el número no se mueve. Excluir
+        // un archivo con lógica porque «se cubre en otro lado» es la misma
+        // clase de verde que este repo viene sacando de todos lados: convence
+        // sin mirar nada.
+        //
+        // Los que quedan afuera abajo no tienen lógica que probar. (Acá también
+        // se excluía "src/server/ai/openai-extractor.ts", un archivo que ya no
+        // existe: el extractor de OpenAI se borró cuando el producto quedó sólo
+        // con Gemini.)
+        //
+        // Cargador de i18n del servidor: tres líneas de `import()` detrás del
+        // guard de `server-only`. La lógica vive en locale-shared.ts, que sí se
+        // mide.
         "src/lib/i18n/locale.ts",
         // CoreSync interface + mock — no real external API implemented.
         // Exercised by integration tests.
@@ -89,13 +93,20 @@ export default defineConfig({
        * — puede subir, no puede bajar.
        *
        * Se sube cuando se sube de verdad. `pnpm cobertura` dice dónde está.
-       * Al 26/08/2026: 71.99 / 62.08 / 74.24 / 73.08.
+       *
+       *   26/08/2026   71.99 / 62.08 / 74.24 / 73.08
+       *   10/09/2026   78.25 / 69.20 / 80.17 / 78.86   ← con los cinco archivos
+       *                                                  que estaban excluidos
+       *
+       * Habían quedado siete puntos atrás: el trinquete dejaba de trincar. Un
+       * piso siete puntos abajo permite borrar la mitad de los tests de un
+       * archivo sin que nada se ponga en rojo.
        */
       thresholds: {
-        lines: 72,
-        functions: 73,
-        branches: 61,
-        statements: 71,
+        lines: 77,
+        functions: 79,
+        branches: 68,
+        statements: 77,
       },
     },
   },

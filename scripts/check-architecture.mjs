@@ -541,6 +541,62 @@ console.log("\n▸ Ningún carácter de control invisible");
   }
 }
 
+// ── 12. Un preview no hace cola con producción ────────────────────────────
+//
+// `post-deploy` corre contra la base de PRODUCCIÓN, así que se serializa con
+// un grupo de concurrencia y `cancel-in-progress: false`. Eso está bien. Lo
+// que no estaba bien era que el grupo fuera una constante.
+//
+// `deployment_status` llega también por cada preview y por cada estado
+// intermedio. Esas corridas saltean todo —`smoke` tiene la guarda y las demás
+// cuelgan de él— y terminan en `skipped`. Parecen gratis. Reservan el turno
+// igual, y GitHub guarda UNA sola corrida esperando: la siguiente que llega
+// cancela a la que estaba en la cola.
+//
+// Medido el 10/09 sobre las últimas 100 corridas: DIEZ commits de `main`
+// quedaron con su post-deploy en `cancelled` y ninguno tuvo otra corrida que
+// terminara. Un preview cualquiera echaba de la cola al merge.
+//
+// Y no deja rastro: `cancelled` no es rojo. Un CI verde no distingue «pasó»
+// de «no llegó a correr», que es la peor forma de fallar que tiene una
+// comprobación.
+console.log("\n▸ Un preview no hace cola con producción");
+{
+  const flujos = existsSync(".github/workflows")
+    ? readdirSync(".github/workflows").filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+    : [];
+  const fijos = [];
+
+  for (const nombre of flujos) {
+    const texto = readFileSync(join(".github/workflows", nombre), "utf8");
+    // Sólo los que reaccionan a un deploy reciben el evento de los previews.
+    if (!/^\s+deployment_status:/m.test(texto)) continue;
+
+    const lineas = texto.split(/\r?\n/);
+    const i = lineas.findIndex((l) => l.trim() === "concurrency:" && !/^\s/.test(l));
+    if (i === -1) continue;
+
+    // El bloque son las líneas sangradas que siguen, salteando las vacías.
+    let bloque = "";
+    for (let j = i + 1; j < lineas.length; j++) {
+      if (lineas[j].trim() === "") continue;
+      if (!/^\s/.test(lineas[j])) break;
+      bloque += lineas[j];
+    }
+
+    if (!bloque.includes("${{")) fijos.push(nombre);
+  }
+
+  if (fijos.length === 0) {
+    bien("el grupo depende del evento: lo que saltea no espera ni echa a nadie");
+  } else {
+    mal(`${fijos.length} workflow(s) de deploy con grupo de concurrencia fijo`);
+    for (const f of fijos) console.log(`     .github/workflows/${f}`);
+    console.log("     Un preview que saltea todos sus jobs igual ocupa el turno, y");
+    console.log("     desaloja de la cola al post-deploy del merge a main.");
+  }
+}
+
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(66));
 if (problemas.length === 0) {

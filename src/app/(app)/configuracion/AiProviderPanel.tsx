@@ -249,7 +249,12 @@ export function AiProviderPanel() {
 
       {/* Gemini API key input — shown when not configured or user clicked the card */}
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+        {/*
+          * Un `placeholder` no es un nombre accesible: desaparece al escribir
+          * y varios lectores no lo anuncian. Era lo único que este campo tenía.
+          */}
         <input
+          aria-label={t("aiProvider.modelo")}
           value={geminiModel}
           onChange={(e) => setGeminiModel(e.target.value)}
           className="rounded-md border border-slate-200 px-3 py-2 font-mono text-xs text-slate-800"

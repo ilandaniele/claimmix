@@ -161,8 +161,14 @@ export function PromptRulesPanel() {
       {/* Create rule form */}
       <form onSubmit={handleCreate} className="space-y-3">
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,auto)]">
+          {/*
+            * `aria-label` además del `placeholder`: el segundo desaparece al
+            * escribir y varios lectores no lo anuncian, así que era un campo
+            * sin nombre para quien no ve la pantalla.
+            */}
           <input
             type="text"
+            aria-label={t("reglas.phTitulo")}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={t("reglas.phTitulo")}
@@ -189,6 +195,7 @@ export function PromptRulesPanel() {
           </div>
         </div>
         <textarea
+          aria-label={t("reglas.placeholder")}
           value={ruleText}
           onChange={(e) => setRuleText(e.target.value)}
           placeholder={t("reglas.placeholder")}

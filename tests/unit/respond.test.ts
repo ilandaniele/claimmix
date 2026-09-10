@@ -2,9 +2,17 @@
  * Unit tests for the API response helpers.
  */
 
-import { describe, it, expect } from "vitest";
+const { mockLogError } = vi.hoisted(() => ({ mockLogError: vi.fn() }));
+
+vi.mock("@/lib/observability/logger", () => ({
+  logger: { error: mockLogError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, created, accepted, noContent, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+
+beforeEach(() => mockLogError.mockClear());
 
 describe("ok()", () => {
   it("returns 200 status with data", async () => {
@@ -93,5 +101,32 @@ describe("err()", () => {
     const res = err(error);
     const body = await res.json();
     expect("details" in body.error).toBe(false);
+  });
+
+  it("un 500 por AppError deja una línea", () => {
+    // Era la forma en que casi todas las rutas reportan una falla del
+    // servidor, y la única rama de err() que no escribía nada: el 500 llegaba
+    // al navegador y no quedaba ni la ruta ni el código.
+    err(new AppError("INTERNAL_ERROR"));
+    expect(mockLogError).toHaveBeenCalledTimes(1);
+    expect(mockLogError.mock.calls[0][0]).toMatchObject({
+      code: "INTERNAL_ERROR",
+      status: 500,
+    });
+  });
+
+  it("un 4xx no deja línea de error", () => {
+    // Una validación que falla, un 404 o un 429 son el producto funcionando.
+    // Anotarlos como error es la otra forma de no tener registro.
+    err(new AppError("NOT_FOUND"));
+    err(new AppError("VALIDATION_FAILED"));
+    err(new AppError("RATE_LIMITED"));
+    expect(mockLogError).not.toHaveBeenCalled();
+  });
+
+  it("un error que nadie previó también deja línea", () => {
+    err(new Error("se cayó Neon"));
+    expect(mockLogError).toHaveBeenCalledTimes(1);
+    expect(mockLogError.mock.calls[0][1]).toBe("api.error_no_manejado");
   });
 });

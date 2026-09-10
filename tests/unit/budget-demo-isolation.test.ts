@@ -105,6 +105,36 @@ describe("checkBudget — el tope mensual de producción", () => {
     const r = await checkBudget(REAL);
     expect(r.exceeded).toBe(true);
   });
+
+  it("el cupo de la persona se ejerce, y con su propio motivo", async () => {
+    // Los tres cupos ahora se piden a la vez y se evalúan en orden: mensual,
+    // inquilino, persona. El de la persona es el que estuvo apagado meses
+    // —`user_id` se grababa null, así que sumaba sobre un conjunto vacío—, y
+    // el que más fácil vuelve a apagarse sin que nada se caiga.
+    process.env.MONTHLY_BUDGET_USD = "200";
+    process.env.AI_TENANT_DAILY_TOKEN_CAP = "1000";
+    process.env.AI_USER_DAILY_TOKEN_CAP = "100";
+    rows.push({ total: 0 }, { total: 500 }, { total: 100 });
+
+    const r = await checkBudget(REAL, "user-1");
+
+    expect(r.exceeded).toBe(true);
+    expect(r.reason).toContain("usuario");
+  });
+
+  it("el mensual gana sobre los del día, como antes", async () => {
+    // Pedirlos en paralelo no puede cambiar QUÉ motivo se reporta cuando se
+    // pasan dos a la vez.
+    process.env.MONTHLY_BUDGET_USD = "50";
+    process.env.AI_TENANT_DAILY_TOKEN_CAP = "1000";
+    process.env.AI_USER_DAILY_TOKEN_CAP = "100";
+    rows.push({ total: 50 }, { total: 5000 }, { total: 5000 });
+
+    const r = await checkBudget(REAL, "user-1");
+
+    expect(r.exceeded).toBe(true);
+    expect(r.reason).toContain("mensual");
+  });
 });
 
 describe("checkDemoBudget", () => {

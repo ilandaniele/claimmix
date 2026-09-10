@@ -555,7 +555,8 @@ console.log("\n▸ Ningún carácter de control invisible");
 //
 // Medido el 10/09 sobre las últimas 100 corridas: DIEZ commits de `main`
 // quedaron con su post-deploy en `cancelled` y ninguno tuvo otra corrida que
-// terminara. Un preview cualquiera echaba de la cola al merge.
+// terminara. El del merge de hoy se canceló UN SEGUNDO después de crearse el
+// run de una rama, sin un job arrancado.
 //
 // Y no deja rastro: `cancelled` no es rojo. Un CI verde no distingue «pasó»
 // de «no llegó a correr», que es la peor forma de fallar que tiene una

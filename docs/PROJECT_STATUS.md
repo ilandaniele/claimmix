@@ -2609,11 +2609,18 @@ cuelgan de él— y terminan en `skipped`, así que parecían gratis. **Reservan
 turno igual.** Con `cancel-in-progress: false` GitHub guarda UNA sola corrida
 esperando: cuando llega la siguiente, la que estaba en la cola se cancela.
 
-    886336c  Production  ← el merge a main, encolado
-    5dbf546  Preview     ← una rama cualquiera; lo desalojó
+    16:26:25  886336c  Production  ← el merge a main, encolado
+    16:27:58  5dbf546  Preview     ← se crea el run de una rama
+    16:27:59  886336c  cancelled   ← un segundo después, sin un job arrancado
 
-O sea que cualquier preview que se despliegue mientras espera el post-deploy de
-un merge lo echa de la cola.
+Ese segundo es la prueba: no se demoró la comprobación, se la sacó de la cola
+otra corrida del mismo grupo. El run cancelado no tiene ni un job registrado.
+
+**Lo que no está establecido** es qué eventos de preview encolan y cuáles no.
+De cuatro previews consecutivos —los cuatro `env=Preview`— dos ocuparon el
+turno y dos terminaron `skipped` enseguida. No importa para el arreglo: lo que
+hay que garantizar es que nada que no pase la guarda pueda ocupar ese lugar, y
+eso no depende de entender por qué a veces sí y a veces no.
 
 #### Cuántas veces pasó
 

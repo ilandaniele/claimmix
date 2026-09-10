@@ -57,11 +57,12 @@ on:
 # Cuando llega otra, la que estaba en la cola se cancela. El 10/09, con una
 # corrida andando, pasó esto:
 #
-#     886336c  Production  ← el merge a main, encolado
-#     5dbf546  Preview     ← una rama cualquiera; lo desalojó
+#     16:26:25  886336c  Production  ← el merge a main, encolado
+#     16:27:58  5dbf546  Preview     ← se crea el run de una rama
+#     16:27:59  886336c  cancelled   ← un segundo después, sin un job arrancado
 #
 # El post-deploy del merge nunca corrió, y no dejó un rojo: dice `cancelled`,
-# que se lee como que alguien la cortó a propósito. Un preview que no ejecuta
+# que se lee como que alguien la cortó a propósito. Una corrida que no ejecuta
 # nada puede tapar la única comprobación que mira producción de verdad.
 #
 # Así que entra a la cola lo mismo que pasa la guarda de `smoke`. Todo lo

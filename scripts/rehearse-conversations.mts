@@ -848,19 +848,43 @@ async function deliverEmail(
  * etiquetas se borran sin distinguir. Por eso el escape del cuerpo redactado se
  * prueba en `tests/unit/email-escape.test.ts` y no acá.
  */
+/**
+ * Sacar etiquetas de a una pasada no alcanza, y CodeQL lo dice.
+ *
+ * `js/incomplete-multi-character-sanitization`, severidad alta. Dos motivos,
+ * los dos reales acá:
+ *
+ *   · El cierre acepta espacio, salto de línea y atributos antes del `>`, así
+ *     que `</script >` no matcheaba y el cuerpo del script terminaba adentro
+ *     del transcripto que lee una persona.
+ *
+ *   · Borrar `<…>` una vez deja `<<a>script>` convertido en `<script>`. Una
+ *     sola pasada CONSTRUYE la etiqueta que venía a sacar.
+ *
+ * Se repite hasta que deja de cambiar, con tope: es un transcripto, no una
+ * frontera de seguridad, y un bucle sin tope sobre texto que escribió otro es
+ * la forma de cambiar un problema por otro.
+ */
+function sinEtiquetas(texto: string): string {
+  let antes = texto;
+  for (let i = 0; i < 8; i++) {
+    const despues = antes.replace(/<[^>]+>/g, "");
+    if (despues === antes) return despues;
+    antes = despues;
+  }
+  return antes;
+}
+
 function readable(body: string): string {
   if (!/<[a-z!]/i.test(body)) return body;
-  return body
-    // El cierre acepta espacio, salto de línea y atributos antes del `>`:
-    // `</script >` no matcheaba, y el `.replace(/<[^>]+>/g)` de abajo dejaba el
-    // cuerpo del script adentro del transcripto que lee una persona.
-    // `js/incomplete-multi-character-sanitization`, en severidad alta.
-    .replace(/<head[\s\S]*?<\/head[^>]*>/gi, "")
-    .replace(/<(script|style)[\s\S]*?<\/\1[^>]*>/gi, "")
-    .replace(/<\/(p|div|h1|h2|h3|li|tr)>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<li[^>]*>/gi, "• ")
-    .replace(/<[^>]+>/g, "")
+  return sinEtiquetas(
+    body
+      .replace(/<head[\s\S]*?<\/head[^>]*>/gi, "")
+      .replace(/<(script|style)[\s\S]*?<\/\1[^>]*>/gi, "")
+      .replace(/<\/(p|div|h1|h2|h3|li|tr)>/gi, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<li[^>]*>/gi, "• ")
+  )
     .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")

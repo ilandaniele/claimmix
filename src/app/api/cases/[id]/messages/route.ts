@@ -18,6 +18,7 @@
 import { type NextRequest } from "next/server";
 import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { mensajesSinPiiSiNoCorresponde } from "@/server/cases/pii";
 import { entrar } from "@/lib/api/entrada";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
@@ -179,7 +180,17 @@ export async function GET(
       }
     }
 
-    const result = messages.map((msg) => ({
+    /*
+     * Lo que escribió la persona no sale crudo para quien sólo mira.
+     *
+     * `body_text` y `from_addr` salían a `...ALL_ROLES` —el cuerpo de cada
+     * mensaje, con el DNI y el teléfono adentro, y la dirección desde la que
+     * escribió—. Es la misma fuga que se cerró en `agent-run`, por la puerta de
+     * al lado. El corte y su porqué están en `@/server/cases/pii`.
+     */
+    const visibles = mensajesSinPiiSiNoCorresponde(messages, userRow.role);
+
+    const result = visibles.map((msg) => ({
       id: msg.id,
       direction: msg.direction,
       provider: msg.provider,

@@ -149,22 +149,38 @@ export function CustomFieldsPanel() {
 
   return (
     <div className="space-y-5">
+      {/*
+        Los cuatro controles llevan nombre accesible.
+
+        Los dos `select` no tenían NINGUNO —se anunciaban como «cuadro
+        combinado» sin decir de qué— y los dos `input` sólo `placeholder`, que
+        un lector lee como un valor de ejemplo y que desaparece al escribir.
+        Es el formulario que define los campos que el extractor completa.
+
+        Por `aria-label` y no por `<label>` visible porque la grilla es de
+        cuatro columnas apretadas y agregar cuatro rótulos la rompe; las claves
+        son las mismas que ya rotulan esas columnas en la tabla de abajo, así
+        que no hay traducción nueva que inventar.
+      */}
       <form onSubmit={createField} className="grid gap-3 lg:grid-cols-[1fr_1fr_140px_140px]">
         <input
           value={form.key}
           onChange={(e) => setForm((prev) => ({ ...prev, key: e.target.value }))}
+          aria-label={t("campos.col.clave")}
           placeholder={t("campos.phClave")}
           className="rounded-md border border-slate-200 px-3 py-2 text-sm"
         />
         <input
           value={form.label}
           onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))}
+          aria-label={t("campos.col.etiqueta")}
           placeholder={t("campos.phEtiqueta")}
           className="rounded-md border border-slate-200 px-3 py-2 text-sm"
         />
         <select
           value={form.field_type}
           onChange={(e) => setForm((prev) => ({ ...prev, field_type: e.target.value }))}
+          aria-label={t("campos.col.tipo")}
           className="rounded-md border border-slate-200 px-3 py-2 text-sm"
         >
           {FIELD_TYPES.map((type) => (
@@ -176,6 +192,7 @@ export function CustomFieldsPanel() {
         <select
           value={form.claim_type}
           onChange={(e) => setForm((prev) => ({ ...prev, claim_type: e.target.value }))}
+          aria-label={t("campos.col.siniestro")}
           className="rounded-md border border-slate-200 px-3 py-2 text-sm"
         >
           {CLAIM_TYPES.map((type) => (

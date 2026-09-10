@@ -6,6 +6,8 @@
 
 import { z } from "zod";
 
+import { camposDePagina } from "@/lib/schemas/paginacion";
+
 /** Allowed claim types */
 export const ClaimTypeSchema = z.enum([
   "choque",
@@ -95,9 +97,20 @@ export type SortColumn = z.infer<typeof SortColumnSchema>;
 export const CaseQuerySchema = z.object({
   status: CaseStatusSchema.optional(),
   type: ClaimTypeSchema.optional(),
-  q: z.string().max(200).optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  per_page: z.coerce.number().int().min(1).max(100).default(25),
+  /*
+   * Tres caracteres es lo que el índice necesita para servir de algo.
+   *
+   * `q` entra a un `ilike '%…%'` sobre `policyholder_name` y `policy_number`,
+   * y los dos índices que lo sostienen son trigram (0020): pg_trgm parte el
+   * texto en grupos de TRES. Con uno o dos caracteres no hay ningún grupo que
+   * buscar, el planificador descarta el índice y recorre la tabla entera del
+   * inquilino. `?q=a` es una petición barata que cuesta una lectura completa.
+   *
+   * Nadie lo manda desde la interfaz: `q` sólo existe en la API y en el CSV.
+   * Un 400 acá no le cambia nada a nadie que hoy esté buscando.
+   */
+  q: z.string().min(3).max(200).optional(),
+  ...camposDePagina,
   sort: SortColumnSchema.default("created_at"),
   order: z.enum(["asc", "desc"]).default("desc"),
   // Email-intake filters (AC18)

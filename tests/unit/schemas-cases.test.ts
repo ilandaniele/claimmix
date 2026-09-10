@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import { CaseQuerySchema, CasePatchSchema, ClaimTypeSchema, CaseStatusSchema } from "@/lib/schemas/cases";
+import { PAGINA_MAXIMA } from "@/lib/schemas/paginacion";
 
 describe("ClaimTypeSchema", () => {
   it("accepts all valid claim types", () => {
@@ -41,6 +42,20 @@ describe("CaseQuerySchema", () => {
       expect(result.data.sort).toBe("created_at");
       expect(result.data.order).toBe("desc");
     }
+  });
+
+  it("rechaza una pagina sin tope: OFFSET ilimitado", () => {
+    // `?page=100000000` con per_page 25 es OFFSET 2.500.000.000, y Postgres
+    // no saltea filas sin leerlas.
+    expect(CaseQuerySchema.safeParse({ page: "100000000" }).success).toBe(false);
+    expect(CaseQuerySchema.safeParse({ page: String(PAGINA_MAXIMA) }).success).toBe(true);
+  });
+
+  it("rechaza una busqueda mas corta que un trigrama", () => {
+    // Con menos de tres caracteres el indice trigram no sirve y la consulta
+    // recorre la tabla del inquilino entera.
+    expect(CaseQuerySchema.safeParse({ q: "ab" }).success).toBe(false);
+    expect(CaseQuerySchema.safeParse({ q: "abc" }).success).toBe(true);
   });
 
   it("caps per_page at 100 via Zod max", () => {

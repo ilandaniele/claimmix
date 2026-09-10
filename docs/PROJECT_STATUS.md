@@ -2416,7 +2416,105 @@ llega gratis: ampliar `/api/health` con cuatro consultas sobre índices que ya
 existen, y persistir los errores en `audit_log` en vez de en stdout. Se pasa de
 «me entero el jueves» a «me entero en la próxima corrida del cron».
 
+### 🧾 El inventario de los catorce prompts, cerrado (2026-09-10)
+
+Dieciséis PR sobre la lista de arriba (#132 y #134-#147). Lo que sigue es qué
+se cerró, qué se **corrigió** del propio inventario, y qué queda con nombre y
+motivo.
+
+#### Lo que se arregló
+
+| | qué era |
+|---|---|
+| **Un timeout no es una escalada** (#132) | `GeminiExtractionError{TIMEOUT}` escalaba el caso a un estado del que el worker no puede arrancar y que `reap-stuck` no barre. Tres reintentos contados en `cases.intentos_de_extraccion` (migración 0030) y después sí escala |
+| **Los límites de las listas** (#135) | `per_page` tenía tope y `page` no: `?page=100000000` es `OFFSET 2.500.000.000`, y Postgres no saltea filas sin leerlas. `q` además pide tres caracteres, que es lo que el índice trigram necesita para servir de algo |
+| **El ensayo al día** (#136) | nada aplicaba las migraciones a la base de los tests ni avisaba que faltaban: estaba **ocho** atrás, y el único síntoma era un `42703` a mitad de un test que culpaba al código del PR |
+| **Borrar era más permisivo que editar** (#137) | un analista no puede editar un caso que no tiene asignado —404— y podía **borrarlo**, con cascada a nueve tablas |
+| **El inquilino por el cuerpo** (#138) | el webhook de WhatsApp aceptaba `tenant_id` en el cuerpo y le ganaba a la configuración. Su credencial es una sola y global; quien la tuviera escribía en la bandeja de cualquier aseguradora |
+| **El 500 que no dejaba línea** (#139) | `err(new AppError("INTERNAL_ERROR"))` era la única rama de `err()` que no anotaba nada |
+| **Once viajes a Neon en fila** (#140) | el analizador de huecos, el presupuesto y el buscador de clientes esperaban consultas que no dependían unas de otras |
+| **La misma fuga de PII, al lado** (#141) | `/api/cases/:id/messages` devolvía `body_text` y `from_addr` crudos a `...ALL_ROLES` |
+| **Tres verdes que no probaban nada** (#142) | la cartera se verificaba con un `grep` sobre el archivo fuente, `getTenantKpis` tenía 0 % de cobertura, y cinco exclusiones decían «sólo se cubre por integración» sobre archivos con 82 %, 80 % y 68 % |
+| **Siete botones que decían ser pestañas** (#143) | la consola del agente no tenía `role="tablist"`, ni flechas, ni `tabpanel`. Y ocho controles sin nombre accesible |
+| **El correo guardado dos veces** (#144) | `raw_payload` guardaba el cuerpo en base64 que ya estaba decodificado al lado: 80 % de 12,8 MB |
+| **El registro en un solo formato** (#145) | 191 líneas de texto libre y 124 con el JSON armado a mano, y el logger estructurado sin **un solo importador**. 315 llamadas convertidas en 62 archivos, cero `console.*` en `src/`, y una invariante para que no vuelvan |
+| **Siete alertas de CodeQL** (#146, #147) | el cierre de `<script>` que no cerraba, el borrado de una pasada que reconstruye la etiqueta, el decode de entidades corriendo DESPUÉS del borrado, dos carreras de sistema de archivos, y dos expresiones armadas con un argumento de la línea de comandos |
+| **La inyección de líneas de log** (#145) | el webhook de Gmail interpolaba el `messageId` del sobre de Pub/Sub en un literal de plantilla: un id con un salto de línea forjaba una segunda línea del registro. Con el logger el valor es un campo y `JSON.stringify` lo escapa |
+
+#### Lo que se midió y NO se sostuvo
+
+Vale tanto como lo otro.
+
+- **`audit_log` no crece 142 filas por caso.** Son **4,3 por caso vivo**. De las
+  70.576 filas, **65.179 (92 %) apuntan a casos que ya no existen** —la
+  telemetría de unos 9.000 casos de simulación que después se borraron, porque
+  `target_id` no es clave foránea a propósito—. La extrapolación a 14,2 M filas
+  usaba el denominador equivocado. No hay retención que resolver.
+
+- **El índice sobre `ai_usage` sigue sin ir.** El tope mensual del presupuesto
+  hace un Seq Scan, sí: **17 ms sobre 13.881 filas**. La 0024 ya midió por qué
+  un índice ahí no lo usa el planificador, y los dos motivos que dio —la columna
+  líder ya está indexada, y una tabla que sólo crece desarma el Index Only Scan
+  por el mapa de visibilidad— siguen valiendo. Crear uno hoy sería repetir
+  exactamente lo que la 0023 hizo y la 0024 deshizo.
+
+- **Gmail ya no colapsa los errores.** El sender propaga el status HTTP
+  (`GMAIL_401`, `GMAIL_429`). Los 115 payloads idénticos de junio son históricos.
+
+- **Los 1,2 s de sueño del correo ya estaban arreglados**, y `googleapis` ya
+  entraba en diferido. Lo que faltaba era el mismo sueño en el camino de
+  simulación: 1,5 s por caso contra una cola vacía, ~162 s sobre los 108
+  escenarios, en una ruta que dura 60 (#143).
+
+#### La única alerta que se descartó en vez de arreglarse
+
+`js/incomplete-multi-character-sanitization` sobre `unaPasada()` de
+`rehearse-conversations.mts`. CodeQL marca esa función sola —es un saneador de
+una pasada— y no sigue al llamador, que la repite hasta el punto fijo.
+
+Los cuatro defectos que la regla señaló están arreglados. Lo que queda es la
+regla mirando la forma: `readable()` se usa en **dos** lugares —un `console.log`
+a la terminal y un `.toLowerCase()` para buscar una frase— y ninguno renderiza
+HTML. No hay sink.
+
+Descartada como falso positivo, con el motivo escrito **en el código** y no sólo
+en el botón de GitHub. Se reabre desde la pestaña Security si no convence.
+
+#### Lo que queda, y por qué
+
+Dos, las dos en el camino del agente:
+
+- **`deliberate` gasta hasta cuatro llamadas al modelo** buscando lo que el
+  matcheo de cliente, el de póliza y la carga de la conversación ya
+  respondieron doscientas líneas antes.
+- **`outbound_messages` se lee cinco veces por orquestación** para el mismo
+  caso, más dos «desde que hablamos» que comparten la misma fila.
+
+Las dos cambian el comportamiento del agente, y `AGENTS.md` es explícito: eso se
+lee en el transcripto del ensayo, no en un diff. El ensayo necesita un deploy, y
+el 10/09 Vercel llegó al tope de builds del día del plan Hobby. **No se tocaron
+a ciegas.**
+
+
 ### 🙋 Waiting on you (not code)
+
+- **¿Corro `pnpm achicar-payloads --apply` contra producción?** Libera 10.290 kB
+  de 12.808 en `claim_messages` sacando la copia en base64 del cuerpo, que ya
+  está decodificada en `body_text`/`body_html`. Es irreversible: el salto de
+  línea y el relleno del base64 no se reconstruyen byte a byte. El CONTENIDO no
+  se pierde. El arreglo hacia adelante ya está aplicado; esto es sólo para las
+  356 filas viejas.
+
+- **¿Para qué existe el rol `viewer`?** La conversación ya no le sale cruda, pero
+  `fetchCaseRow` hace un `db.select()` pelado, así que la pantalla del caso le da
+  igual el `policyholder_name` y el `policy_number`. Si `viewer` es «mira todo y
+  no cambia nada», está bien como está. Si es «no ve datos personales», hace
+  falta una proyección por rol en toda la pantalla, no un parche en una ruta.
+
+- **Vercel llegó al tope de builds del día (10/09, plan Hobby).** No bloquea los
+  merges —no es un check requerido— pero **no hay deploy hasta que se libere**, y
+  sin deploy no corre el ensayo de conversaciones. Por eso quedaron sin tocar las
+  dos optimizaciones del camino del agente.
 
 - ~~**Reponer la contraseña de `claimmix_app`**~~ ✅ **HECHO 2026-08-26.** Rotada
   con `pnpm rol-app --rotar`, puesta en `.env.local` y en Vercel (producción), y

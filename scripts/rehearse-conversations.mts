@@ -874,7 +874,21 @@ async function deliverEmail(
  * Un tope parecía la opción prudente y era peor: salir en la vuelta ocho deja
  * el texto a medio limpiar y nadie se entera.
  */
-/** Una pasada de todo lo que hay que sacar o traducir. Ver `sinEtiquetas`. */
+/**
+ * Una pasada de todo lo que hay que sacar o traducir. Ver `sinEtiquetas`.
+ *
+ * CodeQL marca ESTA función —no el bucle— porque sola es un saneador de una
+ * sola pasada, y no sigue al llamador que la repite hasta el punto fijo. Los
+ * cuatro defectos que la regla señaló están arreglados: el cierre con espacio o
+ * atributos, el borrado de una pasada que reconstruye `<script>`, el mismo
+ * problema en el borrado de `<script>…</script>`, y el decode de entidades que
+ * corría después de limpiar.
+ *
+ * Lo que queda es la regla mirando la forma, no una vulnerabilidad: esto es un
+ * transcripto. `readable()` se usa en exactamente dos lugares y ninguno es un
+ * sink de HTML — un `console.log` a la terminal y un `.toLowerCase()` para
+ * buscar una frase. No hay nada que renderice esta salida.
+ */
 function unaPasada(texto: string): string {
   return texto
     .replace(/<head[\s\S]*?<\/head[^>]*>/gi, "")

@@ -2599,6 +2599,50 @@ la consola del agente.
 Verificado en el navegador contra el ensayo con Playwright —claro, oscuro y 900
 px— y con los 18 e2e de bandeja y selección.
 
+### 🚦 Diez merges sin comprobar, y ninguno dejó rojo (2026-09-10)
+
+Al mergear #154 miré el post-deploy y decía `cancelled`. No lo canceló nadie.
+
+`deployment_status` llega también por cada preview y por cada estado
+intermedio. Esas corridas saltean todo —`smoke` tiene la guarda y las demás
+cuelgan de él— y terminan en `skipped`, así que parecían gratis. **Reservan el
+turno igual.** Con `cancel-in-progress: false` GitHub guarda UNA sola corrida
+esperando: cuando llega la siguiente, la que estaba en la cola se cancela.
+
+    886336c  Production  ← el merge a main, encolado
+    5dbf546  Preview     ← una rama cualquiera; lo desalojó
+
+O sea que cualquier preview que se despliegue mientras espera el post-deploy de
+un merge lo echa de la cola.
+
+#### Cuántas veces pasó
+
+Sobre las últimas 100 corridas del workflow: **10 commits de `main` quedaron con
+su post-deploy en `cancelled`, y ninguno tuvo otra corrida que terminara.** Los
+diez, entre el 09/09 y el 10/09:
+
+    5330791  9d7c024  217f629  f56e5bd  b8e3686
+    3c97810  fa04a11  d1fdd80  e76c2b3  886336c
+
+Lo que no corrió en esos diez es lo único que mira producción de verdad: la
+base, las migraciones aplicadas, R2 con una subida real, el modelo con una
+llamada real, el token de WhatsApp y la casilla conectada. Esto existe porque
+«R2 funcionó en cada corrida local durante horas mientras producción descartaba
+todos los adjuntos» —el comentario que encabeza el workflow—.
+
+Y no dejó rastro: `cancelled` no es rojo, se lee como que alguien la cortó a
+propósito. Un CI verde no distingue «pasó» de «no llegó a correr».
+
+#### El arreglo
+
+El grupo compartido lo usa sólo lo que pasa la misma guarda que `smoke`.
+Todo lo demás va a `post-deploy-sin-cola-<run_id>`: grupo propio por corrida,
+donde no espera ni echa a nadie. La serialización contra la base de producción
+—que es lo que el grupo existía para dar— no cambia.
+
+Se ve recién en el próximo merge: el post-deploy de `main` tiene que llegar al
+final en vez de quedar `cancelled`.
+
 ### 🙋 Waiting on you (not code)
 
 - **¿Corro `pnpm achicar-payloads --apply` contra producción?** Libera 10.290 kB

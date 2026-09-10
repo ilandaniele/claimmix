@@ -865,9 +865,14 @@ async function deliverEmail(
  *     corría una vez: por eso el bucle envuelve la pasada ENTERA y no sólo
  *     el `<[^>]+>` del final.
  *
- * Se repite hasta que deja de cambiar, con tope: es un transcripto, no una
- * frontera de seguridad, y un bucle sin tope sobre texto que escribió otro es
- * la forma de cambiar un problema por otro.
+ * Se repite hasta que deja de cambiar, sin tope, y eso NO es un bucle abierto
+ * sobre texto que escribió otro: cada pasada es estrictamente más corta o
+ * idéntica. Los seis reemplazos o borran, o cambian una secuencia por una más
+ * corta —`</p>` y `<br>` por un salto, `<li…>` por «• »—. Un largo que no
+ * puede crecer y que corta al repetirse termina siempre.
+ *
+ * Un tope parecía la opción prudente y era peor: salir en la vuelta ocho deja
+ * el texto a medio limpiar y nadie se entera.
  */
 /** Una pasada de todo lo que hay que sacar o traducir. Ver `sinEtiquetas`. */
 function unaPasada(texto: string): string {
@@ -882,12 +887,11 @@ function unaPasada(texto: string): string {
 
 function sinEtiquetas(texto: string): string {
   let antes = texto;
-  for (let i = 0; i < 8; i++) {
+  for (;;) {
     const despues = unaPasada(antes);
     if (despues === antes) return despues;
     antes = despues;
   }
-  return antes;
 }
 
 /**

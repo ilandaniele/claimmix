@@ -2496,6 +2496,61 @@ el 10/09 Vercel llegó al tope de builds del día del plan Hobby. **No se tocaro
 a ciegas.**
 
 
+### 🕳️ Una guarda que no guardaba nada, y era del mismo día (2026-09-10)
+
+Buscando qué tests faltaban apareció esto: la invariante **«el inquilino no entra
+por el cuerpo»**, agregada horas antes en #138, tenía un **retroceso literal
+(0x08)** donde va `\b`. Su expresión pedía un carácter que no existe en ningún
+archivo del repo, así que no matcheaba nunca: pasaba en verde sobre una ruta que
+la violaba, comprobado plantando una.
+
+En el diff, en el editor y en GitHub se ve `\b`. Se había verificado, pero con
+una expresión escrita a mano en la terminal y no con la que quedó en el archivo.
+**Verificar el concepto no es verificar el código.**
+
+Y no era la única. Dos más, del 26/08:
+
+| archivo | qué hacía |
+|---|---|
+| `scripts/pen-test.mts` | la sonda del motor de flujos, con un `||` que la salvaba a medias |
+| `tests/e2e/seguridad.spec.ts` | una aserción **negativa** —`.not.toMatch()`— o sea un test que no podía fallar |
+
+```
+con el retroceso  : false   ← nunca detecta
+con la frontera   : true
+```
+
+El origen es siempre el mismo: una herramienta que se come la barra al escribir
+el archivo, y el resultado no se distingue al releer.
+
+#### La invariante que lo cierra
+
+`▸ Ningún carácter de control invisible` recorre `src/`, `scripts/` y `tests/`
+buscando 0x07, 0x08, 0x0B, 0x0C y 0x1B. Tabulación y saltos de línea no están en
+la lista, porque una guarda que marca cada archivo del repo la saca alguien.
+
+Agarró un retroceso adentro de **su propio comentario** apenas se escribió, que
+es la demostración más corta de que hacía falta.
+
+#### Y los dos módulos que sólo se habían verificado a mano
+
+Misma raíz, distinto síntoma: comprobados en archivos del directorio temporal de
+la sesión, que se borran al cerrar.
+
+- **`scripts/lib/env-local.mjs`** — lo usan `migrate.mjs` (decide contra qué base
+  aplicar migraciones) y `create-app-role.mts` (escribe ahí la contraseña rotada,
+  y NO la imprime, así que ponerla en la línea equivocada no se nota). 14 tests;
+  el que más importa es el de la colisión de prefijos.
+- **`readable()` del ensayo** → `scripts/lib/texto-legible.mjs`. Se cambió cuatro
+  veces en un día y no se podía probar porque vivía en un script de top-level
+  await: importarlo lo corre. 13 tests, incluido el que fija la propiedad de la
+  que depende que su bucle sin tope termine —ninguna pasada alarga el texto— y el
+  que distingue un `<` bien escapado de uno crudo.
+
+Las tres guardas del 10/09 tienen ahora sus propios tests, cada una contra lo que
+tiene que ver y contra lo que no. Reintroducir el bug exacto que se mergeó rompe
+uno.
+
 ### 🙋 Waiting on you (not code)
 
 - **¿Corro `pnpm achicar-payloads --apply` contra producción?** Libera 10.290 kB

@@ -475,6 +475,20 @@ export const whatsappMessenger: AgentMessenger = {
       // mensaje que no le llegó al asegurado quedaba con la misma prioridad que
       // uno que sí.
       const registrar = res.ok ? console.log : console.error;
+      /*
+       * Y el motivo, que `sendWhatsAppText` ya se tomó el trabajo de armar.
+       *
+       * Devuelve `{ ok: false, error: "Cloud API 400: {…}" }` con el cuerpo de
+       * error de Meta adentro, y acá se descartaba. Token vencido, fuera de la
+       * ventana de 24 h, plantilla sin aprobar, número fuera de la lista
+       * permitida, o Meta con un 503: todos producían la misma línea.
+       *
+       * Es el mismo defecto que los 115 fallos de Gmail de junio, en el otro
+       * canal — con el agravante de que acá el valor ya estaba en la mano.
+       *
+       * Recortado, porque el cuerpo de error de Meta puede traer el payload que
+       * mandamos y ahí adentro va el texto del mensaje.
+       */
       registrar(
         JSON.stringify({
           level: res.ok ? "info" : "error",
@@ -482,6 +496,7 @@ export const whatsappMessenger: AgentMessenger = {
           msg: res.ok ? "whatsapp.messenger.sent" : "whatsapp.messenger.send_failed",
           case_id: message.caseId,
           template: message.template,
+          ...(res.ok || !res.error ? {} : { detalle: res.error.slice(0, 200) }),
         })
       );
     } catch (err) {

@@ -29,6 +29,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { randomBytes } from "node:crypto";
+import { escribirEnEnvLocal } from "./lib/env-local.mjs";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 
 neonConfig.webSocketConstructor = globalThis.WebSocket as never;
@@ -164,33 +165,19 @@ try {
      * mire esta salida se entera de que se rotó y no de cuál es.
      */
     const CLAVE = VAR === "DATABASE_URL" ? "DATABASE_URL_APP" : `${VAR}_APP`;
-    const { readFileSync, writeFileSync } = await import("node:fs");
-
     const archivo = ".env.local";
+
     /*
-     * Se intenta leer y se atrapa, en vez de preguntar `existsSync` y después
-     * abrir. Entre las dos operaciones hay un hueco —`js/file-system-race`,
-     * que CodeQL marcaba en severidad alta— y además `existsSync` ya hace la
-     * llamada al sistema que después se repite.
+     * Buscaba la línea a pisar con `new RegExp(`^${CLAVE}=.*$`, "m")`. Validar
+     * el nombre antes lo volvía seguro, pero mientras el patrón se arme con una
+     * variable la seguridad depende de que esa guarda no se borre —y CodeQL lo
+     * seguía marcando: `js/regex-injection` quiere escape, no validación—.
+     *
+     * `escribirEnEnvLocal` recorre línea por línea y compara el nombre, igual
+     * que el lector. Un solo lugar que sabe cómo es el formato de ese archivo,
+     * para leerlo y para escribirlo.
      */
-    let contenido = "";
-    try {
-      contenido = readFileSync(archivo, "utf8");
-    } catch {
-      // No está: se crea abajo.
-    }
-    const salto = contenido.includes("\r\n") ? "\r\n" : "\n";
-    // El nombre se valida antes de entrar a la expresión: sale de `--env`, y
-    // armar un patrón con eso es `js/regex-injection` en severidad alta.
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(CLAVE)) {
-      console.error(`✖ "${CLAVE}" no es un nombre de variable de entorno.`);
-      process.exit(1);
-    }
-    const patron = new RegExp(`^${CLAVE}=.*$`, "m");
-    contenido = patron.test(contenido)
-      ? contenido.replace(patron, `${CLAVE}=${urlFinal}`)
-      : `${contenido.replace(/\s*$/, "")}${salto}${salto}${CLAVE}=${urlFinal}${salto}`;
-    writeFileSync(archivo, contenido, "utf8");
+    escribirEnEnvLocal(CLAVE, urlFinal, archivo);
 
     console.log("\n" + "─".repeat(70));
     console.log(`✓ ${CLAVE} actualizada en ${archivo}.`);

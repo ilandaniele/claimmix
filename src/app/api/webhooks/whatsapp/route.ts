@@ -43,7 +43,7 @@ const WhatsAppWebhookSchema = z.object({
   body: z.string().min(1).max(50_000),
   provider_message_id: z.string().max(200).optional().nullable(),
   thread_id: z.string().max(200).optional().nullable(),
-  tenant_id: z.string().uuid().optional(),
+
   /**
    * El nombre de perfil, para que el adaptador BSP y el ensayo puedan recorrer
    * el mismo camino que el webhook de Meta. Quien escribe lo elige y nadie lo
@@ -87,8 +87,25 @@ function esParaNuestroNumero(toPhoneNumberId: string | undefined): boolean {
   return toPhoneNumberId.trim() === nuestro;
 }
 
-function resolveTenantId(bodyTenantId?: string): string | null {
-  return bodyTenantId ?? process.env.WHATSAPP_TENANT_ID ?? process.env.GMAIL_TENANT_ID ?? null;
+/**
+ * De quién es el mensaje que entra.
+ *
+ * Sale de la configuración del deploy y NADA MÁS. Antes el cuerpo del pedido
+ * podía traer un `tenant_id` y ganaba: quien tuviera `WHATSAPP_WEBHOOK_SECRET`
+ * —que es UNO solo y global, y que un adaptador BSP tiene por definición—
+ * escribía una denuncia, con su teléfono y sus fotos, en la bandeja de
+ * cualquier aseguradora del sistema, incluida una que nunca habilitó WhatsApp.
+ * Y ahí la extracción corre igual.
+ *
+ * Ningún llamador lo mandaba: ni el ensayo, ni la prueba de carga, ni el pen
+ * test, ni el adaptador. Era una puerta abierta que nadie usaba.
+ *
+ * El día que haya de verdad más de un inquilino por WhatsApp, el inquilino
+ * tiene que salir de la CREDENCIAL —un secreto por adaptador— y no del cuerpo,
+ * que es lo que la capa de datos viene diciendo desde el principio.
+ */
+function resolveTenantId(): string | null {
+  return process.env.WHATSAPP_TENANT_ID ?? process.env.GMAIL_TENANT_ID ?? null;
 }
 
 /**
@@ -377,7 +394,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const tenantId = resolveTenantId(parsed.data.tenant_id);
+  const tenantId = resolveTenantId();
   if (!tenantId) {
     return NextResponse.json(
       { error: { code: "TENANT_NOT_CONFIGURED", message: "WhatsApp tenant is not configured." } },

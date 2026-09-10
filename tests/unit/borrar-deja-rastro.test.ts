@@ -28,6 +28,8 @@ vi.mock("@/lib/audit/log", () => ({
 
 import { deleteCases } from "@/server/cases/delete";
 
+const ADMIN = { id: "user-9", role: "admin" as const };
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockAudit.mockResolvedValue(undefined);
@@ -38,7 +40,7 @@ describe("deleteCases", () => {
   it("anota una fila por caso, con quién lo borró", async () => {
     mockEnTenant.mockResolvedValue([{ id: "caso-1" }, { id: "caso-2" }]);
 
-    const borrados = await deleteCases({ tenantId: "t-1" }, ["caso-1", "caso-2"], "user-9");
+    const borrados = await deleteCases({ tenantId: "t-1" }, ["caso-1", "caso-2"], ADMIN);
 
     expect(borrados).toEqual(["caso-1", "caso-2"]);
     expect(mockAudit).toHaveBeenCalledTimes(2);
@@ -58,7 +60,7 @@ describe("deleteCases", () => {
     // evento con cien ids adentro no aparece.
     mockEnTenant.mockResolvedValue([{ id: "a" }, { id: "b" }, { id: "c" }]);
 
-    await deleteCases({ tenantId: "t-1" }, ["a", "b", "c"], "user-9");
+    await deleteCases({ tenantId: "t-1" }, ["a", "b", "c"], ADMIN);
 
     expect(mockAudit.mock.calls.map((c) => c[0].target_id)).toEqual(["a", "b", "c"]);
   });
@@ -68,14 +70,14 @@ describe("deleteCases", () => {
     // nada que auditar. Auditar la petición sería inventar un borrado.
     mockEnTenant.mockResolvedValue([{ id: "caso-1" }]);
 
-    await deleteCases({ tenantId: "t-1" }, ["caso-1", "caso-que-no-existe"], "user-9");
+    await deleteCases({ tenantId: "t-1" }, ["caso-1", "caso-que-no-existe"], ADMIN);
 
     expect(mockAudit).toHaveBeenCalledTimes(1);
     expect(mockAudit.mock.calls[0][0].target_id).toBe("caso-1");
   });
 
   it("con nada que borrar no escribe nada", async () => {
-    const borrados = await deleteCases({ tenantId: "t-1" }, [], "user-9");
+    const borrados = await deleteCases({ tenantId: "t-1" }, [], ADMIN);
     expect(borrados).toEqual([]);
     expect(mockAudit).not.toHaveBeenCalled();
     expect(mockEnTenant).not.toHaveBeenCalled();

@@ -19,6 +19,7 @@ import {
   ERROR_MESSAGES,
   ERROR_STATUS,
 } from "@/lib/errors";
+import { logger } from "@/lib/observability/logger";
 
 /** Return a 200 (or custom status) JSON response. */
 export function ok<T>(data: T, status = 200): NextResponse {
@@ -61,6 +62,25 @@ export function err(
   headers?: Record<string, string>
 ): NextResponse {
   if (error instanceof AppError) {
+    /*
+     * Un 500 que sale por acá dejaba de existir apenas se mandaba.
+     *
+     * `err(new AppError("INTERNAL_ERROR"))` es la forma en que casi todas las
+     * rutas reportan que algo se rompió del lado del servidor, y era la única
+     * rama de esta función que no escribía una línea. Se veía el 500 en el
+     * navegador y no quedaba NADA: ni qué ruta, ni qué código, ni cuándo.
+     *
+     * Los 4xx no se anotan, y eso es a propósito. Una validación que falla, un
+     * 404 o un 429 son el producto funcionando: anotarlos como error convierte
+     * el registro en algo que nadie mira, que es la otra forma de no tener
+     * registro.
+     */
+    if (error.status >= 500) {
+      logger.error(
+        { code: error.code, status: error.status },
+        "api.error"
+      );
+    }
     return NextResponse.json(
       {
         error: {
@@ -89,8 +109,16 @@ export function err(
 
   // Unknown error — log internally, return generic 500.
   // NEVER include the original error message in the response body.
-  const unknownErr = error instanceof Error ? error.message : String(error);
-  console.error("[ClaimMix] Unhandled error in route handler:", unknownErr);
+  // El mensaje entero, igual que antes: es un error que nadie previó y es lo
+  // único que va a haber para reconstruirlo. Va a stderr, no al cuerpo.
+  logger.error(
+    {
+      code: "INTERNAL_ERROR",
+      error_name: error instanceof Error ? error.name : "UnknownError",
+      detalle: error instanceof Error ? error.message : String(error),
+    },
+    "api.error_no_manejado"
+  );
 
   return NextResponse.json(
     {

@@ -19,12 +19,16 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { PanelDeFiltros } from "../../../src/app/(app)/bandeja/components/PanelDeFiltros";
+import {
+  BotonDeFiltros,
+  MarcasDeFiltros,
+} from "../../../src/app/(app)/bandeja/components/PanelDeFiltros";
 import { NavegacionPendienteProvider } from "../../../src/app/(app)/bandeja/components/navegacion-pendiente";
 import { LocaleProvider } from "../../../src/lib/i18n/LocaleContext";
 
 const push = vi.hoisted(() => vi.fn());
 const buscados = vi.hoisted(() => ({ actual: "" }));
+const cuentas = vi.hoisted(() => ({ actual: {} as Record<string, number> }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn() }),
@@ -32,12 +36,19 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/bandeja",
 }));
 
-function montar(query = "") {
+function montar(query = "", conCuentas: Record<string, number> = {}) {
   buscados.actual = query;
+  cuentas.actual = conCuentas;
   return render(
     <LocaleProvider locale="es-AR">
       <NavegacionPendienteProvider>
-        <PanelDeFiltros />
+        {/*
+          * Los dos juntos: el botón subió al encabezado de la tarjeta y las
+          * marcas quedaron en su franja, pero comparten la URL y el foco. Un
+          * test que montara sólo uno no vería lo que se rompe entre ellos.
+          */}
+        <BotonDeFiltros cuentas={cuentas.actual} />
+        <MarcasDeFiltros />
       </NavegacionPendienteProvider>
     </LocaleProvider>
   );
@@ -120,18 +131,24 @@ describe("PanelDeFiltros", () => {
     expect(url.get("status")).toBe("listo");
   });
 
-  it("«Limpiar» borra los cuatro filtros en UNA sola navegación", () => {
+  it("«Limpiar» borra los CINCO filtros en UNA sola navegación", () => {
     montar("type=granizo&severity=critical&channel=whatsapp&is_claim=true&status=listo&page=3");
 
     fireEvent.click(screen.getByRole("button", { name: "Limpiar" }));
 
     expect(push).toHaveBeenCalledTimes(1);
     const url = ultimaUrl();
-    for (const p of ["type", "severity", "channel", "is_claim", "page"]) {
+    /*
+     * `status` ahora se limpia con el resto, y antes no.
+     *
+     * Era la pestaña de estado, que vivía afuera del panel, así que «Limpiar»
+     * la respetaba a propósito. Desde que el estado es un grupo más, dejarla
+     * puesta sería decir «limpié todo» y devolver una lista igual de recortada
+     * que antes de apretar.
+     */
+    for (const p of ["status", "type", "severity", "channel", "is_claim", "page"]) {
       expect(url.get(p)).toBeNull();
     }
-    // Lo único que sobrevive: la pestaña de estado, que no es del panel.
-    expect(url.get("status")).toBe("listo");
   });
 
   it("con un solo filtro puesto no aparece «Limpiar»: la marca ya lo saca", () => {

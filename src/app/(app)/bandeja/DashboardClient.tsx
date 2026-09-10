@@ -3,10 +3,11 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { PER_PAGE_OPTIONS } from "./per-page";
-import { FilterTabs, ID_PANEL_DE_LA_LISTA } from "./components/FilterTabs";
+import { ID_PANEL_DE_LA_LISTA } from "./components/ids";
+import { contarPorOpcion } from "@/core/case/filtro-de-estado";
 import { usePaginacion } from "./components/useFilterParam";
 import { NavegacionPendienteProvider, useNavegacion } from "./components/navegacion-pendiente";
-import { PanelDeFiltros } from "./components/PanelDeFiltros";
+import { BotonDeFiltros, MarcasDeFiltros } from "./components/PanelDeFiltros";
 import { CasesTable } from "./components/CasesTable";
 import { SimulateModal } from "./components/SimulateModal";
 import { ToastContainer, useToast } from "./components/Toast";
@@ -478,7 +479,14 @@ function DashboardClientInterno({
   const { irAPagina: handlePageChange, cambiarTamanoDePagina: handlePerPageChange } =
     usePaginacion();
 
-  const tabCounts = statusCountsBase;
+  /*
+   * Los contadores de las opciones de estado, agrupados.
+   *
+   * `statusCountsBase` viene por estado suelto y lo actualiza el sondeo en
+   * vivo; agrupar acá y no en el servidor es lo que hace que el número del
+   * chip se mueva con la lista en vez de quedarse en el del primer render.
+   */
+  const cuentasDeEstado = contarPorOpcion(statusCountsBase);
 
   return (
     <>
@@ -501,6 +509,15 @@ function DashboardClientInterno({
               {visibleTotal} {t("bandeja.claims")}
             </span>
           }
+          /*
+           * El botón va pegado al contador y no entre las acciones.
+           *
+           * «N siniestros» es el resultado de los filtros, así que el control
+           * que los cambia pertenece al lado de ese número. Entre «Exportar» y
+           * «Simular» se leería como una acción más, que es lo contrario de lo
+           * que es.
+           */
+          alLadoDelTitulo={<BotonDeFiltros cuentas={cuentasDeEstado} />}
         >
           {/*
             * El mismo boton entra y sale del modo. Antes desaparecia al entrar
@@ -562,11 +579,7 @@ function DashboardClientInterno({
           * viven en un panel, con lo que está puesto a la vista al lado del
           * botón. El porqué largo está en `PanelDeFiltros`.
           */}
-        <div className="border-b border-slate-100 px-5">
-          <FilterTabs counts={tabCounts} activeStatus={activeStatus} />
-        </div>
-
-        <PanelDeFiltros />
+        <MarcasDeFiltros />
 
         {/*
           * `min-h-0` en este hijo y en el flex de arriba: sin eso un hijo de

@@ -345,6 +345,7 @@ export const esAR = {
   "filter.todos": "Todos",
   "filter.reclamos": "Reclamos",
   "filter.no_relevantes": "No relevantes",
+  "filter.estado": "Estado",
   "filter.tipo": "Tipo",
   "filter.titulo": "Filtros",
   "filter.limpiar": "Limpiar",
@@ -485,10 +486,6 @@ export const esAR = {
   // ── Las baldosas de indicador de la bandeja ─────────────────────────────────
   // Estaban escritas a mano en castellano dentro de `bandeja/page.tsx`, asi que
   // con la interfaz en ingles la fila de indicadores seguia en castellano.
-  "kpi.total": "Total casos",
-  "kpi.criticalHint": "Necesitan una persona",
-  "kpi.criticalNone": "Ninguno abierto",
-  "kpi.pendingHint": "Esperando al denunciante",
 
   /*
    * Las cinco pantallas que estaban enteras en castellano.

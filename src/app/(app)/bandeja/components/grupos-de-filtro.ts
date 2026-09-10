@@ -68,6 +68,31 @@ export interface GrupoDeFiltro {
  * toca todos los días, abajo lo que toca cuando busca algo puntual.
  */
 export const GRUPOS_DE_FILTRO: GrupoDeFiltro[] = [
+  /*
+   * El estado, que hasta hoy vivía afuera en seis pestañas.
+   *
+   * Estaba afuera con un argumento que era cierto —llevan el contador, así
+   * que informan sin que las toquen— y que dejó de serlo cuando se midió:
+   * las pestañas contaban un estado SUELTO y las baldosas de arriba
+   * agrupaban, así que «Escalado» decía 1 mientras la baldosa decía 43.
+   * Tres de las cinco decían 0 sobre 483 casos.
+   *
+   * Adentro del panel, y con el contador puesto en el chip, informan igual y
+   * dejan la franja de arriba para lo que se mira todo el día. El grupo que
+   * cubre cada opción está en `@/core/case/filtro-de-estado`.
+   */
+  {
+    param: "status",
+    rotulo: "filter.estado",
+    opciones: [
+      { clave: "procesando", etiqueta: "tabs.procesando" },
+      { clave: "esperando", etiqueta: "tabs.esperando" },
+      { clave: "confirmacion_pendiente", etiqueta: "status.confirmacion_pendiente" },
+      { clave: "escalado", etiqueta: "tabs.escalado" },
+      { clave: "listo", etiqueta: "tabs.listo" },
+      { clave: "cerrado", etiqueta: "tabs.cerrado" },
+    ],
+  },
   {
     param: "type",
     rotulo: "filter.tipo",

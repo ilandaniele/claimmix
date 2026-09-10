@@ -58,9 +58,19 @@ export function Card({
  */
 export function CardHeader({
   title,
+  alLadoDelTitulo,
   children,
 }: {
   title: ReactNode;
+  /**
+   * Lo que va pegado al título, del lado izquierdo.
+   *
+   * Existe por los filtros de la bandeja: el botón «Filtros» pertenece al
+   * lado de la pregunta —cuántos siniestros hay y con qué recorte— y no al de
+   * las acciones. Metido entre «Exportar» y «Simular» se lee como una acción
+   * más, que es lo contrario de lo que es.
+   */
+  alLadoDelTitulo?: ReactNode;
   /** Los botones de la derecha. Se pasan tal cual: acá no se decide cuáles. */
   children?: ReactNode;
 }) {
@@ -79,9 +89,12 @@ export function CardHeader({
         * `text-balance` reparte el título en líneas parejas en vez de dejar una
         * palabra huérfana abajo.
         */}
-      <h2 className="min-w-0 truncate text-balance text-[15px] font-semibold tracking-tight text-slate-900">
-        {title}
-      </h2>
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <h2 className="min-w-0 truncate text-balance text-[15px] font-semibold tracking-tight text-slate-900">
+          {title}
+        </h2>
+        {alLadoDelTitulo}
+      </div>
       {children ? (
         <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>
       ) : null}

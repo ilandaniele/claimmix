@@ -11,7 +11,8 @@
  * AC12: Pagination per_page is capped at 100.
  */
 
-import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { estadosAConsultar } from "@/core/case/filtro-de-estado";
 import { db } from "@/lib/db";
 import { countRows, ilikeAny } from "@/lib/db/helpers";
 import {
@@ -74,7 +75,18 @@ function buildCaseFilters(
     query;
   const conditions: (SQL | undefined)[] = [];
 
-  if (status) conditions.push(eq(cases.status, status));
+  /*
+   * `inArray` y no `eq`: las cinco opciones de la bandeja son GRUPOS.
+   *
+   * «Escalado» son `escalado` y `requiere_especialista`, y el canal real sólo
+   * escribe el segundo. Con `eq` el chip decía 43 y devolvía 1. El porqué de
+   * cada grupo está en `filtro-de-estado.ts`.
+   *
+   * Un estado suelto que no sea una de las cinco claves sigue funcionando: la
+   * función devuelve ese solo, así que `?status=requiere_especialista` pide
+   * exactamente eso. La API la usan el CSV y el sondeo en vivo.
+   */
+  if (status) conditions.push(inArray(cases.status, estadosAConsultar(status)));
   if (type) conditions.push(eq(cases.claim_type, type));
   if (q) {
     // Case-insensitive substring search on policyholder_name and policy_number.

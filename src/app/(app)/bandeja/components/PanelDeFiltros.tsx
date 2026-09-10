@@ -57,6 +57,7 @@ import {
 import { useDialogoModal } from "../../_components/dialogo-modal";
 
 const ID_PANEL = "panel-de-filtros";
+const ID_BOTON = "boton-de-filtros";
 
 // ── El panel que se abre ──────────────────────────────────────────────────────
 
@@ -70,7 +71,13 @@ const ID_PANEL = "panel-de-filtros";
  * `tests/unit/el-dialogo-y-la-fila.test.ts`: prohíbe que `e.key === "Escape"`
  * vuelva a aparecer escrito a mano en esta parte de la bandeja.
  */
-function Panel({ alCerrar }: { alCerrar: () => void }) {
+function Panel({
+  alCerrar,
+  cuentas,
+}: {
+  alCerrar: () => void;
+  cuentas: Record<string, number>;
+}) {
   const t = useT();
   /*
    * `paramsVisibles` y no `useSearchParams()`: mientras la navegación está en
@@ -158,6 +165,26 @@ function Panel({ alCerrar }: { alCerrar: () => void }) {
                       }
                     >
                       {t(opcion.etiqueta)}
+                      {/*
+                        * El contador, sólo donde hay uno.
+                        *
+                        * Es lo que las pestañas de estado hacían bien y por lo
+                        * que se habían quedado afuera del panel: informan sin
+                        * que las toquen. «Escalado 43» es trabajo pendiente, y
+                        * meterlas acá sin el número habría sido perder eso.
+                        *
+                        * `tabular-nums` para que 9 y 43 no corran el chip.
+                        */}
+                      {cuentas[opcion.clave] !== undefined && (
+                        <span
+                          className={[
+                            "cifra ml-1.5 tabular-nums",
+                            puesto ? "opacity-80" : "text-slate-400",
+                          ].join(" ")}
+                        >
+                          {cuentas[opcion.clave]}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -172,7 +199,26 @@ function Panel({ alCerrar }: { alCerrar: () => void }) {
 
 // ── La franja entera ──────────────────────────────────────────────────────────
 
-export function PanelDeFiltros() {
+/**
+ * El botón y su panel. Va arriba, al lado del título.
+ *
+ * Antes el botón y las marcas de lo puesto eran una franja sola, abajo del
+ * encabezado. Se separaron por dos razones:
+ *
+ *   · el botón pertenece al lado de la PREGUNTA —cuántos siniestros hay y con
+ *     qué recorte— y no al de las acciones; arriba, pegado al contador, es
+ *     donde se lo busca;
+ *   · las marcas son ESTADO, y sin filtros puestos no hay estado que mostrar.
+ *     Como franja fija ocupaban una línea entera para mostrar un botón.
+ *
+ * Ahora, sin filtros, la lista empieza una línea más arriba.
+ */
+export function BotonDeFiltros({
+  cuentas = {},
+}: {
+  /** Cuántos casos cae en cada opción. Hoy sólo las de estado tienen. */
+  cuentas?: Record<string, number>;
+}) {
   const t = useT();
   const { paramsVisibles } = useNavegacion();
   const setFilter = useFilterParam();
@@ -186,37 +232,6 @@ export function PanelDeFiltros() {
 
   const puestos = filtrosPuestos((p) => paramsVisibles.get(p));
 
-  /*
-   * ── El foco cuando se saca una marca ────────────────────────────────────
-   *
-   * Es el error clásico de este patrón: el botón que tenía el foco deja de
-   * existir, el foco se cae al `body`, y el que navega con teclado vuelve al
-   * principio del documento sin haberse movido de la pantalla.
-   *
-   * Se guarda la posición de la que se sacó y, cuando la lista se rehace, el
-   * foco va a la que ocupó ese lugar. Si era la última, al botón «Filtros»,
-   * que es lo más cercano y siempre está.
-   */
-  const focoPendiente = useRef<number | null>(null);
-
-  useEffect(() => {
-    const i = focoPendiente.current;
-    if (i === null) return;
-    focoPendiente.current = null;
-
-    const marcas =
-      franjaRef.current?.querySelectorAll<HTMLElement>("[data-marca]") ?? [];
-    const destino = marcas[Math.min(i, marcas.length - 1)];
-    (destino ?? botonRef.current)?.focus();
-  }, [puestos.length]);
-
-  const sacar = useCallback(
-    (param: string, i: number) => {
-      focoPendiente.current = i;
-      setFilter(param, null);
-    },
-    [setFilter]
-  );
 
   /*
    * Cerrar tocando afuera. `useDialogoModal` trae Escape, la trampa de foco y
@@ -243,7 +258,7 @@ export function PanelDeFiltros() {
   return (
     <div
       ref={franjaRef}
-      className="relative flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-2.5"
+      className="relative flex flex-shrink-0 items-center"
     >
       {/*
         * El botón cambia de aspecto cuando hay filtros puestos, no sólo de
@@ -292,6 +307,75 @@ export function PanelDeFiltros() {
         )}
       </button>
 
+
+      {abierto && <Panel alCerrar={cerrar} cuentas={cuentas} />}
+    </div>
+  );
+}
+
+/**
+ * Lo que está puesto ahora, afuera del panel.
+ *
+ * Es la parte que casi todos los paneles de filtro hacen mal: esconden los
+ * chips detrás del ícono y con eso esconden también **el estado**. Alguien deja
+ * puesto «Severidad: Crítico», vuelve al día siguiente, ve cuarenta casos en vez
+ * de cuatrocientos y no tiene forma de saber por qué sin abrir el panel.
+ *
+ * Sin nada puesto no se renderiza nada: una franja vacía con un borde es una
+ * línea de la pantalla gastada en no decir nada, y la lista puede empezar ahí.
+ */
+export function MarcasDeFiltros() {
+  const t = useT();
+  const { paramsVisibles } = useNavegacion();
+  const setFilter = useFilterParam();
+  const limpiar = useLimpiarFiltros();
+
+  const franjaRef = useRef<HTMLDivElement>(null);
+  const puestos = filtrosPuestos((p) => paramsVisibles.get(p));
+
+  /*
+   * ── El foco cuando se saca una marca ────────────────────────────────────
+   *
+   * Es el error clásico de este patrón: el botón que tenía el foco deja de
+   * existir, el foco se cae al `body`, y el que navega con teclado vuelve al
+   * principio del documento sin haberse movido de la pantalla.
+   *
+   * Se guarda la posición de la que se sacó y, cuando la lista se rehace, el
+   * foco va a la que ocupó ese lugar. Si era la última, al botón «Filtros»,
+   * que ahora vive en otro componente: se lo busca por id, que es lo que queda
+   * cuando dos hermanos no comparten ref. Y si tampoco está —no debería—, el
+   * foco se queda donde está en vez de caerse al body.
+   */
+  const focoPendiente = useRef<number | null>(null);
+
+  useEffect(() => {
+    const i = focoPendiente.current;
+    if (i === null) return;
+    focoPendiente.current = null;
+
+    const marcas =
+      franjaRef.current?.querySelectorAll<HTMLElement>("[data-marca]") ?? [];
+    const destino =
+      marcas[Math.min(i, marcas.length - 1)] ??
+      document.getElementById(ID_BOTON);
+    destino?.focus();
+  }, [puestos.length]);
+
+  const sacar = useCallback(
+    (param: string, i: number) => {
+      focoPendiente.current = i;
+      setFilter(param, null);
+    },
+    [setFilter]
+  );
+
+  if (puestos.length === 0) return null;
+
+  return (
+    <div
+      ref={franjaRef}
+      className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-2"
+    >
       {/*
         * Las marcas de lo que está puesto.
         *
@@ -335,6 +419,8 @@ export function PanelDeFiltros() {
         </button>
       ))}
 
+
+
       {/*
         * Sacarlas de a una sirve para corregir; «Limpiar» sirve para volver a
         * empezar, que con tres o cuatro puestas son tres o cuatro clicks y otras
@@ -348,15 +434,13 @@ export function PanelDeFiltros() {
             limpiar(PARAMS_DE_FILTRO);
             // El propio «Limpiar» desaparece al usarse: sin esto el foco se cae
             // al body, igual que al sacar la última marca.
-            botonRef.current?.focus();
+            document.getElementById(ID_BOTON)?.focus();
           }}
           className="rounded-md px-2 py-1 text-[12.5px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
         >
           {t("filter.limpiar")}
         </button>
       )}
-
-      {abierto && <Panel alCerrar={cerrar} />}
     </div>
   );
 }

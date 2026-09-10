@@ -330,6 +330,7 @@ export const enUS: Record<TranslationKey, string> = {
   "filter.todos": "All",
   "filter.reclamos": "Claims",
   "filter.no_relevantes": "Not relevant",
+  "filter.estado": "Status",
   "filter.tipo": "Type",
   "filter.titulo": "Filters",
   "filter.limpiar": "Clear",
@@ -461,10 +462,6 @@ export const enUS: Record<TranslationKey, string> = {
   "clientes.policyStatus.expired": "Expired",
   "clientes.policyStatus.cancelled": "Cancelled",
   // Inbox KPI tiles — see the es-AR note.
-  "kpi.total": "Total cases",
-  "kpi.criticalHint": "Need a person",
-  "kpi.criticalNone": "None open",
-  "kpi.pendingHint": "Waiting on the claimant",
 
   /*
    * Las cinco pantallas que estaban enteras en castellano.

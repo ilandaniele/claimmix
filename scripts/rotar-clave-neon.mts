@@ -17,7 +17,7 @@
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { escribirEnEnvLocal, leerDeEnvLocal } from "./lib/env-local.mjs";
 
 const API = "https://console.neon.tech/api/v2";
 const vieja = process.env.NEON_API_KEY?.trim().replace(/^"|"$/g, "");
@@ -74,13 +74,16 @@ try {
 
 // ── 4. Guardarla ──────────────────────────────────────────────────────────────
 const archivo = ".env.local";
-const contenido = readFileSync(archivo, "utf8");
-const patron = /^NEON_API_KEY=.*$/m;
-if (!patron.test(contenido)) {
+
+/*
+ * Si la variable no está, algo anda mal y revocar la vieja deja a este
+ * puesto sin entrada a Neon. Se corta antes de tocar nada.
+ */
+if (leerDeEnvLocal("NEON_API_KEY", archivo) === null) {
   console.error("No encontré NEON_API_KEY en .env.local — la vieja NO se revocó.");
   process.exit(1);
 }
-writeFileSync(archivo, contenido.replace(patron, `NEON_API_KEY=${creada.key}`), "utf8");
+escribirEnEnvLocal("NEON_API_KEY", creada.key, archivo);
 console.log(`\n▸ Guardada en ${archivo}`);
 console.log("   ✓ (no se imprime)");
 

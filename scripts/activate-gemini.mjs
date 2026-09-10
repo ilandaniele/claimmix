@@ -11,11 +11,10 @@
  *   3. Reports the escalado backlog.
  *   4. Triggers /api/admin/reprocess-unclassified (CRON_SECRET) to re-drive it.
  */
-import { readFileSync } from "node:fs";
 import pg from "pg";
 
-const env = readFileSync("./.env.local", "utf8");
-const get = (k) => (env.match(new RegExp(`^${k}\\s*=\\s*"?([^"\\n]+)"?`, "m")) || [])[1];
+import { leerDeEnvLocal as get } from "./lib/env-local.mjs";
+
 const KEY = get("GEMINI_API_KEY");
 const CRON = get("CRON_SECRET");
 const PROD = "https://claimmix.vercel.app";

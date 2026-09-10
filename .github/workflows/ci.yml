@@ -285,6 +285,28 @@ jobs:
       # El `if` mira `env` y no `secrets` porque el contexto `secrets` no está
       # disponible en una condición: el workflow ni siquiera arranca. Se mapea
       # una vez al entorno del job y se pregunta por ahí.
+      # El esquema del ensayo tiene que tener lo que el PR agregó.
+      #
+      # El PR #132 agregó una columna a `cases` y la CI se cayó en dos jobs con
+      # `error_code: 42703` —columna inexistente— desde adentro de un test. El
+      # esquema del ensayo estaba OCHO migraciones atrás: nada lo pone al día ni
+      # avisa, y el síntoma culpa al código del PR.
+      #
+      # No las aplica: avisa. Aplicar migraciones desde la rama de un PR es
+      # dejar que cualquier PR escriba en el esquema del ensayo, y este paso
+      # existe para hacer visible un descuido, no para taparlo.
+      - name: El ensayo está al día con las migraciones
+        if: env.HAY_ENSAYO != ''
+        # `ENSAYO_URL` y no `DATABASE_URL`: este paso no configura la
+        # aplicación, le apunta una base a un script. Con el nombre de siempre,
+        # la invariante «los jobs de CI conocen los dos roles» lo marca —y hace
+        # bien: ahí ese nombre significa «acá corre algo que habla con la base
+        # como la app», y entonces le falta el rol restringido. `migrate.mjs`
+        # corre DDL con el rol dueño y no pasa por `enTenant` ni una vez.
+        run: node scripts/migrate.mjs --url "$ENSAYO_URL" --exigir-al-dia
+        env:
+          ENSAYO_URL: ${{ secrets.STAGING_DATABASE_URL }}
+
       - name: Sembrar la base del ensayo
         if: env.HAY_ENSAYO != ''
         run: pnpm sembrar
@@ -514,6 +536,21 @@ jobs:
       # En un pull request queda como aviso: puede venir de un fork, que por
       # diseño no recibe secretos. En `main` falla, porque ahí sí están y que
       # falten significa que alguien los sacó.
+      # `E2E_DATABASE_URL` es un secreto APARTE de `STAGING_DATABASE_URL`.
+      #
+      # Hoy apuntan a la misma base —el resumen de más abajo dice justamente que
+      # se prende copiando una en la otra— pero nada lo obliga, así que el
+      # ensayo puede estar al día y ésta no. Se pregunta acá también.
+      - name: El ensayo de los e2e está al día con las migraciones
+        run: |
+          if [ "${{ secrets.E2E_DATABASE_URL }}" != "" ]; then
+            node scripts/migrate.mjs --url "$ENSAYO_URL" --exigir-al-dia
+          fi
+        # Ver el paso equivalente de `integration-tests` para por qué el nombre
+        # no es `DATABASE_URL`.
+        env:
+          ENSAYO_URL: ${{ secrets.E2E_DATABASE_URL }}
+
       - name: Run E2E tests
         run: |
           if [ "${{ secrets.E2E_DATABASE_URL }}" != "" ]; then

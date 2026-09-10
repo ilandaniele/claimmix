@@ -32,7 +32,13 @@ import { gmailAccounts } from "@/lib/db/schema";
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
 import { enTenant } from "@/data/scope";
 
-const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
+const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
+import {
+  chequearAdjuntos,
+  chequearCasosTrabados,
+  chequearEnvios,
+  chequearExtraccion,
+} from "./trabajo";
 const UNA_HORA_MS = 60 * 60 * 1000;
 
 export const dynamic = "force-dynamic";
@@ -66,6 +72,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     checkGmail(),
     checkAgentConfig(),
     checkPresupuesto(),
+    /*
+     * Y cuatro que preguntan si el producto está HACIENDO su trabajo.
+     *
+     * Los nueve de arriba preguntan «¿alcanzo a X?», y todos pueden estar en
+     * verde con el producto sin hacer nada. El 09/09, con 80 timeouts del
+     * modelo y 189 adjuntos que R2 nunca recibió, esto estuvo verde todo el
+     * día — y se consulta cada quince minutos.
+     *
+     * Ver `./trabajo.ts`.
+     */
+    chequearCasosTrabados(),
+    chequearExtraccion(),
+    chequearEnvios(),
+    chequearAdjuntos(),
   ]);
 
   const worst: Status = checks.some((c) => c.status === "down")

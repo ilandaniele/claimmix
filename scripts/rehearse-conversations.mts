@@ -37,6 +37,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as dotenv from "dotenv";
+import { readable } from "./lib/texto-legible.mjs";
 
 const envPath = path.resolve(process.cwd(), ".env.local");
 dotenv.config({ path: fs.existsSync(envPath) ? envPath : undefined });
@@ -827,117 +828,16 @@ async function deliverEmail(
 }
 
 /**
- * The message as a person would read it.
+ * El cuerpo de un mensaje, como lo leería una persona.
  *
- * Email goes out as HTML, and a rehearsal transcript full of inline styles is
- * a transcript nobody reads — which defeats half the point, since a person
- * skimming the output is how you notice a reply that passes every assertion
- * and still sounds wrong.
+ * Vivía acá adentro, y este archivo es un script de top-level await: importarlo
+ * lo CORRE, así que no había forma de probarlo. Se cambió cuatro veces en un
+ * día —el cierre de etiqueta, el borrado de una pasada, el orden del decode— y
+ * cada vez se verificó a mano, en un archivo temporal que ya no existe.
  *
- * Desde que el cuerpo del mail lo escribe el redactor, esto además tiene que
- * cuidarse de TAPAR. Dos arreglos concretos:
- *
- *   · el ampersand se decodifica AL FINAL y no al principio. Iba primero, así
- *     que un `&amp;lt;` —o sea, un `<` que escribió un desconocido y el escape
- *     convirtió bien— volvía a `<` en el transcripto: se leía igual de
- *     tranquilizador estuviera bien o mal escapado.
- *   · `&quot;` y `&#39;` se decodifican, que ya se veían crudos en el
- *     transcripto («entendimos &quot;16/08/2026&quot;»).
- *
- * Lo que sigue sin poder mostrar es marcado que NO puso la plantilla: las
- * etiquetas se borran sin distinguir. Por eso el escape del cuerpo redactado se
- * prueba en `tests/unit/email-escape.test.ts` y no acá.
+ * Ahora vive en `lib/texto-legible.mjs` con su test. Lo que hace y por qué está
+ * explicado allá, al lado del código.
  */
-/**
- * Sacar etiquetas de a una pasada no alcanza, y CodeQL lo dice.
- *
- * `js/incomplete-multi-character-sanitization`, severidad alta. Tres motivos,
- * los tres reales acá:
- *
- *   · El cierre acepta espacio, salto de línea y atributos antes del `>`, así
- *     que `</script >` no matcheaba y el cuerpo del script terminaba adentro
- *     del transcripto que lee una persona.
- *
- *   · Borrar `<…>` una vez deja `<<a>script>` convertido en `<script>`. Una
- *     sola pasada CONSTRUYE la etiqueta que venía a sacar.
- *
- *   · Y lo mismo vale para el borrado de `<script>…</script>`, que también
- *     corría una vez: por eso el bucle envuelve la pasada ENTERA y no sólo
- *     el `<[^>]+>` del final.
- *
- * Se repite hasta que deja de cambiar, sin tope, y eso NO es un bucle abierto
- * sobre texto que escribió otro: cada pasada es estrictamente más corta o
- * idéntica. Los seis reemplazos o borran, o cambian una secuencia por una más
- * corta —`</p>` y `<br>` por un salto, `<li…>` por «• »—. Un largo que no
- * puede crecer y que corta al repetirse termina siempre.
- *
- * Un tope parecía la opción prudente y era peor: salir en la vuelta ocho deja
- * el texto a medio limpiar y nadie se entera.
- */
-/**
- * Una pasada de todo lo que hay que sacar o traducir. Ver `sinEtiquetas`.
- *
- * CodeQL marca ESTA función —no el bucle— porque sola es un saneador de una
- * sola pasada, y no sigue al llamador que la repite hasta el punto fijo. Los
- * cuatro defectos que la regla señaló están arreglados: el cierre con espacio o
- * atributos, el borrado de una pasada que reconstruye `<script>`, el mismo
- * problema en el borrado de `<script>…</script>`, y el decode de entidades que
- * corría después de limpiar.
- *
- * Lo que queda es la regla mirando la forma, no una vulnerabilidad: esto es un
- * transcripto. `readable()` se usa en exactamente dos lugares y ninguno es un
- * sink de HTML — un `console.log` a la terminal y un `.toLowerCase()` para
- * buscar una frase. No hay nada que renderice esta salida.
- */
-function unaPasada(texto: string): string {
-  return texto
-    .replace(/<head[\s\S]*?<\/head[^>]*>/gi, "")
-    .replace(/<(script|style)[\s\S]*?<\/\1[^>]*>/gi, "")
-    .replace(/<\/(p|div|h1|h2|h3|li|tr)>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<li[^>]*>/gi, "• ")
-    .replace(/<[^>]+>/g, "");
-}
-
-function sinEtiquetas(texto: string): string {
-  let antes = texto;
-  for (;;) {
-    const despues = unaPasada(antes);
-    if (despues === antes) return despues;
-    antes = despues;
-  }
-}
-
-/**
- * Las entidades se decodifican ANTES de sacar las etiquetas, no después.
- *
- * Estaban al final, y esa es la tercera forma del mismo error: `&lt;script&gt;`
- * atraviesa entero el borrado de etiquetas —no hay ninguna— y recién ahí se
- * convierte en `<script>`. El paso que limpia corre antes que el paso que
- * ensucia, así que limpiar no sirve de nada.
- *
- * `&amp;` va última entre las entidades para que `&amp;lt;` termine en `&lt;`
- * y no en `<`.
- */
-function sinEntidades(texto: string): string {
-  return texto
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&");
-}
-
-function readable(body: string): string {
-  if (!/<[a-z!]/i.test(body) && !/&[a-z#]/i.test(body)) return body;
-  return sinEtiquetas(sinEntidades(body))
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line, i, all) => line.length > 0 || (i > 0 && all[i - 1].length > 0))
-    .join("\n")
-    .trim();
-}
 
 /** Lo que salió, y qué claves pidió. La misma consulta, una columna más. */
 async function repliesSince(

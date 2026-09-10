@@ -62,7 +62,7 @@ test.describe("el motor de flujos no acepta trabajo de afuera", () => {
        * motor que aceptó trabajo devuelve un identificador de corrida.
        */
       const cuerpo = await res.text();
-      expect(cuerpo, `${ruta} devolvió una corrida`).not.toMatch(/wrun_[a-z0-9]/i);
+      expect(cuerpo, `${ruta} devolvió una corrida`).not.toMatch(/\bwrun_[a-z0-9]/i);
       expect(cuerpo, `${ruta} devolvió una corrida`).not.toContain('"runId"');
 
       const esPagina = /^\s*<!DOCTYPE html|^\s*<html/i.test(cuerpo);

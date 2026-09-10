@@ -90,3 +90,90 @@ describe("ClienteDatos es de la capa, no cualquier db", () => {
     }
   });
 });
+
+/**
+ * Las tres guardas del 10/09, con la misma pregunta: ¿miran algo?
+ *
+ * No es hipotética. La de «el inquilino no entra por el cuerpo» se mergeó con
+ * un RETROCESO literal (0x08) donde iba `\b`, así que su expresión pedía un
+ * carácter que no existe en ningún archivo: pasaba en verde sobre una ruta que
+ * la violaba, y el diff se veía perfecto. Es exactamente el defecto que este
+ * archivo vino a cerrar para las dos de arriba, cometido de nuevo.
+ *
+ * Cada guarda se prueba contra lo que TIENE que ver y contra lo que no. La
+ * segunda mitad importa igual: una guarda demasiado ancha se apaga sola, porque
+ * alguien la saca cuando da falsos positivos.
+ */
+describe("las tres guardas del 10/09", () => {
+  const FUENTE = readFileSync("scripts/check-architecture.mjs", "utf8");
+
+  /**
+   * La expresión literal que hay en esa línea del script, tal cual está.
+   *
+   * Recortada con `indexOf` y no con otra expresión regular: escribir una
+   * expresión que lea expresiones es donde se pierden las barras, que es
+   * literalmente el bug que la tercera guarda vino a agarrar.
+   */
+  function expresionEnLaLineaCon(marca: string): RegExp {
+    const linea = FUENTE.split("\n").find((l) => l.includes(marca));
+    expect(linea, `no hay línea con ${marca}`).toBeTruthy();
+
+    const abre = linea!.indexOf("/");
+    const cierra = linea!.lastIndexOf("/");
+    expect(cierra, `no hay expresión en: ${linea}`).toBeGreaterThan(abre);
+
+    const cuerpo = linea!.slice(abre + 1, cierra);
+    // Las banderas son lo que queda hasta el `.` o el `;` que siguen.
+    const cola = linea!.slice(cierra + 1);
+    const banderas = (/^[gimsuy]*/.exec(cola)?.[0] ?? "").replace("g", "");
+    return new RegExp(cuerpo, banderas);
+  }
+
+  describe("el inquilino no entra por el cuerpo", () => {
+    const enUnEsquema = expresionEnLaLineaCon("tenant_?[Ii]d:");
+
+    it("ve las dos formas de escribirlo", () => {
+      expect(enUnEsquema.test("  tenant_id: z.string().uuid(),")).toBe(true);
+      expect(enUnEsquema.test('  tenantId: z.string().uuid("..."),')).toBe(true);
+    });
+
+    it("y NO marca un tenant_id que es una columna o una variable", () => {
+      expect(enUnEsquema.test("  tenant_id: cases.tenant_id,")).toBe(false);
+      expect(enUnEsquema.test("const tenantId = userRow.tenant_id;")).toBe(false);
+    });
+  });
+
+  describe("nada anota por fuera del logger", () => {
+    const esConsole = expresionEnLaLineaCon("const re = /console");
+
+    it("ve los cinco métodos", () => {
+      for (const m of ["error", "warn", "info", "log", "debug"]) {
+        expect(esConsole.test(`console.${m}("hola")`)).toBe(true);
+      }
+    });
+
+    it("y NO marca al logger ni a algo que se llame parecido", () => {
+      expect(esConsole.test('logger.error({}, "x")')).toBe(false);
+      expect(esConsole.test("consola.error()")).toBe(false);
+    });
+  });
+
+  describe("ningún carácter de control invisible", () => {
+    /*
+     * La lista de códigos prohibidos, leída del script. Tiene que llevar el 8
+     * —el retroceso— porque es el que se cuela al escribir un `\b`, y NO puede
+     * llevar el 9, el 10 ni el 13, que son tabulación y saltos de línea.
+     */
+    const linea = FUENTE.split("\n").find((l) => l.includes("const PROHIBIDOS"));
+    const codigos = (linea!.match(/\d+/g) ?? []).map(Number);
+
+    it("incluye el retroceso, que es el que se cuela", () => {
+      expect(codigos).toContain(8);
+    });
+
+    it("y NO incluye tabulación ni saltos de línea", () => {
+      // Si los incluyera, marcaría cada archivo del repo y alguien la sacaría.
+      for (const legitimo of [9, 10, 13]) expect(codigos).not.toContain(legitimo);
+    });
+  });
+});

@@ -446,8 +446,8 @@ console.log("\n▸ El inquilino no entra por el cuerpo");
   const sospechosos = [];
   for (const f of archivos("src/app/api").filter((x) => x.endsWith("/route.ts"))) {
     const s = sinComentarios(readFileSync(f, "utf8"));
-    if (!/tenant_?[Ii]d:\s*z\./.test(s)) continue;
-    if (/isInternalRequest\s*\(/.test(s)) continue;
+    if (!/\btenant_?[Ii]d:\s*z\./.test(s)) continue;
+    if (/\bisInternalRequest\s*\(/.test(s)) continue;
     sospechosos.push(f);
   }
   if (sospechosos.length === 0) {
@@ -495,6 +495,49 @@ console.log("\n▸ Nada anota por fuera del logger");
     if (sueltos.length > 15) console.log(`     … y ${sueltos.length - 15} más`);
     console.log("     `logger.error({ campos }, \"modulo.evento\")` — se filtra por");
     console.log("     evento y se agrupa por caso. Un texto libre, no.");
+  }
+}
+
+// ── 11. Ningún carácter de control invisible en el código ─────────────────
+//
+// Un `\\b` y un retroceso literal (0x08) se ven IGUAL en un diff, en el
+// editor y en GitHub. El segundo no matchea NUNCA, así que
+// la expresión que lo lleva deja de mirar lo que decía mirar.
+//
+// Pasó tres veces en este repo, y las tres llegaron a `main`:
+//
+//   · `pen-test.mts` y `seguridad.spec.ts` (26/08): la sonda del motor de
+//     flujos. El del e2e es una aserción NEGATIVA —`.not.toMatch()`— o sea un
+//     test que no podía fallar.
+//   · `check-architecture.mjs` (10/09): la invariante «el inquilino no entra
+//     por el cuerpo» pasaba en verde sobre un archivo que la violaba.
+//
+// El origen es siempre el mismo: una herramienta que se come el `chr(92)` al
+// escribir el archivo, y el resultado no se distingue al releer.
+console.log("\n▸ Ningún carácter de control invisible");
+{
+  // Tab, salto y retorno son legítimos; el resto no tiene por qué estar.
+  const PROHIBIDOS = [7, 8, 11, 12, 27];
+  const sucios = [];
+  for (const f of [
+    ...archivos("src", [".ts", ".tsx"]),
+    ...archivos("scripts", [".ts", ".mts", ".mjs", ".js"]),
+    ...archivos("tests", [".ts", ".tsx"]),
+  ]) {
+    const s = readFileSync(f, "utf8");
+    for (const codigo of PROHIBIDOS) {
+      const i = s.indexOf(String.fromCharCode(codigo));
+      if (i === -1) continue;
+      sucios.push(`${f}:${s.slice(0, i).split("\n").length} — 0x${codigo.toString(16).padStart(2, "0")}`);
+    }
+  }
+  if (sucios.length === 0) {
+    bien("ninguno: una frontera de palabra se lee como lo que es");
+  } else {
+    mal(`${sucios.length} carácter(es) de control adentro del código`);
+    for (const x of sucios) console.log(`     ${x}`);
+    console.log("     Casi siempre es una frontera de palabra que perdió su barra al");
+    console.log("     escribir el archivo. La expresión que lo lleva no matchea nada.");
   }
 }
 

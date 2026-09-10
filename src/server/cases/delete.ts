@@ -25,30 +25,55 @@
 
 import "server-only";
 
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
+import type { UserRow } from "@/lib/db/types";
 import { cases } from "@/lib/db/schema";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+
+/** Quién borra: el id para la auditoría, el rol para saber qué le toca. */
+export type ActorDelBorrado = Pick<UserRow, "id" | "role">;
 
 /**
  * Borra los casos indicados que pertenezcan al inquilino del contexto.
  *
+ * ── Un analista sólo borra lo suyo ──────────────────────────────────────────
+ *
+ * `patchCase` no deja que un analista edite un caso que no tiene asignado: le
+ * contesta 404, para no confirmarle siquiera que existe. Acá no había nada, así
+ * que el mismo analista que no puede cambiarle el estado a un caso ajeno podía
+ * BORRARLO, con sus mensajes, sus adjuntos y sus campos, y con cascada a nueve
+ * tablas. La operación irreversible era la más permisiva de las dos.
+ *
+ * La condición va adentro del `where` y no en un chequeo previo, por lo mismo
+ * que el inquilino: un id que no le toca sencillamente no coincide con ninguna
+ * fila, y sale de la respuesta igual que uno de otra aseguradora. No hace falta
+ * un SELECT de comprobación ni una respuesta distinta que diga «éste existe
+ * pero no es tuyo».
+ *
+ * Los demás roles que llegan hasta acá —dueño, admin, especialista— borran
+ * cualquier caso del inquilino, igual que editan cualquiera. `viewer` no llega:
+ * lo frena la ruta.
+ *
  * @returns los ids efectivamente borrados. Un id que no existe —o que es de
- *   otra aseguradora— no aparece, y eso no es un error: es la respuesta.
+ *   otra aseguradora, o de otro analista— no aparece, y eso no es un error: es
+ *   la respuesta.
  */
 export async function deleteCases(
   ctx: TenantContext,
   ids: string[],
-  /** Quién lo borró. Sin esto la fila de auditoría no sirve para nada. */
-  actorId?: string | null
+  actor: ActorDelBorrado
 ): Promise<string[]> {
   if (ids.length === 0) return [];
+
+  const soloLoSuyo =
+    actor.role === "analyst" ? eq(cases.assigned_to, actor.id) : undefined;
 
   const borrados = await enTenant<Array<{ id: string }>>(ctx, (db) =>
     db
       .delete(cases)
-      .where(inArray(cases.id, ids))
+      .where(and(inArray(cases.id, ids), soloLoSuyo))
       .returning({ id: cases.id })
   );
 
@@ -69,7 +94,7 @@ export async function deleteCases(
   for (const { id } of borrados) {
     await writeAuditLog({
       tenant_id: ctx.tenantId,
-      actor_id: actorId ?? null,
+      actor_id: actor.id,
       event_type: AuditEvent.CASE_DELETED,
       target_type: "case",
       target_id: id,

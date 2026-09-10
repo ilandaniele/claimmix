@@ -5,6 +5,7 @@
  *   node scripts/migrate.mjs --apply          # run every pending migration
  *   node scripts/migrate.mjs --baseline 0009  # record 0001..0009 as applied WITHOUT running them
  *   node scripts/migrate.mjs --forget 0010    # el ledger miente sobre ésta: sacarla para re-aplicarla
+ *   node scripts/migrate.mjs --exigir-al-dia  # sale 1 si falta alguna (para CI)
  *
  * Why this exists: migrations here were applied by hand, with nothing recording
  * which ones had run. That is exactly what caused the 0006-0009 outage — those
@@ -34,6 +35,7 @@ import { connect, LEDGER_INSERT } from "./lib/db-driver.mjs";
 const MIGRATIONS_DIR = "./neon/migrations";
 
 const APPLY = process.argv.includes("--apply");
+const EXIGIR_AL_DIA = process.argv.includes("--exigir-al-dia");
 const baselineIdx = process.argv.indexOf("--baseline");
 const BASELINE = baselineIdx !== -1 ? process.argv[baselineIdx + 1] : null;
 const forgetIdx = process.argv.indexOf("--forget");
@@ -242,6 +244,27 @@ try {
   if (pending.length === 0) {
     console.log("  (ninguna) — la base está al día.");
     process.exit(0);
+  }
+
+  /*
+   * Lo que corre en CI: pendientes es un error, no un informe.
+   *
+   * El PR #132 agregó `cases.intentos_de_extraccion` y la CI se cayó con
+   * `error_code: 42703`, columna inexistente, en dos jobs. Pasaron horas hasta
+   * ver que el ensayo estaba OCHO migraciones atrás: nada aplica las
+   * migraciones ahí ni avisa que faltan, y el único síntoma es un error de
+   * Postgres a mitad de un test, que culpa al código del PR.
+   *
+   * Con esto el mismo problema se ve una vez, arriba, con el nombre del
+   * archivo que falta y el comando para aplicarlo.
+   */
+  if (EXIGIR_AL_DIA) {
+    console.error(`
+✖ La base tiene ${pending.length} migración(es) sin aplicar.`);
+    console.error("  Los tests corren contra el esquema viejo y fallan con errores");
+    console.error("  de Postgres que parecen del código del PR. Aplicalas:");
+    console.error("      node scripts/migrate.mjs --env STAGING_DATABASE_URL --apply");
+    process.exit(1);
   }
 
   // An empty ledger plus pending migrations on a database that clearly already

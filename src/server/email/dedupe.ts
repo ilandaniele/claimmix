@@ -18,6 +18,7 @@ import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
+import { logger } from "@/lib/observability/logger";
 
 export interface DedupeResult {
   isDuplicate: boolean;
@@ -67,7 +68,7 @@ export async function checkDuplicate(
   } catch (err) {
     // Log code only — never raw DB error body (may contain PII).
     const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
-    console.error("[dedupe] claim_messages check error:", code); // crew-debug-ok
+    logger.error({ code }, "dedupe.claim_messages_check_error");
     // Fail open — let the request proceed; idempotency is best-effort.
     return false;
   }
@@ -137,7 +138,7 @@ export async function dedupe(
     );
   } catch (err) {
     const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
-    console.error("[dedupe] cases check error:", code); // crew-debug-ok
+    logger.error({ code }, "dedupe.cases_check_error");
     return { isDuplicate: false };
   }
 

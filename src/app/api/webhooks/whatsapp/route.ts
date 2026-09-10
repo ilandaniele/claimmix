@@ -29,6 +29,7 @@ import { timingSafeStringEqual } from "@/lib/security/compare";
 import { createWhatsAppIntake, runIntakeAgent } from "@/server/agents/intake-agent";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
+import { logger } from "@/lib/observability/logger";
 import {
   parseCloudApiMessages,
   resolveWebhookChallenge,
@@ -135,7 +136,7 @@ function scheduleAgent(
       await runIntakeAgent({ caseId, tenantId, source: "whatsapp" });
     } catch (err) {
       const name = err instanceof Error ? err.name : "UnknownError";
-      console.error("[webhooks/whatsapp] Agent error:", name, "case:", caseId); // crew-debug-ok
+      logger.error({ error_name: name, case_id: caseId }, "webhooks_whatsapp.agent_error");
       return; // no extraction result — nothing worth saying to the claimant yet
     }
 
@@ -179,19 +180,14 @@ function scheduleAgent(
     try {
       const barridos = await reapStuckProcessingCases({ tenantId });
       if (barridos.reaped > 0) {
-        console.warn(
-          JSON.stringify({
-            level: "warn",
-            service: "claimmix",
-            msg: "webhook.barrio_trabados",
-            cuantos: barridos.reaped,
-            nota: "Los encontró el tráfico, no el cron.",
-          })
-        );
+        logger.warn({
+        cuantos: barridos.reaped,
+        nota: "Los encontró el tráfico, no el cron.",
+      }, "webhook.barrio_trabados");
       }
     } catch (err) {
       const name = err instanceof Error ? err.name : "UnknownError";
-      console.error("[webhooks/whatsapp] barrido error:", name); // crew-debug-ok
+      logger.error({ error_name: name }, "webhooks_whatsapp.barrido_error");
     }
 
     /*
@@ -209,19 +205,14 @@ function scheduleAgent(
     try {
       const retomados = await retomarExtraccionesPendientes({ tenantId, limit: 2 });
       if (retomados.retomados > 0) {
-        console.warn(
-          JSON.stringify({
-            level: "warn",
-            service: "claimmix",
-            msg: "webhook.retomo_pendientes",
-            cuantos: retomados.retomados,
-            nota: "Los encontró el tráfico, no el cron.",
-          })
-        );
+        logger.warn({
+        cuantos: retomados.retomados,
+        nota: "Los encontró el tráfico, no el cron.",
+      }, "webhook.retomo_pendientes");
       }
     } catch (err) {
       const name = err instanceof Error ? err.name : "UnknownError";
-      console.error("[webhooks/whatsapp] retomar pendientes error:", name); // crew-debug-ok
+      logger.error({ error_name: name }, "webhooks_whatsapp.retomar_pendientes_error");
     }
   });
 }
@@ -273,7 +264,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const tenantId = resolveTenantId();
     if (!tenantId) {
       // ACK anyway (200) so Meta does not retry indefinitely; log the misconfig.
-      console.error("[webhooks/whatsapp] WHATSAPP_TENANT_ID not configured"); // crew-debug-ok
+      logger.error({}, "webhooks_whatsapp.whatsapp_tenant_id_not_configured");
       return NextResponse.json({ ok: true, ignored: "tenant_not_configured" }, { status: 200 });
     }
 
@@ -285,14 +276,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     for (const msg of messages) {
       if (!esParaNuestroNumero(msg.toPhoneNumberId)) {
         deOtroNumero++;
-        console.error(
-          JSON.stringify({
-            level: "error",
-            service: "claimmix",
-            msg: "whatsapp.webhook.numero_ajeno",
-            to_phone_number_id: msg.toPhoneNumberId ?? null,
-          })
-        ); // crew-debug-ok
+        logger.error({
+        to_phone_number_id: msg.toPhoneNumberId ?? null,
+      }, "whatsapp.webhook.numero_ajeno");
         continue;
       }
       try {
@@ -311,15 +297,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         // El mensaje del error, no su nombre: `insertWhatsAppMessage` se toma
         // el trabajo de meter el código de Postgres adentro y `err.name` es
         // siempre "Error". Y sin el teléfono, que es de la persona.
-        console.error(
-          JSON.stringify({
-            level: "error",
-            service: "claimmix",
-            msg: "whatsapp.webhook.intake_failed",
-            provider_message_id: msg.providerMessageId ?? null,
-            error: err instanceof Error ? err.message : String(err),
-          })
-        ); // crew-debug-ok
+        logger.error({
+        provider_message_id: msg.providerMessageId ?? null,
+        error: err instanceof Error ? err.message : String(err),
+      }, "whatsapp.webhook.intake_failed");
       }
     }
 
@@ -425,7 +406,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   } catch (err) {
     const name = err instanceof Error ? err.name : "UnknownError";
-    console.error("[webhooks/whatsapp] Intake error:", name); // crew-debug-ok
+    logger.error({ error_name: name }, "webhooks_whatsapp.intake_error");
     return NextResponse.json(
       { error: { code: "INTERNAL_ERROR", message: "Could not process WhatsApp message." } },
       { status: 500 }

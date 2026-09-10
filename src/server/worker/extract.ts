@@ -119,6 +119,7 @@ import { mergeExtractedFields, parseEmailClaimFields } from "@/lib/email/claim-p
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
+import { logger } from "@/lib/observability/logger";
 
 
 /**
@@ -163,12 +164,12 @@ export async function runExtractionWorker(
       )
     );
   } catch (err) {
-    console.error("[worker] Case not found:", caseId, dbErrCode(err));
+    logger.error({ case_id: caseId, code: dbErrCode(err) }, "worker.case_not_found");
     return;
   }
 
   if (!caseRow) {
-    console.error("[worker] Case not found:", caseId);
+    logger.error({ case_id: caseId }, "worker.case_not_found");
     return;
   }
 
@@ -184,15 +185,10 @@ export async function runExtractionWorker(
   }
 
   if (caseRow.status !== "procesando") {
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "worker.skipped.not_procesando",
+    logger.info({
         case_id: caseId,
         status: caseRow.status,
-      })
-    );
+      }, "worker.skipped.not_procesando");
     return;
   }
 
@@ -217,7 +213,7 @@ export async function runExtractionWorker(
   }
 
   if (!rawMsg) {
-    console.error("[worker] Raw message not found for case:", caseId);
+    logger.error({ case_id: caseId }, "worker.raw_message_not_found_for_case");
     await escalateCase(caseId, tenantCtx, userId, "raw_message_missing", "raw_message_missing");
     return;
   }
@@ -225,15 +221,10 @@ export async function runExtractionWorker(
   // ── 1. Budget check ──────────────────────────────────────────────────────────
   const budgetResult = await checkBudget(tenantId, userId);
   if (budgetResult.exceeded) {
-    console.warn(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "worker.budget_exceeded",
+    logger.warn({
         case_id: caseId,
         reason: budgetResult.reason,
-      })
-    );
+      }, "worker.budget_exceeded");
     await writeAuditLog({
       tenant_id: tenantId,
       actor_id: userId,
@@ -260,28 +251,18 @@ export async function runExtractionWorker(
     });
   } catch (e) {
     if (e instanceof ClaimAgentError) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "worker.ai_output_invalid",
-          case_id: caseId,
-          error_name: e.cause instanceof Error ? e.cause.name : e.name,
-        })
-      );
+      logger.error({
+        case_id: caseId,
+        error_name: e.cause instanceof Error ? e.cause.name : e.name,
+      }, "worker.ai_output_invalid");
       await escalateCase(caseId, tenantCtx, userId, "AI_OUTPUT_INVALID", "ai_output_invalid");
       return;
     }
     const name = e instanceof Error ? e.name : "UnknownError";
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "worker.extractor_error",
+    logger.error({
         case_id: caseId,
         error_name: name,
-      })
-    );
+      }, "worker.extractor_error");
     await escalateCase(caseId, tenantCtx, userId, "extractor_error", "extractor_error");
     return;
   }
@@ -300,7 +281,7 @@ export async function runExtractionWorker(
     try {
       await upsertExtractedFields(caseId, tenantCtx, extractedClaim.fields);
     } catch (err) {
-      console.error("[worker] Failed to write extracted_fields:", dbErrCode(err), "case:", caseId);
+      logger.error({ code: dbErrCode(err), case_id: caseId }, "worker.failed_to_write_extracted_fields");
     }
   }
 
@@ -309,7 +290,7 @@ export async function runExtractionWorker(
     try {
       await insertMissingDocsIfAbsent(caseId, tenantCtx, gapResult.missing_doc_keys);
     } catch (err) {
-      console.error("[worker] Failed to write missing_docs:", dbErrCode(err), "case:", caseId);
+      logger.error({ code: dbErrCode(err), case_id: caseId }, "worker.failed_to_write_missing_docs");
     }
 
     // Create outbound_messages stub (AC6).
@@ -325,7 +306,7 @@ export async function runExtractionWorker(
         })
       );
     } catch (err) {
-      console.error("[worker] Failed to create outbound_messages:", dbErrCode(err));
+      logger.error({ code: dbErrCode(err) }, "worker.failed_to_create_outbound_messages");
     }
   }
 
@@ -334,7 +315,10 @@ export async function runExtractionWorker(
 
   // Safety: always validate FSM transition (LLM08 containment).
   if (!isValidTransition("procesando", newStatus)) {
-    console.error("[worker] Invalid FSM transition attempt:", "procesando", "→", newStatus);
+    logger.error(
+      { desde: "procesando", hacia: newStatus },
+      "worker.invalid_fsm_transition_attempt"
+    );
     await escalateCase(caseId, tenantCtx, userId, "fsm_violation", "fsm_violation");
     return;
   }
@@ -378,20 +362,15 @@ export async function runExtractionWorker(
   }
 
   // LLM06: Log only safe metadata — never raw_intake_text.
-  console.info(
-    JSON.stringify({
-      level: "info",
-      service: "claimmix",
-      msg: "worker.extraction_complete",
-      case_id: caseId,
-      model: extractedClaim.extraction_model,
-      prompt_tokens: extractedClaim.prompt_tokens,
-      completion_tokens: extractedClaim.completion_tokens,
-      new_status: newStatus,
-      confidence_min: gapResult.confidence_min,
-      missing_docs_count: gapResult.missing_doc_keys.length,
-    })
-  );
+  logger.info({
+        case_id: caseId,
+        model: extractedClaim.extraction_model,
+        prompt_tokens: extractedClaim.prompt_tokens,
+        completion_tokens: extractedClaim.completion_tokens,
+        new_status: newStatus,
+        confidence_min: gapResult.confidence_min,
+        missing_docs_count: gapResult.missing_doc_keys.length,
+      }, "worker.extraction_complete");
 }
 
 // ── Email intake extraction worker ─────────────────────────────────────────────
@@ -528,14 +507,9 @@ async function acquireExtractionLease(
         .where(eq(cases.id, caseId))
     );
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "email_worker.deferred_busy",
+    logger.info({
         case_id: caseId,
-      })
-    );
+      }, "email_worker.deferred_busy");
     return "ocupada";
   } catch (err) {
     /*
@@ -555,15 +529,10 @@ async function acquireExtractionLease(
      * `no_se_pudo` es la tercera respuesta que faltaba: seguí, pero no toques
      * la reserva de nadie al salir.
      */
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "email_worker.lease_indeterminado",
+    logger.error({
         case_id: caseId,
         code: dbErrCode(err),
-      })
-    ); // crew-debug-ok
+      }, "email_worker.lease_indeterminado");
     return "no_se_pudo";
   }
 }
@@ -601,7 +570,7 @@ async function releaseExtractionLease(
 
     return filas[0]?.pending === true;
   } catch (err) {
-    console.error("[email-worker] lease release error:", dbErrCode(err));
+    logger.error({ code: dbErrCode(err) }, "email_worker.lease_release_error");
     return false;
   }
 }
@@ -673,18 +642,13 @@ async function redispatchExtraction(
 
   if (llegó) return;
 
-  console.error(
-    JSON.stringify({
-      level: "error",
-      service: "claimmix",
-      msg: "email_worker.redespacho_no_llego",
-      case_id: caseId,
-      detalle,
-      nota:
+  logger.error({
+        case_id: caseId,
+        detalle,
+        nota:
         "El mensaje que llegó a mitad de corrida no se leyó. Se vuelve a marcar " +
         "el caso como pendiente para que lo tome la próxima corrida.",
-    })
-  );
+      }, "email_worker.redespacho_no_llego");
 
   try {
     await enTenant(tenantCtx, (db) =>
@@ -695,7 +659,7 @@ async function redispatchExtraction(
     );
   } catch (err) {
     // Si ni esto se puede escribir, queda el log de arriba y nada más.
-    console.error("[email-worker] no se pudo remarcar pendiente:", dbErrCode(err));
+    logger.error({ code: dbErrCode(err) }, "email_worker.no_se_pudo_remarcar_pendiente");
   }
 }
 
@@ -744,15 +708,10 @@ async function reintentarPorTimeout(
     );
     return filas.length > 0;
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "email_worker.reintento_por_timeout_fallo",
+    logger.error({
         case_id: caseId,
         code: dbErrCode(err),
-      })
-    ); // crew-debug-ok
+      }, "email_worker.reintento_por_timeout_fallo");
     return false;
   }
 }
@@ -807,7 +766,7 @@ export async function runEmailExtractionWorker(
     );
 
     if (!caseRow) {
-      console.error("[email-worker] Case not found:", caseId);
+      logger.error({ case_id: caseId }, "email_worker.case_not_found");
       return;
     }
 
@@ -847,18 +806,13 @@ export async function runEmailExtractionWorker(
        * Medido antes de escribir esto: en la base no hay todavía ningún caso con
        * un mensaje posterior a la última vez que se lo tocó. Es preventivo.
        */
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "email_worker.mensaje_sin_leer",
-          case_id: caseId,
-          status: caseRow.status,
-          detalle:
+      logger.warn({
+        case_id: caseId,
+        status: caseRow.status,
+        detalle:
             "Llegó un mensaje a un caso en un estado del que el worker no " +
             "vuelve a arrancar. Se guardó y no se leyó.",
-        })
-      );
+      }, "email_worker.mensaje_sin_leer");
       await writeAuditLog({
         tenant_id: tenantId,
         actor_id: null,
@@ -899,17 +853,12 @@ export async function runEmailExtractionWorker(
         caseCreatedAt: caseRow.created_at,
       });
       if (throttle.timedOut) {
-        console.warn(
-          JSON.stringify({
-            level: "warn",
-            service: "claimmix",
-            msg: "email_worker.throttle_timeout",
-            case_id: caseId,
-            waited_ms: throttle.waitedMs,
-            blockers: throttle.blockers,
-            nota: "Se devuelve a la cola en vez de seguir sin turno.",
-          })
-        );
+        logger.warn({
+        case_id: caseId,
+        waited_ms: throttle.waitedMs,
+        blockers: throttle.blockers,
+        nota: "Se devuelve a la cola en vez de seguir sin turno.",
+      }, "email_worker.throttle_timeout");
         await enTenant(tenantCtx, (db) =>
           db
             .update(cases)
@@ -971,7 +920,7 @@ export async function runEmailExtractionWorker(
       latestInboundText = emailBody;
     } else {
       // Neither table has anything: the case exists but no message does.
-      console.error("[email-worker] No message found for case:", caseId); // crew-debug-ok
+      logger.error({ case_id: caseId }, "email_worker.no_message_found_for_case");
       return;
     }
 
@@ -995,15 +944,10 @@ export async function runEmailExtractionWorker(
     // ── d) Budget check ───────────────────────────────────────────────────────
     const budgetResult = await checkBudget(tenantId, userId);
     if (budgetResult.exceeded) {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "email_worker.budget_exceeded",
-          case_id: caseId,
-          reason: budgetResult.reason,
-        })
-      );
+      logger.warn({
+        case_id: caseId,
+        reason: budgetResult.reason,
+      }, "email_worker.budget_exceeded");
       await writeAuditLog({
         tenant_id: tenantId,
         actor_id: userId,
@@ -1044,17 +988,12 @@ export async function runEmailExtractionWorker(
      * decir: si no entra la llamada entera, no se empieza.
      */
     if (restanteMs() < TIMEOUT_DEL_MODELO_MS) {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "email_worker.sin_tiempo_para_extraer",
-          case_id: caseId,
-          presupuesto_ms: PRESUPUESTO_DE_CORRIDA_MS,
-          restante_ms: Math.max(0, Math.round(restanteMs())),
-          necesita_ms: TIMEOUT_DEL_MODELO_MS,
-        })
-      ); // crew-debug-ok
+      logger.warn({
+        case_id: caseId,
+        presupuesto_ms: PRESUPUESTO_DE_CORRIDA_MS,
+        restante_ms: Math.max(0, Math.round(restanteMs())),
+        necesita_ms: TIMEOUT_DEL_MODELO_MS,
+      }, "email_worker.sin_tiempo_para_extraer");
       await enTenant(tenantCtx, (db) =>
         db
           .update(cases)
@@ -1160,7 +1099,9 @@ export async function runEmailExtractionWorker(
       // propagarlo. Es el mismo comportamiento que ya tenía el escalado por
       // error de Gemini, así que esto los unifica.
       await escalateCase(caseId, tenantCtx, userId, "parse_failed", "ai_parse_error");
-      console.warn(JSON.stringify({ level: "warn", service: "claimmix", msg: "email_worker.parse_failed_escalated", case_id: caseId }));
+      logger.warn({
+        case_id: caseId,
+      }, "email_worker.parse_failed_escalated");
       return;
     }
 
@@ -1175,14 +1116,9 @@ export async function runEmailExtractionWorker(
     // The first classification still stands: a case that was never a claim
     // stays not one, and a human can always mark it either way.
     if (extractedClaim.is_claim === false && caseRow.is_claim === true) {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "email_worker.ignored_unclaim",
-          case_id: caseId,
-        })
-      );
+      logger.warn({
+        case_id: caseId,
+      }, "email_worker.ignored_unclaim");
     } else if (extractedClaim.is_claim === false) {
       const reason =
         extractedClaim.not_relevant_reason ||
@@ -1213,14 +1149,9 @@ export async function runEmailExtractionWorker(
         },
       });
 
-      console.info(
-        JSON.stringify({
-          level: "info",
-          service: "claimmix",
-          msg: "email_worker.not_relevant",
-          case_id: caseId,
-        })
-      );
+      logger.info({
+        case_id: caseId,
+      }, "email_worker.not_relevant");
       return;
     }
 
@@ -1239,7 +1170,7 @@ export async function runEmailExtractionWorker(
       try {
         await upsertExtractedFields(caseId, tenantCtx, fieldsToWrite);
       } catch (err) {
-        console.error("[email-worker] extracted_fields upsert error:", dbErrCode(err));
+        logger.error({ code: dbErrCode(err) }, "email_worker.extracted_fields_upsert_error");
       }
     }
 
@@ -1256,7 +1187,7 @@ export async function runEmailExtractionWorker(
       try {
         await insertMissingDocsIfAbsent(caseId, tenantCtx, missingFieldKeys);
       } catch (err) {
-        console.error("[email-worker] missing_docs upsert error:", dbErrCode(err));
+        logger.error({ code: dbErrCode(err) }, "email_worker.missing_docs_upsert_error");
       }
     }
 
@@ -1333,16 +1264,11 @@ export async function runEmailExtractionWorker(
     const debiles = todosLosMatches.length - customerMatches.length;
     if (debiles > 0 && customerMatches.length === 0) {
       // Sin datos de nadie: sólo que pasó, para que se pueda mirar.
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "matching.solo_coincidencias_debiles",
-          case_id: caseId,
-          cuantas: debiles,
-          nota: "Coincide por teléfono o correo escritos en el texto. No alcanza para vincular.",
-        })
-      );
+      logger.warn({
+        case_id: caseId,
+        cuantas: debiles,
+        nota: "Coincide por teléfono o correo escritos en el texto. No alcanza para vincular.",
+      }, "matching.solo_coincidencias_debiles");
     }
 
     // Use the highest-confidence customer match for the case.
@@ -1407,16 +1333,11 @@ export async function runEmailExtractionWorker(
     const currentStatus = caseRow.status as string;
 
     if (!sePuedeTransicionar(currentStatus, newStatus, isValidTransition)) {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "email_worker.fsm_transition_skipped",
-          case_id: caseId,
-          from: currentStatus,
-          to: newStatus,
-        })
-      );
+      logger.warn({
+        case_id: caseId,
+        from: currentStatus,
+        to: newStatus,
+      }, "email_worker.fsm_transition_skipped");
       // Keep current status — do not violate FSM.
       newStatus = currentStatus;
     }
@@ -1468,15 +1389,10 @@ export async function runEmailExtractionWorker(
         caseUpdate.claim_type = claimTypeParsed.data;
       } else {
         // AC3 variant: AI returned a non-null but invalid value — skip, warn, don't throw
-        console.warn(
-          JSON.stringify({
-            level: "warn",
-            service: "claimmix",
-            msg: "email_worker.claim_type_invalid",
-            case_id: caseId,
-            raw_value: rawClaimType.trim().slice(0, 50),
-          })
-        );
+        logger.warn({
+        case_id: caseId,
+        raw_value: rawClaimType.trim().slice(0, 50),
+      }, "email_worker.claim_type_invalid");
       }
     }
     // AC3: AI omitted claim_type (null/undefined/empty) → caseUpdate has no claim_type key
@@ -1500,7 +1416,7 @@ export async function runEmailExtractionWorker(
         db.update(cases).set(caseUpdate).where(eq(cases.id, caseId))
       );
     } catch (err) {
-      console.error("[email-worker] Case update error:", dbErrCode(err));
+      logger.error({ code: dbErrCode(err) }, "email_worker.case_update_error");
     }
 
     // ── m) Specialist audit log — AC11 ────────────────────────────────────────
@@ -1583,11 +1499,7 @@ export async function runEmailExtractionWorker(
       },
     });
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "email_worker.extraction_complete",
+    logger.info({
         case_id: caseId,
         is_claim: true,
         severity: finalSeverity,
@@ -1596,8 +1508,7 @@ export async function runEmailExtractionWorker(
         policy_matched: !!resolvedPolicyId,
         missing_fields_count: missingFieldKeys.length,
         model: extractedClaim.extraction_model,
-      })
-    );
+      }, "email_worker.extraction_complete");
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
 
@@ -1636,14 +1547,9 @@ export async function runEmailExtractionWorker(
       if (errCode === "TIMEOUT") {
         const reintentado = await reintentarPorTimeout(caseId, tenantCtx);
         if (reintentado) {
-          console.warn(
-            JSON.stringify({
-              level: "warn",
-              service: "claimmix",
-              msg: "email_worker.timeout_a_la_cola",
-              case_id: caseId,
-            })
-          ); // crew-debug-ok
+          logger.warn({
+        case_id: caseId,
+      }, "email_worker.timeout_a_la_cola");
           return;
         }
       }
@@ -1673,16 +1579,11 @@ export async function runEmailExtractionWorker(
       }
     }
 
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "email_worker.unhandled_error",
+    logger.error({
         case_id: caseId,
         error_name: errName,
         is_provider_error: err instanceof GeminiExtractionError,
-      })
-    );
+      }, "email_worker.unhandled_error");
     // Do not rethrow — fire-and-forget callers must not crash.
   } finally {
     if (leaseHeld) {
@@ -1690,14 +1591,9 @@ export async function runEmailExtractionWorker(
       // that would have read it deferred to us. Run again for it.
       const arrivedWhileBusy = await releaseExtractionLease(caseId, tenantCtx);
       if (arrivedWhileBusy) {
-        console.info(
-          JSON.stringify({
-            level: "info",
-            service: "claimmix",
-            msg: "email_worker.rerun_for_deferred_message",
-            case_id: caseId,
-          })
-        );
+        logger.info({
+        case_id: caseId,
+      }, "email_worker.rerun_for_deferred_message");
         await redispatchExtraction(caseId, tenantId, tenantCtx, restanteMs());
       }
     }
@@ -1792,15 +1688,10 @@ async function cargarLoDelPrompt(
       customFields: campos,
     };
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "email_worker.lote_del_prompt_fallo",
+    logger.error({
         code: dbErrCode(err),
         nota: "Se vuelve al camino de a uno, donde cada carga degrada sola.",
-      })
-    ); // crew-debug-ok
+      }, "email_worker.lote_del_prompt_fallo");
 
     const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields] =
       await Promise.all([
@@ -1862,7 +1753,7 @@ async function loadKnownPatterns(tenantCtx: TenantContext): Promise<KnownPattern
   try {
     return deKnownPatterns(await enTenant(tenantCtx, consultaKnownPatterns));
   } catch (err) {
-    console.error("[email-worker] known_claim_patterns load error:", dbErrCode(err));
+    logger.error({ code: dbErrCode(err) }, "email_worker.known_claim_patterns_load_error");
     return [];
   }
 }
@@ -2037,21 +1928,16 @@ async function anotarPolizaEncontrada(
       );
     }
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "policy_matcher.numero_completado",
+    logger.info({
         case_id: caseId,
-      })
-    );
+      }, "policy_matcher.numero_completado");
   } catch (err) {
     /*
      * Si esto falla, el caso queda como estaba: la póliza ya está enlazada por
      * `policy_id` y el agente vuelve a pedir el número. Molesto, no roto — y no
      * es motivo para tirar abajo la extracción entera.
      */
-    console.error("[email-worker] no se pudo anotar la póliza encontrada:", dbErrCode(err));
+    logger.error({ code: dbErrCode(err) }, "email_worker.no_se_pudo_anotar_la_poliza");
   }
 }
 
@@ -2074,7 +1960,7 @@ async function updateCaseStatus(
       db.update(cases).set(updatePayload).where(eq(cases.id, caseId))
     );
   } catch (err) {
-    console.error("[worker] Failed to update case status:", dbErrCode(err), "case:", caseId);
+    logger.error({ code: dbErrCode(err), case_id: caseId }, "worker.failed_to_update_case_status");
   }
 }
 

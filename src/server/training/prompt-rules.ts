@@ -12,6 +12,7 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
+import { logger } from "@/lib/observability/logger";
 
 export type PromptRuleType =
   | "extraction"
@@ -64,7 +65,7 @@ export async function loadActivePromptRules(
   } catch (e) {
     const code = (e as { code?: string })?.code;
     if (code && code !== "42P01") {
-      console.error("[prompt-rules] load error:", code); // crew-debug-ok
+      logger.error({ code }, "prompt_rules.load_error");
     }
     // Never break extraction because rules could not be loaded.
     return [];

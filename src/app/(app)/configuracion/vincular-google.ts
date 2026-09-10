@@ -42,6 +42,7 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
 import { getSessionContext } from "@/lib/auth/session";
+import { logger } from "@/lib/observability/logger";
 
 export async function vincularGoogle(): Promise<void> {
   const sesion = await getSessionContext();
@@ -59,14 +60,9 @@ export async function vincularGoogle(): Promise<void> {
     });
     url = resultado.url ?? undefined;
   } catch (e) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "auth.google.link_start_failed",
+    logger.error({
         detalle: e instanceof Error ? e.message : String(e),
-      })
-    );
+      }, "auth.google.link_start_failed");
     url = undefined;
   }
 

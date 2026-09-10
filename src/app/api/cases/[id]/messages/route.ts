@@ -31,6 +31,7 @@ import {
   type RateLimitResult,
 } from "@/lib/rate-limit/index";
 import { z } from "zod";
+import { logger } from "@/lib/observability/logger";
 
 // ── Params schema ─────────────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ export async function GET(
         )
       );
     } catch (e) {
-      console.error("[GET /api/cases/:id/messages] case lookup error:", dbErrCode(e)); // crew-debug-ok
+      logger.error({ code: dbErrCode(e) }, "get_api_cases_id_messages.case_lookup_error");
       return err(new AppError("INTERNAL_ERROR"));
     }
 
@@ -143,7 +144,7 @@ export async function GET(
           .limit(MESSAGES_LIMIT)
       );
     } catch (e) {
-      console.error("[GET /api/cases/:id/messages] messages query error:", dbErrCode(e)); // crew-debug-ok
+      logger.error({ code: dbErrCode(e) }, "get_api_cases_id_messages.messages_query_error");
       return err(new AppError("INTERNAL_ERROR"));
     }
 
@@ -175,7 +176,7 @@ export async function GET(
           );
         }
       } catch (e) {
-        console.error("[GET /api/cases/:id/messages] messages query error:", dbErrCode(e)); // crew-debug-ok
+        logger.error({ code: dbErrCode(e) }, "get_api_cases_id_messages.messages_query_error");
         return err(new AppError("INTERNAL_ERROR"));
       }
     }
@@ -210,7 +211,7 @@ export async function GET(
     return ok({ messages: result });
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
-    console.error("[GET /api/cases/:id/messages] unhandled error:", errName); // crew-debug-ok
+    logger.error({ error_name: errName }, "get_api_cases_id_messages.unhandled_error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 }

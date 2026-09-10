@@ -37,9 +37,12 @@ describe("el re-despacho mira si llegó", () => {
   });
 
   it("el aviso es de nivel error, no una línea más del log", () => {
-    const i = FUENTE.indexOf("email_worker.redespacho_no_llego");
-    const alrededor = FUENTE.slice(Math.max(0, i - 200), i);
-    expect(alrededor).toContain('level: "error"');
+    // El nivel era un campo del objeto (`level: "error"`) y ahora es el método
+    // del logger, así que queda ANTES del nombre del evento y no adentro.
+    const i = FUENTE.indexOf('"email_worker.redespacho_no_llego"');
+    expect(i).toBeGreaterThan(-1);
+    const alrededor = FUENTE.slice(Math.max(0, i - 400), i);
+    expect(alrededor).toContain("logger.error(");
   });
 });
 

@@ -71,6 +71,7 @@ import {
 } from "@/server/confirmations/messenger";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { redactObject } from "@/lib/audit/redact";
+import { logger } from "@/lib/observability/logger";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -853,7 +854,7 @@ async function resolveAnsweredConfirmations(
         )
     );
   } catch (err) {
-    console.error("[orchestrate] Failed to resolve confirmations:", errCode(err));
+    logger.error({ code: errCode(err) }, "orchestrate.failed_to_resolve_confirmations");
   }
 }
 
@@ -898,7 +899,7 @@ async function askedPendingFields(
     );
     return buildAskList([], ranked).fields;
   } catch (err) {
-    console.error("[orchestrate] Failed to read pending confirmations:", errCode(err));
+    logger.error({ code: errCode(err) }, "orchestrate.failed_to_read_pending_confirmations");
     return [];
   }
 }
@@ -1051,11 +1052,7 @@ async function recordLookedUpFields(
   );
 
   if (sinRespaldo.length > 0) {
-    console.warn(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "agent.resolvio_sin_respaldo",
+    logger.warn({
         case_id: caseId,
         // Los nombres, no los valores: el valor es justamente lo dudoso.
         campos: sinRespaldo.map((r) => r.field),
@@ -1063,24 +1060,18 @@ async function recordLookedUpFields(
         detalle:
           "El agente dijo haber encontrado un valor que no aparece en lo que " +
           "devolvió ninguna consulta. Se descarta: el campo sigue faltando.",
-      })
-    );
+      }, "agent.resolvio_sin_respaldo");
   }
 
   if (documentos.length > 0) {
-    console.warn(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "agent.resolvio_un_documento",
+    logger.warn({
         case_id: caseId,
         // Los nombres, no los valores: el valor es texto que escribió una persona.
         campos: documentos.map((d) => d.field),
         detalle:
           "El agente dijo haber resuelto por búsqueda un archivo que sólo puede " +
           "mandar la persona. Se descarta: el pedido sigue abierto.",
-      })
-    );
+      }, "agent.resolvio_un_documento");
   }
 
   if (resolved.length === 0) return;
@@ -1127,18 +1118,13 @@ async function recordLookedUpFields(
         )
     );
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "agent.resolved_by_lookup",
+    logger.info({
         case_id: caseId,
         fields: resolved.map((r) => r.field),
-      })
-    );
+      }, "agent.resolved_by_lookup");
   } catch (err) {
     // The claim survives: the field simply stays missing and gets asked for.
-    console.error("[orchestrate] Failed to store looked-up fields:", errCode(err));
+    logger.error({ code: errCode(err) }, "orchestrate.failed_to_store_looked_up_fields");
   }
 }
 
@@ -1212,15 +1198,10 @@ async function escalate(opts: {
    * especialista necesita contestada.
    */
   if (opts.yaLeEscribimos) {
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "escalation.claimant_message_skipped",
+    logger.info({
         case_id: caseId,
         reason: "already_written_this_round",
-      })
-    );
+      }, "escalation.claimant_message_skipped");
   } else {
     await opts.messenger.send({
       caseId,
@@ -1403,7 +1384,7 @@ async function setStatus(
         .where(eq(cases.id, caseId))
     );
   } catch (err) {
-    console.error("[orchestrate] Failed to update case status:", errCode(err), "case:", caseId);
+    logger.error({ code: errCode(err), case_id: caseId }, "orchestrate.failed_to_update_case_status");
   }
 }
 
@@ -1519,7 +1500,7 @@ async function guardarConfirmaciones(
       );
     }
   } catch (err) {
-    console.error("[orchestrate] guardarConfirmaciones:", errCode(err), "case:", caseId);
+    logger.error({ code: errCode(err), case_id: caseId }, "orchestrate.guardarconfirmaciones");
   }
 }
 
@@ -1592,7 +1573,7 @@ async function lastAskedKeys(caseId: string, tenantId: string): Promise<string[]
     );
     return last?.asked_keys ?? [];
   } catch (err) {
-    console.error("[orchestrate] Failed to read the last ask:", errCode(err));
+    logger.error({ code: errCode(err) }, "orchestrate.failed_to_read_the_last_ask");
     return [];
   }
 }
@@ -1651,7 +1632,7 @@ async function filesArrivedSinceWeLastSpoke(
     return Boolean(since);
   } catch (err) {
     // Speaking is the safe direction here too.
-    console.error("[orchestrate] Failed to check for new files:", errCode(err));
+    logger.error({ code: errCode(err) }, "orchestrate.failed_to_check_for_new_files");
     return false;
   }
 }
@@ -1712,7 +1693,7 @@ async function factsLearnedSinceWeLastSpoke(
     return Boolean(since);
   } catch (err) {
     // Callarse es la dirección insegura acá: ante la duda, contestar.
-    console.error("[orchestrate] Failed to check for new facts:", errCode(err));
+    logger.error({ code: errCode(err) }, "orchestrate.failed_to_check_for_new_facts");
     return false;
   }
 }
@@ -1735,7 +1716,7 @@ async function hasPriorOutbound(caseId: string, tenantId: string): Promise<boole
   } catch (err) {
     // Fall back to the first-contact wording: greeting someone twice is a
     // smaller error than closing a conversation that never happened.
-    console.error("[orchestrate] Failed to check prior outbound:", errCode(err));
+    logger.error({ code: errCode(err) }, "orchestrate.failed_to_check_prior_outbound");
     return false;
   }
 }
@@ -1775,7 +1756,7 @@ async function checkConfirmationAlreadySent(
 
     return data.length > 0;
   } catch (err) {
-    console.error("[orchestrate] Failed to check outbound_messages:", errCode(err));
+    logger.error({ code: errCode(err) }, "orchestrate.failed_to_check_outbound_messages");
     return false;
   }
 }

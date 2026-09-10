@@ -139,6 +139,7 @@ vi.mock("@/lib/audit/log", () => ({
 
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
 import { db } from "@/lib/db";
+import { capturarLogs } from "../../../../mocks/capturar-logs";
 
 // ── Test constants ────────────────────────────────────────────────────────────
 
@@ -440,9 +441,10 @@ describe("dispatchExtractionWorker — AC6: error isolation", () => {
   });
 
   it("logs the error name and caseId but NOT the full error object (no PII)", async () => {
-    const consoleErrorSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => {});
+    // `logger` no pasa por `console`: escribe a stderr directamente. El espía
+    // de antes se quedó mirando un objeto por el que ya no pasa nada, y un
+    // test así no falla — pasa sin comprobar.
+    const logs = capturarLogs();
 
     const networkError = new TypeError("Network Error containing user PII");
     const mockFetch = vi.fn().mockRejectedValue(networkError);
@@ -457,26 +459,20 @@ describe("dispatchExtractionWorker — AC6: error isolation", () => {
     // Wait a tick for the .catch() to run
     await new Promise((r) => setTimeout(r, 0));
 
-    // Find the dispatch error log
-    const dispatchErrorCall = consoleErrorSpy.mock.calls.find(
-      (args) =>
-        typeof args[0] === "string" &&
-        args[0].includes("[gmail-poller] Worker dispatch error:")
-    );
+    const anotado = logs.texto();
+    logs.restaurar();
 
-    expect(dispatchErrorCall).toBeDefined();
+    // La línea del despacho fallido
+    expect(anotado).toContain("gmail_poller.worker_dispatch_error");
 
     // Should log the error name ("TypeError")
-    expect(dispatchErrorCall).toContain("TypeError");
+    expect(anotado).toContain("TypeError");
 
     // Should log the caseId
-    expect(dispatchErrorCall).toContain(CASE_ID);
+    expect(anotado).toContain(CASE_ID);
 
     // Should NOT log the full message text (which could contain PII)
-    const loggedText = dispatchErrorCall!.join(" ");
-    expect(loggedText).not.toContain("Network Error containing user PII");
-
-    consoleErrorSpy.mockRestore();
+    expect(anotado).not.toContain("Network Error containing user PII");
   });
 
   it("processes subsequent messages even after a dispatch failure on the first", async () => {

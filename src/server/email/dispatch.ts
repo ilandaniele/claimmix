@@ -36,6 +36,7 @@ import { getGmailAccountByEmail, getGmailAccountForTenant } from "./gmail/accoun
 import type { GmailSender as TipoGmailSender } from "./gmail/gmail-sender";
 import { isSendSuccess } from "./provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 
 export interface DispatchOptions {
   caseId: string;
@@ -128,7 +129,7 @@ async function resolveReplyContext(
     }
   } catch (err) {
     const code = (err as { code?: string })?.code ?? "DBError";
-    console.error("[dispatch] Could not resolve inbound message:", code); // crew-debug-ok
+    logger.error({ code }, "dispatch.could_not_resolve_inbound_message");
   }
 
   return {
@@ -224,27 +225,17 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
       const code =
         (err as { code?: string })?.code ??
         (err instanceof Error ? err.name : "DBError");
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "dispatch.simulated_preview_failed",
-          case_id: caseId,
-          template,
-          code,
-        })
-      );
-    }
-
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "dispatch.skipped_simulated_recipient",
+      logger.error({
         case_id: caseId,
         template,
-      })
-    );
+        code,
+      }, "dispatch.simulated_preview_failed");
+    }
+
+    logger.info({
+        case_id: caseId,
+        template,
+      }, "dispatch.skipped_simulated_recipient");
     return { error: "SIMULATED_RECIPIENT_SKIPPED" };
   }
 
@@ -254,7 +245,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     rendered = renderTemplate(template, data);
   } catch (err) {
     const name = err instanceof Error ? err.name : "RenderError";
-    console.error("[dispatch] Template render error:", name); // crew-debug-ok
+    logger.error({ error_name: name }, "dispatch.template_render_error");
     return { error: "RENDER_FAILED" };
   }
 
@@ -267,7 +258,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   const replyThreadId = threadId ?? reply.threadId;
   const outboundSubject = replySubject(rendered.subject, reply.originalSubject);
   if (!gmailAccount) {
-    console.error("[dispatch] No Gmail account configured for tenant", tenantId); // crew-debug-ok
+    logger.error({ tenant_id: tenantId }, "dispatch.no_gmail_account_configured_for_tenant");
     return { error: "NO_GMAIL_ACCOUNT" };
   }
 
@@ -325,7 +316,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     }
   } catch (err) {
     const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "DBError");
-    console.error("[dispatch] Failed to insert claim_messages:", code); // crew-debug-ok
+    logger.error({ code }, "dispatch.failed_to_insert_claim_messages");
   }
 
   // ── 3. INSERT outbound_messages row (status='queued') — dual-write window ─
@@ -353,7 +344,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     }
   } catch (err) {
     const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "DBError");
-    console.error("[dispatch] Failed to insert outbound_messages:", code); // crew-debug-ok
+    logger.error({ code }, "dispatch.failed_to_insert_outbound_messages");
   }
 
   // ── 4. Send via EmailProvider ─────────────────────────────────────────────
@@ -409,7 +400,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
         );
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
-        console.error("[dispatch] Failed to update claim_messages status (sent):", name); // crew-debug-ok
+        logger.error({ error_name: name }, "dispatch.failed_to_update_claim_messages_status");
       }
     }
 
@@ -424,7 +415,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
         );
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
-        console.error("[dispatch] Failed to update outbound_messages status (sent):", name); // crew-debug-ok
+        logger.error({ error_name: name }, "dispatch.failed_to_update_outbound_messages_status");
       }
     }
 
@@ -444,7 +435,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   } else {
     // Provider returned an error — AC5: must not throw.
     const { errorCode } = sendResult;
-    console.error("[dispatch] Email send failed, error code:", errorCode); // crew-debug-ok
+    logger.error({ error_code: errorCode }, "dispatch.email_send_failed_error_code");
 
     // Update claim_messages — set status='failed' + error_code
     if (claimMessageId) {
@@ -457,7 +448,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
         );
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
-        console.error("[dispatch] Failed to update claim_messages status (failed):", name); // crew-debug-ok
+        logger.error({ error_name: name }, "dispatch.failed_to_update_claim_messages_status");
       }
     }
 
@@ -472,7 +463,7 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
         );
       } catch (err) {
         const name = err instanceof Error ? err.name : "DBError";
-        console.error("[dispatch] Failed to update outbound_messages status (failed):", name); // crew-debug-ok
+        logger.error({ error_name: name }, "dispatch.failed_to_update_outbound_messages_status");
       }
     }
 

@@ -19,6 +19,7 @@ import { auditLog } from "@/lib/db/schema";
 import type { AuditLogInsert } from "@/lib/db/types";
 import type { AuditPayload } from "./redact";
 import { enTenant } from "@/data/scope";
+import { logger } from "@/lib/observability/logger";
 
 export interface AuditLogEntry {
   tenant_id: string;
@@ -60,10 +61,10 @@ export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
     // Log the error code/name only — never the full error (may contain PII).
     const code = (err as { code?: string })?.code;
     if (code) {
-      console.error("[audit] Failed to write audit log:", code);
+      logger.error({ code }, "audit.failed_to_write_audit_log");
     } else {
       const errName = err instanceof Error ? err.name : "UnknownError";
-      console.error("[audit] Exception writing audit log:", errName);
+      logger.error({ error_name: errName }, "audit.exception_writing_audit_log");
     }
   }
 }

@@ -28,6 +28,7 @@ import { callGemini } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Register the documents this kind of claim needs.
@@ -91,7 +92,7 @@ export async function seedRequiredDocs(
       )
     );
   } catch (err) {
-    console.error("[documents] seed failed:", errCode(err), "case:", caseId);
+    logger.error({ code: errCode(err), case_id: caseId }, "documents.seed_failed");
   }
 }
 
@@ -127,7 +128,7 @@ export async function pendingDocKeys(
       .map((r) => r.doc_key)
       .filter((key) => labelForField(key).kind === "documento");
   } catch (err) {
-    console.error("[documents] pending fetch failed:", errCode(err));
+    logger.error({ code: errCode(err) }, "documents.pending_fetch_failed");
     return [];
   }
 }
@@ -251,7 +252,7 @@ export async function reconcileAttachments(
             .where(eq(claimAttachments.id, attachmentId))
         );
       } catch (err) {
-        console.error("[documents] no se pudo marcar el adjunto:", errCode(err));
+        logger.error({ code: errCode(err) }, "documents.no_se_pudo_marcar_el_adjunto");
       }
     }
 
@@ -264,17 +265,12 @@ export async function reconcileAttachments(
       payload: { doc_keys: [...satisfied] },
     });
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "documents.reconciled",
+    logger.info({
         case_id: caseId,
         satisfied: [...satisfied],
-      })
-    );
+      }, "documents.reconciled");
   } catch (err) {
-    console.error("[documents] reconcile failed:", errCode(err), "case:", caseId);
+    logger.error({ code: errCode(err), case_id: caseId }, "documents.reconcile_failed");
   }
 }
 
@@ -404,7 +400,7 @@ Devolvé JSON: {"doc_key": "<clave exacta de la lista>" | null}`;
     // close a request that does not exist.
     return pending.includes(key) ? key : null;
   } catch (err) {
-    console.error("[documents] identify failed:", errCode(err));
+    logger.error({ code: errCode(err) }, "documents.identify_failed");
     return null;
   }
 }
@@ -527,17 +523,12 @@ export async function resolveDeclinedDocs(
       payload: { doc_keys: declined, note: said.slice(0, 500) },
     });
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "documents.declined",
+    logger.info({
         case_id: caseId,
         declined,
-      })
-    );
+      }, "documents.declined");
   } catch (err) {
-    console.error("[documents] decline check failed:", errCode(err), "case:", caseId);
+    logger.error({ code: errCode(err), case_id: caseId }, "documents.decline_check_failed");
   }
 }
 
@@ -627,7 +618,7 @@ Lista vacía si no niega ninguno.`;
       .map((d) => d.clave.trim())
       .filter((k) => pending.includes(k));
   } catch (err) {
-    console.error("[documents] decline identify failed:", errCode(err));
+    logger.error({ code: errCode(err) }, "documents.decline_identify_failed");
     return [];
   }
 }
@@ -708,6 +699,6 @@ export async function satisfyContactDocsWeAlreadyHave(
   } catch (err) {
     // Que no se cierre no rompe nada: se vuelve a preguntar, que es la falla
     // barata. Lo caro es lo contrario.
-    console.error("[documents] contact close failed:", errCode(err), "case:", caseId);
+    logger.error({ code: errCode(err), case_id: caseId }, "documents.contact_close_failed");
   }
 }

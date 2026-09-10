@@ -24,6 +24,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { computeContentHash, uploadAttachment } from "@/server/storage/claim-attachments-bucket";
 import { validateAttachment, MAX_AGGREGATE_SIZE_BYTES } from "@/server/email/attachment-validator";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -304,7 +305,7 @@ export async function rehostAndRecordAttachments(
       const code =
         (err as { code?: string })?.code ??
         (err instanceof Error ? err.name : "UnknownError");
-      console.error("[attachments] row insert failed:", code); // crew-debug-ok
+      logger.error({ code }, "attachments.row_insert_failed");
       continue;
     }
 

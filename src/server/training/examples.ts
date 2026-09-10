@@ -29,6 +29,7 @@ import {
 import { countRows, firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { UNSAFE_BLOCKING_REASONS } from "./trainability";
+import { logger } from "@/lib/observability/logger";
 
 // ── Few-shot retrieval (immediate learning layer) ─────────────────────────────
 
@@ -315,7 +316,7 @@ export async function approveTrainingExample(
     );
 
     if (!inserted) {
-      console.error("[training-examples] insert error:", "no_data"); // crew-debug-ok
+      logger.error({ detalle: "no_data" }, "training_examples.insert_error");
       return { ok: false, reason: "insert_failed" };
     }
 
@@ -325,7 +326,7 @@ export async function approveTrainingExample(
     if (code === "23505") {
       return { ok: false, reason: "duplicate" };
     }
-    console.error("[training-examples] insert error:", code ?? "no_data"); // crew-debug-ok
+    logger.error({ detalle: code ?? "no_data" }, "training_examples.insert_error");
     return { ok: false, reason: "insert_failed" };
   }
 

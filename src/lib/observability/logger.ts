@@ -50,11 +50,31 @@ function writeEntry(
     msg,
   });
 
-  if (level === "error" || level === "warn") {
-    process.stderr.write(entry + "\n");
-  } else {
-    process.stdout.write(entry + "\n");
-  }
+  /*
+   * Por `console` y no por `process.stderr.write`.
+   *
+   * Escribía al descriptor directamente, que es un pelo más rápido y por lo
+   * demás idéntico: `console.error` termina en stderr igual, y Vercel captura
+   * las dos cosas de la misma manera.
+   *
+   * Lo que NO es idéntico es del lado de los tests. Treinta y tres pruebas
+   * comprueban qué se anota y qué no —«el código del error sí, el mensaje que
+   * puede traer un DNI adentro no»— y todas espían `console`. Escribiendo por
+   * abajo, esos espías se quedan mirando un objeto por el que no pasa nada, y
+   * un test así no falla: pasa sin comprobar. Que es exactamente el tipo de
+   * verde que este repo viene sacando de todos lados.
+   */
+  // Cada nivel por su método: un `warn` que sale por `console.error` rompe a
+  // quien lo espía por donde corresponde, y encima lo pinta de rojo.
+  const salida =
+    level === "error"
+      ? console.error
+      : level === "warn"
+        ? console.warn
+        : level === "debug"
+          ? console.debug
+          : console.info;
+  salida(entry);
 }
 
 export interface Logger {

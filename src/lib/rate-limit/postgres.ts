@@ -25,6 +25,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { logger } from "@/lib/observability/logger";
 
 export interface Counted {
   allowed: boolean;
@@ -83,7 +84,7 @@ export async function checkRateLimitPostgres(
      *
      * Lo que sí cuesta es no enterarse, así que queda anotado.
      */
-    console.warn("[rate-limit] la base no contestó; el intento pasa sin contar"); // crew-debug-ok
+    logger.warn({}, "rate_limit.la_base_no_contesto_el_intento");
     return { allowed: true, remaining: limit, resetAt };
   }
 }

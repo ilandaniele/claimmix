@@ -28,6 +28,7 @@ import {
 } from "@/lib/rate-limit/index";
 import { ConfirmFieldSchema } from "@/lib/schemas/cases";
 import { resolveFieldConfirmation } from "@/server/cases/confirm-field";
+import { logger } from "@/lib/observability/logger";
 
 const ParamsSchema = z.object({
   id: z.string().uuid("ID de caso inválido."),
@@ -105,10 +106,7 @@ export async function PATCH(
     );
   } catch (error) {
     if (error instanceof AppError) return err(error);
-    console.error(
-      "[PATCH /api/cases/:id/confirm-field] error:",
-      error instanceof Error ? error.name : "UnknownError"
-    );
+    logger.error({ detalle: error instanceof Error ? error.name : "UnknownError" }, "patch_api_cases_id_confirm_field.error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 }

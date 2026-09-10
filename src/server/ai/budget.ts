@@ -20,6 +20,7 @@
 import "server-only";
 import { and, eq, gte, ne, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
+import { logger } from "@/lib/observability/logger";
 import {
   enTenant,
   enTenantVarias,
@@ -190,7 +191,7 @@ export async function checkDemoBudget(): Promise<BudgetCheckResult> {
      * gastando es la decisión cara. La demo se apaga un rato; nadie que esté
      * denunciando un siniestro se entera.
      */
-    console.error("[budget] demo check error:", (e as { code?: string })?.code); // crew-debug-ok
+    logger.error({ detalle: (e as { code?: string })?.code }, "budget.demo_check_error");
     return { exceeded: true, reason: "No se pudo verificar el cupo de la demo." };
   }
 }
@@ -347,7 +348,7 @@ async function sumaMensualDelProyecto(
       );
     return { ok: true, total: fila?.total ?? 0 };
   } catch (e) {
-    console.error("[budget] Monthly check error:", (e as { code?: string })?.code);
+    logger.error({ detalle: (e as { code?: string })?.code }, "budget.monthly_check_error");
     return { ok: false, total: 0 };
   }
 }
@@ -386,7 +387,7 @@ async function sumasDelDia(
       persona: persona?.total ?? 0,
     };
   } catch (e) {
-    console.error("[budget] Daily check error:", (e as { code?: string })?.code);
+    logger.error({ detalle: (e as { code?: string })?.code }, "budget.daily_check_error");
     return { ok: false, inquilino: 0, persona: 0 };
   }
 }
@@ -467,16 +468,11 @@ export async function recordUsage(
      * usuario: se pierde la atribucion de esa llamada, no el consumo.
      */
     if ((code === "23503" || code === "22P02") && userId) {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "budget.usuario_desconocido",
-          detalle:
+      logger.warn({
+        detalle:
             "El usuario del gasto no existe en `users`. Se registra sin " +
             "atribuir, para no perder el consumo.",
-        })
-      );
+      }, "budget.usuario_desconocido");
       try {
         await enTenant({ tenantId }, (db) =>
           db.insert(tables.aiUsage).values({ ...fila, user_id: null })
@@ -484,13 +480,13 @@ export async function recordUsage(
         return;
       } catch (e2) {
         const n2 = e2 instanceof Error ? e2.name : "UnknownError";
-        console.error("[budget] Exception recording AI usage (sin usuario):", n2);
+        logger.error({ n2 }, "budget.exception_recording_ai_usage_sin_usuario");
         return;
       }
     }
 
     const name = e instanceof Error ? e.name : "UnknownError";
-    console.error("[budget] Exception recording AI usage:", name);
+    logger.error({ error_name: name }, "budget.exception_recording_ai_usage");
   }
 }
 

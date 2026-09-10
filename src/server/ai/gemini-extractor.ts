@@ -42,6 +42,7 @@ import {
 } from "./model-response";
 import type { EmailClaimPayload } from "./model-response";
 import { getDefaultGeminiModel, getTenantGeminiKey, getTenantGeminiModel } from "./provider";
+import { logger } from "@/lib/observability/logger";
 
 /** Custom error for unrecoverable Gemini extraction failures (simulate flow). */
 export class GeminiExtractionError extends Error {
@@ -207,15 +208,10 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
        * indistinguible de un socket caído.
        */
       if ((err as { name?: string })?.name === "TimeoutError") {
-        console.warn(
-          JSON.stringify({
-            level: "warn",
-            service: "claimmix",
-            msg: "ai.transport_timeout",
-            attempt: attempt + 1,
-            timeout_ms: timeoutMs,
-          })
-        );
+        logger.warn({
+        attempt: attempt + 1,
+        timeout_ms: timeoutMs,
+      }, "ai.transport_timeout");
         throw new GeminiExtractionError(
           `El modelo no contestó en ${timeoutMs} ms`,
           { code: "TIMEOUT" }
@@ -224,15 +220,10 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
 
       lastNetworkError = err;
       if (attempt >= maxRetries) break;
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "ai.transport_retry",
-          attempt: attempt + 1,
-          code: (err as { cause?: { code?: string } })?.cause?.code ?? "network",
-        })
-      );
+      logger.warn({
+        attempt: attempt + 1,
+        code: (err as { cause?: { code?: string } })?.cause?.code ?? "network",
+      }, "ai.transport_retry");
       await sleep(backoffMs(attempt));
       continue;
     }
@@ -532,11 +523,7 @@ export async function extractEmailClaimGemini(
       });
     }
 
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "ai.email_extraction.attempt1",
+    logger.info({
         provider: "gemini",
         case_id: logCaseId,
         tenant_id: logTenantId,
@@ -545,8 +532,7 @@ export async function extractEmailClaimGemini(
         latency_ms: latency1,
         prompt_tokens: totalPromptTokens,
         completion_tokens: totalCompletionTokens,
-      })
-    );
+      }, "ai.email_extraction.attempt1");
   } catch (e) {
     const latency1 = Date.now() - t1;
     const meta = errMeta(e);
@@ -567,18 +553,13 @@ export async function extractEmailClaimGemini(
         errorMessage: e instanceof Error ? e.message.slice(0, 500) : undefined,
       });
     }
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "ai.email_extraction.attempt1.error",
+    logger.error({
         provider: "gemini",
         case_id: logCaseId,
         error_name: meta.name,
         status: meta.status,
         code: meta.code,
-      })
-    );
+      }, "ai.email_extraction.attempt1.error");
   }
 
   // ── Attempt 2 (retry with a correction that matches what went wrong) ─────
@@ -615,16 +596,11 @@ export async function extractEmailClaimGemini(
    * que treinta segundos antes y sin haber pagado la segunda llamada.
    */
   if (!result && lastErrMeta?.code === "TIMEOUT") {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "ai.email_extraction.timeout_sin_reintento",
+    logger.error({
         provider: "gemini",
         case_id: logCaseId,
         timeout_ms: DEFAULT_GEMINI_TIMEOUT_MS,
-      })
-    );
+      }, "ai.email_extraction.timeout_sin_reintento");
   } else if (!result) {
     const correccion =
       lastErrMeta?.code === "MAX_TOKENS"
@@ -652,20 +628,15 @@ export async function extractEmailClaimGemini(
         });
       }
 
-      console.info(
-        JSON.stringify({
-          level: "info",
-          service: "claimmix",
-          msg: "ai.email_extraction.attempt2",
-          provider: "gemini",
-          case_id: logCaseId,
-          model,
-          status: status2,
-          latency_ms: latency2,
-          prompt_tokens: usage.promptTokens,
-          completion_tokens: usage.completionTokens,
-        })
-      );
+      logger.info({
+        provider: "gemini",
+        case_id: logCaseId,
+        model,
+        status: status2,
+        latency_ms: latency2,
+        prompt_tokens: usage.promptTokens,
+        completion_tokens: usage.completionTokens,
+      }, "ai.email_extraction.attempt2");
     } catch (e) {
       const latency2 = Date.now() - t2;
       const meta = errMeta(e);
@@ -686,18 +657,13 @@ export async function extractEmailClaimGemini(
           retryCount: 1,
         });
       }
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "ai.email_extraction.attempt2.error",
-          provider: "gemini",
-          case_id: logCaseId,
-          error_name: meta.name,
-          status: meta.status,
-          code: meta.code,
-        })
-      );
+      logger.error({
+        provider: "gemini",
+        case_id: logCaseId,
+        error_name: meta.name,
+        status: meta.status,
+        code: meta.code,
+      }, "ai.email_extraction.attempt2.error");
     }
   }
 
@@ -739,17 +705,12 @@ export async function extractEmailClaimGemini(
   // no_relevante due to a provider/network/quota error, not a genuine classification.
   // The caller (runEmailExtractionWorker) catches GeminiExtractionError and sets
   // the case to 'escalado' so it can be re-analyzed once the provider recovers.
-  console.error(
-    JSON.stringify({
-      level: "error",
-      service: "claimmix",
-      msg: "ai.email_extraction.both_attempts_failed.provider_error",
-      provider: "gemini",
-      case_id: logCaseId,
-      status: lastErrMeta?.status ?? null,
-      code: lastErrMeta?.code ?? null,
-    })
-  );
+  logger.error({
+        provider: "gemini",
+        case_id: logCaseId,
+        status: lastErrMeta?.status ?? null,
+        code: lastErrMeta?.code ?? null,
+      }, "ai.email_extraction.both_attempts_failed.provider_error");
   throw new GeminiExtractionError(
     `Gemini extraction technical failure after 2 attempts for case ${logCaseId}`,
     {
@@ -801,35 +762,25 @@ export async function runGeminiExtractor(
       totalPromptTokens += usage.promptTokens;
       totalCompletionTokens += usage.completionTokens;
 
-      console.info(
-        JSON.stringify({
-          level: "info",
-          service: "claimmix",
-          msg: `ai.extraction.attempt${attempt}`,
-          provider: "gemini",
-          case_id: caseId,
-          model,
-          prompt_tokens: usage.promptTokens,
-          completion_tokens: usage.completionTokens,
-        })
-      );
+      logger.info({
+        provider: "gemini",
+        case_id: caseId,
+        model,
+        prompt_tokens: usage.promptTokens,
+        completion_tokens: usage.completionTokens,
+      }, `ai.extraction.attempt${attempt}`);
 
       result = parseResponse(text, claimType, model);
     } catch (e) {
       const meta = errMeta(e);
       lastErrMeta = meta;
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: `ai.extraction.attempt${attempt}.error`,
-          provider: "gemini",
-          case_id: caseId,
-          error_name: meta.name,
-          status: meta.status,
-          code: meta.code,
-        })
-      );
+      logger.error({
+        provider: "gemini",
+        case_id: caseId,
+        error_name: meta.name,
+        status: meta.status,
+        code: meta.code,
+      }, `ai.extraction.attempt${attempt}.error`);
     }
   }
 

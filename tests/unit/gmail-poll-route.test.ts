@@ -54,6 +54,7 @@ vi.mock("@/server/email/gmail/watch", () => ({
 // ── Import route AFTER mocks ──────────────────────────────────────────────────
 
 import { GET } from "@/app/api/cron/gmail-poll/route";
+import { capturarLogs } from "../mocks/capturar-logs";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -208,15 +209,18 @@ describe("GET /api/cron/gmail-poll", () => {
     });
     mockPollAllGmailAccounts.mockRejectedValue(err);
 
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // `logger` no pasa por `console`: escribe a stderr directamente. El espía
+    // de antes se quedó mirando un objeto por el que ya no pasa nada, y un
+    // test así no falla — pasa sin comprobar.
+    const logs = capturarLogs();
 
     const req = makeRequest(`Bearer ${CRON_SECRET}`);
     await GET(req);
 
-    // Ensure console.error was called with the code only
-    const calls = consoleSpy.mock.calls.flat().join(" ");
-    expect(calls).toContain("FATAL_CODE");
-    expect(calls).not.toContain("sensitive data here");
+    const anotado = logs.texto();
+    logs.restaurar();
+    expect(anotado).toContain("FATAL_CODE");
+    expect(anotado).not.toContain("sensitive data here");
   });
 
   // ── Timing-safe comparison ─────────────────────────────────────────────────
@@ -357,7 +361,7 @@ describe("GET /api/cron/gmail-poll", () => {
     });
     mockSetupGmailWatch.mockRejectedValue(watchError);
 
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logs = capturarLogs();
 
     const req = makeRequest(`Bearer ${CRON_SECRET}`);
     const res = await GET(req);
@@ -372,7 +376,8 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(mockPollAllGmailAccounts).toHaveBeenCalledTimes(1);
 
     // Error name must be logged; error message (which may contain PII) must not.
-    const loggedText = consoleSpy.mock.calls.flat().join(" ");
+    const loggedText = logs.texto();
+    logs.restaurar();
     expect(loggedText).toContain("QuotaExceededError");
     expect(loggedText).not.toContain("API quota exceeded");
   });

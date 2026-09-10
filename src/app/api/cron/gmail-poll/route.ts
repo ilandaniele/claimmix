@@ -36,6 +36,7 @@ import { pollAllGmailAccounts } from "@/server/email/gmail/gmail-poller";
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
 import { listEnabledGmailAccounts } from "@/server/email/gmail/accounts";
+import { logger } from "@/lib/observability/logger";
 
 /** 24 hours in milliseconds — renew if the watch expires within this window. */
 const RENEWAL_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const secret = process.env.CRON_SECRET;
 
   if (!secret) {
-    console.error("[cron/gmail-poll] CRON_SECRET is not configured"); // crew-debug-ok
+    logger.error({}, "cron_gmail_poll.cron_secret_is_not_configured");
     return NextResponse.json(
       { error: { code: "INTERNAL", message: "Server misconfiguration." } },
       { status: 500 }
@@ -93,11 +94,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     if (!pubsubTopic) {
       // AC11: PUBSUB_TOPIC unset — skip renewal without error.
-      console.info("[cron/gmail-poll] PUBSUB_TOPIC not set, skipping watch renewal"); // crew-debug-ok
+      logger.info({}, "cron_gmail_poll.pubsub_topic_not_set_skipping_watch");
       watchSkippedReason = "PUBSUB_TOPIC_UNSET";
     } else if (renewalAccounts.length === 0) {
       // GMAIL_USER_EMAIL is also required to look up the expiration row.
-      console.info("[cron/gmail-poll] GMAIL_USER_EMAIL not set, skipping watch renewal"); // crew-debug-ok
+      logger.info({}, "cron_gmail_poll.gmail_user_email_not_set_skipping");
       watchSkippedReason = "GMAIL_USER_EMAIL_UNSET";
     } else {
       for (const account of renewalAccounts) {
@@ -117,7 +118,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           // Non-fatal: log error name only (no PII, no stack), then continue to poll.
           const errName =
             (watchErr as { name?: string })?.name ?? "UNKNOWN";
-          console.error("[cron/gmail-poll] Watch renewal failed:", errName); // crew-debug-ok
+          logger.error({ error_name: errName }, "cron_gmail_poll.watch_renewal_failed");
         }
       }
       }
@@ -139,7 +140,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       (err as { code?: string })?.code ??
       (err as { name?: string })?.name ??
       "UNKNOWN";
-    console.error("[cron/gmail-poll] Fatal error:", code); // crew-debug-ok
+    logger.error({ code }, "cron_gmail_poll.fatal_error");
     return NextResponse.json(
       { error: { code: "INTERNAL", message: "Poll failed." } },
       { status: 500 }

@@ -3,6 +3,7 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
+import { logger } from "@/lib/observability/logger";
 
 const TRAINING_LIMIT = 8_000;
 
@@ -42,7 +43,7 @@ export async function loadAgentTraining(tenantId: string): Promise<string> {
   try {
     return deAgentTraining(await enTenant(tenantCtx, consultaAgentTraining));
   } catch (e) {
-    console.error("[agent-training] load error:", (e as { code?: string })?.code);
+    logger.error({ detalle: (e as { code?: string })?.code }, "agent_training.load_error");
     return "";
   }
 }

@@ -23,13 +23,14 @@
  *
  * Security note: No token contents, OIDC payload, message body, emailAddress,
  * historyId, or stack traces are included in responses or logs.
- * crew-debug-ok: console.error calls are annotated with // crew-debug-ok
+
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { OAuth2Client } from "google-auth-library";
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
 import { getGmailAccountByEmail } from "@/server/email/gmail/accounts";
+import { logger } from "@/lib/observability/logger";
 
 /** Required: prevent Vercel from statically optimising this dynamic route. */
 export const dynamic = "force-dynamic";
@@ -59,10 +60,13 @@ let _warnedSkipVerify = false;
 function warnSkipVerifyOnce(): void {
   if (!_warnedSkipVerify) {
     _warnedSkipVerify = true;
-    console.warn(
-      "[webhooks/gmail] PUBSUB_AUDIENCE not set — OIDC verification skipped. " +
-        "Set PUBSUB_AUDIENCE before exposing this endpoint in production."
-    ); // crew-debug-ok
+    logger.warn(
+      {
+        detalle:
+          "Poné PUBSUB_AUDIENCE antes de exponer este endpoint en producción.",
+      },
+      "webhooks_gmail.pubsub_audience_sin_definir"
+    );
   }
 }
 
@@ -103,16 +107,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
    * el flujo localmente sin montar Pub/Sub.
    */
   if (!audience && process.env.NODE_ENV === "production") {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "webhooks.gmail.sin_audiencia_en_produccion",
+    logger.error({
         detalle:
           "PUBSUB_AUDIENCE no está configurada: el webhook rechaza todo en vez " +
           "de aceptar sin verificar.",
-      })
-    );
+      }, "webhooks.gmail.sin_audiencia_en_produccion");
     return NextResponse.json(
       {
         error: {
@@ -164,16 +163,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!cuentaEsperada) {
       // Mismo criterio que la falta de PUBSUB_AUDIENCE: mal configurado
       // rechaza, no degrada a aceptar sin mirar.
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "webhooks.gmail.sin_cuenta_de_servicio_esperada",
-          detalle:
+      logger.error({
+        detalle:
             "PUBSUB_SERVICE_ACCOUNT no está configurada: no hay contra qué " +
             "comparar el remitente del token, así que el webhook rechaza.",
-        })
-      );
+      }, "webhooks.gmail.sin_cuenta_de_servicio_esperada");
       return NextResponse.json(
         {
           error: {
@@ -198,8 +192,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
     } catch {
       // Do NOT log the token or the error message — they may contain token contents.
-      // Only log the error name for debugging. crew-debug-ok
-      console.error("[webhooks/gmail] OIDC token verification failed"); // crew-debug-ok
+      // Sólo queda el nombre del evento.
+      logger.error({}, "webhooks_gmail.oidc_token_verification_failed");
       return NextResponse.json(
         {
           error: {
@@ -279,9 +273,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       (err as { name?: string })?.name ??
       (err as { code?: string })?.code ??
       "UnknownError";
-    console.error(
-      `[webhooks/gmail] pollGmail failed: ${errName} (messageId=${messageId})`
-    ); // crew-debug-ok
+    logger.error(
+      { error_name: errName, message_id: messageId },
+      "webhooks_gmail.poll_gmail_failed"
+    );
     return NextResponse.json({ ok: true, error: errName });
   }
 }

@@ -26,6 +26,7 @@ import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
+import { logger } from "@/lib/observability/logger";
 
 export interface ThreadLookupResult {
   existingCaseId?: string;
@@ -79,7 +80,7 @@ export async function threadLookup(
     }
   } catch (err) {
     const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
-    console.error("[thread-lookup] claim_messages error:", code); // crew-debug-ok
+    logger.error({ code }, "thread_lookup.claim_messages_error");
     // Non-fatal — fall through to legacy check.
   }
 
@@ -107,7 +108,7 @@ export async function threadLookup(
     }
   } catch (err) {
     const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
-    console.error("[thread-lookup] cases error:", code); // crew-debug-ok
+    logger.error({ code }, "thread_lookup.cases_error");
     return { existingCaseId: undefined };
   }
 
@@ -132,7 +133,7 @@ export async function threadLookup(
       if (caseRow) return { existingCaseId: caseRow.id };
     } catch (err) {
       const code = (err as { code?: string })?.code ?? "DBError";
-      console.error("[thread-lookup] subject case lookup error:", code); // crew-debug-ok
+      logger.error({ code }, "thread_lookup.subject_case_lookup_error");
     }
   }
 

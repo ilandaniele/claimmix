@@ -5,6 +5,7 @@ import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { cases } from "@/lib/db/schema";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Stuck-case reaper.
@@ -107,7 +108,7 @@ export async function reapStuckProcessingCases(opts?: {
       .limit(limit);
   } catch (e) {
     const code = (e as { code?: string })?.code ?? "unknown";
-    console.error("[reap-stuck] lookup failed:", code);
+    logger.error({ code }, "reap_stuck.lookup_failed");
     return { reaped: 0, caseIds: [] };
   }
 
@@ -130,7 +131,7 @@ export async function reapStuckProcessingCases(opts?: {
     reapedIds = updated.map((r) => r.id);
   } catch (e) {
     const code = (e as { code?: string })?.code ?? "unknown";
-    console.error("[reap-stuck] update failed:", code);
+    logger.error({ code }, "reap_stuck.update_failed");
     return { reaped: 0, caseIds: [] };
   }
 
@@ -157,15 +158,10 @@ export async function reapStuckProcessingCases(opts?: {
   );
 
   if (reapedIds.length > 0) {
-    console.warn(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "reap_stuck.escalated",
+    logger.warn({
         reaped: reapedIds.length,
         stuck_after_ms: olderThanMs,
-      })
-    );
+      }, "reap_stuck.escalated");
   }
 
   return { reaped: reapedIds.length, caseIds: reapedIds };

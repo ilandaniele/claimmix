@@ -34,6 +34,7 @@ import {
   topePorIp,
 } from "@/lib/rate-limit/index";
 import { SignInSchema } from "@/lib/schemas/auth";
+import { logger } from "@/lib/observability/logger";
 
 type SignInState = {
   error?: string;
@@ -222,14 +223,9 @@ export async function signInWithGoogle(): Promise<void> {
     });
     url = result.url ?? undefined;
   } catch (e) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "auth.google.signin_start_failed",
+    logger.error({
         detalle: e instanceof Error ? e.message : String(e),
-      })
-    );
+      }, "auth.google.signin_start_failed");
     url = undefined;
   }
 

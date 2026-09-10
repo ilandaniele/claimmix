@@ -30,6 +30,7 @@ import { eq } from "drizzle-orm";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { db } from "@/lib/db";
 import { authUsers, sessions, users } from "@/lib/db/schema";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Marcar el correo como verificado.
@@ -57,14 +58,9 @@ async function marcarCorreoVerificado(userId: string): Promise<void> {
       .set({ emailVerified: true })
       .where(eq(authUsers.id, userId));
   } catch {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "auth.reset.no_se_pudo_marcar_verificado",
+    logger.error({
         user_id: userId,
-      })
-    );
+      }, "auth.reset.no_se_pudo_marcar_verificado");
   }
 }
 
@@ -85,14 +81,9 @@ async function cerrarSesionesDe(userId: string): Promise<number> {
       .returning({ id: sessions.id });
     return borradas.length;
   } catch {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "auth.reset.no_se_pudieron_cerrar_las_sesiones",
+    logger.error({
         user_id: userId,
-      })
-    );
+      }, "auth.reset.no_se_pudieron_cerrar_las_sesiones");
     return 0;
   }
 }

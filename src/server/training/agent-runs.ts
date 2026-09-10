@@ -20,6 +20,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { getDefaultGeminiModel } from "@/server/ai/provider";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { TrainabilityAssessment } from "./trainability";
+import { logger } from "@/lib/observability/logger";
 
 export interface LogAgentRunParams {
   tenantId: string;
@@ -106,7 +107,7 @@ export async function logAgentRun(
     );
 
     if (!data) {
-      console.error("[agent-runs] insert error:", "no_data"); // crew-debug-ok
+      logger.error({ detalle: "no_data" }, "agent_runs.insert_error");
       return null;
     }
 
@@ -116,7 +117,7 @@ export async function logAgentRun(
     // so existing deployments keep extracting.
     const code = (e as { code?: string })?.code;
     if (code !== "42P01") {
-      console.error("[agent-runs] insert error:", code ?? "no_data"); // crew-debug-ok
+      logger.error({ detalle: code ?? "no_data" }, "agent_runs.insert_error");
     }
     // Never break the extraction pipeline because run logging failed.
     return null;
@@ -195,7 +196,7 @@ export async function logAgentRunError(
   } catch (e) {
     const code = (e as { code?: string })?.code;
     if (code !== "42P01") {
-      console.error("[agent-runs] error-run insert error:", code ?? "no_data"); // crew-debug-ok
+      logger.error({ detalle: code ?? "no_data" }, "agent_runs.error_run_insert_error");
     }
     return null;
   }
@@ -272,7 +273,7 @@ export async function getLatestAgentRun(
   } catch (e) {
     const code = (e as { code?: string })?.code;
     if (code && code !== "42P01") {
-      console.error("[agent-runs] latest fetch error:", code); // crew-debug-ok
+      logger.error({ code }, "agent_runs.latest_fetch_error");
     }
     return null;
   }

@@ -30,6 +30,7 @@ import type { CaseRow } from "@/lib/db/types";
 import { z } from "zod";
 
 import { deleteCases } from "@/server/cases/delete";
+import { logger } from "@/lib/observability/logger";
 // ── Shared: resolve authenticated user + their public.users row ───────────────
 
 /** `null` cuando no hay sesión, que es lo único que los tres handlers miran. */
@@ -102,7 +103,7 @@ export async function GET(
     });
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
-    console.error("[GET /api/cases/:id] error:", errName);
+    logger.error({ error_name: errName }, "get_api_cases_id.error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 }
@@ -176,7 +177,7 @@ export async function DELETE(
     return ok({ deleted: borrados.length > 0 });
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
-    console.error("[DELETE /api/cases/:id] error:", errName);
+    logger.error({ error_name: errName }, "delete_api_cases_id.error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 }
@@ -249,7 +250,7 @@ export async function PATCH(
       return err(error);
     }
     const errName = error instanceof Error ? error.name : "UnknownError";
-    console.error("[PATCH /api/cases/:id] error:", errName);
+    logger.error({ error_name: errName }, "patch_api_cases_id.error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 }

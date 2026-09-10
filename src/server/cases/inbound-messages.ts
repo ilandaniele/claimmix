@@ -26,6 +26,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimMessages, rawMessages } from "@/lib/db/schema";
+import { logger } from "@/lib/observability/logger";
 
 export interface MensajeEntrante {
   subject: string | null;
@@ -104,16 +105,11 @@ export async function mensajesEntrantes(
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
     // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
     // persona no mandó nada.
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "cases.inbound_messages.query_failed",
+    logger.error({
         error_code:
           (err as { code?: string })?.code ??
           (err instanceof Error ? err.name : "UnknownError"),
-      })
-    );
+      }, "cases.inbound_messages.query_failed");
     return [];
   }
 }

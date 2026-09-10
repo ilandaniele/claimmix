@@ -60,10 +60,26 @@ function normalize(value: string): string {
     .toLowerCase();
 }
 
+/*
+ * El cierre de la etiqueta no es sólo `</script>`.
+ *
+ * HTML acepta espacio, salto de línea y hasta atributos antes del `>`:
+ * `</script >`, `</script\n>`, `</script foo>`. La expresión pedía el `>`
+ * pegado, así que un cuerpo que cerrara de cualquiera de esas formas no
+ * matcheaba — y el `.replace(/<[^>]+>/g)` de abajo se llevaba las etiquetas y
+ * dejaba el CÓDIGO del script como si fuera texto que escribió una persona.
+ *
+ * Acá adentro eso no es un XSS: este texto no se renderiza, se usa para decidir
+ * si un correo parece una denuncia. Lo que produce es una clasificación tomada
+ * sobre variables de JavaScript en vez de sobre lo que dice el mail — y el que
+ * manda el mail elige qué palabras poner ahí.
+ *
+ * `js/bad-tag-filter`, que CodeQL marcaba en severidad alta.
+ */
 function visibleHtmlText(html: string): string {
   return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script\b[\s\S]*?<\/script[^>]*>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style[^>]*>/gi, " ")
     .replace(/<[^>]+>/g, " ");
 }
 

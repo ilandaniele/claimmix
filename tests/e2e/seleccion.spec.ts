@@ -101,44 +101,57 @@ test.describe("selección sin recuadros", () => {
   });
 
   /*
-   * Cambiar de pestaña también poda. Marcar la primera fila de «Todos» y mirar
+   * Cambiar de estado también poda. Marcar la primera fila de «Todos» y mirar
    * «Listos» no pinzaba nada: en el ensayo esa fila casi siempre ES un listo
    * —los deja simulate-flow, con MOCK_AI— y con el fantasma vivo también daba
-   * una marcada y cifra 1. Se marca en una pestaña y se salta a otra: un
-   * siniestro tiene un solo estado, no puede estar en las dos.
+   * una marcada y cifra 1. Se marca en un estado y se salta a otro: un
+   * siniestro tiene uno solo, no puede estar en los dos.
    *
-   * La otra pestaña puede estar vacía, y sin filas no hay barra que mirar. Por
+   * El otro estado puede estar vacío, y sin filas no hay barra que mirar. Por
    * eso se vuelve: lo podado no reaparece marcado junto con la fila.
+   *
+   * El estado se elegía en una pestaña y ahora es un chip adentro del panel de
+   * filtros: las pestañas contaban un estado suelto mientras las baldosas de
+   * arriba agrupaban, así que tres de las cinco decían 0 sobre 483 casos.
    */
-  test("cambiar de pestaña deja el contador diciendo la verdad", async ({ page }) => {
+  test("cambiar de estado deja el contador diciendo la verdad", async ({ page }) => {
     await page.goto("/bandeja");
-    const pestana = (clave: "listo" | "esperando") => ({
-      tab: page.getByRole("tab", { name: enCualquierIdioma(`tabs.${clave}`) }),
+
+    /** Abre el panel si está cerrado y devuelve el chip de ese estado. */
+    const abrir = async () => {
+      const boton = page.getByTestId("filtros-boton");
+      if ((await boton.getAttribute("aria-expanded")) !== "true") await boton.click();
+    };
+    const estado = (clave: "listo" | "esperando") => ({
+      chip: page.getByRole("button", { name: enCualquierIdioma(`tabs.${clave}`) }),
       url: new RegExp(`status=${clave}`),
     });
     // Las cifras vienen del servidor; la tabla no sirve para decidir, en la
     // ventana entre URL y data muestra la página vieja filtrada acá.
-    const vacia = async (p: ReturnType<typeof pestana>) =>
-      (await p.tab.locator(".cifra").innerText()) === "0";
-    const listos = pestana("listo");
-    const esperando = pestana("esperando");
+    await abrir();
+    const vacia = async (p: ReturnType<typeof estado>) =>
+      (await p.chip.locator(".cifra").innerText()) === "0";
+    const listos = estado("listo");
+    const esperando = estado("esperando");
     const [origen, destino] = (await vacia(listos)) ? [esperando, listos] : [listos, esperando];
     test.skip(await vacia(origen), "sin casos listos ni esperando no hay fila que marcar");
 
-    await origen.tab.click();
+    await origen.chip.click();
     await expect(page).toHaveURL(origen.url, { timeout: 15_000 });
     await page.getByRole("button", { name: enCualquierIdioma("bandeja.seleccionar") }).click();
     await page.getByRole("checkbox").first().click();
     await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(1);
 
-    await destino.tab.click();
+    await abrir();
+    await destino.chip.click();
     await expect(page).toHaveURL(destino.url, { timeout: 15_000 });
     // Con filas la barra dice 0 y no ofrece borrar; sin filas no hay barra.
     await expect(
       page.getByRole("button", { name: enCualquierIdioma("bandeja.deleteSelected") })
     ).toHaveCount(0);
 
-    await origen.tab.click();
+    await abrir();
+    await origen.chip.click();
     await expect(page).toHaveURL(origen.url, { timeout: 15_000 });
     await expect(filas(page).first()).toBeVisible();
     await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(0);

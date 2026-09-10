@@ -22,10 +22,9 @@ import { DashboardClient } from "./DashboardClient";
 import { PER_PAGE_OPTIONS } from "./per-page";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
-import { Card, KpiTile } from "../_components/ui";
+import { Card } from "../_components/ui";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
-import { kpisDeLaBandeja } from "@/core/case/kpis-de-la-bandeja";
 
 const VALID_STATUSES: CaseStatus[] = [
   "procesando",
@@ -182,21 +181,6 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     ...VALID_STATUSES.map((s) => ({ status: s, count: cuenta.get(s) ?? 0 })),
   ];
 
-  /*
-   * Los tres de arriba salen de los conjuntos canónicos, no de nombres
-   * sueltos escritos acá.
-   *
-   * Estaban contra el vocabulario del flujo simulado: `escalado` sin
-   * `requiere_especialista`, y `listo` sin `listo_para_core` ni
-   * `enviado_a_core`, que es donde termina todo caso completado por mail o
-   * por WhatsApp. La baldosa que existe para decir «esto necesita a alguien»
-   * no contaba los siniestros derivados a un especialista, que es
-   * literalmente su definición.
-   */
-  const kpis = kpisDeLaBandeja(allStatusCounts);
-  const criticalCount = kpis.escalados;
-  const pendingCount = kpis.esperando;
-  const resolvedCount = kpis.resueltos;
 
   return (
     <div className="flex h-full flex-col">
@@ -217,29 +201,19 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
         <p className="mt-1 text-[13px] text-slate-500">{t("bandeja.subtitle")}</p>
 
         {/*
-         * Los cuatro indicadores.
+         * Acá vivían cuatro baldosas —Total, Escalados, Esperando, Listos— y no
+         * están más.
          *
-         * Antes cada uno venía teñido de su color de fondo —rojo, ámbar, verde—
-         * y la fila entera competía por la atención: cuatro bloques de color no
-         * jerarquizan nada. Ahora la tarjeta es blanca como todas y el color
-         * queda SÓLO en el número, que es el dato que dice si hay que hacer algo.
+         * No es sólo lugar. Los mismos cuatro números viven ahora en los chips
+         * de estado del panel de filtros, y ahí además SIRVEN: se aprieta el que
+         * dice 43 y la lista queda en esos 43. Una baldosa informa y hay que ir
+         * a buscar el control en otro lado; un filtro con su contador hace las
+         * dos cosas.
+         *
+         * Y lo que se saca de encima es medio metro de pantalla en la vista que
+         * se mira ocho horas por día: antes había que bajar para ver la quinta
+         * fila de la lista.
          */}
-        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiTile label={t("kpi.total")} value={totalCount} />
-          <KpiTile
-            label={t("tabs.escalado")}
-            value={criticalCount}
-            tone="critico"
-            hint={criticalCount > 0 ? t("kpi.criticalHint") : t("kpi.criticalNone")}
-          />
-          <KpiTile
-            label={t("tabs.esperando")}
-            value={pendingCount}
-            tone="espera"
-            hint={t("kpi.pendingHint")}
-          />
-          <KpiTile label={t("tabs.listo")} value={resolvedCount} tone="listo" />
-        </div>
       </div>
 
       {/* La lista, dentro de la misma tarjeta que todo lo demás. */}

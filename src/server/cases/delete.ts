@@ -29,6 +29,7 @@ import { inArray } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases } from "@/lib/db/schema";
+import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 /**
  * Borra los casos indicados que pertenezcan al inquilino del contexto.
@@ -38,7 +39,9 @@ import { cases } from "@/lib/db/schema";
  */
 export async function deleteCases(
   ctx: TenantContext,
-  ids: string[]
+  ids: string[],
+  /** Quién lo borró. Sin esto la fila de auditoría no sirve para nada. */
+  actorId?: string | null
 ): Promise<string[]> {
   if (ids.length === 0) return [];
 
@@ -48,6 +51,31 @@ export async function deleteCases(
       .where(inArray(cases.id, ids))
       .returning({ id: cases.id })
   );
+
+  /*
+   * Que quede quién borró qué.
+   *
+   * Era la única operación irreversible del producto y la única sin registro:
+   * un caso desaparecía con sus mensajes, sus adjuntos y sus campos, y no
+   * quedaba nada que dijera quién lo hizo ni cuándo.
+   *
+   * Va DESPUÉS del borrado, no antes: anotar lo que todavía no pasó es cómo se
+   * termina con una auditoría de cosas que fallaron. Y `target_id` no es clave
+   * foránea —el esquema lo dice— así que la fila sobrevive a la que describe.
+   *
+   * Una por caso y no una por tanda: el que después busca «qué pasó con este
+   * siniestro» busca por id, y un evento con cien ids adentro no aparece.
+   */
+  for (const { id } of borrados) {
+    await writeAuditLog({
+      tenant_id: ctx.tenantId,
+      actor_id: actorId ?? null,
+      event_type: AuditEvent.CASE_DELETED,
+      target_type: "case",
+      target_id: id,
+      payload: { borrados_en_la_tanda: borrados.length },
+    });
+  }
 
   return borrados.map((r) => r.id);
 }

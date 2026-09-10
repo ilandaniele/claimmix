@@ -65,6 +65,7 @@ import { rehostAndRecordAttachments } from "@/server/email/rehost-attachments";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { sinLosCuerposYaDecodificados } from "@/server/email/gmail/payload-sin-duplicados";
 import type { gmail_v1 } from "googleapis";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -391,8 +392,11 @@ async function processMessage(
   const bodyText = extractBodyPart(payload ?? undefined, "text/plain");
   const bodyHtml = extractBodyPart(payload ?? undefined, "text/html");
 
-  // raw_payload: verbatim Gmail Message JSON (AC4).
-  const rawPayload = msg;
+  // raw_payload: el JSON verbatim de Gmail (AC4), menos el cuerpo en base64
+  // que ya queda decodificado dos líneas más arriba, en `bodyText` y
+  // `bodyHtml`. Ver `payload-sin-duplicados`: eran 18 kB por correo de los
+  // cuales el 79 % era esa copia.
+  const rawPayload = sinLosCuerposYaDecodificados(msg);
 
   // ── d–f) Find or open the case, and record the message ─────────────────────
   //

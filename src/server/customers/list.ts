@@ -21,6 +21,7 @@ import {
 } from "@/core/matching/normalizar";
 import type { TenantContext } from "@/data/scope";
 import { ilikeAny } from "@/lib/db/helpers";
+import { camposDePagina } from "@/lib/schemas/paginacion";
 import { paginarEnTenant, type Pagina } from "@/lib/db/paginacion";
 import { customers } from "@/lib/db/schema";
 
@@ -28,8 +29,7 @@ export const CustomerQuerySchema = z.object({
   search: z.string().max(200).optional(),
   dni: z.string().max(20).optional(),
   email: z.string().email().optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  per_page: z.coerce.number().int().min(1).max(100).default(25),
+  ...camposDePagina,
 });
 
 export type CustomerQuery = z.infer<typeof CustomerQuerySchema>;

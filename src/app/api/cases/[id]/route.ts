@@ -28,7 +28,8 @@ import {
 } from "@/lib/rate-limit/index";
 import type { CaseRow } from "@/lib/db/types";
 import { z } from "zod";
-
+
+import { deleteCases } from "@/server/cases/delete";
 // ── Shared: resolve authenticated user + their public.users row ───────────────
 
 /** `null` cuando no hay sesión, que es lo único que los tres handlers miran. */
@@ -163,13 +164,16 @@ export async function DELETE(
 
   // ── 5. Hard delete (explicit tenant_id filter ensures isolation) ──────────
   try {
-    await enTenant(tenantCtx, (db) =>
-      db
-        .delete(cases)
-        .where(eq(cases.id, caseId))
-    );
+    /*
+     * Por `deleteCases` y no con un DELETE suelto.
+     *
+     * Eran dos caminos que borraban lo mismo, y sólo uno iba a aprender a
+     * dejar rastro. Borrar es la única operación irreversible del producto: que
+     * quede quién la hizo no puede depender de por qué botón se entró.
+     */
+    const borrados = await deleteCases(tenantCtx, [caseId], userRow.id);
 
-    return ok({ deleted: true });
+    return ok({ deleted: borrados.length > 0 });
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
     console.error("[DELETE /api/cases/:id] error:", errName);

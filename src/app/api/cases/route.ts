@@ -157,7 +157,8 @@ export async function DELETE(request: NextRequest) {
   try {
     const deleted = await deleteCases(
       { tenantId: userRow.tenant_id },
-      parsed.data.ids
+      parsed.data.ids,
+      userRow.id
     );
     return ok({ deleted });
   } catch (error) {

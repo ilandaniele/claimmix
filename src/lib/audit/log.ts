@@ -85,6 +85,18 @@ export const AuditEvent = {
   CASE_STATUS_CHANGED: "case.status_changed",
   CASE_CLOSED: "case.closed",
   CASE_ASSIGNED: "case.assigned",
+  /**
+   * CASE_DELETED: alguien borró un caso.
+   *
+   * La única operación irreversible del producto era la única sin registro de
+   * quién la hizo: ninguna de las dos rutas de DELETE escribía auditoría, y no
+   * había evento que escribir.
+   *
+   * Sobrevive al borrado a propósito: `audit_log.target_id` NO es una clave
+   * foránea, y el comentario del esquema dice que es justamente para esto. El
+   * rastro quedaba disponible y nunca se usaba.
+   */
+  CASE_DELETED: "case.deleted",
 
   // ── AI extraction ──────────────────────────────────────────────────────────
   AI_EXTRACTED: "ai.extracted",

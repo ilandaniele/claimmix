@@ -144,7 +144,7 @@ export function parseResponse(content: string | null, claimType: ClaimType, mode
     }
 
     if (candidates.length > 0) {
-      logger.error({ issuecount: issueCount, issues_across: candidates.length, detalle: "JSON candidate(s)" }, "model_response.schema_validation_failed");
+      logger.error({ issues: issueCount, candidatos: candidates.length }, "model_response.schema_validation_failed");
     }
     return null;
   } catch {
@@ -189,7 +189,7 @@ export function parseEmailResponse(content: string | null, model?: string): Extr
     }
 
     if (candidates.length > 0) {
-      logger.error({ issuecount: issueCount, issues_across: candidates.length, detalle: "JSON candidate(s)" }, "model_response.email_schema_validation_failed");
+      logger.error({ issues: issueCount, candidatos: candidates.length }, "model_response.email_schema_validation_failed");
     }
     return null;
   } catch {

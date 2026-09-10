@@ -257,7 +257,7 @@ async function markMessageRead(
     });
   } catch (err) {
     const code = err instanceof Error ? err.name : "UnknownError";
-    logger.error({ code, msgid: gmailMessageId }, "gmail_poller.mark_as_read_error");
+    logger.error({ code, message_id: gmailMessageId }, "gmail_poller.mark_as_read_error");
   }
 }
 
@@ -436,7 +436,7 @@ async function processMessage(
   } catch (err) {
     // IC9: non-fatal — log code only, never throw.
     const code = err instanceof Error ? err.name : "UnknownError";
-    logger.error({ code, msgid: gmailMessageId }, "gmail_poller.mark_as_read_error");
+    logger.error({ code, message_id: gmailMessageId }, "gmail_poller.mark_as_read_error");
   }
 
   // The EMAIL_RECEIVED audit entry is written by ingestInboundEmail, which is

@@ -114,7 +114,7 @@ export async function uploadAttachment(
     const statusCode =
       (error as { $metadata?: { httpStatusCode?: number } })?.$metadata
         ?.httpStatusCode ?? "unknown";
-    logger.error({ statuscode: statusCode }, "claim_attachments_bucket.upload_failed");
+    logger.error({ status_code: statusCode }, "claim_attachments_bucket.upload_failed");
     return { error: "STORAGE_UPLOAD_FAILED" };
   }
 

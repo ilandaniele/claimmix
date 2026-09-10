@@ -315,7 +315,10 @@ export async function runExtractionWorker(
 
   // Safety: always validate FSM transition (LLM08 containment).
   if (!isValidTransition("procesando", newStatus)) {
-    logger.error({ procesando: "→", newstatus: newStatus }, "worker.invalid_fsm_transition_attempt");
+    logger.error(
+      { desde: "procesando", hacia: newStatus },
+      "worker.invalid_fsm_transition_attempt"
+    );
     await escalateCase(caseId, tenantCtx, userId, "fsm_violation", "fsm_violation");
     return;
   }

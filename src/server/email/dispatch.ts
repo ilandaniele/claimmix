@@ -30,7 +30,10 @@ import { firstRow } from "@/lib/db/helpers";
 import { renderTemplate, type EmailTemplate } from "./render";
 import { isReservedTestAddress } from "@/lib/email/reserved";
 import { getGmailAccountByEmail, getGmailAccountForTenant } from "./gmail/accounts";
-import { GmailSender } from "./gmail/gmail-sender";
+/*
+ * `GmailSender` NO se importa arriba, a propósito. Ver donde se instancia.
+ */
+import type { GmailSender as TipoGmailSender } from "./gmail/gmail-sender";
 import { isSendSuccess } from "./provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
@@ -269,7 +272,25 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   }
 
   const fromAddress = gmailAccount.email;
-  const provider = new GmailSender(gmailAccount.refreshToken);
+
+  /*
+   * En diferido, y son 688 ms de arranque en frío en las DOS rutas calientes.
+   *
+   * `GmailSender` arrastra `googleapis` —medido acá: 688 ms de import— y la
+   * cadena que llega hasta él es toda estática:
+   *
+   *   webhooks/whatsapp → intake-agent → worker/extract → confirmations/
+   *   messenger → email/dispatch → gmail/gmail-sender → googleapis
+   *
+   * O sea que un WhatsApp de texto, que no toca Gmail en ningún momento, pagaba
+   * el import entero antes de atender. Es más caro que los 260 ms de Sentry que
+   * ya se sacaron, en las mismas rutas.
+   *
+   * Acá abajo ya sabemos que hay casilla configurada y que vamos a mandar por
+   * ella: es el primer punto donde el costo se justifica.
+   */
+  const { GmailSender } = await import("./gmail/gmail-sender");
+  const provider: TipoGmailSender = new GmailSender(gmailAccount.refreshToken);
 
   // ── 2. INSERT claim_messages row (status='queued') — AC4/AC5 ──────────────
   let claimMessageId: string | undefined;

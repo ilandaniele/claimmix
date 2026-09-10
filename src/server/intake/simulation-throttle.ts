@@ -290,6 +290,9 @@ export async function waitForEmailExtractionTurn(input: {
   const maxConcurrent = getEmailWorkerMaxConcurrency();
 
   let blockers = await getEarlierPendingEmailCount(input);
+  /** Si hubo cola de verdad. Ver el gap, abajo. */
+  let hubo = blockers >= maxConcurrent;
+
   while (blockers >= maxConcurrent) {
     const elapsed = Date.now() - startedAt;
     if (maxWaitMs <= 0 || elapsed >= maxWaitMs) {
@@ -297,10 +300,24 @@ export async function waitForEmailExtractionTurn(input: {
     }
     await sleep(Math.min(Math.max(pollMs, 1), maxWaitMs - elapsed));
     blockers = await getEarlierPendingEmailCount(input);
+    hubo = true;
   }
 
+  /*
+   * El respiro va sólo si hubo de quién separarse.
+   *
+   * Corría SIEMPRE, incluso con `blockers = 0` y el bucle sin dar una vuelta:
+   * un segundo y dos décimas de sueño en cada mail que entra, esperando a
+   * nadie. En una casilla tranquila —que es casi todo el tiempo— era el único
+   * efecto de esta función.
+   *
+   * Está para no pegarle a Gemini dos veces seguidas cuando venimos de una
+   * cola, no para espaciar contra el vacío. Y el ritmo global contra el
+   * proveedor ya lo cuida `GEMINI_MIN_REQUEST_INTERVAL_MS`, que vive en el
+   * extractor y sí corre siempre.
+   */
   const minGapMs = getEmailWorkerMinGapMs();
-  if (minGapMs > 0) await sleep(minGapMs);
+  if (hubo && minGapMs > 0) await sleep(minGapMs);
 
   return { waitedMs: Date.now() - startedAt, timedOut: false, blockers: 0 };
 }

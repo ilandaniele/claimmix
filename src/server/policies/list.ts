@@ -14,13 +14,13 @@ import { normalizarNumeroPoliza } from "@/core/matching/normalizar";
 import type { TenantContext } from "@/data/scope";
 import { paginarEnTenant, type Pagina } from "@/lib/db/paginacion";
 import { customers, policies } from "@/lib/db/schema";
+import { camposDePagina } from "@/lib/schemas/paginacion";
 
 export const PolicyQuerySchema = z.object({
   customer_id: z.string().uuid().optional(),
   policy_number: z.string().max(100).optional(),
   status: z.enum(["active", "expired", "cancelled"]).optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  per_page: z.coerce.number().int().min(1).max(100).default(25),
+  ...camposDePagina,
 });
 
 export type PolicyQuery = z.infer<typeof PolicyQuerySchema>;

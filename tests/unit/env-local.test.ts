@@ -137,6 +137,23 @@ describe("escribirEnEnvLocal", () => {
     expect(loQueQuedo()).toBe(`A=1${LF}`);
   });
 
+  it("se planta con un valor que trae un salto, sin escribir nada", () => {
+    /*
+     * Los dos que llaman guardan algo que no armaron ellos: una cadena de
+     * conexión con contraseña generada, y la clave que devuelve la API de
+     * Neon. Con un salto adentro, `nombre=valor` escribe DOS variables, y la
+     * segunda la elige quien haya elegido el valor.
+     */
+    conContenido(`A=1${LF}`);
+    expect(() => escribirEnEnvLocal("A", `x${LF}ADMIN=si`, archivo)).toThrow(
+      /salto de línea/
+    );
+    expect(() => escribirEnEnvLocal("A", `x${CRLF}ADMIN=si`, archivo)).toThrow(
+      /salto de línea/
+    );
+    expect(loQueQuedo()).toBe(`A=1${LF}`);
+  });
+
   it("lo que escribe se puede volver a leer", () => {
     // Las dos mitades del módulo tienen que estar de acuerdo sobre el formato:
     // es la razón por la que viven juntas.

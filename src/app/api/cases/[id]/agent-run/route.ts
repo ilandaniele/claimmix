@@ -31,7 +31,7 @@ import {
   CUSTOMER_PII_ROLES,
   type UserRole,
 } from "@/lib/auth/require-role";
-import { redactString } from "@/lib/audit/redact";
+import { sinPiiSiNoCorresponde } from "@/server/cases/pii";
 import { entrar } from "@/lib/api/entrada";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
@@ -53,43 +53,6 @@ import {
 export const dynamic = "force-dynamic";
 
 const ParamsSchema = z.object({ id: z.string().uuid() });
-
-/**
- * El mail del denunciante no sale para quien no puede ver el padrón.
- *
- * `run.input_payload` es `{ subject, body, sender_email }`: el correo ENTERO
- * que escribió la persona, con su DNI, su teléfono y su póliza adentro. Salía
- * a `...ALL_ROLES`, o sea también a `viewer`, mientras `/api/customers` y
- * `/api/policies` exigen `CUSTOMER_PII_ROLES` con el comentario «un analista NO
- * entra: acá salen DNI, correo y teléfono».
- *
- * O sea que la frontera existía y se esquivaba con dos pedidos: `GET
- * /api/cases` para sacar un id, y `GET /api/cases/:id/agent-run` para el mail
- * completo.
- *
- * Que el `viewer` vea la corrida sigue siendo lo correcto —para eso está la
- * pantalla— y lo que se le quita es el cuerpo crudo, no la decisión: el modelo,
- * la confianza, los campos extraídos y el resultado quedan. Enmascarar en vez
- * de esconder, con el mismo redactor que ya usa la auditoría.
- */
-function sinPiiSiNoCorresponde<T>(run: T, rol: string): T {
-  if (CUSTOMER_PII_ROLES.includes(rol as UserRole)) return run;
-  if (!run || typeof run !== "object") return run;
-
-  const r = run as { input_payload?: { subject?: string; body?: string; sender_email?: string | null } };
-  if (!r.input_payload) return run;
-
-  return {
-    ...run,
-    input_payload: {
-      ...r.input_payload,
-      subject: r.input_payload.subject ? redactString(r.input_payload.subject) : r.input_payload.subject,
-      body: r.input_payload.body ? redactString(r.input_payload.body) : r.input_payload.body,
-      // La dirección es de la persona y no hace falta para leer la corrida.
-      sender_email: r.input_payload.sender_email ? "[oculto]" : r.input_payload.sender_email,
-    },
-  } as T;
-}
 
 export async function GET(
   request: NextRequest,

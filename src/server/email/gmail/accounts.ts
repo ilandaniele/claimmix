@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { gmailAccounts } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
+import { logger } from "@/lib/observability/logger";
 
 const TOKEN_ALGORITHM = "aes-256-gcm";
 
@@ -120,7 +121,7 @@ export async function listEnabledGmailAccounts(): Promise<GmailAccount[]> {
     const code = (err as { code?: string })?.code;
     // 42P01 = undefined_table — the migration has not run yet; stay silent.
     if (code !== "42P01") {
-      console.error("[gmail-accounts] list enabled error:", code ?? "unknown");
+      logger.error({ detalle: code ?? "unknown" }, "gmail_accounts.list_enabled_error");
     }
     return [];
   }
@@ -137,7 +138,7 @@ export async function listEnabledGmailAccounts(): Promise<GmailAccount[]> {
       });
     } catch (err) {
       const name = err instanceof Error ? err.name : "UnknownError";
-      console.error("[gmail-accounts] decrypt enabled account error:", name);
+      logger.error({ error_name: name }, "gmail_accounts.decrypt_enabled_account_error");
     }
   }
 
@@ -196,7 +197,7 @@ export async function getGmailAccountForTenant(
   } catch (err) {
     const code = (err as { code?: string })?.code;
     if (code !== "42P01") {
-      console.error("[gmail-accounts] fetch for tenant error:", code ?? "unknown");
+      logger.error({ detalle: code ?? "unknown" }, "gmail_accounts.fetch_for_tenant_error");
     }
     return null;
   }
@@ -237,7 +238,7 @@ export async function getGmailAccountByEmail(
     const code = (err as { code?: string })?.code;
     // 42P01 = undefined_table — the migration has not run yet; stay silent.
     if (code !== "42P01") {
-      console.error("[gmail-accounts] fetch by email error:", code ?? "unknown");
+      logger.error({ detalle: code ?? "unknown" }, "gmail_accounts.fetch_by_email_error");
     }
     return null;
   }

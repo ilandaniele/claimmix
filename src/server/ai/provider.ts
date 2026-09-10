@@ -27,6 +27,7 @@ import { eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
+import { logger } from "@/lib/observability/logger";
 
 export type AiProvider = "gemini";
 export type ExtractionEngine = AiProvider | "mock";
@@ -351,18 +352,13 @@ export async function resolveExtractionEngine(
   const preferred = await getTenantAiProvider(tenantId);
   if (await hasProviderKeyForTenant(tenantId, preferred, uid)) return preferred;
 
-  console.warn(
-    JSON.stringify({
-      level: "warn",
-      service: "claimmix",
-      msg: "ai.provider.degraded_to_mock",
-      tenant_id: tenantId,
-      preferred,
-      reason: "missing_api_key",
-      detalle:
+  logger.warn({
+        tenant_id: tenantId,
+        preferred,
+        reason: "missing_api_key",
+        detalle:
         "Sin credencial utilizable para Gemini. Las extracciones salen del mock: " +
         "son datos inventados y NO sirven para contestarle a un asegurado.",
-    })
-  );
+      }, "ai.provider.degraded_to_mock");
   return "mock";
 }

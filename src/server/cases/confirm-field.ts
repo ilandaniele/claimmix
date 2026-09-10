@@ -45,6 +45,7 @@ import type { CaseStatus, ConfirmField } from "@/lib/schemas/cases";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { updateMemoryFromConfirmation } from "@/server/memory/update";
 import { mensajesEntrantes } from "@/server/cases/inbound-messages";
+import { logger } from "@/lib/observability/logger";
 
 export interface FieldConfirmationResult {
   case_id: string;
@@ -166,7 +167,7 @@ export async function resolveFieldConfirmation(
       )
     );
   } catch (e) {
-    console.error("[confirm-field] claim_field_confirmations fetch error:", dbErrCode(e));
+    logger.error({ code: dbErrCode(e) }, "confirm_field.claim_field_confirmations_fetch_error");
     throw new AppError("INTERNAL_ERROR");
   }
 
@@ -241,7 +242,7 @@ async function confirmar(
           .where(eq(claimFieldConfirmations.id, confirmationRow.id))
       );
     } catch (e) {
-      console.error("[confirm-field] confirmation update error:", dbErrCode(e));
+      logger.error({ code: dbErrCode(e) }, "confirm_field.confirmation_update_error");
     }
   }
 
@@ -265,7 +266,7 @@ async function confirmar(
         })
     );
   } catch (e) {
-    console.error("[confirm-field] extracted_fields upsert error:", dbErrCode(e));
+    logger.error({ code: dbErrCode(e) }, "confirm_field.extracted_fields_upsert_error");
   }
 
   try {
@@ -282,7 +283,7 @@ async function confirmar(
         )
     );
   } catch (e) {
-    console.error("[confirm-field] missing_docs update error:", dbErrCode(e));
+    logger.error({ code: dbErrCode(e) }, "confirm_field.missing_docs_update_error");
   }
 
   /*
@@ -353,7 +354,7 @@ async function rechazar(a: ContextoAccion): Promise<FieldConfirmationResult> {
           .where(eq(claimFieldConfirmations.id, confirmationRow.id))
       );
     } catch (e) {
-      console.error("[confirm-field] reject update error:", dbErrCode(e));
+      logger.error({ code: dbErrCode(e) }, "confirm_field.reject_update_error");
     }
   }
 
@@ -465,7 +466,7 @@ async function reEvaluateStatus(
           .where(eq(cases.id, caseId))
       );
     } catch (e) {
-      console.error("[confirm-field] status update error:", dbErrCode(e));
+      logger.error({ code: dbErrCode(e) }, "confirm_field.status_update_error");
       return currentStatus;
     }
 
@@ -482,10 +483,7 @@ async function reEvaluateStatus(
 
     return newStatus;
   } catch (e) {
-    console.error(
-      "[confirm-field] reEvaluateStatus error:",
-      e instanceof Error ? e.name : "UnknownError"
-    );
+    logger.error({ detalle: e instanceof Error ? e.name : "UnknownError" }, "confirm_field.reevaluatestatus_error");
     return currentStatus;
   }
 }

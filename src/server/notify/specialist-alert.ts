@@ -27,6 +27,7 @@ import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
 import { isSendSuccess } from "@/server/email/provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Quién se entera, y en qué orden.
@@ -164,17 +165,12 @@ async function recipientsFor(tenantId: string): Promise<string[]> {
 
   // Sin especialistas: UNO solo, y que se sepa.
   const respaldo = (await byRoles(FALLBACK_ROLES)).slice(0, 1);
-  console.warn(
-    JSON.stringify({
-      level: "warn",
-      service: "claimmix",
-      msg: "specialist_alert.sin_especialistas",
-      tenant_id: tenantId,
-      // Cuántos, no quiénes: es un registro, y una dirección es un dato personal.
+  logger.warn({
+        tenant_id: tenantId,
+        // Cuántos, no quiénes: es un registro, y una dirección es un dato personal.
       destinatarios_de_respaldo: respaldo.length,
-      nota: "Nadie tiene rol specialist. El aviso va a un owner. Asigná el rol, o fijá SPECIALIST_ALERT_EMAILS.",
-    })
-  );
+        nota: "Nadie tiene rol specialist. El aviso va a un owner. Asigná el rol, o fijá SPECIALIST_ALERT_EMAILS.",
+      }, "specialist_alert.sin_especialistas");
   return respaldo;
 }
 
@@ -213,14 +209,9 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
       // Logged rather than passed over: an operator watching a rehearsal
       // should be able to see the alert was deliberately withheld, not
       // wonder whether it silently failed.
-      console.info(
-        JSON.stringify({
-          level: "info",
-          service: "claimmix",
-          msg: "specialist_alert.skipped_simulated",
-          case_id: caseId,
-        })
-      );
+      logger.info({
+        case_id: caseId,
+      }, "specialist_alert.skipped_simulated");
       return;
     }
 
@@ -230,28 +221,18 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
     if (recipients.length === 0) {
       // Worth an error, not a shrug: the promise made to the claimant has no
       // owner, and the only way to find that out is to look for this line.
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "specialist_alert.no_recipients",
-          case_id: caseId,
-          tenant_id: tenantId,
-        })
-      );
+      logger.error({
+        case_id: caseId,
+        tenant_id: tenantId,
+      }, "specialist_alert.no_recipients");
       return;
     }
 
     const account = await getGmailAccountForTenant(tenantId);
     if (!account) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "specialist_alert.no_mailbox",
-          case_id: caseId,
-        })
-      );
+      logger.error({
+        case_id: caseId,
+      }, "specialist_alert.no_mailbox");
       return;
     }
 
@@ -279,25 +260,15 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
       payload: { recipients: recipients.length, delivered },
     });
 
-    console.info(
-      JSON.stringify({
-        level: delivered ? "info" : "error",
-        service: "claimmix",
-        msg: delivered ? "specialist_alert.sent" : "specialist_alert.send_failed",
+    logger.info({
         case_id: caseId,
         recipients: recipients.length,
-      })
-    );
+      }, delivered ? "specialist_alert.sent" : "specialist_alert.send_failed");
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "specialist_alert.error",
+    logger.error({
         case_id: caseId,
         error: err instanceof Error ? err.name : "UnknownError",
-      })
-    );
+      }, "specialist_alert.error");
   }
 }
 

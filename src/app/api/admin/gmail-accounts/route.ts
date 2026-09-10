@@ -7,6 +7,7 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { logger } from "@/lib/observability/logger";
 
 const UpdateGmailAccountSchema = z.object({
   id: z.string().uuid(),
@@ -47,7 +48,7 @@ export async function GET() {
     } catch (e) {
       const code = (e as { code?: string })?.code;
       if (code === "42P01") return ok({ accounts: [] });
-      console.error("[admin/gmail-accounts GET]", code ?? "unknown");
+      logger.error({ detalle: code ?? "unknown" }, "admin_gmail_accounts_get");
       return err("INTERNAL_ERROR");
     }
 
@@ -83,15 +84,12 @@ export async function PATCH(request: NextRequest) {
         )
       );
     } catch (e) {
-      console.error(
-        "[admin/gmail-accounts PATCH]",
-        (e as { code?: string })?.code ?? "unknown"
-      );
+      logger.error({ detalle: (e as { code?: string })?.code ?? "unknown" }, "admin_gmail_accounts_patch");
       return err("INTERNAL_ERROR");
     }
 
     if (!data) {
-      console.error("[admin/gmail-accounts PATCH]", "no_data");
+      logger.error({ detalle: "no_data" }, "admin_gmail_accounts_patch");
       return err("INTERNAL_ERROR");
     }
 
@@ -116,10 +114,7 @@ export async function DELETE(request: NextRequest) {
         db.delete(t).where(eq(t.id, id))
       );
     } catch (e) {
-      console.error(
-        "[admin/gmail-accounts DELETE]",
-        (e as { code?: string })?.code ?? "unknown"
-      );
+      logger.error({ detalle: (e as { code?: string })?.code ?? "unknown" }, "admin_gmail_accounts_delete");
       return err("INTERNAL_ERROR");
     }
 

@@ -23,6 +23,7 @@ import { callGemini } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
+import { logger } from "@/lib/observability/logger";
 
 export type ReplyIntent =
   | "ask" // we need things from them
@@ -360,28 +361,18 @@ export async function composeReply(input: ComposeReplyInput): Promise<string> {
     const second = await attempt(input, first.problem);
     if (second.ok) return second.message;
 
-    console.warn(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "compose.rejected",
+    logger.warn({
         intent: input.intent,
         channel: input.channel,
         reason: second.problem,
         first_reason: first.problem,
-      })
-    );
+      }, "compose.rejected");
     return withUnansweredQuestion(input);
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "compose.failed",
+    logger.error({
         intent: input.intent,
         error: err instanceof Error ? err.name : "UnknownError",
-      })
-    );
+      }, "compose.failed");
     return withUnansweredQuestion(input);
   }
 }

@@ -13,6 +13,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +69,7 @@ export async function GET() {
     } catch (e) {
       const code = (e as { code?: string })?.code;
       if (code === "42P01" || code === "42703") return ok({ fields: [] });
-      console.error("[admin/custom-fields GET]", code ?? "unknown");
+      logger.error({ detalle: code ?? "unknown" }, "admin_custom_fields_get");
       return err(new AppError("INTERNAL_ERROR"));
     }
   } catch (e) {

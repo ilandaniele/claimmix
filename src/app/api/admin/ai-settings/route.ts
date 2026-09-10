@@ -18,6 +18,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 import {
   getTenantAiProvider,
   hasProviderKeyForTenant,
@@ -109,7 +110,7 @@ export async function PATCH(request: NextRequest) {
             "Falta aplicar las migraciones de tenant_ai_settings."
           );
         }
-        console.error("[admin/ai-settings PATCH]", code ?? "unknown");
+        logger.error({ detalle: code ?? "unknown" }, "admin_ai_settings_patch");
         return err(new AppError("INTERNAL_ERROR"));
       }
     }

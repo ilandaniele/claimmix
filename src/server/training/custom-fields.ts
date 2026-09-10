@@ -10,6 +10,7 @@ import "server-only";
 import { and, asc, eq, or, isNull } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
+import { logger } from "@/lib/observability/logger";
 
 export interface AgentCustomField {
   id: string;
@@ -62,7 +63,7 @@ export async function loadActiveCustomFields(
   } catch (e) {
     const code = (e as { code?: string })?.code;
     if (code && code !== "42P01" && code !== "42703") {
-      console.error("[custom-fields] load error:", code);
+      logger.error({ code }, "custom_fields.load_error");
     }
     return [];
   }

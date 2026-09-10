@@ -33,6 +33,7 @@ import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
 import { isReservedTestNumber } from "@/core/phone/reserved";
 import { enTenant } from "@/data/scope";
+import { logger } from "@/lib/observability/logger";
 
 export interface AgentMessage {
   caseId: string;
@@ -84,16 +85,11 @@ export const emailMessenger: AgentMessenger = {
     } catch (err) {
       // Este módulo promete que nada acá tira: una denuncia ya extraída y
       // guardada no se puede perder porque el redactor falló.
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "email.messenger.compose_failed",
-          case_id: message.caseId,
-          template: message.template,
-          error: err instanceof Error ? err.name : "UnknownError",
-        })
-      );
+      logger.error({
+        case_id: message.caseId,
+        template: message.template,
+        error: err instanceof Error ? err.name : "UnknownError",
+      }, "email.messenger.compose_failed");
     }
 
     await dispatchOutboundEmail(
@@ -451,15 +447,10 @@ export const whatsappMessenger: AgentMessenger = {
 
       const body = renderForWhatsApp(message);
       if (!body) {
-        console.error(
-          JSON.stringify({
-            level: "error",
-            service: "claimmix",
-            msg: "whatsapp.messenger.no_renderer",
-            case_id: message.caseId,
-            template: message.template,
-          })
-        );
+        logger.error({
+        case_id: message.caseId,
+        template: message.template,
+      }, "whatsapp.messenger.no_renderer");
         return;
       }
 
@@ -501,15 +492,10 @@ export const whatsappMessenger: AgentMessenger = {
       );
     } catch (err) {
       // Intake already succeeded; a messaging failure must not undo it.
-      console.error(
-        JSON.stringify({
-          level: "error",
-          service: "claimmix",
-          msg: "whatsapp.messenger.error",
-          case_id: message.caseId,
-          error: err instanceof Error ? err.name : "UnknownError",
-        })
-      );
+      logger.error({
+        case_id: message.caseId,
+        error: err instanceof Error ? err.name : "UnknownError",
+      }, "whatsapp.messenger.error");
     }
   },
 };
@@ -538,15 +524,10 @@ async function recordOutbound(
     const code =
       (err as { code?: string })?.code ??
       (err instanceof Error ? err.name : "DBError");
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "whatsapp.messenger.ledger_failed",
+    logger.error({
         case_id: message.caseId,
         code,
-      })
-    );
+      }, "whatsapp.messenger.ledger_failed");
   }
 }
 
@@ -567,15 +548,10 @@ export const simulatedWhatsappMessenger: AgentMessenger = {
     // claimant actually reads is whatever the model made of it.
     const finalBody = await writeReply(message, body, "whatsapp");
     await recordOutbound(message, finalBody, "skipped_simulated");
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "whatsapp.messenger.skipped_simulated",
+    logger.info({
         case_id: message.caseId,
         template: message.template,
-      })
-    );
+      }, "whatsapp.messenger.skipped_simulated");
   },
 };
 

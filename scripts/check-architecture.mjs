@@ -461,6 +461,43 @@ console.log("\n▸ El inquilino no entra por el cuerpo");
   }
 }
 
+// ── 10. Todo lo que se anota se puede filtrar ──────────────────────────────
+//
+// Había 198 líneas de `console.error("[modulo] algo pasó:", code)` contra 124
+// de JSON estructurado. El 44 % de lo que el servidor anotaba no se podía
+// filtrar por evento ni agrupar por caso: para saber por qué 115 personas se
+// quedaron sin respuesta entre el 24 y el 28 de junio hubo que leer el código y
+// adivinar, porque los 115 fallos tenían el mismo texto.
+//
+// Y el logger estructurado existía desde el principio, con su nivel, su reloj y
+// su ruteo a stdout/stderr. No lo importaba NADIE: cero archivos.
+//
+// Ahora es el único camino. `console.*` en `src/` vuelve a partir el registro en
+// dos formatos, que es como estaba.
+console.log("\n▸ Nada anota por fuera del logger");
+{
+  const sueltos = [];
+  for (const f of archivos("src", [".ts", ".tsx"])) {
+    // El logger es el que llama a console, obviamente.
+    if (f.endsWith("src/lib/observability/logger.ts")) continue;
+    const s = sinComentarios(readFileSync(f, "utf8"));
+    const re = /console\.(error|warn|info|log|debug)\s*\(/g;
+    let m;
+    while ((m = re.exec(s))) {
+      sueltos.push(`${f}:${s.slice(0, m.index).split("\n").length}`);
+    }
+  }
+  if (sueltos.length === 0) {
+    bien("todo pasa por `logger`, con su evento y sus campos");
+  } else {
+    mal(`${sueltos.length} llamada(s) a console.* fuera del logger`);
+    for (const x of sueltos.slice(0, 15)) console.log(`     ${x}`);
+    if (sueltos.length > 15) console.log(`     … y ${sueltos.length - 15} más`);
+    console.log("     `logger.error({ campos }, \"modulo.evento\")` — se filtra por");
+    console.log("     evento y se agrupa por caso. Un texto libre, no.");
+  }
+}
+
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(66));
 if (problemas.length === 0) {

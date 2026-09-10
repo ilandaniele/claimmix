@@ -22,6 +22,7 @@ import {
 } from "@/lib/rate-limit/index";
 import { checkBudget } from "@/server/ai/budget";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 
 export const maxDuration = 60;
 
@@ -144,17 +145,12 @@ export async function POST(request: NextRequest): Promise<Response> {
      * que corresponde es reintentar o avisar. El detalle queda del lado de
      * adentro, que es donde alguien puede actuar sobre él.
      */
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "demo.analyze.extractor_error",
+    logger.error({
         error_name: e instanceof Error ? e.name : "UnknownError",
         // El mensaje entero al log —acá adentro sí sirve— y recortado, que los
         // de los proveedores a veces traen la petición completa.
         detail: e instanceof Error ? e.message.slice(0, 300) : undefined,
-      })
-    );
+      }, "demo.analyze.extractor_error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 

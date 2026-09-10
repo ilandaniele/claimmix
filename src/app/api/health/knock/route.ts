@@ -35,6 +35,7 @@ import { z } from "zod";
 import { isInternalRequest } from "@/lib/security/internal-auth";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { getGmailClient } from "@/server/email/gmail/gmail-client";
+import { logger } from "@/lib/observability/logger";
 
 
 export const dynamic = "force-dynamic";
@@ -148,7 +149,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch (err) {
     // Sin PII y sin el token: sólo por qué no se pudo.
     const code = (err as { code?: string | number })?.code ?? "UNKNOWN";
-    console.error("[health/knock] gmail error:", String(code));
+    logger.error({ detalle: String(code) }, "health_knock.gmail_error");
     return NextResponse.json(
       { error: { code: "GMAIL_ERROR", message: `Gmail respondió ${String(code)}.` } },
       { status: 502 }

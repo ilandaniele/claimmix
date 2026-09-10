@@ -23,6 +23,7 @@
  */
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { waitForSimulationTurn } from "@/server/intake/simulation-throttle";
+import { logger } from "@/lib/observability/logger";
 
 export interface EntradaSimulacion {
   readonly caseId: string;
@@ -51,16 +52,11 @@ async function esperarElTurno(entrada: EntradaSimulacion): Promise<void> {
     // Se sigue igual. La espera es para no atropellar al modelo con veinte
     // casos a la vez, no una condición para procesar: quedarse acá dejaría el
     // caso en `procesando`, que es exactamente lo que esto vino a evitar.
-    console.warn(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "intake.simulate.queue_wait_timed_out",
+    logger.warn({
         case_id: entrada.caseId,
         blockers: turno.blockers,
         waited_ms: turno.waitedMs,
-      })
-    );
+      }, "intake.simulate.queue_wait_timed_out");
   }
 }
 

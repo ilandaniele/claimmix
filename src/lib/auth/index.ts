@@ -9,6 +9,7 @@ import { accounts, authUsers, sessions, verifications } from "@/lib/db/schema";
 
 import { provisionUserProfile } from "./provision";
 import { altaHabilitada } from "./registro-permitido";
+import { logger } from "@/lib/observability/logger";
 
 function resolveBaseURL(): string {
   if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
@@ -191,15 +192,10 @@ export const auth = betterAuth({
         before: async (user) => {
           const email = typeof user.email === "string" ? user.email : "";
           if (altaHabilitada(email)) return;
-          console.warn(
-            JSON.stringify({
-              level: "warn",
-              service: "claimmix",
-              msg: "auth.registro.rechazado",
-              dominio: email.slice(email.lastIndexOf("@") + 1) || "(sin dominio)",
-              motivo: "fuera_de_signup_allowed_emails",
-            })
-          );
+          logger.warn({
+        dominio: email.slice(email.lastIndexOf("@") + 1) || "(sin dominio)",
+        motivo: "fuera_de_signup_allowed_emails",
+      }, "auth.registro.rechazado");
           return false;
         },
         after: async (user) => {

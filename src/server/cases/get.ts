@@ -20,6 +20,7 @@ import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { auditLog, cases, extractedFields, missingDocs } from "@/lib/db/schema";
+import { logger } from "@/lib/observability/logger";
 import type {
   AuditLogRow,
   CaseRow,
@@ -92,16 +93,11 @@ export async function fetchCaseRow(
      *
      * No cambia lo que devuelve. Sólo deja de ser mudo.
      */
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "cases.fetchCaseRow.query_failed",
+    logger.error({
         error_code:
           (err as { code?: string })?.code ??
           (err instanceof Error ? err.name : "UnknownError"),
-      })
-    );
+      }, "cases.fetchCaseRow.query_failed");
     return null;
   }
 }
@@ -137,16 +133,11 @@ export async function fetchExtractedFields(
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
     // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
     // persona no mandó nada.
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "cases.fetchExtractedFields.query_failed",
+    logger.error({
         error_code:
           (err as { code?: string })?.code ??
           (err instanceof Error ? err.name : "UnknownError"),
-      })
-    );
+      }, "cases.fetchExtractedFields.query_failed");
     return [];
   }
 }
@@ -169,16 +160,11 @@ export async function fetchMissingDocs(
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
     // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
     // persona no mandó nada.
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "cases.fetchMissingDocs.query_failed",
+    logger.error({
         error_code:
           (err as { code?: string })?.code ??
           (err instanceof Error ? err.name : "UnknownError"),
-      })
-    );
+      }, "cases.fetchMissingDocs.query_failed");
     return [];
   }
 }
@@ -237,16 +223,11 @@ export async function fetchAuditLog(
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
     // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
     // persona no mandó nada.
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "cases.fetchAuditLog.query_failed",
+    logger.error({
         error_code:
           (err as { code?: string })?.code ??
           (err instanceof Error ? err.name : "UnknownError"),
-      })
-    );
+      }, "cases.fetchAuditLog.query_failed");
     return [];
   }
 }

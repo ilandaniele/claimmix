@@ -18,6 +18,7 @@ import { and, desc, eq, inArray, or, type SQL } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { enTenant } from "@/data/scope";
+import { logger } from "@/lib/observability/logger";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -120,7 +121,7 @@ export async function loadMemoryHints(
           .limit(MEMORY_LOAD_LIMIT)
       );
     } catch (e) {
-      console.error("[memory/load] claim_memory fetch error:", (e as { code?: string })?.code);
+      logger.error({ detalle: (e as { code?: string })?.code }, "memory_load.claim_memory_fetch_error");
       return [];
     }
 
@@ -138,16 +139,11 @@ export async function loadMemoryHints(
 
     // AC13: Log MEMORY_APPLIED audit event when hints were found.
     if (hints.length > 0) {
-      console.info(
-        JSON.stringify({
-          level: "info",
-          service: "claimmix",
-          msg: "memory.hints_loaded",
-          hint_count: hints.length,
-          case_id: caseId ?? null,
-          // PII: sender email is NOT logged here
-        })
-      );
+      logger.info({
+        hint_count: hints.length,
+        case_id: caseId ?? null,
+        // PII: sender email is NOT logged here,
+      }, "memory.hints_loaded");
 
       if (caseId && tenantId) {
         // Fire-and-forget audit log — does not block the extraction path.
@@ -170,7 +166,7 @@ export async function loadMemoryHints(
     return hints;
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
-    console.error("[memory/load] exception:", errName);
+    logger.error({ error_name: errName }, "memory_load.exception");
     return [];
   }
 }
@@ -192,6 +188,6 @@ async function updateLastUsedAt(tenantId: string, ids: string[]): Promise<void> 
     );
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
-    console.error("[memory/load] last_used_at update exception:", errName);
+    logger.error({ error_name: errName }, "memory_load.last_used_at_update_exception");
   }
 }

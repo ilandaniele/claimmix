@@ -40,6 +40,7 @@ import { customers, insuredAssets, policies } from "@/lib/db/schema";
  */
 import { normalizarDni, normalizarNumeroPoliza } from "@/core/matching/normalizar";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
+import { logger } from "@/lib/observability/logger";
 
 export interface ToolContext {
   tenantId: string;
@@ -350,7 +351,7 @@ export async function runTool(
     const code =
       (err as { code?: string })?.code ??
       (err instanceof Error ? err.name : "UnknownError");
-    console.error("[agent-tools] failed:", name, code);
+    logger.error({ error_name: name, code }, "agent_tools.failed");
     return { error: "la consulta falló, seguí sin este dato" };
   }
 }

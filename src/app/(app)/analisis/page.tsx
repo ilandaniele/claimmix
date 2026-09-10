@@ -17,6 +17,7 @@ import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
 import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
+import { logger } from "@/lib/observability/logger";
 
 // ── Status and type labels ─────────────────────────────────────────────────────
 
@@ -131,7 +132,10 @@ async function fetchAnalisis(): Promise<AnalisisData | null> {
   } catch (e) {
     unstable_rethrow(e);
     if (e instanceof AppError) throw e;
-    console.error("[analisis] fetch error:", e instanceof Error ? e.name : "unknown");
+    logger.error(
+      { error_name: e instanceof Error ? e.name : "unknown" },
+      "analisis.fetch_error"
+    );
     return null;
   }
 }

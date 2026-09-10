@@ -25,6 +25,7 @@ import {
   resetRateLimit,
   clearAllRateLimits,
 } from "./memory";
+import { logger } from "@/lib/observability/logger";
 
 export { resetRateLimit, clearAllRateLimits };
 
@@ -152,16 +153,14 @@ function avisarSiEsMemoriaEnProduccion(proveedor: string, motivo: string): void 
   if (proveedor !== "memory") return;
   if (process.env.NODE_ENV !== "production") return;
 
-  console.error(
-    JSON.stringify({
-      level: "error",
-      service: "claimmix",
-      msg: "rate_limit.memoria_en_produccion",
+  logger.error(
+    {
       motivo,
       detalle:
         "El límite de tráfico cuenta en memoria: en serverless cada instancia " +
         "tiene la suya, así que en la práctica no hay tope.",
-    })
+    },
+    "rate_limit.memoria_en_produccion"
   );
 }
 

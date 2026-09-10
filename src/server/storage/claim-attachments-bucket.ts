@@ -22,6 +22,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { createHash } from "crypto";
 import { sanitizeFilename } from "@/server/email/attachment-validator";
+import { logger } from "@/lib/observability/logger";
 
 /** Bucket name — resolved at call time so env-var overrides in tests work. */
 function bucketName(): string {
@@ -113,7 +114,7 @@ export async function uploadAttachment(
     const statusCode =
       (error as { $metadata?: { httpStatusCode?: number } })?.$metadata
         ?.httpStatusCode ?? "unknown";
-    console.error("[claim-attachments-bucket] Upload failed:", statusCode); // crew-debug-ok
+    logger.error({ status_code: statusCode }, "claim_attachments_bucket.upload_failed");
     return { error: "STORAGE_UPLOAD_FAILED" };
   }
 
@@ -147,7 +148,7 @@ export async function readAttachment(storagePath: string): Promise<Buffer | null
     return bytes ? Buffer.from(bytes) : null;
   } catch (err) {
     const name = err instanceof Error ? err.name : "UnknownError";
-    console.error("[attachments] read failed:", name); // crew-debug-ok
+    logger.error({ error_name: name }, "attachments.read_failed");
     return null;
   }
 }
@@ -170,7 +171,7 @@ export async function deleteAttachment(storagePath: string): Promise<boolean> {
     return true;
   } catch (err) {
     const name = err instanceof Error ? err.name : "UnknownError";
-    console.error("[attachments] delete failed:", name); // crew-debug-ok
+    logger.error({ error_name: name }, "attachments.delete_failed");
     return false;
   }
 }

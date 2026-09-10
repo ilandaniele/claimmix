@@ -42,6 +42,7 @@ import type { ClaimType } from "@/lib/schemas/cases";
 import { enTenant } from "@/data/scope";
 import { start } from "workflow/api";
 import { procesarCasoSimulado } from "@/workflows/intake-simulado";
+import { logger } from "@/lib/observability/logger";
 
 export const maxDuration = 180;
 
@@ -207,14 +208,14 @@ export async function POST(request: NextRequest): Promise<Response> {
       )
     );
     if (!newCase) {
-      console.error("[intake/simulate] Failed to create case: no_row");
+      logger.error({}, "intake_simulate.failed_to_create_case_no_row");
       return err(new AppError("INTERNAL_ERROR"));
     }
     caseId = newCase.id;
     caseCreatedAt = newCase.created_at ?? null;
   } catch (e) {
     const code = (e as { code?: string })?.code;
-    console.error("[intake/simulate] Failed to create case:", code);
+    logger.error({ code }, "intake_simulate.failed_to_create_case");
     return err(new AppError("INTERNAL_ERROR"));
   }
 
@@ -232,7 +233,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   } catch (e) {
     const code = (e as { code?: string })?.code;
-    console.error("[intake/simulate] Failed to create raw_message:", code);
+    logger.error({ code }, "intake_simulate.failed_to_create_raw_message");
     // Non-fatal — case still created; worker will fail gracefully.
   }
 
@@ -269,7 +270,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     // Si no se pudo encolar, se cae al camino de antes en vez de dejar el caso
     // colgado. Un flujo que no arranca es peor que un `after()` que quizás sí.
     const name = e instanceof Error ? e.name : "UnknownError";
-    console.error("[intake/simulate] no pude encolar el flujo:", name, "caso:", caseId);
+    logger.error({ error_name: name, case_id: caseId }, "intake_simulate.no_pude_encolar_el_flujo");
     scheduleAfterResponse(async () => {
       try {
         await runIntakeAgent({
@@ -280,7 +281,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       } catch (e2: unknown) {
         const n = e2 instanceof Error ? e2.name : "UnknownError";
-        console.error("[intake/simulate] Worker error:", n, "case:", caseId);
+        logger.error({ n, case_id: caseId }, "intake_simulate.worker_error");
       }
     });
   }

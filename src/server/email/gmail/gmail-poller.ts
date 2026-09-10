@@ -67,6 +67,7 @@ import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { sinLosCuerposYaDecodificados } from "@/server/email/gmail/payload-sin-duplicados";
 import type { gmail_v1 } from "googleapis";
+import { logger } from "@/lib/observability/logger";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -236,21 +237,11 @@ async function llamarAlWorker(caseId: string, tenantId: string): Promise<void> {
     });
 
     if (!response.ok) {
-      console.error(
-        "[gmail-poller] Worker dispatch error:",
-        `HttpError status=${response.status}`,
-        "case:",
-        caseId
-      ); // crew-debug-ok
+      logger.error({ detalle: `HttpError status=${response.status}`, case_id: caseId }, "gmail_poller.worker_dispatch_error");
     }
   } catch (err) {
     const name = err instanceof Error ? err.name : "UnknownError";
-    console.error(
-      "[gmail-poller] Worker dispatch error:",
-      name,
-      "case:",
-      caseId
-    ); // crew-debug-ok
+    logger.error({ error_name: name, case_id: caseId }, "gmail_poller.worker_dispatch_error");
   }
 }
 
@@ -266,7 +257,7 @@ async function markMessageRead(
     });
   } catch (err) {
     const code = err instanceof Error ? err.name : "UnknownError";
-    console.error("[gmail-poller] mark-as-read error:", code, "msgId:", gmailMessageId); // crew-debug-ok
+    logger.error({ code, message_id: gmailMessageId }, "gmail_poller.mark_as_read_error");
   }
 }
 
@@ -292,7 +283,7 @@ async function processAttachments(
     adapted = await adaptGmailAttachments(parts, gmailMessageId, gmail);
   } catch (err) {
     const code = err instanceof Error ? err.name : "UnknownError";
-    console.error("[gmail-poller] adaptGmailAttachments error:", code); // crew-debug-ok
+    logger.error({ code }, "gmail_poller.adaptgmailattachments_error");
     return;
   }
 
@@ -377,14 +368,9 @@ async function processMessage(
   // Matching on the connected mailboxes rather than the polled address covers
   // a tenant whose mailboxes write to each other.
   if (await isOwnMailbox(fromAddr)) {
-    console.info(
-      JSON.stringify({
-        level: "info",
-        service: "claimmix",
-        msg: "gmail_poller.skipped_own_message",
+    logger.info({
         message_id: gmailMessageId,
-      })
-    );
+      }, "gmail_poller.skipped_own_message");
     return { outcome: "skipped" };
   }
 
@@ -450,7 +436,7 @@ async function processMessage(
   } catch (err) {
     // IC9: non-fatal — log code only, never throw.
     const code = err instanceof Error ? err.name : "UnknownError";
-    console.error("[gmail-poller] mark-as-read error:", code, "msgId:", gmailMessageId); // crew-debug-ok
+    logger.error({ code, message_id: gmailMessageId }, "gmail_poller.mark_as_read_error");
   }
 
   // The EMAIL_RECEIVED audit entry is written by ingestInboundEmail, which is
@@ -479,13 +465,13 @@ export async function pollGmail(
   const tenantId = account?.tenantId ?? resolveTenantId();
   if (!tenantId) {
     // Should never happen with MVP sentinel, but guard explicitly.
-    console.error("[gmail-poller] Could not resolve tenant — aborting poll"); // crew-debug-ok
+    logger.error({}, "gmail_poller.could_not_resolve_tenant_aborting_poll");
     return { processed: 0, skipped: 0, errors: 1, fallback: false, history_id: "0", case_ids: [] };
   }
 
   const gmailEmail = account?.email ?? process.env.GMAIL_USER_EMAIL;
   if (!gmailEmail) {
-    console.error("[gmail-poller] GMAIL_USER_EMAIL not set — aborting poll"); // crew-debug-ok
+    logger.error({}, "gmail_poller.gmail_user_email_not_set_aborting");
     return { processed: 0, skipped: 0, errors: 1, fallback: false, history_id: "0", case_ids: [] };
   }
 
@@ -555,17 +541,12 @@ export async function pollGmail(
 
     if (quedaCola && ultimoRegistroLeido) {
       latestHistoryId = ultimoRegistroLeido;
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "gmail_poller.cola_pendiente",
-          leidos: messageIds.length,
-          detalle:
+      logger.warn({
+        leidos: messageIds.length,
+        detalle:
             "Había más mensajes de los que entran en una corrida. La marca queda " +
             "en el último leído y la próxima sigue desde ahí.",
-        })
-      );
+      }, "gmail_poller.cola_pendiente");
     } else if (!quedaCola && historyData.historyId) {
       latestHistoryId = historyData.historyId;
     }
@@ -579,7 +560,7 @@ export async function pollGmail(
     if (isHistoryNotFound) {
       // ── Fallback: messages.list(newer_than:1d) ─────────────────────────────
       usedFallback = true;
-      console.error("[gmail-poller] historyId stale — falling back to messages.list"); // crew-debug-ok
+      logger.error({}, "gmail_poller.historyid_stale_falling_back_to_messages");
 
       try {
         const listResponse = await gmail.users.messages.list({
@@ -603,11 +584,11 @@ export async function pollGmail(
           }
         } catch (profileErr) {
           const code = profileErr instanceof Error ? profileErr.name : "UnknownError";
-          console.error("[gmail-poller] getProfile error:", code); // crew-debug-ok
+          logger.error({ code }, "gmail_poller.getprofile_error");
         }
       } catch (listErr) {
         const code = listErr instanceof Error ? listErr.name : "UnknownError";
-        console.error("[gmail-poller] messages.list fallback error:", code); // crew-debug-ok
+        logger.error({ code }, "gmail_poller.messages_list_fallback_error");
         await recordPollError(pollState.id, `messages_list_failed: ${code}`);
         return {
           processed: 0,
@@ -621,7 +602,7 @@ export async function pollGmail(
     } else {
       // Non-404 error — fatal for this poll run.
       const code = err instanceof Error ? err.name : "UnknownError";
-      console.error("[gmail-poller] history.list error:", code); // crew-debug-ok
+      logger.error({ code }, "gmail_poller.history_list_error");
       await recordPollError(pollState.id, `history_list_failed: ${code}`);
       return {
         processed: 0,
@@ -658,11 +639,11 @@ export async function pollGmail(
         }
       } catch (profileErr) {
         const code = profileErr instanceof Error ? profileErr.name : "UnknownError";
-        console.error("[gmail-poller] getProfile error (first-run):", code); // crew-debug-ok
+        logger.error({ code }, "gmail_poller.getprofile_error_first_run");
       }
     } catch (listErr) {
       const code = listErr instanceof Error ? listErr.name : "UnknownError";
-      console.error("[gmail-poller] messages.list first-run error:", code); // crew-debug-ok
+      logger.error({ code }, "gmail_poller.messages_list_first_run_error");
       await recordPollError(pollState.id, `first_run_list_failed: ${code}`);
       return {
         processed: 0,
@@ -725,8 +706,9 @@ export async function pollGmail(
       errors++;
       // IC10: per-message isolation — log code only (no PII), continue to next.
       const code = err instanceof Error ? err.name : "UnknownError";
-      console.error( // crew-debug-ok
-        "[gmail-poller] message error:", code, "msgId:", messageId
+      logger.error(
+        { code, message_id: messageId },
+        "gmail_poller.message_error"
       );
       await recordPollError(
         pollState.id,
@@ -741,17 +723,12 @@ export async function pollGmail(
        */
       const intentos = (intentosPrevios.get(messageId) ?? 0) + 1;
       if (intentos >= MAX_INTENTOS_POR_MENSAJE) {
-        console.error(
-          JSON.stringify({
-            level: "error",
-            service: "claimmix",
-            msg: "gmail_poller.mensaje_abandonado",
-            gmail_message_id: messageId,
-            intentos,
-            error_code: code,
-            nota: "Se agotaron los reintentos. Si era una denuncia, hay que abrirla a mano.",
-          })
-        );
+        logger.error({
+        gmail_message_id: messageId,
+        intentos,
+        error_code: code,
+        nota: "Se agotaron los reintentos. Si era una denuncia, hay que abrirla a mano.",
+      }, "gmail_poller.mensaje_abandonado");
       } else {
         siguenFallando.push({
           id: messageId,
@@ -797,7 +774,7 @@ export async function pollGmail(
       await advancePollState(pollState.id, latestHistoryId);
     } catch (advanceErr) {
       const code = advanceErr instanceof Error ? advanceErr.name : "UnknownError";
-      console.error("[gmail-poller] advancePollState error:", code); // crew-debug-ok
+      logger.error({ code }, "gmail_poller.advancepollstate_error");
       // Non-fatal for the response — watermark will retry on next run.
     }
   }

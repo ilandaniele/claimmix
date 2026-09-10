@@ -1,6 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
+import { logger } from "@/lib/observability/logger";
 
 function createDb(connectionString: string) {
   return drizzle(neon(connectionString), { schema });
@@ -62,7 +63,7 @@ function avisarAQueBaseEnDesarrollo(connectionString: string): void {
    * Llamarle «desarrollo» ahí era falso justo donde más importa saber a qué base
    * se le está escribiendo.
    */
-  console.info(`[db] conectando a ${host}`);
+  logger.info({ host }, "db.conectando");
 }
 
 export const db = new Proxy({} as Db, {

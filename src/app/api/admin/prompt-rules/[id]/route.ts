@@ -16,6 +16,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { logger } from "@/lib/observability/logger";
 import {
   rateLimit,
   RATE_LIMIT_CONFIGS,
@@ -121,15 +122,12 @@ export async function PATCH(
         )
       );
     } catch (e) {
-      console.error(
-        "[admin/prompt-rules PATCH]",
-        (e as { code?: string })?.code ?? "unknown"
-      );
+      logger.error({ detalle: (e as { code?: string })?.code ?? "unknown" }, "admin_prompt_rules_patch");
       return err(new AppError("INTERNAL_ERROR"));
     }
 
     if (!data) {
-      console.error("[admin/prompt-rules PATCH]", "no_data");
+      logger.error({ detalle: "no_data" }, "admin_prompt_rules_patch");
       return err(new AppError("INTERNAL_ERROR"));
     }
 

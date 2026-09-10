@@ -18,6 +18,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
 import { listEnabledGmailAccounts } from "@/server/email/gmail/accounts";
 import { isInternalRequest } from "@/lib/security/internal-auth";
+import { logger } from "@/lib/observability/logger";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // ── Auth check ────────────────────────────────────────────────────────────────
@@ -80,14 +81,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
-    console.error(
-      JSON.stringify({
-        level: "error",
-        service: "claimmix",
-        msg: "admin.setup_gmail_watch.failed",
+    logger.error({
         error_name: errName,
-      })
-    );
+      }, "admin.setup_gmail_watch.failed");
     return NextResponse.json(
       { error: { code: "INTERNAL", message: "Watch setup failed. Check server logs." } },
       { status: 500 }

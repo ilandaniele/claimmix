@@ -23,6 +23,7 @@
 import "server-only";
 import type { gmail_v1 } from "googleapis";
 import type { EmailAttachment } from "@/server/email/rehost-attachments";
+import { logger } from "@/lib/observability/logger";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -177,7 +178,7 @@ export async function adaptGmailAttachments(
       } catch (err) {
         // Log error code only — no PII (filename is not PII, but body content is).
         const code = err instanceof Error ? err.name : "UnknownError";
-        console.error("[gmail-attachment-adapter] Failed to fetch attachment:", code); // crew-debug-ok
+        logger.error({ code }, "gmail_attachment_adapter.failed_to_fetch_attachment");
         // Skip this attachment rather than failing the whole message.
         continue;
       }

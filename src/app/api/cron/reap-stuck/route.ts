@@ -21,13 +21,14 @@ import { isInternalRequest } from "@/lib/security/internal-auth";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
+import { logger } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const secret = process.env.CRON_SECRET;
   if (!secret) {
-    console.error("[cron/reap-stuck] CRON_SECRET is not configured"); // crew-debug-ok
+    logger.error({}, "cron_reap_stuck.cron_secret_is_not_configured");
     return NextResponse.json(
       { error: { code: "INTERNAL", message: "Server misconfiguration." } },
       { status: 500 }

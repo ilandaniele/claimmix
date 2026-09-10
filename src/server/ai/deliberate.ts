@@ -34,6 +34,7 @@ import { labelForField } from "@/lib/labels/claim-fields";
 import { describeTools, runTool, type ToolContext } from "@/server/ai/agent-tools";
 import { redactObject, redactString } from "@/lib/audit/redact";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
+import { logger } from "@/lib/observability/logger";
 
 export type AgentIntent =
   | "ask"
@@ -160,24 +161,16 @@ export async function deliberate(
 
     const problem = validate(plan, input);
     if (problem) {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          service: "claimmix",
-          msg: "agent.deliberation_rejected",
-          reason: problem,
-          intent: plan.intent,
-        })
-      );
+      logger.warn({
+        reason: problem,
+        intent: plan.intent,
+      }, "agent.deliberation_rejected");
       return null;
     }
 
     return plan;
   } catch (err) {
-    console.error(
-      "[deliberate] failed:",
-      err instanceof Error ? err.name : "UnknownError"
-    );
+    logger.error({ detalle: err instanceof Error ? err.name : "UnknownError" }, "deliberate.failed");
     return null;
   }
 }
@@ -246,20 +239,15 @@ async function think(
 
       // Logged because a lookup that quietly returns nothing looks exactly
       // like a lookup nobody made, and the two need different fixes.
-      console.info(
-        JSON.stringify({
-          level: "info",
-          service: "claimmix",
-          msg: "agent.tool_call",
-          case_id: input.caseId,
-          tool: call.tool,
-          // Los argumentos son el DNI, el número de póliza o el teléfono que
+      logger.info({
+        case_id: input.caseId,
+        tool: call.tool,
+        // Los argumentos son el DNI, el número de póliza o el teléfono que
           // escribió una persona, y esto va a los logs de Vercel. El resultado,
           // lo mismo: trae el padrón.
           args: redactObject(call.args),
-          result: redactString(JSON.stringify(result).slice(0, 300)),
-        })
-      );
+        result: redactString(JSON.stringify(result).slice(0, 300)),
+      }, "agent.tool_call");
 
       transcript.push(
         `${call.tool}(${JSON.stringify(call.args)}) → ${JSON.stringify(result)}`

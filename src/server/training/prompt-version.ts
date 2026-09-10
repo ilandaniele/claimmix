@@ -13,6 +13,7 @@ import { and, eq } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
+import { logger } from "@/lib/observability/logger";
 
 /** Version label recorded when no tenant prompt_versions row is active. */
 export const BUILTIN_PROMPT_VERSION = "builtin-v1";
@@ -69,7 +70,7 @@ export async function getActivePromptVersion(
   } catch (e) {
     const code = (e as { code?: string })?.code;
     if (code && code !== "42P01") {
-      console.error("[prompt-version] load error:", code); // crew-debug-ok
+      logger.error({ code }, "prompt_version.load_error");
     }
     // Never break extraction because the prompt version could not be loaded.
     return BUILTIN;

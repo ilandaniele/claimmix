@@ -26,6 +26,7 @@ import { classifyInboundEmailForIntake } from "@/server/email/relevance-prefilte
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { enTenant } from "@/data/scope";
 import { reabrirSiEraNoRelevante } from "@/server/cases/reabrir-no-relevante";
+import { logger } from "@/lib/observability/logger";
 
 export interface InboundEmail {
   tenantId: string;
@@ -133,7 +134,7 @@ export async function ingestInboundEmail(
       // A unique violation means a previous partial run already opened the
       // case. Treat it as done rather than opening a second one.
       if (code === "23505") return { outcome: "skipped", reason: "duplicate" };
-      console.error("[inbound-email] case insert failed:", code); // crew-debug-ok
+      logger.error({ code }, "inbound_email.case_insert_failed");
       throw new Error(`case_insert_failed: ${code ?? "unknown"}`);
     }
   }
@@ -212,7 +213,7 @@ async function insertInboundMessage(
     const code =
       (err as { code?: string })?.code ??
       (err instanceof Error ? err.name : "UnknownError");
-    console.error("[inbound-email] claim_messages insert failed:", code); // crew-debug-ok
+    logger.error({ code }, "inbound_email.claim_messages_insert_failed");
     return null;
   }
 }

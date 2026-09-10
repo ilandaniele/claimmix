@@ -31,6 +31,7 @@ import {
   MINIMO_TELEFONO,
 } from "@/core/matching/normalizar";
 import type { ClaimFields } from "@/lib/schemas/extracted-claim";
+import { logger } from "@/lib/observability/logger";
 
 /** A single customer match result. */
 export interface CustomerMatch {
@@ -153,15 +154,11 @@ export async function findCustomerMatches(
   // Sort by confidence descending (highest first).
   matches.sort((a, b) => b.confidence - a.confidence);
 
-  console.info(
-    JSON.stringify({
-      level: "info",
-      service: "claimmix",
-      msg: "customer_matcher.matches_found",
-      tenant_id: tenantId,
-      match_count: matches.length,
-      match_types: matches.map((m) => m.matchType),
-      /*
+  logger.info({
+        tenant_id: tenantId,
+        match_count: matches.length,
+        match_types: matches.map((m) => m.matchType),
+        /*
        * Con qué claves se pudo buscar. Los NOMBRES, nunca los valores.
        *
        * Un `match_count: 0` tiene dos causas que se ven igual en el log: la
@@ -178,8 +175,7 @@ export async function findCustomerMatches(
       claves_disponibles: (["policy_number", "dni", "email", "phone"] as const).filter(
         (k) => fields[k] && fields[k]!.trim() !== ""
       ),
-    })
-  );
+      }, "customer_matcher.matches_found");
 
   return matches;
 }
@@ -231,7 +227,7 @@ async function matchByPolicyNumber(
         .limit(5)
     );
   } catch (e) {
-    console.error("[customer-matcher] Policy lookup error:", (e as { code?: string })?.code);
+    logger.error({ detalle: (e as { code?: string })?.code }, "customer_matcher.policy_lookup_error");
     return [];
   }
 
@@ -285,7 +281,7 @@ async function matchByDni(
         .limit(5)
     );
   } catch (e) {
-    console.error("[customer-matcher] DNI lookup error:", (e as { code?: string })?.code);
+    logger.error({ detalle: (e as { code?: string })?.code }, "customer_matcher.dni_lookup_error");
     return [];
   }
 
@@ -324,7 +320,7 @@ async function matchByEmail(
         .limit(5)
     );
   } catch (e) {
-    console.error("[customer-matcher] Email lookup error:", (e as { code?: string })?.code);
+    logger.error({ detalle: (e as { code?: string })?.code }, "customer_matcher.email_lookup_error");
     return [];
   }
 
@@ -389,7 +385,7 @@ async function matchByPhone(
         .limit(5)
     );
   } catch (e) {
-    console.error("[customer-matcher] Phone lookup error:", (e as { code?: string })?.code);
+    logger.error({ detalle: (e as { code?: string })?.code }, "customer_matcher.phone_lookup_error");
     return [];
   }
 

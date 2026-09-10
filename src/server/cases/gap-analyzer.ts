@@ -33,6 +33,7 @@ import {
 } from "@/lib/db/schema";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
+import { logger } from "@/lib/observability/logger";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -313,15 +314,10 @@ async function leerElCaso(
       confirmaciones: deConfirmaciones(confirmaciones),
     };
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "warn",
-        service: "claimmix",
-        msg: "gap_analyzer.lote_fallo",
+    logger.error({
         code: codigoDeError(err),
         nota: "Se vuelve al camino de a uno, donde cada lectura degrada sola.",
-      })
-    ); // crew-debug-ok
+      }, "gap_analyzer.lote_fallo");
 
     const [storedFields, missingDocKeys, confirmaciones] = await Promise.all([
       fetchStoredFields(caseId, tenantId),
@@ -459,7 +455,7 @@ async function fetchStoredFields(
       await enTenant<FilaDeCampo[]>({ tenantId }, (db) => consultaCampos(db, caseId))
     );
   } catch (err) {
-    console.error("[gap-analyzer] extracted_fields fetch error:", codigoDeError(err));
+    logger.error({ detalle: codigoDeError(err) }, "gap_analyzer.extracted_fields_fetch_error");
     return [];
   }
 }
@@ -482,7 +478,7 @@ async function fetchMissingDocKeys(
       )
     );
   } catch (err) {
-    console.error("[gap-analyzer] missing_docs fetch error:", codigoDeError(err));
+    logger.error({ detalle: codigoDeError(err) }, "gap_analyzer.missing_docs_fetch_error");
     return [];
   }
 }
@@ -506,10 +502,7 @@ async function fetchConfirmaciones(
       )
     );
   } catch (err) {
-    console.error(
-      "[gap-analyzer] claim_field_confirmations fetch error:",
-      codigoDeError(err)
-    );
+    logger.error({ detalle: codigoDeError(err) }, "gap_analyzer.claim_field_confirmations_fetch_error");
     return [];
   }
 }

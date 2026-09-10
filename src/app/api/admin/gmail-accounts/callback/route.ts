@@ -5,6 +5,7 @@ import { tables } from "@/lib/db";
 import { encryptRefreshToken } from "@/server/email/gmail/accounts";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
 import { enTenant } from "@/data/scope";
+import { logger } from "@/lib/observability/logger";
 import {
   COOKIE_ESTADO_OAUTH,
   decodificarEstado,
@@ -98,10 +99,7 @@ export async function GET(request: NextRequest) {
           })
       );
     } catch (e) {
-      console.error(
-        "[gmail-accounts callback] upsert:",
-        (e as { code?: string })?.code ?? "unknown"
-      );
+      logger.error({ detalle: (e as { code?: string })?.code ?? "unknown" }, "gmail_accounts_callback.upsert");
       return NextResponse.redirect(new URL("/configuracion?gmail=save_failed", origin));
     }
 
@@ -126,10 +124,7 @@ export async function GET(request: NextRequest) {
           refreshToken: tokens.refresh_token,
         });
       } catch (e) {
-        console.error(
-          "[gmail-accounts callback] watch:",
-          e instanceof Error ? e.name : "unknown"
-        );
+        logger.error({ detalle: e instanceof Error ? e.name : "unknown" }, "gmail_accounts_callback.watch");
       }
     }
 
@@ -140,7 +135,7 @@ export async function GET(request: NextRequest) {
     return listo;
   } catch (err) {
     const name = err instanceof Error ? err.name : "UnknownError";
-    console.error("[gmail-accounts callback] error:", name);
+    logger.error({ error_name: name }, "gmail_accounts_callback.error");
     return NextResponse.redirect(new URL("/configuracion?gmail=connect_failed", origin));
   }
 }

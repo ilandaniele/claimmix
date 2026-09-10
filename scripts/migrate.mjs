@@ -31,6 +31,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { connect, LEDGER_INSERT } from "./lib/db-driver.mjs";
+import { leerDeEnvLocal } from "./lib/env-local.mjs";
 
 const MIGRATIONS_DIR = "./neon/migrations";
 
@@ -131,13 +132,16 @@ if (urlIdx !== -1) {
   conn = process.argv[urlIdx + 1];
   console.log("▸ base: (pasada por --url)");
 } else {
-  const env = readFileSync("./.env.local", "utf8");
-  const connMatch = env.match(new RegExp("^" + VAR + '\\s*=\\s*"?([^"\\n]+)"?', "m"));
-  if (!connMatch) {
+  // `leerDeEnvLocal` valida el nombre antes de usarlo. Armar la expresión con
+  // lo que venga de `--env` es `js/regex-injection` en severidad alta, y no es
+  // teórico: `--env "A|.*"` deja de buscar una variable y matchea cualquier
+  // línea, así que este script —que aplica migraciones— apunta a una base que
+  // nadie nombró.
+  conn = leerDeEnvLocal(VAR);
+  if (!conn) {
     console.error(`✖ ${VAR} no está en .env.local`);
     process.exit(1);
   }
-  conn = connMatch[1];
   console.log(`▸ base: ${VAR}`);
 }
 

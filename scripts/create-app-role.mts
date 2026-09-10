@@ -180,6 +180,12 @@ try {
       // No está: se crea abajo.
     }
     const salto = contenido.includes("\r\n") ? "\r\n" : "\n";
+    // El nombre se valida antes de entrar a la expresión: sale de `--env`, y
+    // armar un patrón con eso es `js/regex-injection` en severidad alta.
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(CLAVE)) {
+      console.error(`✖ "${CLAVE}" no es un nombre de variable de entorno.`);
+      process.exit(1);
+    }
     const patron = new RegExp(`^${CLAVE}=.*$`, "m");
     contenido = patron.test(contenido)
       ? contenido.replace(patron, `${CLAVE}=${urlFinal}`)

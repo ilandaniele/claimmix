@@ -36,7 +36,7 @@
  */
 
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   enTenant,
@@ -696,6 +696,64 @@ async function redispatchExtraction(
   } catch (err) {
     // Si ni esto se puede escribir, queda el log de arriba y nada más.
     console.error("[email-worker] no se pudo remarcar pendiente:", dbErrCode(err));
+  }
+}
+
+/**
+ * Cuántas veces se reintenta una extracción que se quedó sin tiempo.
+ *
+ * El mismo tope que usa `gmail_poll_state.pendientes` para lo mismo y que la
+ * 0028 le puso a las miradas por adjunto. Tres intentos y después sí escala:
+ * a esa altura no es el proveedor, es este mensaje.
+ */
+const MAX_REINTENTOS_POR_TIMEOUT = 3;
+
+/**
+ * Marca el caso para que lo retome el barrido, si le quedan intentos.
+ *
+ * Devuelve `false` cuando se agotaron —o cuando no se pudo escribir— y ahí el
+ * llamador escala, que es lo que hacía siempre.
+ */
+async function reintentarPorTimeout(
+  caseId: string,
+  tenantCtx: TenantContext
+): Promise<boolean> {
+  try {
+    /*
+     * El tope va en el WHERE, no en un `if` sobre lo que leímos.
+     *
+     * Leer el contador y después decidir son dos transacciones, y en el medio
+     * entra otra corrida: las dos leen dos, las dos escriben tres, y el caso
+     * se reintenta cuatro veces. Con el predicado adentro del UPDATE, la base
+     * serializa y la fila devuelta dice si nos tocó a nosotros.
+     */
+    const filas = await enTenant<Array<{ id: string }>>(tenantCtx, (db) =>
+      db
+        .update(cases)
+        .set({
+          extraction_pending: true,
+          intentos_de_extraccion: sql`${cases.intentos_de_extraccion} + 1`,
+        })
+        .where(
+          and(
+            eq(cases.id, caseId),
+            lt(cases.intentos_de_extraccion, MAX_REINTENTOS_POR_TIMEOUT)
+          )
+        )
+        .returning({ id: cases.id })
+    );
+    return filas.length > 0;
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "email_worker.reintento_por_timeout_fallo",
+        case_id: caseId,
+        code: dbErrCode(err),
+      })
+    ); // crew-debug-ok
+    return false;
   }
 }
 
@@ -1554,6 +1612,42 @@ export async function runEmailExtractionWorker(
         | undefined;
       const errStatus = typeof cause?.status === "number" ? cause.status : null;
       const errCode = typeof cause?.code === "string" ? cause.code : null;
+
+      /*
+       * Un TIMEOUT no es una escalada. Es «probá de nuevo».
+       *
+       * Escalar mandaba el caso a `escalado`, que NO está en la lista de
+       * estados desde los que el worker puede arrancar y que `reap-stuck` no
+       * barre. O sea que treinta segundos de lentitud de Vertex dejaban al
+       * denunciante sin respuesta hasta que una persona tocara «Re-analizar».
+       *
+       * Pasó en el ensayo del post-deploy del 10/09: `choque-completo`, turno
+       * 4, «esperaba 1 respuesta(s), hubo 0», dos corridas seguidas. El
+       * producto hizo lo que estaba escrito; lo que estaba mal era lo escrito.
+       *
+       * Con la marca de pendiente lo levanta `retomarExtraccionesPendientes`
+       * dos minutos después. Sólo para TIMEOUT: un 400 no mejora reintentando,
+       * y una cuota agotada tampoco.
+       *
+       * Y con tope, porque `extraction_pending` no distingue «se cayó una vez»
+       * de «este caso rompe siempre»: un mensaje que agota el plazo SIEMPRE se
+       * reintentaría en cada barrido, pagando una llamada cada vez.
+       */
+      if (errCode === "TIMEOUT") {
+        const reintentado = await reintentarPorTimeout(caseId, tenantCtx);
+        if (reintentado) {
+          console.warn(
+            JSON.stringify({
+              level: "warn",
+              service: "claimmix",
+              msg: "email_worker.timeout_a_la_cola",
+              case_id: caseId,
+            })
+          ); // crew-debug-ok
+          return;
+        }
+      }
+
       try {
         await escalateCase(
           caseId,

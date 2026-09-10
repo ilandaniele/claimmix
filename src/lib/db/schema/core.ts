@@ -19,6 +19,7 @@ import {
   numeric,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uuid,
@@ -162,6 +163,14 @@ export const cases = pgTable("cases", {
   }),
   /** A message arrived while a run was in flight; the holder must run again. */
   extraction_pending: boolean("extraction_pending").default(false).notNull(),
+  /**
+   * Cuántas veces se reintentó la extracción tras un timeout del proveedor.
+   *
+   * Un timeout es transitorio y merece otro intento — pero un mensaje que
+   * SIEMPRE agota el plazo se reintentaría para siempre, pagando una llamada
+   * cada vez. Pasado el tope del código, escala. Ver la migración 0030.
+   */
+  intentos_de_extraccion: smallint("intentos_de_extraccion").default(0).notNull(),
   email_message_id: text("email_message_id"),
   email_thread_id: text("email_thread_id"),
   is_claim: boolean("is_claim"),

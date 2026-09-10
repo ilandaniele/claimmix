@@ -14,6 +14,7 @@ import type { CaseRow } from "@/server/cases/list";
 function makeCase(overrides: Partial<CaseRow> = {}): CaseRow {
   return {
     injury_severity: null,
+    intentos_de_extraccion: 0,
     id: "00000000-0000-0000-0000-000000000001",
     tenant_id: "t1",
     policy_number: "POL-001",

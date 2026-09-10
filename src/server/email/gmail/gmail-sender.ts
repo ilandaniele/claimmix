@@ -161,6 +161,23 @@ async function fetchRfcMessageId(
   }
 }
 
+/**
+ * El código HTTP que Google devolvió, si lo devolvió.
+ *
+ * `googleapis` lo pone en tres lugares distintos según por dónde falle: en
+ * `err.status`, en `err.code` (a veces número, a veces la cadena de undici como
+ * `ECONNRESET`) y en `err.response.status`. Se miran los tres porque el que
+ * está es justamente el que dice qué pasó.
+ */
+function errorStatus(err: unknown): number | string | undefined {
+  const e = err as {
+    status?: number;
+    code?: number | string;
+    response?: { status?: number };
+  };
+  return e?.status ?? e?.response?.status ?? e?.code;
+}
+
 export class GmailSender implements EmailProvider {
   readonly name = "gmail" as const;
 
@@ -196,11 +213,42 @@ export class GmailSender implements EmailProvider {
 
       return { providerMessageId, rfcMessageId: await fetchRfcMessageId(gmail, providerMessageId) };
     } catch (err) {
-      // AC10: log only the error code — never credential values or message bodies.
-      const code =
-        err instanceof Error ? err.name : typeof err === "string" ? err : "UnknownError";
-      console.error("[GmailSender] send error:", code); // crew-debug-ok
-      return { errorCode: "GMAIL_SEND_FAILED" };
+      /*
+       * El MOTIVO, no una constante.
+       *
+       * Esto devolvía `GMAIL_SEND_FAILED` para todo y logueaba `err.name`, que
+       * para un error de `googleapis` es siempre «GaxiosError» o «Error». O sea
+       * que el 401 (token revocado), el 403 (cuota del proyecto), el 429 (tope
+       * de Gmail), el 400 (destinatario inválido) y un `ECONNRESET` producían la
+       * misma línea de log y la misma fila en la base.
+       *
+       * No es teórico. En producción, entre el 24 y el 28 de junio de 2026 hay
+       * 115 eventos `email.outbound_failed` con el payload IDÉNTICO
+       * —`{"error": "GMAIL_SEND_FAILED"}`, los 115— contra 195 enviados. Ciento
+       * quince personas que denunciaron un siniestro y no recibieron respuesta
+       * durante cuatro días, y de por qué no queda nada: los `console.error` de
+       * esos días ya no existen, que la retención de Hobby es de una hora.
+       *
+       * Con el status propagado, ese incidente habría dicho `GMAIL_401` en las
+       * 115 filas de `audit_log`, que están guardadas y no vencen. La diferencia
+       * entre «algo falló» y «el token está revocado, andá a reconectar la
+       * casilla».
+       *
+       * Sigue sin loguearse nada del mensaje ni de la credencial (AC10): un
+       * código HTTP no es ninguna de las dos cosas.
+       */
+      const status = errorStatus(err);
+      const code = err instanceof Error ? err.name : "UnknownError";
+      console.error(
+        JSON.stringify({
+          level: "error",
+          service: "claimmix",
+          msg: "gmail_sender.send_failed",
+          status: status ?? null,
+          error_name: code,
+        })
+      ); // crew-debug-ok
+      return { errorCode: status ? `GMAIL_${status}` : "GMAIL_SEND_FAILED" };
     }
   }
 }

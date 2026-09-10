@@ -59,6 +59,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { analyzeGaps, UMBRAL_POR_OMISION } from "@/core/case/gap-analysis";
 import { checkBudget, recordUsage } from "@/server/ai/budget";
 import { ClaimAgentError, runClaimTextAgent, runEmailClaimAgent } from "@/server/ai/claim-agent";
+import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
 import { findCustomerMatches, MATCH_QUE_VINCULA } from "@/server/matching/customer-matcher";
@@ -450,6 +451,15 @@ const EXTRACTION_LEASE_MS = 3 * 60 * 1000;
  * a mitad de una escritura.
  */
 const PRESUPUESTO_DE_CORRIDA_MS = 40_000;
+
+/**
+ * Lo que la llamada al modelo necesita para siquiera intentar.
+ *
+ * Sale del módulo compartido y no es una copia: si allá se mueve el corte, acá se
+ * mueve solo. Dos números que tienen que coincidir y viven en dos archivos son
+ * dos números que en algún momento dejan de coincidir.
+ */
+const TIMEOUT_DEL_MODELO_MS = PLAZO_DEL_MODELO_MS;
 
 /**
  * Lo mínimo que hace falta para que valga la pena redespachar.
@@ -963,7 +973,19 @@ export async function runEmailExtractionWorker(
     //
     // Se marca el caso como pendiente —la misma marca que usa el mensaje que
     // llega a mitad de corrida— y la próxima corrida lo retoma desde acá.
-    if (restanteMs() <= 0) {
+    /*
+     * No alcanza con que quede tiempo: tiene que quedar el que la llamada NECESITA.
+     *
+     * Esto miraba `<= 0`, o sea «empezá si te queda un milisegundo». Y la
+     * llamada al modelo tiene su propio corte de 30 s: arrancarla con 5 s de
+     * presupuesto garantiza que la maten en el medio, que es exactamente lo que
+     * este control existe para evitar. Un timeout del modelo escala el caso; que
+     * lo maten a mitad de escritura, no lo escala nada.
+     *
+     * Con el corte del modelo como piso, la comparación dice lo que quería
+     * decir: si no entra la llamada entera, no se empieza.
+     */
+    if (restanteMs() < TIMEOUT_DEL_MODELO_MS) {
       console.warn(
         JSON.stringify({
           level: "warn",
@@ -971,6 +993,8 @@ export async function runEmailExtractionWorker(
           msg: "email_worker.sin_tiempo_para_extraer",
           case_id: caseId,
           presupuesto_ms: PRESUPUESTO_DE_CORRIDA_MS,
+          restante_ms: Math.max(0, Math.round(restanteMs())),
+          necesita_ms: TIMEOUT_DEL_MODELO_MS,
         })
       ); // crew-debug-ok
       await enTenant(tenantCtx, (db) =>

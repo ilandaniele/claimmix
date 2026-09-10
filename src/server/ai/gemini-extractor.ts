@@ -27,6 +27,7 @@
  */
 
 import "server-only";
+import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { tokenDeGcp } from "@/server/gcp/credenciales";
 import { RESPUESTA_JSON_SCHEMA } from "@/lib/schemas/extracted-claim";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
@@ -78,7 +79,8 @@ const DEFAULT_GEMINI_MAX_RETRIES = 3;
  * En 0 no se corta nada. Está para el ensayo y para una emergencia, no
  * para producción.
  */
-const DEFAULT_GEMINI_TIMEOUT_MS = 20_000;
+/** El plazo vive en `@/core/ai/plazo-del-modelo`: lo comparte con el worker. */
+const DEFAULT_GEMINI_TIMEOUT_MS = PLAZO_DEL_MODELO_MS;
 
 let geminiRequestQueue: Promise<void> = Promise.resolve();
 let lastGeminiRequestAt = 0;
@@ -596,7 +598,34 @@ export async function extractEmailClaimGemini(
   // pasarse—; lo que arregla es que la corrección hable del problema que
   // hubo. Un reintento que da el consejo equivocado no es un reintento: es
   // la misma llamada, más cara.
-  if (!result) {
+  /*
+   * Un TIMEOUT no se reintenta.
+   *
+   * Caía en la rama de abajo, o sea que la corrección le decía «tu respuesta
+   * anterior fue JSON inválido» a un modelo que no llegó a contestar nada. Es
+   * el mismo defecto que ya se había arreglado para MAX_TOKENS, en el otro
+   * caso: un consejo correcto para otro problema.
+   *
+   * Y encima es caro. El segundo intento manda el MISMO prompt de ~10.600
+   * tokens que acaba de no entrar en treinta segundos, así que lo más probable
+   * es que tampoco entre — y son otros treinta segundos de los cuarenta que
+   * tiene la corrida. Reintentar acá es lo que hacía imposible subir el corte.
+   *
+   * El caso queda escalado con `provider_error`, que es lo que ya pasaba, sólo
+   * que treinta segundos antes y sin haber pagado la segunda llamada.
+   */
+  if (!result && lastErrMeta?.code === "TIMEOUT") {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        service: "claimmix",
+        msg: "ai.email_extraction.timeout_sin_reintento",
+        provider: "gemini",
+        case_id: logCaseId,
+        timeout_ms: DEFAULT_GEMINI_TIMEOUT_MS,
+      })
+    );
+  } else if (!result) {
     const correccion =
       lastErrMeta?.code === "MAX_TOKENS"
         ? "\n\nIMPORTANT: Your previous response was cut off because it exceeded the length limit. Be concise: emit each field once, do not repeat yourself, and omit fields you have no value for. Return ONLY valid JSON matching the schema."

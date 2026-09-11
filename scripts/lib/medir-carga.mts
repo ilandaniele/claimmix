@@ -206,3 +206,37 @@ export function porTiempo(samples: Sample[], partes: number): Sample[][] {
   }
   return cortes;
 }
+/**
+ * Una celda de la forma «carga»: una consulta a una concurrencia, contra un
+ * presupuesto de p95.
+ *
+ * Una medición no es un veredicto. El 11/09 el mismo commit dio 856, 557, 311
+ * y 284 ms para «detalle de un caso» con 20 analistas, con la columna de un
+ * analista quieta en 262–388 y consultas que nadie tocó saltando al azar. Lo
+ * que se mueve es la contención del camino runner → Neon, y una regresión de
+ * verdad se repite; un hipo no.
+ *
+ * Si el p95 pasa el presupuesto, la celda se mide otra vez y falla sólo si se
+ * repite. Las dos mediciones van al reporte. El número no se toca: subirlo deja
+ * de avisar, no cambia lo que pasa. Una celda con consultas falladas no se
+ * repite: eso no es ruido.
+ */
+export async function medirCelda(
+  etiqueta: string,
+  total: number,
+  concurrency: number,
+  op: () => Promise<void>,
+  presupuestoMs: number,
+  medir: typeof measure = measure
+): Promise<{ fila: Fila; repetida: Fila | null; ok: boolean }> {
+  const primera = fila(etiqueta, await medir(total, concurrency, op));
+  if (primera.fallaron > 0) return { fila: primera, repetida: null, ok: false };
+  if (primera.p95 <= presupuestoMs) return { fila: primera, repetida: null, ok: true };
+
+  const repetida = fila(`${etiqueta} · repetida`, await medir(total, concurrency, op));
+  return {
+    fila: primera,
+    repetida,
+    ok: repetida.fallaron === 0 && repetida.p95 <= presupuestoMs,
+  };
+}

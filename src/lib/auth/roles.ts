@@ -37,5 +37,13 @@ export const CUSTOMER_PII_ROLES: UserRole[] = ["owner", "admin", "specialist"];
 /** Roles with admin-level configuration access. */
 export const ADMIN_ROLES: UserRole[] = ["owner", "admin"];
 
-/** Roles allowed to mutate cases / confirm fields (everything except viewer). */
+/*
+ * Roles allowed to mutate cases / confirm fields (everything except viewer).
+ *
+ * `viewer` ve todo lo que ve `analyst` —el caso entero, `policyholder_name` y
+ * `policy_number` incluidos— y no toca nada. La única lectura que se le niega
+ * es la misma que a `analyst`: el padrón (`CUSTOMER_PII_ROLES`). Decidido el
+ * 11/09: si algún día «viewer» pasa a ser «no ve datos personales», eso es una
+ * proyección por rol en toda la pantalla del caso, no un parche en una ruta.
+ */
 export const CASE_EDITOR_ROLES: UserRole[] = ["owner", "admin", "specialist", "analyst"];

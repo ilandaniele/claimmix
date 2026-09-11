@@ -2743,16 +2743,33 @@ deploy. Regla que se siguió: dos reruns como máximo y **el número no se toca*
 —subirlo a 550 deja de avisar, no cambia lo que pasa—. La decisión de fondo
 sigue siendo la de #157, y sigue siendo tuya.
 
+### ✅ Cuatro decisiones tomadas (2026-09-11)
+
+Delegadas con «tomá vos las decisiones». Las cuatro, con su porqué:
+
+| decisión | qué se hizo |
+|---|---|
+| **Carga: el presupuesto de 500 ms** | Ni subir el número ni aceptar el rojo al azar. **Una medición no es un veredicto**: si una celda pasa el presupuesto se mide otra vez y falla sólo si se repite (`medirCelda`, con test). Las dos mediciones van al reporte y la celda repetida lleva `*` en la tabla. Una celda con consultas falladas no se repite: eso no es ruido. |
+| **`viewer`** | «Mira todo y no cambia nada». El código ya lo decía (`require-role.ts`, `CASE_EDITOR_ROLES`, el padrón negado igual que a `analyst`); ahora está escrito en `roles.ts` para que nadie lo reabra. La pantalla del caso queda como está. |
+| **`achicar-payloads --apply`** | Aplicado: **356 filas, 12.808 → 2.518 kB**. Nadie en `src/` lee `body.data` de `raw_payload` y el arreglo hacia adelante llevaba días en producción; los bytes base64 eran una copia que nada consultaba. |
+| **El escaneo de los 15 componentes** | Corriendo sobre `c9899bc`: 331 archivos, `medium` con foco en superficie de ataque; informe en `CLAUDE-SECURITY-20260911-175932/`. Esta fila se actualiza cuando termine. |
+
 ### 🙋 Waiting on you (not code)
 
-- **¿Corro `pnpm achicar-payloads --apply` contra producción?** Libera 10.290 kB
+- ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
+  356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`
+  (el único lector es `->>'profile_name'`) y el arreglo hacia adelante llevaba
+  días en producción sin que nada se rompiera. Liberaba 10.290 kB
   de 12.808 en `claim_messages` sacando la copia en base64 del cuerpo, que ya
   está decodificada en `body_text`/`body_html`. Es irreversible: el salto de
   línea y el relleno del base64 no se reconstruyen byte a byte. El CONTENIDO no
   se pierde. El arreglo hacia adelante ya está aplicado; esto es sólo para las
   356 filas viejas.
 
-- **¿Para qué existe el rol `viewer`?** La conversación ya no le sale cruda, pero
+- ~~**¿Para qué existe el rol `viewer`?**~~ ✅ **DECIDIDO 2026-09-11: «mira todo y no
+  cambia nada».** Lee lo mismo que `analyst` —la pantalla del caso entera— y no
+  escribe; el padrón se le niega igual que a `analyst` (`CUSTOMER_PII_ROLES`).
+  Escrito en `roles.ts`. La pregunta era: la conversación ya no le sale cruda, pero
   `fetchCaseRow` hace un `db.select()` pelado, así que la pantalla del caso le da
   igual el `policyholder_name` y el `policy_number`. Si `viewer` es «mira todo y
   no cambia nada», está bien como está. Si es «no ve datos personales», hace

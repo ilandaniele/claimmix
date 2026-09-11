@@ -2752,9 +2752,21 @@ Delegadas con «tomá vos las decisiones». Las cuatro, con su porqué:
 | **Carga: el presupuesto de 500 ms** | Ni subir el número ni aceptar el rojo al azar. **Una medición no es un veredicto**: si una celda pasa el presupuesto se mide otra vez y falla sólo si se repite (`medirCelda`, con test). Las dos mediciones van al reporte y la celda repetida lleva `*` en la tabla. Una celda con consultas falladas no se repite: eso no es ruido. |
 | **`viewer`** | «Mira todo y no cambia nada». El código ya lo decía (`require-role.ts`, `CASE_EDITOR_ROLES`, el padrón negado igual que a `analyst`); ahora está escrito en `roles.ts` para que nadie lo reabra. La pantalla del caso queda como está. |
 | **`achicar-payloads --apply`** | Aplicado: **356 filas, 12.808 → 2.518 kB**. Nadie en `src/` lee `body.data` de `raw_payload` y el arreglo hacia adelante llevaba días en producción; los bytes base64 eran una copia que nada consultaba. |
-| **El escaneo de los 15 componentes** | Corriendo sobre `c9899bc`: 331 archivos, `medium` con foco en superficie de ataque; informe en `CLAUDE-SECURITY-20260911-175932/`. Esta fila se actualiza cuando termine. |
+| **El escaneo de los 15 componentes** | Corrió sobre `c9899bc` y **no leyó nada**: 58 investigadores despachados, 0 devueltos, barrido y panel sin correr, todos por el límite mensual de uso. El informe en `CLAUDE-SECURITY-20260911-175932/` lo dice sin vueltas (sello `unverified`, motivo `nothing-examined`). Falta repetirlo en tandas más chicas; ver «Waiting on you». |
 
 ### 🙋 Waiting on you (not code)
+
+- **¿Repito el escaneo de seguridad en tandas?** El acotado a los 15 componentes
+  corrió sobre `c9899bc` y **no leyó nada**: 58 investigadores, 0 devueltos, por
+  el límite mensual de uso (informe en `CLAUDE-SECURITY-20260911-175932/`, sello
+  `unverified`). Es la tercera vez que un escaneo se come el límite, así que no lo
+  relanzo solo: son tus tokens. Propuesta: tres tandas a `medium` —(1) `src/proxy.ts`,
+  `src/lib/auth`, `src/lib/security`, `src/lib/rate-limit`, `src/app/api`;
+  (2) `src/server` menos `email`, `src/core`, `src/lib/db`, `src/lib/schemas`, `neon`;
+  (3) `src/app/(app)`, `src/app/(auth)`, `src/components`, `scripts`— y cada una
+  pide la confirmación de costo del plugin. Los dos primeros escaneos dejaron
+  afuera `src/lib/db`, `src/lib/schemas`, `src/lib/rate-limit` y `src/app/api/admin`;
+  las tandas los incluyen.
 
 - ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
   356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`
@@ -2775,7 +2787,9 @@ Delegadas con «tomá vos las decisiones». Las cuatro, con su porqué:
   no cambia nada», está bien como está. Si es «no ve datos personales», hace
   falta una proyección por rol en toda la pantalla, no un parche en una ruta.
 
-- **Vercel llegó al tope de builds del día (10/09, plan Hobby).** No bloquea los
+- ~~**Vercel llegó al tope de builds del día (10/09, plan Hobby).**~~ ✅ **LIBERADO
+  2026-09-11.** Volvieron los deploys y el post-deploy dio 7/7 en `ae4fa82` y
+  `c9899bc`. Lo que sigue es el relato original. No bloquea los
   merges —no es un check requerido— pero **no hay deploy hasta que se libere**, y
   sin deploy no corre el ensayo de conversaciones. Por eso quedaron sin tocar las
   dos optimizaciones del camino del agente.

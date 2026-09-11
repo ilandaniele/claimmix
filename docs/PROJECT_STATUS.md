@@ -2716,6 +2716,33 @@ componentes que faltan cierra el hueco más barato. El informe con la cobertura
 exacta está en `CLAUDE-SECURITY-20260910-182639/` (fuera del repo por su
 `.gitignore`).
 
+### 📉 Carga: cuatro mediciones del mismo commit, y ninguna del código (2026-09-11)
+
+El post-deploy de `ae4fa82` (los tres parches de seguridad, #158) dio rojo en
+Carga: `detalle de un caso` p95 **383 / 744 / 856 ms** con 1/5/20 analistas.
+Como el margen sobre 500 es más chico que el ruido (#157), «es ruido» no
+alcanzaba: había que separar varianza de regresión.
+
+| corrida | 1 | 5 | 20 | desde |
+|---|---|---|---|---|
+| post-deploy | 383 | 744 | **856** | runner de GitHub |
+| rerun aislado | 388 | 409 | **557** | runner de GitHub |
+| `pnpm load` local | 178 | 167 | 311 | esta máquina |
+| rerun 2 | 262 | 258 | 284 | runner de GitHub |
+
+Lo que descarta el código: los tres parches no tocan el camino de lectura (F7 y
+F9 son intake, F8 es envío); la base tiene el mismo tamaño (483 casos, cero
+creados hoy: el ensayo limpia lo suyo); y la columna de **1 analista** es
+estable en todas (262–388). Si la consulta se hubiera encarecido, esa columna se
+movería. Lo que explota es 5 y 20 —contención—, y consultas que nadie tocó
+saltan al azar: `búsqueda por texto` dio 448 con 5 analistas en el rerun 1 y
+357 con 20 en el rerun 2, cuando siempre da ~200.
+
+Conclusión: el gate mide el camino runner → Neon bajo 20 concurrentes, no el
+deploy. Regla que se siguió: dos reruns como máximo y **el número no se toca**
+—subirlo a 550 deja de avisar, no cambia lo que pasa—. La decisión de fondo
+sigue siendo la de #157, y sigue siendo tuya.
+
 ### 🙋 Waiting on you (not code)
 
 - **¿Corro `pnpm achicar-payloads --apply` contra producción?** Libera 10.290 kB

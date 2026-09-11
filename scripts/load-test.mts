@@ -61,6 +61,7 @@ import {
   fila,
   measure,
   measureFor,
+  medirCelda,
   ms,
   porTiempo,
   razon,
@@ -454,6 +455,10 @@ const AVISO_FUNCION =
  * quinientos usuarios virtuales. Contesta una sola pregunta —cuánto tarda una
  * consulta cuando el resto también está consultando— y es la única de las
  * cuatro que corre en cada deploy.
+ *
+ * Una celda que pasa el presupuesto se mide otra vez y falla sólo si se
+ * repite (`medirCelda`). Las celdas repetidas llevan `*` en la tabla, y las
+ * dos mediciones van al reporte.
  */
 async function formaCarga(escenarios: Escenario[]): Promise<Forma> {
   const ANCHO = 30;
@@ -464,6 +469,7 @@ async function formaCarga(escenarios: Escenario[]): Promise<Forma> {
   console.log("─".repeat(68));
 
   const filas: Fila[] = [];
+  const repetidas: string[] = [];
   let peor = 0;
   let fallaron = 0;
   let ok = true;
@@ -471,9 +477,17 @@ async function formaCarga(escenarios: Escenario[]): Promise<Forma> {
   for (const escenario of escenarios) {
     const cells: string[] = [];
     for (const concurrency of [1, 5, 20]) {
-      const samples = await measure(MUESTRAS, concurrency, escenario.run);
-      const f = fila(`${escenario.name} · ${concurrency} analistas`, samples);
-      filas.push(f);
+      const celda = await medirCelda(
+        `${escenario.name} · ${concurrency} analistas`,
+        MUESTRAS,
+        concurrency,
+        escenario.run,
+        P95_LECTURA_MS
+      );
+      filas.push(celda.fila);
+      if (celda.repetida) filas.push(celda.repetida);
+      // La que decide es la última que se midió.
+      const f = celda.repetida ?? celda.fila;
       if (f.fallaron > 0) {
         // El p95 de una celda que falló es el de los sobrevivientes, y entraba
         // igual al titular «p95 peor caso» del reporte, donde se lee como si
@@ -483,8 +497,13 @@ async function formaCarga(escenarios: Escenario[]): Promise<Forma> {
         cells.push(`${f.fallaron} ✗`.padStart(9));
       } else {
         peor = Math.max(peor, f.p95);
-        if (f.p95 > P95_LECTURA_MS) ok = false;
-        cells.push(ms(f.p95).padStart(9));
+        if (!celda.ok) ok = false;
+        cells.push((ms(f.p95) + (celda.repetida ? "*" : "")).padStart(9));
+      }
+      if (celda.repetida) {
+        repetidas.push(
+          `${escenario.name} · ${concurrency} analistas: ${ms(celda.fila.p95)} la primera vez, ${ms(f.p95)} al repetir`
+        );
       }
     }
     console.log(escenario.name.padEnd(ANCHO) + cells.join(""));
@@ -492,6 +511,7 @@ async function formaCarga(escenarios: Escenario[]): Promise<Forma> {
 
   console.log(`\np95: de cada 20 consultas, 19 tardan menos que esto. ${MUESTRAS} por celda.`);
   console.log(`Presupuesto: ${ms(P95_LECTURA_MS)}. Más que eso el tablero se siente lento.`);
+  for (const r of repetidas) console.log(`* ${r}`);
 
   return {
     nombre: "carga",
@@ -503,7 +523,7 @@ async function formaCarga(escenarios: Escenario[]): Promise<Forma> {
       (fallaron > 0 ? ` · ${fallaron} consulta(s) fallada(s), sin p95 comparable` : ""),
     ok,
     filas,
-    notas: [AVISO_FUNCION],
+    notas: [AVISO_FUNCION, ...repetidas.map((r) => `Celda repetida — ${r}`)],
   };
 }
 

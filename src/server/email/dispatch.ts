@@ -123,8 +123,14 @@ async function resolveReplyContext(
       originalSubject = inbound.subject?.trim() || undefined;
 
       if (inbound.to_addr) {
+        // `to_addr` es el `To:` tal como lo escribió quien mandó el mail, y la
+        // búsqueda por dirección mira las casillas de TODOS los inquilinos. Un
+        // `To:` que nombre la casilla de otro no puede hacer que se responda
+        // desde ella, con su token: sólo sirve si la casilla es de este.
         const account = await getGmailAccountByEmail(bareAddress(inbound.to_addr));
-        if (account?.enabled) return { account, inReplyTo, threadId, originalSubject };
+        if (account?.enabled && account.tenantId === tenantId) {
+          return { account, inReplyTo, threadId, originalSubject };
+        }
       }
     }
   } catch (err) {

@@ -196,3 +196,105 @@ describe("el cierre de <script> con espacio o atributos", () => {
     ).toEqual({ action: "allow" });
   });
 });
+
+/*
+ * Un cuerpo HTML grande y sin cerrar colgaba el poller.
+ *
+ * Las tres expresiones de `visibleHtmlText` retrocedían: por cada `<script`
+ * sin su `</script>` el motor recorría el resto del cuerpo otra vez, cuadrático
+ * en el tamaño del mail: el doble de cuerpo, cuatro veces el tiempo. Dos
+ * megabytes de `<script>` repetido eran segundos enteros de CPU; 256 kB de `<a`
+ * sin mayor, catorce. El poller se moría por timeout antes de mover la marca
+ * de historial, así que el mismo mensaje volvía con cada push, para siempre,
+ * y las denuncias reales quedaban atrás.
+ *
+ * Se mide el tiempo a mano porque el timeout de vitest no interrumpe código
+ * sincrónico: el test «pasaría» después de esperar todo eso.
+ */
+describe("un cuerpo HTML enorme y sin cerrar", () => {
+  const elapsed = (bodyHtml: string): number => {
+    const start = performance.now();
+    classifyInboundEmailForIntake({
+      fromAddr: "alguien@example.com",
+      subject: "Hola",
+      bodyText: "",
+      bodyHtml,
+    });
+    return performance.now() - start;
+  };
+
+  it("dos megabytes de <script> sin </script> se clasifican en milisegundos", () => {
+    expect(elapsed("<script>".repeat(1 << 18))).toBeLessThan(1000);
+  });
+
+  it("lo mismo con etiquetas que nunca cierran el mayor", () => {
+    expect(elapsed("<a".repeat(1 << 17))).toBeLessThan(1000);
+  });
+
+  it("y con medio millón de <> seguidos, que no son etiqueta", () => {
+    expect(elapsed("<>".repeat(1 << 19))).toBeLessThan(1000);
+  });
+});
+
+/*
+ * Los recorridos tienen que decidir igual que las expresiones que reemplazan.
+ * Cada caso de acá es un borde donde un recorrido escrito a mano se equivoca
+ * fácil, y en todos la respuesta es la que daban las expresiones.
+ */
+describe("el recorrido a mano decide igual que las expresiones", () => {
+  const NEWSLETTER = {
+    fromAddr: "novedades@example.com",
+    subject: "Newsletter",
+    bodyText: "",
+    headers: [{ name: "Precedence", value: "bulk" }],
+  };
+
+  it("<> no es una etiqueta: lo que sigue se lee", () => {
+    // `<[^>]+>` pide al menos un carácter adentro. Un recorrido que tomara el
+    // primer `>` de más adelante se comería la denuncia entera.
+    expect(
+      classifyInboundEmailForIntake({
+        ...NEWSLETTER,
+        bodyHtml: "<>Tuve un siniestro con mi poliza>",
+      })
+    ).toEqual({ action: "allow" });
+  });
+
+  it("<scripts> no abre un script: el nombre termina en el límite de palabra", () => {
+    expect(
+      classifyInboundEmailForIntake({
+        ...NEWSLETTER,
+        bodyHtml: "<scripts>Tuve un siniestro con mi poliza</scripts>",
+      })
+    ).toEqual({ action: "allow" });
+  });
+
+  it("el nombre de la etiqueta no distingue mayúsculas, ni al abrir ni al cerrar", () => {
+    expect(
+      classifyInboundEmailForIntake({
+        ...NEWSLETTER,
+        bodyHtml: '<SCRIPT>var x = "siniestro poliza";</Script >Promociones',
+      })
+    ).toMatchObject({ action: "skip" });
+  });
+
+  it("<style> se saca igual que <script>", () => {
+    expect(
+      classifyInboundEmailForIntake({
+        ...NEWSLETTER,
+        bodyHtml: "<style>.siniestro { color: red } .poliza {}</STYLE\n>Promociones",
+      })
+    ).toMatchObject({ action: "skip" });
+  });
+
+  it("un <script> que nunca cierra deja su código a la vista, como antes", () => {
+    // Sin cierre la expresión no matcheaba y el borrador de etiquetas dejaba el
+    // código como texto. El recorrido hace lo mismo: sólo cambia cuánto tarda.
+    expect(
+      classifyInboundEmailForIntake({
+        ...NEWSLETTER,
+        bodyHtml: '<script>var x = "siniestro poliza"; Promociones',
+      })
+    ).toEqual({ action: "allow" });
+  });
+});

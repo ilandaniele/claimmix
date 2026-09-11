@@ -18,6 +18,10 @@
  * The outbound claim_messages check is tried first because it is the common
  * case once W4/W5 are deployed: claimants reply to provider-sent outbound
  * messages whose provider_message_id is stored in claim_messages.
+ *
+ * Whichever step matches, the case is returned only if the sender already
+ * takes part in it (senderParticipates): headers and subject say which
+ * conversation a mail claims to belong to, not who sent it.
  */
 
 import "server-only";
@@ -26,7 +30,11 @@ import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
+import { bareAddress } from "@/lib/email/reserved";
 import { logger } from "@/lib/observability/logger";
+
+/** The channels whose `cases.email_thread_id` is an email thread. */
+const EMAIL_CHANNELS = ["email", "email_sim"];
 
 export interface ThreadLookupResult {
   existingCaseId?: string;
@@ -42,18 +50,31 @@ export interface ThreadLookupResult {
  * @param tenantId    - Tenant UUID for scoping the lookup
  * @param inReplyTo   - Value of the In-Reply-To header (may include angle brackets)
  * @param references  - Value of the References header (space-separated message-ids)
+ * @param subject     - Value of the Subject header (may carry "Caso #<uuid>")
+ * @param fromAddr    - Value of the From header; must already take part in the case
  * @returns { existingCaseId?: string }
  */
 export async function threadLookup(
   tenantId: string,
   inReplyTo: string,
   references: string,
-  subject: string = ""
+  subject: string,
+  fromAddr: string
 ): Promise<ThreadLookupResult> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   // Collect candidate thread IDs from both headers (angle brackets stripped).
   const candidates = buildCandidates(inReplyTo, references);
+  const sender = bareAddress(fromAddr);
+
+  // A match names the conversation the mail claims to belong to. It joins the
+  // case only if the sender is already part of it; otherwise the next step
+  // gets its turn and, failing all, the mail opens a case of its own.
+  const onlyIfParticipant = async (caseId: string, via: string) => {
+    if (await senderParticipates(tenantCtx, caseId, sender)) return caseId;
+    logger.warn({ case_id: caseId, via }, "thread_lookup.sender_not_in_case");
+    return undefined;
+  };
 
   // ── 1. New path: claim_messages WHERE direction='outbound' (AC6 / IC7) ────
   // A claimant reply to one of our outbound emails will have
@@ -76,7 +97,8 @@ export async function threadLookup(
     );
 
     if (claimMsgRow) {
-      return { existingCaseId: claimMsgRow.case_id };
+      const caseId = await onlyIfParticipant(claimMsgRow.case_id, "in_reply_to");
+      if (caseId) return { existingCaseId: caseId };
     }
   } catch (err) {
     const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
@@ -96,6 +118,9 @@ export async function threadLookup(
           .from(cases)
           .where(
             and(
+              // A WhatsApp case keeps the claimant's phone number here, and a
+              // phone number is something anyone can type into a header.
+              inArray(cases.channel, EMAIL_CHANNELS),
               inArray(cases.email_thread_id, candidates)
             )
           )
@@ -104,7 +129,8 @@ export async function threadLookup(
     );
 
     if (caseRow) {
-      return { existingCaseId: caseRow.id };
+      const caseId = await onlyIfParticipant(caseRow.id, "email_thread_id");
+      if (caseId) return { existingCaseId: caseId };
     }
   } catch (err) {
     const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
@@ -130,7 +156,10 @@ export async function threadLookup(
             .limit(1)
         )
       );
-      if (caseRow) return { existingCaseId: caseRow.id };
+      if (caseRow) {
+        const caseId = await onlyIfParticipant(caseRow.id, "subject");
+        if (caseId) return { existingCaseId: caseId };
+      }
     } catch (err) {
       const code = (err as { code?: string })?.code ?? "DBError";
       logger.error({ code }, "thread_lookup.subject_case_lookup_error");
@@ -147,6 +176,46 @@ export function caseIdFromSubject(subject: string | null | undefined): string | 
     /caso\s*#\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
   );
   return match ? match[1].toLowerCase() : null;
+}
+
+/**
+ * Whether `sender` already takes part in the case: wrote to it, or was written to.
+ *
+ * Headers and subject are typed by whoever sends the mail. A WhatsApp case
+ * keeps the claimant's phone number as its thread id and every outbound mail
+ * prints the case number, so on their own they let a stranger who knows a
+ * phone number or a case id file mail — and attachments — onto someone else's
+ * claim, skip the prefilter, reopen a closed case and become the newest
+ * inbound sender, which is who the agent answers next.
+ *
+ * Compared by bare address: `from_addr` and `to_addr` are stored as the header
+ * came, display name and all. A lookup that fails counts as "not a participant".
+ */
+async function senderParticipates(
+  tenantCtx: TenantContext,
+  caseId: string,
+  sender: string
+): Promise<boolean> {
+  if (!sender) return false;
+  try {
+    const rows = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          direction: claimMessages.direction,
+          from_addr: claimMessages.from_addr,
+          to_addr: claimMessages.to_addr,
+        })
+        .from(claimMessages)
+        .where(eq(claimMessages.case_id, caseId))
+    );
+    return rows.some(
+      (m) => bareAddress(m.direction === "inbound" ? m.from_addr : m.to_addr) === sender
+    );
+  } catch (err) {
+    const code = (err as { code?: string })?.code ?? "DBError";
+    logger.error({ code }, "thread_lookup.participants_error");
+    return false;
+  }
 }
 
 /**

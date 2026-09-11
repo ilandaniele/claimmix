@@ -75,12 +75,68 @@ function normalize(value: string): string {
  * manda el mail elige qué palabras poner ahí.
  *
  * `js/bad-tag-filter`, que CodeQL marcaba en severidad alta.
+ *
+ * Y no se hace con expresiones regulares. `<script\b[\s\S]*?<\/script[^>]*>`
+ * retrocede: por cada `<script` sin cierre el motor recorre el resto del cuerpo
+ * otra vez, cuadrático en el tamaño del mail —el doble de cuerpo, cuatro veces
+ * el tiempo—, y un mail de un par de megabytes se come la invocación entera.
+ * El poller se moría por timeout antes de mover la marca de historial y el
+ * mismo mensaje volvía con cada push, para siempre, con las denuncias reales
+ * atrás. Los recorridos de abajo hacen exactamente lo mismo que las tres
+ * expresiones, en una pasada.
  */
+function closingTagEnd(html: string, from: number, name: string): number {
+  for (let lt = html.indexOf("</", from); lt !== -1; lt = html.indexOf("</", lt + 2)) {
+    const end = lt + 2 + name.length;
+    if (html.slice(lt + 2, end).toLowerCase() === name) {
+      const gt = html.indexOf(">", end);
+      return gt === -1 ? -1 : gt + 1;
+    }
+  }
+  return -1;
+}
+
+function stripElement(html: string, name: string): string {
+  let out = "";
+  let i = 0;
+  let lt = html.indexOf("<");
+  while (lt !== -1) {
+    const nameEnd = lt + 1 + name.length;
+    const opens =
+      html.slice(lt + 1, nameEnd).toLowerCase() === name && !/\w/.test(html.charAt(nameEnd));
+    if (!opens) {
+      lt = html.indexOf("<", lt + 1);
+      continue;
+    }
+    const end = closingTagEnd(html, nameEnd, name);
+    if (end === -1) break;
+    out += html.slice(i, lt) + " ";
+    i = end;
+    lt = html.indexOf("<", end);
+  }
+  return out + html.slice(i);
+}
+
+function stripTags(html: string): string {
+  let out = "";
+  let i = 0;
+  for (let lt = html.indexOf("<"); lt !== -1; lt = html.indexOf("<", i)) {
+    const gt = html.indexOf(">", lt + 1);
+    if (gt === -1) break;
+    out += html.slice(i, lt);
+    if (gt === lt + 1) {
+      out += "<";
+      i = lt + 1;
+    } else {
+      out += " ";
+      i = gt + 1;
+    }
+  }
+  return out + html.slice(i);
+}
+
 function visibleHtmlText(html: string): string {
-  return html
-    .replace(/<script\b[\s\S]*?<\/script[^>]*>/gi, " ")
-    .replace(/<style\b[\s\S]*?<\/style[^>]*>/gi, " ")
-    .replace(/<[^>]+>/g, " ");
+  return stripTags(stripElement(stripElement(html, "script"), "style"));
 }
 
 function headerValue(

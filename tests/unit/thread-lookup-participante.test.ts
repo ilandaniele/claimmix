@@ -97,9 +97,9 @@ import { threadLookup } from "@/server/email/thread-lookup";
 const TENANT = "8a3f2c1e-5b6d-4e7f-9a0b-1c2d3e4f5a6b";
 const CASO_WHATSAPP = "2b8b1f0e-9c4d-4a5b-8e6f-7a8b9c0d1e2f";
 const CASO_MAIL = "151bf83d-a9c2-43fe-bd57-55ee0b5c3ed8";
-const TELEFONO = "5491155551234";
+const TELEFONO = "5491100000000";
 const CASILLA = "siniestros@aseguradora.com";
-const ASEGURADO = "Martín Sosa <martin.sosa@gmail.com>";
+const ASEGURADO = "Martín Sosa <martin.sosa@example.com>";
 const EXTRANO = "alguien@evil.example";
 
 beforeEach(() => {
@@ -146,7 +146,7 @@ describe("threadLookup: a stranger's mail", () => {
 
   it("opens its own case when the participants cannot be read", async () => {
     participantsUnreadable = true;
-    const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "martin.sosa@gmail.com");
+    const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "martin.sosa@example.com");
     expect(r.existingCaseId).toBeUndefined();
   });
 });
@@ -164,7 +164,7 @@ describe("threadLookup: the claimant's reply", () => {
   });
 
   it("lands on it through the case's own thread id when the case came by mail", async () => {
-    const r = await threadLookup(TENANT, "<18c1a2b3d4e5f6>", "", "Re: Caso", "martin.sosa@gmail.com");
+    const r = await threadLookup(TENANT, "<18c1a2b3d4e5f6>", "", "Re: Caso", "martin.sosa@example.com");
     expect(r.existingCaseId).toBe(CASO_MAIL);
   });
 

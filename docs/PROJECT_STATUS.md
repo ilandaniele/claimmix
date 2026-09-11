@@ -2686,6 +2686,36 @@ distintas de para qué está el presupuesto:
 Lo que **no** corresponde es subir el número a 550: eso no cambia lo que pasa,
 sólo deja de avisarlo.
 
+### 🔒 Tres parches del escaneo de seguridad (2026-09-11)
+
+El escaneo de Claude Security del 10/09 sobre `b4f66dc` devolvió tres hallazgos
+verificados, todos en el camino del mail entrante. Los tres tienen parche, y cada
+parche pasó por un verificador independiente que corrió la suite y por un
+investigador fresco que atacó el diff desnudo. Ninguno descansa en lectura sola:
+los tres traen un test en la suite que falla en la base y pasa con el cambio.
+
+| | qué pasaba | qué hace el parche | lo que **no** hace, a propósito |
+|---|---|---|---|
+| **F7** `relevance-prefilter.ts` CWE-1333 | Tres regex con retroceso cuadrático sobre el HTML del mail, sin tope. 256 kB de `<a` sin cerrar: 35 s, más que la invocación. La marca de agua no avanzaba y el mismo mail se bajaba para siempre. | Recorridos lineales con `indexOf`, idénticos a los regex sobre 1,5 M de casos. 25 MB de `<script>` en 177 ms. | No pone tope de tamaño: el primer intento lo traía y el verificador lo rechazó porque cambiaba `allow` por `skip` en mails legítimos. Tampoco anota el mensaje en `mensajes_pendientes` antes de procesar. |
+| **F8** `dispatch.ts` CWE-639 | La casilla con la que contestar salía del `To:` del mail entrante, buscada con el rol dueño, y valía cualquier fila habilitada: la respuesta a un extraño podía salir por la casilla de otro inquilino, con su DKIM y su refresh token. | La cuenta resuelta tiene que ser del inquilino que despacha; si no, el fallback por `enTenant` que ya existía. | No hace el refactor de resolver la casilla por `enTenant` y tratar `to_addr` como pista. Cierra el exploit con un invariante de una línea. |
+| **F9** `thread-lookup.ts` CWE-639 | Un mail se pegaba a un caso sólo por sus propios encabezados. Los casos de WhatsApp guardan el teléfono en `email_thread_id`: un número adivinable metía a un extraño en la denuncia de la víctima y lo convertía en a quien el agente contesta. | Guardia de participante en los tres caminos (el `From` tiene que ser un `from_addr` entrante o un `to_addr` saliente del caso) y `channel IN ('email','email_sim')` en la rama por `email_thread_id`. Falla cerrado. | Sigue confiando en el encabezado `From`, que es la frontera estándar del threading por mail. Un token secreto por caso en los salientes sería más fuerte: **decisión de diseño pendiente**. El camino por `Subject` no tiene filtro de canal (lo cubre la guardia); agregarlo es barato. |
+
+**Lo que cambia para un usuario real**, y es lo único: con F9, una respuesta desde
+una dirección que el caso nunca vio abre caso nuevo en vez de pegarse. Las cuatro
+rutas de respuesta legítima, el ensayo (una dirección por escenario, hilo por
+asunto) y WhatsApp (nunca pasa por `threadLookup`) siguen iguales.
+
+#### Lo que el escaneo no miró
+
+Estos tres salen de **3 de 18 componentes**. El escaneo se quedó sin cuota a mitad
+de camino: 53 de 60 investigadores fallaron, el barrido entero y los 18 votos del
+panel de la primera corrida. Auth/RLS, el webhook de WhatsApp, los agentes de IA,
+storage, facturación y las migraciones **no los leyó nadie**. Un escaneo entero a
+`medium` es el tamaño que agotó el límite dos veces; uno acotado a los 15
+componentes que faltan cierra el hueco más barato. El informe con la cobertura
+exacta está en `CLAUDE-SECURITY-20260910-182639/` (fuera del repo por su
+`.gitignore`).
+
 ### 🙋 Waiting on you (not code)
 
 - **¿Corro `pnpm achicar-payloads --apply` contra producción?** Libera 10.290 kB

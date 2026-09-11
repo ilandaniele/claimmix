@@ -154,7 +154,7 @@ describe("threadLookup: a stranger's mail", () => {
 describe("threadLookup: the claimant's reply", () => {
   it("lands on their case when it answers a mail we sent them", async () => {
     // Stored with display name; replied to bare and in another case.
-    const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "Martin.Sosa@Gmail.com");
+    const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "Martin.Sosa@example.com");
     expect(r.existingCaseId).toBe(CASO_MAIL);
   });
 

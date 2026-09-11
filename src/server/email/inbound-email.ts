@@ -74,7 +74,8 @@ export async function ingestInboundEmail(
     tenantId,
     email.inReplyTo ?? "",
     email.references ?? "",
-    email.subject
+    email.subject,
+    email.fromAddr
   );
 
   if (!existingCaseId) {

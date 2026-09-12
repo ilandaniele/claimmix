@@ -2756,17 +2756,24 @@ Delegadas con «tomá vos las decisiones». Las cuatro, con su porqué:
 
 ### 🙋 Waiting on you (not code)
 
-- **¿Repito el escaneo de seguridad en tandas?** El acotado a los 15 componentes
-  corrió sobre `c9899bc` y **no leyó nada**: 58 investigadores, 0 devueltos, por
-  el límite mensual de uso (informe en `CLAUDE-SECURITY-20260911-175932/`, sello
-  `unverified`). Es la tercera vez que un escaneo se come el límite, así que no lo
-  relanzo solo: son tus tokens. Propuesta: tres tandas a `medium` —(1) `src/proxy.ts`,
-  `src/lib/auth`, `src/lib/security`, `src/lib/rate-limit`, `src/app/api`;
-  (2) `src/server` menos `email`, `src/core`, `src/lib/db`, `src/lib/schemas`, `neon`;
-  (3) `src/app/(app)`, `src/app/(auth)`, `src/components`, `scripts`— y cada una
-  pide la confirmación de costo del plugin. Los dos primeros escaneos dejaron
-  afuera `src/lib/db`, `src/lib/schemas`, `src/lib/rate-limit` y `src/app/api/admin`;
-  las tandas los incluyen.
+- **El escaneo de seguridad no entra en el límite de la cuenta.** Tres corridas,
+  tres veces el mismo final. El acotado a los 15 componentes sobre `c9899bc`: 58
+  investigadores, 0 devueltos (`CLAUDE-SECURITY-20260911-175932/`, sello
+  `unverified`). La **tanda 1** —`src/proxy.ts`, `src/lib/auth`, `src/lib/security`,
+  `src/lib/rate-limit`, `src/app/api`, 74 archivos— sobre `9912c90`: 13
+  investigadores, 0 devueltos, barrido caído, panel sin votar
+  (`CLAUDE-SECURITY-20260911-220639/`, sello `unverified`). Se relanzó una vez con
+  la cuota ya restablecida y volvió a caer igual. En el primer intento **una** de
+  las cinco lentes del componente de API autenticada sí terminó y no propuso nada;
+  una lente de un componente no alcanza para afirmar nada.
+
+  Lo que falta decidir es tuyo: **el límite mensual**. Con este pipeline, cualquier
+  escaneo va a terminar igual hasta que haya cuota. Cuando la haya, las tandas 2 y 3
+  —(2) `src/server` menos `email`, `src/core`, `src/lib/db`, `src/lib/schemas`,
+  `neon`; (3) `src/app/(app)`, `src/app/(auth)`, `src/components`, `scripts`— y la
+  tanda 1 de nuevo, preferentemente **de a un componente por corrida**, no cinco
+  directorios. La única cobertura real que tiene el repo sigue siendo
+  `src/server/email` del 10/09: F7, F8 y F9, parchados en `main` desde `ae4fa82`.
 
 - ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
   356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`

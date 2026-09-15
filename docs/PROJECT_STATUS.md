@@ -2752,31 +2752,36 @@ Delegadas con «tomá vos las decisiones». Las cuatro, con su porqué:
 | **Carga: el presupuesto de 500 ms** | Ni subir el número ni aceptar el rojo al azar. **Una medición no es un veredicto**: si una celda pasa el presupuesto se mide otra vez y falla sólo si se repite (`medirCelda`, con test). Las dos mediciones van al reporte y la celda repetida lleva `*` en la tabla. Una celda con consultas falladas no se repite: eso no es ruido. |
 | **`viewer`** | «Mira todo y no cambia nada». El código ya lo decía (`require-role.ts`, `CASE_EDITOR_ROLES`, el padrón negado igual que a `analyst`); ahora está escrito en `roles.ts` para que nadie lo reabra. La pantalla del caso queda como está. |
 | **`achicar-payloads --apply`** | Aplicado: **356 filas, 12.808 → 2.518 kB**. Nadie en `src/` lee `body.data` de `raw_payload` y el arreglo hacia adelante llevaba días en producción; los bytes base64 eran una copia que nada consultaba. |
-| **El escaneo de los 15 componentes** | Corrió sobre `c9899bc` y **no leyó nada**: 58 investigadores despachados, 0 devueltos, barrido y panel sin correr, todos por el límite mensual de uso. El informe en `CLAUDE-SECURITY-20260911-175932/` lo dice sin vueltas (sello `unverified`, motivo `nothing-examined`). Falta repetirlo en tandas más chicas; ver «Waiting on you». |
+| **El escaneo de los 15 componentes** | Cerrado por tandas. La tanda 1 (auth, seguridad, rate-limit y `src/app/api`, 74 archivos) corrió entera el 15/09 sobre `cc89d00`: 11 de 11 investigadores, 74 de 74 archivos leídos, 3 candidatos rechazados por el panel, 0 hallazgos, sello `verified` (`CLAUDE-SECURITY-20260915-170931/`). Faltan las tandas 2 y 3; ver «Waiting on you». |
 
 ### 🙋 Waiting on you (not code)
 
-- **El escaneo de seguridad: la tanda 1 llegó a un veredicto, con 1 de 14
-  investigadores.** Cuatro corridas cortadas por el límite de la cuenta: el
-  acotado a 15 componentes sobre `c9899bc` (58 investigadores, 0 devueltos,
-  `CLAUDE-SECURITY-20260911-175932/`), la tanda 1 sobre `9912c90` dos veces
-  (13 y 0 devueltos, `CLAUDE-SECURITY-20260911-220639/`), y la tanda 1 otra vez
-  el 12/09 (`CLAUDE-SECURITY-20260912-204146/`), que es la que cuenta: 14
-  investigadores, **1 devuelto** (lente cripto/secretos sobre `src/app/api/cases`
-  y `user`), un candidato —la clave AES derivada con SHA-256 sin sal de
-  `GMAIL_TOKEN_ENCRYPTION_KEY`— **rechazado 3 a 0** por el panel el 15/09: la
-  entrada del hash la pone el operador, no el atacante, y el repo no trae ningún
-  valor débil. Sello `verified`, 0 hallazgos, pero el cero cubre 23 de 74
-  archivos: 39 no los contabilizó nadie. `src/proxy.ts` + `src/lib/{auth,security,rate-limit}`,
-  la API pública y `src/app/api/admin` siguen sin leer.
+- **Escaneo de seguridad: la tanda 1 está cerrada; faltan la 2 y la 3.** Cinco
+  corridas para llegar: las cuatro primeras las cortó el límite de la cuenta
+  (informes en `CLAUDE-SECURITY-20260911-175932/`, `-20260911-220639/` y
+  `-20260912-204146/`), y la quinta, el 15/09 sobre `cc89d00`, terminó entera:
+  11 de 11 investigadores, 74 de 74 archivos leídos hasta una conclusión, 5
+  candidatos (3 tras deduplicar) y el panel rechazó los 3; sello `verified`, 0
+  hallazgos (`CLAUDE-SECURITY-20260915-170931/`). La diferencia fue el modelo:
+  los investigadores corrieron en Sonnet 5 por un `model` explícito en una copia
+  del script del plugin (el original hereda el de la sesión); los votantes
+  siguieron en Fable 5.1. Costó unos 2 M de tokens de subagentes y no tocó el límite.
 
-  Lo que queda es tuyo: **el modelo de la sesión**. Los investigadores y los
-  votantes del plugin heredan el modelo de la sesión, y con Fable 5.1 cada
-  intento agota el límite antes de terminar. Con la sesión en Sonnet 5 la misma
-  tanda cuesta una fracción y tiene chances reales de terminar; después, las
-  tandas 2 y 3. Endurecimiento barato que dejó el candidato rechazado: documentar
-  en `README.md` cómo generar `GMAIL_TOKEN_ENCRYPTION_KEY` (`openssl rand -hex 32`)
-  y exigirle un largo mínimo; cambiar el KDF no, porque rompe lo ya cifrado.
+  Para las tandas 2 (`src/server` menos `email`, `src/core`, `src/lib/db`,
+  `src/lib/schemas`, `neon`) y 3 (`src/app/(app)`, `src/app/(auth)`,
+  `src/components`, `scripts`) se repite la receta: copia parcheada, Sonnet en
+  investigadores, panel en el modelo de la sesión. Cada una pide la confirmación
+  de costo del plugin. Endurecimiento barato que dejó el candidato C3, rechazado
+  2 a 1: `POST /api/health/knock` borra en Gmail el `message_id` que le manden en
+  el cuerpo; que borre sólo el id que devolvió su propio `insert`. Está detrás de
+  `CRON_SECRET`, así que no es hallazgo, pero es una línea.
+
+- **Diez PRs de dependabot (#163-#172) desde el 12/09.** Los seis limpios se
+  mergean de a uno, esperando el verde del post-deploy entre cada uno, porque la
+  cola de producción guarda un solo pendiente y seis merges seguidos dejarían
+  post-deploys sin correr. Rojos que quedan para vos: #166 (`codeql-action` 4.38
+  rompe el análisis de CodeQL) y #171 (`nodemailer` 10 rompe el type check). A
+  #165 y #169, inestables, se les pidió rebase.
 
 - ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
   356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`

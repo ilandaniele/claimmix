@@ -839,6 +839,23 @@ async function deliverEmail(
  * explicado allá, al lado del código.
  */
 
+/**
+ * Si el worker dejó el caso pendiente por un timeout del modelo.
+ *
+ * En producción lo levanta `retomarExtraccionesPendientes` dos minutos después,
+ * con el mismo `runIntakeAgent` que usa acá el ensayo. El ensayo no tiene dos
+ * minutos: retoma el caso una vez, en el acto, y sólo cuando el turno esperaba
+ * respuesta y no hubo ninguna. Un silencio que el escenario pide no se toca.
+ */
+async function extraccionPendiente(caseId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ pending: cases.extraction_pending })
+    .from(cases)
+    .where(and(eq(cases.id, caseId), eq(cases.tenant_id, TENANT_ID!)))
+    .limit(1);
+  return row?.pending === true;
+}
+
 /** Lo que salió, y qué claves pidió. La misma consulta, una columna más. */
 async function repliesSince(
   caseId: string,
@@ -913,7 +930,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
       const active: string = delivered;
       caseId = active;
 
-      const said = await repliesSince(active, seen);
+      let said = await repliesSince(active, seen);
+      if (said.length === 0 && (turn.expect?.replies ?? 0) > 0 && (await extraccionPendiente(active))) {
+        console.log("       ⟳ el modelo no llegó en treinta segundos; se retoma el caso una vez");
+        await runIntakeAgent({ caseId: active, tenantId: TENANT_ID!, userId: null, source: "worker" });
+        said = await repliesSince(active, seen);
+      }
       seen += said.length;
 
       if (said.length === 0) console.log("       🤖 (silencio)");

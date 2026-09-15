@@ -2756,24 +2756,27 @@ Delegadas con «tomá vos las decisiones». Las cuatro, con su porqué:
 
 ### 🙋 Waiting on you (not code)
 
-- **El escaneo de seguridad no entra en el límite de la cuenta.** Tres corridas,
-  tres veces el mismo final. El acotado a los 15 componentes sobre `c9899bc`: 58
-  investigadores, 0 devueltos (`CLAUDE-SECURITY-20260911-175932/`, sello
-  `unverified`). La **tanda 1** —`src/proxy.ts`, `src/lib/auth`, `src/lib/security`,
-  `src/lib/rate-limit`, `src/app/api`, 74 archivos— sobre `9912c90`: 13
-  investigadores, 0 devueltos, barrido caído, panel sin votar
-  (`CLAUDE-SECURITY-20260911-220639/`, sello `unverified`). Se relanzó una vez con
-  la cuota ya restablecida y volvió a caer igual. En el primer intento **una** de
-  las cinco lentes del componente de API autenticada sí terminó y no propuso nada;
-  una lente de un componente no alcanza para afirmar nada.
+- **El escaneo de seguridad: la tanda 1 llegó a un veredicto, con 1 de 14
+  investigadores.** Cuatro corridas cortadas por el límite de la cuenta: el
+  acotado a 15 componentes sobre `c9899bc` (58 investigadores, 0 devueltos,
+  `CLAUDE-SECURITY-20260911-175932/`), la tanda 1 sobre `9912c90` dos veces
+  (13 y 0 devueltos, `CLAUDE-SECURITY-20260911-220639/`), y la tanda 1 otra vez
+  el 12/09 (`CLAUDE-SECURITY-20260912-204146/`), que es la que cuenta: 14
+  investigadores, **1 devuelto** (lente cripto/secretos sobre `src/app/api/cases`
+  y `user`), un candidato —la clave AES derivada con SHA-256 sin sal de
+  `GMAIL_TOKEN_ENCRYPTION_KEY`— **rechazado 3 a 0** por el panel el 15/09: la
+  entrada del hash la pone el operador, no el atacante, y el repo no trae ningún
+  valor débil. Sello `verified`, 0 hallazgos, pero el cero cubre 23 de 74
+  archivos: 39 no los contabilizó nadie. `src/proxy.ts` + `src/lib/{auth,security,rate-limit}`,
+  la API pública y `src/app/api/admin` siguen sin leer.
 
-  Lo que falta decidir es tuyo: **el límite mensual**. Con este pipeline, cualquier
-  escaneo va a terminar igual hasta que haya cuota. Cuando la haya, las tandas 2 y 3
-  —(2) `src/server` menos `email`, `src/core`, `src/lib/db`, `src/lib/schemas`,
-  `neon`; (3) `src/app/(app)`, `src/app/(auth)`, `src/components`, `scripts`— y la
-  tanda 1 de nuevo, preferentemente **de a un componente por corrida**, no cinco
-  directorios. La única cobertura real que tiene el repo sigue siendo
-  `src/server/email` del 10/09: F7, F8 y F9, parchados en `main` desde `ae4fa82`.
+  Lo que queda es tuyo: **el modelo de la sesión**. Los investigadores y los
+  votantes del plugin heredan el modelo de la sesión, y con Fable 5.1 cada
+  intento agota el límite antes de terminar. Con la sesión en Sonnet 5 la misma
+  tanda cuesta una fracción y tiene chances reales de terminar; después, las
+  tandas 2 y 3. Endurecimiento barato que dejó el candidato rechazado: documentar
+  en `README.md` cómo generar `GMAIL_TOKEN_ENCRYPTION_KEY` (`openssl rand -hex 32`)
+  y exigirle un largo mínimo; cambiar el KDF no, porque rompe lo ya cifrado.
 
 - ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
   356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`

@@ -65,11 +65,34 @@ describe("lo que ya averiguamos", () => {
     expect(texto).not.toContain("existe en el padrón");
     expect(texto).toContain("por contacto");
   });
+
+  it("dice que la póliza no está vigente y desde cuándo, sin decir cuál", () => {
+    const texto = loQueYaAveriguamos([match("policy_number")], {
+      vigentes: 0,
+      noVigentes: 1,
+      vencioEl: "2020-03-01",
+      derivar: true,
+    })!;
+    expect(texto).toContain("no está vigente");
+    expect(texto).toContain("2020-03-01");
+    expect(texto).not.toContain("POL-");
+    expect(texto).not.toContain("Juan Pérez");
+  });
+
+  it("con una póliza vigente no dice nada de vencimientos", () => {
+    const texto = loQueYaAveriguamos([match("policy_number")], {
+      vigentes: 1,
+      noVigentes: 0,
+      vencioEl: null,
+      derivar: false,
+    })!;
+    expect(texto).not.toContain("no está vigente");
+  });
 });
 
 describe("el cableado", () => {
   it("el plan lo recibe y el prompt lo muestra", () => {
-    expect(ORQ).toContain("yaAveriguado: loQueYaAveriguamos(customerMatches)");
+    expect(ORQ).toContain("yaAveriguado: loQueYaAveriguamos(customerMatches, extractedOutput.polizas)");
     expect(DEL).toContain("LO QUE YA AVERIGUAMOS");
   });
 

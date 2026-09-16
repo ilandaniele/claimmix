@@ -25,6 +25,8 @@ export interface PolicyMatch {
   policyType: string;
   /** Policy status: active, expired, cancelled. */
   status: "active" | "expired" | "cancelled" | string;
+  /** Fin de vigencia, AAAA-MM-DD, o null si no vence. */
+  endDate: string | null;
   /** Full name of the policyholder (PII — not logged). */
   customerName: string;
   /** Confidence score: active policies rank higher than expired/cancelled. */
@@ -95,6 +97,7 @@ async function matchByPolicyNumber(
     policy_number: string;
     policy_type: string | null;
     status: string;
+    end_date: string | null;
     customer_full_name: string | null;
   }>;
   try {
@@ -105,6 +108,7 @@ async function matchByPolicyNumber(
           policy_number: p.policy_number,
           policy_type: p.policy_type,
           status: p.status,
+          end_date: p.end_date,
           customer_full_name: c.full_name,
         })
         .from(p)
@@ -135,6 +139,7 @@ async function matchByPolicyNumber(
       policyNumber: row.policy_number,
       policyType: row.policy_type ?? "other",
       status: row.status,
+      endDate: row.end_date ?? null,
       customerName: row.customer_full_name ?? "",
       confidence,
     };
@@ -155,6 +160,7 @@ async function matchByCustomerId(
     policy_number: string;
     policy_type: string | null;
     status: string;
+    end_date: string | null;
     customer_full_name: string | null;
   }>;
   try {
@@ -165,6 +171,7 @@ async function matchByCustomerId(
           policy_number: p.policy_number,
           policy_type: p.policy_type,
           status: p.status,
+          end_date: p.end_date,
           customer_full_name: c.full_name,
         })
         .from(p)
@@ -187,6 +194,7 @@ async function matchByCustomerId(
       policyNumber: row.policy_number,
       policyType: row.policy_type ?? "other",
       status: row.status,
+      endDate: row.end_date ?? null,
       customerName: row.customer_full_name ?? "",
       confidence,
     };

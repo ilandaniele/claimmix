@@ -59,6 +59,7 @@ const ACTIVE_POLICY_ROW = {
   policy_number: "POL-1234",
   policy_type: "auto",
   status: "active",
+  end_date: "2027-01-15",
   customer_full_name: "Juan Pérez",
 };
 
@@ -67,6 +68,7 @@ const EXPIRED_POLICY_ROW = {
   policy_number: "POL-OLD-9999",
   policy_type: "auto",
   status: "expired",
+  end_date: "2024-06-30",
   customer_full_name: "Juan Pérez",
 };
 
@@ -101,6 +103,7 @@ describe("findPolicyMatches — policy_number exact match", () => {
     expect(match.policyNumber).toBe("POL-1234");
     expect(match.confidence).toBe(0.95);
     expect(match.status).toBe("active");
+    expect(match.endDate).toBe(ACTIVE_POLICY_ROW.end_date);
   });
 
   it("returns lower confidence (0.70) for expired policy by policy_number", async () => {

@@ -40,6 +40,7 @@ import { customers, insuredAssets, policies } from "@/lib/db/schema";
  */
 import { normalizarDni, normalizarNumeroPoliza } from "@/core/matching/normalizar";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
+import { polizaEnVigencia } from "@/core/case/poliza-vigente";
 import { logger } from "@/lib/observability/logger";
 
 export interface ToolContext {
@@ -153,9 +154,7 @@ const verificarPoliza: AgentTool = {
       };
     }
 
-    const expired =
-      policy.status !== "active" ||
-      (policy.endDate !== null && policy.endDate < today());
+    const expired = !polizaEnVigencia(policy, today());
 
     const givenDni = str(args, "dni");
     const dniMatches =
@@ -259,7 +258,7 @@ const polizasPorDni: AgentTool = {
       polizas: rows.map((r) => ({
         numero: r.number,
         tipo: r.type,
-        vigente: r.status === "active" && (r.endDate === null || r.endDate >= today()),
+        vigente: polizaEnVigencia(r, today()),
       })),
     };
   },

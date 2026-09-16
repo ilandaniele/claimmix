@@ -352,6 +352,7 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
           policyNumber: "POL-4471-A",
           policyType: "auto",
           status: "active",
+          endDate: null,
           customerName: "Ana García",
           confidence: 0.95,
         },

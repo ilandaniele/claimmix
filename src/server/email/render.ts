@@ -17,6 +17,7 @@ import { renderMissingInformationRequest } from "./templates/missing-information
 import { renderDataConfirmationRequest } from "./templates/data-confirmation-request";
 import { renderSpecialistEscalation } from "./templates/specialist-escalation";
 import { renderInformationReceived } from "./templates/information-received";
+import { maskEmail } from "@/lib/email/mask";
 
 /**
  * Se re-exporta desde acá porque es de donde lo importan las cinco plantillas.
@@ -87,6 +88,45 @@ export function maskPolicyNumber(policyNumber: string): string {
   const [, prefix, digits] = match;
   const maskedDigits = "****" + digits.slice(-4);
   return prefix + maskedDigits;
+}
+
+/** De dónde salió el valor: lo escribió quien nos mandó el mensaje, o está en nuestro padrón. */
+export type OrigenDelValor = "remitente" | "padron";
+
+/**
+ * Un nombre, como se le puede mostrar a alguien que todavía no probó ser quien dice.
+ * Iniciales y cantidad de palabras: el titular se reconoce, el que no lo es no
+ * aprende un nombre que no sabía.
+ */
+export function maskFullName(nombre: string): string {
+  const partes = nombre.trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return "***";
+  return partes.map((p) => `${p[0]}***`).join(" ");
+}
+
+/**
+ * Un valor de conflicto, como se puede escribir.
+ *
+ * El mensaje de conflicto sale cuando un mensaje entrante coincide con un
+ * cliente por DNI o por póliza (`MATCH_QUE_VINCULA`) y el nombre o el correo NO
+ * coinciden. Con el nombre y el correo guardados enteros adentro, quien tenga
+ * —o adivine— un DNI recibe de vuelta el nombre y la casilla del titular, sin
+ * autenticarse contra nada.
+ *
+ * Nombre y correo se enmascaran sólo cuando salen de NUESTRO padrón: repetirle
+ * a alguien lo que acaba de escribir no le revela nada, y sin el valor propuesto
+ * a la vista el mensaje no dice qué hay que corregir. Documento y póliza se
+ * enmascaran siempre — AC24, y era lo que ya se hacía.
+ *
+ * @returns null cuando no hay nada que enmascarar; quien llama decide qué mostrar.
+ */
+export function enmascararCampo(fieldKey: string, value: string, origen: OrigenDelValor): string | null {
+  if (fieldKey === "dni") return maskDni(value);
+  if (fieldKey === "policy_number") return maskPolicyNumber(value);
+  if (origen === "remitente") return null;
+  if (fieldKey === "full_name") return maskFullName(value);
+  if (fieldKey === "email") return maskEmail(value) ?? "***";
+  return null;
 }
 
 // ── Template dispatcher ───────────────────────────────────────────────────────

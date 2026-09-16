@@ -41,11 +41,15 @@ import {
   missingDocs,
 } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
+import type { UserRow } from "@/lib/db/types";
 import type { CaseStatus, ConfirmField } from "@/lib/schemas/cases";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { updateMemoryFromConfirmation } from "@/server/memory/update";
 import { mensajesEntrantes } from "@/server/cases/inbound-messages";
 import { logger } from "@/lib/observability/logger";
+
+/** Quién resuelve: el id para la auditoría, el rol para saber qué le toca. */
+export type ActorDeConfirmacion = Pick<UserRow, "id" | "role">;
 
 export interface FieldConfirmationResult {
   case_id: string;
@@ -66,9 +70,9 @@ function dbErrCode(e: unknown): string {
  * Resuelve un campo pendiente.
  *
  * @throws AppError('VALIDATION_FAILED') si se pide confirmar algo sin valor.
- * @throws AppError('NOT_FOUND') si el caso no existe o es de otra aseguradora.
- *   Nunca 403: un 403 confirmaría que el caso existe, y eso solo ya permite
- *   enumerar los casos de la competencia.
+ * @throws AppError('NOT_FOUND') si el caso no existe, es de otra aseguradora, o
+ *   es de otro analista. Nunca 403: un 403 confirmaría que el caso existe, y
+ *   eso solo ya permite enumerar los casos de la competencia.
  * @throws AppError('INTERNAL_ERROR') si falla la lectura de confirmaciones.
  *
  * @param ip de quien resolvió, para el registro de auditoría. Es dato personal
@@ -82,10 +86,11 @@ export async function resolveFieldConfirmation(
   ctx: TenantContext,
   caseId: string,
   input: ConfirmField,
-  actorId: string,
+  actor: ActorDeConfirmacion,
   ip: string | null = null,
   ua: string | null = null
 ): Promise<FieldConfirmationResult> {
+  const actorId = actor.id;
   const { field_key: fieldKey, value: confirmedValue, action } = input;
 
   /*
@@ -106,12 +111,12 @@ export async function resolveFieldConfirmation(
   }
 
   // ── 1. El caso ────────────────────────────────────────────────────────────
-  let caseRow: { id: string; status: string } | null;
+  let caseRow: { id: string; status: string; assigned_to: string | null } | null;
   try {
     caseRow = firstRow(
       await enTenant(ctx, (db) =>
         db
-          .select({ id: cases.id, status: cases.status })
+          .select({ id: cases.id, status: cases.status, assigned_to: cases.assigned_to })
           .from(cases)
           .where(eq(cases.id, caseId))
           .limit(1)
@@ -122,6 +127,22 @@ export async function resolveFieldConfirmation(
   }
 
   if (!caseRow) {
+    throw new AppError("NOT_FOUND", "El caso no existe o no tenés acceso.");
+  }
+
+  /*
+   * Un analista resuelve campos de los casos que tiene asignados, y nada más.
+   *
+   * `patchCase` ya no lo deja editar un caso ajeno y `deleteCases` no lo deja
+   * borrarlo; acá no había nada, así que el mismo analista podía confirmar,
+   * corregir o rechazar cualquier campo de cualquier caso del inquilino — y eso
+   * escribe en `extracted_fields` Y en la memoria del cliente, que se propaga a
+   * todos sus siniestros siguientes.
+   *
+   * 404 y no 403, por lo mismo que arriba: un 403 confirmaría que el caso
+   * existe, y eso solo ya permite enumerar los casos de los demás.
+   */
+  if (actor.role === "analyst" && caseRow.assigned_to !== actor.id) {
     throw new AppError("NOT_FOUND", "El caso no existe o no tenés acceso.");
   }
 

@@ -95,7 +95,7 @@ export async function PATCH(
         { tenantId: userRow.tenant_id },
         parsedParams.data.id,
         parsed.data,
-        userRow.id,
+        userRow,
         // De dónde vino la acción, igual que en el PATCH del caso. Es dato
         // personal de un empleado y va al registro a propósito: un historial
         // donde la mitad de las acciones tiene origen y la otra mitad no, no

@@ -117,12 +117,16 @@ jobs:
         # Contra el alias, no contra la URL del deploy: el alias es lo que usan
         # los asegurados, y --expect-commit se encarga de que sea este build y
         # no el anterior.
+        #
+        # Lo que viene del evento entra por `env:` y no interpolado en el shell:
+        # una URL con una comilla adentro sería un comando en un job que tiene
+        # CRON_SECRET. Es el mismo patrón que barrer-trabados y load-tests.
         run: |
-          pnpm smoke -- --deep \
-            --url "${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}" \
-            ${{ github.event_name == 'deployment_status' && format('--expect-commit {0}', github.event.deployment.sha) || '' }}
+          pnpm smoke -- --deep --url "$URL" $EXPECT
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
+          EXPECT: ${{ github.event_name == 'deployment_status' && format('--expect-commit {0}', github.event.deployment.sha) || '' }}
 
       - name: Qué hacer si esto falló
         if: failure()

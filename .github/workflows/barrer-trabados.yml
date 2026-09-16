@@ -90,6 +90,8 @@ jobs:
     name: Escalar lo que quedó trabado
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - name: Pedirle al barredor que pase
         env:

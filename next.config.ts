@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  poweredByHeader: false,
   // Optional peer dependencies (upgrade path — not installed by default).
   // Without this, Next.js/Turbopack throws "Module not found" even for dynamic imports.
   serverExternalPackages: ["@upstash/ratelimit", "@upstash/redis"],

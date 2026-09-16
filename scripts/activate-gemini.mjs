@@ -35,7 +35,7 @@ async function main() {
   console.log("   ✅ Key OK (HTTP 200) — está paga y viva.");
 
   // 2) DB sanity
-  const c = new pg.Client({ connectionString: get("DATABASE_URL"), ssl: { rejectUnauthorized: false } });
+  const c = new pg.Client({ connectionString: get("DATABASE_URL") });
   await c.connect();
   try {
     const s = (await c.query(`select

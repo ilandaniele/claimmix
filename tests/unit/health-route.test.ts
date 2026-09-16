@@ -63,7 +63,7 @@ const CONFIGURED: Record<string, string> = {
   R2_BUCKET: "bucket",
   GEMINI_API_KEY: "gemini",
   GMAIL_TENANT_ID: "10000000-0000-0000-0000-000000000001",
-  GMAIL_TOKEN_ENCRYPTION_KEY: "una-clave-de-prueba",
+  GMAIL_TOKEN_ENCRYPTION_KEY: "una-clave-de-prueba-para-los-tests-largos",
 };
 
 beforeEach(() => {
@@ -331,6 +331,18 @@ describe("GET /api/health — a connected mailbox that cannot be read", () => {
     const gmail = await gmailCheck();
     expect(gmail.status).toBe("down");
     expect(gmail.detail).toContain("no descifra");
+  });
+
+  it("calls it degraded, not down, when the key is merely short", async () => {
+    // Descifra igual —AES no exige un largo mínimo— pero un SHA-256 sin sal
+    // deriva la clave de esto, así que su fuerza es la de la cadena.
+    mailboxOnFile();
+    process.env.GMAIL_TOKEN_ENCRYPTION_KEY = "a".repeat(20);
+    expect(process.env.GMAIL_TOKEN_ENCRYPTION_KEY).toHaveLength(20);
+
+    const gmail = await gmailCheck();
+    expect(gmail.status).toBe("degraded");
+    expect(gmail.detail).toContain("corta");
   });
 
   it("still reports a mailbox nobody has connected as merely degraded", async () => {

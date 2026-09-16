@@ -2370,8 +2370,9 @@ tanto como la otra.
 - **El trinquete de cobertura quedó siete puntos por debajo de lo medido**, y
   tres de sus exclusiones dicen «sólo se cubre por integración» sobre archivos
   que tienen 69-82 % de cobertura unitaria.
-- **`page` sin tope superior** (OFFSET ilimitado) y **`q` sin largo mínimo** (dos
-  caracteres recorren el índice trigram entero). Dos líneas.
+- ~~**`page` sin tope superior** (OFFSET ilimitado) y **`q` sin largo mínimo**~~ ✅
+  **HECHO**: `page` acotado en la API (#135) y en la pantalla de clientes (16/09);
+  `q` exige tres caracteres en `/api/cases`.
 - **`audit_log` crece 142 filas por caso** y no tiene retención: a 100 k casos son
   14,2 M filas y ~5,9 GB. Y **`claim_messages` pesa 31 kB por fila** porque guarda
   el payload entero del proveedor: ~24 GB a la misma escala.
@@ -2698,7 +2699,7 @@ los tres traen un test en la suite que falla en la base y pasa con el cambio.
 |---|---|---|---|
 | **F7** `relevance-prefilter.ts` CWE-1333 | Tres regex con retroceso cuadrático sobre el HTML del mail, sin tope. 256 kB de `<a` sin cerrar: 35 s, más que la invocación. La marca de agua no avanzaba y el mismo mail se bajaba para siempre. | Recorridos lineales con `indexOf`, idénticos a los regex sobre 1,5 M de casos. 25 MB de `<script>` en 177 ms. | No pone tope de tamaño: el primer intento lo traía y el verificador lo rechazó porque cambiaba `allow` por `skip` en mails legítimos. Tampoco anota el mensaje en `mensajes_pendientes` antes de procesar. |
 | **F8** `dispatch.ts` CWE-639 | La casilla con la que contestar salía del `To:` del mail entrante, buscada con el rol dueño, y valía cualquier fila habilitada: la respuesta a un extraño podía salir por la casilla de otro inquilino, con su DKIM y su refresh token. | La cuenta resuelta tiene que ser del inquilino que despacha; si no, el fallback por `enTenant` que ya existía. | No hace el refactor de resolver la casilla por `enTenant` y tratar `to_addr` como pista. Cierra el exploit con un invariante de una línea. |
-| **F9** `thread-lookup.ts` CWE-639 | Un mail se pegaba a un caso sólo por sus propios encabezados. Los casos de WhatsApp guardan el teléfono en `email_thread_id`: un número adivinable metía a un extraño en la denuncia de la víctima y lo convertía en a quien el agente contesta. | Guardia de participante en los tres caminos (el `From` tiene que ser un `from_addr` entrante o un `to_addr` saliente del caso) y `channel IN ('email','email_sim')` en la rama por `email_thread_id`. Falla cerrado. | Sigue confiando en el encabezado `From`, que es la frontera estándar del threading por mail. Un token secreto por caso en los salientes sería más fuerte: **decisión de diseño pendiente**. El camino por `Subject` no tiene filtro de canal (lo cubre la guardia); agregarlo es barato. |
+| **F9** `thread-lookup.ts` CWE-639 | Un mail se pegaba a un caso sólo por sus propios encabezados. Los casos de WhatsApp guardan el teléfono en `email_thread_id`: un número adivinable metía a un extraño en la denuncia de la víctima y lo convertía en a quien el agente contesta. | Guardia de participante en los tres caminos (el `From` tiene que ser un `from_addr` entrante o un `to_addr` saliente del caso) y `channel IN ('email','email_sim')` en la rama por `email_thread_id`. Falla cerrado. | Sigue confiando en el encabezado `From`, que es la frontera estándar del threading por mail. El «token secreto por caso» **no hace falta** (decidido el 16/09): el id del caso en el asunto ya es un UUID inadivinable, y la guardia exige que el remitente participe. El camino por `Subject` filtra por canal desde el 16/09, con test. |
 
 **Lo que cambia para un usuario real**, y es lo único: con F9, una respuesta desde
 una dirección que el caso nunca vio abre caso nuevo en vez de pegarse. Las cuatro

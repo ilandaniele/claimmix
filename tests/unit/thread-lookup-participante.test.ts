@@ -176,3 +176,23 @@ describe("threadLookup: the claimant's reply", () => {
     expect(r.existingCaseId).toBe(CASO_MAIL);
   });
 });
+
+describe("el camino por asunto", () => {
+  it("un caso de WhatsApp no se pega por el asunto ni cuando el remitente participa", async () => {
+    tables.claim_messages.push({
+      case_id: CASO_WHATSAPP,
+      direction: "outbound",
+      provider_message_id: "wa-out-1",
+      from_addr: CASILLA,
+      to_addr: "algo@example.com",
+    });
+    const r = await threadLookup(
+      TENANT,
+      "",
+      "",
+      `Re: Recibimos tu reclamo - Caso #${CASO_WHATSAPP}`,
+      "algo@example.com"
+    );
+    expect(r.existingCaseId).toBeUndefined();
+  });
+});

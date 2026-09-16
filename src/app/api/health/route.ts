@@ -22,7 +22,7 @@
  * free to call often.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { isInternalRequest } from "@/lib/security/internal-auth";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 
@@ -32,7 +32,7 @@ import { gmailAccounts } from "@/lib/db/schema";
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
 import { enTenant } from "@/data/scope";
 
-const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
+const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
 import {
   chequearAdjuntos,
   chequearCasosTrabados,
@@ -439,6 +439,13 @@ async function checkGmail(): Promise<Check> {
     // the decryption costs no network and turns a guess into a fact.
     if (!process.env.GMAIL_TOKEN_ENCRYPTION_KEY?.trim()) {
       return down("gmail", "falta GMAIL_TOKEN_ENCRYPTION_KEY: el token no se puede descifrar");
+    }
+
+    // Un solo SHA-256 sin sal deriva la clave AES de esto: su fuerza es la de la
+    // cadena. No se corta el servicio por una clave corta —rotarla es re-cifrar
+    // todo— pero tampoco se calla.
+    if (process.env.GMAIL_TOKEN_ENCRYPTION_KEY.trim().length < 32) {
+      return degraded("gmail", "GMAIL_TOKEN_ENCRYPTION_KEY es corta: menos de 32 caracteres");
     }
 
     try {

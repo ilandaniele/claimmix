@@ -152,7 +152,10 @@ export async function threadLookup(
           db
             .select({ id: cases.id })
             .from(cases)
-            .where(eq(cases.id, subjectCaseId))
+            // Un caso de WhatsApp no tiene hilo de mail: aunque alguien escriba
+            // su id en el asunto, no se pega. La guardia de participante ya lo
+            // cubre; esto lo dice en la consulta, que es donde se lee.
+            .where(and(eq(cases.id, subjectCaseId), inArray(cases.channel, EMAIL_CHANNELS)))
             .limit(1)
         )
       );

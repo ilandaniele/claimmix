@@ -65,7 +65,7 @@ Optional seed data lives in `neon/seed.sql`.
 | `MOCK_AI` | no | Set `true` to use deterministic mock agent output |
 | `GMAIL_CLIENT_ID` | email | Google OAuth client ID |
 | `GMAIL_CLIENT_SECRET` | email | Google OAuth client secret |
-| `GMAIL_TOKEN_ENCRYPTION_KEY` | email | Encryption secret for Gmail and AI provider keys |
+| `GMAIL_TOKEN_ENCRYPTION_KEY` | email | Encryption secret for Gmail and AI provider keys — 32+ random bytes, e.g. `openssl rand -hex 32` |
 | `GMAIL_TENANT_ID` | email | Fallback tenant for fixed-inbox mode |
 | `GMAIL_USER_EMAIL` | email | Fallback fixed inbox address |
 | `GMAIL_FROM_ADDRESS` | email | Outbound Gmail sender |

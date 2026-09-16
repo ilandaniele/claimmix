@@ -210,7 +210,8 @@ function setupDbForConfirm(opts: {
   extractedFields?: unknown[];
 } = {}) {
   const {
-    caseRow = { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID },
+    // El caso es del analista que actúa: sin assigned_to el guardia nuevo devuelve 404.
+    caseRow = { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID, assigned_to: USER_ID },
     confirmationRow = {
       id: "conf-1",
       proposed_value: "Juan Pérez",
@@ -239,7 +240,7 @@ function setupDbForReject(opts: {
   confirmationRow?: unknown;
 } = {}) {
   const {
-    caseRow = { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID },
+    caseRow = { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID, assigned_to: USER_ID },
     confirmationRow = {
       id: "conf-1",
       proposed_value: "Juan Pérez",
@@ -639,7 +640,7 @@ describe("PATCH /api/cases/:id/confirm-field — el recálculo de estado falla",
 
   it("si revienta el análisis de brechas, responde 200 con el estado de antes", async () => {
     setupAuth();
-    setupDbForConfirm({ caseRow: { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID } });
+    setupDbForConfirm({ caseRow: { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID, assigned_to: USER_ID } });
     vi.mocked(analyzeEmailClaimGaps).mockRejectedValue(new Error("gap analyzer caído"));
 
     const response = await PATCH(
@@ -656,7 +657,7 @@ describe("PATCH /api/cases/:id/confirm-field — el recálculo de estado falla",
 
   it("si revienta el UPDATE del estado, tampoco se pierde la confirmación", async () => {
     setupAuth();
-    setupDbForConfirm({ caseRow: { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID } });
+    setupDbForConfirm({ caseRow: { id: CASE_ID, status: "confirmacion_pendiente", tenant_id: TENANT_ID, assigned_to: USER_ID } });
 
     // Los tres primeros UPDATE andan; el cuarto —el del estado— falla.
     let n = 0;

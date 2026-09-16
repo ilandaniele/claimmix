@@ -376,8 +376,11 @@ const SCENARIOS: Scenario[] = [
         ].join("\n"),
         // Que nombre los dos valores no depende de cómo redacte ese día: si el
         // mensaje no los dice, `violation()` lo rechaza y sale la plantilla,
-        // que también los dice. Lo que SÍ depende del modelo —si suena a
-        // acusación o a pregunta— es lo que hay que leer en el transcripto.
+        // que también los dice. El del padrón sale en iniciales —«R*** P***»—
+        // y el entero no puede aparecer: con un DNI ajeno, este mensaje le
+        // devolvía al remitente el nombre del titular. Lo que SÍ depende del
+        // modelo —si suena a acusación o a pregunta— es lo que hay que leer
+        // en el transcripto.
         //
         // `replies: 1` es la mitad que más costó. Salían DOS: el pedido de
         // confirmación y, segundos después, «tu reclamo fue asignado a un
@@ -385,7 +388,7 @@ const SCENARIOS: Scenario[] = [
         // coincide, y decide bien que esto lo mire una persona—. Los dos
         // mensajes son razonables y juntos son un problema: uno le pide que
         // conteste, el otro que espere.
-        expect: { replies: 1, mentions: ["Roberto Paz"] },
+        expect: { replies: 1, mentions: ["R*** P***", "Lucía Paz"], avoids: ["Roberto Paz"] },
       },
     ],
     // Y la derivación ocurre igual: lo que se suprime es el mensaje al

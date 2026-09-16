@@ -30,6 +30,7 @@ import { countRows, firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { UNSAFE_BLOCKING_REASONS } from "./trainability";
 import { logger } from "@/lib/observability/logger";
+import { sinCentinelas } from "@/core/ai/sin-centinelas";
 
 // ── Few-shot retrieval (immediate learning layer) ─────────────────────────────
 
@@ -143,10 +144,22 @@ export async function loadApprovedExamples(
  */
 export function formatApprovedExamples(examples: ApprovedExample[]): string {
   if (examples.length === 0) return "";
+
+  /*
+   * El texto del ejemplo es de un denunciante, guardado tal cual en
+   * `agent_runs.input_payload` y copiado a `training_examples` al aprobarlo.
+   * Se interpola adentro de `<approved_examples>`, que va como
+   * `systemInstruction`: un cuerpo con `</approved_examples>` adentro sigue
+   * escribiendo instrucciones en el mismo lugar que las de la casa, y queda
+   * guardado para TODAS las extracciones siguientes de esa aseguradora.
+   *
+   * Se limpia acá, al leer, y no al aprobar: así quedan cubiertas también las
+   * filas que ya están guardadas.
+   */
   return examples
     .map(
       (example, i) =>
-        `EXAMPLE ${i + 1} (human-approved):\nINPUT subject: ${example.input.subject}\nINPUT body (excerpt): ${example.input.body}\nEXPECTED OUTPUT: ${JSON.stringify(example.expectedOutput)}`
+        `EXAMPLE ${i + 1} (human-approved):\nINPUT subject: ${sinCentinelas(example.input.subject)}\nINPUT body (excerpt): ${sinCentinelas(example.input.body)}\nEXPECTED OUTPUT: ${sinCentinelas(JSON.stringify(example.expectedOutput))}`
     )
     .join("\n\n");
 }

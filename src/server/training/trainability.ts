@@ -19,6 +19,7 @@
 
 import "server-only";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
+import { RE_CENTINELA } from "@/core/ai/sin-centinelas";
 
 export interface TrainabilityAssessment {
   isTrainableSuggestion: boolean;
@@ -60,8 +61,11 @@ const INJECTION_PATTERNS: RegExp[] = [
   /jailbreak/i,
   /\bDAN\s+mode\b/i,
   /set\s+(?:is_claim|severity|status|confidence)\s*=/i,
-  // Embedded copies of our own sentinel tags are a strong injection signal.
-  /<\/?(?:email_body|email_subject|agent_training|agent_rules|memory_hints|severity_patterns|approved_examples|claim_text)>/i,
+  // Copias de nuestros propios centinelas son señal fuerte de inyección. La
+  // lista y la tolerancia a los espacios salen de `sinCentinelas`: escrita acá
+  // aparte, se quedó corta (le faltaban `custom_fields` y `tenant_prompt`) y
+  // exigía la forma canónica, así que `< / email_body >` la esquivaba.
+  RE_CENTINELA,
 ];
 
 /** Returns the list of matched injection signals (empty = clean). */

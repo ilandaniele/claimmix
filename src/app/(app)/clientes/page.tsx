@@ -17,6 +17,7 @@ import { getServerLocale } from "@/lib/i18n/locale";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { listCustomers } from "@/server/customers/list";
+import { PAGINA_MAXIMA } from "@/lib/schemas/paginacion";
 
 /*
  * La fila la define `listCustomers`, no esta pantalla.
@@ -45,9 +46,10 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
       ? searchParam.trim()
       : undefined;
 
+  // El mismo tope que la API (#135): un OFFSET sin techo recorre la tabla entera.
   const page =
     typeof pageParam === "string"
-      ? Math.max(1, parseInt(pageParam, 10) || 1)
+      ? Math.min(PAGINA_MAXIMA, Math.max(1, parseInt(pageParam, 10) || 1))
       : 1;
 
   const PER_PAGE = 25;

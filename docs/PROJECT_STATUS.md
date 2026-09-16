@@ -2770,25 +2770,27 @@ Delegadas con «tomá vos las decisiones». Las cuatro, con su porqué:
   Receta que funcionó: investigadores en Sonnet 5 por una copia del script del
   plugin con `model` explícito, panel en Fable 5.1.
 
-  Lo que quedó sin veredicto, y es tuyo: **F19 de la tanda 2**, los tokens OAuth
-  de Google (`access_token`, `refresh_token`, `id_token`) guardados en texto
-  plano en la tabla `account`, porque `src/lib/auth/index.ts` no activa
-  `account.encryptOAuthTokens` de Better Auth. Dos de tres votantes lo dieron
-  por cierto (MEDIUM); el tercero cayó por cuota y el plugin lo descartó. Activar
-  el cifrado implica migrar las filas ya guardadas. Y dos endurecimientos
-  baratos que el panel no consideró hallazgo: sacar `ssl: { rejectUnauthorized:
-  false }` de `scripts/lib/db-driver.mjs` y de cinco scripts (hoy la URL con
-  `sslmode` lo pisa; el día que falte, haría lo que dice), y que
-  `POST /api/health/knock` borre sólo el id que devolvió su propio `insert`.
+  Lo que quedó sin veredicto, **F19 de la tanda 2** —los tokens OAuth de Google
+  guardados en texto plano en `account`, dos votos a favor y el tercero caído
+  por cuota— se cerró igual en **#181**: la app nunca leía esos tokens, así que
+  ya no se piden refresh tokens (`accessType: "offline"` afuera) y lo que se
+  guarda va cifrado con el secreto de auth (`account.encryptOAuthTokens`); las
+  filas viejas se reescriben cifradas en el próximo ingreso con Google. En el
+  mismo PR, los dos endurecimientos que el panel no consideró hallazgo: fuera
+  el `ssl: { rejectUnauthorized: false }` muerto de seis scripts, y
+  `POST /api/health/knock` borra sólo un mensaje con la marca del timbre en el
+  asunto, con test.
 
 - **Dependabot (#163-#172), cerrado salvo uno.** Entraron de a uno con
   post-deploy verde entre cada uno: #163, #164, #167, #168, #170 (next 16.3.5),
   #172 y #165; los dos rojos se resolvieron aparte: #176 subió las tres acciones
   de CodeQL juntas (dependabot subía sólo `analyze` y el análisis rechazaba la
-  mezcla de versiones) y #177 subió nodemailer a 10 con sus propios tipos. Queda
-  **#169 (better-auth 1.7)**: 1.7 evalúa el adapter al cargar el módulo y el
-  build de Vercel, sin `DATABASE_URL`, revienta en el proxy perezoso de `db`;
-  está diagnosticado en el PR y espera a que se toque auth.
+  mezcla de versiones), #177 subió nodemailer a 10 con sus propios tipos, y
+  **#182** subió better-auth a 1.7.4: su adapter de Drizzle lee `db._` al
+  cargar el módulo y el proxy perezoso conectaba para contestar, así que el
+  build de Vercel, sin `DATABASE_URL`, reventaba (#169); ahora el proxy
+  contesta el esquema sin conectar, con test. No queda ningún PR de dependabot
+  abierto.
 
 - **El ensayo del post-deploy ya no cae por un pico de Gemini.** El 15/09 dio
   rojo 5 de 8 veces por `transport_timeout` (30 s) en dos a cinco casos de mail

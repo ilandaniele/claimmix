@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { createTableRelationsHelpers, extractTablesRelationalConfig } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
 import { logger } from "@/lib/observability/logger";
@@ -6,6 +7,18 @@ import { logger } from "@/lib/observability/logger";
 function createDb(connectionString: string) {
   return drizzle(neon(connectionString), { schema });
 }
+
+const relacional = extractTablesRelationalConfig(schema, createTableRelationsHelpers);
+/*
+ * `_` se contesta sin conectar.
+ *
+ * El adapter de Drizzle de Better Auth lee `db._.schema` y `db._.fullSchema` al
+ * construirse, o sea al cargar el módulo de auth — también durante `next build`,
+ * donde no hay DATABASE_URL. Son metadatos del esquema, no una conexión, así que
+ * se devuelven tal cual los arma Drizzle (misma forma que `PgDatabase._`, sin la
+ * sesión). Todo lo demás sigue conectando recién cuando alguien consulta.
+ */
+const meta = { schema: relacional.tables, fullSchema: schema, tableNamesMap: relacional.tableNamesMap };
 
 export type Db = ReturnType<typeof createDb>;
 
@@ -68,6 +81,7 @@ function avisarAQueBaseEnDesarrollo(connectionString: string): void {
 
 export const db = new Proxy({} as Db, {
   get(_target, prop, receiver) {
+    if (prop === "_") return meta;
     const instance = getDb();
     const value = Reflect.get(instance as object, prop, receiver);
     return typeof value === "function" ? value.bind(instance) : value;

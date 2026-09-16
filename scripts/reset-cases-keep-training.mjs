@@ -28,7 +28,7 @@ import pg from "pg";
 const APPLY = process.argv.includes("--apply");
 const env = readFileSync("./.env.local", "utf8");
 const conn = env.match(/^DATABASE_URL\s*=\s*"?([^"\n]+)"?/m)[1];
-const c = new pg.Client({ connectionString: conn, ssl: { rejectUnauthorized: false } });
+const c = new pg.Client({ connectionString: conn });
 await c.connect();
 
 const n = async (q) => Number((await c.query(q)).rows[0].n);

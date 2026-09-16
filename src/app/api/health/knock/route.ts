@@ -122,6 +122,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           { status: 400 }
         );
       }
+
+      const notFound = NextResponse.json(
+        { error: { code: "NOT_FOUND", message: "El mensaje no es del timbre." } },
+        { status: 404 }
+      );
+
+      // Sólo se borra lo que el timbre mismo insertó. Detrás de CRON_SECRET, pero
+      // «borrá este id» no debería alcanzar para borrar cualquier mensaje de la
+      // casilla: el asunto lleva la marca del timbre, y se mira antes de tocar.
+      let subject: string | undefined;
+      try {
+        const meta = await gmail.users.messages.get({
+          userId: "me",
+          id,
+          format: "metadata",
+          metadataHeaders: ["Subject"],
+        });
+        subject = meta.data.payload?.headers?.find(
+          (h) => h.name?.toLowerCase() === "subject"
+        )?.value ?? undefined;
+      } catch (err) {
+        if ((err as { code?: number })?.code === 404) {
+          return notFound;
+        }
+        throw err;
+      }
+
+      if (!subject?.includes("[timbre ")) {
+        return notFound;
+      }
+
       // A la papelera y no borrado: `messages.delete` pide el permiso total de
       // la cuenta, y para dejar la casilla como estaba alcanza con esto.
       await gmail.users.messages.trash({ userId: "me", id });

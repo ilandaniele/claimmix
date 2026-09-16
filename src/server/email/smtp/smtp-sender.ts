@@ -1,11 +1,11 @@
 import "server-only";
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import type { EmailProvider, SendEmailOptions, SendResult } from "../provider";
 
 export class SmtpSender implements EmailProvider {
   readonly name = "smtp" as const;
 
-  private transporter: nodemailer.Transporter;
+  private transporter: Transporter;
 
   constructor() {
     const host = process.env.SMTP_HOST;

@@ -315,7 +315,10 @@ describe("renderTemplate — data_confirmation_request", () => {
       conflictWithValue: "Juan Pérez",
     });
     expect(result.html).toContain("Pedro García");
-    expect(result.html).toContain("Juan Pérez");
+    // El valor en conflicto es el que tenemos en nuestro padrón: se enmascara,
+    // no sale entero.
+    expect(result.html).not.toContain("Juan Pérez");
+    expect(result.html).toContain("J*** P***");
     expect(result.html).toContain("difiere");
   });
 
@@ -544,9 +547,19 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
   it("nombra los tres datos en un solo mensaje", () => {
     const result = renderTemplate("data_confirmation_request", TRES);
 
-    for (const esperado of ["Pedro García", "Juan Pérez", "pedro@ejemplo.com", "juan@ejemplo.com"]) {
+    for (const esperado of ["Pedro García", "pedro@ejemplo.com"]) {
       expect(result.text).toContain(esperado);
       expect(result.html).toContain(esperado);
+    }
+    // Lo que ya teníamos guardado —nombre y correo del padrón— no vuelve
+    // entero: sólo en iniciales y con la casilla tapada.
+    for (const noEsperado of ["Juan Pérez", "juan@ejemplo.com"]) {
+      expect(result.text).not.toContain(noEsperado);
+      expect(result.html).not.toContain(noEsperado);
+    }
+    for (const enmascarado of ["J*** P***", "j***@ejemplo.com"]) {
+      expect(result.text).toContain(enmascarado);
+      expect(result.html).toContain(enmascarado);
     }
   });
 

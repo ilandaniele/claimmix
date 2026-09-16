@@ -24,10 +24,10 @@ import { outboundMessages } from "@/lib/db/schema";
 import { labelForField, labelForClaimType, displayFieldValue } from "@/lib/labels/claim-fields";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import {
-  maskDni,
-  maskPolicyNumber,
+  enmascararCampo,
   renderTemplate,
   type EmailTemplate,
+  type OrigenDelValor,
 } from "@/server/email/render";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
@@ -200,8 +200,8 @@ function renderConflict(data: Record<string, unknown>): string {
     const label = labelForField(c.fieldKey).label;
     // Enmascarado, igual que lo que entra al prompt: éste es el texto que sale
     // por WhatsApp cuando el redactor no está, y salía con el DNI entero.
-    const propuesto = enmascarar(c.fieldKey, c.proposed);
-    const guardado = enmascarar(c.fieldKey, c.stored);
+    const propuesto = enmascarar(c.fieldKey, c.proposed, "remitente");
+    const guardado = enmascarar(c.fieldKey, c.stored, "padron");
     return `${label}: vos nos decís "${propuesto}" y en nuestro sistema figura "${guardado}".`;
   });
 
@@ -376,13 +376,13 @@ export function nombresEnElLibro(template: EmailTemplate): string[] {
  * por WhatsApp y quedaba visible en la notificación de la pantalla bloqueada.
  *
  * Es la misma regla en los dos lados, así que es una sola función.
+ *
+ * El nombre y el correo que figuran en nuestro padrón también salen
+ * enmascarados, por lo mismo que el DNI y la póliza; el valor que propuso
+ * quien escribió no, porque repetirle lo que acaba de mandar no revela nada.
  */
-function enmascarar(fieldKey: string, valor: string): string {
-  return fieldKey === "dni"
-    ? maskDni(valor)
-    : fieldKey === "policy_number"
-      ? maskPolicyNumber(valor)
-      : valor;
+function enmascarar(fieldKey: string, valor: string, origen: OrigenDelValor): string {
+  return enmascararCampo(fieldKey, valor, origen) ?? valor;
 }
 
 function conflictosParaElRedactor(
@@ -392,8 +392,8 @@ function conflictosParaElRedactor(
     .filter((c) => c.proposed && c.stored)
     .map((c) => ({
       fieldKey: c.fieldKey,
-      proposed: enmascarar(c.fieldKey, c.proposed),
-      stored: enmascarar(c.fieldKey, c.stored),
+      proposed: enmascarar(c.fieldKey, c.proposed, "remitente"),
+      stored: enmascarar(c.fieldKey, c.stored, "padron"),
     }));
 }
 

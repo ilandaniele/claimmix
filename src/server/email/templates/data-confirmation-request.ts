@@ -20,7 +20,7 @@
  */
 
 import { displayFieldValue, labelForField } from "@/lib/labels/claim-fields";
-import { escapeHtml, maskDni, maskPolicyNumber } from "@/server/email/render";
+import { escapeHtml, enmascararCampo, type OrigenDelValor } from "@/server/email/render";
 import { textoAHtml } from "@/core/email/html";
 
 /** Un dato sobre el que se pregunta. */
@@ -63,10 +63,8 @@ const SENSITIVE_FIELDS = new Set(["dni", "policy_number"]);
  * "siniestro" sólo tapaba el problema — el correo terminaba pidiéndole a
  * alguien que confirmara que el tipo de su siniestro era "siniestro".
  */
-function maskFieldValue(fieldKey: string, value: string): string | null {
-  if (fieldKey === "dni") return maskDni(value);
-  if (fieldKey === "policy_number") return maskPolicyNumber(value);
-  return displayFieldValue(fieldKey, value);
+function maskFieldValue(fieldKey: string, value: string, origen: OrigenDelValor): string | null {
+  return enmascararCampo(fieldKey, value, origen) ?? displayFieldValue(fieldKey, value);
 }
 
 interface BloqueDeCampo {
@@ -78,9 +76,9 @@ interface BloqueDeCampo {
 
 function armarBloque(campo: CampoAConfirmar): BloqueDeCampo {
   const field = labelForField(campo.fieldKey);
-  const displayValue = maskFieldValue(campo.fieldKey, campo.proposedValue);
+  const displayValue = maskFieldValue(campo.fieldKey, campo.proposedValue, "remitente");
   const displayConflict = campo.conflictWithValue
-    ? maskFieldValue(campo.fieldKey, campo.conflictWithValue)
+    ? maskFieldValue(campo.fieldKey, campo.conflictWithValue, "padron")
     : null;
 
   const abierto = !displayValue;

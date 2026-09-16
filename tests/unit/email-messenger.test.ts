@@ -327,10 +327,14 @@ describe("emailMessenger — el conflicto lleva sus valores", () => {
   };
 
   it("el redactor recibe los dos valores de cada campo", async () => {
+    // El nombre guardado ("stored") le llega al redactor ya enmascarado —es
+    // el del padrón, no lo que escribió la persona— así que la prosa tiene
+    // que repetir "R*** P***" y no "Roberto Paz", o la guarda de
+    // `dropped_conflict` la rechaza por no nombrar los valores que recibió.
     escribe(
       "Ilan, encontramos dos diferencias. El documento que nos diste termina en ****1222 " +
         "y el que figura en nuestro sistema termina en ****5678. Y el nombre: vos nos " +
-        'decís "Juan Perez" y nosotros tenemos "Roberto Paz". ¿Cuáles son los correctos?'
+        'decís "Juan Perez" y nosotros tenemos "R*** P***". ¿Cuáles son los correctos?'
     );
 
     await mandar("data_confirmation_request", CONFLICTO);
@@ -339,7 +343,7 @@ describe("emailMessenger — el conflicto lleva sus valores", () => {
       intent: "conflict",
       conflicts: [
         { fieldKey: "dni", proposed: "****1222", stored: "****5678" },
-        { fieldKey: "full_name", proposed: "Juan Perez", stored: "Roberto Paz" },
+        { fieldKey: "full_name", proposed: "Juan Perez", stored: "R*** P***" },
       ],
     });
   });
@@ -350,7 +354,7 @@ describe("emailMessenger — el conflicto lleva sus valores", () => {
     // modelo no ve es uno que no puede copiar.
     escribe(
       "Ilan, el documento que nos diste termina en ****1222 y el que tenemos termina " +
-        'en ****5678. También difiere el nombre: "Juan Perez" contra "Roberto Paz". ' +
+        'en ****5678. También difiere el nombre: "Juan Perez" contra "R*** P***". ' +
         "¿Cuáles son los correctos?"
     );
 
@@ -361,6 +365,22 @@ describe("emailMessenger — el conflicto lleva sus valores", () => {
     expect(prompt).not.toContain("20345678");
     expect(prompt).toContain("****1222");
     expect(prompt).toContain("****5678");
+  });
+
+  it("y el nombre que figura en nuestro padrón, también", async () => {
+    // La otra mitad del control anterior, pero para full_name: el nombre
+    // guardado no puede llegar entero al prompt, aunque el propuesto sí.
+    escribe(
+      "Ilan, el documento que nos diste termina en ****1222 y el que tenemos termina " +
+        'en ****5678. También difiere el nombre: "Juan Perez" contra "R*** P***". ' +
+        "¿Cuáles son los correctos?"
+    );
+
+    await mandar("data_confirmation_request", CONFLICTO);
+
+    const prompt = String(modelo.mock.calls[0][0].prompt ?? modelo.mock.calls[0][0]);
+    expect(prompt).not.toContain("Roberto Paz");
+    expect(prompt).toContain("R*** P***");
   });
 
   it("una prosa que no nombra los valores no sale: sale la plantilla", async () => {

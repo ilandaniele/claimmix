@@ -210,7 +210,11 @@ describe("whatsappMessenger — what it says", () => {
 
     const body = sentBody();
     expect(body).toContain("Pedro García");
-    expect(body).toContain("Juan Pérez");
+    // El nombre guardado es el de nuestro padrón, no lo que escribió el
+    // remitente: repetirlo entero le confirma a cualquiera con un DNI el
+    // nombre del titular sin haber probado nada.
+    expect(body).not.toContain("Juan Pérez");
+    expect(body).toContain("J*** P***");
   });
 
   /*
@@ -259,9 +263,9 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).toContain("****7654");
   });
 
-  it("lo que no es sensible sigue saliendo entero", async () => {
+  it("lo que escribió la persona sale entero; lo que tenemos guardado, no", async () => {
     // El control que impide que el arreglo sea «enmascarar todo»: sin el
-    // nombre a la vista, el mensaje no dice qué hay que corregir.
+    // valor propuesto a la vista, el mensaje no dice qué hay que corregir.
     await send("data_confirmation_request", {
       caseId: CASE,
       fieldKey: "full_name",
@@ -271,7 +275,8 @@ describe("whatsappMessenger — what it says", () => {
 
     const body = sentBody();
     expect(body).toContain("Pedro García");
-    expect(body).toContain("Juan Pérez");
+    expect(body).not.toContain("Juan Pérez");
+    expect(body).toContain("J*** P***");
   });
 
   it("lista los tres datos en un solo mensaje", async () => {
@@ -285,9 +290,11 @@ describe("whatsappMessenger — what it says", () => {
 
     const body = sentBody();
     expect(body).toContain("Pedro García");
-    expect(body).toContain("Juan Pérez");
+    expect(body).not.toContain("Juan Pérez");
+    expect(body).toContain("J*** P***");
     expect(body).toContain("pedro@ejemplo.com");
-    expect(body).toContain("juan@ejemplo.com");
+    expect(body).not.toContain("juan@ejemplo.com");
+    expect(body).toContain("j***@ejemplo.com");
     // En plural, porque son varios.
     expect(body).toMatch(/datos que no coinciden/i);
     expect(body).toMatch(/cuáles son los correctos/i);

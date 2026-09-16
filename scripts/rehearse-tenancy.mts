@@ -324,17 +324,14 @@ try {
     paso("Probando la tenencia con el rol nuevo");
     console.log("");
     try {
-      // La URL va entre comillas a propósito.
-      //
-      // En Windows `npx` es un .cmd, así que hace falta shell para invocarlo; y
-      // con shell, cmd parte el argumento en el `&` de "?sslmode=require&..." e
-      // intenta ejecutar "sslmode" como si fuera un comando. El ensayo pasaba y
-      // el envoltorio reportaba fracaso. Es el mismo defecto que ya apareció en
-      // switch-gcp: en Windows, todo argumento con & o espacios va comillado.
-      execSync(
-        `npx tsx --tsconfig tsconfig.rehearsal.json scripts/prove-tenancy.mts --url "${urlRolFinal}"`,
-        { stdio: "inherit" }
-      );
+      // La URL va por el entorno y no por un argumento: un argumento se ve en
+      // la lista de procesos y en el log de CI, y ésta lleva la contraseña del
+      // rol. `prove-tenancy` lee DATABASE_URL_APP cuando no recibe --url. De
+      // paso se va el `&` de "?sslmode=require&..." que cmd partía en Windows.
+      execSync(`npx tsx --tsconfig tsconfig.rehearsal.json scripts/prove-tenancy.mts`, {
+        stdio: "inherit",
+        env: { ...process.env, DATABASE_URL_APP: urlRolFinal },
+      });
       salida = 0;
     } catch (e) {
       // Un catch mudo acá cuesta caro: el ensayo dice "no pasó" y no se sabe si

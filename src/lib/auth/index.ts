@@ -135,7 +135,6 @@ export const auth = betterAuth({
             clientId: googleClientId,
             clientSecret: googleClientSecret,
             prompt: "select_account",
-            accessType: "offline",
           },
         }
       : {},
@@ -149,6 +148,15 @@ export const auth = betterAuth({
       enabled: true,
       trustedProviders: ["google"],
     },
+    /*
+     * Los tokens de Google no los usa nadie: el proveedor existe para entrar con
+     * «Continuar con Google» y nada más. Sin `accessType: "offline"` Google no
+     * emite refresh tokens, y lo que sí guarda Better Auth (el access token
+     * corto y el id token) va cifrado con el secreto de auth. Las filas ya
+     * guardadas en texto plano se reescriben cifradas la próxima vez que esa
+     * persona entra con Google.
+     */
+    encryptOAuthTokens: true,
   },
   session: {
     /*

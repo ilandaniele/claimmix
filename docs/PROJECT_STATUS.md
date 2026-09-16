@@ -2790,6 +2790,54 @@ respuesta y `mail-que-no-coincide-con-el-padron` sin los dos nombres— no se
 repitieron en las dos corridas: son timeouts del proveedor y varianza, y la
 intersección de las dos corridas ya los filtra.
 
+### 🖥️ La bandeja, mirada al ancho en que se usa (2026-09-16)
+
+Tres defectos que ninguna verificación iba a encontrar, porque todas miran
+datos y estos se ven en la pantalla. La bandeja mide exactamente el alto de la
+ventana, así que los 24 px de `pb-6` eran TODO el aire entre el paginador y el
+borde; la barra lateral se quedaba con 232 px fijos; y la tabla era
+`w-full table-auto` sin piso, así que el navegador estrujaba las columnas en
+vez de comprometerse a un ancho — severidad y asignación quedaban ilegibles y
+no había ninguna barra para llegar a ellas, porque no había nada que scrollear.
+
+Ahora: `pb-8` (con las dos pantallas de carga copiando el valor, o el esqueleto
+salta al hidratar), barra lateral de 208 px, y `min-w-[1080px]` en la tabla. El
+contenedor de la lista ya era `overflow-auto`: con un piso real aparece la
+barra horizontal. Por encima de 1080 manda `w-full` y nada cambia.
+
+⛔ **No poner `overflow-x-auto` en el `<div role="region">` de `CasesTable`.**
+`overflow-x: auto` obliga a `overflow-y: auto`, ese div pasa a ser el scroller,
+y vuelve el bug de los scrollers anidados que el comentario de ahí existe para
+evitar — además de romper el `sticky top-0` del encabezado.
+
+**La primera columna es la fecha del siniestro, no el número del caso.** El
+enlace se mudó con ella: la celda de la fecha es el `<a href>`, así que
+Ctrl+click, botón del medio y «copiar dirección del enlace» siguen andando. El
+dato sale de `extracted_fields` por subconsulta correlacionada, igual que la
+póliza y el asegurado; una sola consulta. La clave es `accident_date`, la
+canónica — `fecha_siniestro` es el alias en español, y en la base están las dos
+con el mismo valor (159 casos contra 153, y ninguno tiene sólo el alias).
+
+Medido antes de elegir la posición: de las 160 denuncias reales, **157 tienen
+fecha**; de los 330 casos que no son denuncia, 2. La columna está poblada donde
+importa y vacía donde no hay siniestro que fechar.
+
+**Y simular un mail dejó de pedir el tipo de siniestro.** No era una pista para
+el modelo: los `email_sim` pasan por `runEmailExtractionWorker`, cuyo prompt le
+pide al modelo clasificar `claim_type` solo, y el resultado pisa lo sembrado.
+Lo que el campo sí hacía era meter la palabra elegida en el asunto —que después
+se interpola en el prompt, así que elegir «granizo» y pegar un choque le ponía
+las dos cosas delante— y hacer que `cargarLoDelPrompt` cargara los ejemplos del
+tipo equivocado. Los escenarios precargados siguen trayendo el suyo.
+
+**Lo que no se pudo verificar acá, y cómo se verifica:** las pantallas privadas
+piden sesión, y las credenciales de Playwright (`PLAYWRIGHT_TEST_EMAIL` /
+`PLAYWRIGHT_TEST_PASSWORD`) viven sólo en CI. Así que el arreglo se fijó con un
+test que MIDE en vez de mirar: `tests/e2e/la-bandeja-respira-y-scrollea.spec.ts`
+comprueba el hueco en píxeles bajo la tarjeta a 1280×800 y que el contenedor de
+la lista tenga de verdad a dónde scrollear. Una captura no habría servido: lo
+que falla acá es aritmética de layout.
+
 ### 🙋 Waiting on you (not code)
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,

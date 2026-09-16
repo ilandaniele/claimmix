@@ -42,6 +42,7 @@ import {
 } from "@/lib/db/schema";
 import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
+import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import { analyzeEmailClaimGaps, MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/gap-analyzer";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
@@ -87,6 +88,8 @@ export interface ExtractedClaimOutput {
    * find in it.
    */
   latestMessageText?: string;
+  /** Lo que el worker vio de las pólizas encontradas. */
+  polizas?: PolizasDelCaso;
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -112,34 +115,48 @@ export interface ExtractedClaimOutput {
  * cuarenta.
  *
  * Sin nombres ni números: el modelo no necesita el DNI para saber que la
- * póliza existe y está vigente, y esto va a un prompt. Lo que necesita es si
- * hay con qué seguir.
+ * póliza existe, ni el número para saber que venció, y esto va a un prompt.
+ * Lo que necesita es si hay con qué seguir.
  */
-export function loQueYaAveriguamos(matches: CustomerMatch[]): string | undefined {
-  if (matches.length === 0) {
-    return "- El padrón no devolvió ningún cliente para los datos de este mensaje.";
+export function loQueYaAveriguamos(
+  matches: CustomerMatch[],
+  polizas?: PolizasDelCaso | null
+): string | undefined {
+  const lineas: string[] = [];
+
+  if (polizas && polizas.vigentes === 0 && polizas.noVigentes > 0) {
+    lineas.push(
+      polizas.vencioEl
+        ? `- La póliza no está vigente: venció el ${polizas.vencioEl}. Pedirle documentación no sirve.`
+        : "- La póliza no está vigente. Pedirle documentación no sirve."
+    );
   }
 
-  const lineas: string[] = [];
+  if (matches.length === 0) {
+    lineas.push("- El padrón no devolvió ningún cliente para los datos de este mensaje.");
+    return lineas.join("\n");
+  }
+
+  const resto: string[] = [];
   const porPoliza = matches.filter((m) => m.matchType === "policy_number");
   const porDni = matches.filter((m) => m.matchType === "dni");
 
   if (porPoliza.length > 0) {
-    lineas.push(`- La póliza que dio existe en el padrón (${porPoliza.length} coincidencia(s)).`);
+    resto.push(`- La póliza que dio existe en el padrón (${porPoliza.length} coincidencia(s)).`);
   }
   if (porDni.length > 0) {
-    lineas.push(`- El DNI que dio tiene ${porDni.length} póliza(s) en el padrón.`);
+    resto.push(`- El DNI que dio tiene ${porDni.length} póliza(s) en el padrón.`);
   }
-  if (lineas.length === 0) {
-    lineas.push(`- Hay ${matches.length} coincidencia(s) en el padrón, por contacto y no por póliza ni DNI.`);
+  if (resto.length === 0) {
+    resto.push(`- Hay ${matches.length} coincidencia(s) en el padrón, por contacto y no por póliza ni DNI.`);
   }
 
   const conflictos = matches.flatMap((m) => m.conflictsWithExtracted);
   if (conflictos.length > 0) {
-    lineas.push(`- No coincide con lo que tenemos guardado: ${[...new Set(conflictos)].join(", ")}.`);
+    resto.push(`- No coincide con lo que tenemos guardado: ${[...new Set(conflictos)].join(", ")}.`);
   }
 
-  return lineas.join("\n");
+  return [...lineas, ...resto].join("\n");
 }
 
 export async function orchestratePostExtraction(
@@ -187,8 +204,9 @@ export async function orchestratePostExtraction(
   // ── B. Severity escalation — AC11 ────────────────────────────────────────
   const severity = extractedClaim.severity;
   const isHighSeverity = severity === "high" || severity === "critical";
+  const derivaSola = isHighSeverity || extractedOutput.polizas?.derivar === true;
 
-  if (isHighSeverity) {
+  if (derivaSola) {
     await escalate({
       caseId,
       tenantId,
@@ -202,7 +220,9 @@ export async function orchestratePostExtraction(
         (f) => canonicalFieldKey(f.field_key) === "claim_type"
       )?.field_value ?? null,
       summary: extractedClaim.summary ?? null,
-      reason: `severidad ${severity}`,
+      reason: isHighSeverity
+        ? `severidad ${severity}`
+        : `póliza sin vigencia${extractedOutput.polizas?.vencioEl ? ` desde ${extractedOutput.polizas.vencioEl}` : ""}`,
     });
   }
 
@@ -383,7 +403,7 @@ export async function orchestratePostExtraction(
      * pidió nada. Era así antes de este cambio y se mantiene: agregarle ahora
      * un evento de auditoría que nunca emitió sería inventar historia.
      */
-    if (!isHighSeverity) {
+    if (!derivaSola) {
       await setStatus(caseId, tenantId, "confirmacion_pendiente");
 
       await messenger.send({
@@ -463,9 +483,9 @@ export async function orchestratePostExtraction(
     lastAsked,
     latestMessage: latestMessageText ?? "",
     claimTypeLabel: labelForClaimType(claimTypeValue),
-    isHighSeverity,
+    isHighSeverity: derivaSola,
     isComplete: everythingOutstanding.fields.length === 0,
-    yaAveriguado: loQueYaAveriguamos(customerMatches),
+    yaAveriguado: loQueYaAveriguamos(customerMatches, extractedOutput.polizas),
   });
 
   if (plan) {
@@ -545,7 +565,7 @@ export async function orchestratePostExtraction(
   // Routed through the same code as a severity escalation so there is one
   // place where escalation happens, one audit event, and one guarantee that a
   // specialist is actually told.
-  if (plan?.intent === "escalate" && !isHighSeverity) {
+  if (plan?.intent === "escalate" && !derivaSola) {
     await escalate({
       caseId,
       tenantId,
@@ -640,7 +660,7 @@ export async function orchestratePostExtraction(
     nosPreguntoAlgo: owesAnAnswer,
     llegoUnArchivo: somethingArrived,
     datosQueFaltan: askItems.fields.length,
-    esGrave: isHighSeverity,
+    esGrave: derivaSola,
   } as const;
 
   const askOnHold = elPedidoQuedaEnEspera({ ...señalesBase, aprendimosAlgo: false });
@@ -649,7 +669,7 @@ export async function orchestratePostExtraction(
   // decisión. Antes el `&&` la salteaba por corto circuito y sería una pena
   // perder eso: es una ida a la base por cada caso que no está en espera.
   const aprendimosAlgo =
-    askOnHold && !agentIsWaiting && !isHighSeverity
+    askOnHold && !agentIsWaiting && !derivaSola
       ? await factsLearnedSinceWeLastSpoke(caseId, tenantId, hablamos)
       : false;
 
@@ -657,7 +677,7 @@ export async function orchestratePostExtraction(
   const askIsNew = decision === "pedir";
   const acknowledgeOnly = decision === "acusar-recibo";
 
-  if (askIsNew && !confirmationEmailDispatched && !isHighSeverity) {
+  if (askIsNew && !confirmationEmailDispatched && !derivaSola) {
     await messenger.send({
       caseId,
       tenantId,
@@ -697,7 +717,7 @@ export async function orchestratePostExtraction(
       target_id: caseId,
       payload: { missing_fields: gapResult.missingRequiredFields },
     });
-  } else if (askOnHold && !isHighSeverity && !confirmationEmailDispatched) {
+  } else if (askOnHold && !derivaSola && !confirmationEmailDispatched) {
     // We asked for exactly this and they have not answered it yet. Nothing to
     // say, but the case is still blocked on it — leaving the status alone here
     // would let the branch below mark a claim ready while a document nobody
@@ -707,7 +727,7 @@ export async function orchestratePostExtraction(
       tenantId,
       missingInfoEmailComing ? "info_faltante" : "confirmacion_pendiente"
     );
-  } else if (!isHighSeverity && !confirmationEmailDispatched) {
+  } else if (!derivaSola && !confirmationEmailDispatched) {
     // Nothing was asked, so nothing is being waited on.
     //
     // The analyzer can return confirmacion_pendiente over doubts we decided are
@@ -765,7 +785,7 @@ export async function orchestratePostExtraction(
   // not to repeat a question would fall through to "ya tenemos todo lo
   // necesario" — which is worse than asking twice, because it is false.
   const somethingElseWasSaid =
-    isHighSeverity ||
+    derivaSola ||
     confirmationEmailDispatched ||
     missingInfoEmailDispatched ||
     acknowledgementDispatched ||

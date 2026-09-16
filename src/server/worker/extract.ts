@@ -72,7 +72,9 @@ import {
 import { CLAIM_FIELD_KEYS } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { polizaParaCompletar } from "@/core/case/poliza-encontrada";
+import { mirarPolizas } from "@/core/case/poliza-vigente";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
+import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
@@ -1288,6 +1290,11 @@ export async function runEmailExtractionWorker(
       resolvedPolicyId = policyMatches[0]?.policyId;
     }
 
+    // El worker ya sabe acá si la póliza que encontramos venció: no hace
+    // falta que el modelo lo descubra llamando a `verificar_poliza`, que
+    // dejó de hacer 7 de 7 corridas.
+    const polizas = mirarPolizas(policyNumber, policyMatches, diaArgentino());
+
     /*
      * ── j bis) La póliza que encontramos deja de ser algo que le pedimos ──────
      *
@@ -1472,6 +1479,7 @@ export async function runEmailExtractionWorker(
           // carried In-Reply-To.
           inReplyToMessageId: undefined,
           latestMessageText: latestInboundText,
+          polizas,
         },
         customerMatches,
         messengerFor(caseRow.channel)

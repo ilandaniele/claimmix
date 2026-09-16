@@ -2755,6 +2755,41 @@ Delegadas con «tomá vos las decisiones». Las cuatro, con su porqué:
 | **`achicar-payloads --apply`** | Aplicado: **356 filas, 12.808 → 2.518 kB**. Nadie en `src/` lee `body.data` de `raw_payload` y el arreglo hacia adelante llevaba días en producción; los bytes base64 eran una copia que nada consultaba. |
 | **El escaneo de los 15 componentes** | Cerrado: las tres tandas corrieron enteras entre el 15 y el 16/09 (74, 134 y 128 archivos leídos de 74, 134 y 129), con 0, 5 y 1 hallazgos; los de la tanda 2 están parchados en #178 y el de la 3 en este mismo PR. Lo que dejaron sin veredicto, en «Waiting on you». |
 
+### 🪪 Una póliza vencida se deriva sola, sin esperar a que el modelo pregunte (2026-09-16)
+
+El ensayo `poliza-vencida` pasó de verde a rojo a las 19:14 con el mismo código:
+7 de 7 corridas después (tres intentos del post-deploy de `5da01aa` y una local),
+el agente le pedía fotos de los daños y la licencia a alguien cuya cobertura
+venció en 2020, y el caso quedaba en `confirmacion_pendiente` en vez de
+`requiere_especialista`.
+
+**La causa no era el modelo: era que dependíamos de él.** Desde #130 el worker le
+sirve al agente lo que ya averiguó («la póliza que dio existe en el padrón»),
+pero no le decía que había vencido — `PolicyMatch` no traía `end_date`. Que la
+derivación ocurriera dependía de que el modelo igual llamara a `verificar_poliza`.
+Hasta esa tarde lo hacía; desde esa tarde, no. Una decisión de producto que el
+worker ya tenía resuelta estaba en manos de la varianza del modelo.
+
+**Lo que cambia.** La regla de vigencia (`status === "active"` y `end_date` no
+pasada) vive una sola vez en `src/core/case/poliza-vigente.ts`; la usan
+`verificar_poliza`, `polizas_por_dni` y el worker. `mirarPolizas` decide
+`derivar` cuando la persona dio un número, coincide con lo encontrado y ninguna
+de sus pólizas está en pie; `orchestratePostExtraction` lo lleva por el MISMO
+`escalate` que la severidad — mismo estado, mismo mensaje, mismo aviso al
+especialista, sin gastar ninguna llamada al modelo. Y la línea servida al prompt
+ahora dice «la póliza no está vigente: venció el 2020-03-01» cuando corresponde,
+para el caso que la derivación determinista no cubre (llegaron por DNI, sin
+número).
+
+Verificado: 17 tests nuevos (regla pura, texto servido, derivación de punta a
+punta con un solo mensaje y sin pedido de documentación), y el ensayo:
+`poliza-vencida` deriva, `busca-la-poliza` (póliza vigente) sigue igual.
+
+**Los otros dos rojos del mismo post-deploy** —`choque-completo` turno 4 sin
+respuesta y `mail-que-no-coincide-con-el-padron` sin los dos nombres— no se
+repitieron en las dos corridas: son timeouts del proveedor y varianza, y la
+intersección de las dos corridas ya los filtra.
+
 ### 🙋 Waiting on you (not code)
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,

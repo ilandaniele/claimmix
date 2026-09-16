@@ -26,7 +26,7 @@ export const LEDGER_INSERT =
   "insert into schema_migrations (version, filename, checksum, applied_by) values ($1,$2,$3,$4)";
 
 export async function connect(connectionString) {
-  const client = new pg.Client({ connectionString, ssl: { rejectUnauthorized: false } });
+  const client = new pg.Client({ connectionString });
   try {
     await client.connect();
     return tcpDriver(client);

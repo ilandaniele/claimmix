@@ -23,7 +23,7 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const client = new pg.Client({ connectionString, ssl: { rejectUnauthorized: false } });
+const client = new pg.Client({ connectionString });
 
 try {
   await client.connect();

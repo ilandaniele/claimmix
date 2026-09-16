@@ -19,7 +19,7 @@ const outDir = "training-export";
 const stamp = new Date().toISOString().slice(0, 10);
 const outFile = process.argv[2] || `${outDir}/training-examples-${stamp}.json`;
 
-const c = new pg.Client({ connectionString: conn, ssl: { rejectUnauthorized: false } });
+const c = new pg.Client({ connectionString: conn });
 await c.connect();
 
 const examples = (await c.query(`

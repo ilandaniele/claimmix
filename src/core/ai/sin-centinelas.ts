@@ -40,6 +40,22 @@ const CENTINELAS = [
   "tenant_prompt",
 ] as const;
 
+/** La forma de un centinela: `<tag>` o `</tag>`, con o sin espacios adentro. */
+function forma(nombres: string): string {
+  return `<\\s*/?\\s*(?:${nombres})\\s*>`;
+}
+
+/**
+ * Cualquiera de los centinelas, para DETECTARLO — `sinCentinelas` los rompe,
+ * esto sólo dice que están. Misma lista y misma tolerancia a los espacios: la
+ * detección que mira menos tags que la limpieza es la que deja pasar el ataque.
+ *
+ * Sin `g` a propósito: `.test()` sobre una expresión global arrastra
+ * `lastIndex` entre llamadas y empieza a devolver `false` una vez sí y una vez
+ * no.
+ */
+export const RE_CENTINELA = new RegExp(forma(CENTINELAS.join("|")), "i");
+
 /**
  * Deja el texto sin poder cerrar ni reabrir un centinela.
  *
@@ -58,7 +74,7 @@ export function sinCentinelas(texto: string | null | undefined): string {
      * expresión que sólo mire la forma canónica es una que se esquiva
      * escribiendo un espacio.
      */
-    const re = new RegExp(`<\\s*/?\\s*${nombre}\\s*>`, "gi");
+    const re = new RegExp(forma(nombre), "gi");
     salida = salida.replace(re, `[${nombre}]`);
   }
 

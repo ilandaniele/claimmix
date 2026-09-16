@@ -107,6 +107,7 @@ async function attackSurface(): Promise<void> {
   console.log(`Probando ${routes.length} rutas sin credenciales:\n`);
 
   const open: string[] = [];
+  const sinRespuesta: string[] = [];
 
   for (const file of routes) {
     const pattern = routePattern(file);
@@ -115,6 +116,14 @@ async function attackSurface(): Promise<void> {
     const url = BASE + routeToUrl(file);
 
     let res = await head(url);
+    // Un 0 no es una respuesta: el fetch no llegó. Se prueba una vez más y, si
+    // sigue sin llegar, se cuenta aparte. La sonda falla igual —no probó lo que
+    // tenía que probar— pero no dice «abierta» de una ruta que no contestó.
+    if (res.status === 0) res = await head(url);
+    if (res.status === 0) {
+      sinRespuesta.push(pattern);
+      continue;
+    }
     // 405 quiere decir "ese método no", no "no podés": hay que probar el otro.
     if (res.status === 405) {
       res = await head(url, {
@@ -143,9 +152,10 @@ async function attackSurface(): Promise<void> {
 
   probe(
     `las ${routes.length - INTENTIONALLY_PUBLIC.size} rutas privadas piden credenciales`,
-    open.length === 0,
+    open.length === 0 && sinRespuesta.length === 0,
     "leer o modificar denuncias, clientes y pólizas de un asegurador sin ninguna credencial",
-    open.length ? `\n      abiertas: ${open.join(", ")}` : ""
+    (open.length ? `\n      abiertas: ${open.join(", ")}` : "") +
+      (sinRespuesta.length ? `\n      sin respuesta (red): ${sinRespuesta.join(", ")}` : "")
   );
 
   // ── Las rutas que publica el SDK de flujos ─────────────────────────────────

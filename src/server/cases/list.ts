@@ -22,10 +22,20 @@ import {
   type TenantContext,
 } from "@/data/scope";
 import { cases } from "@/lib/db/schema";
-import type { CaseRow } from "@/lib/db/types";
+import type { CaseRow as CasesTableRow } from "@/lib/db/types";
 import type { CaseQuery, SortColumn } from "@/lib/schemas/cases";
 
-export type { CaseRow };
+/**
+ * La fila que devuelve este listado: las columnas de `cases` más lo que
+ * `consultaListado` suma por subconsulta correlacionada — hoy
+ * `fecha_siniestro` (y ya antes `replied_at`, que quedó sin sumar acá al
+ * tipo cuando se agregó). No es la fila cruda de la tabla: esa sigue siendo
+ * `CaseRow` en `@/lib/db/types`, y la sigue usando el resto del código
+ * (detalle de un caso, patch, orquestación) donde no hay tal subconsulta.
+ */
+export type CaseRow = CasesTableRow & {
+  fecha_siniestro: string | null;
+};
 
 export interface CaseListResult {
   data: CaseRow[];
@@ -137,6 +147,16 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery) {
              and ef.tenant_id = ${cases.tenant_id}
              and ef.field_key = 'full_name'
         ))`,
+      // No hay columna `cases.incident_date` con la que hacer coalesce — el
+      // dato vive solo en `extracted_fields`. La clave real es `accident_date`:
+      // `fecha_siniestro` es el alias en español que a veces emite el
+      // extractor, y `canonicalFieldKey` (claim-fields.ts) lo mapea a esta.
+      fecha_siniestro: sql<string | null>`(
+          select ef.field_value from extracted_fields ef
+           where ef.case_id = ${cases.id}
+             and ef.tenant_id = ${cases.tenant_id}
+             and ef.field_key = 'accident_date'
+        )`,
       claim_type: cases.claim_type,
       status: cases.status,
       confidence_min: cases.confidence_min,
@@ -291,6 +311,9 @@ export async function listCasesForExport(
 
   try {
     // Max 1000 rows per export.
+    // Sin `fecha_siniestro`: la alimenta el CSV de export.csv/route.ts, con su
+    // propio CSV_HEADERS fijo, y ninguna columna ahí la pide — agregarla sería
+    // ensanchar un consumidor que nadie pidió tocar.
     const data = await enTenant({ tenantId }, (db) =>
       db
         .select({

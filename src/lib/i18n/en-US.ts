@@ -90,6 +90,7 @@ export const enUS: Record<TranslationKey, string> = {
 
   // ── Case table columns ─────────────────────────────────────────────────────
   "table.col.id": "ID",
+  "table.col.incidentDate": "Date of loss",
   "table.col.policyholder": "Policyholder",
   "table.col.policy": "Policy",
   "table.col.type": "Type",

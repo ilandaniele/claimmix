@@ -11,15 +11,15 @@
  * Auth: cualquier rol que pueda tocar un caso — o sea, todos menos `viewer`.
  *
  * Body modes:
- *   { scenario_id: "choque-01" }          → use pre-seeded scenario
- *   { raw_text: "...", case_type: "robo" } → ad-hoc text
+ *   { scenario_id: "choque-01" } → use pre-seeded scenario
+ *   { raw_text: "..." }          → ad-hoc text; el modelo clasifica el tipo
  */
 
 import { type NextRequest, after } from "next/server";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, rawMessages } from "@/lib/db/schema";
-import {
+import {
   CASE_EDITOR_ROLES,
   type RoleContext,
 } from "@/lib/auth/require-role";
@@ -124,7 +124,13 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // ── 4. Resolve scenario or raw text ─────────────────────────────────────────
   let rawText: string;
-  let claimType: ClaimType;
+  /*
+   * Sin escenario no hay tipo: lo clasifica el modelo, igual que un mail que
+   * entra de verdad (`inbound-email.ts` también arranca con `claim_type:
+   * null`). Pedirle el tipo a quien pega el texto era una adivinanza que la
+   * extracción iba a pisar apenas corriera.
+   */
+  let claimType: ClaimType | null;
   let policyholderName: string | null = null;
   let policyNumber: string | null = null;
 
@@ -144,7 +150,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     policyNumber = scenario.policy_number;
   } else {
     rawText = input.raw_text!;
-    claimType = input.case_type!;
+    claimType = input.case_type ?? null;
   }
 
   // ── 5. Budget guard ──────────────────────────────────────────────────────────
@@ -227,7 +233,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         tenant_id: userRow.tenant_id,
         channel: "email_sim",
         from_addr: remitenteDeEnsayo(policyholderName),
-        subject: `[email_sim] Siniestro - ${claimType} - ${input.scenario_id ?? "custom"}`,
+        subject: `[email_sim] Siniestro - ${input.scenario_id ?? "custom"}`,
         body: rawText,
       })
     );

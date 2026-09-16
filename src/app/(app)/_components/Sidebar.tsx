@@ -169,7 +169,12 @@ export function Sidebar({
   return (
     <nav
       aria-label={t("nav.principal")}
-      className="flex h-full w-[232px] flex-shrink-0 flex-col border-r border-slate-200"
+      /*
+       * 208 px y no 232: cada píxel de acá se lo saca a la tabla de la bandeja,
+       * que a 1400 de ancho llegaba a cortar sus últimas columnas. El rótulo
+       * más largo es «Administración», que entra holgado.
+       */
+      className="flex h-full w-[208px] flex-shrink-0 flex-col border-r border-slate-200"
     >
       {/* Logo / brand */}
       <div className="flex h-16 items-center gap-2.5 px-4">

@@ -4,7 +4,7 @@
  * Tests:
  *   - Renders scenario dropdown with all 20 scenarios
  *   - Renders mode switch (scenario / custom)
- *   - Shows custom text area and type selector in custom mode
+ *   - Shows custom text area in custom mode, sin pedir el tipo (lo clasifica el modelo)
  *   - Calls onClose when "Cancelar" is clicked
  *   - Calls fetch and onSuccess when submitted with valid scenario
  *   - Shows rate limit error (429) as error message
@@ -129,7 +129,13 @@ describe("SimulateModal", () => {
     render(<SimulateModal {...defaultProps} />);
     await user.click(screen.getByText(esAR["simulate.modoTexto"]));
     expect(screen.getByLabelText(esAR["simulate.textoLabel"])).toBeInTheDocument();
-    expect(screen.getByLabelText(esAR["simulate.scenario"])).toBeInTheDocument();
+  });
+
+  it("no pide el tipo de siniestro en modo texto — lo clasifica el modelo", async () => {
+    const user = userEvent.setup();
+    render(<SimulateModal {...defaultProps} />);
+    await user.click(screen.getByText(esAR["simulate.modoTexto"]));
+    expect(screen.queryByLabelText(esAR["simulate.scenario"])).not.toBeInTheDocument();
   });
 
   it("submits scenario mode with correct body", async () => {
@@ -156,7 +162,7 @@ describe("SimulateModal", () => {
     expect(defaultProps.onClose).toHaveBeenCalled();
   });
 
-  it("submits custom mode with raw_text and case_type", async () => {
+  it("submits custom mode with raw_text and no case_type — lo clasifica el modelo", async () => {
     const user = userEvent.setup();
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -176,7 +182,6 @@ describe("SimulateModal", () => {
           method: "POST",
           body: JSON.stringify({
             raw_text: "Mi auto fue chocado",
-            case_type: "choque",
           }),
         })
       );

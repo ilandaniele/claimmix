@@ -134,38 +134,59 @@ export function CasesTable({
           ]
         : []),
       {
-        accessorKey: "id",
-        header: t("table.col.id"),
-        cell: ({ getValue }) => {
-          const id = getValue<string>();
+        accessorKey: "fecha_siniestro",
+        header: t("table.col.incidentDate"),
+        cell: ({ getValue, row }) => {
+          const raw = getValue<string | null>();
+          const id = row.original.id;
 
           /*
-           * `whitespace-nowrap`: «SIN-91DB-1A14» se partia en dos lineas por el
-           * guion, y una tabla con la primera columna de doble altura se lee
-           * como si cada fila fuera dos.
-           *
-           * Violeta y no gris: es el identificador de la entidad, lo que en la
-           * referencia se dibuja como enlace. Es el UNICO acento de la fila —
-           * el estado y la severidad llevan color semantico, no de marca.
+           * El valor guardado es el string crudo que devolvio el extractor:
+           * a veces una fecha ISO, a veces una frase. Se muestra corta
+           * cuando efectivamente parsea como fecha; si no, se imprime tal
+           * cual — nunca se inventa una fecha, y nunca se muestra
+           * "Invalid Date".
            */
-          const pinta =
-            "whitespace-nowrap font-mono text-[12.5px] font-medium text-violet-700";
+          const fecha = raw ? new Date(raw) : null;
+          const display = !raw ? (
+            <Vacio />
+          ) : fecha && !Number.isNaN(fecha.getTime()) ? (
+            new Intl.DateTimeFormat(locale, {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            }).format(fecha)
+          ) : (
+            raw
+          );
+
+          /*
+           * Antes esto era el identificador del caso —mono, violeta, el
+           * UNICO acento de marca de la fila—. Una fecha no es un codigo,
+           * asi que se saca el mono, pero el violeta se queda: sigue
+           * siendo la columna que lleva el enlace, y el color es lo que
+           * la anuncia como clickeable. El estado y la severidad llevan
+           * color semantico, no de marca.
+           */
+          const pinta = "whitespace-nowrap text-[13px] font-medium text-violet-700";
 
           /*
            * En modo seleccion NO va el enlace: ahi tocar la fila la MARCA, y un
            * <a> en el medio se llevaria ese click a otra pantalla.
            */
           if (seleccionando) {
-            return <span className={pinta}>{formatCaseId(id)}</span>;
+            return <span className={pinta}>{display}</span>;
           }
 
           /*
-           * El numero era un <span> y la fila navegaba con `router.push`. Con
-           * eso Ctrl+click abria el caso en la MISMA pestaña —el onClick de la
-           * fila ni recibe el evento, asi que no mira las teclas—, el boton del
-           * medio no hacia nada, y no habia «copiar direccion del enlace»
-           * porque no habia direccion. Un <a href> de verdad devuelve las tres,
-           * y las pone el navegador, no nosotros.
+           * La fecha de siniestro es ahora la que lleva el enlace —antes
+           * era el numero del caso—. Ese numero era un <span> y la fila
+           * navegaba con `router.push`. Con eso Ctrl+click abria el caso
+           * en la MISMA pestana —el onClick de la fila ni recibe el
+           * evento, asi que no mira las teclas—, el boton del medio no
+           * hacia nada, y no habia «copiar direccion del enlace» porque no
+           * habia direccion. Un <a href> de verdad devuelve las tres, y
+           * las pone el navegador, no nosotros.
            *
            * Un analista que revisa veinte casos abre varios en pestañas: era lo
            * que mas se sentia de este defecto, mas que el rol del <tr>.
@@ -199,7 +220,7 @@ export function CasesTable({
               tabIndex={-1}
               className={`${pinta} hover:underline`}
             >
-              {formatCaseId(id)}
+              {display}
             </Link>
           );
         },
@@ -472,7 +493,19 @@ export function CasesTable({
         * que ahora es uno solo.
         */}
       <div role="region" aria-label={t("bandeja.tableLabel")}>
-        <table className="w-full table-auto text-left" aria-label={t("bandeja.tableLabel")}>
+        {/*
+          * `min-w-[1080px]`: sin un piso, `table-auto` reparte lo que haya y
+          * con la ventana angosta las últimas columnas —severidad, asignación—
+          * se estrujaban hasta quedar ilegibles, sin nada que permitiera
+          * llegar a ellas. Con el piso, el contenedor de arriba (que ya es
+          * `overflow-auto`) muestra una barra para correr la tabla al costado.
+          * El número es la suma de los anchos mínimos de las once columnas; por
+          * encima de eso manda `w-full` y nada cambia.
+          */}
+        <table
+          className="w-full min-w-[1080px] table-auto text-left"
+          aria-label={t("bandeja.tableLabel")}
+        >
           <thead className="sticky top-0 z-10 bg-slate-50">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>

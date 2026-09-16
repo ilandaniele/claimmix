@@ -199,6 +199,11 @@ function mensajeCrudoInsertado(): Record<string, unknown> | undefined {
   return valoresInsertados.find((v) => v && "from_addr" in v);
 }
 
+/** La fila de `cases` que escribió el simulador. */
+function casoInsertado(): Record<string, unknown> | undefined {
+  return valoresInsertados.find((v) => v && "assigned_to" in v);
+}
+
 function setupAuthMocks() {
   mockGetSession.mockResolvedValue({ user: MOCK_USER });
   setupDbMocks();
@@ -311,12 +316,21 @@ describe("POST /api/intake/simulate", () => {
     expect(body.error.code).toBe("VALIDATION_FAILED");
   });
 
-  it("returns 400 when raw_text provided without case_type", async () => {
-    const req = makeRequest({ raw_text: "El 15/03/2024 tuve un choque..." });
+  /*
+   * Antes esto era 400. El tipo lo clasifica el modelo, igual que un mail
+   * real (`inbound-email.ts` arranca con `claim_type: null`): pedírselo a
+   * quien pega el texto era una adivinanza que la extracción iba a pisar.
+   */
+  it("acepta raw_text sin case_type — lo clasifica el modelo, no la persona", async () => {
+    const req = makeRequest({ raw_text: "El 15/03/2024 tuve un choque en Av. Corrientes." });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(202);
     const body = await res.json();
-    expect(body.error.code).toBe("VALIDATION_FAILED");
+    expect(body.case_id).toBeDefined();
+
+    const caso = casoInsertado();
+    expect(caso).toBeDefined();
+    expect(caso!.claim_type).toBeNull();
   });
 
   it("returns 400 for invalid case_type with raw_text", async () => {

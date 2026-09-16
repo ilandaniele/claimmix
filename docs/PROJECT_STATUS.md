@@ -2752,36 +2752,51 @@ Delegadas con «tomá vos las decisiones». Las cuatro, con su porqué:
 | **Carga: el presupuesto de 500 ms** | Ni subir el número ni aceptar el rojo al azar. **Una medición no es un veredicto**: si una celda pasa el presupuesto se mide otra vez y falla sólo si se repite (`medirCelda`, con test). Las dos mediciones van al reporte y la celda repetida lleva `*` en la tabla. Una celda con consultas falladas no se repite: eso no es ruido. |
 | **`viewer`** | «Mira todo y no cambia nada». El código ya lo decía (`require-role.ts`, `CASE_EDITOR_ROLES`, el padrón negado igual que a `analyst`); ahora está escrito en `roles.ts` para que nadie lo reabra. La pantalla del caso queda como está. |
 | **`achicar-payloads --apply`** | Aplicado: **356 filas, 12.808 → 2.518 kB**. Nadie en `src/` lee `body.data` de `raw_payload` y el arreglo hacia adelante llevaba días en producción; los bytes base64 eran una copia que nada consultaba. |
-| **El escaneo de los 15 componentes** | Cerrado por tandas. La tanda 1 (auth, seguridad, rate-limit y `src/app/api`, 74 archivos) corrió entera el 15/09 sobre `cc89d00`: 11 de 11 investigadores, 74 de 74 archivos leídos, 3 candidatos rechazados por el panel, 0 hallazgos, sello `verified` (`CLAUDE-SECURITY-20260915-170931/`). Faltan las tandas 2 y 3; ver «Waiting on you». |
+| **El escaneo de los 15 componentes** | Cerrado: las tres tandas corrieron enteras entre el 15 y el 16/09 (74, 134 y 128 archivos leídos de 74, 134 y 129), con 0, 5 y 1 hallazgos; los de la tanda 2 están parchados en #178 y el de la 3 en este mismo PR. Lo que dejaron sin veredicto, en «Waiting on you». |
 
 ### 🙋 Waiting on you (not code)
 
-- **Escaneo de seguridad: la tanda 1 está cerrada; faltan la 2 y la 3.** Cinco
-  corridas para llegar: las cuatro primeras las cortó el límite de la cuenta
-  (informes en `CLAUDE-SECURITY-20260911-175932/`, `-20260911-220639/` y
-  `-20260912-204146/`), y la quinta, el 15/09 sobre `cc89d00`, terminó entera:
-  11 de 11 investigadores, 74 de 74 archivos leídos hasta una conclusión, 5
-  candidatos (3 tras deduplicar) y el panel rechazó los 3; sello `verified`, 0
-  hallazgos (`CLAUDE-SECURITY-20260915-170931/`). La diferencia fue el modelo:
-  los investigadores corrieron en Sonnet 5 por un `model` explícito en una copia
-  del script del plugin (el original hereda el de la sesión); los votantes
-  siguieron en Fable 5.1. Costó unos 2 M de tokens de subagentes y no tocó el límite.
+- **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,
+  seguridad, rate-limit, `src/app/api`; 15/09, `cc89d00`): 74/74 archivos, 0
+  hallazgos, sello `verified`. Tanda 2 (`src/server` sin `email`, `src/core`,
+  `src/lib/db`, `src/lib/schemas`, `neon`; 15-16/09, `b8c079e`): 134/134
+  archivos, 5 hallazgos MEDIUM que son 3 defectos, **parchados en #178** con un
+  test cada uno (propiedad del caso en `confirm-field`, saneo de los ejemplos
+  aprobados, nombre y correo del padrón enmascarados en el conflicto). Tanda 3
+  (`src/app/(app)`, `src/app/(auth)`, `src/components`, `scripts`; 16/09,
+  `933a7e9`): 128/128 archivos, 1 hallazgo LOW, parchado en este mismo PR (la
+  URL del rol de ensayo va por el entorno y no por argumento). Informes en
+  `CLAUDE-SECURITY-20260915-170931/`, `-20260915-220949/` y `-20260916-130237/`.
+  Receta que funcionó: investigadores en Sonnet 5 por una copia del script del
+  plugin con `model` explícito, panel en Fable 5.1.
 
-  Para las tandas 2 (`src/server` menos `email`, `src/core`, `src/lib/db`,
-  `src/lib/schemas`, `neon`) y 3 (`src/app/(app)`, `src/app/(auth)`,
-  `src/components`, `scripts`) se repite la receta: copia parcheada, Sonnet en
-  investigadores, panel en el modelo de la sesión. Cada una pide la confirmación
-  de costo del plugin. Endurecimiento barato que dejó el candidato C3, rechazado
-  2 a 1: `POST /api/health/knock` borra en Gmail el `message_id` que le manden en
-  el cuerpo; que borre sólo el id que devolvió su propio `insert`. Está detrás de
-  `CRON_SECRET`, así que no es hallazgo, pero es una línea.
+  Lo que quedó sin veredicto, y es tuyo: **F19 de la tanda 2**, los tokens OAuth
+  de Google (`access_token`, `refresh_token`, `id_token`) guardados en texto
+  plano en la tabla `account`, porque `src/lib/auth/index.ts` no activa
+  `account.encryptOAuthTokens` de Better Auth. Dos de tres votantes lo dieron
+  por cierto (MEDIUM); el tercero cayó por cuota y el plugin lo descartó. Activar
+  el cifrado implica migrar las filas ya guardadas. Y dos endurecimientos
+  baratos que el panel no consideró hallazgo: sacar `ssl: { rejectUnauthorized:
+  false }` de `scripts/lib/db-driver.mjs` y de cinco scripts (hoy la URL con
+  `sslmode` lo pisa; el día que falte, haría lo que dice), y que
+  `POST /api/health/knock` borre sólo el id que devolvió su propio `insert`.
 
-- **Diez PRs de dependabot (#163-#172) desde el 12/09.** Los seis limpios se
-  mergean de a uno, esperando el verde del post-deploy entre cada uno, porque la
-  cola de producción guarda un solo pendiente y seis merges seguidos dejarían
-  post-deploys sin correr. Rojos que quedan para vos: #166 (`codeql-action` 4.38
-  rompe el análisis de CodeQL) y #171 (`nodemailer` 10 rompe el type check). A
-  #165 y #169, inestables, se les pidió rebase.
+- **Dependabot (#163-#172), cerrado salvo uno.** Entraron de a uno con
+  post-deploy verde entre cada uno: #163, #164, #167, #168, #170 (next 16.3.5),
+  #172 y #165; los dos rojos se resolvieron aparte: #176 subió las tres acciones
+  de CodeQL juntas (dependabot subía sólo `analyze` y el análisis rechazaba la
+  mezcla de versiones) y #177 subió nodemailer a 10 con sus propios tipos. Queda
+  **#169 (better-auth 1.7)**: 1.7 evalúa el adapter al cargar el módulo y el
+  build de Vercel, sin `DATABASE_URL`, revienta en el proxy perezoso de `db`;
+  está diagnosticado en el PR y espera a que se toque auth.
+
+- **El ensayo del post-deploy ya no cae por un pico de Gemini.** El 15/09 dio
+  rojo 5 de 8 veces por `transport_timeout` (30 s) en dos a cinco casos de mail
+  por corrida, con producción sana. Desde #175, cuando un turno esperaba
+  respuesta y el worker dejó el caso pendiente, el ensayo lo retoma una vez con
+  el mismo `runIntakeAgent` que usa el barrido. Ante un rojo, mirar primero
+  `--log-failed` por `transport_timeout`; regla de la casa: hasta dos reruns, el
+  umbral no se toca.
 
 - ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
   356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`

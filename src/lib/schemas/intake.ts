@@ -44,8 +44,10 @@ const ScenarioIdSchema = z.enum(SCENARIO_IDS, {
  * POST /api/intake/simulate body.
  *
  * Two modes:
- *   1. scenario_id: use a pre-seeded scenario
- *   2. raw_text + case_type: ad-hoc text (for advanced callers)
+ *   1. scenario_id: use a pre-seeded scenario (trae su propio case_type)
+ *   2. raw_text: ad-hoc text — el modelo clasifica el tipo, como con un mail
+ *      real. `case_type` es opcional acá: si alguien lo manda igual (un
+ *      caller avanzado) se guarda hasta que la extracción lo pise.
  */
 export const SimulateIntakeSchema = z
   .object({
@@ -60,23 +62,13 @@ export const SimulateIntakeSchema = z
   .superRefine((data, ctx) => {
     const hasScenario = data.scenario_id !== undefined;
     const hasRaw = data.raw_text !== undefined;
-    const hasType = data.case_type !== undefined;
 
     if (!hasScenario && !hasRaw) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "Se requiere 'scenario_id' o 'raw_text' con 'case_type'.",
+          "Se requiere 'scenario_id' o 'raw_text'.",
         path: ["scenario_id"],
-      });
-    }
-
-    if (hasRaw && !hasType) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          "Se requiere 'case_type' cuando se envía 'raw_text'.",
-        path: ["case_type"],
       });
     }
   });

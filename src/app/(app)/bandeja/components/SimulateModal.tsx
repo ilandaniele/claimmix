@@ -10,7 +10,6 @@
 
 import { useState, useCallback } from "react";
 import type { OpcionDeEscenario } from "@/server/intake/scenarios";
-import type { ClaimType } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
 import { useDialogoModal } from "../../_components/dialogo-modal";
@@ -23,24 +22,6 @@ interface SimulateModalProps {
 }
 
 type InputMode = "scenario" | "custom";
-
-/*
- * La etiqueta es una CLAVE y no un texto ya traducido.
- *
- * Decia `label: t("simulate.scenario.choque")`, con el `t` de modulo, que no
- * recibe locale y por eso siempre devuelve es-AR. Ademas corria UNA vez, al
- * cargar el archivo, antes de que exista ningun idioma: aunque el `t` hubiera
- * sabido el locale, la lista habria quedado congelada en el primero.
- *
- * Es la peor forma del defecto —parece traducido y no lo esta—, asi que la
- * traduccion baja al `map`, que corre adentro del componente.
- */
-const CLAIM_TYPES: { value: ClaimType; clave: TranslationKey }[] = [
-  { value: "choque", clave: "simulate.scenario.choque" },
-  { value: "robo", clave: "simulate.scenario.robo" },
-  { value: "granizo", clave: "simulate.scenario.granizo" },
-  { value: "incendio", clave: "simulate.scenario.incendio" },
-];
 
 /*
  * El escenario muestra su tipo capitalizado a mano. Si el tipo esta en el
@@ -70,7 +51,6 @@ export function SimulateModal({
     scenarios[0]?.id ?? ""
   );
   const [customText, setCustomText] = useState("");
-  const [customType, setCustomType] = useState<ClaimType>("choque");
   const [submitting, setSubmitting] = useState(false);
   const t = useT();
   // Sin foco inicial: lo primero enfocable del panel es el selector de
@@ -96,7 +76,7 @@ export function SimulateModal({
           setSubmitting(false);
           return;
         }
-        body = { raw_text: customText.trim(), case_type: customType };
+        body = { raw_text: customText.trim() };
       }
 
       const res = await fetch("/api/intake/simulate", {
@@ -129,7 +109,7 @@ export function SimulateModal({
     } finally {
       setSubmitting(false);
     }
-  }, [mode, selectedScenarioId, customText, customType, onClose, onSuccess, onError, t]);
+  }, [mode, selectedScenarioId, customText, onClose, onSuccess, onError, t]);
 
   // Close on backdrop click
   const handleBackdropClick = useCallback(
@@ -214,26 +194,12 @@ export function SimulateModal({
         {/* Custom text input */}
         {mode === "custom" && (
           <div className="space-y-3 mb-4">
-            <div>
-              <label
-                htmlFor="custom-type"
-                className="block text-sm font-medium text-slate-700 mb-1"
-              >
-                {t("simulate.scenario")}
-              </label>
-              <select
-                id="custom-type"
-                value={customType}
-                onChange={(e) => setCustomType(e.target.value as ClaimType)}
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400"
-              >
-                {CLAIM_TYPES.map(({ value, clave }) => (
-                  <option key={value} value={value}>
-                    {t(clave)}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/*
+             * Sin selector de tipo: lo clasifica el modelo, igual que con un
+             * mail real. Cualquier tipo que se pidiera acá era una adivinanza
+             * que el extractor iba a pisar apenas corriera, y mientras tanto
+             * contradecía el texto que la persona acababa de pegar.
+             */}
             <div>
               <label
                 htmlFor="custom-text"

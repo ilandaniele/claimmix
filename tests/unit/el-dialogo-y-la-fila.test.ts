@@ -86,9 +86,10 @@ describe("23 — una fila se puede abrir en otra pestaña", () => {
 
   it("en modo selección vuelve a ser texto", () => {
     // Ahí tocar la fila la MARCA, y un <a> en el medio se llevaría ese clic a
-    // otra pantalla.
+    // otra pantalla. El enlace ahora vive en la columna de fecha de
+    // siniestro, no en el id.
     expect(TABLA).toContain("if (seleccionando) {");
-    expect(TABLA).toContain("<span className={pinta}>{formatCaseId(id)}</span>");
+    expect(TABLA).toContain("<span className={pinta}>{display}</span>");
   });
 
   it("el clic no navega dos veces", () => {

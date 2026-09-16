@@ -99,6 +99,7 @@ export const esAR = {
 
   // ── Case table columns ─────────────────────────────────────────────────────
   "table.col.id": "ID",
+  "table.col.incidentDate": "Fecha de siniestro",
   "table.col.policyholder": "Asegurado",
   "table.col.policy": "Póliza",
   "table.col.type": "Tipo",

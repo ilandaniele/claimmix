@@ -216,8 +216,14 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
          */}
       </div>
 
-      {/* La lista, dentro de la misma tarjeta que todo lo demás. */}
-      <div className="flex-1 overflow-hidden px-6 pb-6">
+      {/*
+        * La lista, dentro de la misma tarjeta que todo lo demás.
+        *
+        * `pb-8` y no `pb-6`: la pantalla mide exactamente el alto de la
+        * ventana, así que lo que sobre acá abajo es TODO el aire que hay entre
+        * el paginador y el borde. Con 24 px la tarjeta se leía pegada al filo.
+        */}
+      <div className="flex-1 overflow-hidden px-6 pb-8">
         <Card className="flex h-full flex-col overflow-hidden">
           <DashboardClient
             initialData={initialData}

@@ -701,7 +701,12 @@ console.log("\n▸ Lo previo al merge no apunta a producción");
       if (actual) trabajos.push(actual);
     }
 
-    for (const trabajo of trabajos) {
+    for (const bruto of trabajos) {
+      // Sin comentarios: la primera version de esto se dio por satisfecha
+      // con un comentario que NOMBRABA el campo mientras la guarda no lo
+      // miraba. Un chequeo que pasa por lo que dice el comentario no es un
+      // chequeo.
+      const trabajo = bruto.replace(/^\s*#.*$/gm, "");
       if (!/\bpnpm (tenancy|capa-datos|pentest)\b/.test(trabajo)) continue;
       // Anclado a la sintaxis real de una expresión de Actions: un comentario
       // que sólo NOMBRE `secrets.DATABASE_URL` entre comillas no matchea.
@@ -770,7 +775,7 @@ console.log("\n▸ La guarda de post-deploy no es sólo el entorno");
 
     for (const trabajo of trabajos) {
       if (!/deployment\.environment\s*==\s*['"]Production['"]/.test(trabajo)) continue;
-      if (!/\bdeployment\.ref\b/.test(trabajo)) cojos.push(nombre);
+      if (!/deployment_status\.environment_url/.test(trabajo)) cojos.push(nombre);
     }
   }
 
@@ -783,7 +788,7 @@ console.log("\n▸ La guarda de post-deploy no es sólo el entorno");
     for (const w of [...new Set(cojos)]) console.log(`     .github/workflows/${w}`);
     console.log("     Con dos proyectos de Vercel, un deploy de QA también llega con");
     console.log("     environment == 'Production' —la etiqueta de SU entorno, en SU");
-    console.log("     proyecto—. Agregá `deployment.ref == 'main'` a la guarda.");
+    console.log("     proyecto—. Mirá el host de `deployment_status.environment_url`.");
   }
 }
 

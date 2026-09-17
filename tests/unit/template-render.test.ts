@@ -8,7 +8,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { renderTemplate, maskDni, maskPolicyNumber } from "../../src/server/email/render";
+import {
+  renderTemplate,
+  maskDni,
+  maskFullName,
+  maskPolicyNumber,
+} from "../../src/server/email/render";
 
 // ── PII masking unit tests ────────────────────────────────────────────────────
 
@@ -370,6 +375,78 @@ describe("renderTemplate — specialist_escalation", () => {
     const result = renderTemplate("specialist_escalation", { caseId: "esc-4" });
     expect(typeof result.text).toBe("string");
     expect(result.text.length).toBeGreaterThan(50);
+  });
+});
+
+describe("specialist_escalation — el titular que no coincide", () => {
+  /*
+   * Escribe un familiar del titular: el DNI que da no es el del padrón.
+   *
+   * El agente ve `titular_coincide: false` y deriva, que está bien. Lo que le
+   * llegaba a esa persona era «tu caso pasó a un especialista» y nada más: no
+   * sabe cuál de los dos nombres estamos mirando, así que no tiene qué
+   * contestar y el caso queda esperando una respuesta que no puede dar.
+   *
+   * Es AC7/AC9, y el escenario `mail-que-no-coincide-con-el-padron` del ensayo
+   * lo exige con estos mismos valores.
+   */
+  const DEL_PADRON = maskFullName("Roberto Paz");
+  const QUE_DIJO = "Lucía Paz";
+
+  function derivacionDeTitular(extra: Record<string, unknown> = {}) {
+    return renderTemplate("specialist_escalation", {
+      caseId: "esc-titular",
+      titularIniciales: DEL_PADRON,
+      claimantName: QUE_DIJO,
+      ...extra,
+    });
+  }
+
+  it("nombra los dos valores", () => {
+    const r = derivacionDeTitular();
+    expect(r.html).toContain("R*** P***");
+    expect(r.html).toContain(QUE_DIJO);
+    expect(r.text).toContain("R*** P***");
+    expect(r.text).toContain(QUE_DIJO);
+  });
+
+  it("y el del padrón NUNCA entero", () => {
+    // Con un DNI ajeno, este mensaje le devolvía al remitente el nombre del
+    // titular. Las iniciales son todo lo que puede salir.
+    const r = derivacionDeTitular();
+    expect(r.html).not.toContain("Roberto Paz");
+    expect(r.text).not.toContain("Roberto Paz");
+  });
+
+  it("sobrevive a que el redactor reescriba el cuerpo", () => {
+    // La mitad que es un dato va fuera de `cuerpo`, que es lo único que el
+    // redactor ve. Si dependiera de que el modelo lo copie, volveríamos al
+    // mensaje sin valores.
+    const r = derivacionDeTitular({ cuerpo: "Lucía, tu caso ya está con un especialista." });
+    expect(r.html).toContain("R*** P***");
+    expect(r.text).toContain("R*** P***");
+    expect(r.cuerpo).not.toContain("R*** P***");
+  });
+
+  it("un escalado por severidad no menciona ningún padrón", () => {
+    const r = renderTemplate("specialist_escalation", {
+      caseId: "esc-grave",
+      severity: "critical",
+      claimantName: QUE_DIJO,
+    });
+    expect(r.html).not.toContain("figura a nombre de");
+    expect(r.text).not.toContain("figura a nombre de");
+  });
+
+  it("y con las iniciales solas tampoco", () => {
+    // Sin el nombre que dio la persona, el del padrón es una acusación sin
+    // término de comparación.
+    const r = renderTemplate("specialist_escalation", {
+      caseId: "esc-solo",
+      titularIniciales: DEL_PADRON,
+    });
+    expect(r.html).not.toContain("R*** P***");
+    expect(r.text).not.toContain("R*** P***");
   });
 });
 

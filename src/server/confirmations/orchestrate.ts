@@ -36,10 +36,14 @@ import {
   cases,
   claimAttachments,
   claimFieldConfirmations,
+  customers,
   extractedFields,
   missingDocs,
   outboundMessages,
+  policies,
 } from "@/lib/db/schema";
+import { normalizarDni, normalizarNumeroPoliza } from "@/core/matching/normalizar";
+import { maskFullName } from "@/server/email/render";
 import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
@@ -566,6 +570,18 @@ export async function orchestratePostExtraction(
   // place where escalation happens, one audit event, and one guarantee that a
   // specialist is actually told.
   if (plan?.intent === "escalate" && !derivaSola) {
+    // Quién figura en el padrón, para que el mensaje pueda nombrarlo. Sólo
+    // cuando le vamos a escribir: es una consulta más a la base.
+    const titularIniciales = confirmationEmailDispatched
+      ? null
+      : await inicialesDelTitularAjeno(
+          caseId,
+          tenantId,
+          extractedClaim,
+          claimantName,
+          plan.toolCalls ?? []
+        );
+
     await escalate({
       caseId,
       tenantId,
@@ -575,6 +591,7 @@ export async function orchestratePostExtraction(
       messenger,
       severity: extractedClaim.severity,
       claimantName,
+      titularIniciales,
       claimTypeValue,
       reason: plan.reasoning,
       // Si el conflicto ya salió, el asegurado no recibe además esto.
@@ -1156,6 +1173,98 @@ async function recordLookedUpFields(
 }
 
 /**
+ * El titular del padrón en iniciales, cuando quien escribe no es esa persona.
+ *
+ * `verificar_poliza` ya detecta esto —devuelve `titular_coincide: false`— y a
+ * propósito NO le dice el nombre al modelo: un número de póliza se adivina, y
+ * ésa es la línea entre una línea de siniestros y un servicio de consulta del
+ * padrón. Así que las iniciales se arman acá, del lado del servidor, leyendo
+ * la base, y lo único que puede salir del sistema es «R*** P***».
+ *
+ * Devuelve null —y entonces el mensaje no nombra ningún padrón— cuando no hay
+ * con qué comparar, cuando el titular ES quien escribe, y cuando los dos
+ * nombres son el mismo: un padre y un hijo homónimos con documentos distintos
+ * existen, y ahí las iniciales al lado del nombre entero lo dirían entero.
+ */
+async function inicialesDelTitularAjeno(
+  caseId: string,
+  tenantId: string,
+  extractedClaim: ExtractedClaim,
+  nombreQueDijo: string | null,
+  toolCalls: Array<{ tool: string; args: Record<string, unknown> }>
+): Promise<string | null> {
+  const dicho = (key: string) =>
+    extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === key)
+      ?.field_value?.trim() || null;
+
+  /*
+   * Los mismos dos valores que comparó `verificar_poliza`, no los extraídos.
+   *
+   * En el ensayo la herramienta la buscó como «POL-3390-F» y la encontró,
+   * mientras el emparejador —que usa el campo extraído— devolvía cero
+   * coincidencias para la misma póliza: el modelo escribe el número de una
+   * forma en el campo y de otra en la llamada, y el guion no se normaliza a
+   * propósito (ver `normalizarNumeroPoliza`). Buscar con el número que ya
+   * resolvió es lo único que hace que esto no dependa de cuál de las dos
+   * formas eligió el modelo ese día.
+   */
+  const verificada =
+    toolCalls.find((c) => c.tool === "verificar_poliza")?.args ?? {};
+  const texto = (v: unknown) =>
+    typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+
+  const numero = texto(verificada.numero_poliza) ?? dicho("policy_number");
+  const dni = texto(verificada.dni) ?? dicho("dni");
+  if (!numero || !dni || !nombreQueDijo) return null;
+
+  try {
+    // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
+    const titular = firstRow(
+      await enTenant({ tenantId }, (db) =>
+        db
+          .select({ nombre: customers.full_name, dni: customers.dni })
+          .from(policies)
+          .leftJoin(customers, eq(policies.customer_id, customers.id))
+          // Los dos lados sin espacios y en mayúsculas, igual que los
+          // buscadores: el número lo tipea una persona.
+          .where(
+            sql`upper(replace(${policies.policy_number}, ' ', '')) = ${normalizarNumeroPoliza(numero)}`
+          )
+          .limit(1)
+      )
+    );
+
+    if (!titular?.nombre || !titular.dni) {
+      // Sin nombres ni números: que la póliza no apareció es lo que hay que
+      // poder leer cuando el mensaje sale sin los dos valores.
+      logger.info({ case_id: caseId }, "escalation.holder_not_found");
+      return null;
+    }
+    if (normalizarDni(titular.dni) === normalizarDni(dni)) return null;
+    if (mismoNombre(titular.nombre, nombreQueDijo)) return null;
+
+    return maskFullName(titular.nombre);
+  } catch (err) {
+    // Sin las iniciales el mensaje dice menos; sin derivación no se entera
+    // nadie. La derivación gana.
+    logger.error({ code: errCode(err) }, "orchestrate.holder_lookup_failed");
+    return null;
+  }
+}
+
+/** Sin acentos, sin mayúsculas y sin espacios de más: «Lucía  PAZ» es «lucia paz». */
+function mismoNombre(uno: string, otro: string): boolean {
+  const plano = (s: string) =>
+    s
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  return plano(uno) === plano(otro);
+}
+
+/**
  * Hand the case to a person, and make sure a person is actually told.
  *
  * One function because there are now two ways in and they must not diverge.
@@ -1179,6 +1288,14 @@ async function escalate(opts: {
   severity: string | null | undefined;
   /** El nombre de pila, para que el redactor no salude a un desconocido. */
   claimantName?: string | null;
+  /**
+   * El titular del padrón en iniciales, cuando no es quien escribe.
+   *
+   * Con el nombre que dio quien escribe —`claimantName`— son los dos valores
+   * que no coinciden, y son lo único que esa persona necesita para saber qué
+   * contestar. Nunca el nombre entero: ver `inicialesDelTitularAjeno`.
+   */
+  titularIniciales?: string | null;
   claimTypeValue: string | null;
   summary?: string | null;
   reason: string;
@@ -1236,7 +1353,12 @@ async function escalate(opts: {
       to: opts.senderEmail,
       lastMessage: opts.latestMessageText,
       template: "specialist_escalation",
-      data: { caseId, severity, claimantName: opts.claimantName ?? null },
+      data: {
+        caseId,
+        severity,
+        claimantName: opts.claimantName ?? null,
+        titularIniciales: opts.titularIniciales ?? null,
+      },
       inReplyToMessageId: opts.inReplyToMessageId,
     });
   }

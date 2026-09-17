@@ -865,6 +865,46 @@ console.log("\n▸ Nadie compara `deployment.ref` con el nombre de una rama");
   }
 }
 
+// ── 18. Nadie compara `deployment.environment` con un literal ─────────────
+//
+// GitHub le pone al entorno el nombre que Vercel le manda, y Vercel lo CAMBIA
+// cuando aparece un segundo proyecto: `Production` pasó a `Production – claimmix`
+// el día que se creó `claimmix-qa`. Ninguna guarda se rompió con un error —
+// cambiaron de lado en silencio.
+//
+// El post-deploy se salteaó tres merges seguidos sin dejar un rojo. Y el job de
+// carga, que usaba `!= 'Production'` para correr sólo contra vistas previas,
+// pasó a aceptar producción: k6 midiendo contra la base de los clientes.
+//
+console.log("\n▸ Nadie compara `deployment.environment` con un literal");
+{
+  const flujos = existsSync(".github/workflows")
+    ? readdirSync(".github/workflows").filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+    : [];
+  const culpables = [];
+
+  for (const nombre of flujos) {
+    const texto = readFileSync(`.github/workflows/${nombre}`, "utf8");
+    // Sin comentarios: este archivo y los workflows EXPLICAN el defecto citando
+    // la expresión. Misma razón que en las invariantes 15 y 17.
+    const sinComentar = texto
+      .split(/\r?\n/)
+      .map((l) => l.replace(/(^|\s)#.*$/, "$1"))
+      .join("\n");
+    if (/deployment\.environment\s*[!=]=\s*['\"]/.test(sinComentar)) culpables.push(nombre);
+  }
+
+  if (flujos.length === 0) {
+    console.log("     (no hay workflows: nada que comprobar)");
+  } else if (culpables.length === 0) {
+    bien("se compara por prefijo: el nombre del entorno lo elige Vercel");
+  } else {
+    mal(`${culpables.length} workflow(s) comparan deployment.environment con un literal`);
+    for (const w of culpables) console.log(`     .github/workflows/${w}`);
+    console.log("     Vercel renombra el entorno al crear otro proyecto. Usá startsWith().");
+  }
+}
+
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(66));
 if (problemas.length === 0) {

@@ -130,12 +130,31 @@ todavía no demostró que es estable bloquea a todo el mundo.
 
 ## Dos trampas que ya están resueltas, y conviene no reabrir
 
-**Un deploy de QA también llega como `environment == 'Production'`.** Los dos
-proyectos de Vercel mandan el mismo evento con la misma etiqueta. Por eso el
-guard de `post-deploy.yml` filtra además por la **rama** del despliegue, y hay
-una invariante en `check-architecture.mjs` que lo exige. Sin eso, un deploy de QA
-dispara el smoke contra el alias de producción.
-
+**Un deploy de QA también llega como `environment == 'Production'`.** Los dos
+proyectos de Vercel mandan el mismo evento con la misma etiqueta, porque cada
+uno la pone sobre SU propio entorno de producción.
+
+⛔ **La rama no sirve para distinguirlos, y se aprendió rompiéndolo.** Vercel le
+pone a `deployment.ref` el **SHA del commit**, no el nombre de la rama, así que
+`deployment.ref == 'main'` no es cierto nunca: con esa guarda puesta el
+post-deploy quedó muerto —el deploy llegó con `state: success` y la corrida
+salió salteada—, que es el mismo defecto de «verde porque no corrió» que este
+trabajo vino a sacar.
+
+Lo que sí distingue es el **host de `environment_url`**, que Vercel arma con el
+nombre del proyecto. Hoy el guard excluye lo que empiece con
+`https://claimmix-qa-`. **Cuando crees el proyecto, mirá un evento real antes de
+confiar en ese prefijo**: si le ponés otro nombre, hay que ajustarlo. Para verlo:
+
+```bash
+gh api repos/ilandaniele/claimmix/deployments --jq '.[0:5][] | "\(.environment) \(.ref[0:7])"'
+D=$(gh api repos/ilandaniele/claimmix/deployments --jq '.[0].id')
+gh api "repos/ilandaniele/claimmix/deployments/$D/statuses" --jq '.[0].environment_url'
+```
+
+La invariante 15 de `check-architecture.mjs` exige que el guard mire ese campo,
+y está probada: si se lo sacás, falla.
+
 **Un check que avisa y aprueba es peor que no tenerlo.** Tres jobs hacían eso
 cuando les faltaba un secreto, y dos de ellos eran requeridos: podían pasar sin
 haber corrido una línea. Ahora sólo un fork avisa —que es cuando GitHub retiene

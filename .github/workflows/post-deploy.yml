@@ -84,11 +84,23 @@ jobs:
     # correría el smoke de producción contra el alias de producción para un
     # deploy que nunca lo tocó. Es la misma respuesta peligrosa del comentario
     # de arriba de `concurrency`, un piso más abajo.
+    #
+    # ⛔ `deployment.ref` NO es el nombre de la rama: Vercel le pone el SHA.
+    #
+    # Se probó y el post-deploy quedó MUERTO — `f73a28b` desplegó a producción
+    # con `state: success` y la corrida salió salteada, que es exactamente el
+    # defecto que este trabajo vino a sacar: verde porque no corrió.
+    #
+    # Así que vuelve la condición que funciona. Para cuando exista el proyecto
+    # de QA hay que distinguirlo por el HOST de `environment_url`, que es lo
+    # único que difiere entre los dos proyectos (`claimmix-…` contra
+    # `claimmix-qa-…`), y eso se escribe MIRANDO un evento real de QA, no
+    # adivinando otra vez. Está anotado en docs/PROMOCION.md.
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event.deployment.ref == 'main' &&
-       github.event.deployment_status.state == 'success' &&
-       github.event.deployment.environment == 'Production')
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.environment == 'Production' &&
+       !startsWith(github.event.deployment_status.environment_url, 'https://claimmix-qa-'))
     permissions:
       contents: read
       # Techo para el job `rehearse` de deploy-checks.yml: un workflow

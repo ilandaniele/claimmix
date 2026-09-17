@@ -2,9 +2,12 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, qa]
   push:
     branches: [main]
+  # Para comprobar una rama sin abrir un PR — sin esto la única forma de correr
+  # el workflow completo era mandarlo a revisión.
+  workflow_dispatch:
 
 # Una corrida por rama. Acá sí se cancela la anterior: no toca nada de afuera
 # —tipos, lint, tests, build en un runner limpio— así que el resultado del
@@ -243,6 +246,10 @@ jobs:
     env:
       # Un secreto no se puede leer desde un `if:`; una variable de entorno sí.
       HAY_ENSAYO: ${{ secrets.STAGING_DATABASE_URL }}
+      # Sólo en un fork GitHub retiene los secretos por diseño. En cualquier
+      # otro caso —`main`, un PR interno, `workflow_dispatch`— faltar el
+      # secreto es un descuido y no un límite de la plataforma.
+      ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
     permissions:
       contents: read
     continue-on-error: false
@@ -357,10 +364,16 @@ jobs:
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           MOCK_AI: "true"
 
+      # Antes, sin el secreto, esto avisaba y el job quedaba VERDE sin importar
+      # de dónde viniera la corrida. En un fork eso es lo correcto —no recibe
+      # secretos por diseño—, pero en `main` o un PR interno un check
+      # REQUERIDO pasaba sin haber corrido ni un test.
       - name: Run integration tests
         run: |
-          if [ "${{ secrets.STAGING_DATABASE_URL }}" != "" ]; then
+          if [ -n "$HAY_ENSAYO" ]; then
             INTEGRATION_ENABLED=true pnpm test:integration
+          elif [ "$ES_FORK" = "true" ]; then
+            echo "::warning title=Integración sin correr::Fork sin secretos, no se probó."
           else
             {
               echo "### 204 tests de integración no corrieron"
@@ -370,7 +383,8 @@ jobs:
               echo ""
               echo "En local: \`pnpm sembrar\`, levantar el servidor, y \`pnpm test:integration\`."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning title=Integración sin correr::Falta STAGING_DATABASE_URL — ver el resumen del run."
+            echo "::error title=Integración sin correr::Falta STAGING_DATABASE_URL — ver el resumen del run."
+            exit 1
           fi
         env:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
@@ -458,6 +472,10 @@ jobs:
   e2e-tests:
     name: E2E tests (Playwright)
     runs-on: ubuntu-latest
+    env:
+      # Mismo motivo que en `integration-tests`.
+      HAY_E2E: ${{ secrets.E2E_DATABASE_URL }}
+      ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
     # El mismo grupo que `integration-tests`: comparten la base y su cupo.
     # Adentro de una corrida ya van en serie por el `needs:` de mas abajo;
     # esto es lo que falta para que tampoco se encimen entre corridas.
@@ -533,9 +551,12 @@ jobs:
       # el servidor, así que no se pueden correr sin ella — pero eso tiene que
       # verse.
       #
-      # En un pull request queda como aviso: puede venir de un fork, que por
-      # diseño no recibe secretos. En `main` falla, porque ahí sí están y que
-      # falten significa que alguien los sacó.
+      # Sólo en un fork queda como aviso: no recibe secretos por diseño. La
+      # condición era `github.event_name == 'push'`, y eso fallaba sólo en
+      # `main` — un PR interno (mismo repo, no fork) SÍ recibe secretos, y con
+      # esa condición faltarlos ahí pasaba como un aviso silencioso en vez de
+      # como el descuido que es. Ahora mira si la corrida es de un fork de
+      # verdad, no si el evento es `push`.
       # `E2E_DATABASE_URL` es un secreto APARTE de `STAGING_DATABASE_URL`.
       #
       # Hoy apuntan a la misma base —el resumen de más abajo dice justamente que
@@ -553,9 +574,11 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          if [ "${{ secrets.E2E_DATABASE_URL }}" != "" ]; then
+          if [ -n "$HAY_E2E" ]; then
             pnpm test:e2e --project=chromium
-          elif [ "${{ github.event_name }}" = "push" ]; then
+          elif [ "$ES_FORK" = "true" ]; then
+            echo "::warning title=E2E sin correr::Falta E2E_DATABASE_URL — normal en un fork. Los e2e NO se probaron en este PR."
+          else
             {
               echo "### Los e2e no corrieron"
               echo ""
@@ -576,8 +599,6 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error title=E2E sin correr::Falta el secreto E2E_DATABASE_URL. 13 tests de seguridad que no necesitan datos quedaron sin correr — el resumen del run tiene el comando exacto."
             exit 1
-          else
-            echo "::warning title=E2E sin correr::Falta E2E_DATABASE_URL — normal en un fork. Los e2e NO se probaron en este PR."
           fi
         env:
           # Secretos PROPIOS, y no los de producción, y ese es todo el punto.
@@ -700,6 +721,19 @@ jobs:
         # exactamente lo que tiene que pasar para que alguien lo mire.
 
   # ── 8. Bundle size check ─────────────────────────────────────────────────────
+  #
+  # El presupuesto de 500 ms (`PRESUPUESTO_P95_MS`) se mide sólo en el
+  # post-deploy, contra producción: el ensayo tiene cuatrocientos casos contra
+  # cientos de miles de verdad, y un p95 medido ahí no es comparable con el que
+  # importa. Se lo probó local (`ci.yml`) contra un build propio con una base
+  # placeholder y no hay forma de que mida nada — no hay login posible sin una
+  # base real, así que un k6 acá sólo mediría si `/api/auth/sign-in/email`
+  # devuelve rápido un error, no si el tablero responde rápido con datos.
+  #
+  # Antes de mergear, lo que se vigila es esto: el peso del bundle. Atrapa
+  # JavaScript que engorda el build. No atrapa un índice perdido bajo volumen
+  # real ni el arranque en frío del runtime — eso lo mide `pnpm load` después
+  # de cada deploy contra la base de producción, con la mesa llena de verdad.
   bundle-size:
     name: Bundle size check
     runs-on: ubuntu-latest
@@ -839,3 +873,159 @@ jobs:
         # no podía fallar por ningún camino. Hoy pasa limpio: comprobado corriendo
         # el checker a mano antes de sacarle la red. Si mañana entra una
         # dependencia GPL, ahora se entera alguien.
+
+  # ── 11. Tenencia y capa de datos ─────────────────────────────────────────────
+  #
+  # `pnpm tenancy` le pregunta a la base si separa a las aseguradoras; `pnpm
+  # capa-datos` prueba que el código que la usa no la deja abierta igual. Los
+  # dos contra el ENSAYO, nunca contra producción — `tenancy` sólo lee, pero
+  # `capa-datos` puede escribir una fila señuelo si encuentra una fuga (y la
+  # borra con el rol dueño), así que no hay margen para apuntarlos a la base de
+  # los clientes.
+  #
+  # `needs: [integration-tests]` para no pelearse el mismo cupo de la base de
+  # ensayo — ver el comentario largo en `integration-tests` sobre la corrida de
+  # main y la de un PR encimándose el 2026-09-07.
+  tenencia-capa-datos:
+    name: Tenencia y capa de datos
+    runs-on: ubuntu-latest
+    needs: [integration-tests]
+    permissions:
+      contents: read
+    env:
+      # Mismo motivo que en `integration-tests`.
+      HAY_ENSAYO: ${{ secrets.STAGING_DATABASE_URL }}
+      ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm tenancy && pnpm capa-datos
+        run: |
+          if [ -n "$HAY_ENSAYO" ]; then
+            pnpm tenancy
+            pnpm capa-datos
+          elif [ "$ES_FORK" = "true" ]; then
+            echo "::warning title=Tenencia sin probar::Fork sin secretos, no se probó."
+          else
+            echo "::error title=Tenencia sin probar::Falta STAGING_DATABASE_URL (y STAGING_DATABASE_URL_APP)."
+            exit 1
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          DATABASE_URL_APP: ${{ secrets.STAGING_DATABASE_URL_APP }}
+
+  # ── 12. Pen test (local) ─────────────────────────────────────────────────────
+  #
+  # `pnpm pentest --solo-superficie`: sólo LA SUPERFICIE de `scripts/pen-test.mts`
+  # — cada ruta de `src/app/api` sin credenciales, el subárbol admin de Better
+  # Auth, y las cabeceras de seguridad. Sin `--solo-superficie` también ataca la
+  # pared entre inquilinos y al agente, y las dos piden una base de verdad y
+  # tokens de modelo — nada de eso hay en este runner, así que quedan afuera acá
+  # y las sigue cubriendo el pen test de post-deploy contra producción.
+  #
+  # `pnpm build` + `pnpm start`, nunca `pnpm dev`. No es una preferencia de
+  # estilo: el webhook de Gmail (`src/app/api/webhooks/gmail/route.ts`) sólo
+  # exige `PUBSUB_AUDIENCE` cuando `NODE_ENV === "production"` — en dev sigue de
+  # largo sin verificar, a propósito, para poder ensayar el flujo local sin
+  # montar Pub/Sub. Con `next dev` esa ruta queda abierta y este chequeo la
+  # marcaría como una fuga que no existe en el deploy real; `next start` corre
+  # con el mismo `NODE_ENV` que producción y la guarda se comporta igual.
+  #
+  # Alcance real, no el que sugiere el nombre del job: `--solo-superficie`
+  # también saltea `/.well-known/workflow/v1/flow` y
+  # `/.well-known/workflow/v1/step`, porque lo único que las cierra es
+  # `experimentalTriggers` en `.vc-config.json` — una garantía que pone Vercel
+  # al desplegar, y que contra localhost no existe. Ese par lo sigue probando el
+  # pen test de post-deploy. Este job atrapa una ruta nueva bajo `src/app/api`
+  # que responde sin credenciales, en el mismo PR que la agrega; no cubre las
+  # garantías que dependen del deploy.
+  pen-test-local:
+    name: Pen test (local)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          # La capa de datos usa su propio rol. Sin esta variable, cualquier
+          # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
+          BETTER_AUTH_SECRET: placeholder-secret-for-build-only
+          MOCK_AI: "true"
+
+      - name: Levantar el servidor
+        run: |
+          pnpm start > /tmp/start.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null "http://localhost:3000/api/health" && break
+            # 401 es "está arriba y pide credenciales", que alcanza.
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health)" = "401" ] && break
+            sleep 2
+          done
+          curl -s -o /dev/null -w "servidor: %{http_code}" http://localhost:3000/api/health
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
+          BETTER_AUTH_SECRET: placeholder-secret-for-build-only
+          MOCK_AI: "true"
+          #
+          # Un `CRON_SECRET` de mentira, y hace falta que esté.
+          #
+          # Las rutas de cron devuelven 500 —no 401— cuando el secreto NO está
+          # configurado, a propósito: que falte es una mala configuración del
+          # despliegue y no un llamador sin permiso, y la diferencia está fijada
+          # por tests. Pero la sonda cuenta como «abierta» toda respuesta que no
+          # sea 401 ni 403, así que sin esto marcaba /api/cron/gmail-poll y
+          # /api/cron/reap-stuck como abiertas.
+          #
+          # No era un hallazgo: era esta corrida probando una configuración que
+          # en producción no existe. Con el secreto puesto, la sonda ejercita el
+          # camino real —pedir sin el Bearer correcto— y recibe su 401.
+          CRON_SECRET: no-sirve-en-ningun-lado-solo-para-que-el-cron-conteste-401
+
+      - name: La superficie, contra el build local
+        run: pnpm pentest --url http://localhost:3000 --solo-superficie

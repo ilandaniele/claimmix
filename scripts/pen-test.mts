@@ -23,9 +23,10 @@
  *   equivoque. Gasta tokens y escribe casos, que después borra.
  *
  * Uso:
- *   pnpm pentest                 # la superficie: gratis
- *   pnpm pentest --agent         # + los ataques al agente (gasta tokens)
- *   pnpm pentest --url https://… # contra un preview
+ *   pnpm pentest                    # la superficie: gratis
+ *   pnpm pentest --agent            # + los ataques al agente (gasta tokens)
+ *   pnpm pentest --url https://…    # contra un preview
+ *   pnpm pentest --solo-superficie  # sin base ni tokens: sirve contra un server local en CI, antes de mergear
  */
 
 import * as path from "node:path";
@@ -46,7 +47,10 @@ function flag(name: string): string | null {
   return v && !v.startsWith("--") ? v : null;
 }
 
-const doAgent = args.includes("--agent");
+const soloSuperficie = args.includes("--solo-superficie");
+// `--solo-superficie` gana: sin base no hay agente que atacar, aunque alguien
+// pase los dos flags juntos.
+const doAgent = args.includes("--agent") && !soloSuperficie;
 const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix.vercel.app").replace(
   /\/+$/,
   ""
@@ -96,6 +100,26 @@ const INTENTIONALLY_PUBLIC = new Map<string, string>([
   ["/api/demo/public-analyze", "la demo del prospecto; acotada por IP y por presupuesto propio"],
   ["/api/intake/email", "410 Gone, un stub del webhook viejo de Postmark"],
   ["/api/admin/health", "el monitor de uptime la pinga cada 5 minutos; abajo se controla qué dice"],
+]);
+
+/**
+ * Rutas cuya única cerradura la pone el despliegue, no el código.
+ *
+ * Las dos entran acá y no a `INTENTIONALLY_PUBLIC`: no son públicas a
+ * propósito, son inalcanzables sólo porque Vercel las registra detrás de
+ * `experimentalTriggers` (`.vc-config.json`) — una promesa que se cumple al
+ * desplegar, no al escribir el handler. Contra un servidor local esa cola no
+ * existe y no puede existir, así que la sonda daría rojo sin decir nada de
+ * la rama en revisión.
+ *
+ * Por eso el salteo va atado a `--solo-superficie` únicamente: la corrida
+ * normal (la que usa el post-deploy, contra producción) las sigue
+ * comprobando, porque ahí sí hay una cola que puede fallar en dejarlas
+ * cerradas.
+ */
+const SOLO_SUPERFICIE_SIN_COLA = new Set([
+  "/.well-known/workflow/v1/flow",
+  "/.well-known/workflow/v1/step",
 ]);
 
 async function attackSurface(): Promise<void> {
@@ -175,6 +199,16 @@ async function attackSurface(): Promise<void> {
     "/.well-known/workflow/v1/flow",
     "/.well-known/workflow/v1/step",
   ]) {
+    if (soloSuperficie && SOLO_SUPERFICIE_SIN_COLA.has(ruta)) {
+      console.log(
+        `  (--solo-superficie: se saltea ${ruta} — la garantía la pone el ` +
+          "despliegue, no el código; localhost no tiene esa cola y no hay nada " +
+          "que comprobar acá. Se sigue comprobando en el post-deploy, contra " +
+          "producción.)"
+      );
+      continue;
+    }
+
     const r = await head(`${BASE}${ruta}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1077,9 +1111,20 @@ async function attackAgent(): Promise<void> {
 await attackSurface();
 await attackBetterAuthAdmin();
 auditAdminGuards();
-await attackTenantWall();
+if (soloSuperficie) {
+  console.log(
+    "\n--solo-superficie: no se prueba la pared entre tenants (pide DATABASE_URL, " +
+      "DATABASE_URL_APP, GMAIL_TENANT_ID y DEMO_TENANT_ID, y esto corre sin base)."
+  );
+} else {
+  await attackTenantWall();
+}
 if (doAgent) {
   await attackAgent();
+} else if (soloSuperficie) {
+  console.log(
+    "\n--solo-superficie: tampoco se ataca al agente (necesita base y gasta tokens de modelo)."
+  );
 } else {
   console.log("\nSin --agent no se ataca al agente, que es la mitad propia de este");
   console.log("producto: el resto de la superficie la tiene cualquier aplicación.");

@@ -114,16 +114,38 @@ jobs:
       # Automation) y ponerlo acá como `VERCEL_AUTOMATION_BYPASS_SECRET`.
       #
       # Mientras no esté, esto NO corre y lo dice. No sale verde —un verde que no
-      # midió es peor que un rojo— y no sale rojo en cada PR, que enseña a no
-      # mirar la CI. Queda como aviso, con lo que hay que hacer.
+      # midió es peor que un rojo. Se avisa (no se falla) sólo cuando la corrida
+      # viene de un fork, que por diseño no recibe secretos; en cualquier otro
+      # caso falta el secreto porque nadie lo creó, y eso tiene que ser rojo.
+      #
+      # Ese secreto TODAVÍA no existe en el repo — es un paso manual pendiente,
+      # no un bug de este workflow. Así que hoy, a propósito, este job sale en
+      # rojo en cada corrida: `deployment_status` no trae `pull_request` en el
+      # evento (nunca hay ref de fork ahí), así que cae siempre al error de
+      # abajo. Es preferible a lo que reemplaza: un k6 que nunca corrió una sola
+      # vez y un ícono verde que lo escondía.
+      #
+      # Y no es el único que falta: `LOAD_TEST_EMAIL` y `LOAD_TEST_PASSWORD`
+      # —de más abajo, la cuenta con la que `helpers/auth.js` inicia sesión en
+      # `setup()`— tampoco existen todavía. Son tres secretos, no uno, los que
+      # hacen falta antes de que esto mida algo: sin la llave de Vercel ya
+      # queda en rojo acá, y aunque se cree, sin las credenciales de la cuenta
+      # de pruebas el login de k6 falla igual.
       - name: ¿Hay llave para la vista previa?
         id: llave
+        env:
+          HAY: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
         run: |
-          if [ -n "${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" ]; then
+          if [ -n "$HAY" ]; then
             echo "hay=1" >> "$GITHUB_OUTPUT"
+          elif [ "$ES_FORK" = "true" ]; then
+            echo "hay=0" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Carga sin medir::Fork sin secretos, no se probó."
           else
             echo "hay=0" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Carga sin medir::Falta VERCEL_AUTOMATION_BYPASS_SECRET. La vista previa está protegida y k6 mediría la pantalla de Vercel, no la aplicación. Crealo en Vercel (Settings → Deployment Protection → Protection Bypass for Automation) y agregalo como secreto del repo."
+            echo "::error title=Carga sin medir::Falta VERCEL_AUTOMATION_BYPASS_SECRET. La vista previa está protegida y k6 mediría la pantalla de Vercel, no la aplicación. Creá el secreto en Vercel (Settings → Deployment Protection → Protection Bypass for Automation) y agregalo en GitHub."
+            exit 1
           fi
 
       - name: Correr ${{ steps.plan.outputs.escenario }}

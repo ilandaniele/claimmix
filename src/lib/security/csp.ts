@@ -88,6 +88,14 @@ export function buildCsp(nonce: string): string {
     `connect-src 'self'${sentryOrigin()}`,
     "img-src 'self' data: https:",
     "font-src 'self' data:",
+    /*
+     * Sólo el origen del reproductor, y sólo para enmarcar: `frame-src` no
+     * habilita nada de lo que arriba se cierra a mano —ni script, ni conexión,
+     * ni estilo—, es el único permiso para meter un `<iframe>` de YouTube en
+     * `/demo`. `-nocookie` y no `youtube.com`: no pone cookies hasta que se
+     * aprieta play, y esta página es pública y no tiene cartel de consentimiento.
+     */
+    "frame-src https://www.youtube-nocookie.com",
     "frame-ancestors 'none'",
     "object-src 'none'",
     "base-uri 'self'",

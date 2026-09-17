@@ -79,6 +79,11 @@ Ana Morales`,
 
 type ExampleKey = keyof typeof EXAMPLES;
 
+// ── Video ─────────────────────────────────────────────────────────────────────
+
+// Placeholder a reemplazar por el video real del producto.
+const VIDEO_ID = "aqz-KE-bpKQ";
+
 // ── Field labels ──────────────────────────────────────────────────────────────
 
 const FIELD_LABELS: Record<string, string> = {
@@ -338,6 +343,79 @@ function ResultPanel({ result, elapsed }: { result: ExtractedClaim; elapsed: num
   );
 }
 
+// ── Video section ─────────────────────────────────────────────────────────────
+
+function VideoSection() {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-6 mt-8">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">
+        Video
+      </h2>
+      <div className="mx-auto aspect-video w-full max-w-3xl overflow-hidden rounded-lg border border-slate-200">
+        <iframe
+          className="h-full w-full"
+          src={`https://www.youtube-nocookie.com/embed/${VIDEO_ID}`}
+          title="Video de presentación de ClaimMix"
+          loading="lazy"
+          allowFullScreen
+          allow="accelerometer; clipboard-write; encrypted-media; picture-in-picture; web-share"
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Cómo usar section ─────────────────────────────────────────────────────────
+
+const COMO_USAR_PASOS = [
+  {
+    titulo: "1. El siniestro llega solo",
+    texto:
+      "Entra por mail o por WhatsApp y el agente extrae los campos automáticamente, sin que nadie los tipee.",
+  },
+  {
+    titulo: "2. La bandeja",
+    texto:
+      "Cada caso aparece en la bandeja. Se filtra por estado, tipo de siniestro, severidad y canal desde el panel de filtros.",
+  },
+  {
+    titulo: "3. Confirmar un campo",
+    texto:
+      "Si un campo tiene confianza media o no coincide con un dato ya guardado del asegurado, el caso pide confirmación. El ajustador lo confirma, corrige o rechaza desde el detalle del caso.",
+  },
+  {
+    titulo: "4. Derivar a un especialista",
+    texto:
+      "Cuando la severidad es alta o crítica, el caso pasa solo a \"Requiere especialista\": una persona lo revisa antes de seguir.",
+  },
+  {
+    titulo: "5. Exportar",
+    texto:
+      "El botón \"Exportar\" de la bandeja descarga un CSV con los mismos filtros que se están mirando en pantalla.",
+  },
+] as const;
+
+function ComoUsar() {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-6 mt-8">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">
+        Cómo usar la interfaz real
+      </h2>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {COMO_USAR_PASOS.map((paso) => (
+          <div
+            key={paso.titulo}
+            className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
+          >
+            <div className="text-sm font-semibold text-slate-800 mb-1">{paso.titulo}</div>
+            <p className="text-sm text-slate-500 leading-relaxed">{paso.texto}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 type Stage = "idle" | "loading" | "done" | "error";
@@ -586,6 +664,12 @@ export function DemoPublic() {
 
       {/* FNOL flow diagram */}
       <FNOLFlow />
+
+      {/* Video de presentación */}
+      <VideoSection />
+
+      {/* Guía de la interfaz real */}
+      <ComoUsar />
     </div>
   );
 }

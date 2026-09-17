@@ -84,6 +84,22 @@ describe("buildCsp", () => {
     const csp = buildCsp("testnonce123==");
     expect(csp).toContain("form-action 'self'");
   });
+
+  it("allows framing only the YouTube nocookie player, for the /demo video", () => {
+    const csp = buildCsp("testnonce123==");
+    expect(csp).toContain("frame-src https://www.youtube-nocookie.com");
+    expect(csp).not.toContain("youtube.com'");
+    expect(csp).not.toContain("frame-src https://www.youtube.com");
+  });
+
+  it("still blocks framing US, and script-src is still unsafe-inline-free", () => {
+    const csp = buildCsp("testnonce123==");
+    expect(csp).toContain("frame-ancestors 'none'");
+    const scriptSrc = csp
+      .split("; ")
+      .find((d) => d.startsWith("script-src"));
+    expect(scriptSrc).not.toContain("unsafe-inline");
+  });
 });
 
 describe("buildCsp — where reports may go", () => {

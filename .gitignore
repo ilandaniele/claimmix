@@ -71,6 +71,9 @@ supabase/.temp/
 !.claude/skills/
 # Los workflows de orquestación también: describen cómo se trabaja en este repo.
 !.claude/workflows/
+# Y los ajustes del proyecto: `autoCompactWindow` hace que la compactación
+# ocurra a los 200k en serio, no sólo en una regla de CLAUDE.md.
+!.claude/settings.json
 
 # Los enlaces que deja `npx skills` apuntan a una ruta ABSOLUTA de la máquina
 # donde se instaló (`/c/Users/…`). El archivo de verdad vive en `.agents/skills/`

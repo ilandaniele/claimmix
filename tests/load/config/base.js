@@ -36,14 +36,25 @@ export const PERMITIR_REMOTO = __ENV.PERMITIR_REMOTO === "1";
  */
 const BYPASS = __ENV.VERCEL_BYPASS || "";
 
-/** Las cabeceras que abren la puerta, o nada si no hay llave. */
+/**
+ * Las cabeceras que abren la puerta, o nada si no hay llave.
+ *
+ * Va la llave y nada más. Acá iba también `x-vercel-set-bypass-cookie: true`,
+ * que Vercel documenta así: deja la autorización como cookie «using a redirect
+ * with a Set-Cookie header». Un redirect, y en el POST del login.
+ *
+ * k6 sigue ese redirect mandando las MISMAS cabeceras, con lo cual la respuesta
+ * siguiente vuelve a redirigir para dejar la cookie de nuevo, y así hasta
+ * agotar `maxRedirects`. Lo que le llega a `entrar()` no es la sesión: es el
+ * 307, y el error que sale —«El login contestó 307. Sin sesión no hay nada que
+ * medir.»— manda a buscar el problema al login, que no tiene ninguno.
+ *
+ * La cookie era una comodidad para un navegador, que la reenvía solo. Acá no
+ * hace falta: esta función se llama en cada pedido y la llave viaja en todos.
+ */
 export function cabecerasDeVercel() {
   if (!BYPASS) return {};
-  return {
-    "x-vercel-protection-bypass": BYPASS,
-    // Que la primera respuesta deje la cookie y las siguientes no revaliden.
-    "x-vercel-set-bypass-cookie": "true",
-  };
+  return { "x-vercel-protection-bypass": BYPASS };
 }
 
 const ES_LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(BASE_URL);

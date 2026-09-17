@@ -55,10 +55,17 @@ jobs:
     # El evento `deployment_status` llega también para estados intermedios y
     # para producción. Acá sólo interesa una vista previa que terminó bien:
     # contra producción esto no corre solo nunca.
+    #
+    # ⛔ `!= 'Production'` NO alcanza, y era peligroso. Cuando nació el segundo
+    # proyecto de Vercel, GitHub pasó a llamar al entorno `Production – claimmix`
+    # para desambiguarlo. Con la comparación exacta, un deploy de PRODUCCIÓN
+    # dejaba de ser igual a `Production` y entraba acá: k6 midiendo carga contra
+    # la base de los clientes. No llegó a pasar sólo porque falta el secreto de
+    # Vercel y el job muere antes.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
-       github.event.deployment.environment != 'Production')
+       !startsWith(github.event.deployment.environment, 'Production'))
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

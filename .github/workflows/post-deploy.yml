@@ -70,7 +70,7 @@ concurrency:
   group: >-
     ${{ (github.event_name == 'workflow_dispatch' ||
     (github.event.deployment_status.state == 'success' &&
-    github.event.deployment.environment == 'Production' &&
+    startsWith(github.event.deployment.environment, 'Production') &&
     !startsWith(github.event.deployment_status.environment_url,
     'https://claimmix-qa-')))
     && 'post-deploy-contra-produccion'
@@ -108,7 +108,7 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
-       github.event.deployment.environment == 'Production' &&
+       startsWith(github.event.deployment.environment, 'Production') &&
        !startsWith(github.event.deployment_status.environment_url, 'https://claimmix-qa-'))
     permissions:
       contents: read

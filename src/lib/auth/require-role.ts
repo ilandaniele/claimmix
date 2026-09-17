@@ -18,12 +18,8 @@
  * Every query on tenant-owned tables MUST filter by it explicitly.
  */
 
-import { eq } from "drizzle-orm";
-
 import { getSessionContext } from "@/lib/auth/session";
-import { db } from "@/lib/db";
-import { firstRow } from "@/lib/db/helpers";
-import { users } from "@/lib/db/schema";
+import { filaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 import type { UserRole } from "@/lib/auth/roles";
 import { AppError } from "@/lib/errors";
 
@@ -60,15 +56,7 @@ export async function requireRole(...roles: UserRole[]): Promise<RoleContext> {
     throw new AppError("MISSING_SESSION");
   }
 
-  const userRow = firstRow(
-    // sin-inquilino: El arranque de toda petición: de acá sale el inquilino que después
-    // usa `enTenant`. Por definición no puede ir adentro.
-    await db
-      .select({ id: users.id, tenant_id: users.tenant_id, role: users.role })
-      .from(users)
-      .where(eq(users.id, session.user.id))
-      .limit(1),
-  );
+  const userRow = await filaDeUsuario(session.user.id);
 
   if (!userRow) throw new AppError("MISSING_SESSION");
   if (!roles.includes(userRow.role as UserRole)) {

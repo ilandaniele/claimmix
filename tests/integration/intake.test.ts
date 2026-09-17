@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 
 // ── Hoisted mocks (vi.hoisted runs before module evaluation) ──────────────────
 
@@ -214,6 +215,8 @@ function setupAuthMocks() {
 describe("POST /api/intake/simulate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // La caché de usuarios reutiliza el mismo id con roles distintos sin limpieza.
+    olvidarFilaDeUsuario();
     afterCallbacks.length = 0;
     mockCheckBudget.mockResolvedValue({ exceeded: false });
     mockRunIntakeAgent.mockResolvedValue({ ok: true, action: "extract_email" });

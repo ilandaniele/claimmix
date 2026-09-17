@@ -91,8 +91,16 @@ export const RATE_LIMIT_CONFIGS = {
   AUTH_RESET: { limit: 3, windowMs: 60 * 60_000 },
   /** Intake simulation: 30 per minute per user */
   INTAKE_SIMULATE: { limit: 30, windowMs: 60_000 },
-  /** Cases API: 100 per minute per user */
-  CASES_API: { limit: 100, windowMs: 60_000 },
+  /**
+   * Cases API: 100 por minuto por usuario.
+   *
+   * Con `lote`: reserva de a cinco. La bandeja sondea esta ruta cada 5 a 30
+   * segundos por pestaña abierta — es la más pedida del producto — y sin
+   * `lote` cada sondeo es una escritura en la base sólo para contar, aunque el
+   * pedido en sí no escriba nada. Ver `credito-local.ts` para la reserva y el
+   * porqué de que sea seguro.
+   */
+  CASES_API: { limit: 100, windowMs: 60_000, lote: 5 },
 
   // ── Email-intake rate limits (spec §Security posture) ─────────────────────
 
@@ -177,17 +185,23 @@ export interface RateLimitResult {
  * Check the rate limit for the given key and profile.
  *
  * @param key    - Unique identifier string (e.g. "ip:email" or "user:id")
- * @param config - Limit configuration from RATE_LIMIT_CONFIGS
+ * @param config - Limit configuration from RATE_LIMIT_CONFIGS. Con `lote`,
+ *                 reserva ese número de créditos de una escritura y los gasta
+ *                 en memoria — ver `credito-local.ts`. Sin `lote` (todos los
+ *                 perfiles de autenticación) cada llamada sigue yendo a la
+ *                 base: es la defensa contra fuerza bruta y no se negocia.
  */
 export async function rateLimit(
   key: string,
-  config: { limit: number; windowMs: number }
+  config: { limit: number; windowMs: number; lote?: number }
 ): Promise<RateLimitResult> {
   const provider = resolveProvider();
 
   let result: { allowed: boolean; remaining: number; resetAt: number };
 
-  if (provider === "upstash") {
+  if (provider === "postgres" && config.lote) {
+    result = await rateLimitDeALotes(key, config.limit, config.windowMs, config.lote);
+  } else if (provider === "upstash") {
     const { checkRateLimitUpstash } = await import("./upstash");
     result = await checkRateLimitUpstash(key, config.limit, config.windowMs);
   } else if (provider === "postgres") {
@@ -205,6 +219,32 @@ export async function rateLimit(
     ...result,
     retryAfterSeconds,
   };
+}
+
+/**
+ * La mitad de `rateLimit` que reserva de a lotes: gasta crédito local primero,
+ * y sólo si no queda va a la base a pedir un lote nuevo.
+ *
+ * Sólo tiene sentido contra Postgres — es la escritura que se quiere evitar.
+ * Memoria no tiene ese costo, y Upstash no tiene esta forma de lote.
+ */
+async function rateLimitDeALotes(
+  key: string,
+  limit: number,
+  windowMs: number,
+  lote: number
+): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+  const { gastarCredito, anotarReserva } = await import("./credito-local");
+
+  const local = gastarCredito(key, windowMs);
+  if (local) return local;
+
+  const { checkRateLimitPostgres } = await import("./postgres");
+  const remoto = await checkRateLimitPostgres(key, limit, windowMs, lote);
+  anotarReserva(key, windowMs, remoto.hits, limit, lote);
+
+  // Recién anotado: siempre hay al menos un crédito del lote sin usar.
+  return gastarCredito(key, windowMs)!;
 }
 
 /**

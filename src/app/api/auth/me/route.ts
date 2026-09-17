@@ -13,6 +13,7 @@ import { z } from "zod";
 import { getSessionContext } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
+import { olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 
 const PatchMeSchema = z.object({
   locale: z.enum(["es-AR", "en-US"]),
@@ -88,6 +89,10 @@ export async function PATCH(request: NextRequest) {
     .update(users)
     .set({ locale: parsed.data.locale })
     .where(eq(users.id, session.user.id));
+
+  // El idioma vive en la misma fila cacheada: sin esto, la persona cambia de
+  // idioma y la interfaz sigue en el anterior hasta que vence el TTL.
+  olvidarFilaDeUsuario(session.user.id);
 
   return NextResponse.json({ ok: true, persisted: true });
 }

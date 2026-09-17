@@ -60,6 +60,7 @@ vi.mock("@/server/policies/list", async (importOriginal) => ({
 // ── Imports (después de los mocks) ────────────────────────────────────────────
 
 import { NextRequest } from "next/server";
+import { olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 
 // ── Ayudas ────────────────────────────────────────────────────────────────────
 
@@ -114,6 +115,10 @@ const ENDPOINTS = [
 describe.each(ENDPOINTS)("GET $nombre — quién entra", ({ url, ruta, listar }) => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // La fila de `users` se cachea por proceso y estos casos reusan el mismo
+    // id con roles distintos: sin vaciarla, el segundo recibe el rol del
+    // primero mientras dure el TTL.
+    olvidarFilaDeUsuario();
     listar.mockResolvedValue(PAGINA_VACIA);
   });
 
@@ -194,6 +199,10 @@ describe.each(ENDPOINTS)("GET $nombre — quién entra", ({ url, ruta, listar })
 describe("GET /api/customers — parámetros", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // La fila de `users` se cachea por proceso y estos casos reusan el mismo
+    // id con roles distintos: sin vaciarla, el segundo recibe el rol del
+    // primero mientras dure el TTL.
+    olvidarFilaDeUsuario();
     mockListCustomers.mockResolvedValue(PAGINA_VACIA);
     conSesion(USER_ID);
     conRol("admin");
@@ -227,6 +236,10 @@ describe("GET /api/customers — parámetros", () => {
 describe("GET /api/policies — parámetros", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // La fila de `users` se cachea por proceso y estos casos reusan el mismo
+    // id con roles distintos: sin vaciarla, el segundo recibe el rol del
+    // primero mientras dure el TTL.
+    olvidarFilaDeUsuario();
     mockListPolicies.mockResolvedValue(PAGINA_VACIA);
     conSesion(USER_ID);
     conRol("admin");

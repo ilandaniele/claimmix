@@ -150,8 +150,30 @@ no las detectó. Las otras siete ya existen vacías: se **editan**.
 | `AI_TENANT_DAILY_TOKEN_CAP` | `20000000` | Config | editar |
 | `DATABASE_URL` | la rama `qa` de Neon | Secret | editar |
 | `DATABASE_URL_APP` | la rama `qa` de Neon | Secret | editar |
-| `GOOGLE_DEFAULT_TENANT_ID` · `GMAIL_TENANT_ID` | de `.env.local` | Config | editar |
+| `GMAIL_TENANT_ID` | `10000000-0000-0000-0000-000000000001` | Config | editar |
+| `GOOGLE_DEFAULT_TENANT_ID` | el mismo UUID | Config | editar |
 | `BETTER_AUTH_SECRET` | uno NUEVO: `openssl rand -base64 32` | Secret | editar |
+
+Ese UUID es el inquilino «Seguros del Sur S.A.», y la rama `qa` ya lo tiene: se
+sacó de la rama de ensayo, así que se llevó los tres inquilinos con ella.
+
+`GOOGLE_DEFAULT_TENANT_ID` no figura en `.env.local` porque producción no la
+define: el código cae a `GMAIL_TENANT_ID`. En QA hay que ponerle igual el mismo
+UUID. Una variable declarada y vacía no es una variable ausente — `??` la da por
+buena, devuelve la cadena vacía, y el alta de cualquier usuario nuevo muere con
+«GOOGLE_DEFAULT_TENANT_ID … is required to provision new users».
+
+**Los cuatro valores que no se escriben a mano.** Todo esto va en Git Bash, que
+viene con Git para Windows; `clip` es de Windows y deja el valor en el
+portapapeles, listo para pegar en Vercel sin que pase por pantalla.
+
+- `VERTEX_EXTRACTION_MODEL`:
+  `grep '^VERTEX_EXTRACTION_MODEL=' .env.local | cut -d= -f2- | tr -d '\r\n' | clip`
+- `BETTER_AUTH_SECRET`: `openssl rand -base64 32 | tr -d '\r\n' | clip`
+- `DATABASE_URL` y `DATABASE_URL_APP`: consola de Neon, proyecto **ClaimMix**,
+  rama **`qa`** (`br-muddy-mountain-acxm92sh`), «Connection string». Una con el
+  rol `neondb_owner` (esa es `DATABASE_URL`) y la otra con `claimmix_app` (esa
+  es `DATABASE_URL_APP`).
 
 ⚠ **Si el agente de QA queda mudo, mirá las dos primeras.** Son las que deciden
 por dónde sale la extracción y con qué modelo, y su ausencia no rompe el build ni

@@ -468,13 +468,13 @@ describe("listCases — filter branches", () => {
 
   it("applies status filter (branch: if status)", async () => {
     setupListMocks(2, [{ id: "abc" }]);
-    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, status: "recibido" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, status: ["recibido"] });
     expect(result.meta.total).toBe(2);
   });
 
   it("applies type filter (branch: if type)", async () => {
     setupListMocks(1, [{ id: "xyz" }]);
-    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, type: "choque" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, type: ["choque"] });
     expect(result.data.length).toBe(1);
   });
 
@@ -486,7 +486,7 @@ describe("listCases — filter branches", () => {
 
   it("applies severity filter", async () => {
     setupListMocks(1, [{ id: "s1" }]);
-    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, severity: "high" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, severity: ["high"] });
     expect(result.data.length).toBe(1);
   });
 
@@ -504,7 +504,7 @@ describe("listCases — filter branches", () => {
 
   it("applies channel filter", async () => {
     setupListMocks(5, new Array(5).fill({ id: "e" }));
-    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, channel: "email" });
+    const result = await listCases({ tenantId: TENANT_ID }, { ...BASE_QUERY, channel: ["email"] });
     expect(result.meta.total).toBe(5);
   });
 
@@ -554,7 +554,7 @@ describe("listCasesForExport — filter branches", () => {
 
   it("applies status + type + q filters in export", async () => {
     setupExportMock([]);
-    const result = await listCasesForExport(TENANT_ID, { status: "recibido", type: "robo", q: "Pérez" });
+    const result = await listCasesForExport(TENANT_ID, { status: ["recibido"], type: ["robo"], q: "Pérez" });
     expect(Array.isArray(result)).toBe(true);
   });
 

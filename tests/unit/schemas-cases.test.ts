@@ -80,10 +80,13 @@ describe("CaseQuerySchema", () => {
   });
 
   it("accepts valid status filter", () => {
+    // Un valor suelto llega como lista de uno: los filtros de la bandeja pasaron
+    // a aceptar varios, y la URL los lleva repetidos. Un enlace viejo con un
+    // solo `?status=listo` sigue entrando por acá.
     const result = CaseQuerySchema.safeParse({ status: "listo" });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.status).toBe("listo");
+      expect(result.data.status).toEqual(["listo"]);
     }
   });
 

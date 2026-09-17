@@ -52,6 +52,7 @@ import { CHIP_BASE, claseChip } from "./chip";
 import {
   GRUPOS_DE_FILTRO,
   PARAMS_DE_FILTRO,
+  alternar,
   filtrosPuestos,
 } from "./grupos-de-filtro";
 import { useDialogoModal } from "../../_components/dialogo-modal";
@@ -91,7 +92,7 @@ function Panel({
   const limpiar = useLimpiarFiltros();
 
   const panelRef = useDialogoModal<HTMLDivElement>(alCerrar);
-  const hayAlguno = filtrosPuestos((p) => paramsVisibles.get(p)).length > 0;
+  const hayAlguno = filtrosPuestos((p) => paramsVisibles.getAll(p)).length > 0;
 
   return (
     <div
@@ -123,7 +124,7 @@ function Panel({
 
       <div className="space-y-3">
         {GRUPOS_DE_FILTRO.map((grupo, i) => {
-          const activo = paramsVisibles.get(grupo.param);
+          const activos = paramsVisibles.getAll(grupo.param);
 
           return (
             <div
@@ -141,7 +142,7 @@ function Panel({
                 className="flex flex-wrap gap-1"
               >
                 {grupo.opciones.map((opcion) => {
-                  const puesto = activo === opcion.clave;
+                  const puesto = activos.includes(opcion.clave);
 
                   return (
                     <button
@@ -149,14 +150,23 @@ function Panel({
                       type="button"
                       aria-pressed={puesto}
                       /*
-                       * Apretar el que ya está encendido lo apaga. Es la única
-                       * forma de sacar un filtro desde adentro del panel ahora
-                       * que no hay chip «Todos», y es también por lo que estos
-                       * siguen siendo botones con `aria-pressed` y no radios:
-                       * un radio no se puede desmarcar.
+                       * Prender un chip no apaga los demás del grupo: varios
+                       * pueden quedar encendidos a la vez, y eso se lee
+                       * «cualquiera de estos» — la ausencia de marca sigue
+                       * queriendo decir «todos», como ya explica el comentario
+                       * de arriba de `GRUPOS_DE_FILTRO` sobre el chip «Todos»
+                       * que no está. La excepción es el grupo `unico`: sus
+                       * opciones se excluyen, así que prender una apaga las
+                       * demás y prender la que ya estaba prendida vacía el
+                       * grupo entero, igual que antes.
                        */
                       onClick={() =>
-                        setFilter(grupo.param, puesto ? null : opcion.clave)
+                        setFilter(
+                          grupo.param,
+                          grupo.unico
+                            ? puesto ? [] : [opcion.clave]
+                            : alternar(activos, opcion.clave)
+                        )
                       }
                       className={
                         puesto && opcion.color
@@ -230,7 +240,7 @@ export function BotonDeFiltros({
 
   const cerrar = useCallback(() => setAbierto(false), []);
 
-  const puestos = filtrosPuestos((p) => paramsVisibles.get(p));
+  const puestos = filtrosPuestos((p) => paramsVisibles.getAll(p));
 
 
   /*
@@ -331,7 +341,7 @@ export function MarcasDeFiltros() {
   const limpiar = useLimpiarFiltros();
 
   const franjaRef = useRef<HTMLDivElement>(null);
-  const puestos = filtrosPuestos((p) => paramsVisibles.get(p));
+  const puestos = filtrosPuestos((p) => paramsVisibles.getAll(p));
 
   /*
    * ── El foco cuando se saca una marca ────────────────────────────────────
@@ -362,11 +372,11 @@ export function MarcasDeFiltros() {
   }, [puestos.length]);
 
   const sacar = useCallback(
-    (param: string, i: number) => {
+    (param: string, valor: string, i: number) => {
       focoPendiente.current = i;
-      setFilter(param, null);
+      setFilter(param, alternar(paramsVisibles.getAll(param), valor));
     },
-    [setFilter]
+    [setFilter, paramsVisibles]
   );
 
   if (puestos.length === 0) return null;
@@ -390,10 +400,12 @@ export function MarcasDeFiltros() {
         */}
       {puestos.map((f, i) => (
         <button
-          key={f.param}
+          // `${param}:${valor}`: un grupo puede aportar varias marcas ahora,
+          // y el `param` solo no alcanza para distinguirlas.
+          key={`${f.param}:${f.valor}`}
           type="button"
-          data-marca={f.param}
-          onClick={() => sacar(f.param, i)}
+          data-marca={`${f.param}:${f.valor}`}
+          onClick={() => sacar(f.param, f.valor, i)}
           aria-label={`${t("filter.quitar")} ${t(f.rotulo)}: ${t(f.etiqueta)}`}
           className="group inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white py-1 pl-2.5 pr-2 text-[12.5px] font-medium text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
         >

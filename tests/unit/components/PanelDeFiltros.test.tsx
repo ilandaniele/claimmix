@@ -107,6 +107,45 @@ describe("PanelDeFiltros", () => {
     expect(ultimaUrl().get("type")).toBeNull();
   });
 
+  it("dos chips del mismo grupo leen aria-pressed a la vez", () => {
+    montar("type=choque&type=robo");
+    fireEvent.click(boton());
+
+    expect(screen.getByRole("button", { name: "Choque" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(screen.getByRole("button", { name: "Robo" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  });
+
+  it("agregar un segundo valor al grupo deja los dos en la URL", () => {
+    montar("type=choque");
+    fireEvent.click(boton());
+
+    fireEvent.click(screen.getByRole("button", { name: "Robo" }));
+
+    expect(ultimaUrl().getAll("type")).toEqual(["choque", "robo"]);
+  });
+
+  it("is_claim se queda excluyente: prender uno reemplaza, no se acumulan", () => {
+    montar("is_claim=true");
+    fireEvent.click(boton());
+
+    fireEvent.click(screen.getByRole("button", { name: "No relevantes" }));
+    expect(ultimaUrl().getAll("is_claim")).toEqual(["false"]);
+  });
+
+  it("apretar la opción ya prendida de is_claim vacía el grupo", () => {
+    montar("is_claim=true");
+    fireEvent.click(boton());
+
+    fireEvent.click(screen.getByRole("button", { name: "Reclamos" }));
+    expect(ultimaUrl().has("is_claim")).toBe(false);
+  });
+
   it("lo que está puesto se lee sin abrir el panel", () => {
     montar("type=granizo&severity=critical");
 
@@ -120,6 +159,11 @@ describe("PanelDeFiltros", () => {
     ]);
   });
 
+  it("el contador cuenta VALORES, no grupos", () => {
+    montar("type=choque&type=robo&severity=critical");
+    expect(boton().querySelector(".cifra")?.textContent).toBe("3");
+  });
+
   it("la marca saca su propio filtro y deja los otros", () => {
     montar("type=granizo&severity=critical&status=listo");
 
@@ -129,6 +173,22 @@ describe("PanelDeFiltros", () => {
     expect(url.get("type")).toBeNull();
     expect(url.get("severity")).toBe("critical");
     expect(url.get("status")).toBe("listo");
+  });
+
+  it("la marca de un valor saca sólo ese valor y deja el otro puesto", () => {
+    montar("type=choque&type=robo");
+
+    fireEvent.click(screen.getByLabelText("Quitar filtro Tipo: Choque"));
+
+    expect(ultimaUrl().getAll("type")).toEqual(["robo"]);
+  });
+
+  it("sacar el último valor de un grupo deja la URL sin ese parámetro", () => {
+    montar("type=granizo");
+
+    fireEvent.click(screen.getByLabelText("Quitar filtro Tipo: Granizo"));
+
+    expect(ultimaUrl().has("type")).toBe(false);
   });
 
   it("«Limpiar» borra los CINCO filtros en UNA sola navegación", () => {

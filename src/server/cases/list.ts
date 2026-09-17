@@ -78,7 +78,7 @@ const SORT_COLUMNS = {
  * sería redundante y —peor— haría pensar que sin él la consulta filtraría de
  * menos, cuando lo que pasaría es que no devolvería nada.
  */
-function buildCaseFilters(
+export function buildCaseFilters(
   query: Omit<CaseQuery, "page" | "per_page" | "sort" | "order">
 ): SQL | undefined {
   const { status, type, q, severity, customer_id, policy_id, channel, is_claim } =
@@ -86,28 +86,37 @@ function buildCaseFilters(
   const conditions: (SQL | undefined)[] = [];
 
   /*
-   * `inArray` y no `eq`: las cinco opciones de la bandeja son GRUPOS.
+   * `inArray` y no `eq`: las cinco opciones de la bandeja son GRUPOS, y ahora
+   * cada filtro es una lista — se puede pedir «choque» y «robo» a la vez.
    *
    * «Escalado» son `escalado` y `requiere_especialista`, y el canal real sólo
    * escribe el segundo. Con `eq` el chip decía 43 y devolvía 1. El porqué de
-   * cada grupo está en `filtro-de-estado.ts`.
+   * cada grupo está en `filtro-de-estado.ts`. Con varios chips de estado, la
+   * consulta es la UNIÓN de sus grupos, sin repetidos (de ahí el `Set`).
    *
    * Un estado suelto que no sea una de las cinco claves sigue funcionando: la
    * función devuelve ese solo, así que `?status=requiere_especialista` pide
    * exactamente eso. La API la usan el CSV y el sondeo en vivo.
+   *
+   * `?.length` y no sólo el valor: una lista vacía tiene que significar SIN
+   * filtro, nunca `inArray(col, [])` — eso en Postgres no empareja ninguna
+   * fila, y vaciaría la bandeja entera sin ningún aviso.
    */
-  if (status) conditions.push(inArray(cases.status, estadosAConsultar(status)));
-  if (type) conditions.push(eq(cases.claim_type, type));
+  if (status?.length)
+    conditions.push(
+      inArray(cases.status, [...new Set(status.flatMap(estadosAConsultar))])
+    );
+  if (type?.length) conditions.push(inArray(cases.claim_type, type));
   if (q) {
     // Case-insensitive substring search on policyholder_name and policy_number.
     // Parameterized via Drizzle — no raw SQL string interpolation.
     conditions.push(ilikeAny([cases.policyholder_name, cases.policy_number], q));
   }
   // AC18: Email-intake filters
-  if (severity) conditions.push(eq(cases.severity, severity));
+  if (severity?.length) conditions.push(inArray(cases.severity, severity));
   if (customer_id) conditions.push(eq(cases.customer_id, customer_id));
   if (policy_id) conditions.push(eq(cases.policy_id, policy_id));
-  if (channel) conditions.push(eq(cases.channel, channel));
+  if (channel?.length) conditions.push(inArray(cases.channel, channel));
   if (is_claim !== undefined) conditions.push(eq(cases.is_claim, is_claim));
 
   // `and()` sin condiciones devuelve undefined, que para drizzle es «sin WHERE».

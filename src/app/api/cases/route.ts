@@ -58,19 +58,24 @@ export async function GET(request: NextRequest) {
   // ── 3. Parse and validate query params ────────────────────────────────────
   const searchParams = request.nextUrl.searchParams;
   // AC18: Extended with email-intake filters (severity, customer_id, policy_id, channel, is_claim)
+  // status/type/severity/channel son multi-select: repetidos en la URL
+  // (`?type=choque&type=robo`), no separados por comas. `getAll` ya los junta
+  // en un array — vacío si el parámetro no vino, que `CaseQuerySchema` trata
+  // como `undefined`. Un valor solo (`?type=choque`) da `["choque"]`, igual
+  // que antes de que el esquema aceptara varios.
   const rawQuery = {
-    status: searchParams.get("status") ?? undefined,
-    type: searchParams.get("type") ?? undefined,
+    status: searchParams.getAll("status"),
+    type: searchParams.getAll("type"),
     q: searchParams.get("q") ?? undefined,
     page: searchParams.get("page") ?? undefined,
     per_page: searchParams.get("per_page") ?? undefined,
     sort: searchParams.get("sort") ?? undefined,
     order: searchParams.get("order") ?? undefined,
     // Email-intake filters (AC18)
-    severity: searchParams.get("severity") ?? undefined,
+    severity: searchParams.getAll("severity"),
     customer_id: searchParams.get("customer_id") ?? undefined,
     policy_id: searchParams.get("policy_id") ?? undefined,
-    channel: searchParams.get("channel") ?? undefined,
+    channel: searchParams.getAll("channel"),
     is_claim: searchParams.get("is_claim") ?? undefined,
   };
 

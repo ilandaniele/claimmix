@@ -19,6 +19,7 @@ import {
 import type { CaseRow, CaseListResult } from "@/server/cases/list";
 import type { OpcionDeEscenario } from "@/server/intake/scenarios";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
+import { estadosAConsultar } from "@/core/case/filtro-de-estado";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { CardHeader } from "../_components/ui";
 import { useDialogoModal } from "../_components/dialogo-modal";
@@ -279,8 +280,9 @@ function DashboardClientInterno({
    * ya se esta mirando, no de lo que esta por llegar.
    */
   const { pending, paramsVisibles } = useNavegacion();
-  const activeStatus = (paramsVisibles.get("status") as CaseStatus) || undefined;
-  const activeType = (paramsVisibles.get("type") as ClaimType) || undefined;
+  // Multi-select: cada uno puede traer varios valores (`?type=choque&type=robo`).
+  const activeStatus = paramsVisibles.getAll("status") as CaseStatus[];
+  const activeType = paramsVisibles.getAll("type") as ClaimType[];
 
   // Lo que va al CSV: todo lo que filtra la pantalla, sin la paginación.
   const exportQuery = (() => {
@@ -290,9 +292,8 @@ function DashboardClientInterno({
     return p.toString();
   })();
   const activePage = parseInt(paramsVisibles.get("page") ?? "1", 10) || 1;
-  const activeChannel =
-    (paramsVisibles.get("channel") as "email" | "email_sim") || undefined;
-  const activeSeverity = (paramsVisibles.get("severity") as Severity) || undefined;
+  const activeChannel = paramsVisibles.getAll("channel") as CaseRow["channel"][];
+  const activeSeverity = paramsVisibles.getAll("severity") as Severity[];
   const activeIsClaimRaw = paramsVisibles.get("is_claim") as "true" | "false" | null;
   const activeIsClaim = activeIsClaimRaw ?? undefined;
 
@@ -463,11 +464,30 @@ function DashboardClientInterno({
 
   // ── Filtering & pagination ─────────────────────────────────────────────────
   const PER_PAGE = parseInt(paramsVisibles.get("per_page") ?? "", 10) || initialData.meta.per_page;
+  /*
+   * El estado activo no se compara contra la CLAVE del grupo: se compara
+   * contra el conjunto de estados que esa clave cubre. Comparar contra la
+   * clave —`c.status !== activeStatus`— descartaba una fila con
+   * `?status=escalado` puesto apenas el sondeo la traía con su estado CRUDO
+   * `requiere_especialista`, que es justo lo que el canal real escribe. La
+   * fila desaparecía de la lista con el filtro puesto, y volvía sola al
+   * sacarlo. `estadosAConsultar` es la misma expansión que ya usa el servidor.
+   */
+  const estadosActivos =
+    activeStatus.length > 0 ? new Set(activeStatus.flatMap(estadosAConsultar)) : null;
   const visibleCases = cases.filter((c) => {
-    if (activeStatus && c.status !== activeStatus) return false;
-    if (activeType && c.claim_type !== activeType) return false;
-    if (activeChannel && c.channel !== activeChannel) return false;
-    if (activeSeverity && c.severity !== activeSeverity) return false;
+    if (estadosActivos && !estadosActivos.has(c.status)) return false;
+    if (
+      activeType.length > 0 &&
+      (!c.claim_type || !activeType.includes(c.claim_type as ClaimType))
+    )
+      return false;
+    if (activeChannel.length > 0 && !activeChannel.includes(c.channel)) return false;
+    if (
+      activeSeverity.length > 0 &&
+      (!c.severity || !activeSeverity.includes(c.severity as Severity))
+    )
+      return false;
     if (activeIsClaim === "true" && c.is_claim !== true) return false;
     if (activeIsClaim === "false" && c.is_claim !== false) return false;
     return true;

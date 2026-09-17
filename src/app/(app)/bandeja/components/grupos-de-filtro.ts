@@ -51,6 +51,12 @@ export interface GrupoDeFiltro {
   /** Clave de i18n del título del grupo. */
   rotulo: TranslationKey;
   opciones: OpcionDeFiltro[];
+  /**
+   * El resto de los grupos son multi-selección: se puede marcar «choque» y
+   * «robo» a la vez. Este flag es para el grupo que no puede, porque sus
+   * opciones no se acumulan sino que se excluyen.
+   */
+  unico?: boolean;
 }
 
 /*
@@ -131,6 +137,8 @@ export const GRUPOS_DE_FILTRO: GrupoDeFiltro[] = [
   {
     param: "is_claim",
     rotulo: "filter.isClaim",
+    // Sus dos opciones son complementarias: marcar las dos equivale a no filtrar.
+    unico: true,
     opciones: [
       { clave: "true", etiqueta: "filter.reclamos" },
       { clave: "false", etiqueta: "filter.no_relevantes" },
@@ -141,8 +149,24 @@ export const GRUPOS_DE_FILTRO: GrupoDeFiltro[] = [
 /** Los parámetros que maneja el panel. Los usa «Limpiar» para borrarlos todos. */
 export const PARAMS_DE_FILTRO = GRUPOS_DE_FILTRO.map((g) => g.param);
 
+/**
+ * Agregar o sacar `v` de la lista de valores puestos en un filtro.
+ *
+ * Cada grupo pasó de guardar un valor a guardar varios, y esto es lo único
+ * que cambia entre las dos formas: en vez de reemplazar el valor, hay que
+ * decidir si el que se tocó ya estaba. Pura, sin `Set` de por medio, para no
+ * barajar el orden en que se fueron marcando: lo que ya estaba se queda donde
+ * estaba, y lo nuevo se agrega al final.
+ */
+export function alternar(valores: readonly string[], v: string): string[] {
+  if (valores.includes(v)) return valores.filter((x) => x !== v);
+  return [...valores, v];
+}
+
 export interface FiltroPuesto {
   param: string;
+  /** El valor puesto, para poder sacarlo con `alternar` sin releer la URL. */
+  valor: string;
   /** Clave de i18n del grupo, para leer «Severidad: Crítico» y no sólo «Crítico». */
   rotulo: TranslationKey;
   etiqueta: TranslationKey;
@@ -161,25 +185,30 @@ export interface FiltroPuesto {
  * cualquiera a mano, y una marca que dijera «Tipo: meteorito» no se podría
  * sacar con un chip que no existe. Es la misma decisión que toma `page.tsx`
  * al validar contra sus listas antes de consultar.
+ *
+ * Cada grupo puede tener varios valores puestos a la vez, así que esto ya no
+ * devuelve una marca por grupo sino una por valor. `leer` recibe el parámetro
+ * y devuelve la lista que trajo la URL —`searchParams.getAll(param)`—, y así
+ * esta función se queda pura y se puede probar sin montar un router.
  */
 export function filtrosPuestos(
-  leer: (param: string) => string | null
+  leer: (param: string) => string[]
 ): FiltroPuesto[] {
   const puestos: FiltroPuesto[] = [];
 
   for (const grupo of GRUPOS_DE_FILTRO) {
-    const valor = leer(grupo.param);
-    if (!valor) continue;
+    for (const valor of leer(grupo.param)) {
+      const opcion = grupo.opciones.find((o) => o.clave === valor);
+      if (!opcion) continue;
 
-    const opcion = grupo.opciones.find((o) => o.clave === valor);
-    if (!opcion) continue;
-
-    puestos.push({
-      param: grupo.param,
-      rotulo: grupo.rotulo,
-      etiqueta: opcion.etiqueta,
-      color: opcion.color,
-    });
+      puestos.push({
+        param: grupo.param,
+        valor,
+        rotulo: grupo.rotulo,
+        etiqueta: opcion.etiqueta,
+        color: opcion.color,
+      });
+    }
   }
 
   return puestos;

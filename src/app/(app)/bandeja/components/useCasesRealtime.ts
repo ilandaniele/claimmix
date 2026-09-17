@@ -55,17 +55,20 @@ const POLL_MAX_MS = 30000;
  * trae filas que no cumplen el filtro nuevo y las inyecta en la lista, así que
  * la pantalla se contradice sola y hay que estar mirándola para verlo.
  *
- * `status` va aparte porque no vive en el panel: son las pestañas.
+ * `status` ya viene incluido: es el primero de `PARAMS_DE_FILTRO`, aunque no
+ * viva en el panel sino en las pestañas.
  */
-export const FILTER_PARAMS = ["status", ...PARAMS_DE_FILTRO] as const;
+export const FILTER_PARAMS = PARAMS_DE_FILTRO;
 
 /** Build the /api/cases query string from the current location filters. */
 function buildQuery(): string {
   const current = new URLSearchParams(window.location.search);
   const params = new URLSearchParams();
   for (const key of FILTER_PARAMS) {
-    const value = current.get(key);
-    if (value) params.set(key, value);
+    // `getAll` + `append`: cada parámetro puede venir repetido en la URL
+    // (`?type=choque&type=robo`) y hay que reenviarlos todos, no sólo el
+    // primero — con `get`/`set` un multi-select perdía todo menos uno.
+    for (const value of current.getAll(key)) params.append(key, value);
   }
   params.set("page", "1");
   params.set("per_page", "100");

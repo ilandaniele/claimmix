@@ -145,12 +145,15 @@ export async function GET(request: NextRequest) {
   // canal o is_claim y tocaba Exportar se bajaba mil filas SIN esos filtros y
   // sin ningún aviso: el CSV decía otra cosa que la pantalla desde la que se
   // pidió.
+  // status/type/severity/channel son multi-select: repetidos en la URL, no
+  // separados por comas. `getAll` los junta en un array — vacío si el
+  // parámetro no vino, que `CaseQuerySchema` trata como `undefined`.
   const rawQuery = {
-    status: searchParams.get("status") ?? undefined,
-    type: searchParams.get("type") ?? undefined,
+    status: searchParams.getAll("status"),
+    type: searchParams.getAll("type"),
     q: searchParams.get("q") ?? undefined,
-    severity: searchParams.get("severity") ?? undefined,
-    channel: searchParams.get("channel") ?? undefined,
+    severity: searchParams.getAll("severity"),
+    channel: searchParams.getAll("channel"),
     is_claim: searchParams.get("is_claim") ?? undefined,
     customer_id: searchParams.get("customer_id") ?? undefined,
     policy_id: searchParams.get("policy_id") ?? undefined,

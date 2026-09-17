@@ -142,9 +142,20 @@ test.describe("selección sin recuadros", () => {
     await page.getByRole("checkbox").first().click();
     await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(1);
 
+    /*
+     * Dos clics y no uno: los chips de un grupo pasaron a acumularse, así que
+     * apretar el segundo agrega el estado en vez de reemplazar al primero y la
+     * lista seguiría mostrando las filas del primero. Lo que este test prueba
+     * —que saltar de un estado a otro poda lo marcado— es saltar, o sea apagar
+     * uno y prender el otro.
+     */
+    await abrir();
+    await origen.chip.click();
+    await expect(page).not.toHaveURL(origen.url, { timeout: 15_000 });
     await abrir();
     await destino.chip.click();
     await expect(page).toHaveURL(destino.url, { timeout: 15_000 });
+    await expect(page).not.toHaveURL(origen.url);
     // Con filas la barra dice 0 y no ofrece borrar; sin filas no hay barra.
     await expect(
       page.getByRole("button", { name: enCualquierIdioma("bandeja.deleteSelected") })

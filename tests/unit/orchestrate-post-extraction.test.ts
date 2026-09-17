@@ -150,6 +150,11 @@ function setupDbMocks({
    * us something we did not have when we last wrote to them.
    */
   newFactRows = [] as Array<{ id: string }>,
+  /**
+   * Quién figura en el padrón para la póliza que dieron, como lo lee
+   * `inicialesDelTitularAjeno` en el camino de escalado.
+   */
+  titularRows = [] as Array<{ nombre: string | null; dni: string | null }>,
 } = {}) {
   const mockDbTyped = db as unknown as MockDb;
 
@@ -178,6 +183,7 @@ function setupDbMocks({
 
   const insertSpy = vi.fn().mockReturnValue(resultadoDeInsert);
   const updateSpy = vi.fn().mockResolvedValue([]);
+  const titularWhereSpy = vi.fn();
 
   // db.select() returns a chainable builder; from() decides the result.
   mockDbTyped.select.mockImplementation(() => ({
@@ -202,6 +208,24 @@ function setupDbMocks({
 
       if (tableName === "extracted_fields") {
         return { where: () => ({ limit: () => Promise.resolve(newFactRows) }) };
+      }
+
+      // La única consulta con join del orquestador: la póliza y su titular.
+      //
+      // Del `where` se guardan los valores, que es lo que importa de esa
+      // consulta: con QUÉ número se buscó. Serializarlo entero no se puede —un
+      // `sql` con columnas adentro es circular y `JSON.stringify` tira—, pero
+      // los valores del template viajan como cadenas sueltas entre los trozos.
+      if (tableName === "policies") {
+        return {
+          leftJoin: () => ({
+            where: (cond: unknown) => {
+              const chunks = (cond as { queryChunks?: unknown[] })?.queryChunks ?? [];
+              titularWhereSpy(chunks.filter((c) => typeof c === "string").join(" "));
+              return { limit: () => Promise.resolve(titularRows) };
+            },
+          }),
+        };
       }
 
       // claim_field_confirmations (or any other table) — return empty so upsert inserts.
@@ -232,7 +256,7 @@ function setupDbMocks({
     }),
   }));
 
-  return { insertSpy, updateSpy };
+  return { insertSpy, updateSpy, titularWhereSpy };
 }
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -3179,5 +3203,94 @@ describe("orchestratePostExtraction — la derivación no manda un segundo mensa
       .mock.calls.map((c) => c[0].template);
 
     expect(templates).toContain("specialist_escalation");
+  });
+
+  /*
+   * Y cuando le escribe, el mensaje nombra los dos valores.
+   *
+   * Quien detecta el conflicto acá no es el emparejador —en la corrida roja de
+   * producción devolvió cero coincidencias— sino `verificar_poliza`, que le
+   * dice al agente `titular_coincide: false` y a propósito NO le dice el
+   * nombre del titular. Por eso las iniciales se arman del lado del servidor,
+   * leyendo la base, en el camino de escalado.
+   */
+  function familiarConDni(numeroPoliza = "POL-3390-F") {
+    return extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields.filter(
+          (f) => f.field_key !== "full_name" && f.field_key !== "policy_number"
+        ),
+        { field_key: "full_name", field_value: "Lucía Paz", confidence: 0.93, source: "ai" as const },
+        { field_key: "dni", field_value: "41.207.663", confidence: 0.94, source: "ai" as const },
+        { field_key: "policy_number", field_value: numeroPoliza, confidence: 0.9, source: "ai" as const },
+      ],
+    });
+  }
+
+  async function derivacionDe(claim: ReturnType<typeof extractEmailClaimMock>) {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    return vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "specialist_escalation")?.[0];
+  }
+
+  it("le dice quién figura en el padrón, en iniciales, y lo que dijo ella", async () => {
+    setupDbMocks({ titularRows: [{ nombre: "Roberto Paz", dni: "26.880.140" }] });
+
+    const derivacion = await derivacionDe(familiarConDni());
+
+    expect(derivacion?.data).toMatchObject({
+      titularIniciales: "R*** P***",
+      claimantName: "Lucía Paz",
+    });
+  });
+
+  it("y el nombre entero no sale del servidor", async () => {
+    // La restricción que no se negocia: un número de póliza se adivina, y este
+    // mensaje le devolvía al remitente el nombre del titular.
+    setupDbMocks({ titularRows: [{ nombre: "Roberto Paz", dni: "26.880.140" }] });
+
+    const derivacion = await derivacionDe(familiarConDni());
+
+    expect(JSON.stringify(derivacion?.data)).not.toContain("Roberto Paz");
+  });
+
+  it("si el documento ES el del titular, no hay ningún padrón que nombrar", async () => {
+    setupDbMocks({ titularRows: [{ nombre: "Lucía Paz", dni: "41207663" }] });
+
+    const derivacion = await derivacionDe(familiarConDni());
+
+    expect(derivacion?.data).toMatchObject({ titularIniciales: null });
+  });
+
+  it("busca con el número que el agente verificó, no con el que quedó extraído", async () => {
+    /*
+     * El modelo escribe el número de una forma en el campo y de otra en la
+     * llamada a la herramienta. El ensayo lo dejó a la vista: `verificar_poliza`
+     * encontró POL-3390-F y el emparejador, con el campo extraído, devolvió
+     * cero coincidencias para esa misma póliza. El guion no se normaliza —y no
+     * debe—, así que hay que buscar con el número que ya resolvió.
+     */
+    const { titularWhereSpy } = setupDbMocks({
+      titularRows: [{ nombre: "Roberto Paz", dni: "26.880.140" }],
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "escalate",
+      reasoning: "el titular de la póliza no es quien escribe",
+      askFor: [],
+      resolved: [],
+      toolCalls: [{ tool: "verificar_poliza", args: { numero_poliza: "POL-3390-F" } }],
+    } as unknown as Awaited<ReturnType<typeof deliberate>>);
+
+    const derivacion = await derivacionDe(familiarConDni("POL 3390 F"));
+
+    expect(titularWhereSpy.mock.calls.flat().join(" ")).toContain("POL-3390-F");
+    expect(derivacion?.data).toMatchObject({ titularIniciales: "R*** P***" });
   });
 });

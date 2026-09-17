@@ -26,8 +26,40 @@ import { textoAHtml } from "@/core/email/html";/**
 export interface SpecialistEscalationData {
   caseId: string;
   severity?: "high" | "critical" | string;
+  /** El titular del padrón, en iniciales: «R*** P***». Nunca el nombre entero. */
+  titularIniciales?: string | null;
+  /** El nombre que dio quien escribe, tal cual lo escribió. */
+  claimantName?: string | null;
   /** La prosa ya redactada. Reemplaza el cuerpo y nada más. */
   cuerpo?: string | null;
+}
+
+/**
+ * Los dos valores que no coinciden, dichos.
+ *
+ * Es el único párrafo de este mensaje cuyo piso es un dato y no una frase.
+ * Quien escribe por la póliza de otro —un familiar del titular— recibe que su
+ * caso pasó a una persona y no tiene con qué contestar: no sabe cuál de los
+ * dos nombres estamos mirando. Nombrarlos es AC7/AC9.
+ *
+ * Sale sólo cuando están los dos. Un escalado por severidad no tiene por qué
+ * mencionar ningún padrón, y el del padrón sin el que dijo la persona es una
+ * acusación sin término de comparación.
+ *
+ * Va DESPUÉS de la prosa y FUERA de `cuerpo`, que es lo único que el redactor
+ * ve y reescribe: la mitad que es un dato no puede depender de que el modelo
+ * se acuerde de copiarla. Por eso tampoco se repite cuando el redactor
+ * contesta — nunca la tuvo.
+ */
+function laDiferencia(data: SpecialistEscalationData): string | null {
+  const padron = data.titularIniciales?.trim();
+  const dijo = data.claimantName?.trim();
+  if (!padron || !dijo) return null;
+
+  return (
+    `La póliza figura a nombre de ${padron} y vos nos decís que sos ${dijo}. ` +
+    `El especialista va a revisar esa diferencia; si querés, contanos qué relación tenés con el titular.`
+  );
 }
 
 function severityMessage(severity: string | undefined): string {
@@ -55,6 +87,7 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
 
   const cuerpo = `${urgencyMsg}\n\n${derivacion}\n\n${sinAccion}\n\n${agregar}`;
   const redactado = data.cuerpo?.trim();
+  const diferencia = laDiferencia(data);
 
   const prosaHtml = redactado
     ? textoAHtml(redactado)
@@ -69,12 +102,13 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #b91c1c;">Tu reclamo fue asignado a un especialista</h1>
   ${prosaHtml}
+  ${diferencia ? `<p>${escapeHtml(diferencia)}</p>` : ""}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
   <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${escapeHtml(data.caseId)}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.</p>
 </body>
 </html>`;
 
-  const text = `Tu reclamo fue asignado a un especialista\n\n${redactado ?? cuerpo}\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
+  const text = `Tu reclamo fue asignado a un especialista\n\n${redactado ?? cuerpo}${diferencia ? `\n\n${diferencia}` : ""}\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
 
   return { subject, html, text, cuerpo };
 }

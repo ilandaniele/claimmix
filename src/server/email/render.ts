@@ -230,6 +230,9 @@ export function renderTemplate(
       return renderSpecialistEscalation({
         caseId: String(data.caseId ?? ""),
         severity: data.severity != null ? String(data.severity) : undefined,
+        titularIniciales:
+          data.titularIniciales != null ? String(data.titularIniciales) : null,
+        claimantName: data.claimantName != null ? String(data.claimantName) : null,
         cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
       });
 

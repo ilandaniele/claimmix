@@ -92,11 +92,15 @@ jobs:
         env:
           URL: ${{ inputs.base_url || github.event.deployment_status.target_url }}
         run: |
+          # El alias de QA va LITERAL, no como comodín. Sus vistas previas ya
+          # entran por el patrón de abajo —empiezan con `claimmix-`—; lo que
+          # faltaba era el alias de producción de ese proyecto, que no lleva el
+          # sufijo de la organización.
           # El sufijo de la organización, no sólo el nombre del proyecto: con
           # `claimmix*` alcanzaba con crear un proyecto llamado `claimmix-x` en
           # cualquier cuenta de Vercel para quedar del lado bueno del filtro.
           case "$URL" in
-            https://claimmix.vercel.app|            https://claimmix-*-ilandaniele-3471s-projects.vercel.app)
+            https://claimmix.vercel.app|https://claimmix-qa.vercel.app|            https://claimmix-*-ilandaniele-3471s-projects.vercel.app)
               echo "url=$URL" >> "$GITHUB_OUTPUT" ;;
             *)
               echo "::error title=Destino no reconocido::La corrida iba a mandar las credenciales de la cuenta de pruebas a $URL, que no es un despliegue de este proyecto. Se corta."

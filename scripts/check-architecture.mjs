@@ -598,6 +598,128 @@ console.log("\n▸ Un preview no hace cola con producción");
   }
 }
 
+// ── 13. Ningún job avisa y aprueba con el secreto vacío ────────────────────
+//
+// Tres jobs tenían el mismo defecto: si faltaba el secreto, imprimían
+// `::warning` y terminaban en verde SIN IMPORTAR quién corría. `Integration
+// tests` y `E2E tests (Playwright)` son checks REQUERIDOS de `main`, y el
+// tercero —el `k6` de `load-tests.yml`— quedó así meses enteros: nunca corrió
+// una sola vez, porque `VERCEL_AUTOMATION_BYPASS_SECRET` no existe, y nadie lo
+// vio porque el ícono seguía verde.
+//
+// Un fork es el único motivo legítimo para avisar y seguir: GitHub no le
+// entrega secretos por diseño, y eso no es un descuido de nadie. Cualquier
+// otro camino que avise y no corte es un check mintiendo sobre haber corrido.
+console.log("\n▸ Ningún job avisa y aprueba con el secreto vacío");
+{
+  const flujos = existsSync(".github/workflows")
+    ? readdirSync(".github/workflows").filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+    : [];
+  const mudos = [];
+
+  for (const nombre of flujos) {
+    const lineas = readFileSync(join(".github/workflows", nombre), "utf8").split(/\r?\n/);
+
+    // Un paso `run:` no tiene delimitador de cierre: su cuerpo son las líneas
+    // que siguen con MÁS sangría que la propia `run:`. Misma idea que ya usa
+    // la invariante 12 para el bloque de `concurrency:`.
+    for (let i = 0; i < lineas.length; i++) {
+      const m = /^(\s*)run:\s*(\|[-+0-9]*|>[-+0-9]*)?\s*(.*)$/.exec(lineas[i]);
+      if (!m) continue;
+      const sangria = m[1].length;
+      let cuerpo = m[3] ?? "";
+      if (m[2]) {
+        for (let j = i + 1; j < lineas.length; j++) {
+          if (lineas[j].trim() === "") continue;
+          if (/^(\s*)/.exec(lineas[j])[1].length <= sangria) break;
+          cuerpo += "\n" + lineas[j];
+        }
+      }
+
+      if (!cuerpo.includes("::warning")) continue;
+      // La forma real: un `if [ -z "$X" ]`, o un `if [ -n "$X" ]` con su `else`.
+      const guardaVacio = /if\s*\[\s*-z\s*"[^"]*"\s*\]/.test(cuerpo);
+      const guardaLleno = /if\s*\[\s*-n\s*"[^"]*"\s*\]/.test(cuerpo) && /\belse\b/.test(cuerpo);
+      if (!guardaVacio && !guardaLleno) continue;
+      if (cuerpo.includes("exit 1") || cuerpo.includes("ES_FORK")) continue;
+      mudos.push(`${nombre}:${i + 1}`);
+    }
+  }
+
+  if (flujos.length === 0) {
+    console.log("     (no hay workflows: nada que comprobar)");
+  } else if (mudos.length === 0) {
+    bien("todo bloque que avisa sobre un secreto vacío también corta, salvo en un fork");
+  } else {
+    mal(`${mudos.length} bloque(s) que avisan y aprueban sin cortar`);
+    for (const m of mudos) console.log(`     .github/workflows/${m}`);
+    console.log("     Un fork no recibe secretos por diseño: ahí avisar y seguir está");
+    console.log("     bien. En cualquier otro camino falta un `exit 1` — sin él, un");
+    console.log("     check requerido queda en verde sin haber corrido nada.");
+  }
+}
+
+// ── 14. Lo previo al merge no apunta a producción ──────────────────────────
+//
+// `pnpm tenancy` sólo lee, pero `pnpm capa-datos` puede escribir una fila
+// señuelo para probar una fuga entre inquilinos —y la borra con el rol
+// dueño—, y `pnpm pentest` ataca rutas de la aplicación. Ninguno de los tres
+// tiene margen para correr contra la base de los clientes antes de un merge:
+// el que la escribe es un PR cualquiera, no un deploy.
+//
+// `post-deploy.yml` es la excepción real y a propósito —corre DESPUÉS del
+// deploy, contra producción— así que queda afuera de esta invariante.
+console.log("\n▸ Lo previo al merge no apunta a producción");
+{
+  const flujos = existsSync(".github/workflows")
+    ? readdirSync(".github/workflows").filter(
+        (f) => (f.endsWith(".yml") || f.endsWith(".yaml")) && f !== "post-deploy.yml"
+      )
+    : [];
+  const apuntanAProduccion = [];
+
+  for (const nombre of flujos) {
+    const lineas = readFileSync(join(".github/workflows", nombre), "utf8").split(/\r?\n/);
+
+    // Un job cuelga de `jobs:` con dos espacios de sangría, y dura hasta el
+    // próximo job a esa misma sangría o el fin del archivo.
+    const iJobs = lineas.findIndex((l) => l.trim() === "jobs:" && !/^\s/.test(l));
+    const trabajos = [];
+    if (iJobs !== -1) {
+      let actual = null;
+      for (let i = iJobs + 1; i < lineas.length; i++) {
+        if (/^ {2}[\w-]+:/.test(lineas[i])) {
+          if (actual) trabajos.push(actual);
+          actual = "";
+        }
+        if (actual !== null) actual += lineas[i] + "\n";
+      }
+      if (actual) trabajos.push(actual);
+    }
+
+    for (const trabajo of trabajos) {
+      if (!/\bpnpm (tenancy|capa-datos|pentest)\b/.test(trabajo)) continue;
+      // Anclado a la sintaxis real de una expresión de Actions: un comentario
+      // que sólo NOMBRE `secrets.DATABASE_URL` entre comillas no matchea.
+      if (/\$\{\{\s*secrets\.DATABASE_URL(?:_APP)?\b/.test(trabajo)) {
+        apuntanAProduccion.push(nombre);
+        break;
+      }
+    }
+  }
+
+  if (flujos.length === 0) {
+    console.log("     (no hay workflows: nada que comprobar)");
+  } else if (apuntanAProduccion.length === 0) {
+    bien("tenancy, capa-datos y pentest van contra el ensayo o localhost antes de mergear");
+  } else {
+    mal(`${apuntanAProduccion.length} workflow(s) con un job que apunta a producción`);
+    for (const w of [...new Set(apuntanAProduccion)]) console.log(`     .github/workflows/${w}`);
+    console.log("     Antes de mergear van contra STAGING_* o localhost. La base de");
+    console.log("     producción sólo la toca post-deploy.yml, después del deploy.");
+  }
+}
+
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(66));
 if (problemas.length === 0) {

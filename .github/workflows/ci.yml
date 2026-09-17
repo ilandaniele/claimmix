@@ -773,7 +773,6 @@ jobs:
           DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
           BETTER_AUTH_SECRET: placeholder-secret-for-build-only
           MOCK_AI: "true"
-          ANALYZE: "true"
 
       # Este paso imprimía "Bundle size check passed" SIEMPRE.
       #

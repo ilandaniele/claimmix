@@ -28,7 +28,13 @@ import { join } from "node:path";
 
 const RAIZ = ".next/static/chunks";
 
-/** El presupuesto, en kilobytes ya comprimidos. */
+/**
+ * El presupuesto, en kilobytes ya comprimidos.
+ *
+ * Para ver QUÉ lo está llenando: `pnpm peso:ver`, que abre el analizador de
+ * Turbopack con el grafo de módulos. `@next/bundle-analyzer` NO sirve acá: es
+ * de webpack, y este proyecto compila con Turbopack.
+ */
 const TOPE_KB = 300;
 
 if (!existsSync(RAIZ)) {

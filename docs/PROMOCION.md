@@ -128,6 +128,23 @@ y `Pen test (local)`.
 **Recién después de verlos verdes unas cuantas corridas.** Un check requerido que
 todavía no demostró que es estable bloquea a todo el mundo.
 
+Al 2026-09-17, sobre las últimas doce corridas de `ci.yml`: **10 verdes y ninguna
+roja** para cada uno de los tres. Las otras dos salieron `cancelled`, y no son
+inestabilidad: son dos empujones al mismo minuto en la misma rama, que el grupo
+de concurrencia cancela a propósito.
+
+`Pen test (local)` tuvo una roja antes de esa ventana, y ya está explicada: le
+faltaba un `CRON_SECRET` de mentira, y sin él las rutas de cron contestan 500 y la
+sonda las lee como abiertas. Lo arregló #196.
+
+Para rehacer la cuenta antes de decidir:
+
+```bash
+for RID in $(gh run list --workflow=ci.yml --limit 12 --json databaseId --jq '.[].databaseId'); do
+  gh run view "$RID" --json jobs --jq '.jobs[] | "\(.name) \(.conclusion)"'
+done | grep -E '^(Bundle size check|Tenencia y capa de datos|Pen test)' | sort | uniq -c
+```
+
 ## Dos trampas que ya están resueltas, y conviene no reabrir
 
 **Un deploy de QA también llega como `environment == 'Production'`.** Los dos

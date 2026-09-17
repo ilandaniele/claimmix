@@ -1,26 +1,9 @@
 # Comprobar el deploy que acaba de salir.
 #
-# CI ya corre en cada push: tipos, lint, tests, build. Todo eso pasa en un
-# runner limpio y no dice nada sobre el entorno de producción — que es donde
-# fallan las cosas que más caro salen. R2 funcionó en cada corrida local
-# durante horas mientras producción descartaba todos los adjuntos, porque las
-# credenciales nunca se habían cargado en Vercel. Nada falló en voz alta.
-#
-# Esto le pregunta al deploy recién promovido qué alcanza a ver: base de datos,
-# migraciones aplicadas, almacenamiento (con una subida real), el modelo (con
-# una llamada real), el token de WhatsApp y la casilla conectada.
-#
-# Primero espera a que el alias sirva el commit de este deploy. Sin eso el
-# chequeo puede interrogar al build anterior y darlo por bueno, que es la
-# respuesta más peligrosa posible: la que tapa justo el deploy que se está
-# preguntando.
-#
-# El smoke sólo necesita un secreto, CRON_SECRET: interroga al deploy, y todo
-# lo demás ya vive adentro. Los otros tres trabajos no — el ensayo, la carga y
-# la pared entre tenants corren el código acá, en el runner, contra la base de
-# producción, así que necesitan sus credenciales y su configuración. Lo que
-# olvidan es lo segundo: una variable que falta acá no rompe nada en voz alta,
-# toma otro default que producción y prueba algo que no es producción.
+# Qué pregunta cada uno de los siete chequeos, y por qué, vive en
+# deploy-checks.yml: es un workflow reusable, porque un segundo proyecto de
+# Vercel para QA lo va a llamar contra su propia URL y su propia base. Este
+# archivo sólo decide CUÁNDO llamarlo contra PRODUCCIÓN.
 
 name: Post-deploy
 
@@ -49,9 +32,9 @@ on:
 # ── Pero la cola es sólo de producción, y esto costó una corrida ─────────────
 #
 # `deployment_status` llega también por cada preview y por cada estado
-# intermedio. Esas corridas saltean todo —`smoke` tiene la guarda y las demás
-# cuelgan de él— y terminan en `skipped`. Parecen gratis. No lo son: **ya
-# reservaron el turno**.
+# intermedio. Esas corridas saltean todo —el job `produccion` tiene la
+# guarda— y terminan en `skipped`. Parecen gratis. No lo son: **ya reservaron
+# el turno**.
 #
 # Con `cancel-in-progress: false` GitHub guarda UNA sola corrida esperando.
 # Cuando llega otra, la que estaba en la cola se cancela. El 10/09, con una
@@ -65,14 +48,21 @@ on:
 # que se lee como que alguien la cortó a propósito. Una corrida que no ejecuta
 # nada puede tapar la única comprobación que mira producción de verdad.
 #
-# Así que entra a la cola lo mismo que pasa la guarda de `smoke`. Todo lo
+# Así que entra a la cola lo mismo que pasa la guarda de `produccion`. Todo lo
 # demás va a un grupo propio —uno por corrida— donde no espera ni echa a
 # nadie. La condición está repetida a propósito: son dos lugares distintos de
 # GitHub y no hay forma de compartirla.
+#
+# La condición también exige la rama, no sólo el entorno: con un segundo
+# proyecto de Vercel para QA, su deploy llega etiquetado igual —
+# `environment == 'Production'` es el nombre de SU entorno, en SU proyecto—
+# y sin la rama entraría a esta misma cola y podría cancelar una corrida de
+# producción de verdad que estuviera encolada.
 concurrency:
   group: >-
     ${{ (github.event_name == 'workflow_dispatch' ||
-    (github.event.deployment_status.state == 'success' &&
+    (github.event.deployment.ref == 'main' &&
+    github.event.deployment_status.state == 'success' &&
     github.event.deployment.environment == 'Production'))
     && 'post-deploy-contra-produccion'
     || format('post-deploy-sin-cola-{0}', github.run_id) }}
@@ -82,529 +72,34 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
-    name: Smoke de producción
-    runs-on: ubuntu-latest
-    # Sólo cuando un deploy de producción terminó bien. El evento también llega
-    # para previews y para estados intermedios.
+  produccion:
+    # QA todavía no tiene proyecto de Vercel: cuando lo tenga, agregar acá un
+    # job `qa` que llame a este mismo deploy-checks.yml con su URL, entorno:
+    # QA y medir_carga: false. Antes de eso sería un job atado a una rama que
+    # nadie despliega — YAML muerto.
+    #
+    # La rama, no sólo el entorno: con dos proyectos de Vercel, el de QA
+    # también llega con environment == 'Production' —así se llama SU entorno
+    # de producción, en SU proyecto— y sin `deployment.ref == 'main'` esto
+    # correría el smoke de producción contra el alias de producción para un
+    # deploy que nunca lo tocó. Es la misma respuesta peligrosa del comentario
+    # de arriba de `concurrency`, un piso más abajo.
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event.deployment_status.state == 'success' &&
+      (github.event.deployment.ref == 'main' &&
+       github.event.deployment_status.state == 'success' &&
        github.event.deployment.environment == 'Production')
-
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        # Historia completa: el chequeo compara el commit que pidió este run
-        # con el que producción está sirviendo, y para saber cuál viene
-        # después necesita `merge-base`. Con el clon de un solo commit no
-        # puede, y ante la duda falla — que es el comportamiento viejo.
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Instalar dependencias
-        run: pnpm install --frozen-lockfile
-
-      - name: Chequear el deploy
-        # --deep sube un archivo a R2 y llama al modelo de verdad. Cuesta
-        # centavos y es la diferencia entre "las variables están" y "funciona".
-        #
-        # Contra el alias, no contra la URL del deploy: el alias es lo que usan
-        # los asegurados, y --expect-commit se encarga de que sea este build y
-        # no el anterior.
-        #
-        # Lo que viene del evento entra por `env:` y no interpolado en el shell:
-        # una URL con una comilla adentro sería un comando en un job que tiene
-        # CRON_SECRET. Es el mismo patrón que barrer-trabados y load-tests.
-        run: |
-          pnpm smoke -- --deep --url "$URL" $EXPECT
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
-          EXPECT: ${{ github.event_name == 'deployment_status' && format('--expect-commit {0}', github.event.deployment.sha) || '' }}
-
-      - name: Qué hacer si esto falló
-        if: failure()
-        run: |
-          echo "::error::El deploy salió pero producción no está sana."
-          echo ""
-          echo "Mirá el detalle arriba. Los tres casos habituales:"
-          echo ""
-          echo "  · 'faltan columnas'   → hay una migración sin aplicar en Neon."
-          echo "                          Los deploys no las corren solas."
-          echo "  · 'sin configurar'    → falta una variable en Vercel."
-          echo "  · 'sigue sirviendo X' → el alias no se movió al build nuevo."
-          echo ""
-          echo "Reproducilo con: pnpm smoke --deep"
-
-  # ── El ensayo de conversaciones ──────────────────────────────────────────────
-  #
-  # Doce denuncias enteras contra el agente real, por WhatsApp y por mail, sobre
-  # los canales simulados. No le manda un mensaje a nadie.
-  #
-  # Corre después del smoke y sólo si pasó: si producción no puede llegar a la
-  # base o al modelo, el ensayo va a fallar por eso y el resultado no dice nada
-  # sobre el agente.
-  #
-  # Usa la base de PRODUCCIÓN. Escribe doce casos y los borra al terminar, y al
-  # empezar barre los que hayan quedado de una corrida que se murió a mitad de
-  # camino. Se los reconoce por identidades inventadas — números 5490000… y
-  # direcciones ensayo.*@example.com — que ningún asegurado real puede tener.
-  #
-  # El reconocimiento de documentos no se ejercita acá: necesita fotos reales, y
-  # una licencia de verdad no entra ni al repositorio ni a los secretos de
-  # GitHub. El ensayo avisa que esa parte no la probó.
-  rehearse:
-    name: Ensayo de conversaciones
-    runs-on: ubuntu-latest
-    needs: [smoke]
     permissions:
       contents: read
+      # Techo para el job `rehearse` de deploy-checks.yml: un workflow
+      # reusable nunca obtiene más permiso que el de quien lo llama, así que
+      # sin id-token acá ese job no podría pedir el token OIDC para WIF.
       id-token: write
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      # GitHub firma un token OIDC para este job y Google lo acepta por Workload
-      # Identity Federation (proveedor `github`, sólo este repo y sólo `main`).
-      # La acción escribe un archivo de credenciales y apunta
-      # GOOGLE_APPLICATION_CREDENTIALS a él: el ensayo entra por ADC.
-      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        with:
-          project_id: claimmix-506321
-          workload_identity_provider: projects/1032332436198/locations/global/workloadIdentityPools/vercel/providers/github
-          service_account: claimmix-extractor@claimmix-506321.iam.gserviceaccount.com
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Instalar dependencias
-        run: pnpm install --frozen-lockfile
-
-      # Una diferencia se confirma con una segunda corrida.
-      #
-      # Del otro lado hay un modelo, no una función: la misma conversación puede
-      # terminar distinto. Medido sobre `goteo`, que difirió una vez acá: tres
-      # corridas seguidas después, cero diferencias. El escenario estaba bien y
-      # el modelo, esa vez, eligió callarse.
-      #
-      # Reintentar no afloja la exigencia —la afirmación es la misma— sino que
-      # separa dos cosas que en un reporte se ven iguales: una regresión, que
-      # falla siempre, y una variación, que casi nunca falla dos veces.
-      #
-      # Lo que separa las dos es la INTERSECCIÓN de las dos corridas, y eso es lo
-      # que faltaba. Antes el reintento pedía que la segunda corrida saliera
-      # limpia entera, que con medio centenar de afirmaciones dependientes del
-      # modelo es tirar otro dado en vez de confirmar el primero: salía rojo por
-      # diferencias DISTINTAS cada vez. Un rojo que cambia de motivo en cada
-      # corrida enseña a no mirar el reporte, que es peor que no tenerlo.
-      #
-      # `|| true` en la segunda es a propósito: su código de salida ya no decide
-      # nada, decide la comparación. Y un reporte que falta no cuenta como cero
-      # diferencias — si el ensayo se cayó antes de escribirlo, eso es rojo.
-      #
-      # Va acá y no adentro del script porque cada corrida necesita identidades
-      # nuevas, y el ensayo las deriva de una constante por proceso. Intentarlo
-      # adentro hacía que el reintento cayera en el mismo hilo: las respuestas
-      # del primer intento se contaban en el turno 1 del segundo. Un proceso
-      # nuevo lo resuelve sin tocar nada.
-      #
-      # Cuesta una corrida más, y sólo cuando algo difirió.
-      - name: Ensayar las doce conversaciones
-        run: |
-          if pnpm rehearse --reporte primera.json; then
-            exit 0
-          fi
-          echo "::notice title=Se repite el ensayo::Difirió algo. Segunda corrida para separar variación de regresión."
-          pnpm rehearse --reporte segunda.json || true
-          node scripts/comparar-ensayos.mjs primera.json segunda.json
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # La capa de datos entra por acá. Sin esto, toda consulta que pase por
-          # `enTenant` rompe con "falta DATABASE_URL_APP" — que en el pen test se
-          # lee como "la pared entre inquilinos falló" y no como "falta una variable".
-          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
-          GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-          GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
-          GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
-          GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
-          VERTEX_EXTRACTION_MODEL: ${{ secrets.VERTEX_EXTRACTION_MODEL }}
-          # El cupo diario de tokens del tenant.
-          #
-          # El ensayo corre acá, en el runner, no adentro del deploy — así que
-          # lee el tope de ESTE entorno. Sin esta línea tomaba el default de 5M
-          # mientras producción tiene 20M, y una tarde de pruebas (la carga, el
-          # pen test del agente, los ensayos mismos) lo agotaba. Entonces el
-          # worker no llama al modelo, el agente se queda mudo, y las doce
-          # conversaciones fallan juntas como si se hubiera roto algo.
-          #
-          # Variable del repo y no secreto: no lo es, y GitHub tacha el valor de
-          # un secreto en el log — dejaría «5.088.283 / ***» justo en la línea
-          # que explica la falla. Mantenerla igual a la de Vercel.
-          AI_TENANT_DAILY_TOKEN_CAP: ${{ vars.AI_TENANT_DAILY_TOKEN_CAP || '20000000' }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-
-      - name: Qué significa que esto falle
-        if: failure()
-        run: |
-          echo "::error::El agente no se comportó como esperábamos."
-          echo ""
-          echo "El transcripto completo está en el paso de arriba. Leelo: la"
-          echo "diferencia que reporta dice qué esperaba, y el mensaje que"
-          echo "mandó dice qué hizo en su lugar."
-          echo ""
-          echo "Reproducilo con: pnpm rehearse <nombre-del-escenario>"
-
-  # ── El timbre ────────────────────────────────────────────────────────────────
-  #
-  # El ensayo entra por los canales simulados, a propósito: así no le escribe a
-  # nadie. Lo que queda afuera de esa decisión es el primer metro — entre que el
-  # mensaje aparece en la casilla o llega al webhook, y que el worker lo levanta.
-  #
-  # Esto lo cubre sin sacar nada del edificio: el deploy DEPOSITA un mail en la
-  # casilla (no lo manda), y se le manda al webhook un payload firmado con el
-  # secreto de Meta desde un número del bloque reservado. Cuesta dos
-  # extracciones y borra los dos casos al terminar.
-  #
-  # La mitad de WhatsApp necesita WHATSAPP_APP_SECRET para firmar como Meta. Si
-  # no está, se saltea y lo dice — que es distinto de darla por probada.
-  timbre:
-    name: Tocar el timbre
-    runs-on: ubuntu-latest
-    needs: [smoke]
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Instalar dependencias
-        run: pnpm install --frozen-lockfile
-
-      - name: Entrar por los transportes de verdad
-        run: pnpm knock
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # La capa de datos entra por acá. Sin esto, toda consulta que pase por
-          # `enTenant` rompe con "falta DATABASE_URL_APP" — que en el pen test se
-          # lee como "la pared entre inquilinos falló" y no como "falta una variable".
-          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
-          GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-          WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
-
-      - name: Qué significa que esto falle
-        if: failure()
-        run: |
-          echo "::error::Un mensaje que llega por el transporte real no termina en un caso."
-          echo ""
-          echo "  · 'no pudo dejar el mensaje' → la casilla se desconectó, o el token"
-          echo "                                  de Gmail dejó de servir."
-          echo "  · 'no se creó el caso'       → el poller o el webhook lo levantan y"
-          echo "                                  algo se rompe antes del worker."
-          echo "  · 'la respuesta SALIÓ'       → el freno de destinatarios reservados"
-          echo "                                  no frenó. Eso es un mail a alguien."
-          echo ""
-          echo "Reproducilo con: pnpm knock --keep"
-
-  # ── La prueba de carga, sólo la mitad gratis ─────────────────────────────────
-  #
-  # La fase de lectura: las consultas del tablero contra la base de producción,
-  # con 1, 5 y 20 analistas simultáneos, y el plan que Postgres elige para cada
-  # una. No escribe nada y no gasta un token.
-  #
-  # Lo que busca no es una latencia bonita: es la regresión silenciosa. Un
-  # cambio de orden o un filtro nuevo pueden dejar el índice afuera y convertir
-  # el listado en un recorrido de la tabla entera. Con cuatrocientos casos eso
-  # no se nota; con cuatrocientos mil es la pantalla que no abre, y para
-  # entonces nadie se acuerda del commit que lo causó.
-  #
-  # La fase de escritura — cien asegurados a la vez contra el webhook — NO corre
-  # acá: cuesta plata en cada deploy y el número no cambia solo. Se corre a
-  # mano antes de un piloto, con `pnpm load --write --claimants 100`.
-  #
-  # De las cuatro formas de lectura corre UNA, la de carga, que es la que
-  # contesta la pregunta de un deploy: ¿esto quedó más lento que ayer? Las otras
-  # tres (pico, resistencia, estrés) tienen sentido a mano y no en cada deploy:
-  # miden minutos contra la base de producción para contestar preguntas que no
-  # cambian de un commit al otro. `pnpm load --forma todas`.
-  #
-  # El reporte se guarda como artefacto porque, cuando esto falla, el mensaje de
-  # abajo pide compararlo con la corrida anterior — y hasta ahora esa corrida no
-  # quedaba en ningún lado.
-  # ── Y por qué espera a los otros dos ────────────────────────────────────────
-  #
-  # Esto mide p95 con 1, 5 y 20 analistas simultáneos contra la base de
-  # producción. El ensayo y el timbre entran a ESA misma base al mismo tiempo:
-  # el ensayo abre trece conversaciones enteras con extracción incluida, y el
-  # timbre crea casos y consulta en bucle. Con todos arrancando juntos, este
-  # job no medía las consultas del tablero — medía a sus hermanos.
-  #
-  # Pasó el 2026-09-08, dos corridas seguidas con la MISMA cantidad de filas:
-  #
-  #     56b5ff4   486 casos   p95 peor caso 435 ms   ✓
-  #     5f0bba5   484 casos   p95 peor caso 835 ms   ✗
-  #
-  # Las columnas de 1 y 5 simultáneos casi no se movieron; sólo se duplicó la
-  # de 20, que es justo donde la contención se nota. Ninguna consulta cambió
-  # entre esos dos commits.
-  #
-  # Es el mismo error que ya se arregló en `ci.yml` entre los tests de
-  # integración y los e2e, y entre corridas: un número que depende de qué más
-  # está corriendo no es un presupuesto, es un sorteo. Y un rojo que sale por
-  # sorteo se deja de mirar.
-  #
-  # `always()` porque esto es orden y no dependencia: si alguno falla, la
-  # medición tiene que correr igual — de hecho ahí interesa más.
-  #
-  # La primera versión de esto esperaba sólo al ensayo y al timbre, y quedó
-  # corta: el pen test también entra a la misma base —le pega a los endpoints
-  # de producción, y cada uno consulta— y seguía corriendo al mismo tiempo. La
-  # corrida de `fe1d0b8` volvió a pasarse del presupuesto con `búsqueda por
-  # texto` en 611 ms mientras el pen test estaba encima.
-  #
-  # La regla, entonces, es la simple: esta medición va ÚLTIMA. Si mañana
-  # aparece otro job que toque la base, va en esta lista.
-  carga:
-    name: Carga (lectura)
-    runs-on: ubuntu-latest
-    needs: [smoke, rehearse, timbre, pentest, listas-parejas, permisos]
-    if: always() && needs.smoke.result == 'success'
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Instalar dependencias
-        run: pnpm install --frozen-lockfile
-
-      - name: Medir las consultas del tablero
-        run: pnpm load --reporte carga.json
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # La capa de datos entra por acá. Sin esto, toda consulta que pase por
-          # `enTenant` rompe con "falta DATABASE_URL_APP" — que en el pen test se
-          # lee como "la pared entre inquilinos falló" y no como "falta una variable".
-          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
-          GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-
-      # `always()`: el reporte del deploy que FALLÓ es justamente el que hay que
-      # poder mirar.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: carga
-          path: |
-            carga.json
-            carga.html
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Qué significa que esto falle
-        if: failure()
-        run: |
-          echo "::error::El tablero se puso lento, o una consulta perdió su índice."
-          echo ""
-          echo "  · 'regresión' en el plan → el listado dejó de usar el índice."
-          echo "                             Mirá qué cambió en el orden o los filtros"
-          echo "                             de listCases (src/server/cases/list.ts)."
-          echo "  · p95 por encima del presupuesto → puede ser volumen real."
-          echo "                             Comparalo con el artefacto 'carga' del deploy"
-          echo "                             anterior: carga.json tiene los números medidos"
-          echo "                             y carga.html los muestra."
-          echo ""
-          echo "Reproducilo con: pnpm load"
-
-  # ── El pen test, la mitad gratis ─────────────────────────────────────────────
-  #
-  # Corre desde donde corre un desconocido: sin credenciales. Prueba cada ruta
-  # de la API —la lista sale de recorrer src/app/api, no está escrita a mano—
-  # más las firmas de webhook, las cabeceras, CORS y lo que cuenta un error.
-  #
-  # El valor está en que la lista no sea manual: una ruta nueva que nadie
-  # protegió falla acá el día que se sube. Escrita a mano, la lista se
-  # desactualiza el primer día que alguien tiene apuro.
-  #
-  # Los ataques al agente (--agent) NO corren acá: gastan tokens del mismo cupo
-  # que atiende a los asegurados. Se corren a mano al tocar el agente o los
-  # prompts, con `pnpm pentest --agent`.
-  # ── Que el código y la base digan lo mismo ───────────────────────────────────
-  #
-  # El checklist de documentos por tipo de siniestro vive en dos lados: en el
-  # código, que es de donde el agente saca qué papeles pedir, y en
-  # `required_docs_config`, que es de donde el caso saca qué registrar como
-  # pendiente. Nada comparaba las dos listas, y divergieron durante meses: el
-  # código conocía ocho tipos de siniestro y la tabla tenía cuatro.
-  #
-  # El síntoma era mudo, que es lo que lo hizo durar. El sembrador se vuelve sin
-  # hacer nada cuando no encuentra filas para el tipo, así que el agente pedía
-  # bien los papeles y el caso no registraba ninguno. Cuarenta y cinco casos de
-  # producción sin seguimiento de documentación, y en la pantalla del analista
-  # se veían completos.
-  #
-  # Una divergencia así se descubre sola cuando ya hizo daño. Preguntarlo
-  # después de cada deploy cuesta una consulta.
-  #
-  # `pnpm esquemas` —la otra comparación de esta familia, entre los archivos de
-  # migración y el esquema que corre— NO está acá, y vale decir por qué: necesita
-  # `STAGING_DATABASE_URL`, porque compara staging contra producción, y que
-  # alguien mantenga staging al día. Sin eso se pondría rojo por drift de
-  # staging en vez de por drift de producción, que es justo la clase de rojo que
-  # enseña a no mirar el reporte. Se corre a mano.
-  #
-  # Lo anoto porque lo cableé sin comprobarlo y la CI se puso roja: pasa local
-  # porque la variable está en .env.local, y en el runner no existe. Que un
-  # chequeo pase en mi máquina no dice nada sobre si puede correr allá.
-  #
-  # Sólo lee.
-  listas-parejas:
-    name: Código y base dicen lo mismo
-    runs-on: ubuntu-latest
-    needs: [smoke]
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Instalar dependencias
-        run: pnpm install --frozen-lockfile
-
-      - name: Documentos por tipo de siniestro
-        run: pnpm docs-config
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # Ninguno de estos dos entra por la capa de datos —consultan el catálogo
-          # directo— pero la variable va igual: la invariante pide que estén las dos
-          # juntas para que nadie tenga que averiguar cuál necesita cuál.
-          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
-      - name: Qué significa que esto falle
-        if: failure()
-        run: |
-          echo "::error::El código y la base dejaron de decir lo mismo."
-          echo ""
-          echo "  · 'falta en la base'  → agregaste un tipo de siniestro al código y"
-          echo "                          no escribiste la migración que carga sus"
-          echo "                          filas. El agente va a pedir los papeles y el"
-          echo "                          caso no va a registrar ninguno."
-          echo "  · 'sobra en la base'  → una fila que el agente nunca pide. Queda"
-          echo "                          pendiente para siempre."
-          echo "  · esquema distinto    → hay una migración escrita y sin aplicar, o"
-          echo "                          alguien tocó la base a mano."
-          echo ""
-          echo "Reproducilo con: pnpm docs-config"
-
-  # ── Permisos del rol de la aplicación ────────────────────────────────────────
-  #
-  # La aplicación ya no consulta con el rol dueño de las tablas: usa
-  # `claimmix_app`, que obedece RLS. Un GRANT que falte no se ve como un error
-  # visible — casi todas las escrituras están adentro de un `try/catch` que
-  # traga el fallo a propósito, así que el síntoma es una aplicación que anda y
-  # no guarda nada. Se pregunta al catálogo después de cada deploy.
-  #
-  # Sólo lee.
-  permisos:
-    name: Permisos del rol
-    runs-on: ubuntu-latest
-    needs: [smoke]
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Instalar dependencias
-        run: pnpm install --frozen-lockfile
-
-      - name: Preguntarle al catálogo qué puede hacer el rol
-        run: pnpm permisos
-        env:
-          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
-
-      - name: Qué significa que esto falle
-        if: failure()
-        run: |
-          echo "::error::El rol de la aplicación no tiene lo que la capa de datos le pide."
-          echo ""
-          echo "  · 'le falta INSERT'   → una tabla nueva nació sin permisos. Los"
-          echo "                          ALTER DEFAULT PRIVILEGES cubren las que se"
-          echo "                          crean después; una migración que las crea"
-          echo "                          con otro rol dueño se saltea eso."
-          echo "  · 'sin forzar'        → le falta FORCE ROW LEVEL SECURITY. Sin él,"
-          echo "                          el dueño de la tabla ignora sus propias"
-          echo "                          políticas."
-          echo "  · 'sin ninguna'       → tabla con RLS y sin política: no filtra,"
-          echo "                          niega todo. Se ve como una tabla vacía."
-          echo ""
-          echo "Reproducilo con: pnpm permisos"
-
-  pentest:
-    name: Pen test (superficie)
-    runs-on: ubuntu-latest
-    needs: [smoke]
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Instalar dependencias
-        run: pnpm install --frozen-lockfile
-
-      - name: Atacar la superficie y la pared entre tenants
-        run: pnpm pentest
-        env:
-          # La fase de la pared necesita la base y DOS tenants. Sin el segundo
-          # se saltea y lo dice — que es distinto de darla por probada.
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # La capa de datos entra por acá. Sin esto, toda consulta que pase por
-          # `enTenant` rompe con "falta DATABASE_URL_APP" — que en el pen test se
-          # lee como "la pared entre inquilinos falló" y no como "falta una variable".
-          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
-          GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
-          DEMO_TENANT_ID: ${{ secrets.DEMO_TENANT_ID }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-
-      - name: Qué significa que esto falle
-        if: failure()
-        run: |
-          echo "::error::Hay algo accesible sin credenciales."
-          echo ""
-          echo "  · una ruta 'abierta'  → le falta requireRole o el chequeo de sesión."
-          echo "                          Si es pública a propósito, agregala a"
-          echo "                          INTENTIONALLY_PUBLIC en scripts/pen-test.mts"
-          echo "                          CON EL MOTIVO, y controlá qué contesta."
-          echo "  · una cabecera        → mirá next.config.ts y src/proxy.ts."
-          echo "  · 'cruza la pared'    → UNA CONSULTA SIN where tenant_id."
-          echo "                          Es la falla que termina el negocio. Parate acá."
-          echo ""
-          echo "Reproducilo con: pnpm pentest"
+    uses: ./.github/workflows/deploy-checks.yml
+    with:
+      # El `url` del disparo a mano llega hasta acá: si no, sería un campo
+      # que se puede llenar y no hace nada.
+      url: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
+      entorno: Production
+      medir_carga: true
+    secrets: inherit

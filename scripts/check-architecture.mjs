@@ -4,7 +4,7 @@
  * Una arquitectura escrita en un documento se degrada en seis meses; una
  * comprobada en cada `pnpm check`, no. Esto es lo segundo.
  *
- * Comprueba seis invariantes, en orden de importancia:
+ * Comprueba quince invariantes, en orden de importancia:
  *
  *   1. `src/core/` no toca infraestructura. Recibe datos y devuelve decisiones;
  *      si importa la base, la red o el entorno, deja de poder probarse sin
@@ -668,12 +668,16 @@ console.log("\n▸ Ningún job avisa y aprueba con el secreto vacío");
 // el que la escribe es un PR cualquiera, no un deploy.
 //
 // `post-deploy.yml` es la excepción real y a propósito —corre DESPUÉS del
-// deploy, contra producción— así que queda afuera de esta invariante.
+// deploy, contra producción— así que queda afuera de esta invariante. Los
+// siete jobs viven en `deploy-checks.yml`, que ese archivo llama como
+// workflow reusable: la excepción es la misma, sólo que el `pnpm pentest`
+// que la dispara ahora está en el otro archivo, no en post-deploy.yml.
+const EXCEPCION_PRODUCCION = ["post-deploy.yml", "deploy-checks.yml"];
 console.log("\n▸ Lo previo al merge no apunta a producción");
 {
   const flujos = existsSync(".github/workflows")
     ? readdirSync(".github/workflows").filter(
-        (f) => (f.endsWith(".yml") || f.endsWith(".yaml")) && f !== "post-deploy.yml"
+        (f) => (f.endsWith(".yml") || f.endsWith(".yaml")) && !EXCEPCION_PRODUCCION.includes(f)
       )
     : [];
   const apuntanAProduccion = [];
@@ -716,7 +720,70 @@ console.log("\n▸ Lo previo al merge no apunta a producción");
     mal(`${apuntanAProduccion.length} workflow(s) con un job que apunta a producción`);
     for (const w of [...new Set(apuntanAProduccion)]) console.log(`     .github/workflows/${w}`);
     console.log("     Antes de mergear van contra STAGING_* o localhost. La base de");
-    console.log("     producción sólo la toca post-deploy.yml, después del deploy.");
+    console.log("     producción sólo la toca post-deploy.yml (vía deploy-checks.yml),");
+    console.log("     después del deploy.");
+  }
+}
+
+// ── 15. La guarda de post-deploy no es sólo el entorno ─────────────────────
+//
+// `environment == 'Production'` es una etiqueta que pone CADA proyecto de
+// Vercel sobre su propio entorno de producción. Con un segundo proyecto para
+// QA, su deploy llega con el mismo evento —`deployment_status`— y la misma
+// etiqueta, así que una guarda que sólo mire el entorno correría el smoke de
+// producción, el ensayo y la carga de lectura contra el alias de producción
+// para un deploy que nunca lo tocó.
+//
+// La rama sí distingue: sólo el proyecto de producción despliega `main`. Todo
+// job que gatee EXIGIENDO ese entorno —`deployment.environment == 'Production'`—
+// tiene que exigir también la rama. `load-tests.yml` gatea con `!= 'Production'`
+// —corre en previews, cualquier proyecto— y esa exclusión no la engaña un
+// segundo proyecto: por eso la invariante mira el `==`, no cualquier mención.
+console.log("\n▸ La guarda de post-deploy no es sólo el entorno");
+{
+  const flujos = existsSync(".github/workflows")
+    ? readdirSync(".github/workflows").filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+    : [];
+  const cojos = [];
+
+  for (const nombre of flujos) {
+    const texto = readFileSync(join(".github/workflows", nombre), "utf8");
+    if (!/^\s+deployment_status:/m.test(texto)) continue;
+
+    const lineas = texto.split(/\r?\n/);
+    // Un job cuelga de `jobs:` con dos espacios de sangría, y dura hasta el
+    // próximo job a esa misma sangría o el fin del archivo. Misma idea que ya
+    // usa la invariante 14.
+    const iJobs = lineas.findIndex((l) => l.trim() === "jobs:" && !/^\s/.test(l));
+    const trabajos = [];
+    if (iJobs !== -1) {
+      let actual = null;
+      for (let i = iJobs + 1; i < lineas.length; i++) {
+        if (/^ {2}[\w-]+:/.test(lineas[i])) {
+          if (actual) trabajos.push(actual);
+          actual = "";
+        }
+        if (actual !== null) actual += lineas[i] + "\n";
+      }
+      if (actual) trabajos.push(actual);
+    }
+
+    for (const trabajo of trabajos) {
+      if (!/deployment\.environment\s*==\s*['"]Production['"]/.test(trabajo)) continue;
+      if (!/\bdeployment\.ref\b/.test(trabajo)) cojos.push(nombre);
+    }
+  }
+
+  if (flujos.length === 0) {
+    console.log("     (no hay workflows: nada que comprobar)");
+  } else if (cojos.length === 0) {
+    bien("todo job que gatea por entorno gatea también por la rama");
+  } else {
+    mal(`${cojos.length} workflow(s) con un job que gatea sólo por entorno`);
+    for (const w of [...new Set(cojos)]) console.log(`     .github/workflows/${w}`);
+    console.log("     Con dos proyectos de Vercel, un deploy de QA también llega con");
+    console.log("     environment == 'Production' —la etiqueta de SU entorno, en SU");
+    console.log("     proyecto—. Agregá `deployment.ref == 'main'` a la guarda.");
   }
 }
 

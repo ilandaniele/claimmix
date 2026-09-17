@@ -93,10 +93,27 @@ export type Severity = z.infer<typeof SeveritySchema>;
 export const SortColumnSchema = z.enum(["created_at", "confidence_min", "status"]);
 export type SortColumn = z.infer<typeof SortColumnSchema>;
 
+/**
+ * Convierte un campo en lista, aceptando un valor suelto o varios.
+ *
+ * Repetido en la URL (`?type=choque&type=robo`) y no separado por comas:
+ * `URLSearchParams` ya sabe juntar valores repetidos en un array, así que no
+ * hace falta parsear nada a mano. Y un solo valor (`?type=choque`) queda
+ * byte a byte igual que hoy — un bookmark viejo con un filtro sigue andando.
+ * Vacío (`""`, `[]`) o ausente da `undefined`; cualquier valor inválido tira
+ * abajo el parámetro entero, como ya pasaba con uno solo.
+ */
+const listaDe = <T extends z.ZodTypeAny>(v: T) =>
+  z.preprocess((x) => {
+    if (x === undefined) return undefined;
+    const lista = (Array.isArray(x) ? x : [x]).filter((s) => s !== "");
+    return lista.length === 0 ? undefined : lista;
+  }, z.array(v).nonempty().optional());
+
 /** GET /api/cases query parameters (extended with email-intake filters) */
 export const CaseQuerySchema = z.object({
-  status: CaseStatusSchema.optional(),
-  type: ClaimTypeSchema.optional(),
+  status: listaDe(CaseStatusSchema),
+  type: listaDe(ClaimTypeSchema),
   /*
    * Tres caracteres es lo que el índice necesita para servir de algo.
    *
@@ -114,10 +131,10 @@ export const CaseQuerySchema = z.object({
   sort: SortColumnSchema.default("created_at"),
   order: z.enum(["asc", "desc"]).default("desc"),
   // Email-intake filters (AC18)
-  severity: SeveritySchema.optional(),
+  severity: listaDe(SeveritySchema),
   customer_id: z.string().uuid().optional(),
   policy_id: z.string().uuid().optional(),
-  channel: z.enum(["email_sim", "email", "whatsapp_sim", "whatsapp"]).optional(),
+  channel: listaDe(z.enum(["email_sim", "email", "whatsapp_sim", "whatsapp"])),
   is_claim: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
 });
 

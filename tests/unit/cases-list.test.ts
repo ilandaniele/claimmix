@@ -265,7 +265,7 @@ describe("listCasesForExport", () => {
     };
     vi.mocked(db.select).mockReturnValue(chain as any);
 
-    const result = await listCasesForExport(TENANT_ID, { status: "cerrado" });
+    const result = await listCasesForExport(TENANT_ID, { status: ["cerrado"] });
     expect(result).toEqual([]);
   });
 

@@ -56,6 +56,27 @@ const VALID_TYPES: ClaimType[] = ClaimTypeSchema.options;
 const VALID_SEVERITIES: Severity[] = ["low", "medium", "high", "critical"];
 const VALID_CHANNELS = ["email_sim", "email", "whatsapp_sim", "whatsapp"] as const;
 
+/**
+ * Normaliza un parámetro multi-valor (`status`, `type`, `severity`,
+ * `channel`): junta lo que haya —cero, uno o varios—, descarta lo que no esté
+ * en `lista`, y devuelve `undefined` si no queda nada.
+ *
+ * A propósito distinto de `CaseQuerySchema`: la API rechaza el parámetro
+ * ENTERO si trae un valor inválido, acá se descarta sólo ese valor y se sigue
+ * — una pantalla no le puede dar 400 a alguien que llegó por un enlace viejo.
+ */
+function valores<T extends string>(
+  raw: string | string[] | undefined,
+  lista: readonly T[]
+): [T, ...T[]] | undefined {
+  if (raw === undefined) return undefined;
+  const candidatos = Array.isArray(raw) ? raw : [raw];
+  const filtrados = candidatos.filter((v): v is T =>
+    (lista as readonly string[]).includes(v)
+  );
+  return filtrados.length > 0 ? (filtrados as [T, ...T[]]) : undefined;
+}
+
 interface BandejaPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
@@ -71,17 +92,9 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const severityParam = params["severity"];
   const isClaimParam = params["is_claim"];
 
-  const status =
-    typeof statusParam === "string" &&
-    VALID_STATUSES.includes(statusParam as CaseStatus)
-      ? (statusParam as CaseStatus)
-      : undefined;
+  const status = valores(statusParam, VALID_STATUSES);
 
-  const type =
-    typeof typeParam === "string" &&
-    VALID_TYPES.includes(typeParam as ClaimType)
-      ? (typeParam as ClaimType)
-      : undefined;
+  const type = valores(typeParam, VALID_TYPES);
 
   const page =
     typeof pageParam === "string" ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
@@ -95,17 +108,9 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
       ? parseInt(perPageParam, 10)
       : 20;
 
-  const channel =
-    typeof channelParam === "string" &&
-    (VALID_CHANNELS as readonly string[]).includes(channelParam)
-      ? (channelParam as typeof VALID_CHANNELS[number])
-      : undefined;
+  const channel = valores(channelParam, VALID_CHANNELS);
 
-  const severity =
-    typeof severityParam === "string" &&
-    VALID_SEVERITIES.includes(severityParam as Severity)
-      ? (severityParam as Severity)
-      : undefined;
+  const severity = valores(severityParam, VALID_SEVERITIES);
 
   const is_claim =
     isClaimParam === "true" ? true : isClaimParam === "false" ? false : undefined;

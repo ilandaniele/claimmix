@@ -122,8 +122,18 @@ test.describe("selección sin recuadros", () => {
       const boton = page.getByTestId("filtros-boton");
       if ((await boton.getAttribute("aria-expanded")) !== "true") await boton.click();
     };
+    /*
+     * El chip se busca DENTRO del panel, no en la página.
+     *
+     * Con el filtro puesto, el mismo nombre lo llevan también la marca que
+     * queda afuera del panel para poder sacarlo y la baldosa de arriba: sin
+     * acotar, el localizador encuentra tres botones y Playwright no elige.
+     */
+    const panel = page.getByRole("dialog", {
+      name: enCualquierIdioma("filter.titulo", { exacto: true }),
+    });
     const estado = (clave: "listo" | "esperando") => ({
-      chip: page.getByRole("button", { name: enCualquierIdioma(`tabs.${clave}`) }),
+      chip: panel.getByRole("button", { name: enCualquierIdioma(`tabs.${clave}`) }),
       url: new RegExp(`status=${clave}`),
     });
     // Las cifras vienen del servidor; la tabla no sirve para decidir, en la

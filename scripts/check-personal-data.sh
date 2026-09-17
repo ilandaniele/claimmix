@@ -26,12 +26,24 @@ allowed() {
   grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" | sed 's/[[:space:]]//g'
 }
 
+# Qué archivos se miran: los que git ya tiene y los nuevos que todavía no se
+# agregaron. Lo ignorado queda afuera a propósito.
+#
+# Antes esto recorría el directorio entero. Un teléfono dentro de un directorio
+# gitignoreado —la salida de un escaneo, el workspace de una herramienta— no
+# llega nunca al repositorio público, así que marcarlo deja el chequeo en rojo
+# sin que haya nada que arreglar. Un rojo que no significa nada se aprende a
+# saltear, y este chequeo existe para correrlo antes de commitear.
+archivos() {
+  git ls-files -z --cached --others --exclude-standard \
+    -- '*.ts' '*.tsx' '*.md' '*.yml' 2>/dev/null
+}
+
 scan() {
   local what="$1" pattern="$2" hits
-  hits=$(grep -rInE "$pattern" \
-    --include='*.ts' --include='*.tsx' --include='*.md' --include='*.yml' \
-    --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.crew-workspace \
-    . 2>/dev/null || true)
+  # -H: con un solo archivo grep omite el nombre y el hallazgo perdería la ruta.
+  # -r de xargs: sin archivos, grep se quedaría leyendo la entrada estándar.
+  hits=$(archivos | xargs -0 -r grep -HInE "$pattern" 2>/dev/null || true)
 
   while IFS= read -r ok; do
     [ -z "$ok" ] && continue

@@ -1012,6 +1012,20 @@ jobs:
           DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
           BETTER_AUTH_SECRET: placeholder-secret-for-build-only
           MOCK_AI: "true"
+          #
+          # Un `CRON_SECRET` de mentira, y hace falta que esté.
+          #
+          # Las rutas de cron devuelven 500 —no 401— cuando el secreto NO está
+          # configurado, a propósito: que falte es una mala configuración del
+          # despliegue y no un llamador sin permiso, y la diferencia está fijada
+          # por tests. Pero la sonda cuenta como «abierta» toda respuesta que no
+          # sea 401 ni 403, así que sin esto marcaba /api/cron/gmail-poll y
+          # /api/cron/reap-stuck como abiertas.
+          #
+          # No era un hallazgo: era esta corrida probando una configuración que
+          # en producción no existe. Con el secreto puesto, la sonda ejercita el
+          # camino real —pedir sin el Bearer correcto— y recibe su 401.
+          CRON_SECRET: no-sirve-en-ningun-lado-solo-para-que-el-cron-conteste-401
 
       - name: La superficie, contra el build local
         run: pnpm pentest --url http://localhost:3000 --solo-superficie

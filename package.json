@@ -61,6 +61,7 @@
     "indices": "tsx --tsconfig tsconfig.rehearsal.json scripts/auditar-indices.mts",
     "rls-indices": "tsx --tsconfig tsconfig.rehearsal.json scripts/medir-rls-indices.mts",
     "peso": "node scripts/medir-peso.mjs",
+    "peso:ver": "next experimental-analyze",
     "docs-config": "tsx --tsconfig tsconfig.rehearsal.json scripts/verificar-docs-config.mts",
     "comparar-ensayos": "node scripts/comparar-ensayos.mjs",
     "achicar-payloads": "tsx --tsconfig tsconfig.rehearsal.json scripts/achicar-payloads.mts"

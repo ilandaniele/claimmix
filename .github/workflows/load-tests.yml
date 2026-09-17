@@ -125,12 +125,16 @@ jobs:
       # abajo. Es preferible a lo que reemplaza: un k6 que nunca corrió una sola
       # vez y un ícono verde que lo escondía.
       #
-      # Y no es el único que falta: `LOAD_TEST_EMAIL` y `LOAD_TEST_PASSWORD`
-      # —de más abajo, la cuenta con la que `helpers/auth.js` inicia sesión en
-      # `setup()`— tampoco existen todavía. Son tres secretos, no uno, los que
-      # hacen falta antes de que esto mida algo: sin la llave de Vercel ya
-      # queda en rojo acá, y aunque se cree, sin las credenciales de la cuenta
-      # de pruebas el login de k6 falla igual.
+      # Acá decía que también faltaban `LOAD_TEST_EMAIL` y `LOAD_TEST_PASSWORD`.
+      # Era falso, y lo desmiente este mismo archivo treinta líneas más abajo:
+      # no son secretos, son variables que el job arma desde
+      # `PLAYWRIGHT_TEST_EMAIL` y `PLAYWRIGHT_TEST_PASSWORD`.
+      #
+      # Falta UN secreto acá. Lo que sigue faltando después no es un secreto: la
+      # cuenta de Playwright vive en la base de ENSAYO, y los únicos destinos que
+      # acepta el paso de abajo leen la de PRODUCCIÓN, así que el login de
+      # `setup()` va a dar 401 igual. Las tres salidas están en docs/PROMOCION.md,
+      # paso 5.
       - name: ¿Hay llave para la vista previa?
         id: llave
         env:

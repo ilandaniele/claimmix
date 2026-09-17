@@ -84,18 +84,50 @@ producción.
 
 ⛔ **Nunca las de producción.** QA existe para poder romper cosas.
 
-### 5. Los tres secretos que faltan
+### 5. Un secreto, y una cuenta que todavía no existe
 
 Hoy el job `k6` de `load-tests.yml` está **rojo a propósito**. Antes venía verde
 sin haber ejecutado k6 una sola vez, porque le faltaba un secreto y se salteaba
-con un aviso. Ahora falla. Para que mida de verdad hacen falta tres:
+con un aviso. Ahora falla.
 
-1. `VERCEL_AUTOMATION_BYPASS_SECRET` — Vercel → `claimmix` → Settings →
-   Deployment Protection → Protection Bypass for Automation → crear, y después
-   `gh secret set VERCEL_AUTOMATION_BYPASS_SECRET`.
-2. `LOAD_TEST_EMAIL` y `LOAD_TEST_PASSWORD` — una cuenta **del ensayo**, no de
-   producción. Los seis escenarios de carga arrancan haciendo login; sin esto
-   ninguno puede correr.
+Acá decía que faltaban **tres** secretos. Era falso: `LOAD_TEST_EMAIL` y
+`LOAD_TEST_PASSWORD` no son secretos de GitHub, son variables que el workflow
+arma solo desde `PLAYWRIGHT_TEST_EMAIL` y `PLAYWRIGHT_TEST_PASSWORD`
+(`load-tests.yml:164-165`, desde #121). Crearlos no hubiera servido de nada.
+
+Lo que falta de verdad son dos cosas, y la segunda no se arregla con un secreto.
+
+**Falta un secreto.** `VERCEL_AUTOMATION_BYPASS_SECRET` — Vercel → `claimmix`
+→ Settings → Deployment Protection → Protection Bypass for Automation → crear,
+y después `gh secret set VERCEL_AUTOMATION_BYPASS_SECRET`.
+
+**Y falta una cuenta que k6 pueda usar.** Los seis escenarios arrancan haciendo
+login (`tests/load/helpers/auth.js:46-60`; sin credenciales, `fail()`). La cuenta
+cableada hoy es la de Playwright, y esa vive en la base de **ensayo**:
+`sembrar-para-integracion.mts` siembra contra `STAGING_DATABASE_URL` y se planta
+si le pasás la de producción. Pero `load-tests.yml:98-104` sólo acepta como
+destino `claimmix.vercel.app` o una vista previa del MISMO proyecto, y las dos
+leen la base de **producción**. El login va a devolver 401.
+
+Ese rastrillo ya se pisó una vez, y está anotado en `playwright.config.ts:75-79`:
+«el login respondía “Credenciales inválidas” porque el servidor miraba
+producción, donde esas cuentas no existen».
+
+Tres salidas, en orden de menos a más compromiso:
+
+1. **Esperar a QA.** Cuando exista `claimmix-qa` con `STAGING_DATABASE_URL`
+   (paso 4), la cuenta de Playwright sirve tal cual contra ese deploy. Hay que
+   agregar el host de QA al `case` de `load-tests.yml:98-104`, que hoy lo
+   rechaza — y esa lista blanca es un control de seguridad, así que se agrega el
+   host exacto, nunca un comodín tipo `claimmix*`.
+2. **Correrlo a mano contra localhost.** `pnpm sembrar` con
+   `DATABASE_URL=$STAGING_DATABASE_URL`, levantar el servidor y `pnpm
+   carga:smoke`. Mide la aplicación, no la red, y no necesita ninguna cuenta
+   nueva.
+3. **Crear una cuenta de analista en producción.** Es lo único que pone el job
+   automático en verde hoy. ⛔ Es una credencial viva contra datos de clientes
+   viajando en cada corrida; los escenarios sólo leen (`base.js:94-106`), pero
+   el riesgo es real y la decisión es de la persona, no del repositorio.
 
 ### 6. Workload Identity Federation para `qa`
 

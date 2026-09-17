@@ -724,7 +724,41 @@ contra producción o con un test que falla si deja de ser cierto.
   cuarto.
 - **Dominio propio**: corre en `claimmix.vercel.app`. Hace falta comprar y
   configurar uno.
-- **VPS**: no aplica. Esto es serverless; no hay puertos ni SSH que cerrar.
+- **VPS**: no aplica, y esta vez con la comprobación hecha. Volvió a preguntarse
+  el 16/09/2026 —«desactivar el login por SSH con contraseña, poner otra forma de
+  entrar al servidor Nginx»— y no hay tal servidor. Lo que se miró:
+
+  | dónde se buscó | qué había |
+  |---|---|
+  | `~/.ssh/known_hosts` | una sola entrada, `github.com`: esta máquina nunca entró por SSH a ningún servidor |
+  | `~/.ssh/config` | GitHub (dos cuentas) y los espacios de SAP BAS por túnel a `127.0.0.1`. Nada más |
+  | servicios y puertos de esta PC | sin `sshd`, sin `nginx`, nada escuchando en 22, 80 ni 443 |
+  | Compute Engine, en los cuatro proyectos de GCP | la API nunca se habilitó en ninguno: jamás hubo una máquina |
+  | DNS | `claimmix.vercel.app` resuelve a IP anycast de Vercel; no hay dominio propio apuntando a ningún lado |
+  | la respuesta de producción | `Server: Vercel`. No hay nginx delante |
+
+  Quien retome esto: no hay `sshd_config` que editar ni puerto que cerrar. La
+  superficie es Vercel, Neon y GCP, y se cierra en la consola de cada uno.
+
+- **El único login por contraseña que queda es el del producto**, y hoy no lo usa
+  casi nadie. Medido contra producción el 16/09/2026:
+
+  | rol | usuarios | con Google | con contraseña |
+  |---|---|---|---|
+  | `analyst` | 3 | 3 | 0 |
+  | `admin` | 2 | 2 | 1 |
+  | `specialist` | 1 | 0 | 0 |
+
+  O sea: las cinco cuentas que entran ya entran con Google, y una sola —un
+  admin— conserva además una contraseña. El `specialist` no tiene ninguna de las
+  dos porque nunca entra: existe para recibir el aviso de derivación.
+
+  ⛔ **Apagar `emailAndPassword` no dejaría a nadie afuera, pero rompe las
+  pruebas.** `tests/e2e/auth.setup.ts` y los tests de integración entran por el
+  formulario con `PLAYWRIGHT_TEST_PASSWORD` e `INTEGRATION_LOGIN_PASSWORD`, a
+  propósito: si el login se rompe, tienen que romperse ellos. Apagarlo de un
+  lado deja la suite sin forma de entrar. Es una decisión, no un arreglo, y por
+  eso queda acá y no en un PR.
 - **No hay ningún `owner`.** Ya no bloquea nada: desde el 28 de agosto de 2026
   `veltra.soporte@gmail.com` tiene rol `specialist`, y el aviso de derivación
   busca especialistas ANTES de caer al respaldo por `owner`. `owner` sólo se

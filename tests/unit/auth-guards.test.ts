@@ -27,6 +27,7 @@ vi.mock("@/lib/db/schema", () => ({
 }));
 
 import { requireRole, ADMIN_ROLES, CASE_EDITOR_ROLES } from "@/lib/auth/require-role";
+import { olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { AppError } from "@/lib/errors";
 
@@ -42,6 +43,10 @@ function conFila(fila: unknown | null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // La fila de `users` ahora se cachea por proceso, y estos tests reusan el
+  // mismo id con filas distintas: sin vaciar la caché, el segundo recibe la
+  // fila del primero durante los treinta segundos del TTL.
+  olvidarFilaDeUsuario();
   mockSession.mockResolvedValue({ user: USUARIO });
   conFila(FILA);
 });

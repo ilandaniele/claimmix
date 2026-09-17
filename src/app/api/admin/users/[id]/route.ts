@@ -13,6 +13,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +89,15 @@ export async function PATCH(
     );
 
     if (!updated) throw new AppError("NOT_FOUND");
+
+    /*
+     * El rol acaba de cambiar, así que la fila cacheada miente.
+     *
+     * Esto limpia SÓLO la instancia que atendió este PATCH; las demás esperan
+     * el TTL. Un degradado conserva el rol viejo hasta treinta segundos donde
+     * ya lo tenían en memoria, que es el precio dicho de la caché.
+     */
+    olvidarFilaDeUsuario(params.data.id);
 
     await writeAuditLog({
       tenant_id: userRow.tenant_id,

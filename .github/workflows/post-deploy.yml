@@ -53,17 +53,26 @@ on:
 # nadie. La condición está repetida a propósito: son dos lugares distintos de
 # GitHub y no hay forma de compartirla.
 #
-# La condición también exige la rama, no sólo el entorno: con un segundo
-# proyecto de Vercel para QA, su deploy llega etiquetado igual —
-# `environment == 'Production'` es el nombre de SU entorno, en SU proyecto—
-# y sin la rama entraría a esta misma cola y podría cancelar una corrida de
-# producción de verdad que estuviera encolada.
+# La condición también distingue el proyecto, no sólo el entorno: con un
+# segundo proyecto de Vercel para QA, su deploy llega etiquetado igual
+# —`environment == 'Production'` es el nombre de SU entorno, en SU proyecto—
+# y sin distinguirlo entraría a esta misma cola y podría cancelar una corrida
+# de producción de verdad que estuviera encolada.
+#
+# ⛔ Acá decía `deployment.ref == 'main'`, y por eso la cola estuvo MUERTA.
+# Vercel le pone el SHA a `deployment.ref`, así que esa comparación no era
+# cierta nunca: todo deploy de producción caía en el grupo `sin-cola`, uno por
+# corrida, y dos post-deploy podían correr a la vez contra la base de un
+# cliente pisándose los casos de ensayo. #199 arregló la guarda del job de
+# abajo y se olvidó de esta copia —que es justo lo que advierte el comentario
+# de arriba: son dos lugares distintos y hay que tocar los dos—.
 concurrency:
   group: >-
     ${{ (github.event_name == 'workflow_dispatch' ||
-    (github.event.deployment.ref == 'main' &&
-    github.event.deployment_status.state == 'success' &&
-    github.event.deployment.environment == 'Production'))
+    (github.event.deployment_status.state == 'success' &&
+    github.event.deployment.environment == 'Production' &&
+    !startsWith(github.event.deployment_status.environment_url,
+    'https://claimmix-qa-')))
     && 'post-deploy-contra-produccion'
     || format('post-deploy-sin-cola-{0}', github.run_id) }}
   cancel-in-progress: false
@@ -78,12 +87,12 @@ jobs:
     # QA y medir_carga: false. Antes de eso sería un job atado a una rama que
     # nadie despliega — YAML muerto.
     #
-    # La rama, no sólo el entorno: con dos proyectos de Vercel, el de QA
+    # El proyecto, no sólo el entorno: con dos proyectos de Vercel, el de QA
     # también llega con environment == 'Production' —así se llama SU entorno
-    # de producción, en SU proyecto— y sin `deployment.ref == 'main'` esto
-    # correría el smoke de producción contra el alias de producción para un
-    # deploy que nunca lo tocó. Es la misma respuesta peligrosa del comentario
-    # de arriba de `concurrency`, un piso más abajo.
+    # de producción, en SU proyecto— y sin distinguirlo esto correría el smoke
+    # de producción contra el alias de producción para un deploy que nunca lo
+    # tocó. Es la misma condición que el grupo de `concurrency`, un piso más
+    # arriba, y las dos se tocan juntas.
     #
     # ⛔ `deployment.ref` NO es el nombre de la rama: Vercel le pone el SHA.
     #

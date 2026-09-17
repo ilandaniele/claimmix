@@ -825,6 +825,46 @@ console.log("\n▸ El lint de la CI exige lo mismo que el de la máquina");
   }
 }
 
+// ── 17. Nadie compara `deployment.ref` con el nombre de una rama ──────────
+//
+// Vercel le pone a `deployment.ref` el SHA del commit, no el nombre de la rama.
+// Cualquier comparación contra un literal es falsa SIEMPRE, y lo que cuelgue de
+// ella queda muerto sin dejar un rojo.
+//
+// Ya costó dos veces. En #198 mató el post-deploy entero. En #199 se arregló la
+// guarda del job y quedó la copia del grupo de `concurrency`, que dejaba a dos
+// corridas pisándose los casos de ensayo en la base de un cliente.
+//
+console.log("\n▸ Nadie compara `deployment.ref` con el nombre de una rama");
+{
+  const flujos = existsSync(".github/workflows")
+    ? readdirSync(".github/workflows").filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+    : [];
+  const culpables = [];
+
+  for (const nombre of flujos) {
+    const texto = readFileSync(`.github/workflows/${nombre}`, "utf8");
+    // Sin comentarios: este archivo y el workflow EXPLICAN el defecto citando
+    // la expresión, y buscar sobre el texto crudo convertiría la explicación en
+    // la infracción. Es el mismo problema que ya arregló la invariante 15.
+    const sinComentar = texto
+      .split(/\r?\n/)
+      .map((l) => l.replace(/(^|\s)#.*$/, "$1"))
+      .join("\n");
+    if (/deployment\.ref\s*[!=]=\s*['\"]/.test(sinComentar)) culpables.push(nombre);
+  }
+
+  if (flujos.length === 0) {
+    console.log("     (no hay workflows: nada que comprobar)");
+  } else if (culpables.length === 0) {
+    bien("ninguna condición cuelga de un campo que trae el SHA");
+  } else {
+    mal(`${culpables.length} workflow(s) comparan deployment.ref con un literal`);
+    for (const w of culpables) console.log(`     .github/workflows/${w}`);
+    console.log("     Vercel pone el SHA ahí. Usá el host de deployment_status.environment_url.");
+  }
+}
+
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(66));
 if (problemas.length === 0) {

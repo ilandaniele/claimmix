@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { CUSTOMER_PII_ROLES } from "@/lib/auth/roles";
+import { ADMIN_ROLES, CUSTOMER_PII_ROLES } from "@/lib/auth/roles";
 import { usePathname, useSearchParams } from "next/navigation";
 import { hrefActivo } from "./nav-activo";
 import { useT } from "@/lib/i18n/LocaleContext";
@@ -106,7 +106,7 @@ export function Sidebar({
   const t = useT();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const canUseAgent = role === "owner" || role === "admin";
+  const esAdmin = (ADMIN_ROLES as string[]).includes(role);
   const puedeVerClientes = (CUSTOMER_PII_ROLES as string[]).includes(role);
 
   const operacionItems: NavItemDef[] = [
@@ -146,11 +146,23 @@ export function Sidebar({
       label: t("nav.agente"),
       href: "/agente",
       icon: Brain,
-      disabled: !canUseAgent,
+      disabled: !esAdmin,
       disabledReason: t("nav.agenteBloqueado"),
     },
-    { label: t("nav.admin") || "Usuarios", href: "/admin/users", icon: Shield },
-    { label: t("nav.facturacion"), href: "/admin/facturacion", icon: Receipt },
+    /*
+     * «Administración» y «Facturación» sólo para admin/owner.
+     *
+     * `admin/users/page.tsx` y `admin/facturacion/page.tsx` ya se defienden
+     * solas con `requireAdmin`: un analista que apretaba el enlace no recibía
+     * un 403, volvía en silencio a `/bandeja`. El enlace visible no era un
+     * permiso, era un rebote.
+     */
+    ...(esAdmin
+      ? [
+          { label: t("nav.admin") || "Usuarios", href: "/admin/users", icon: Shield },
+          { label: t("nav.facturacion"), href: "/admin/facturacion", icon: Receipt },
+        ]
+      : []),
     // La cartera cruza tenants: la ve el operador, no el asegurador. Se
     // oculta en vez de deshabilitarse — que la pantalla exista tampoco es
     // algo que le tenga que constar a un cliente.

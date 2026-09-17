@@ -80,6 +80,12 @@ supabase/.temp/
 # y ése sí se versiona; el enlace no le sirve a nadie más.
 .claude/skills/web-design-guidelines
 
+# El andamio de `crew-build`: plan, spec, review, reporte de QA y su estado.
+# Entró de arrastre en un commit de funcionalidad. Es de una corrida, no del
+# proyecto, y envejece mal: el reporte de QA que quedó versionado afirmaba que
+# el lint tolera cinco avisos, que dejó de ser cierto.
+.crew-workspace/
+
 # MCP server config — may carry API tokens (e.g. WhatsApp Cloud API). Keep local.
 .mcp.json
 

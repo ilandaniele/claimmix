@@ -3177,7 +3177,7 @@ public demo's own tenant — no fallback to production on purpose),
 in the runner). See the post-deploy section above for what happens when they don't.
 
 ## Verify / build commands
-`pnpm type-check` · `pnpm lint` (max 5 warnings) · `pnpm test:unit` · `pnpm build`.
+`pnpm type-check` · `pnpm lint` · `pnpm test:unit` · `pnpm build`.
 CI (GitHub Actions) runs all of these + CodeQL on every push to `main`.
 
 After every **production** deploy, `post-deploy.yml` runs `pnpm smoke --deep` and, if

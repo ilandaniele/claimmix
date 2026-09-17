@@ -792,6 +792,39 @@ console.log("\n▸ La guarda de post-deploy no es sólo el entorno");
   }
 }
 
+// ── 16. El lint de la CI exige lo mismo que el de la máquina ──────────────
+//
+// El job `Lint` —requerido para mergear— corre `pnpm lint`, y `pnpm check`
+// corre `pnpm verify`, que lintea aparte. Cuando los dos no piden el mismo
+// `--max-warnings`, el requerido es el flojo: un PR con avisos entra, y después
+// `pnpm check --local` se pone en rojo en la máquina del que sigue, por algo que
+// la CI ya había aprobado.
+//
+// Pasó: `lint` toleraba 5 avisos por UNO preexistente de TanStack que hoy ya no
+// está, y la tolerancia se quedó.
+//
+console.log("\n▸ El lint de la CI exige lo mismo que el de la máquina");
+{
+  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+  const tope = (guion) => {
+    const m = /--max-warnings=(\d+)/.exec(pkg.scripts?.[guion] ?? "");
+    return m ? m[1] : null;
+  };
+  const enLint = tope("lint");
+  const enVerify = tope("verify");
+
+  if (enLint === null || enVerify === null) {
+    mal("`lint` o `verify` dejó de declarar --max-warnings");
+    console.log("     Sin el tope declarado, eslint aprueba con cualquier cantidad de avisos.");
+  } else if (enLint !== enVerify) {
+    mal(`lint pide ${enLint} aviso(s) y verify ${enVerify}`);
+    console.log("     El job `Lint` es requerido y corre `pnpm lint`. Si tolera más que");
+    console.log("     `verify`, la CI aprueba lo que `pnpm check --local` rechaza.");
+  } else {
+    bien(`los dos cortan en ${enLint} aviso(s)`);
+  }
+}
+
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(66));
 if (problemas.length === 0) {

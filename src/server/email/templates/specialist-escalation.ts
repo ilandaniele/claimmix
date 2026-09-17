@@ -1,6 +1,8 @@
-
 import { escapeHtml } from "@/server/email/render";
-import { textoAHtml } from "@/core/email/html";/**
+import { textoAHtml } from "@/core/email/html";
+import { laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
+
+/**
  * Email template: specialist_escalation
  *
  * Sent when a case is escalated to a specialist due to high or critical severity.
@@ -34,33 +36,6 @@ export interface SpecialistEscalationData {
   cuerpo?: string | null;
 }
 
-/**
- * Los dos valores que no coinciden, dichos.
- *
- * Es el único párrafo de este mensaje cuyo piso es un dato y no una frase.
- * Quien escribe por la póliza de otro —un familiar del titular— recibe que su
- * caso pasó a una persona y no tiene con qué contestar: no sabe cuál de los
- * dos nombres estamos mirando. Nombrarlos es AC7/AC9.
- *
- * Sale sólo cuando están los dos. Un escalado por severidad no tiene por qué
- * mencionar ningún padrón, y el del padrón sin el que dijo la persona es una
- * acusación sin término de comparación.
- *
- * Va DESPUÉS de la prosa y FUERA de `cuerpo`, que es lo único que el redactor
- * ve y reescribe: la mitad que es un dato no puede depender de que el modelo
- * se acuerde de copiarla. Por eso tampoco se repite cuando el redactor
- * contesta — nunca la tuvo.
- */
-function laDiferencia(data: SpecialistEscalationData): string | null {
-  const padron = data.titularIniciales?.trim();
-  const dijo = data.claimantName?.trim();
-  if (!padron || !dijo) return null;
-
-  return (
-    `La póliza figura a nombre de ${padron} y vos nos decís que sos ${dijo}. ` +
-    `El especialista va a revisar esa diferencia; si querés, contanos qué relación tenés con el titular.`
-  );
-}
 
 function severityMessage(severity: string | undefined): string {
   if (severity === "critical") {

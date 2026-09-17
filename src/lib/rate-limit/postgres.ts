@@ -31,6 +31,12 @@ export interface Counted {
   allowed: boolean;
   remaining: number;
   resetAt: number;
+  /**
+   * El contador ya cargado en la base, lote incluido. Lo necesita quien
+   * reserva créditos de a lotes (ver `credito-local.ts`) para saber, sin
+   * volver a preguntarle a la base, cuánto de ese lote ya está gastado.
+   */
+  hits: number;
 }
 
 /**
@@ -39,11 +45,16 @@ export interface Counted {
  * @param key      Identificador de quien pide (IP, usuario, o la combinación).
  * @param limit    Cuántos entran por ventana.
  * @param windowMs Cuánto dura la ventana.
+ * @param lote     Cuántos sumar de una vez (default 1, o sea el intento de
+ *                 siempre). Lo usa `rateLimit` cuando el perfil reserva de a
+ *                 lotes: en vez de escribir una vez por pedido, escribe una
+ *                 vez por lote y el resto se resuelve en memoria.
  */
 export async function checkRateLimitPostgres(
   key: string,
   limit: number,
-  windowMs: number
+  windowMs: number,
+  lote = 1
 ): Promise<Counted> {
   const now = Date.now();
   // Todas las instancias tienen que caer en la misma ventana para contar
@@ -56,21 +67,22 @@ export async function checkRateLimitPostgres(
     // inquilino, y tiene que funcionar antes de saber quién es el que llama.
     const result = await db.execute(sql`
       insert into rate_limit_counters (bucket_key, window_start, hits)
-      values (${key}, ${windowStart.toISOString()}, 1)
+      values (${key}, ${windowStart.toISOString()}, ${lote})
       on conflict (bucket_key, window_start)
-        do update set hits = rate_limit_counters.hits + 1
+        do update set hits = rate_limit_counters.hits + ${lote}
       returning hits
     `);
 
     // sin-inquilino: Idem: es el resultado del mismo insert de arriba.
     // db.execute devuelve { rows: [...] }, no un arreglo.
     const rows = (result as unknown as { rows: { hits: number | string }[] }).rows ?? [];
-    const hits = Number(rows[0]?.hits ?? 1);
+    const hits = Number(rows[0]?.hits ?? lote);
 
     return {
       allowed: hits <= limit,
       remaining: Math.max(0, limit - hits),
       resetAt,
+      hits,
     };
   } catch {
     /*
@@ -85,7 +97,9 @@ export async function checkRateLimitPostgres(
      * Lo que sí cuesta es no enterarse, así que queda anotado.
      */
     logger.warn({}, "rate_limit.la_base_no_contesto_el_intento");
-    return { allowed: true, remaining: limit, resetAt };
+    // hits: 0 — nada se cargó de verdad, así que quien reserva de a lotes no
+    // le resta presupuesto a nadie por un intento que la base nunca vio.
+    return { allowed: true, remaining: limit, resetAt, hits: 0 };
   }
 }
 

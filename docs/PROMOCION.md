@@ -132,7 +132,41 @@ Development.
 
 ⛔ **Nunca las de producción.** QA existe para poder romper cosas.
 
-### 5. Un secreto, y una cuenta que todavía no existe
+### 4bis. Las nueve variables de `claimmix-qa`
+
+Las 63 que Vercel creó al importar salen de `.env.example` y vienen VACÍAS. Estas
+nueve hay que llenarlas, en los tres entornos del proyecto (Production, Preview,
+Development).
+
+Dos se **crean**, porque hasta #212 no estaban en `.env.example` y por eso Vercel
+no las detectó. Las otras siete ya existen vacías: se **editan**.
+
+| variable | valor | tipo | crear o editar |
+|---|---|---|---|
+| `GEMINI_TRANSPORT` | `vertex` | Config | **crear** |
+| `VERTEX_EXTRACTION_MODEL` | de `.env.local` | Secret | **crear** |
+| `GOOGLE_CLOUD_PROJECT` | `claimmix-506321` | Config | editar |
+| `GOOGLE_CLOUD_LOCATION` | `us-central1` | Config | editar |
+| `AI_TENANT_DAILY_TOKEN_CAP` | `20000000` | Config | editar |
+| `DATABASE_URL` | la rama `qa` de Neon | Secret | editar |
+| `DATABASE_URL_APP` | la rama `qa` de Neon | Secret | editar |
+| `GOOGLE_DEFAULT_TENANT_ID` · `GMAIL_TENANT_ID` | de `.env.local` | Config | editar |
+| `BETTER_AUTH_SECRET` | uno NUEVO: `openssl rand -base64 32` | Secret | editar |
+
+⚠ **Si el agente de QA queda mudo, mirá las dos primeras.** Son las que deciden
+por dónde sale la extracción y con qué modelo, y su ausencia no rompe el build ni
+el arranque: el síntoma llega recién con el primer mensaje que nadie contesta.
+
+⛔ **Gmail y WhatsApp se dejan vacías.** Así QA lee, extrae, clasifica y decide,
+pero no le escribe a nadie. Un QA que puede mandar mensajes es un QA que puede
+mandárselos a un asegurado real el día que alguien se equivoque de base.
+Habilitarlo pide una casilla y un número de prueba propios — cuentas nuevas, no
+configuración.
+
+⚠ **QA comparte la cuota de Vertex con producción**: es el mismo proyecto de GCP.
+El 2026-09-17, sin QA corriendo, devolvió `RESOURCE_EXHAUSTED` tres veces.
+
+### 5. Un secreto, y dónde mide k6
 
 Hoy el job `k6` de `load-tests.yml` está **rojo a propósito**. Antes venía verde
 sin haber ejecutado k6 una sola vez, porque le faltaba un secreto y se salteaba
@@ -161,7 +195,13 @@ Ese rastrillo ya se pisó una vez, y está anotado en `playwright.config.ts:75-7
 «el login respondía “Credenciales inválidas” porque el servidor miraba
 producción, donde esas cuentas no existen».
 
-Tres salidas, en orden de menos a más compromiso:
+**Desde que QA tiene base propia, esto ya no pide una cuenta nueva.** La rama de
+Neon se sacó del ensayo, así que las cuentas `PLAYWRIGHT_*` están adentro, y
+`load-tests.yml` ya acepta `https://claimmix-qa.vercel.app` como destino. Con el
+secreto de Vercel puesto y QA desplegado, k6 mide contra QA con las credenciales
+que ya existen.
+
+Las otras salidas, por si hace falta antes de que QA esté en pie:
 
 1. **Esperar a QA.** Cuando exista `claimmix-qa` con `STAGING_DATABASE_URL`
    (paso 4), la cuenta de Playwright sirve tal cual contra ese deploy. Hay que

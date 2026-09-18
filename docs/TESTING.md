@@ -165,7 +165,15 @@ tiene la llave.
 pnpm smoke                      # configuración y conectividad
 pnpm smoke --deep               # además sube un archivo real y llama al modelo
 pnpm smoke --url https://…      # un preview en vez de producción
+pnpm smoke --tolera almacenamiento   # ese chequeo no está configurado en este entorno
 ```
+
+`--tolera` (o `SMOKE_TOLERA`) recibe nombres separados por comas y es para los
+entornos que a propósito no tienen todo —QA no tiene R2, ni WhatsApp, ni la
+casilla—. Un chequeo tolerado no cuenta como falla, pero no se calla: se
+imprime con otra marca y el resumen lo lista como **NO verificado**. Tolerado
+no es probado. Un nombre mal escrito tampoco pasa desapercibido: el script
+avisa que `--tolera` nombra chequeos que no existen.
 
 ### 5. `pnpm load` — cuánto aguanta
 
@@ -550,10 +558,10 @@ producción.
 **En cada push a `main`** — `.github/workflows/ci.yml`, que ya existía: tipos,
 lint, tests, build, auditoría de dependencias.
 
-**Después de cada deploy de producción** — `.github/workflows/post-deploy.yml`.
-GitHub recibe de Vercel el aviso de que el deploy terminó bien y dispara cuatro
-trabajos: el smoke primero, y si pasó, el ensayo, la mitad gratis de la prueba
-de carga y la mitad gratis del pen test.
+**Después de cada deploy de producción** — `.github/workflows/post-deploy.yml`,
+que llama al workflow reusable `.github/workflows/deploy-checks.yml`. GitHub
+recibe de Vercel el aviso de que el deploy terminó bien y dispara siete
+chequeos: el smoke primero, y colgando de él los otros seis.
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
@@ -570,14 +578,38 @@ de carga y la mitad gratis del pen test.
    extracciones, y borra los casos al terminar.
 5. `pnpm pentest`: cada ruta de la API sin credenciales, las firmas de webhook,
    las cabeceras y lo que cuenta un error. Gratis. Falla si algo quedó abierto.
+6. `pnpm docs-config`: el código y la base tienen que decir lo mismo sobre qué
+   papeles pide cada tipo de siniestro. Sólo le pregunta al catálogo.
+7. `pnpm permisos`: el rol restringido con el que consulta la aplicación puede
+   hacer lo que la capa de datos le pide. Sólo lee.
+
+Hay un octavo trabajo que no verifica nada, `alcance`. Corre con `if: always()`
+y escribe en el resumen del run una fila por chequeo: **corrió**, **corrió y
+falló**, o **NO corrió y por qué**. También nombra si el smoke fue profundo o
+liviano y qué chequeos de salud se toleraron sin verificar. Existe porque un
+chequeo apagado sin decirlo se lee igual que uno pasado, y esa es la forma
+lenta de volver al verde por ausencia.
 
 Antes de mirar nada, espera a que el alias sirva **el commit de ese deploy**.
 Sin eso el chequeo puede interrogar al build anterior y darlo por bueno — la
 respuesta más peligrosa posible, porque tapa justo el deploy que se está
 preguntando.
 
-Necesita un solo secreto en GitHub, `CRON_SECRET`. Todo lo demás ya vive en el
-deploy, que es exactamente el punto.
+Usa quince secretos del repositorio, pero el único que existe **sólo** para
+esto es `CRON_SECRET`: los otros catorce —la base, R2, Vertex, Gmail, la firma
+de WhatsApp— ya estaban. Lo que el chequeo mira de verdad vive en el deploy, no
+en el runner, que es exactamente el punto.
+
+**Contra QA corre menos, y lo que no corre queda escrito.** El caller de
+producción hereda los secretos del repositorio; el de QA no puede —eso
+apuntaría a la base de producción los seis trabajos que corren en el runner, y
+tres de ellos escriben—, así que `deploy-checks.yml` declara sus secretos uno
+por uno y el caller de QA mapea cada uno con su nombre `QA_*`. QA corre el
+smoke liviano tolerando `almacenamiento`, más los dos chequeos que sólo le
+preguntan al catálogo; el ensayo espera a que exista un balde de R2 propio, y
+el timbre, el pen test y la carga no corren nunca ahí. Nada de eso arranca
+hasta que existan los secretos `QA_*` del repositorio: paso 10 de
+[docs/PROMOCION.md](PROMOCION.md).
 
 También se puede disparar a mano desde la pestaña *Actions* → *Post-deploy* →
 *Run workflow*, con una URL distinta si querés apuntar a un preview.

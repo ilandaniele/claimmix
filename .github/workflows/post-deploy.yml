@@ -2,8 +2,8 @@
 #
 # Qué pregunta cada uno de los siete chequeos, y por qué, vive en
 # deploy-checks.yml: es un workflow reusable, porque un segundo proyecto de
-# Vercel para QA lo va a llamar contra su propia URL y su propia base. Este
-# archivo sólo decide CUÁNDO llamarlo contra PRODUCCIÓN.
+# Vercel para QA lo llama contra su propia URL y su propia base. Este archivo
+# sólo decide CUÁNDO llamarlo, y contra cuál de los dos.
 
 name: Post-deploy
 
@@ -97,6 +97,17 @@ on:
 # y no entra. Lo que se cae con un cambio de nombre del proyecto de QA es la
 # exclusión, así que renombrarlo obliga a tocar estas dos copias de la
 # condición — la de acá y la del `if` del job.
+#
+# ── Y QA tiene su propia cola, no la de producción ni la de nadie ──────────
+#
+# Desde que existe el job `qa`, un deploy de QA tampoco es gratis: corre el
+# ensayo, que escribe y borra casos en la base de QA. Dos corridas de QA
+# encimadas se pisan igual que dos de producción.
+#
+# Pero va a un grupo DISTINTO. Son dos bases distintas: hacer esperar a QA
+# porque producción está midiendo no protege nada, y al revés tampoco — y con
+# una sola cola compartida, el turno que QA reserva es el que le cancela la
+# corrida encolada a producción, que es el defecto contado justo arriba.
 concurrency:
   group: >-
     ${{ (github.event_name == 'workflow_dispatch' ||
@@ -104,6 +115,10 @@ concurrency:
     startsWith(github.event.deployment.environment, 'Production') &&
     !endsWith(github.event.deployment.environment, '-qa')))
     && 'post-deploy-contra-produccion'
+    || (github.event.deployment_status.state == 'success' &&
+    startsWith(github.event.deployment.environment, 'Production') &&
+    endsWith(github.event.deployment.environment, '-qa'))
+    && 'post-deploy-contra-qa'
     || format('post-deploy-sin-cola-{0}', github.run_id) }}
   cancel-in-progress: false
 
@@ -128,12 +143,9 @@ jobs:
     # con `state: success` y la corrida salió salteada, que es exactamente el
     # defecto que este trabajo vino a sacar: verde porque no corrió.
     #
-    # Contra QA no corre ninguno de los siete todavía, y eso es verde por
-    # ausencia, no verde. El job `qa` que falta está bloqueado por dos cosas
-    # concretas, anotadas en docs/PROMOCION.md: `secrets: inherit` apuntaría
-    # los seis trabajos que corren en el runner a la base de PRODUCCIÓN, y el
-    # smoke `--deep` exige R2, WhatsApp, Gmail y un CRON_SECRET que en QA
-    # están vacíos a propósito.
+    # Contra QA corre el job `qa`, acá abajo, con sus propios secretos y sus
+    # propios interruptores. Lo que QA no puede correr queda nombrado en el
+    # resumen del run por el job `alcance` de deploy-checks.yml.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
@@ -153,3 +165,156 @@ jobs:
       entorno: Production
       medir_carga: true
     secrets: inherit
+  # ── QA: primero, que los secretos de QA sean de QA ──────────────────────────
+  #
+  # Seis de los siete chequeos corren acá, en el runner, y hablan con la base
+  # por `DATABASE_URL`. Tres de ellos ESCRIBEN. Por eso el job `qa` de abajo
+  # mapea los secretos uno por uno en vez de heredarlos: heredando, una corrida
+  # de QA crearía y borraría casos en la base de un cliente.
+  #
+  # Este job es el cinturón de ese mapeo, y hace dos cosas.
+  #
+  # Primero exige los tres secretos sin los cuales QA no puede correr NADA, y
+  # falla en voz alta si falta alguno. La alternativa —que el caller mande el
+  # secreto vacío y el job de abajo se rompa con el mensaje del script— también
+  # sale roja, pero roja donde no se entiende: "falta DATABASE_URL" en un job
+  # que sí la recibió, vacía.
+  #
+  # Y segundo, compara la cadena de QA con la de producción sin imprimir
+  # ninguna de las dos. Si son la misma, alguien cargó la de producción en el
+  # secreto de QA, y la próxima corrida de QA escribe en la base de un cliente.
+  # Es el único error de esta familia que no se ve en ningún lado hasta que ya
+  # pasó.
+  #
+  # Lo que NO es obligatorio se mira igual, y su ausencia apaga un chequeo en
+  # vez de romper la corrida: el ensayo sube adjuntos de verdad y necesita
+  # almacenamiento propio y un inquilino propio. Sin eso no corre, y el job
+  # `alcance` de deploy-checks.yml lo nombra como no verificado.
+  qa_secretos:
+    name: QA tiene lo suyo
+    runs-on: ubuntu-latest
+    # Misma condición que el grupo de `concurrency`, con el sufijo al revés.
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment.environment, 'Production') &&
+      endsWith(github.event.deployment.environment, '-qa')
+    outputs:
+      ensayo: ${{ steps.mirar.outputs.ensayo }}
+    steps:
+      - name: Que estén, y que no sean los de producción
+        id: mirar
+        env:
+          BASE: ${{ secrets.QA_DATABASE_URL }}
+          BASE_APP: ${{ secrets.QA_DATABASE_URL_APP }}
+          CRON: ${{ secrets.QA_CRON_SECRET }}
+          BASE_PROD: ${{ secrets.DATABASE_URL }}
+          BASE_APP_PROD: ${{ secrets.DATABASE_URL_APP }}
+          INQUILINO: ${{ secrets.QA_GMAIL_TENANT_ID }}
+          AUTH: ${{ secrets.QA_BETTER_AUTH_SECRET }}
+          R2_CUENTA: ${{ secrets.QA_R2_ACCOUNT_ID }}
+          R2_LLAVE: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
+          R2_SECRETO: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
+          R2_BALDE: ${{ secrets.QA_R2_BUCKET }}
+        run: |
+          faltan=""
+          [ -n "$BASE" ] || faltan="$faltan QA_DATABASE_URL"
+          [ -n "$BASE_APP" ] || faltan="$faltan QA_DATABASE_URL_APP"
+          [ -n "$CRON" ] || faltan="$faltan QA_CRON_SECRET"
+          if [ -n "$faltan" ]; then
+            {
+              echo "### Contra QA no corrió ningún chequeo"
+              echo ""
+              echo "Faltan secretos del repositorio:$faltan"
+              echo ""
+              echo "Cargá cada uno en Settings, Secrets and variables, Actions."
+              echo "Los dos primeros son la rama de Neon de QA, NO la base de"
+              echo "producción: el ensayo escribe y borra casos ahí adentro."
+              echo "El tercero es el CRON_SECRET del proyecto claimmix-qa."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=QA sin secretos::Faltan$faltan - ver el resumen del run."
+            exit 1
+          fi
+          # Sin imprimir ninguna de las dos.
+          if [ "$BASE" = "$BASE_PROD" ] || [ "$BASE_APP" = "$BASE_APP_PROD" ]; then
+            {
+              echo "### QA apunta a la base de PRODUCCIÓN"
+              echo ""
+              echo "QA_DATABASE_URL (o QA_DATABASE_URL_APP) tiene la misma cadena"
+              echo "que el secreto de producción. Si esto corriera, el ensayo"
+              echo "escribiría y borraría casos en la base de un cliente."
+              echo ""
+              echo "Corregilo antes de volver a desplegar QA."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=QA apunta a producción::Los secretos de QA son los de producción."
+            exit 1
+          fi
+          # El ensayo sube adjuntos de verdad. Los secretos de R2 que ya existen
+          # son los del balde de producción, y QA no escribe ahí.
+          if [ -n "$INQUILINO" ] && [ -n "$AUTH" ] && [ -n "$R2_CUENTA" ] &&
+             [ -n "$R2_LLAVE" ] && [ -n "$R2_SECRETO" ] && [ -n "$R2_BALDE" ]; then
+            echo "ensayo=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "ensayo=0" >> "$GITHUB_OUTPUT"
+            echo "::notice title=QA sin ensayo::Faltan QA_GMAIL_TENANT_ID, QA_BETTER_AUTH_SECRET o los QA_R2_* - el ensayo no corre."
+          fi
+
+  # ── QA: lo que sí puede correr ──────────────────────────────────────────────
+  #
+  # Corre el smoke, las dos comparaciones contra el catálogo y —cuando QA tiene
+  # lo suyo— el ensayo. No corre el timbre (QA no lleva Gmail ni WhatsApp: no le
+  # escribe a nadie, a propósito), ni el pen test (le falta el inquilino de
+  # demo), ni la carga (cuatrocientos casos contra los cientos de miles de
+  # producción no comparan con el mismo presupuesto).
+  #
+  # El smoke va liviano: `--deep` sube a R2 y llama al modelo, y el proyecto de
+  # QA no tiene R2. Por eso además tolera `almacenamiento`: sin esa lista el
+  # smoke de QA sale rojo SIEMPRE por lo mismo, y un rojo permanente se deja de
+  # leer. Tolerado no es probado — el script lo imprime con otra marca y su
+  # resumen lo nombra.
+  #
+  # `whatsapp` y `gmail` no hace falta tolerarlos: sin configurar avisan, no
+  # fallan.
+  #
+  # Nada de esto queda implícito: el job `alcance` escribe, al final del run,
+  # una fila por chequeo con lo que pasó o el motivo por el que no corrió.
+  qa:
+    needs: [qa_secretos]
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment.environment, 'Production') &&
+      endsWith(github.event.deployment.environment, '-qa')
+    permissions:
+      contents: read
+      # Techo para el ensayo, que pide el token OIDC de WIF. Sin ensayo no se
+      # usa, y un permiso que sobra no hace nada.
+      id-token: write
+    uses: ./.github/workflows/deploy-checks.yml
+    with:
+      url: https://claimmix-qa.vercel.app
+      entorno: QA
+      smoke_profundo: false
+      smoke_tolera: almacenamiento
+      correr_ensayo: ${{ needs.qa_secretos.outputs.ensayo == '1' }}
+      correr_timbre: false
+      correr_pentest: false
+      medir_carga: false
+    # Uno por uno y con el nombre de QA de cada lado. `secrets: inherit` acá
+    # sería apuntar seis jobs a la base de producción; está contado arriba, en
+    # `qa_secretos`, y también en deploy-checks.yml donde se declaran.
+    secrets:
+      CRON_SECRET: ${{ secrets.QA_CRON_SECRET }}
+      DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
+      DATABASE_URL_APP: ${{ secrets.QA_DATABASE_URL_APP }}
+      GMAIL_TENANT_ID: ${{ secrets.QA_GMAIL_TENANT_ID }}
+      BETTER_AUTH_SECRET: ${{ secrets.QA_BETTER_AUTH_SECRET }}
+      R2_ACCOUNT_ID: ${{ secrets.QA_R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.QA_R2_BUCKET }}
+      # El modelo no tiene versión de QA y no hace falta: el ensayo corre acá,
+      # en el runner, y llama a Vertex con el mismo proyecto de GCP. Lo que
+      # nunca se comparte es la base.
+      GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+      GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
+      VERTEX_EXTRACTION_MODEL: ${{ secrets.VERTEX_EXTRACTION_MODEL }}

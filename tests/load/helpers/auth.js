@@ -70,7 +70,15 @@ function entrar({ correo, clave }) {
     `${BASE_URL}/api/auth/sign-in/email`,
     JSON.stringify({ email: correo, password: clave }),
     {
-      headers: { "Content-Type": "application/json", ...cabecerasDeVercel() },
+      headers: {
+        "Content-Type": "application/json",
+        // Un navegador siempre manda `Origin`, y Better Auth lo exige: sin esa
+        // cabecera contesta 403 `MISSING_OR_NULL_ORIGIN` y la corrida se muere
+        // antes de medir nada. Va el propio destino, que es lo que mandaría la
+        // pantalla de login servida desde ahí.
+        Origin: BASE_URL,
+        ...cabecerasDeVercel(),
+      },
       tags: { escenario: "login" },
     }
   );
@@ -82,11 +90,21 @@ function entrar({ correo, clave }) {
      * Decirlo cambia dónde busca el que lee el error.
      */
     const puerta = (res.body || "").includes("Protected deployment");
+    /*
+     * Y un 403 por el origen tampoco es una credencial mala: Better Auth sólo
+     * acepta pedidos que vengan de su propia baseURL, que en Vercel sale de
+     * `NEXT_PUBLIC_SITE_URL` y, si esa falta, del host del deploy. Medir
+     * contra un alias que no es ese host devuelve 403 aunque la cuenta exista.
+     */
+    const origen = res.status === 403 && /ORIGIN/i.test(res.body || "");
     fail(
       puerta
         ? "La vista previa está detrás de Deployment Protection y no hay llave. " +
             "Poné VERCEL_BYPASS con el secreto de automatización de Vercel."
-        : `El login contestó ${res.status}. Sin sesión no hay nada que medir.`
+        : origen
+          ? `El login rechazó el origen ${BASE_URL}. En Vercel, ` +
+            "`NEXT_PUBLIC_SITE_URL` del proyecto tiene que ser la URL contra la que se mide."
+          : `El login contestó ${res.status}. Sin sesión no hay nada que medir.`
     );
   }
 

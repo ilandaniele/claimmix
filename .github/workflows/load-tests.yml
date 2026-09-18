@@ -106,7 +106,16 @@ jobs:
       - name: ¿A dónde apunta esto?
         id: destino
         env:
-          URL: ${{ inputs.base_url || github.event.deployment_status.target_url }}
+          # Contra QA va el ALIAS, no la URL del deploy. Medido el 18/09: la URL
+          # con hash de ese proyecto está detrás de Vercel Auth —contesta
+          # `{"protection":{"vercel_auth_enabled":true…}}` antes de llegar a la
+          # aplicación— y el secreto de automatización que hay en el repositorio
+          # es el del OTRO proyecto, así que ahí k6 mediría la puerta. El alias
+          # de producción de QA es público, y además es la URL que usa quien
+          # prueba.
+          URL: >-
+            ${{ inputs.base_url || (endsWith(github.event.deployment.environment, '-qa')
+            && 'https://claimmix-qa.vercel.app' || github.event.deployment_status.target_url) }}
         run: |
           # Se compara el HOST pelado, no la URL entera, y por eso hay tres
           # pasos y no un `case` solo.

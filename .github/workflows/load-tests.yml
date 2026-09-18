@@ -53,8 +53,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     # El evento `deployment_status` llega también para estados intermedios y
-    # para producción. Acá sólo interesa una vista previa que terminó bien:
-    # contra producción esto no corre solo nunca.
+    # para producción. Acá interesan las vistas previas que terminaron bien y
+    # el proyecto de QA: contra la producción de los clientes esto no corre
+    # solo nunca.
+    #
+    # QA entra por el `endsWith`, y hace falta porque su deploy llega
+    # etiquetado `Production – claimmix-qa` —GitHub le agrega el nombre del
+    # proyecto cuando hay más de uno— y la exclusión de arriba lo sacaba junto
+    # con producción. Medir ahí es lo que siempre se quiso: la cuenta de
+    # pruebas vive en la rama `qa` de Neon, que es la que lee ese deploy, y no
+    # existe en la base de producción.
     #
     # ⛔ `!= 'Production'` NO alcanza, y era peligroso. Cuando nació el segundo
     # proyecto de Vercel, GitHub pasó a llamar al entorno `Production – claimmix`
@@ -65,7 +73,8 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
-       !startsWith(github.event.deployment.environment, 'Production'))
+       (!startsWith(github.event.deployment.environment, 'Production') ||
+        endsWith(github.event.deployment.environment, '-qa')))
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -97,7 +106,16 @@ jobs:
       - name: ¿A dónde apunta esto?
         id: destino
         env:
-          URL: ${{ inputs.base_url || github.event.deployment_status.target_url }}
+          # Contra QA va el ALIAS, no la URL del deploy. Medido el 18/09: la URL
+          # con hash de ese proyecto está detrás de Vercel Auth —contesta
+          # `{"protection":{"vercel_auth_enabled":true…}}` antes de llegar a la
+          # aplicación— y el secreto de automatización que hay en el repositorio
+          # es el del OTRO proyecto, así que ahí k6 mediría la puerta. El alias
+          # de producción de QA es público, y además es la URL que usa quien
+          # prueba.
+          URL: >-
+            ${{ inputs.base_url || (endsWith(github.event.deployment.environment, '-qa')
+            && 'https://claimmix-qa.vercel.app' || github.event.deployment_status.target_url) }}
         run: |
           # Se compara el HOST pelado, no la URL entera, y por eso hay tres
           # pasos y no un `case` solo.
@@ -209,6 +227,81 @@ jobs:
           LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_TEST_EMAIL }}
           LOAD_TEST_PASSWORD: ${{ secrets.PLAYWRIGHT_TEST_PASSWORD }}
           VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+      # ── Cuando el login se cae, preguntar qué más está caído ───────────────
+      #
+      # Un 500 en el login puede ser del login o de todo el deploy, y son dos
+      # problemas distintos. Estas tres rutas lo separan sin mandar credenciales:
+      # `/` y `/login` no piden sesión, y `/api/health` contesta 401 cuando la
+      # aplicación está viva. Si las tres se caen, lo que falla es el arranque
+      # —`instrumentation.ts` corta el proceso sin `BETTER_AUTH_SECRET`, por
+      # ejemplo—; si sólo se cae el login, el problema está en Better Auth o en su
+      # base.
+      #
+      # Sólo corre cuando el paso de arriba falló, y sólo imprime códigos.
+      - name: ¿Qué contesta el resto del deploy?
+        if: failure() && steps.llave.outputs.hay == '1'
+        env:
+          URL: ${{ steps.destino.outputs.url }}
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          # `/privacy` y `/demo` están en la lista porque son las dos únicas
+          # rutas de página que NO consultan la sesión: son públicas y no están
+          # en `SOLO_ANONIMOS`, así que el middleware las deja pasar sin tocar
+          # la base (`src/proxy.ts`, pasos 4 y 5). `/` y `/login` sí la
+          # consultan. Si estas dos contestan 200 y esas dos 500, el que no
+          # contesta es la capa de datos y no queda nada más que mirar.
+          # `/api/admin/health` es el único que dice POR QUÉ: es público —está
+          # en `PUBLIC_PREFIXES`— y su `dbError` trae el código de Postgres o
+          # los primeros 50 caracteres del mensaje. Eso separa «la variable no
+          # está» de «la variable está y la base no contesta», que es lo último
+          # que queda por saber y no se puede mirar desde afuera.
+          for RUTA in / /login /privacy /demo /api/health /api/admin/health; do
+            CUERPO=$(curl -s -D - -o cuerpo.txt -H "x-vercel-protection-bypass: $BYPASS" "$URL$RUTA")
+            COD=$(printf '%s' "$CUERPO" | head -1)
+            # `x-vercel-error` es lo que separa un fallo de la plataforma
+            # —FUNCTION_INVOCATION_FAILED, DEPLOYMENT_NOT_FOUND— de un 500 que
+            # devolvió la aplicación con su propia página de error.
+            ERR=$(printf '%s' "$CUERPO" | grep -i '^x-vercel-error:' || true)
+            echo "$RUTA -> $COD ${ERR:-sin x-vercel-error}"
+            head -c 200 cuerpo.txt | tr '\n' ' '
+            echo
+          done
+
+      # Y una vez que se sabe que el 500 es de la aplicación y no de la
+      # plataforma, falta cuál de las dependencias es la que no contesta.
+      #
+      # `/api/health` es el único que lo dice desde ADENTRO del deploy: corre
+      # con las variables de ESE entorno y reporta, dependencia por
+      # dependencia, qué alcanza. Sin esto el diagnóstico se queda en «algo
+      # tira 500» y hay que adivinar cuál de las once variables falta.
+      #
+      # Sale el nombre, el estado y el detalle recortado de cada chequeo. No
+      # son secretos: es el mapa de qué está configurado, que es justamente lo
+      # que el `Bearer CRON_SECRET` protege de los de afuera.
+      - name: ¿Qué dependencia del deploy no contesta?
+        if: failure() && steps.llave.outputs.hay == '1'
+        env:
+          URL: ${{ steps.destino.outputs.url }}
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "Sin CRON_SECRET del repositorio no se puede interrogar a /api/health."
+            exit 0
+          fi
+          COD=$(curl -s -o salud.json -w '%{http_code}' \
+            -H "x-vercel-protection-bypass: $BYPASS" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$URL/api/health")
+          echo "/api/health -> $COD"
+          if jq -e . salud.json > /dev/null 2>&1; then
+            jq -r '"entorno=" + (.environment // "?") + " commit=" + (.commit // "?") + " estado=" + (.status // "?")' salud.json
+            jq -r '.checks[]? | "  " + .name + ": " + .status + " — " + (.detail // "" | .[0:120])' salud.json
+          else
+            head -c 300 salud.json
+            echo
+          fi
 
       # `always()`: el reporte de la corrida que FALLÓ es el que hay que mirar.
       - name: Guardar el reporte

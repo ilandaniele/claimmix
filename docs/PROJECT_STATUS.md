@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-09. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-18. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -95,6 +95,68 @@ Corrélo después de cada deploy. Detalle completo en
   instead of at the first request that needs the column.
 - **Neon DATABASE_URL** is in `.env.local` (prod). `vercel env pull` returns blank
   values for secrets — use `vercel env ls` to check presence.
+- **Second Vercel project: `claimmix-qa`.** Deploys the `qa` branch, reads the
+  `qa` Neon branch (`br-muddy-mountain-acxm92sh`), public alias
+  https://claimmix-qa.vercel.app. First real deploy: 2026-09-18. What that day
+  taught, all of it verified against the live deploy:
+  - **A QA deploy runs none of the seven post-deploy checks.** `post-deploy.yml`
+    calls them for production only, and the `qa` caller job does not exist yet:
+    `secrets: inherit` would aim its six runner jobs at the PRODUCTION database,
+    and `pnpm smoke --deep` needs R2, WhatsApp, Gmail and a `CRON_SECRET` that QA
+    keeps empty on purpose. That is green by absence, not green.
+  - **Nobody can log into QA yet.** `POST /api/auth/sign-in/email` answers
+    `403 INVALID_ORIGIN` because `NEXT_PUBLIC_SITE_URL` is empty in that project,
+    so `resolveBaseURL()` (`src/lib/auth/index.ts:14-18`) falls back to the
+    per-deployment hash host and Better Auth rejects the alias it is served from.
+    Production, same probe, answers `401 INVALID_EMAIL_OR_PASSWORD`. Load the
+    variable and redeploy; it is the eleventh of `docs/PROMOCION.md` step 4bis,
+    and k6 stays red until it is there.
+  - **The two projects are told apart by the environment NAME, never the URL.**
+    With more than one project GitHub disambiguates the environment as
+    `Production – claimmix` / `Production – claimmix-qa` (en dash), while
+    `environment_url` is `claimmix-<hash>-…vercel.app` for both. Every gate that
+    must exclude QA reads the name; invariant 15 of `check-architecture.mjs`
+    enforces it, in the job `if:` and in the `concurrency` group alike.
+  - The QA hash URL sits behind Vercel Auth and the repo's automation bypass
+    secret belongs to the other project, so k6 measures the public alias.
+- **⛔ The Preview environment of `claimmix` has no `DATABASE_URL`.** That is
+  the whole 500, diagnosed and closed on 2026-09-18. The deploy says it itself:
+
+      GET /api/admin/health
+      {"status":"degraded","db":"error","db_error":"DATABASE_URL is not set"}
+
+  Fix it in the Vercel dashboard — Settings → Environment Variables, and tick
+  **Preview**, not only Production. `CRON_SECRET` is missing from that scope
+  too: `/api/health` answers 401 to the repo secret that production accepts.
+  Nothing in this repo can set either one.
+  - **How it was narrowed, so nobody redoes it.** Measured from CI with the
+    automation bypass, on the same preview deploy:
+
+        /                  500   (sin x-vercel-error, "Internal Server Error")
+        /login             500   (idem)
+        /privacy           200   <!DOCTYPE html>…
+        /demo              200   <!DOCTYPE html>…
+        /api/health        401
+        /api/admin/health  200   db_error: DATABASE_URL is not set
+
+    `/privacy` and `/demo` are the only two pages the middleware returns
+    without consulting the session — public and not in `SOLO_ANONIMOS`. They
+    serve whole HTML, which rules out the build, the runtime, the CSP and
+    `instrumentation.ts`: a failing `exigirSecretoDeSesion()` would take them
+    down as well. The split leaves exactly one suspect, `auth.api.getSession`,
+    and `/api/admin/health` names it.
+  - **A database outage takes `/login` down with it.** `src/proxy.ts` lists
+    `/login` in `SOLO_ANONIMOS`, so even though the path is public the
+    middleware still calls `auth.api.getSession` on it to bounce anyone who is
+    already signed in. That is a query. There is no "degraded but you can still
+    log in" mode: if the data layer is unreachable, the login page 500s too.
+  - **Carga on previews cannot pass until that variable exists**, because k6
+    starts by logging in. Carga is not a required check on `main`, so it never
+    blocked a merge; it also was never green. The standing decision to make is
+    either to load the Preview variables or to stop aiming Carga at previews —
+    running it against an environment with no database measures nothing.
+  - The `if: failure()` diagnostics that produced the table above live in
+    `load-tests.yml` and cost nothing on a green run. Leave them.
 
 ## Status by area
 

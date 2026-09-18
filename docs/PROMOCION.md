@@ -314,6 +314,40 @@ público, y además es la URL contra la que prueba una persona.
 INVALID_ORIGIN` de arriba y la corrida muere antes de medir nada. El mensaje de
 error lo dice con esas palabras desde ahora (`tests/load/helpers/auth.js:99-106`).
 
+**Contra una vista previa de `claimmix` ahora mide la mitad que se puede.** Ese
+500 del login no era la aplicación caída: las Preview de ese proyecto no tienen
+`DATABASE_URL`, así que arranca todo menos la base. Medido el 18/09 en la corrida
+35366436854: `/privacy`, `/demo` y `/api/admin/health` contestaban 200 —este
+último con `{"status":"degraded","db":"error","db_error":"DATABASE_URL is not
+set"}`— y `/` y `/login` contestaban 500. O sea que había una mitad medible y la
+corrida no medía ninguna, porque `setup()` moría primero.
+
+Desde ahora el job sondea `/api/admin/health` antes de elegir qué correr, y mira
+el CUERPO y no el código (ese endpoint es público y contesta 200 igual con la
+base caída). Sin base corre `tests/load/scenarios/publico.js`: las cuatro páginas
+que el middleware sirve sin leer la sesión —`/privacy`, `/demo`, `/terms`,
+`/restablecer`, ver `src/proxy.ts:30,40,53-55`—, un VU, treinta segundos, con
+umbral propio de p(95) < 1000 ms porque son páginas de marketing y no el
+presupuesto de 500 ms del producto.
+
+⛔ **Y termina en rojo igual.** La mitad de adentro sigue sin medirse, y un verde
+que no midió lo que dice medir es peor que un rojo: el paso escribe un
+`::error title=Carga a medias` que nombra lo que NO se midió, y el artefacto se
+llama `carga-publico` y no `carga-smoke`, para que el nombre no mienta sobre lo
+que hay adentro. El rojo se apaga solo el día que la Preview tenga base, sin
+tocar el workflow.
+
+**Cómo se apaga:** cargar `DATABASE_URL` y `CRON_SECRET` en el alcance
+**Preview** del proyecto `claimmix` (Settings → Environment Variables), apuntando
+`DATABASE_URL` a la rama de Neon de ensayo —la misma que usa Playwright—, nunca a
+producción. Con eso la vista previa levanta con base, el login de `setup()`
+funciona y el smoke vuelve a medir lo de adentro.
+
+`publico` también se puede pedir a mano (`workflow_dispatch` → escenario
+`publico`, o `pnpm carga:publico` contra cualquier URL). Pedido a mano sale
+verde: ahí medir sólo la mitad pública es lo que se pidió, no una corrida a
+medias.
+
 Las otras salidas, por si hace falta medir antes de que QA tenga un deploy:
 
 1. **Medir contra QA a mano.** No queda nada por agregar: QA tiene su propia

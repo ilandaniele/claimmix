@@ -99,6 +99,39 @@ jobs:
         env:
           URL: ${{ inputs.base_url || github.event.deployment_status.target_url }}
         run: |
+          # Se compara el HOST pelado, no la URL entera, y por eso hay tres
+          # pasos y no un `case` solo.
+          #
+          # ⛔ El `case` contra la URL entera tenía un agujero: `*` en un patrón
+          # de `case` casa también con `/`, con `?` y con `@`. Así,
+          # `https://claimmix-x.evil.com/-ilandaniele-3471s-projects.vercel.app`
+          # entraba por el tercer patrón —`claimmix-` + `*` + el sufijo— con el
+          # host en `evil.com` y el sufijo de la organización degradado a una
+          # ruta. Lo mismo con `?` en lugar de `/`. Es exactamente la amenaza
+          # que describe el comentario de arriba, y estaba abierta.
+          #
+          # Primero el esquema: `http://` no entra, y sin eso el recorte de
+          # abajo no recorta nada y todo el filtro corre contra otra cosa.
+          case "$URL" in
+            https://*) ;;
+            *)
+              echo "::error title=Destino no reconocido::$URL no es https. Se corta."
+              exit 1 ;;
+          esac
+
+          # Después, lo que quede después de `https://` tiene que ser un host y
+          # nada más: sin ruta, sin consulta, sin ancla, sin credenciales y sin
+          # puerto. Con eso, el `*` del último patrón ya no puede saltar a otro
+          # dominio.
+          HOST="${URL#https://}"
+          case "$HOST" in
+            *[/?#@:]*)
+              echo "::error title=Destino no reconocido::$URL trae ruta, consulta, credenciales o puerto. Acá va sólo el origen de un despliegue de este proyecto. Se corta."
+              exit 1 ;;
+          esac
+
+          # Y recién ahí la lista blanca.
+          #
           # El alias de QA va LITERAL, no como comodín. Sus vistas previas ya
           # entran por el patrón de abajo —empiezan con `claimmix-`—; lo que
           # faltaba era el alias de producción de ese proyecto, que no lleva el
@@ -106,8 +139,8 @@ jobs:
           # El sufijo de la organización, no sólo el nombre del proyecto: con
           # `claimmix*` alcanzaba con crear un proyecto llamado `claimmix-x` en
           # cualquier cuenta de Vercel para quedar del lado bueno del filtro.
-          case "$URL" in
-            https://claimmix.vercel.app|https://claimmix-qa.vercel.app|            https://claimmix-*-ilandaniele-3471s-projects.vercel.app)
+          case "$HOST" in
+            claimmix.vercel.app|claimmix-qa.vercel.app|claimmix-*-ilandaniele-3471s-projects.vercel.app)
               echo "url=$URL" >> "$GITHUB_OUTPUT" ;;
             *)
               echo "::error title=Destino no reconocido::La corrida iba a mandar las credenciales de la cuenta de pruebas a $URL, que no es un despliegue de este proyecto. Se corta."
@@ -129,12 +162,9 @@ jobs:
       # viene de un fork, que por diseño no recibe secretos; en cualquier otro
       # caso falta el secreto porque nadie lo creó, y eso tiene que ser rojo.
       #
-      # Ese secreto TODAVÍA no existe en el repo — es un paso manual pendiente,
-      # no un bug de este workflow. Así que hoy, a propósito, este job sale en
-      # rojo en cada corrida: `deployment_status` no trae `pull_request` en el
-      # evento (nunca hay ref de fork ahí), así que cae siempre al error de
-      # abajo. Es preferible a lo que reemplaza: un k6 que nunca corrió una sola
-      # vez y un ícono verde que lo escondía.
+      # El secreto ya existe en el repo desde el 17/09. Acá decía que no, y que
+      # por eso este job salía en rojo en cada corrida; las dos cosas dejaron de
+      # ser ciertas y la nota se quedó.
       #
       # Acá decía que también faltaban `LOAD_TEST_EMAIL` y `LOAD_TEST_PASSWORD`.
       # Era falso, y lo desmiente este mismo archivo treinta líneas más abajo:

@@ -1,9 +1,12 @@
 # De dev a QA a producción
 
-Hoy hay **un solo entorno**: la rama `main`, un proyecto de Vercel, una base de
-Neon. Este documento dice cómo queda el camino de tres escalones, qué parte ya
-está hecha en el repositorio, y qué parte hay que hacer a mano en Vercel, GitHub
-y Google Cloud, porque ningún script puede hacerla.
+El camino de tres escalones ya tiene sus piezas: la rama `qa`, el proyecto
+`claimmix-qa` en Vercel, su propia rama de Neon y un job que lo verifica después
+de cada deploy. Lo que falta es de a mano —cargarle un par de variables y crear
+los secretos `QA_*`—, y los pasos numerados de abajo dicen cuál y qué se rompe si
+se saltea. Este documento cuenta cómo queda el camino, qué parte ya está hecha en
+el repositorio, y qué parte hay que hacer en Vercel, GitHub y Google Cloud,
+porque ningún script puede hacerla.
 
 Se eligió que todo entre en el plan gratuito. No hace falta pagar nada.
 
@@ -14,7 +17,7 @@ rama de trabajo  →  PR a  qa   →  deploy de QA   →  PR de qa a main  →  
 ```
 
 Una rama de trabajo no despliega nada. `qa` despliega al proyecto de QA, contra
-la base de ensayo. `main` despliega a producción. **Cuesta un despliegue por
+su propia rama de Neon —no la del ensayo, que la CI ya usa: ver el paso 4—. `main` despliega a producción. **Cuesta un despliegue por
 promoción, no uno por PR**, que es lo que hace que entre en el plan gratuito.
 
 ## Qué gatea cada paso
@@ -46,30 +49,54 @@ no son requeridos y por eso no están en la tabla: un PR mergea con ellos en roj
 ### Después del deploy
 
 Los siete de `deploy-checks.yml`: smoke, ensayo de conversaciones, timbre, pen
-test de superficie, listas y parejas, permisos del rol y carga. Contra QA no
-corre ninguno todavía: `post-deploy.yml` tiene un solo job, `produccion`, y el
-`qa` que faltaría agregarle está bloqueado por dos motivos concretos:
+test de superficie, listas y parejas, permisos del rol y carga.
 
-1. `secrets: inherit` apuntaría los seis trabajos de `deploy-checks.yml` que
-   corren EN EL RUNNER —`rehearse`, `timbre`, `carga`, `listas-parejas`,
-   `permisos`, `pentest`— a `secrets.DATABASE_URL` / `DATABASE_URL_APP`, que son
-   los de PRODUCCIÓN. El ensayo escribe doce conversaciones ahí, y eso está
-   prohibido. La salida es partir `deploy-checks.yml` con un input tipo
-   `solo_smoke`, o crear secretos de repo `QA_DATABASE_URL` /
-   `QA_DATABASE_URL_APP` con la rama `qa` de Neon y pasarlos por `secrets:`
-   explícito en vez de `inherit`.
-2. Aunque se corriera sólo el smoke, hoy sale rojo seguro: `pnpm smoke --deep`
-   necesita `CRON_SECRET` —el del repo es el de producción, y en `claimmix-qa`
-   esa variable está entre las 63 vacías—, y además sube un archivo a R2 y
-   comprueba el token de WhatsApp y la casilla de Gmail, que en QA se dejaron
-   vacías a propósito. Para que el smoke contra QA signifique algo hacen falta
-   dos decisiones del usuario: cargar un `CRON_SECRET` propio en `claimmix-qa`
-   y como secreto de repo `QA_CRON_SECRET`, y decidir qué subconjunto de
-   comprobaciones debe exigirle a QA.
+Contra producción corren los siete. Contra QA corre lo que QA puede correr, que
+no es ni «ninguno» ni «todos»: `post-deploy.yml` tiene ahora un job `qa` que
+llama al mismo workflow con los secretos de QA mapeados uno por uno —nunca
+`secrets: inherit`, que apuntaría a la base de PRODUCCIÓN los seis trabajos que
+corren en el runner, tres de los cuales escriben— y con un interruptor por
+chequeo.
 
-Cuando se destrabe, contra QA van todos menos **carga**: el ensayo tiene
-cuatrocientos casos contra los cientos de miles de producción, así que un p95
-medido ahí no se puede comparar con el presupuesto de 500 ms.
+| Chequeo           | Producción   | QA                  | Por qué                                                                  |
+| ----------------- | ------------ | ------------------- | ------------------------------------------------------------------------ |
+| Smoke             | sí, `--deep` | sí, liviano         | `--deep` sube a R2 y llama al modelo, y QA no tiene R2                   |
+| Ensayo            | sí           | sólo con los `QA_R2_*` | sube adjuntos de verdad, y QA no escribe en el balde de producción   |
+| Timbre            | sí           | no                  | QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito         |
+| Listas y parejas  | sí           | sí                  | sólo le pregunta al catálogo                                             |
+| Permisos del rol  | sí           | sí                  | sólo le pregunta al catálogo                                             |
+| Pen test          | sí           | no                  | la pared entre inquilinos necesita el inquilino de demo, que en QA no está |
+| Carga             | sí           | no                  | 400 casos contra cientos de miles no comparan con el mismo presupuesto   |
+
+**Lo apagado no queda callado.** El job `alcance` corre al final, aun con todo
+rojo, y escribe en el resumen del run una fila por chequeo: corrió, corrió y
+falló, o NO corrió y por qué. De ahí venía el verde por ausencia — cuatro jobs
+verdes de los que tres ni arrancaron se leen igual que siete chequeos pasados.
+
+El smoke de QA además tolera `almacenamiento` (input `smoke_tolera`). Tolerado
+no es probado: el script lo imprime con `·` y termina nombrándolo bajo «Sin
+verificar en este entorno». `whatsapp` y `gmail` no hace falta tolerarlos, que
+sin configurar avisan y no fallan.
+
+#### Los secretos de repositorio que necesita QA
+
+Settings → Secrets and variables → Actions. Sin los tres primeros el job
+`qa_secretos` corta la corrida y no se chequea nada; los demás sólo encienden
+el ensayo.
+
+| Secreto                                                                        | Qué es                                       | Sin él                              |
+| ------------------------------------------------------------------------------ | -------------------------------------------- | ----------------------------------- |
+| `QA_DATABASE_URL`                                                              | la rama de Neon de QA                        | no corre ningún chequeo             |
+| `QA_DATABASE_URL_APP`                                                          | la misma rama, con el rol `claimmix_app`     | ídem                                |
+| `QA_CRON_SECRET`                                                               | el `CRON_SECRET` cargado en `claimmix-qa`    | ídem: el smoke no puede preguntar   |
+| `QA_GMAIL_TENANT_ID`                                                           | el inquilino de QA                           | el ensayo no corre                  |
+| `QA_BETTER_AUTH_SECRET`                                                        | el de `claimmix-qa`                          | el ensayo no corre                  |
+| `QA_R2_ACCOUNT_ID`, `QA_R2_ACCESS_KEY_ID`, `QA_R2_SECRET_ACCESS_KEY`, `QA_R2_BUCKET` | un balde de R2 propio de QA           | el ensayo no corre                  |
+
+⛔ **`QA_DATABASE_URL` no es la de producción, nunca.** `qa_secretos` compara
+las dos cadenas sin imprimir ninguna y corta si son la misma. Sin esa
+comparación, el ensayo escribiría y borraría casos en la base de un cliente y
+no habría nada que lo mostrara hasta después.
 
 ## Lo que hay que hacer a mano, en orden
 
@@ -153,14 +180,14 @@ marcando Production, Preview y Development.
 
 ⛔ **Nunca las de producción.** QA existe para poder romper cosas.
 
-### 4bis. Las once variables de `claimmix-qa`
+### 4bis. Las doce variables de `claimmix-qa`
 
 Las 63 que Vercel creó al importar salen de `.env.example` y vienen VACÍAS. Estas
-once hay que llenarlas, en los tres entornos del proyecto (Production, Preview,
+doce hay que llenarlas, en los tres entornos del proyecto (Production, Preview,
 Development).
 
 Dos se **crean**, porque hasta #212 no estaban en `.env.example` y por eso Vercel
-no las detectó. Las otras nueve ya existen vacías: se **editan**.
+no las detectó. Las otras diez ya existen vacías: se **editan**.
 
 | variable | valor | tipo | crear o editar |
 |---|---|---|---|
@@ -174,6 +201,7 @@ no las detectó. Las otras nueve ya existen vacías: se **editan**.
 | `GMAIL_TENANT_ID` | `10000000-0000-0000-0000-000000000001` | Config | editar |
 | `GOOGLE_DEFAULT_TENANT_ID` | el mismo UUID | Config | editar |
 | `BETTER_AUTH_SECRET` | uno NUEVO: `openssl rand -base64 32` | Secret | editar |
+| `CRON_SECRET` | uno NUEVO: `openssl rand -hex 32` | Secret | editar |
 | `NEXT_PUBLIC_SITE_URL` | `https://claimmix-qa.vercel.app` | Config | editar |
 
 Ese UUID es el inquilino «Seguros del Sur S.A.», y la rama `qa` ya lo tiene: se
@@ -195,13 +223,17 @@ contra producción contesta `401 INVALID_EMAIL_OR_PASSWORD` — o sea que allá
 llega a mirar la credencial y en QA ni eso. Rompe el login del navegador, no
 sólo el de k6.
 
-**Los cuatro valores que no se escriben a mano.** Todo esto va en Git Bash, que
+**Los cinco valores que no se escriben a mano.** Todo esto va en Git Bash, que
 viene con Git para Windows; `clip` es de Windows y deja el valor en el
 portapapeles, listo para pegar en Vercel sin que pase por pantalla.
 
 - `VERTEX_EXTRACTION_MODEL`:
   `grep '^VERTEX_EXTRACTION_MODEL=' .env.local | cut -d= -f2- | tr -d '\r\n' | clip`
 - `BETTER_AUTH_SECRET`: `openssl rand -base64 32 | tr -d '\r\n' | clip`
+- `CRON_SECRET`: `openssl rand -hex 32 | tr -d '\r\n' | clip`. Pegalo en Vercel
+  y, sin cerrar el portapapeles, también en el secreto de repositorio
+  `QA_CRON_SECRET`: tienen que ser el MISMO valor o el smoke contra QA recibe
+  un 401 de `/api/health` y la corrida entera queda roja sin haber medido nada.
 - `DATABASE_URL` y `DATABASE_URL_APP`: consola de Neon, proyecto **ClaimMix**,
   rama **`qa`** (`br-muddy-mountain-acxm92sh`), «Connection string». Una con el
   rol `neondb_owner` (esa es `DATABASE_URL`) y la otra con `claimmix_app` (esa
@@ -346,6 +378,32 @@ done | grep -E '^(Bundle size check|Tenencia y capa de datos|Pen test)' | sort |
 ```
 
 
+### 10. Los secretos `QA_*` del repositorio — FALTA
+
+Es lo único que separa a QA de que sus deploys empiecen a verificarse. Van en
+Settings → Secrets and variables → Actions del repositorio, y la tabla de
+«Después del deploy» dice qué apaga cada ausencia.
+
+Los tres obligatorios son `QA_DATABASE_URL`, `QA_DATABASE_URL_APP` y
+`QA_CRON_SECRET`. Los dos primeros son las mismas cadenas de Neon que se
+cargaron en Vercel en el paso 4bis; el tercero, el mismo `CRON_SECRET` que se
+generó ahí. Sin alguno de los tres el job `qa_secretos` corta la corrida con el
+motivo escrito en el resumen: no hay chequeo que pueda correr sin ellos, y no
+correr no se muestra como verde.
+
+⛔ **Nunca las cadenas de producción.** `qa_secretos` las compara sin imprimir
+ninguna de las dos y falla si coinciden, porque el ensayo escribe y borra casos
+donde apunte. La comparación es la última red, no el permiso para probar.
+
+Los otros seis —`QA_GMAIL_TENANT_ID`, `QA_BETTER_AUTH_SECRET` y los cuatro
+`QA_R2_*`— son opcionales y encienden el ensayo de conversaciones. El inquilino
+y el secreto de Better Auth ya existen en `claimmix-qa`; los de R2 piden una
+decisión que todavía no está tomada: **QA necesita un balde propio**. Pasarle
+los de producción haría que el ensayo de QA suba y borre adjuntos en el balde
+de los clientes, así que el ensayo queda apagado hasta que exista ese balde —y
+el job `alcance` lo nombra como no verificado en cada corrida, para que la
+decisión siga a la vista en vez de olvidarse.
+
 ## Dos trampas que ya están resueltas, y conviene no reabrir
 
 **Un deploy de QA también llega etiquetado como producción.** Los dos proyectos
@@ -379,10 +437,13 @@ Ninguna URL de QA empieza con `https://claimmix-qa`. No era teórico: la corrida
 QA— y su Smoke de producción falló contra el alias de producción, que ese
 deploy nunca tocó.
 
-Ese NOMBRE del entorno sí distingue, entonces: el guard de hoy es
-`startsWith(…, 'Production') && !endsWith(…, '-qa')`, escrito dos veces —en el
-grupo de `concurrency` y en el `if` del job, porque GitHub no deja compartirlas
-(`post-deploy.yml:104-105` y `:140-141`)—.
+Ese NOMBRE del entorno sí distingue, entonces: el guard de producción es
+`startsWith(…, 'Production') && !endsWith(…, '-qa')`, y el de QA es el mismo par
+con el `endsWith` sin negar. Van escritos cuatro veces —una en el grupo de
+`concurrency`, que además tiene su propia cola para QA, y una en el `if` de cada
+job (`produccion`, `qa_secretos`, `qa`)—, porque GitHub no deja compartir una
+condición entre jobs: `post-deploy.yml:115-120`, `:152-153`, `:199-200` y
+`:284-285`.
 
 La invariante 15 de `check-architecture.mjs` exigía mirar `environment_url`: era
 una premisa falsa, y estaba verde sobre un guard roto —las tres condiciones

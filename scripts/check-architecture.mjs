@@ -296,6 +296,13 @@ console.log("\n▸ Los jobs de CI conocen los dos roles");
      *
      * Ahora, por cada `DATABASE_URL:` se busca su compañero entre las líneas de
      * la misma sangría, que es lo que delimita un bloque `env:` en YAML.
+     *
+     * Las líneas MÁS sangradas se saltean en vez de cortar el bloque: en un
+     * `env:` una clave no tiene hijos, pero en el `secrets:` de un
+     * `workflow_call` sí —`DATABASE_URL:` seguido de `required: false`—, y ahí
+     * el corte dejaba a cada secreto solo en su propio bloque de una línea. La
+     * declaración también tiene que nombrar a los dos: un caller que puede
+     * mapear uno y no el otro arma exactamente el job cojo que esto busca.
      */
     for (let i = 0; i < lineas.length; i++) {
       const m = /^(\s+)DATABASE_URL:/.exec(lineas[i]);
@@ -308,6 +315,7 @@ console.log("\n▸ Los jobs de CI conocen los dos roles");
           const l = lineas[k];
           if (l.trim() === "") continue;
           const propia = /^(\s*)/.exec(l)[1];
+          if (propia.length > sangria.length) continue;
           if (propia.length !== sangria.length) break;
           if (l.trim().startsWith("DATABASE_URL_APP:")) tieneApp = true;
         }

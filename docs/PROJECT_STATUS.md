@@ -99,18 +99,27 @@ Corrélo después de cada deploy. Detalle completo en
   `qa` Neon branch (`br-muddy-mountain-acxm92sh`), public alias
   https://claimmix-qa.vercel.app. First real deploy: 2026-09-18. What that day
   taught, all of it verified against the live deploy:
-  - **A QA deploy runs none of the seven post-deploy checks.** `post-deploy.yml`
-    calls them for production only, and the `qa` caller job does not exist yet:
-    `secrets: inherit` would aim its six runner jobs at the PRODUCTION database,
-    and `pnpm smoke --deep` needs R2, WhatsApp, Gmail and a `CRON_SECRET` that QA
-    keeps empty on purpose. That is green by absence, not green.
+  - **A QA deploy now runs what QA can run — and says out loud what it cannot.**
+    `post-deploy.yml` has a `qa` caller that maps every secret one by one (never
+    `secrets: inherit`, which would aim its six runner jobs at the PRODUCTION
+    database, three of them writing) and switches each check on or off. QA runs
+    the smoke — light, tolerating `almacenamiento`, since the project has no R2 —
+    plus `listas-parejas` and `permisos`; it runs the rehearsal only once the
+    `QA_R2_*`, `QA_GMAIL_TENANT_ID` and `QA_BETTER_AUTH_SECRET` secrets exist,
+    and it never runs the doorbell, the pen test or the load check. A new
+    `alcance` job writes one row per check into the run summary — ran, ran and
+    failed, or did not run and why — so a run is never green by absence. The
+    `qa_secretos` gate refuses to start when the three required secrets are
+    missing, and also when QA's database string equals production's (compared
+    without printing either). None of it fires until those `QA_*` repository
+    secrets are created: step 10 of `docs/PROMOCION.md`.
   - **Nobody can log into QA yet.** `POST /api/auth/sign-in/email` answers
     `403 INVALID_ORIGIN` because `NEXT_PUBLIC_SITE_URL` is empty in that project,
     so `resolveBaseURL()` (`src/lib/auth/index.ts:14-18`) falls back to the
     per-deployment hash host and Better Auth rejects the alias it is served from.
     Production, same probe, answers `401 INVALID_EMAIL_OR_PASSWORD`. Load the
-    variable and redeploy; it is the eleventh of `docs/PROMOCION.md` step 4bis,
-    and k6 stays red until it is there.
+    variable and redeploy; it is the last of the twelve in `docs/PROMOCION.md`
+    step 4bis, and k6 stays red until it is there.
   - **The two projects are told apart by the environment NAME, never the URL.**
     With more than one project GitHub disambiguates the environment as
     `Production – claimmix` / `Production – claimmix-qa` (en dash), while

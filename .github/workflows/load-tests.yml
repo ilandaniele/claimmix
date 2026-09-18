@@ -246,8 +246,15 @@ jobs:
           BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           for RUTA in / /login /api/health; do
-            COD=$(curl -s -o /dev/null -w '%{http_code}' -H "x-vercel-protection-bypass: $BYPASS" "$URL$RUTA")
-            echo "$RUTA -> $COD"
+            CUERPO=$(curl -s -D - -o cuerpo.txt -H "x-vercel-protection-bypass: $BYPASS" "$URL$RUTA")
+            COD=$(printf '%s' "$CUERPO" | head -1)
+            # `x-vercel-error` es lo que separa un fallo de la plataforma
+            # —FUNCTION_INVOCATION_FAILED, DEPLOYMENT_NOT_FOUND— de un 500 que
+            # devolvió la aplicación con su propia página de error.
+            ERR=$(printf '%s' "$CUERPO" | grep -i '^x-vercel-error:' || true)
+            echo "$RUTA -> $COD ${ERR:-sin x-vercel-error}"
+            head -c 200 cuerpo.txt | tr '\n' ' '
+            echo
           done
 
       # `always()`: el reporte de la corrida que FALLÓ es el que hay que mirar.

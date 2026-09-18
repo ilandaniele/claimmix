@@ -66,13 +66,35 @@ on:
 # cliente pisándose los casos de ensayo. #199 arregló la guarda del job de
 # abajo y se olvidó de esta copia —que es justo lo que advierte el comentario
 # de arriba: son dos lugares distintos y hay que tocar los dos—.
+#
+# ── Y la exclusión de QA falla CERRADA ──────────────────────────────────────
+#
+# Tres condiciones sobre `environment_url`, no una. La que estaba —excluir lo
+# que empieza con `https://claimmix-qa-`— dejaba pasar dos casos, y los dos
+# terminan corriendo el post-deploy de PRODUCCIÓN contra el alias de
+# producción para un deploy que no lo tocó:
+#
+#   1. El alias de producción de QA lleva PUNTO, no guion:
+#      `https://claimmix-qa.vercel.app`. El literal terminaba en guion.
+#   2. Si el campo llega vacío —un estado sin URL— `startsWith` de un vacío es
+#      falso, la negación es verdadera, y pasa.
+#
+# La condición positiva arregla los dos: si no empieza con `https://claimmix`,
+# no es un deploy nuestro y no entra. Las dos negaciones anclan los dos
+# separadores posibles.
+#
+# `contains('//claimmix-qa')` habría sido más corto y está MAL: un deploy de
+# producción cuyo hash empiece con `qa` —`https://claimmix-qa3f9...`— quedaría
+# excluido, y ahí el post-deploy de producción no corre nunca y nadie se
+# entera. Un prefijo que no existe es preferible a un rojo que no pasa.
 concurrency:
   group: >-
     ${{ (github.event_name == 'workflow_dispatch' ||
     (github.event.deployment_status.state == 'success' &&
     startsWith(github.event.deployment.environment, 'Production') &&
-    !startsWith(github.event.deployment_status.environment_url,
-    'https://claimmix-qa-')))
+    startsWith(github.event.deployment_status.environment_url, 'https://claimmix') &&
+    !startsWith(github.event.deployment_status.environment_url, 'https://claimmix-qa-') &&
+    !startsWith(github.event.deployment_status.environment_url, 'https://claimmix-qa.')))
     && 'post-deploy-contra-produccion'
     || format('post-deploy-sin-cola-{0}', github.run_id) }}
   cancel-in-progress: false
@@ -100,16 +122,20 @@ jobs:
     # con `state: success` y la corrida salió salteada, que es exactamente el
     # defecto que este trabajo vino a sacar: verde porque no corrió.
     #
-    # Así que vuelve la condición que funciona. Para cuando exista el proyecto
-    # de QA hay que distinguirlo por el HOST de `environment_url`, que es lo
-    # único que difiere entre los dos proyectos (`claimmix-…` contra
-    # `claimmix-qa-…`), y eso se escribe MIRANDO un evento real de QA, no
-    # adivinando otra vez. Está anotado en docs/PROMOCION.md.
+    # Así que vuelve la condición que funciona, y el proyecto se distingue por
+    # el HOST de `environment_url`, que es lo único que difiere entre los dos.
+    # Por qué son tres condiciones y no una está arriba, en el comentario de
+    # `concurrency`: la exclusión sola fallaba ABIERTA.
+    #
+    # Lo que todavía se escribe mirando un evento real de QA, y no adivinando,
+    # es el job `qa` que falta. Está anotado en docs/PROMOCION.md.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
        startsWith(github.event.deployment.environment, 'Production') &&
-       !startsWith(github.event.deployment_status.environment_url, 'https://claimmix-qa-'))
+       startsWith(github.event.deployment_status.environment_url, 'https://claimmix') &&
+       !startsWith(github.event.deployment_status.environment_url, 'https://claimmix-qa-') &&
+       !startsWith(github.event.deployment_status.environment_url, 'https://claimmix-qa.'))
     permissions:
       contents: read
       # Techo para el job `rehearse` de deploy-checks.yml: un workflow

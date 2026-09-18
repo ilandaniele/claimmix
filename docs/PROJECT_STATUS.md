@@ -12,9 +12,13 @@ Update it at the end of a work session so the next one can recover quickly._
 > simultaneous claimants, onboarding a second client was rehearsed end to end, a closed
 > month's invoice is frozen, billing + portfolio have screens, and **both channels were
 > driven end to end with real messages from a real person** — a mail, two WhatsApps and a
-> photograph, all answered. **Every check is green** (CI, CodeQL, secret scan, and the
-> five post-deploy jobs), and the extraction now bills to **Veltra's own Google Cloud
-> project**. What is left is commercial: paid plans, and a first client.
+> photograph, all answered. **In production every check is green** (CI, CodeQL, secret
+> scan and the seven post-deploy jobs, plus the `alcance` job that writes down what each
+> run did and did not verify), and the extraction now bills to **Veltra's own Google
+> Cloud project**. Two reds are known, and named here so they are not read as green:
+> Carga on previews is red **with numbers** until `DATABASE_URL` reaches the Preview
+> scope of `claimmix`, and a QA deploy verifies nothing until the `QA_*` repository
+> secrets exist. What is left is commercial: paid plans, and a first client.
 
 ## What ClaimMix is
 

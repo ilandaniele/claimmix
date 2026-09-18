@@ -565,7 +565,7 @@ chequeos: el smoke primero, y colgando de él los otros seis.
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
-2. `pnpm rehearse`: las doce conversaciones enteras contra el agente real.
+2. `pnpm rehearse`: las catorce conversaciones enteras contra el agente real.
    Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
 3. `pnpm load --reporte carga.json`: las consultas del tablero con la mesa
@@ -614,12 +614,29 @@ hasta que existan los secretos `QA_*` del repositorio: paso 10 de
 También se puede disparar a mano desde la pestaña *Actions* → *Post-deploy* →
 *Run workflow*, con una URL distinta si querés apuntar a un preview.
 
-El ensayo **escribe en la base de producción**: crea doce casos y los borra al
-terminar. Al empezar barre los que hayan quedado de una corrida que se murió a
-mitad de camino — se los reconoce por identidades inventadas (números
+El ensayo **escribe en la base de producción**: crea los casos del ensayo y los
+borra al terminar. Al empezar barre los que hayan quedado de una corrida que
+se murió a mitad de camino — se los reconoce por identidades inventadas (números
 `5490000…`, direcciones `ensayo.*@example.com`) que ningún asegurado real puede
 tener. Si estás mostrando el tablero justo en ese momento, los vas a ver
 aparecer y desaparecer.
+
+**No corras el ensayo mientras corre el de un deploy.** `pnpm check` y
+`pnpm rehearse` pegan contra el mismo proyecto de Gemini que el post-deploy, y
+el único freno entre pedidos —el espaciador de 1200 ms de
+`src/server/ai/gemini-extractor.ts:114`— es por proceso: no ve al otro. El 18 de
+septiembre de 2026 los dos se pisaron y el proveedor contestó 429. El
+post-deploy tardó 19m16s donde el anterior, corriendo solo, había tardado
+9m31s, y la corrida local salió roja con seis escenarios en «esperaba 1
+respuesta(s), hubo 0» que no tenían nada que ver con el agente. Antes de
+arrancar, fijate si hay uno en vuelo:
+
+```bash
+gh run list --workflow=post-deploy.yml --limit 3
+```
+
+Un ensayo rojo mientras había otro corriendo no dice nada sobre el agente: se
+repite cuando el otro termina, y recién ahí se mira el resultado.
 
 **Dos cosas siguen sin correr solas**, y por el mismo motivo: no se puede
 copiar lo que hace falta.

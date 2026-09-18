@@ -104,7 +104,19 @@ function entrar({ correo, clave }) {
         : origen
           ? `El login rechazó el origen ${BASE_URL}. En Vercel, ` +
             "`NEXT_PUBLIC_SITE_URL` del proyecto tiene que ser la URL contra la que se mide."
-          : `El login contestó ${res.status}. Sin sesión no hay nada que medir.`
+          : /*
+             * Y para todo lo demás, el cuerpo recortado.
+             *
+             * El 500 de las vistas previas de `claimmix` lleva días sin
+             * diagnosticar porque el error decía el número y nada más, y esas
+             * URLs no se pueden mirar desde afuera: están detrás de Deployment
+             * Protection y la llave la tiene el runner, no una persona. Doscientos
+             * caracteres alcanzan para distinguir un error de la aplicación de una
+             * pantalla de Vercel, y no son un secreto: en producción Next no manda
+             * la traza.
+             */
+            `El login contestó ${res.status}. Sin sesión no hay nada que medir.` +
+            ` Cuerpo (200 primeros caracteres): ${(res.body || "").slice(0, 200)}`
     );
   }
 

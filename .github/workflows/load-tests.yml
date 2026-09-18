@@ -228,6 +228,28 @@ jobs:
           LOAD_TEST_PASSWORD: ${{ secrets.PLAYWRIGHT_TEST_PASSWORD }}
           VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
+      # ── Cuando el login se cae, preguntar qué más está caído ───────────────
+      #
+      # Un 500 en el login puede ser del login o de todo el deploy, y son dos
+      # problemas distintos. Estas tres rutas lo separan sin mandar credenciales:
+      # `/` y `/login` no piden sesión, y `/api/health` contesta 401 cuando la
+      # aplicación está viva. Si las tres se caen, lo que falla es el arranque
+      # —`instrumentation.ts` corta el proceso sin `BETTER_AUTH_SECRET`, por
+      # ejemplo—; si sólo se cae el login, el problema está en Better Auth o en su
+      # base.
+      #
+      # Sólo corre cuando el paso de arriba falló, y sólo imprime códigos.
+      - name: ¿Qué contesta el resto del deploy?
+        if: failure() && steps.llave.outputs.hay == '1'
+        env:
+          URL: ${{ steps.destino.outputs.url }}
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          for RUTA in / /login /api/health; do
+            COD=$(curl -s -o /dev/null -w '%{http_code}' -H "x-vercel-protection-bypass: $BYPASS" "$URL$RUTA")
+            echo "$RUTA -> $COD"
+          done
+
       # `always()`: el reporte de la corrida que FALLÓ es el que hay que mirar.
       - name: Guardar el reporte
         if: always() && steps.llave.outputs.hay == '1' 

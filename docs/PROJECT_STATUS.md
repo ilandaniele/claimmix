@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-09. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-18. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -95,6 +95,30 @@ Corrélo después de cada deploy. Detalle completo en
   instead of at the first request that needs the column.
 - **Neon DATABASE_URL** is in `.env.local` (prod). `vercel env pull` returns blank
   values for secrets — use `vercel env ls` to check presence.
+- **Second Vercel project: `claimmix-qa`.** Deploys the `qa` branch, reads the
+  `qa` Neon branch (`br-muddy-mountain-acxm92sh`), public alias
+  https://claimmix-qa.vercel.app. First real deploy: 2026-09-18. What that day
+  taught, all of it verified against the live deploy:
+  - **A QA deploy runs none of the seven post-deploy checks.** `post-deploy.yml`
+    calls them for production only, and the `qa` caller job does not exist yet:
+    `secrets: inherit` would aim its six runner jobs at the PRODUCTION database,
+    and `pnpm smoke --deep` needs R2, WhatsApp, Gmail and a `CRON_SECRET` that QA
+    keeps empty on purpose. That is green by absence, not green.
+  - **Nobody can log into QA yet.** `POST /api/auth/sign-in/email` answers
+    `403 INVALID_ORIGIN` because `NEXT_PUBLIC_SITE_URL` is empty in that project,
+    so `resolveBaseURL()` (`src/lib/auth/index.ts:14-18`) falls back to the
+    per-deployment hash host and Better Auth rejects the alias it is served from.
+    Production, same probe, answers `401 INVALID_EMAIL_OR_PASSWORD`. Load the
+    variable and redeploy; it is the eleventh of `docs/PROMOCION.md` step 4bis,
+    and k6 stays red until it is there.
+  - **The two projects are told apart by the environment NAME, never the URL.**
+    With more than one project GitHub disambiguates the environment as
+    `Production – claimmix` / `Production – claimmix-qa` (en dash), while
+    `environment_url` is `claimmix-<hash>-…vercel.app` for both. Every gate that
+    must exclude QA reads the name; invariant 15 of `check-architecture.mjs`
+    enforces it, in the job `if:` and in the `concurrency` group alike.
+  - The QA hash URL sits behind Vercel Auth and the repo's automation bypass
+    secret belongs to the other project, so k6 measures the public alias.
 
 ## Status by area
 

@@ -307,11 +307,17 @@ async function knockByMail(): Promise<void> {
 
   const [reply] = await replyFor(found.id);
   check("el agente contestó", Boolean(reply), reply?.template);
-  check(
-    "y la respuesta NO salió del edificio",
-    reply?.status === "skipped_simulated",
-    reply?.status ?? "sin registro"
-  );
+  /*
+   * Sin fila de respuesta, la aserción de arriba ya lo dijo. Mirar el estado
+   * igual hacía que las dos cruces contaran el mismo hecho como dos problemas.
+   */
+  if (reply) {
+    check(
+      "y la respuesta NO salió del edificio",
+      reply.status === "skipped_simulated",
+      reply.status
+    );
+  }
 
   if (!KEEP && body.message_id) {
     await fetch(`${BASE}/api/health/knock`, {
@@ -405,11 +411,13 @@ async function knockByWhatsApp(): Promise<void> {
 
   const [reply] = await replyFor(found.id);
   check("el agente contestó", Boolean(reply), reply?.template);
-  check(
-    "y no le escribió a un número inventado",
-    reply?.status === "skipped_simulated",
-    reply?.status ?? "sin registro"
-  );
+  if (reply) {
+    check(
+      "y no le escribió a un número inventado",
+      reply.status === "skipped_simulated",
+      reply.status
+    );
+  }
 }
 
 // ── Correr ───────────────────────────────────────────────────────────────────

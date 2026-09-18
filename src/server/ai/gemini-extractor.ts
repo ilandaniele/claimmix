@@ -377,8 +377,13 @@ export async function callGemini(
     const errBody = (await res.json().catch(() => null)) as {
       error?: { status?: string; message?: string };
     } | null;
+    // El mensaje de Google nombra la cuota agotada (RPM vs TPM); sin él, el
+    // log no distingue una de otra.
+    const detalle = errBody?.error?.message?.slice(0, 200);
     throw new GeminiExtractionError(
-      `Gemini API error ${res.status} ${errBody?.error?.status ?? ""}`.trim(),
+      [`Gemini API error ${res.status} ${errBody?.error?.status ?? ""}`.trim(), detalle]
+        .filter(Boolean)
+        .join(" — "),
       { status: res.status, code: errBody?.error?.status }
     );
   }

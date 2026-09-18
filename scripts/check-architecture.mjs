@@ -739,11 +739,20 @@ console.log("\n▸ Lo previo al merge no apunta a producción");
 // producción, el ensayo y la carga de lectura contra el alias de producción
 // para un deploy que nunca lo tocó.
 //
-// La rama sí distingue: sólo el proyecto de producción despliega `main`. Todo
-// job que gatee EXIGIENDO ese entorno —`deployment.environment == 'Production'`—
-// tiene que exigir también la rama. `load-tests.yml` gatea con `!= 'Production'`
-// —corre en previews, cualquier proyecto— y esa exclusión no la engaña un
-// segundo proyecto: por eso la invariante mira el `==`, no cualquier mención.
+// Lo único que distingue a los dos proyectos es el HOST del deploy, así que
+// todo job que gatee EXIGIENDO ese entorno tiene que mirar además
+// `deployment_status.environment_url`.
+//
+// La invariante busca `startsWith(github.event.deployment.environment` sin `!`
+// adelante, y no la comparación exacta que había antes: desde que Vercel
+// renombró el entorno a `Production – claimmix`, esa comparación no es cierta
+// nunca y la invariante no activaba en un solo job. El `!` importa:
+// `load-tests.yml` gatea con `!startsWith(...)` —una exclusión, que corre en
+// previews de cualquier proyecto— y no tiene por qué mirar ninguna URL.
+//
+// Los comentarios se borran antes de buscar: el bloque de `post-deploy.yml`
+// nombra `environment_url` en prosa, y un job no queda protegido por un
+// comentario.
 console.log("\n▸ La guarda de post-deploy no es sólo el entorno");
 {
   const flujos = existsSync(".github/workflows")
@@ -774,15 +783,19 @@ console.log("\n▸ La guarda de post-deploy no es sólo el entorno");
     }
 
     for (const trabajo of trabajos) {
-      if (!/deployment\.environment\s*==\s*['"]Production['"]/.test(trabajo)) continue;
-      if (!/deployment_status\.environment_url/.test(trabajo)) cojos.push(nombre);
+      const sinComentar = trabajo
+        .split(/\r?\n/)
+        .map((l) => l.replace(/(^|\s)#.*$/, "$1"))
+        .join("\n");
+      if (!/(^|[^!])startsWith\(github\.event\.deployment\.environment/.test(sinComentar)) continue;
+      if (!/deployment_status\.environment_url/.test(sinComentar)) cojos.push(nombre);
     }
   }
 
   if (flujos.length === 0) {
     console.log("     (no hay workflows: nada que comprobar)");
   } else if (cojos.length === 0) {
-    bien("todo job que gatea por entorno gatea también por la rama");
+    bien("todo job que gatea por entorno mira también el host del deploy");
   } else {
     mal(`${cojos.length} workflow(s) con un job que gatea sólo por entorno`);
     for (const w of [...new Set(cojos)]) console.log(`     .github/workflows/${w}`);
@@ -862,6 +875,46 @@ console.log("\n▸ Nadie compara `deployment.ref` con el nombre de una rama");
     mal(`${culpables.length} workflow(s) comparan deployment.ref con un literal`);
     for (const w of culpables) console.log(`     .github/workflows/${w}`);
     console.log("     Vercel pone el SHA ahí. Usá el host de deployment_status.environment_url.");
+  }
+}
+
+// ── 18. Nadie compara `deployment.environment` con un literal ─────────────
+//
+// GitHub le pone al entorno el nombre que Vercel le manda, y Vercel lo CAMBIA
+// cuando aparece un segundo proyecto: `Production` pasó a `Production – claimmix`
+// el día que se creó `claimmix-qa`. Ninguna guarda se rompió con un error —
+// cambiaron de lado en silencio.
+//
+// El post-deploy se salteaó tres merges seguidos sin dejar un rojo. Y el job de
+// carga, que usaba `!= 'Production'` para correr sólo contra vistas previas,
+// pasó a aceptar producción: k6 midiendo contra la base de los clientes.
+//
+console.log("\n▸ Nadie compara `deployment.environment` con un literal");
+{
+  const flujos = existsSync(".github/workflows")
+    ? readdirSync(".github/workflows").filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+    : [];
+  const culpables = [];
+
+  for (const nombre of flujos) {
+    const texto = readFileSync(`.github/workflows/${nombre}`, "utf8");
+    // Sin comentarios: este archivo y los workflows EXPLICAN el defecto citando
+    // la expresión. Misma razón que en las invariantes 15 y 17.
+    const sinComentar = texto
+      .split(/\r?\n/)
+      .map((l) => l.replace(/(^|\s)#.*$/, "$1"))
+      .join("\n");
+    if (/deployment\.environment\s*[!=]=\s*['\"]/.test(sinComentar)) culpables.push(nombre);
+  }
+
+  if (flujos.length === 0) {
+    console.log("     (no hay workflows: nada que comprobar)");
+  } else if (culpables.length === 0) {
+    bien("se compara por prefijo: el nombre del entorno lo elige Vercel");
+  } else {
+    mal(`${culpables.length} workflow(s) comparan deployment.environment con un literal`);
+    for (const w of culpables) console.log(`     .github/workflows/${w}`);
+    console.log("     Vercel renombra el entorno al crear otro proyecto. Usá startsWith().");
   }
 }
 

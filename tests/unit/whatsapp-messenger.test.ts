@@ -90,6 +90,42 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).toContain("especialista");
     expect(body).not.toContain("•");
   });
+  /*
+   * El mismo caso, por correo, nombra los dos valores que no coinciden. Por
+   * acá salía sin ellos: quien escribe por la póliza de su padre recibía «pasó
+   * a un especialista» y nada con qué contestar. AC7/AC9 cumplido en un canal y
+   * no en el otro es peor que incumplido en los dos, porque nadie lo mira.
+   */
+  it("dice los dos valores cuando el titular del padrón no es quien escribe", async () => {
+    await send("specialist_escalation", {
+      caseId: CASE,
+      titularIniciales: "R*** P***",
+      claimantName: "Lucía Paz",
+    });
+
+    const body = sentBody();
+    expect(body).toContain("R*** P***");
+    expect(body).toContain("Lucía Paz");
+    expect(body).toContain("especialista");
+  });
+
+  it("y el nombre del padrón nunca entero", async () => {
+    // El tipo sólo acepta iniciales, pero si alguien le pasa el nombre entero
+    // por este camino tiene que notarse acá y no en la casilla de una persona.
+    await send("specialist_escalation", {
+      caseId: CASE,
+      titularIniciales: "R*** P***",
+      claimantName: "Lucía Paz",
+    });
+
+    expect(sentBody()).not.toContain("Roberto Paz");
+  });
+
+  it("un escalado por severidad no menciona ningún padrón", async () => {
+    await send("specialist_escalation", { caseId: CASE, severity: "critical" });
+
+    expect(sentBody()).not.toContain("figura a nombre de");
+  });
 
   it("names every field in Spanish, never the database key", async () => {
     // A real reply once listed dni_asegurado and telefono_contacto verbatim.

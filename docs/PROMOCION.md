@@ -54,37 +54,141 @@ con el presupuesto de 500 ms.
 
 Cada paso dice qué se rompe si se saltea.
 
-### 1. El proyecto de QA en Vercel
+### 1. El proyecto de QA en Vercel — HECHO
 
 Vercel → New Project → el mismo repositorio `claimmix` → nombre `claimmix-qa`.
 
-### 2. Que `claimmix-qa` sólo construya `qa`
+⚠️ Las 63 variables que Vercel «detecta» al importar salen de `.env.example` y
+vienen VACÍAS. Eso es lo que hace seguro crear el proyecto: sin el token de Gmail
+ni las credenciales de WhatsApp, QA no le puede escribir a nadie. Si en cambio se
+importan las de producción, QA arranca leyendo la casilla real y puede mandarle
+mensajes a asegurados de verdad.
 
-En `claimmix-qa` → Settings → Git:
+⛔ **No usar «Import .env»** con el `.env.local` de la máquina, por lo mismo.
 
-- **Production Branch**: `qa`
-- **Ignored Build Step**:
-  ```bash
-  [ "$VERCEL_GIT_COMMIT_REF" != "qa" ] && exit 0 || exit 1
-  ```
+### 2. Que `claimmix-qa` sólo construya `qa` — HECHO
 
-Sin esto, el proyecto de QA construye cada rama y se come el cupo de
-despliegues del plan gratuito.
+La rama de producción ya NO se elige en Settings → Git. Vercel la movió:
 
-### 3. Que el proyecto de producción ignore `qa`
+**Settings → Environments → Production → Branch Tracking** → `qa`.
 
-En `claimmix` → Settings → Git → agregar `qa` a las ramas ignoradas. Sin esto,
-un push a `qa` despliega a **producción**.
+Y el freno para no gastar el cupo de despliegues, en
+**Settings → Build and Deployment → Ignored Build Step** → Behavior `Custom`:
 
-### 4. Las variables de `claimmix-qa`
+```bash
+[ "$VERCEL_GIT_COMMIT_REF" != "qa" ] && exit 0 || exit 1
+```
 
-Copiar las del proyecto de producción **apuntando al ensayo**:
-`STAGING_DATABASE_URL` y `STAGING_DATABASE_URL_APP` en lugar de las de
-producción.
+Sin esto, el proyecto de QA construye cada rama y se come el cupo del plan
+gratuito.
+
+### 3. Que el proyecto de producción ignore `qa` — HECHO
+
+Acá decía «Settings → Git → agregar `qa` a las ramas ignoradas». **Esa pantalla
+no existe**: Settings → Git sólo tiene el repositorio conectado, Git LFS, deploy
+hooks y commits verificados. El mecanismo es el mismo Ignored Build Step, en el
+proyecto `claimmix`, con la condición al revés:
+
+```bash
+[ "$VERCEL_GIT_COMMIT_REF" = "qa" ] && exit 0 || exit 1
+```
+
+Saltea sólo `qa` y construye todo lo demás — `main` y las vistas previas de los
+PR, que hacen falta para los checks.
+
+⚠️ Mirar **Production Overrides** antes de dar por hecho que quedó: si esa caja
+tiene un comando, pisa al de Project Settings. Hoy está vacía.
+
+### 4. La base de QA — HECHA, y es propia
+
+Acá decía que QA apuntara a `STAGING_DATABASE_URL`. Se cambió: QA tiene su
+**propia rama de Neon**, `qa`, sacada de la del ensayo.
+
+El motivo es que la base de ensayo no está libre: contra ella corren los tests de
+integración y los e2e de cada PR. Un QA que escriba ahí se pisa con la CI, y el
+rojo que sale no dice cuál de los dos lo causó.
+
+```
+proyecto ClaimMix (odd-fire-27605230)
+  rama production   ← lo que .env.local llama STAGING_DATABASE_URL
+  rama qa           ← br-muddy-mountain-acxm92sh
+```
+
+Trae copiados los dos roles y los datos sembrados, así que las cuentas de prueba
+ya están adentro. Comprobado sobre la rama nueva:
+
+| rol | BYPASSRLS | tenants |
+|---|---|---|
+| `neondb_owner` | sí | 3 |
+| `claimmix_app` | **no** | 3 |
+
+Que `claimmix_app` NO tenga BYPASSRLS es la invariante que sostiene la separación
+entre aseguradoras. Si algún día da «sí», la pared no existe.
+
+En `claimmix-qa` van como `DATABASE_URL` y `DATABASE_URL_APP` —esos nombres, no
+`STAGING_*`: el servidor lee los primeros (`src/data/scope.ts:21`) y los
+`STAGING_*` sólo los usan scripts locales—, marcando Production, Preview y
+Development.
 
 ⛔ **Nunca las de producción.** QA existe para poder romper cosas.
 
-### 5. Un secreto, y una cuenta que todavía no existe
+### 4bis. Las nueve variables de `claimmix-qa`
+
+Las 63 que Vercel creó al importar salen de `.env.example` y vienen VACÍAS. Estas
+nueve hay que llenarlas, en los tres entornos del proyecto (Production, Preview,
+Development).
+
+Dos se **crean**, porque hasta #212 no estaban en `.env.example` y por eso Vercel
+no las detectó. Las otras siete ya existen vacías: se **editan**.
+
+| variable | valor | tipo | crear o editar |
+|---|---|---|---|
+| `GEMINI_TRANSPORT` | `vertex` | Config | **crear** |
+| `VERTEX_EXTRACTION_MODEL` | de `.env.local` | Secret | **crear** |
+| `GOOGLE_CLOUD_PROJECT` | `claimmix-506321` | Config | editar |
+| `GOOGLE_CLOUD_LOCATION` | `us-central1` | Config | editar |
+| `AI_TENANT_DAILY_TOKEN_CAP` | `20000000` | Config | editar |
+| `DATABASE_URL` | la rama `qa` de Neon | Secret | editar |
+| `DATABASE_URL_APP` | la rama `qa` de Neon | Secret | editar |
+| `GMAIL_TENANT_ID` | `10000000-0000-0000-0000-000000000001` | Config | editar |
+| `GOOGLE_DEFAULT_TENANT_ID` | el mismo UUID | Config | editar |
+| `BETTER_AUTH_SECRET` | uno NUEVO: `openssl rand -base64 32` | Secret | editar |
+
+Ese UUID es el inquilino «Seguros del Sur S.A.», y la rama `qa` ya lo tiene: se
+sacó de la rama de ensayo, así que se llevó los tres inquilinos con ella.
+
+`GOOGLE_DEFAULT_TENANT_ID` no figura en `.env.local` porque producción no la
+define: el código cae a `GMAIL_TENANT_ID`. En QA hay que ponerle igual el mismo
+UUID. Una variable declarada y vacía no es una variable ausente — `??` la da por
+buena, devuelve la cadena vacía, y el alta de cualquier usuario nuevo muere con
+«GOOGLE_DEFAULT_TENANT_ID … is required to provision new users».
+
+**Los cuatro valores que no se escriben a mano.** Todo esto va en Git Bash, que
+viene con Git para Windows; `clip` es de Windows y deja el valor en el
+portapapeles, listo para pegar en Vercel sin que pase por pantalla.
+
+- `VERTEX_EXTRACTION_MODEL`:
+  `grep '^VERTEX_EXTRACTION_MODEL=' .env.local | cut -d= -f2- | tr -d '\r\n' | clip`
+- `BETTER_AUTH_SECRET`: `openssl rand -base64 32 | tr -d '\r\n' | clip`
+- `DATABASE_URL` y `DATABASE_URL_APP`: consola de Neon, proyecto **ClaimMix**,
+  rama **`qa`** (`br-muddy-mountain-acxm92sh`), «Connection string». Una con el
+  rol `neondb_owner` (esa es `DATABASE_URL`) y la otra con `claimmix_app` (esa
+  es `DATABASE_URL_APP`).
+
+⚠ **Si el agente de QA queda mudo, mirá las dos primeras.** Son las que deciden
+por dónde sale la extracción y con qué modelo, y su ausencia no rompe el build ni
+el arranque: el síntoma llega recién con el primer mensaje que nadie contesta.
+
+⛔ **Gmail y WhatsApp se dejan vacías.** Así QA lee, extrae, clasifica y decide,
+pero no le escribe a nadie. Un QA que puede mandar mensajes es un QA que puede
+mandárselos a un asegurado real el día que alguien se equivoque de base.
+Habilitarlo pide una casilla y un número de prueba propios — cuentas nuevas, no
+configuración.
+
+⚠ **QA comparte la cuota de Vertex con producción**: es el mismo proyecto de GCP.
+El 2026-09-17, sin QA corriendo, devolvió `RESOURCE_EXHAUSTED` tres veces.
+
+### 5. Un secreto, y dónde mide k6
 
 Hoy el job `k6` de `load-tests.yml` está **rojo a propósito**. Antes venía verde
 sin haber ejecutado k6 una sola vez, porque le faltaba un secreto y se salteaba
@@ -113,7 +217,13 @@ Ese rastrillo ya se pisó una vez, y está anotado en `playwright.config.ts:75-7
 «el login respondía “Credenciales inválidas” porque el servidor miraba
 producción, donde esas cuentas no existen».
 
-Tres salidas, en orden de menos a más compromiso:
+**Desde que QA tiene base propia, esto ya no pide una cuenta nueva.** La rama de
+Neon se sacó del ensayo, así que las cuentas `PLAYWRIGHT_*` están adentro, y
+`load-tests.yml` ya acepta `https://claimmix-qa.vercel.app` como destino. Con el
+secreto de Vercel puesto y QA desplegado, k6 mide contra QA con las credenciales
+que ya existen.
+
+Las otras salidas, por si hace falta antes de que QA esté en pie:
 
 1. **Esperar a QA.** Cuando exista `claimmix-qa` con `STAGING_DATABASE_URL`
    (paso 4), la cuenta de Playwright sirve tal cual contra ese deploy. Hay que
@@ -129,53 +239,53 @@ Tres salidas, en orden de menos a más compromiso:
    viajando en cada corrida; los escenarios sólo leen (`base.js:94-106`), pero
    el riesgo es real y la decisión es de la persona, no del repositorio.
 
-### 6. Workload Identity Federation para `qa`
+### 6. Workload Identity Federation para `qa` — NO HACE FALTA
 
-En Google Cloud, el proveedor `github` del pool acepta hoy sólo la rama `main`.
-Hay que agregar `qa` a su condición de atributos, o el ensayo de conversaciones
-de QA no va a poder autenticar contra Vertex.
+Acá decía que el proveedor `github` aceptaba sólo la rama `main` y había que
+agregar `qa`. Se leyó la condición real y ya estaba cubierto:
+
+```
+assertion.repository=='ilandaniele/claimmix'
+&& assertion.workflow_ref.startsWith('…/post-deploy.yml@')
+&& (assertion.ref=='refs/heads/main' || assertion.event_name=='deployment_status')
+```
+
+El segundo término del `||` acepta cualquier rama cuando el evento es
+`deployment_status`, que es exactamente como llega un deploy de QA.
+
+⛔ **No ampliarla igual.** Abrir un límite de seguridad que ya alcanza sería
+empeorarlo sin motivo.
 
 ⛔ **No borrar la clave de la cuenta de servicio que está en la máquina local.**
 
-### 7. El entorno `QA` en GitHub
+### 7. El entorno `QA` en GitHub — HECHO
 
-GitHub → Settings → Environments → New environment → `QA`.
+Creado, con las ramas de despliegue restringidas a `qa`. `Preview` y `Production`
+no se tocaron: esos los creó Vercel.
 
-- Deployment branches: **selected**, y elegir `qa`.
-- Cargar ahí los secretos del ensayo.
+### 8. La regla de rama para `qa` — HECHA
 
-No tocar `Preview` ni `Production`: esos los creó Vercel.
+Los mismos 14 checks requeridos que `main`, `enforce_admins`, «require branches
+to be up to date» y resolución de conversaciones.
 
-### 8. La regla de rama para `qa`
+### 9. Marcar como requeridos los tres checks nuevos — HECHO
 
-GitHub → Settings → Branches → nueva regla para `qa`, con los mismos checks
-requeridos que `main`, `enforce_admins` activado y «require branches to be up to
-date».
+`Bundle size check`, `Tenencia y capa de datos` y `Pen test (local)` ya son
+requeridos en `main` y en `qa`. La regla pasó de 11 checks a 14.
 
-### 9. Marcar como requeridos los tres checks nuevos
+La evidencia con la que se decidió, sobre las últimas doce corridas de `ci.yml`:
+**10 verdes y ninguna roja** para cada uno de los tres. Las otras dos salieron
+`cancelled` por dos empujones al mismo minuto en la misma rama, que el grupo de
+concurrencia cancela a propósito.
 
-En la regla de `main`, agregar: `Bundle size check`, `Tenencia y capa de datos`
-y `Pen test (local)`.
-
-**Recién después de verlos verdes unas cuantas corridas.** Un check requerido que
-todavía no demostró que es estable bloquea a todo el mundo.
-
-Al 2026-09-17, sobre las últimas doce corridas de `ci.yml`: **10 verdes y ninguna
-roja** para cada uno de los tres. Las otras dos salieron `cancelled`, y no son
-inestabilidad: son dos empujones al mismo minuto en la misma rama, que el grupo
-de concurrencia cancela a propósito.
-
-`Pen test (local)` tuvo una roja antes de esa ventana, y ya está explicada: le
-faltaba un `CRON_SECRET` de mentira, y sin él las rutas de cron contestan 500 y la
-sonda las lee como abiertas. Lo arregló #196.
-
-Para rehacer la cuenta antes de decidir:
+Para rehacer la cuenta:
 
 ```bash
 for RID in $(gh run list --workflow=ci.yml --limit 12 --json databaseId --jq '.[].databaseId'); do
   gh run view "$RID" --json jobs --jq '.jobs[] | "\(.name) \(.conclusion)"'
 done | grep -E '^(Bundle size check|Tenencia y capa de datos|Pen test)' | sort | uniq -c
 ```
+
 
 ## Dos trampas que ya están resueltas, y conviene no reabrir
 

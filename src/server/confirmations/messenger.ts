@@ -34,6 +34,7 @@ import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
 import { isReservedTestNumber } from "@/core/phone/reserved";
 import { enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
+import { laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
 
 export interface AgentMessage {
   caseId: string;
@@ -114,6 +115,24 @@ const ESCALATION_TEXT =
   "Recibimos tu denuncia y ya quedó registrada. Por las características de lo que nos contás, " +
   "la derivamos a un especialista que se va a comunicar con vos a la brevedad. " +
   "Si necesitás asistencia urgente, llamá a la línea de emergencias de tu póliza.";
+
+/**
+ * El escalado por WhatsApp, con los dos valores cuando el titular no coincide.
+ *
+ * Era una constante: el mismo caso que por correo nombra los dos valores, por
+ * acá salía sin ellos. La persona que escribe por la póliza de su padre recibía
+ * «pasó a un especialista» y nada con qué contestar — AC7/AC9 cumplido en un
+ * canal y no en el otro.
+ */
+function renderEscalation(data: Record<string, unknown>): string {
+  const diferencia = laDiferencia({
+    titularIniciales: typeof data.titularIniciales === "string" ? data.titularIniciales : null,
+    claimantName: typeof data.claimantName === "string" ? data.claimantName : null,
+  });
+  return diferencia ? `${ESCALATION_TEXT}
+
+${diferencia}` : ESCALATION_TEXT;
+}
 
 /**
  * The "we need a few things" message.
@@ -294,7 +313,7 @@ function intentFor(template: EmailTemplate): ReplyIntent {
 function renderForWhatsApp(message: AgentMessage): string | null {
   switch (message.template) {
     case "specialist_escalation":
-      return ESCALATION_TEXT;
+      return renderEscalation(message.data);
     case "missing_information_request":
       return renderAsk(message.data);
     case "data_confirmation_request":

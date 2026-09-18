@@ -1,6 +1,8 @@
-
 import { escapeHtml } from "@/server/email/render";
-import { textoAHtml } from "@/core/email/html";/**
+import { textoAHtml } from "@/core/email/html";
+import { laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
+
+/**
  * Email template: specialist_escalation
  *
  * Sent when a case is escalated to a specialist due to high or critical severity.
@@ -26,9 +28,14 @@ import { textoAHtml } from "@/core/email/html";/**
 export interface SpecialistEscalationData {
   caseId: string;
   severity?: "high" | "critical" | string;
+  /** El titular del padrón, en iniciales: «R*** P***». Nunca el nombre entero. */
+  titularIniciales?: string | null;
+  /** El nombre que dio quien escribe, tal cual lo escribió. */
+  claimantName?: string | null;
   /** La prosa ya redactada. Reemplaza el cuerpo y nada más. */
   cuerpo?: string | null;
 }
+
 
 function severityMessage(severity: string | undefined): string {
   if (severity === "critical") {
@@ -55,6 +62,7 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
 
   const cuerpo = `${urgencyMsg}\n\n${derivacion}\n\n${sinAccion}\n\n${agregar}`;
   const redactado = data.cuerpo?.trim();
+  const diferencia = laDiferencia(data);
 
   const prosaHtml = redactado
     ? textoAHtml(redactado)
@@ -69,12 +77,13 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #b91c1c;">Tu reclamo fue asignado a un especialista</h1>
   ${prosaHtml}
+  ${diferencia ? `<p>${escapeHtml(diferencia)}</p>` : ""}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
   <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${escapeHtml(data.caseId)}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.</p>
 </body>
 </html>`;
 
-  const text = `Tu reclamo fue asignado a un especialista\n\n${redactado ?? cuerpo}\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
+  const text = `Tu reclamo fue asignado a un especialista\n\n${redactado ?? cuerpo}${diferencia ? `\n\n${diferencia}` : ""}\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
 
   return { subject, html, text, cuerpo };
 }

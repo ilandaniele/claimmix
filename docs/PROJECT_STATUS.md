@@ -119,25 +119,44 @@ Corrélo después de cada deploy. Detalle completo en
     enforces it, in the job `if:` and in the `concurrency` group alike.
   - The QA hash URL sits behind Vercel Auth and the repo's automation bypass
     secret belongs to the other project, so k6 measures the public alias.
-- **Every Preview deploy of `claimmix` answers 500, and it is the environment,
-  not the branch.** Measured 2026-09-18 from CI with the automation bypass:
-  `/` and `/login` return `500` with no `x-vercel-error` header and a plain
-  `Internal Server Error` body — an application 500, not a platform one — while
-  `https://claimmix.vercel.app` and `https://claimmix-qa.vercel.app` serve the
-  same paths fine. So the code is not the problem; what the Preview scope has
-  is.
-  - `/api/health` answers its own `401 UNAUTHORIZED` on the same deploy. That
-    route is reached, so `instrumentation.ts` ran and `BETTER_AUTH_SECRET` is
-    present — the process boots. It also never touches the database before
-    checking the token, which is why it is the one path that survives.
+- **⛔ The Preview environment of `claimmix` has no `DATABASE_URL`.** That is
+  the whole 500, diagnosed and closed on 2026-09-18. The deploy says it itself:
+
+      GET /api/admin/health
+      {"status":"degraded","db":"error","db_error":"DATABASE_URL is not set"}
+
+  Fix it in the Vercel dashboard — Settings → Environment Variables, and tick
+  **Preview**, not only Production. `CRON_SECRET` is missing from that scope
+  too: `/api/health` answers 401 to the repo secret that production accepts.
+  Nothing in this repo can set either one.
+  - **How it was narrowed, so nobody redoes it.** Measured from CI with the
+    automation bypass, on the same preview deploy:
+
+        /                  500   (sin x-vercel-error, "Internal Server Error")
+        /login             500   (idem)
+        /privacy           200   <!DOCTYPE html>…
+        /demo              200   <!DOCTYPE html>…
+        /api/health        401
+        /api/admin/health  200   db_error: DATABASE_URL is not set
+
+    `/privacy` and `/demo` are the only two pages the middleware returns
+    without consulting the session — public and not in `SOLO_ANONIMOS`. They
+    serve whole HTML, which rules out the build, the runtime, the CSP and
+    `instrumentation.ts`: a failing `exigirSecretoDeSesion()` would take them
+    down as well. The split leaves exactly one suspect, `auth.api.getSession`,
+    and `/api/admin/health` names it.
   - **A database outage takes `/login` down with it.** `src/proxy.ts` lists
     `/login` in `SOLO_ANONIMOS`, so even though the path is public the
     middleware still calls `auth.api.getSession` on it to bounce anyone who is
     already signed in. That is a query. There is no "degraded but you can still
     log in" mode: if the data layer is unreachable, the login page 500s too.
-  - k6 against a preview cannot pass while this lasts, and Carga is not a
-    required check on `main`, so it does not block a merge. It also is not
-    green — do not read the merge as the 500 being fixed.
+  - **Carga on previews cannot pass until that variable exists**, because k6
+    starts by logging in. Carga is not a required check on `main`, so it never
+    blocked a merge; it also was never green. The standing decision to make is
+    either to load the Preview variables or to stop aiming Carga at previews —
+    running it against an environment with no database measures nothing.
+  - The `if: failure()` diagnostics that produced the table above live in
+    `load-tests.yml` and cost nothing on a green run. Leave them.
 
 ## Status by area
 

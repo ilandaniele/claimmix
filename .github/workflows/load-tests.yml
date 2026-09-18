@@ -257,6 +257,41 @@ jobs:
             echo
           done
 
+      # Y una vez que se sabe que el 500 es de la aplicación y no de la
+      # plataforma, falta cuál de las dependencias es la que no contesta.
+      #
+      # `/api/health` es el único que lo dice desde ADENTRO del deploy: corre
+      # con las variables de ESE entorno y reporta, dependencia por
+      # dependencia, qué alcanza. Sin esto el diagnóstico se queda en «algo
+      # tira 500» y hay que adivinar cuál de las once variables falta.
+      #
+      # Sale el nombre, el estado y el detalle recortado de cada chequeo. No
+      # son secretos: es el mapa de qué está configurado, que es justamente lo
+      # que el `Bearer CRON_SECRET` protege de los de afuera.
+      - name: ¿Qué dependencia del deploy no contesta?
+        if: failure() && steps.llave.outputs.hay == '1'
+        env:
+          URL: ${{ steps.destino.outputs.url }}
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "Sin CRON_SECRET del repositorio no se puede interrogar a /api/health."
+            exit 0
+          fi
+          COD=$(curl -s -o salud.json -w '%{http_code}' \
+            -H "x-vercel-protection-bypass: $BYPASS" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$URL/api/health")
+          echo "/api/health -> $COD"
+          if jq -e . salud.json > /dev/null 2>&1; then
+            jq -r '"entorno=" + (.environment // "?") + " commit=" + (.commit // "?") + " estado=" + (.status // "?")' salud.json
+            jq -r '.checks[]? | "  " + .name + ": " + .status + " — " + (.detail // "" | .[0:120])' salud.json
+          else
+            head -c 300 salud.json
+            echo
+          fi
+
       # `always()`: el reporte de la corrida que FALLÓ es el que hay que mirar.
       - name: Guardar el reporte
         if: always() && steps.llave.outputs.hay == '1' 

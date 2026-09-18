@@ -2934,6 +2934,65 @@ comprueba el hueco en píxeles bajo la tarjeta a 1280×800 y que el contenedor d
 la lista tenga de verdad a dónde scrollear. Una captura no habría servido: lo
 que falla acá es aritmética de layout.
 
+### 🔔 «Sin registro» en el timbre: lo que puede y lo que no puede significar (2026-09-18)
+
+El post-deploy de `5e63300` salió rojo en `Tocar el timbre`, sólo en la rama de
+mail, con el caso creado, 18 campos extraídos y ninguna respuesta:
+
+```
+   ✓ se creó el caso — e3c06ece-89f8-4f50-bd63-847a3d27de09
+   ✓ extrajo los datos — 18 campo(s)
+   ✓ no lo tomó por spam — info_faltante
+   ✗ el agente contestó
+   ✗ y la respuesta NO salió del edificio — sin registro
+```
+
+La re-corrida dio los siete jobs en verde sin tocar una línea, y el commit
+siguiente también, así que como suceso es varianza. Lo que queda escrito acá es
+lo otro: qué puede significar ese «sin registro», porque se investigó entero y
+la próxima vez no hay que volver a hacerlo.
+
+**«Sin registro» sólo puede ser cero filas.** `outbound_messages.status` tiene
+`.default("queued")` (`src/lib/db/schema/core.ts:266`), así que no existe la
+fila a medio escribir sin estado: o hay respuesta compuesta, o no hay fila.
+
+**El `info_faltante` de la línea de arriba NO lo puso el agente.** Lo pone la
+extracción: `status-after-extraction.ts:63` devuelve `info_faltante` en cuanto
+falta un campo obligatorio, y `src/server/worker/extract.ts:790` lo escribe.
+O sea que la extracción llegó al final, y lo que no dejó nada es la etapa del
+agente.
+
+**La rama silenciosa del orquestador no es candidata, y conviene saberlo.**
+`orchestrate.ts:737` fija el estado y no escribe ningún mensaje —es correcto: no
+se vuelve a preguntar lo mismo—, pero para entrar ahí hace falta `askOnHold`, y
+`elPedidoQuedaEnEspera` es `(yaSePidio || elAgenteEspera) && …`
+(`src/core/case/reply-decision.ts:70-72`). En un caso al que nadie le escribió
+todavía las dos son falsas. El timbre crea un caso nuevo en cada corrida, así
+que por ahí no pasa. Un silencio deliberado y una invocación cortada se ven
+igual en el reporte; acá se distinguen por el código, no por el síntoma.
+
+**Queda una sola explicación: la invocación no llegó al mensajero.** Es el
+incidente que ya está contado en `src/server/email/gmail/gmail-poller.ts:193-205`
+(08/09). El mail paga un salto más que WhatsApp: el poller le pasa el trabajo a
+`/api/worker/extract`, que es otra invocación con su propio techo de 60 s
+(`vercel.json:19`) y su propio arranque en frío, mientras que WhatsApp resuelve
+`runIntakeAgent` adentro del `after()` de su propio webhook. Y el mail corre
+primero, que es cuando la función está más fría. La asimetría es
+infraestructural, no del agente: las dos ramas esperan lo mismo.
+
+**Lo que esto NO arregla, y por eso no se tocó el camino del mail:** las tres
+llamadas al modelo —extracción, deliberación y redacción— no tienen timeout de
+proveedor por debajo del techo de la función. Un modelo que no contesta nunca
+deja al asegurado esperando, y eso no se arregla esperándolo más tiempo desde el
+guión. Lo que cubre ese caso es `barrer-trabados.yml`, que escala lo trabado
+cada quince minutos.
+
+**Lo que sí se arregló, que era del reporte y no del producto:** las dos cruces
+de arriba contaban el mismo hecho dos veces y el resumen decía «2 problema(s)»
+donde hay uno (#223), y las dos lecturas del guión no seguían la regla del
+archivo — `replyFor` contaba vueltas en vez de mirar el reloj, y ni ella ni
+`fieldsFor` filtraban por `tenant_id` (#224).
+
 ### 🙋 Waiting on you (not code)
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,

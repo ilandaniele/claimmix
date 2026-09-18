@@ -119,6 +119,25 @@ Corrélo después de cada deploy. Detalle completo en
     enforces it, in the job `if:` and in the `concurrency` group alike.
   - The QA hash URL sits behind Vercel Auth and the repo's automation bypass
     secret belongs to the other project, so k6 measures the public alias.
+- **Every Preview deploy of `claimmix` answers 500, and it is the environment,
+  not the branch.** Measured 2026-09-18 from CI with the automation bypass:
+  `/` and `/login` return `500` with no `x-vercel-error` header and a plain
+  `Internal Server Error` body — an application 500, not a platform one — while
+  `https://claimmix.vercel.app` and `https://claimmix-qa.vercel.app` serve the
+  same paths fine. So the code is not the problem; what the Preview scope has
+  is.
+  - `/api/health` answers its own `401 UNAUTHORIZED` on the same deploy. That
+    route is reached, so `instrumentation.ts` ran and `BETTER_AUTH_SECRET` is
+    present — the process boots. It also never touches the database before
+    checking the token, which is why it is the one path that survives.
+  - **A database outage takes `/login` down with it.** `src/proxy.ts` lists
+    `/login` in `SOLO_ANONIMOS`, so even though the path is public the
+    middleware still calls `auth.api.getSession` on it to bounce anyone who is
+    already signed in. That is a query. There is no "degraded but you can still
+    log in" mode: if the data layer is unreachable, the login page 500s too.
+  - k6 against a preview cannot pass while this lasts, and Carga is not a
+    required check on `main`, so it does not block a merge. It also is not
+    green — do not read the merge as the 500 being fixed.
 
 ## Status by area
 

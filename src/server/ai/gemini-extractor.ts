@@ -454,7 +454,7 @@ export async function callGemini(
 }
 
 /** Extract status/code from a thrown error for structured logging. */
-function errMeta(e: unknown): { name: string; status: number | null; code: string | null } {
+export function errMeta(e: unknown): { name: string; status: number | null; code: string | null } {
   const name = e instanceof Error ? e.name : "UnknownError";
   const cause = (e as GeminiExtractionError)?.cause as
     | { status?: number; code?: string }

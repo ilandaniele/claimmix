@@ -12,6 +12,11 @@
 
 vi.mock("@/server/ai/gemini-extractor", () => ({
   callGemini: vi.fn(),
+  errMeta: (e: unknown) => ({
+    name: e instanceof Error ? e.name : "UnknownError",
+    status: null,
+    code: null,
+  }),
 }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

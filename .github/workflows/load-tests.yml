@@ -53,8 +53,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     # El evento `deployment_status` llega también para estados intermedios y
-    # para producción. Acá sólo interesa una vista previa que terminó bien:
-    # contra producción esto no corre solo nunca.
+    # para producción. Acá interesan las vistas previas que terminaron bien y
+    # el proyecto de QA: contra la producción de los clientes esto no corre
+    # solo nunca.
+    #
+    # QA entra por el `endsWith`, y hace falta porque su deploy llega
+    # etiquetado `Production – claimmix-qa` —GitHub le agrega el nombre del
+    # proyecto cuando hay más de uno— y la exclusión de arriba lo sacaba junto
+    # con producción. Medir ahí es lo que siempre se quiso: la cuenta de
+    # pruebas vive en la rama `qa` de Neon, que es la que lee ese deploy, y no
+    # existe en la base de producción.
     #
     # ⛔ `!= 'Production'` NO alcanza, y era peligroso. Cuando nació el segundo
     # proyecto de Vercel, GitHub pasó a llamar al entorno `Production – claimmix`
@@ -65,7 +73,8 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
-       !startsWith(github.event.deployment.environment, 'Production'))
+       (!startsWith(github.event.deployment.environment, 'Production') ||
+        endsWith(github.event.deployment.environment, '-qa')))
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

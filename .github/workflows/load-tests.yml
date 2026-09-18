@@ -251,7 +251,12 @@ jobs:
           # la base (`src/proxy.ts`, pasos 4 y 5). `/` y `/login` sí la
           # consultan. Si estas dos contestan 200 y esas dos 500, el que no
           # contesta es la capa de datos y no queda nada más que mirar.
-          for RUTA in / /login /privacy /demo /api/health; do
+          # `/api/admin/health` es el único que dice POR QUÉ: es público —está
+          # en `PUBLIC_PREFIXES`— y su `dbError` trae el código de Postgres o
+          # los primeros 50 caracteres del mensaje. Eso separa «la variable no
+          # está» de «la variable está y la base no contesta», que es lo último
+          # que queda por saber y no se puede mirar desde afuera.
+          for RUTA in / /login /privacy /demo /api/health /api/admin/health; do
             CUERPO=$(curl -s -D - -o cuerpo.txt -H "x-vercel-protection-bypass: $BYPASS" "$URL$RUTA")
             COD=$(printf '%s' "$CUERPO" | head -1)
             # `x-vercel-error` es lo que separa un fallo de la plataforma

@@ -2972,6 +2972,16 @@ que falla acá es aritmética de layout.
   contesta el esquema sin conectar, con test. No queda ningún PR de dependabot
   abierto.
 
+- **La última alerta de Dependabot no tenía PR que mergear: `devalue` < 5.9.1.**
+  Cerrada el 18/09 con #221. No hay dependencia directa sobre `devalue`: entra
+  por `workflow@4.8.5` → `@workflow/core@4.8.5`, así que dependabot no podía
+  abrir un bump y actualizar el `package.json` no la movía. Se fija en
+  `pnpm.overrides` con `">=5.9.2"`, que es lo que el repositorio ya hace con
+  otras ocho transitivas (`esbuild`, `browserslist`, `postcss`, `fast-uri`,
+  `nanoid`, `qs`, `undici`, `sharp`). Cuando una alerta señale una transitiva,
+  ése es el camino: override, `pnpm install --lockfile-only`, `pnpm verify`.
+  Hoy no queda ninguna alerta abierta.
+
 - **El ensayo del post-deploy ya no cae por un pico de Gemini.** El 15/09 dio
   rojo 5 de 8 veces por `transport_timeout` (30 s) en dos a cinco casos de mail
   por corrida, con producción sana. Desde #175, cuando un turno esperaba

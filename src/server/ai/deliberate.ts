@@ -29,7 +29,7 @@
 import "server-only";
 
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
-import { callGemini } from "@/server/ai/gemini-extractor";
+import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { describeTools, runTool, type ToolContext } from "@/server/ai/agent-tools";
 import { redactObject, redactString } from "@/lib/audit/redact";
@@ -170,7 +170,14 @@ export async function deliberate(
 
     return plan;
   } catch (err) {
-    logger.error({ detalle: err instanceof Error ? err.name : "UnknownError" }, "deliberate.failed");
+    // El nombre del error solo no distingue un 429 de un MAX_TOKENS.
+    const meta = errMeta(err);
+    logger.error({
+        error_name: meta.name,
+        status: meta.status,
+        code: meta.code,
+        detalle: err instanceof Error ? err.message.slice(0, 200) : undefined,
+      }, "deliberate.failed");
     return null;
   }
 }

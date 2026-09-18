@@ -245,7 +245,13 @@ jobs:
           URL: ${{ steps.destino.outputs.url }}
           BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
-          for RUTA in / /login /api/health; do
+          # `/privacy` y `/demo` están en la lista porque son las dos únicas
+          # rutas de página que NO consultan la sesión: son públicas y no están
+          # en `SOLO_ANONIMOS`, así que el middleware las deja pasar sin tocar
+          # la base (`src/proxy.ts`, pasos 4 y 5). `/` y `/login` sí la
+          # consultan. Si estas dos contestan 200 y esas dos 500, el que no
+          # contesta es la capa de datos y no queda nada más que mirar.
+          for RUTA in / /login /privacy /demo /api/health; do
             CUERPO=$(curl -s -D - -o cuerpo.txt -H "x-vercel-protection-bypass: $BYPASS" "$URL$RUTA")
             COD=$(printf '%s' "$CUERPO" | head -1)
             # `x-vercel-error` es lo que separa un fallo de la plataforma

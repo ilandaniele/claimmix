@@ -57,6 +57,14 @@ export function cabecerasDeVercel() {
   return { "x-vercel-protection-bypass": BYPASS };
 }
 
+/** Como `comoAnalista` pero sin sesión: nadie arma sus cabeceras a mano. */
+export function comoVisitante(tags = {}) {
+  return {
+    headers: cabecerasDeVercel(),
+    tags: { escenario: "publico", ...tags },
+  };
+}
+
 const ES_LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(BASE_URL);
 
 /**
@@ -115,6 +123,12 @@ export const RUTAS = {
   clientes: "/api/customers?page=1&per_page=25",
   polizas: "/api/policies?page=1&per_page=25",
 };
+
+/**
+ * Las páginas que el middleware sirve sin leer la sesión, o sea las que
+ * contestan con la base de datos caída. Ver `src/proxy.ts:30,40,53-55`.
+ */
+export const RUTAS_PUBLICAS = ["/privacy", "/demo", "/terms", "/restablecer"];
 
 /**
  * Las que llevan el id de un caso.

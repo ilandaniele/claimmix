@@ -139,8 +139,10 @@ Corrélo después de cada deploy. Detalle completo en
         /api/health        401
         /api/admin/health  200   db_error: DATABASE_URL is not set
 
-    `/privacy` and `/demo` are the only two pages the middleware returns
-    without consulting the session — public and not in `SOLO_ANONIMOS`. They
+    `/privacy` and `/demo` are pages the middleware returns without consulting
+    the session — public and not in `SOLO_ANONIMOS`. So are `/terms` and
+    `/restablecer` (`src/proxy.ts:30,40,53-55`); an earlier version of this note
+    called those two the only ones, and that was wrong. They
     serve whole HTML, which rules out the build, the runtime, the CSP and
     `instrumentation.ts`: a failing `exigirSecretoDeSesion()` would take them
     down as well. The split leaves exactly one suspect, `auth.api.getSession`,
@@ -150,11 +152,18 @@ Corrélo después de cada deploy. Detalle completo en
     middleware still calls `auth.api.getSession` on it to bounce anyone who is
     already signed in. That is a query. There is no "degraded but you can still
     log in" mode: if the data layer is unreachable, the login page 500s too.
-  - **Carga on previews cannot pass until that variable exists**, because k6
-    starts by logging in. Carga is not a required check on `main`, so it never
-    blocked a merge; it also was never green. The standing decision to make is
-    either to load the Preview variables or to stop aiming Carga at previews —
-    running it against an environment with no database measures nothing.
+  - **Carga on previews cannot pass until that variable exists**, because the
+    six scenarios with a session start by logging in. Carga is not a required
+    check on `main`, so it never blocked a merge; it also was never green.
+  - **But it no longer dies without measuring anything.** Since 2026-09-18 the
+    job probes `/api/admin/health` first — reading the body, not the status,
+    because that endpoint answers 200 with the database down — and when there is
+    no database it runs `tests/load/scenarios/publico.js` instead: the four
+    session-free pages, one VU, thirty seconds, its own p(95) < 1000 ms budget.
+    It still ends **red**, with an `::error title=Carga a medias` naming the half
+    that was not measured, and the artifact is called `carga-publico` so the name
+    does not lie about what is inside it. Numbers now, red still. The red turns
+    itself off the day Preview gets the variables; nothing to edit here.
   - The `if: failure()` diagnostics that produced the table above live in
     `load-tests.yml` and cost nothing on a green run. Leave them.
 

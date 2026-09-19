@@ -265,11 +265,35 @@ jobs:
           # La vista previa no es localhost, así que un perfil pesado pide
           # permiso explícito. El smoke del deploy no lo necesita.
           PERMITIR_REMOTO: ${{ inputs.permitir_remoto && '1' || '0' }}
-          # La misma cuenta de pruebas que usa Playwright. UNA sesión para todos
-          # los VUs: el login tiene tope de cinco intentos cada diez segundos y
-          # doscientos VUs logueándose miden ese tope. Ver `helpers/auth.js`.
-          LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_TEST_EMAIL }}
-          LOAD_TEST_PASSWORD: ${{ secrets.PLAYWRIGHT_TEST_PASSWORD }}
+          # La cuenta ADMIN de Playwright, no la de analista, y el motivo es que
+          # dos de las seis rutas medidas no las puede ver una analista.
+          #
+          # `/api/customers` y `/api/policies` entran con `CUSTOMER_PII_ROLES`
+          # —`owner`, `admin`, `specialist`— en `customers/route.ts:33` y
+          # `policies/route.ts:31`. `analyst` está fuera a propósito: es el
+          # padrón, y la decisión está escrita en `lib/auth/roles.ts:45`. La
+          # cuenta que había acá era `PLAYWRIGHT_TEST_EMAIL`, o sea Paula, que
+          # `sembrar-para-integracion.mts:232` da de alta como `analyst`.
+          #
+          # Así que el smoke medía cuatro rutas y contaba 403 en las otras dos.
+          # Medido en la corrida 35464921889: `32.9% fallidos · 79 pedidos`, que
+          # son 13 vueltas por 2 rutas, exacto. Cruzaba `checks` y
+          # `http_req_failed`, nunca `http_req_duration`: no era latencia.
+          #
+          # La contraseña sale de `INTEGRATION_ADMIN_PASSWORD` y no de
+          # `PLAYWRIGHT_ADMIN_PASSWORD` aunque el mail salga de la familia
+          # `PLAYWRIGHT_`. No es un descuido: `INTEGRATION_ADMIN_PASSWORD` es la
+          # que `sembrar-para-integracion.mts:94,230` le escribe a Mariela en la
+          # rama de ensayo (`ci.yml:331`), o sea la única que por construcción es
+          # la que la cuenta tiene puesta. La otra tendría que coincidir y no hay
+          # forma de comprobarlo sin gastar un deploy.
+          #
+          # UNA sesión para todos los VUs: el login tiene tope de cinco intentos
+          # cada diez segundos y doscientos VUs logueándose miden ese tope. Ver
+          # `helpers/auth.js`. Ojo que este `env` cuelga del paso entero, así que
+          # los perfiles de 50 VUs también miden con la cuenta admin.
+          LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_ADMIN_EMAIL }}
+          LOAD_TEST_PASSWORD: ${{ secrets.INTEGRATION_ADMIN_PASSWORD }}
           VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
       # Sin base, se mide lo que hay: las cuatro páginas que el middleware

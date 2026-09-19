@@ -20,8 +20,10 @@
  * limitador. Y la corrida sale roja por `http_req_failed` mientras el p95 sale
  * VERDE, porque un 429 se contesta rapidísimo. Es el p95 de que te rechacen.
  *
- * Cincuenta analistas de verdad tienen cincuenta baldes de 100. Para
- * reproducir eso hacen falta varias cuentas, y el reparto es `__VU % n`.
+ * Cincuenta usuarios de verdad tienen cincuenta baldes de 100. Para reproducir
+ * eso hacen falta varias cuentas, y el reparto es `__VU % n`. Hoy hay una sola
+ * y es admin: el rol no cambia el cupo —el balde es por usuario y por ruta— y
+ * sí cambia qué rutas contestan 200, que es lo que hacía falta arreglar.
  *
  * `scripts/load-test.mts` ya había documentado exactamente este problema como
  * la razón para NO escribir la versión por HTTP. Se escribió igual, y sin esto.

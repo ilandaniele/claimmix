@@ -189,20 +189,11 @@ jobs:
       # viene de un fork, que por diseño no recibe secretos; en cualquier otro
       # caso falta el secreto porque nadie lo creó, y eso tiene que ser rojo.
       #
-      # El secreto ya existe en el repo desde el 17/09. Acá decía que no, y que
-      # por eso este job salía en rojo en cada corrida; las dos cosas dejaron de
-      # ser ciertas y la nota se quedó.
-      #
-      # Acá decía que también faltaban `LOAD_TEST_EMAIL` y `LOAD_TEST_PASSWORD`.
-      # Era falso, y lo desmiente este mismo archivo treinta líneas más abajo:
-      # no son secretos, son variables que el job arma desde
-      # `PLAYWRIGHT_TEST_EMAIL` y `PLAYWRIGHT_TEST_PASSWORD`.
-      #
-      # Falta UN secreto acá. Lo que sigue faltando después no es un secreto: la
-      # cuenta de Playwright vive en la base de ENSAYO, y los únicos destinos que
-      # acepta el paso de abajo leen la de PRODUCCIÓN, así que el login de
-      # `setup()` va a dar 401 igual. Las tres salidas están en docs/PROMOCION.md,
-      # paso 5.
+      # El secreto existe en el repo desde el 17/09, y desde el 19/09 el alcance
+      # Preview del proyecto tiene `DATABASE_URL`, `DATABASE_URL_APP` y
+      # `BETTER_AUTH_SECRET` apuntando a la rama de ENSAYO de Neon, que es donde
+      # vive la cuenta con la que entra `setup()`. Con eso el job mide de verdad:
+      # la corrida 35466095444 dio `p95 530 ms · 0% fallidos · 67 pedidos`.
       - name: ¿Hay llave para la vista previa?
         id: llave
         env:
@@ -265,11 +256,35 @@ jobs:
           # La vista previa no es localhost, así que un perfil pesado pide
           # permiso explícito. El smoke del deploy no lo necesita.
           PERMITIR_REMOTO: ${{ inputs.permitir_remoto && '1' || '0' }}
-          # La misma cuenta de pruebas que usa Playwright. UNA sesión para todos
-          # los VUs: el login tiene tope de cinco intentos cada diez segundos y
-          # doscientos VUs logueándose miden ese tope. Ver `helpers/auth.js`.
-          LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_TEST_EMAIL }}
-          LOAD_TEST_PASSWORD: ${{ secrets.PLAYWRIGHT_TEST_PASSWORD }}
+          # La cuenta ADMIN de Playwright, no la de analista, y el motivo es que
+          # dos de las seis rutas medidas no las puede ver una analista.
+          #
+          # `/api/customers` y `/api/policies` entran con `CUSTOMER_PII_ROLES`
+          # —`owner`, `admin`, `specialist`— en `customers/route.ts:33` y
+          # `policies/route.ts:31`. `analyst` está fuera a propósito: es el
+          # padrón, y la decisión está escrita en `lib/auth/roles.ts:45`. La
+          # cuenta que había acá era `PLAYWRIGHT_TEST_EMAIL`, o sea Paula, que
+          # `sembrar-para-integracion.mts:232` da de alta como `analyst`.
+          #
+          # Así que el smoke medía cuatro rutas y contaba 403 en las otras dos.
+          # Medido en la corrida 35464921889: `32.9% fallidos · 79 pedidos`, que
+          # son 13 vueltas por 2 rutas, exacto. Cruzaba `checks` y
+          # `http_req_failed`, nunca `http_req_duration`: no era latencia.
+          #
+          # La contraseña sale de `INTEGRATION_ADMIN_PASSWORD` y no de
+          # `PLAYWRIGHT_ADMIN_PASSWORD` aunque el mail salga de la familia
+          # `PLAYWRIGHT_`. No es un descuido: `INTEGRATION_ADMIN_PASSWORD` es la
+          # que `sembrar-para-integracion.mts:94,230` le escribe a Mariela en la
+          # rama de ensayo (`ci.yml:331`), o sea la única que por construcción es
+          # la que la cuenta tiene puesta. La otra tendría que coincidir y no hay
+          # forma de comprobarlo sin gastar un deploy.
+          #
+          # UNA sesión para todos los VUs: el login tiene tope de cinco intentos
+          # cada diez segundos y doscientos VUs logueándose miden ese tope. Ver
+          # `helpers/auth.js`. Ojo que este `env` cuelga del paso entero, así que
+          # los perfiles de 50 VUs también miden con la cuenta admin.
+          LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_ADMIN_EMAIL }}
+          LOAD_TEST_PASSWORD: ${{ secrets.INTEGRATION_ADMIN_PASSWORD }}
           VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
       # Sin base, se mide lo que hay: las cuatro páginas que el middleware
@@ -287,7 +302,7 @@ jobs:
         run: |
           mkdir -p resultados
           k6 run tests/load/scenarios/publico.js
-          echo "::error title=Carga a medias::El destino contesta sin base de datos, así que se midió sólo la mitad pública (/privacy, /demo, /terms, /restablecer) y NO se midió nada detrás de la sesión. Los números que sí se tomaron están en el artefacto. Para medir la otra mitad hace falta DATABASE_URL en el alcance Preview del proyecto claimmix; las tres salidas están en docs/PROMOCION.md, paso 5."
+          echo "::error title=Carga a medias::El destino contesta sin base de datos, así que se midió sólo la mitad pública (/privacy, /demo, /terms, /restablecer) y NO se midió nada detrás de la sesión. Los números que sí se tomaron están en el artefacto. Para medir la otra mitad hacen falta DATABASE_URL, DATABASE_URL_APP y BETTER_AUTH_SECRET en el alcance Preview del proyecto claimmix; las tres salidas están en docs/PROMOCION.md, paso 5."
           exit 1
         env:
           BASE_URL: ${{ steps.destino.outputs.url }}

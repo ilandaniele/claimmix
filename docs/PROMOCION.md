@@ -252,55 +252,77 @@ configuración.
 ⚠ **QA comparte la cuota de Vertex con producción**: es el mismo proyecto de GCP.
 El 2026-09-17, sin QA corriendo, devolvió `RESOURCE_EXHAUSTED` tres veces.
 
-### 5. Un secreto, y dónde mide k6
+### 5. Dónde mide k6 — HECHO contra vistas previas
 
-Acá decía que el job `k6` de `load-tests.yml` estaba **rojo a propósito** porque
-le faltaba un secreto. Ya no: `VERCEL_AUTOMATION_BYPASS_SECRET` existe en el repo
-desde el 17/09, el job pasa esa puerta y corre k6 de verdad. Lo que antes venía
-verde sin haber ejecutado k6 una sola vez ahora mide — y lo primero que midió
-también es rojo, pero por otra cosa: contra una vista previa de `claimmix`, el
-login devolvió **500**.
+El job `k6` de `load-tests.yml` mide de verdad. La corrida 35466095444, contra
+una vista previa de `claimmix`, dio `smoke: p95 530 ms · 0% fallidos · 67
+pedidos`. Llegar ahí pidió tres cosas, y ninguna de las tres se ve desde el
+workflow.
 
-Acá decía que faltaban **tres** secretos. Era falso: `LOAD_TEST_EMAIL` y
-`LOAD_TEST_PASSWORD` no son secretos de GitHub, son variables que el workflow
-arma solo desde `PLAYWRIGHT_TEST_EMAIL` y `PLAYWRIGHT_TEST_PASSWORD`
-(`load-tests.yml:227-228`, desde #121). Crearlos no hubiera servido de nada.
+**Un secreto.** `VERCEL_AUTOMATION_BYPASS_SECRET` se creó en Vercel —`claimmix`
+→ Settings → Deployment Protection → Protection Bypass for Automation— y se
+cargó en el repositorio el 17/09. Sin él, el job se salteaba k6 entero y salía
+verde sin haber medido nada.
 
-Lo que falta de verdad es una sola cosa, y no se arregla con un secreto.
+**Cuatro variables en el alcance Preview de `claimmix`**, cargadas el 19/09
+(Settings → Environment Variables), sin tocar las de `Production`. Vercel admite
+el mismo nombre dos veces mientras los entornos no se solapen. Las cuatro, y por
+qué cada una:
 
-**El secreto ya está.** `VERCEL_AUTOMATION_BYPASS_SECRET` se creó en Vercel
-—`claimmix` → Settings → Deployment Protection → Protection Bypass for
-Automation— y se cargó en el repo el 17/09; aparece en `gh secret list`. Acá
-decía que faltaba, y la línea sobrevivió al día en que se creó.
+- `DATABASE_URL` apuntando a la rama de Neon de **ensayo** —la misma que usa
+  Playwright—, **nunca** a producción. Ahí vive la cuenta con la que entra
+  `setup()`; `sembrar-para-integracion.mts:21-29` se planta si le pasás la de
+  producción. Sin esto el login devolvía **500**: la vista previa arrancaba
+  entera menos la base.
+- `DATABASE_URL_APP` a esa misma rama, **con el rol restringido**. La capa de
+  datos la lee sin respaldo (`src/data/scope.ts:109`, «esta capa NO usa
+  DATABASE_URL») y las seis rutas del smoke pasan todas por ahí. Si entra como
+  el dueño, `src/data/scope.ts:187` corta la corrida y nombra el usuario: un rol
+  con BYPASSRLS haría pasar las pruebas leyendo los datos de todas las
+  aseguradoras a la vez.
+- `BETTER_AUTH_SECRET` con un valor **propio de Preview**, distinto del de
+  `Production`. Es el que firma las cookies de sesión, y las vistas previas son
+  públicas salvo por el bypass: compartir el secreto significa que una cookie
+  fabricada contra cualquier vista previa vale también contra
+  `claimmix.vercel.app`. Se genera con `openssl rand -base64 32`. Sin él la
+  sonda elegía `smoke` —la base contestaba— y `setup()` moría con «El login
+  contestó 500»; el log del deploy lo decía: `[BetterAuthError] You are using
+  the default secret`. El comentario de `src/lib/auth/index.ts:26-50` explica
+  por qué better-auth no rompe solo y por qué la comprobación vive en
+  `instrumentation.ts`.
+- `CRON_SECRET`, con el mismo valor que el secreto del repositorio. No cambia lo
+  que se mide: lo usa el paso de diagnóstico `¿Qué dependencia del deploy no
+  contesta?`, que corre con `if: failure()` e interroga `/api/health` con
+  `Bearer`. Si no coincide, ese paso recibe 401 y el diagnóstico se pierde justo
+  el día que sirve.
 
-**Y falta una cuenta que k6 pueda usar donde k6 mide.** Los seis escenarios
-arrancan haciendo login (`tests/load/helpers/auth.js:46-60`; sin credenciales,
-`fail()`). La cuenta cableada hoy es la de Playwright, y esa vive en la base de
-**ensayo**: `sembrar-para-integracion.mts` siembra contra `SEED_DATABASE_URL` o,
-si no está, `STAGING_DATABASE_URL`, y se planta si le pasás la de producción
-(`scripts/sembrar-para-integracion.mts:21-29`). La lista blanca de destinos
-(`load-tests.yml:160-166`) acepta el alias de producción de `claimmix`, el de
-`claimmix-qa` y las vistas previas del proyecto; los dos primeros de esa lista
-—el alias de `claimmix` y sus vistas previas— leen la base de **producción**,
-donde esa cuenta no existe. Acá decía que el login iba a devolver 401. Medido
-contra una vista previa de `claimmix`, devolvió **500**.
+**Y una cuenta con el rol correcto.** Con las cuatro variables cargadas la
+corrida seguía roja: `32.9% fallidos · 79 pedidos`, 26 fallos exactos = 13
+vueltas × 2 rutas. La cuenta cableada era `PLAYWRIGHT_TEST_EMAIL`, o sea Paula,
+que `sembrar-para-integracion.mts` siembra como `analyst`, y `/api/customers` y
+`/api/policies` exigen `CUSTOMER_PII_ROLES` (`src/lib/auth/roles.ts:35`), que a
+propósito no incluye a los analistas: por ahí salen DNI, correo y teléfono. El
+job usa ahora `PLAYWRIGHT_ADMIN_EMAIL` con `INTEGRATION_ADMIN_PASSWORD` —la
+contraseña que el sembrador realmente le escribe a Mariela— y las seis rutas
+contestan 200.
 
-Ese rastrillo ya se pisó una vez, y está anotado en `playwright.config.ts:75-79`:
-«el login respondía “Credenciales inválidas” porque el servidor miraba
-producción, donde esas cuentas no existen».
+Ese rastrillo ya se había pisado una vez, y está anotado en
+`playwright.config.ts:75-79`: «el login respondía “Credenciales inválidas”
+porque el servidor miraba producción, donde esas cuentas no existen».
 
-**Desde que QA tiene base propia, esto ya no pide una cuenta nueva.** La rama de
-Neon se sacó del ensayo, así que las cuentas `PLAYWRIGHT_*` están adentro, y
-`load-tests.yml` ya acepta `https://claimmix-qa.vercel.app` como destino.
+#### Contra QA
 
-**Y ahora k6 sí elige QA solo.** El job se dispara por `deployment_status`, y la
-guarda pasó de excluir todo entorno que empiece con `Production` a
+`load-tests.yml` acepta `https://claimmix-qa.vercel.app` y QA tiene base propia
+(paso 4), así que las cuentas `PLAYWRIGHT_*` están adentro y no hace falta crear
+ninguna.
+
+**k6 elige QA solo.** El job se dispara por `deployment_status` y la guarda pasó
+de excluir todo entorno que empiece con `Production` a
 `(!startsWith(github.event.deployment.environment, 'Production') ||
 endsWith(github.event.deployment.environment, '-qa'))` (`load-tests.yml:73-77`):
-el entorno de producción del proyecto de QA se llama `Production –
-claimmix-qa` —con guion largo, el nombre que arma GitHub para desambiguar dos
-proyectos—, y ese sufijo ya entra por el `endsWith`. Cada deploy de la rama `qa`
-mide solo, sin disparar nada a mano.
+el entorno de producción del proyecto de QA se llama `Production – claimmix-qa`
+—con guion largo, el nombre que arma GitHub para desambiguar dos proyectos— y
+ese sufijo entra por el `endsWith`.
 
 **Contra QA mide el ALIAS, no la URL del deploy** (`load-tests.yml:116-118`).
 Medido el 18/09: la URL con hash de `claimmix-qa` está detrás de Vercel Auth
@@ -309,60 +331,42 @@ aplicación— y el secreto de automatización que hay en el repositorio es el d
 OTRO proyecto, así que ahí k6 mediría la puerta. El alias de producción de QA es
 público, y además es la URL contra la que prueba una persona.
 
-⛔ **Y va a seguir rojo hasta que `NEXT_PUBLIC_SITE_URL` esté cargada en
-`claimmix-qa`** (paso 4bis): el login de `setup()` se come el `403
-INVALID_ORIGIN` de arriba y la corrida muere antes de medir nada. El mensaje de
-error lo dice con esas palabras desde ahora (`tests/load/helpers/auth.js:99-106`).
+⛔ **Va a salir rojo hasta que `NEXT_PUBLIC_SITE_URL` esté cargada en
+`claimmix-qa`** (paso 4bis): el login de `setup()` se come un `403
+INVALID_ORIGIN` y la corrida muere antes de medir nada. El mensaje de error lo
+dice con esas palabras (`tests/load/helpers/auth.js:99-106`).
 
-**Contra una vista previa de `claimmix` ahora mide la mitad que se puede.** Ese
-500 del login no era la aplicación caída: las Preview de ese proyecto no tienen
-`DATABASE_URL`, así que arranca todo menos la base. Medido el 18/09 en la corrida
-35366436854: `/privacy`, `/demo` y `/api/admin/health` contestaban 200 —este
-último con `{"status":"degraded","db":"error","db_error":"DATABASE_URL is not
-set"}`— y `/` y `/login` contestaban 500. O sea que había una mitad medible y la
-corrida no medía ninguna, porque `setup()` moría primero.
+#### Cuando el destino no tiene base
 
-Desde ahora el job sondea `/api/admin/health` antes de elegir qué correr, y mira
-el CUERPO y no el código (ese endpoint es público y contesta 200 igual con la
-base caída). Sin base corre `tests/load/scenarios/publico.js`: las cuatro páginas
-que el middleware sirve sin leer la sesión —`/privacy`, `/demo`, `/terms`,
+El job sondea `/api/admin/health` antes de elegir qué correr, y mira el CUERPO y
+no el código (ese endpoint es público y contesta 200 igual con la base caída).
+Sin base corre `tests/load/scenarios/publico.js`: las cuatro páginas que el
+middleware sirve sin leer la sesión —`/privacy`, `/demo`, `/terms`,
 `/restablecer`, ver `src/proxy.ts:30,40,53-55`—, un VU, treinta segundos, con
 umbral propio de p(95) < 1000 ms porque son páginas de marketing y no el
 presupuesto de 500 ms del producto.
 
-⛔ **Y termina en rojo igual.** La mitad de adentro sigue sin medirse, y un verde
-que no midió lo que dice medir es peor que un rojo: el paso escribe un
-`::error title=Carga a medias` que nombra lo que NO se midió, y el artefacto se
-llama `carga-publico` y no `carga-smoke`, para que el nombre no mienta sobre lo
-que hay adentro. El rojo se apaga solo el día que la Preview tenga base, sin
-tocar el workflow.
-
-**Cómo se apaga:** cargar `DATABASE_URL` y `CRON_SECRET` en el alcance
-**Preview** del proyecto `claimmix` (Settings → Environment Variables), apuntando
-`DATABASE_URL` a la rama de Neon de ensayo —la misma que usa Playwright—, nunca a
-producción. Con eso la vista previa levanta con base, el login de `setup()`
-funciona y el smoke vuelve a medir lo de adentro.
+Y termina en rojo igual: la mitad de adentro no se midió, y un verde que no
+midió lo que dice medir es peor que un rojo. El paso escribe un `::error
+title=Carga a medias` que nombra lo que NO se midió, y el artefacto se llama
+`carga-publico` y no `carga-smoke`, para que el nombre no mienta sobre lo que
+hay adentro.
 
 `publico` también se puede pedir a mano (`workflow_dispatch` → escenario
 `publico`, o `pnpm carga:publico` contra cualquier URL). Pedido a mano sale
 verde: ahí medir sólo la mitad pública es lo que se pidió, no una corrida a
 medias.
 
-Las otras salidas, por si hace falta medir antes de que QA tenga un deploy:
+#### Medir a mano
 
-1. **Medir contra QA a mano.** No queda nada por agregar: QA tiene su propia
-   rama de Neon (paso 4), así que la cuenta de Playwright sirve tal cual, y el
-   host `claimmix-qa.vercel.app` ya está en la lista blanca
-   (`load-tests.yml:160-166`). Esa lista es un control de seguridad, así que el
-   alias de QA entró literal, nunca como comodín tipo `claimmix*`.
-2. **Correrlo a mano contra localhost.** `pnpm sembrar` con
-   `DATABASE_URL=$STAGING_DATABASE_URL`, levantar el servidor y `pnpm
-   carga:smoke`. Mide la aplicación, no la red, y no necesita ninguna cuenta
-   nueva.
-3. **Crear una cuenta de analista en producción.** Es lo único que pone el job
-   automático en verde hoy. ⛔ Es una credencial viva contra datos de clientes
-   viajando en cada corrida; los escenarios sólo leen (`base.js:94-106`), pero
-   el riesgo es real y la decisión es de la persona, no del repositorio.
+`pnpm sembrar` con `DATABASE_URL=$STAGING_DATABASE_URL`, levantar el servidor y
+`pnpm carga:smoke`. Mide la aplicación, no la red, y no necesita ninguna cuenta
+nueva.
+
+⛔ Crear una cuenta en **producción** para que k6 la use sigue descartado: es una
+credencial viva contra datos de clientes viajando en cada corrida. Los
+escenarios sólo leen (`base.js:94-106`), pero el riesgo es real y ya no hace
+falta: la vista previa mide con la base de ensayo.
 
 ### 6. Workload Identity Federation para `qa` — NO HACE FALTA
 

@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-18. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-19. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -15,10 +15,13 @@ Update it at the end of a work session so the next one can recover quickly._
 > photograph, all answered. **In production every check is green** (CI, CodeQL, secret
 > scan and the seven post-deploy jobs, plus the `alcance` job that writes down what each
 > run did and did not verify), and the extraction now bills to **Veltra's own Google
-> Cloud project**. Two reds are known, and named here so they are not read as green:
-> Carga on previews is red **with numbers** until `DATABASE_URL` reaches the Preview
-> scope of `claimmix`, and a QA deploy verifies nothing until the `QA_*` repository
-> secrets exist. What is left is commercial: paid plans, and a first client.
+> Cloud project**. Carga now measures previews for real —
+> `p95 530 ms · 0% fallidos · 67 pedidos`, run 35466095444 — after the Preview
+> scope of `claimmix` got `DATABASE_URL`, `DATABASE_URL_APP` and
+> `BETTER_AUTH_SECRET` pointing at the Neon rehearsal branch and the k6 account
+> was swapped to an admin. One red is left and named here so it is not read as
+> green: a QA deploy verifies nothing until the `QA_*` repository secrets exist.
+> What is left is commercial: paid plans, and a first client.
 
 ## What ClaimMix is
 
@@ -165,18 +168,23 @@ Corrélo después de cada deploy. Detalle completo en
     middleware still calls `auth.api.getSession` on it to bounce anyone who is
     already signed in. That is a query. There is no "degraded but you can still
     log in" mode: if the data layer is unreachable, the login page 500s too.
-  - **Carga on previews cannot pass until that variable exists**, because the
-    six scenarios with a session start by logging in. Carga is not a required
-    check on `main`, so it never blocked a merge; it also was never green.
-  - **But it no longer dies without measuring anything.** Since 2026-09-18 the
+  - **Carga on previews is green since 2026-09-19.** The Preview scope of
+    `claimmix` now carries `DATABASE_URL`, `DATABASE_URL_APP` and
+    `BETTER_AUTH_SECRET` against the Neon rehearsal branch, and the k6 account
+    was swapped from Paula (`analyst`) to Mariela (`admin`) because
+    `/api/customers` and `/api/policies` require `CUSTOMER_PII_ROLES`, which
+    excludes analysts on purpose. Run 35466095444: `p95 530 ms · 0% fallidos ·
+    67 pedidos`. Carga is still not a required check on `main`.
+  - **And when a target has no database it no longer dies without measuring
+    anything.** Since 2026-09-18 the
     job probes `/api/admin/health` first — reading the body, not the status,
     because that endpoint answers 200 with the database down — and when there is
     no database it runs `tests/load/scenarios/publico.js` instead: the four
     session-free pages, one VU, thirty seconds, its own p(95) < 1000 ms budget.
     It still ends **red**, with an `::error title=Carga a medias` naming the half
     that was not measured, and the artifact is called `carga-publico` so the name
-    does not lie about what is inside it. Numbers now, red still. The red turns
-    itself off the day Preview gets the variables; nothing to edit here.
+    does not lie about what is inside it. That fallback stays for any target
+    that comes up without a database.
   - The `if: failure()` diagnostics that produced the table above live in
     `load-tests.yml` and cost nothing on a green run. Leave them.
 
@@ -1866,9 +1874,11 @@ inquilinos, 9.891 contra 5.
 `22P02` y el tope no veía nada. (Yo mismo había dicho antes que sí registraba:
 había comprobado que `recordUsage` se llama, no que el INSERT entrara.)
 
-**Pendiente, y es una decisión de producto, no un defecto:** `renderConflict` de
-WhatsApp muestra los valores del conflicto **sin enmascarar**, y siempre lo
-hizo — AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee un asegurado.
+~~**Pendiente, y es una decisión de producto, no un defecto:** `renderConflict`
+de WhatsApp muestra los valores del conflicto **sin enmascarar**~~ ✅ **HECHO
+después:** el enmascarado se mudó a una sola función que corre en los dos lados
+(`src/server/confirmations/messenger.ts:217-222,388-404`), así que el DNI entero
+ya no sale por WhatsApp cuando el redactor está apagado.
 
 **También:** los hallazgos de la auditoría pasaron por verificación adversarial
 de dos lentes: 116 veredictos sobre los 62 hallazgos —los 42 que habían quedado sin votar, incluidos—, 36 refutados, 26 en pie, 23 distintos. Lo arreglado esta sesión son
@@ -1954,9 +1964,9 @@ comentario de la vez anterior que pasó lo mismo, el 1º de septiembre.
 - **Tres de las cuatro consultas del tablero recorren `cases` entera** (Seq
   Scan). Con 484 casos no se nota; el reporte de `pnpm load` lo imprime en cada
   corrida para cuando sí. Es otro cambio, con su propia medición.
-- **`renderConflict` de WhatsApp muestra los valores sin enmascarar**, y
-  siempre lo hizo — AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee
-  un asegurado: es una decisión de producto.
+- ~~**`renderConflict` de WhatsApp muestra los valores sin enmascarar**~~ ✅
+  **HECHO después.** Sale enmascarado, con la misma función que el prompt
+  (`src/server/confirmations/messenger.ts:217-222`).
 - **El barredor no corre cada quince minutos en la práctica.** El `schedule`
   dice `*/15`, y las corridas reales del 8 de septiembre fueron 11:42, 15:22 y
   18:55. GitHub demora las tareas programadas cuando está cargado, cosa que el
@@ -2215,9 +2225,10 @@ solo lado de la llave.
 
 - ~~**Los tres Seq Scan del tablero**~~ — **medido el 2026-09-08: no hacen falta
   índices nuevos, y ya no son tres sino uno.** Ver abajo.
-- **`renderConflict` de WhatsApp muestra los valores sin enmascarar**, y siempre
-  lo hizo. AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee un
-  asegurado: es decisión de producto.
+- ~~**`renderConflict` de WhatsApp muestra los valores sin enmascarar**~~ ✅
+  **HECHO.** `enmascarar` se sacó de `conflictosParaElRedactor` y ahora corre
+  también en `renderConflict` (`src/server/confirmations/messenger.ts:217-222`),
+  que es el texto que sale cuando el redactor está apagado o falla.
 - **Un adjunto rechazado por tamaño ya no deja fila con `rejected_reason`** — el
   camino es `null`, el mismo de las otras fallas de descarga, así que queda en
   el log y no en la pantalla del analista. Devolver ese rastro pide tocar el que

@@ -1874,9 +1874,11 @@ inquilinos, 9.891 contra 5.
 `22P02` y el tope no veía nada. (Yo mismo había dicho antes que sí registraba:
 había comprobado que `recordUsage` se llama, no que el INSERT entrara.)
 
-**Pendiente, y es una decisión de producto, no un defecto:** `renderConflict` de
-WhatsApp muestra los valores del conflicto **sin enmascarar**, y siempre lo
-hizo — AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee un asegurado.
+~~**Pendiente, y es una decisión de producto, no un defecto:** `renderConflict`
+de WhatsApp muestra los valores del conflicto **sin enmascarar**~~ ✅ **HECHO
+después:** el enmascarado se mudó a una sola función que corre en los dos lados
+(`src/server/confirmations/messenger.ts:217-222,388-404`), así que el DNI entero
+ya no sale por WhatsApp cuando el redactor está apagado.
 
 **También:** los hallazgos de la auditoría pasaron por verificación adversarial
 de dos lentes: 116 veredictos sobre los 62 hallazgos —los 42 que habían quedado sin votar, incluidos—, 36 refutados, 26 en pie, 23 distintos. Lo arreglado esta sesión son
@@ -1962,9 +1964,9 @@ comentario de la vez anterior que pasó lo mismo, el 1º de septiembre.
 - **Tres de las cuatro consultas del tablero recorren `cases` entera** (Seq
   Scan). Con 484 casos no se nota; el reporte de `pnpm load` lo imprime en cada
   corrida para cuando sí. Es otro cambio, con su propia medición.
-- **`renderConflict` de WhatsApp muestra los valores sin enmascarar**, y
-  siempre lo hizo — AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee
-  un asegurado: es una decisión de producto.
+- ~~**`renderConflict` de WhatsApp muestra los valores sin enmascarar**~~ ✅
+  **HECHO después.** Sale enmascarado, con la misma función que el prompt
+  (`src/server/confirmations/messenger.ts:217-222`).
 - **El barredor no corre cada quince minutos en la práctica.** El `schedule`
   dice `*/15`, y las corridas reales del 8 de septiembre fueron 11:42, 15:22 y
   18:55. GitHub demora las tareas programadas cuando está cargado, cosa que el
@@ -2223,9 +2225,10 @@ solo lado de la llave.
 
 - ~~**Los tres Seq Scan del tablero**~~ — **medido el 2026-09-08: no hacen falta
   índices nuevos, y ya no son tres sino uno.** Ver abajo.
-- **`renderConflict` de WhatsApp muestra los valores sin enmascarar**, y siempre
-  lo hizo. AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee un
-  asegurado: es decisión de producto.
+- ~~**`renderConflict` de WhatsApp muestra los valores sin enmascarar**~~ ✅
+  **HECHO.** `enmascarar` se sacó de `conflictosParaElRedactor` y ahora corre
+  también en `renderConflict` (`src/server/confirmations/messenger.ts:217-222`),
+  que es el texto que sale cuando el redactor está apagado o falla.
 - **Un adjunto rechazado por tamaño ya no deja fila con `rejected_reason`** — el
   camino es `null`, el mismo de las otras fallas de descarga, así que queda en
   el log y no en la pantalla del analista. Devolver ese rastro pide tocar el que

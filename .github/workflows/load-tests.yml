@@ -287,7 +287,7 @@ jobs:
         run: |
           mkdir -p resultados
           k6 run tests/load/scenarios/publico.js
-          echo "::error title=Carga a medias::El destino contesta sin base de datos, así que se midió sólo la mitad pública (/privacy, /demo, /terms, /restablecer) y NO se midió nada detrás de la sesión. Los números que sí se tomaron están en el artefacto. Para medir la otra mitad hacen falta DATABASE_URL y DATABASE_URL_APP en el alcance Preview del proyecto claimmix; las tres salidas están en docs/PROMOCION.md, paso 5."
+          echo "::error title=Carga a medias::El destino contesta sin base de datos, así que se midió sólo la mitad pública (/privacy, /demo, /terms, /restablecer) y NO se midió nada detrás de la sesión. Los números que sí se tomaron están en el artefacto. Para medir la otra mitad hacen falta DATABASE_URL, DATABASE_URL_APP y BETTER_AUTH_SECRET en el alcance Preview del proyecto claimmix; las tres salidas están en docs/PROMOCION.md, paso 5."
           exit 1
         env:
           BASE_URL: ${{ steps.destino.outputs.url }}

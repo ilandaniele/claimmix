@@ -16,10 +16,10 @@ Update it at the end of a work session so the next one can recover quickly._
 > scan and the seven post-deploy jobs, plus the `alcance` job that writes down what each
 > run did and did not verify), and the extraction now bills to **Veltra's own Google
 > Cloud project**. Two reds are known, and named here so they are not read as green:
-> Carga on previews is red **with numbers** until `DATABASE_URL` and
-> `DATABASE_URL_APP` reach the Preview scope of `claimmix`, and a QA deploy
-> verifies nothing until the `QA_*` repository secrets exist. What is left is
-> commercial: paid plans, and a first client.
+> Carga on previews is red **with numbers** until `DATABASE_URL`,
+> `DATABASE_URL_APP` and `BETTER_AUTH_SECRET` reach the Preview scope of
+> `claimmix`, and a QA deploy verifies nothing until the `QA_*` repository
+> secrets exist. What is left is commercial: paid plans, and a first client.
 
 ## What ClaimMix is
 

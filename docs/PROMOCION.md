@@ -337,13 +337,14 @@ llama `carga-publico` y no `carga-smoke`, para que el nombre no mienta sobre lo
 que hay adentro. El rojo se apaga solo el día que la Preview tenga base, sin
 tocar el workflow.
 
-**Cómo se apaga: son tres variables, no dos.** En el alcance **Preview** del
+**Cómo se apaga: son cuatro variables, no dos.** En el alcance **Preview** del
 proyecto `claimmix` (Settings → Environment Variables), sin tocar las de
 `Production`: `DATABASE_URL` apuntando a la rama de Neon de ensayo —la misma que
 usa Playwright—, nunca a producción; `DATABASE_URL_APP` a esa misma rama pero con
-el rol restringido; y `CRON_SECRET` con el mismo valor que el secreto del
-repositorio. Vercel admite el mismo nombre dos veces mientras los entornos no se
-solapen, así que las de producción quedan donde están.
+el rol restringido; `BETTER_AUTH_SECRET` con un valor propio de Preview; y
+`CRON_SECRET` con el mismo valor que el secreto del repositorio. Vercel admite el
+mismo nombre dos veces mientras los entornos no se solapen, así que las de
+producción quedan donde están.
 
 `DATABASE_URL_APP` faltaba en esta lista y hace falta igual. La capa de datos la
 lee sin respaldo —`src/data/scope.ts:109`, «esta capa NO usa DATABASE_URL»— y las
@@ -361,14 +362,31 @@ Y el rol tiene que ser el restringido. Si `DATABASE_URL_APP` entra como el dueñ
 rol con BYPASSRLS haría pasar las pruebas leyendo los datos de todas las
 aseguradoras a la vez.
 
+`BETTER_AUTH_SECRET` tampoco estaba, y es la que rompió el primer intento. Con
+las dos de base cargadas y sin ella, la sonda elige `smoke` —la base contesta— y
+el escenario se muere en `setup()` con «El login contestó 500». El log del deploy
+dice por qué: `[BetterAuthError] You are using the default secret`. Las cuatro
+páginas públicas que no consultan la sesión contestan 200 y `/` y `/login`
+contestan 500, porque son las que pasan por `auth.api.getSession` en el
+middleware (`src/proxy.ts`).
+
+El valor tiene que ser propio de Preview, distinto del de `Production`. Es el que
+firma las cookies de sesión, y las vistas previas son públicas salvo por el
+bypass: compartir el secreto significa que una cookie fabricada contra cualquier
+vista previa vale también contra `claimmix.vercel.app`. Se genera con
+`openssl rand -base64 32`; el comentario de `src/lib/auth/index.ts:26-50` explica
+qué pasa cuando falta —better-auth no rompe por su cuenta, usa un secreto de
+relleno que está publicado en su propio código—, y por qué la comprobación vive
+en `instrumentation.ts` y no al cargar el módulo.
+
 `CRON_SECRET` no cambia lo que se mide. Lo usa el paso de diagnóstico `¿Qué
 dependencia del deploy no contesta?` (`load-tests.yml:347-361`), que corre con
 `if: failure()` e interroga `/api/health` con `Bearer`. Si no coincide con el
 secreto del repositorio ese paso recibe 401, y el día que algo salga rojo el
 diagnóstico se pierde justo cuando sirve.
 
-Con las tres, la vista previa levanta con base, el login de `setup()` funciona y
-el smoke vuelve a medir lo de adentro.
+Con las cuatro, la vista previa levanta con base, el login de `setup()` funciona
+y el smoke vuelve a medir lo de adentro.
 
 `publico` también se puede pedir a mano (`workflow_dispatch` → escenario
 `publico`, o `pnpm carga:publico` contra cualquier URL). Pedido a mano sale

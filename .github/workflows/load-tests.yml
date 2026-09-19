@@ -189,20 +189,11 @@ jobs:
       # viene de un fork, que por diseño no recibe secretos; en cualquier otro
       # caso falta el secreto porque nadie lo creó, y eso tiene que ser rojo.
       #
-      # El secreto ya existe en el repo desde el 17/09. Acá decía que no, y que
-      # por eso este job salía en rojo en cada corrida; las dos cosas dejaron de
-      # ser ciertas y la nota se quedó.
-      #
-      # Acá decía que también faltaban `LOAD_TEST_EMAIL` y `LOAD_TEST_PASSWORD`.
-      # Era falso, y lo desmiente este mismo archivo treinta líneas más abajo:
-      # no son secretos, son variables que el job arma desde
-      # `PLAYWRIGHT_TEST_EMAIL` y `PLAYWRIGHT_TEST_PASSWORD`.
-      #
-      # Falta UN secreto acá. Lo que sigue faltando después no es un secreto: la
-      # cuenta de Playwright vive en la base de ENSAYO, y los únicos destinos que
-      # acepta el paso de abajo leen la de PRODUCCIÓN, así que el login de
-      # `setup()` va a dar 401 igual. Las tres salidas están en docs/PROMOCION.md,
-      # paso 5.
+      # El secreto existe en el repo desde el 17/09, y desde el 19/09 el alcance
+      # Preview del proyecto tiene `DATABASE_URL`, `DATABASE_URL_APP` y
+      # `BETTER_AUTH_SECRET` apuntando a la rama de ENSAYO de Neon, que es donde
+      # vive la cuenta con la que entra `setup()`. Con eso el job mide de verdad:
+      # la corrida 35466095444 dio `p95 530 ms · 0% fallidos · 67 pedidos`.
       - name: ¿Hay llave para la vista previa?
         id: llave
         env:

@@ -337,11 +337,38 @@ llama `carga-publico` y no `carga-smoke`, para que el nombre no mienta sobre lo
 que hay adentro. El rojo se apaga solo el día que la Preview tenga base, sin
 tocar el workflow.
 
-**Cómo se apaga:** cargar `DATABASE_URL` y `CRON_SECRET` en el alcance
-**Preview** del proyecto `claimmix` (Settings → Environment Variables), apuntando
-`DATABASE_URL` a la rama de Neon de ensayo —la misma que usa Playwright—, nunca a
-producción. Con eso la vista previa levanta con base, el login de `setup()`
-funciona y el smoke vuelve a medir lo de adentro.
+**Cómo se apaga: son tres variables, no dos.** En el alcance **Preview** del
+proyecto `claimmix` (Settings → Environment Variables), sin tocar las de
+`Production`: `DATABASE_URL` apuntando a la rama de Neon de ensayo —la misma que
+usa Playwright—, nunca a producción; `DATABASE_URL_APP` a esa misma rama pero con
+el rol restringido; y `CRON_SECRET` con el mismo valor que el secreto del
+repositorio. Vercel admite el mismo nombre dos veces mientras los entornos no se
+solapen, así que las de producción quedan donde están.
+
+`DATABASE_URL_APP` faltaba en esta lista y hace falta igual. La capa de datos la
+lee sin respaldo —`src/data/scope.ts:109`, «esta capa NO usa DATABASE_URL»— y las
+seis rutas del smoke pasan todas por ahí: `/api/cases` tres veces,
+`/api/metricas`, `/api/customers` y `/api/policies`
+(`tests/load/config/base.js:113-125`). La sonda que elige el escenario mira
+`/api/admin/health`, y ese endpoint sólo toca `@/lib/db`
+(`src/app/api/admin/health/route.ts:16`), o sea sólo `DATABASE_URL`: cargando esa
+sola, la sonda contestaría `"db":"connected"`, el job elegiría `smoke` en vez de
+`publico`, y las seis rutas darían error. Seguiría rojo, pero por otra cosa y sin
+el mensaje que dice cuál.
+
+Y el rol tiene que ser el restringido. Si `DATABASE_URL_APP` entra como el dueño,
+`src/data/scope.ts:187` corta la corrida y nombra el usuario con el que entró: un
+rol con BYPASSRLS haría pasar las pruebas leyendo los datos de todas las
+aseguradoras a la vez.
+
+`CRON_SECRET` no cambia lo que se mide. Lo usa el paso de diagnóstico `¿Qué
+dependencia del deploy no contesta?` (`load-tests.yml:347-361`), que corre con
+`if: failure()` e interroga `/api/health` con `Bearer`. Si no coincide con el
+secreto del repositorio ese paso recibe 401, y el día que algo salga rojo el
+diagnóstico se pierde justo cuando sirve.
+
+Con las tres, la vista previa levanta con base, el login de `setup()` funciona y
+el smoke vuelve a medir lo de adentro.
 
 `publico` también se puede pedir a mano (`workflow_dispatch` → escenario
 `publico`, o `pnpm carga:publico` contra cualquier URL). Pedido a mano sale

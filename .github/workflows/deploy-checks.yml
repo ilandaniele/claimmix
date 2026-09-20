@@ -49,6 +49,85 @@ on:
         required: false
         type: boolean
         default: true
+      # ── Qué puede correr cada entorno ───────────────────────────────────────
+      #
+      # No todos los chequeos tienen sentido en todos lados. QA no lleva Gmail
+      # ni WhatsApp —no le escribe a nadie, a propósito—, así que el timbre no
+      # tiene a qué tocarle, y el pen test necesita un inquilino de demo que en
+      # QA tampoco existe.
+      #
+      # Apagarlos acá no es esconderlos: el job `alcance`, al final, nombra uno
+      # por uno los que no corrieron y por qué. Lo que no se puede hacer es
+      # dejar que un caller no los corra EN SILENCIO, que es de donde venía el
+      # verde por ausencia.
+      smoke_profundo:
+        description: "Si el smoke corre con --deep (sube a R2 y llama al modelo)"
+        required: false
+        type: boolean
+        default: true
+      smoke_tolera:
+        description: "Chequeos de salud que este entorno no configura (coma)"
+        required: false
+        type: string
+        default: ""
+      correr_ensayo:
+        description: "Si corre el ensayo de conversaciones"
+        required: false
+        type: boolean
+        default: true
+      correr_timbre:
+        description: "Si corre el timbre. QA no: no tiene Gmail ni WhatsApp."
+        required: false
+        type: boolean
+        default: true
+      correr_pentest:
+        description: "Si corre el pen test. QA no: le falta el inquilino demo."
+        required: false
+        type: boolean
+        default: true
+    # ── Por qué los secretos van declarados y no heredados ────────────────────
+    #
+    # `secrets: inherit` le pasa al workflow los secretos del caller con SU
+    # nombre. Para producción alcanza. Para QA es peligroso: seis de los siete
+    # jobs corren en el runner y hablan con la base por `DATABASE_URL`, y tres
+    # de ellos ESCRIBEN. Heredando, una corrida de QA crearía y borraría casos
+    # en la base de un cliente.
+    #
+    # Declarándolos, el caller de QA puede mapear `QA_DATABASE_URL` a
+    # `DATABASE_URL` por nombre. Todos van `required: false` a propósito: el
+    # que falta no rompe la llamada, rompe el job que lo necesita, con el
+    # mensaje del script que lo pide. Un secreto ausente tiene que verse.
+    secrets:
+      CRON_SECRET:
+        required: false
+      DATABASE_URL:
+        required: false
+      DATABASE_URL_APP:
+        required: false
+      GMAIL_TENANT_ID:
+        required: false
+      BETTER_AUTH_SECRET:
+        required: false
+      GEMINI_TRANSPORT:
+        required: false
+      GOOGLE_CLOUD_PROJECT:
+        required: false
+      GOOGLE_CLOUD_LOCATION:
+        required: false
+      VERTEX_EXTRACTION_MODEL:
+        required: false
+      R2_ACCOUNT_ID:
+        required: false
+      R2_ACCESS_KEY_ID:
+        required: false
+      R2_SECRET_ACCESS_KEY:
+        required: false
+      R2_BUCKET:
+        required: false
+      WHATSAPP_APP_SECRET:
+        required: false
+      DEMO_TENANT_ID:
+        required: false
   # Para poder ensayar este archivo en una rama antes de que tenga un caller:
   # `deployment_status` corre siempre la versión de la rama default, y lo
   # mismo vale para `workflow_call` — el archivo que define el job que llama
@@ -60,6 +139,40 @@ on:
         description: "URL contra la que correr los siete chequeos"
         required: true
         type: string
+      # Los mismos interruptores que el caller, repetidos acá a propósito: si no
+      # están, `inputs.correr_ensayo` vale vacío en una corrida a mano y los
+      # jobs se saltean solos. Un archivo que a mano corre otra cosa que la que
+      # corre por caller no sirve para ensayarlo antes de mergearlo.
+      smoke_profundo:
+        description: "Si el smoke corre con --deep (sube a R2 y llama al modelo)"
+        required: false
+        type: boolean
+        default: true
+      smoke_tolera:
+        description: "Chequeos de salud que este entorno no configura (coma)"
+        required: false
+        type: string
+        default: ""
+      correr_ensayo:
+        description: "Si corre el ensayo de conversaciones"
+        required: false
+        type: boolean
+        default: true
+      correr_timbre:
+        description: "Si corre el timbre"
+        required: false
+        type: boolean
+        default: true
+      correr_pentest:
+        description: "Si corre el pen test"
+        required: false
+        type: boolean
+        default: true
+      medir_carga:
+        description: "Si corre la medición de carga"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -101,11 +214,20 @@ jobs:
         # Lo que viene del evento entra por `env:` y no interpolado en el shell:
         # una URL con una comilla adentro sería un comando en un job que tiene
         # CRON_SECRET. Es el mismo patrón que barrer-trabados y load-tests.
+        #
+        # `--deep` lo decide el caller. QA no tiene R2 ni modelo cargados, y una
+        # subida que no se puede hacer no es un chequeo: es un rojo fijo.
+        #
+        # `SMOKE_TOLERA` va por entorno y no interpolado en el comando: una
+        # lista con un espacio se partiría en dos argumentos y el segundo lo
+        # comería `--url`. El script la lee del entorno (`smoke-production.mts`).
         run: |
-          pnpm smoke -- --deep --url "$URL" $EXPECT
+          pnpm smoke -- $PROFUNDO --url "$URL" $EXPECT
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           URL: ${{ inputs.url }}
+          PROFUNDO: ${{ inputs.smoke_profundo && '--deep' || '' }}
+          SMOKE_TOLERA: ${{ inputs.smoke_tolera }}
           # `github.event` es el del run entero, no el de este archivo: si lo
           # que disparó la corrida fue un deployment_status (el caso de
           # producción, vía workflow_call), acá está su sha y lo exigimos. Si
@@ -148,6 +270,9 @@ jobs:
     name: Ensayo de conversaciones
     runs-on: ubuntu-latest
     needs: [smoke]
+    # Lo apaga el caller que no lo puede correr. El job `alcance`, al final, lo
+    # nombra: apagado y dicho no es lo mismo que apagado y callado.
+    if: inputs.correr_ensayo
     permissions:
       contents: read
       id-token: write
@@ -268,6 +393,9 @@ jobs:
     name: Tocar el timbre
     runs-on: ubuntu-latest
     needs: [smoke]
+    # QA no tiene ni casilla ni WhatsApp: no hay timbre que tocar. Lo apaga su
+    # caller y el job `alcance` lo nombra como no verificado.
+    if: inputs.correr_timbre
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -283,6 +411,10 @@ jobs:
       - name: Entrar por los transportes de verdad
         run: pnpm knock
         env:
+          # Sin esto el script cae a su default, que es la URL de PRODUCCIÓN
+          # (scripts/knock-on-the-door.mts). Un caller de QA tocaría el timbre
+          # de producción con la base de QA: lo peor de los dos lados.
+          SMOKE_URL: ${{ inputs.url }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # La capa de datos entra por acá. Sin esto, toda consulta que pase por
@@ -393,6 +525,8 @@ jobs:
       - name: Medir las consultas del tablero
         run: pnpm load --reporte carga.json
         env:
+          # Ídem: default a producción en scripts/load-test.mts.
+          SMOKE_URL: ${{ inputs.url }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # La capa de datos entra por acá. Sin esto, toda consulta que pase por
           # `enTenant` rompe con "falta DATABASE_URL_APP" — que en el pen test se
@@ -561,6 +695,9 @@ jobs:
     name: Pen test (superficie)
     runs-on: ubuntu-latest
     needs: [smoke]
+    # La fase de la pared necesita dos inquilinos, y en QA el de demo no existe.
+    # Lo apaga su caller y el job `alcance` lo nombra como no verificado.
+    if: inputs.correr_pentest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -576,6 +713,9 @@ jobs:
       - name: Atacar la superficie y la pared entre tenants
         run: pnpm pentest
         env:
+          # Contra la URL del caller. Sin esto ataca la de producción por
+          # default (scripts/pen-test.mts), corra quien corra.
+          SMOKE_URL: ${{ inputs.url }}
           # La fase de la pared necesita la base y DOS tenants. Sin el segundo
           # se saltea y lo dice — que es distinto de darla por probada.
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -601,3 +741,84 @@ jobs:
           echo "                          Es la falla que termina el negocio. Parate acá."
           echo ""
           echo "Reproducilo con: pnpm pentest"
+
+  # ── El alcance: qué se preguntó de verdad ───────────────────────────
+  #
+  # Un caller puede apagar los chequeos que su entorno no puede correr. Eso está
+  # bien. Lo que no puede pasar es que se apaguen EN SILENCIO: cuatro jobs verdes
+  # de los que tres ni arrancaron se leen igual que siete chequeos pasados, y de
+  # ahí venía el verde por ausencia.
+  #
+  # Este job corre siempre, aun con todo rojo, y escribe una fila por chequeo en
+  # el resumen del run: si corrió, si falló, o si NO corrió y por qué. No vuelve
+  # a fallar por lo que ya falló arriba — ese rojo ya está en su propio job — y
+  # tampoco lo tapa.
+  alcance:
+    name: Qué se preguntó y qué no
+    runs-on: ubuntu-latest
+    needs: [smoke, rehearse, timbre, carga, listas-parejas, permisos, pentest]
+    if: always()
+    steps:
+      - name: Escribir el alcance en el resumen
+        env:
+          ENTORNO: ${{ inputs.entorno }}
+          URL: ${{ inputs.url }}
+          SMOKE: ${{ needs.smoke.result }}
+          ENSAYO: ${{ needs.rehearse.result }}
+          TIMBRE: ${{ needs.timbre.result }}
+          CARGA: ${{ needs.carga.result }}
+          # Un nombre con guión no se puede desreferenciar con punto.
+          LISTAS: ${{ needs['listas-parejas'].result }}
+          PERMISOS: ${{ needs.permisos.result }}
+          PENTEST: ${{ needs.pentest.result }}
+          PROFUNDO: ${{ inputs.smoke_profundo }}
+          TOLERA: ${{ inputs.smoke_tolera }}
+        run: |
+          # $1 nombre, $2 resultado, $3 el interruptor que lo apaga (o "-").
+          # "propio" es el smoke, que no cuelga de nadie.
+          fila() {
+            case "$2" in
+              success)   estado="corrió y pasó" ;;
+              failure)   estado="CORRIÓ Y FALLÓ" ;;
+              cancelled) estado="cancelado: no dice nada" ;;
+              *)
+                if [ "$SMOKE" != "success" ] && [ "$3" != "propio" ]; then
+                  estado="NO CORRIÓ: el smoke no pasó y todo lo demás cuelga de él"
+                elif [ "$3" = "-" ]; then
+                  estado="NO CORRIÓ: no tiene interruptor propio, mirá el grafo de jobs"
+                else
+                  estado="NO CORRIÓ: lo apagó el caller ($3)"
+                fi
+                ;;
+            esac
+            echo "| $1 | $estado |" >> "$GITHUB_STEP_SUMMARY"
+          }
+          {
+            echo "## Qué se le preguntó a $ENTORNO"
+            echo ""
+            echo "Contra $URL."
+            echo ""
+            echo "| Chequeo | Qué pasó |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          fila "Smoke del deploy" "$SMOKE" "propio"
+          fila "Ensayo de conversaciones" "$ENSAYO" "correr_ensayo"
+          fila "Timbre (Gmail y WhatsApp)" "$TIMBRE" "correr_timbre"
+          fila "Pen test (superficie y pared)" "$PENTEST" "correr_pentest"
+          fila "Código y base dicen lo mismo" "$LISTAS" "-"
+          fila "Permisos del rol" "$PERMISOS" "-"
+          fila "Carga (lectura)" "$CARGA" "medir_carga"
+          {
+            echo ""
+            if [ "$PROFUNDO" = "true" ]; then
+              echo "El smoke corrió profundo: subió un archivo a R2 y llamó al modelo de verdad."
+            else
+              echo "El smoke corrió liviano: NO se probaron ni el almacenamiento ni el modelo."
+            fi
+            if [ -n "$TOLERA" ]; then
+              echo ""
+              echo "Chequeos de salud que este entorno no configura, y que el smoke NO verificó: $TOLERA."
+            fi
+            echo ""
+            echo "Lo que dice NO CORRIÓ no está probado. Un verde de este run no lo cubre."
+          } >> "$GITHUB_STEP_SUMMARY"

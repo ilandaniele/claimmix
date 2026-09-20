@@ -14,6 +14,12 @@ name: Carga
 # el deploy real de este proyecto no mide resistencia: mide el plan. Cuando haga
 # falta, se lanza a mano contra una vista previa.
 #
+# Contra un destino que arranca SIN base de datos —las vistas previas de
+# `claimmix` no tienen `DATABASE_URL`— el smoke no puede loguearse y antes no
+# medía nada. Ahora se sondea la salud primero y, si no hay base, corre
+# `publico`: las cuatro páginas que el middleware sirve sin leer la sesión. Deja
+# números y termina en rojo igual, porque la mitad de adentro sigue sin medirse.
+#
 # Ver también `tests/load/config/base.js`, que se niega a correr un perfil
 # pesado fuera de localhost salvo que se lo pida explícitamente.
 
@@ -26,7 +32,10 @@ on:
         required: true
         default: smoke
         type: choice
-        options: [smoke, load, stress, spike, soak, peak]
+        # `publico` no necesita sesión ni base: mide las páginas que el
+        # middleware sirve sin leerla. Es lo único que se puede medir contra un
+        # destino sin `DATABASE_URL`, y se elige a mano cuando se quiere sólo eso.
+        options: [smoke, load, stress, spike, soak, peak, publico]
       base_url:
         description: "Contra qué URL"
         required: true
@@ -53,8 +62,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     # El evento `deployment_status` llega también para estados intermedios y
-    # para producción. Acá sólo interesa una vista previa que terminó bien:
-    # contra producción esto no corre solo nunca.
+    # para producción. Acá interesan las vistas previas que terminaron bien y
+    # el proyecto de QA: contra la producción de los clientes esto no corre
+    # solo nunca.
+    #
+    # QA entra por el `endsWith`, y hace falta porque su deploy llega
+    # etiquetado `Production – claimmix-qa` —GitHub le agrega el nombre del
+    # proyecto cuando hay más de uno— y la exclusión de arriba lo sacaba junto
+    # con producción. Medir ahí es lo que siempre se quiso: la cuenta de
+    # pruebas vive en la rama `qa` de Neon, que es la que lee ese deploy, y no
+    # existe en la base de producción.
     #
     # ⛔ `!= 'Production'` NO alcanza, y era peligroso. Cuando nació el segundo
     # proyecto de Vercel, GitHub pasó a llamar al entorno `Production – claimmix`
@@ -65,7 +82,8 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
-       !startsWith(github.event.deployment.environment, 'Production'))
+       (!startsWith(github.event.deployment.environment, 'Production') ||
+        endsWith(github.event.deployment.environment, '-qa')))
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -97,7 +115,16 @@ jobs:
       - name: ¿A dónde apunta esto?
         id: destino
         env:
-          URL: ${{ inputs.base_url || github.event.deployment_status.target_url }}
+          # Contra QA va el ALIAS, no la URL del deploy. Medido el 18/09: la URL
+          # con hash de ese proyecto está detrás de Vercel Auth —contesta
+          # `{"protection":{"vercel_auth_enabled":true…}}` antes de llegar a la
+          # aplicación— y el secreto de automatización que hay en el repositorio
+          # es el del OTRO proyecto, así que ahí k6 mediría la puerta. El alias
+          # de producción de QA es público, y además es la URL que usa quien
+          # prueba.
+          URL: >-
+            ${{ inputs.base_url || (endsWith(github.event.deployment.environment, '-qa')
+            && 'https://claimmix-qa.vercel.app' || github.event.deployment_status.target_url) }}
         run: |
           # Se compara el HOST pelado, no la URL entera, y por eso hay tres
           # pasos y no un `case` solo.
@@ -162,20 +189,11 @@ jobs:
       # viene de un fork, que por diseño no recibe secretos; en cualquier otro
       # caso falta el secreto porque nadie lo creó, y eso tiene que ser rojo.
       #
-      # El secreto ya existe en el repo desde el 17/09. Acá decía que no, y que
-      # por eso este job salía en rojo en cada corrida; las dos cosas dejaron de
-      # ser ciertas y la nota se quedó.
-      #
-      # Acá decía que también faltaban `LOAD_TEST_EMAIL` y `LOAD_TEST_PASSWORD`.
-      # Era falso, y lo desmiente este mismo archivo treinta líneas más abajo:
-      # no son secretos, son variables que el job arma desde
-      # `PLAYWRIGHT_TEST_EMAIL` y `PLAYWRIGHT_TEST_PASSWORD`.
-      #
-      # Falta UN secreto acá. Lo que sigue faltando después no es un secreto: la
-      # cuenta de Playwright vive en la base de ENSAYO, y los únicos destinos que
-      # acepta el paso de abajo leen la de PRODUCCIÓN, así que el login de
-      # `setup()` va a dar 401 igual. Las tres salidas están en docs/PROMOCION.md,
-      # paso 5.
+      # El secreto existe en el repo desde el 17/09, y desde el 19/09 el alcance
+      # Preview del proyecto tiene `DATABASE_URL`, `DATABASE_URL_APP` y
+      # `BETTER_AUTH_SECRET` apuntando a la rama de ENSAYO de Neon, que es donde
+      # vive la cuenta con la que entra `setup()`. Con eso el job mide de verdad:
+      # la corrida 35466095444 dio `p95 530 ms · 0% fallidos · 67 pedidos`.
       - name: ¿Hay llave para la vista previa?
         id: llave
         env:
@@ -193,8 +211,43 @@ jobs:
             exit 1
           fi
 
-      - name: Correr ${{ steps.plan.outputs.escenario }}
+      # ── Preguntar antes de medir, en vez de morir en el login ──────────────
+      #
+      # Los seis perfiles con sesión empiezan por `setup()`, que se loguea y, si
+      # no puede, corta la corrida entera con «El login contestó 500. Sin sesión
+      # no hay nada que medir». Contra una vista previa de `claimmix` eso pasa
+      # siempre, y no porque la aplicación esté caída: las Preview de ese
+      # proyecto no tienen `DATABASE_URL`, así que arranca todo menos la base.
+      # Medido el 18/09 en la corrida 35366436854:
+      #
+      #     /privacy → 200   /demo → 200   /api/admin/health → 200
+      #     {"status":"degraded","db":"error","db_error":"DATABASE_URL is not set"}
+      #     /login   → 500   /        → 500
+      #
+      # O sea que había una mitad medible y la corrida no medía ninguna. Esta
+      # sonda decide cuál de los dos perfiles corre. `/api/admin/health` sirve
+      # para esto y no `/api/health`: es pública (no pide CRON_SECRET) y
+      # contesta 200 aun con la base caída, con `db` adentro del cuerpo — así
+      # que hay que mirar el CUERPO, no el código.
+      - name: ¿El destino tiene base de datos?
+        id: base
         if: steps.llave.outputs.hay == '1'
+        env:
+          URL: ${{ steps.destino.outputs.url }}
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          CUERPO=$(curl -fsS -m 30 -H "x-vercel-protection-bypass: $BYPASS" \
+            "$URL/api/admin/health" | tr -d ' ' || true)
+          echo "$CUERPO"
+          case "$CUERPO" in
+            *'"db":"connected"'*) echo "hay=1" >> "$GITHUB_OUTPUT" ;;
+            *) echo "hay=0" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Correr ${{ steps.plan.outputs.escenario }}
+        if: >-
+          steps.llave.outputs.hay == '1' && (steps.base.outputs.hay == '1'
+          || steps.plan.outputs.escenario == 'publico')
         run: |
           mkdir -p resultados
           k6 run "tests/load/scenarios/${{ steps.plan.outputs.escenario }}.js"
@@ -203,18 +256,142 @@ jobs:
           # La vista previa no es localhost, así que un perfil pesado pide
           # permiso explícito. El smoke del deploy no lo necesita.
           PERMITIR_REMOTO: ${{ inputs.permitir_remoto && '1' || '0' }}
-          # La misma cuenta de pruebas que usa Playwright. UNA sesión para todos
-          # los VUs: el login tiene tope de cinco intentos cada diez segundos y
-          # doscientos VUs logueándose miden ese tope. Ver `helpers/auth.js`.
-          LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_TEST_EMAIL }}
-          LOAD_TEST_PASSWORD: ${{ secrets.PLAYWRIGHT_TEST_PASSWORD }}
+          # La cuenta ADMIN de Playwright, no la de analista, y el motivo es que
+          # dos de las seis rutas medidas no las puede ver una analista.
+          #
+          # `/api/customers` y `/api/policies` entran con `CUSTOMER_PII_ROLES`
+          # —`owner`, `admin`, `specialist`— en `customers/route.ts:33` y
+          # `policies/route.ts:31`. `analyst` está fuera a propósito: es el
+          # padrón, y la decisión está escrita en `lib/auth/roles.ts:45`. La
+          # cuenta que había acá era `PLAYWRIGHT_TEST_EMAIL`, o sea Paula, que
+          # `sembrar-para-integracion.mts:232` da de alta como `analyst`.
+          #
+          # Así que el smoke medía cuatro rutas y contaba 403 en las otras dos.
+          # Medido en la corrida 35464921889: `32.9% fallidos · 79 pedidos`, que
+          # son 13 vueltas por 2 rutas, exacto. Cruzaba `checks` y
+          # `http_req_failed`, nunca `http_req_duration`: no era latencia.
+          #
+          # La contraseña sale de `INTEGRATION_ADMIN_PASSWORD` y no de
+          # `PLAYWRIGHT_ADMIN_PASSWORD` aunque el mail salga de la familia
+          # `PLAYWRIGHT_`. No es un descuido: `INTEGRATION_ADMIN_PASSWORD` es la
+          # que `sembrar-para-integracion.mts:94,230` le escribe a Mariela en la
+          # rama de ensayo (`ci.yml:331`), o sea la única que por construcción es
+          # la que la cuenta tiene puesta. La otra tendría que coincidir y no hay
+          # forma de comprobarlo sin gastar un deploy.
+          #
+          # UNA sesión para todos los VUs: el login tiene tope de cinco intentos
+          # cada diez segundos y doscientos VUs logueándose miden ese tope. Ver
+          # `helpers/auth.js`. Ojo que este `env` cuelga del paso entero, así que
+          # los perfiles de 50 VUs también miden con la cuenta admin.
+          LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_ADMIN_EMAIL }}
+          LOAD_TEST_PASSWORD: ${{ secrets.INTEGRATION_ADMIN_PASSWORD }}
           VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+      # Sin base, se mide lo que hay: las cuatro páginas que el middleware
+      # sirve sin leer la sesión. Deja números, deja artefacto, y termina en
+      # ROJO igual — porque la mitad de adentro no se midió, y un verde que no
+      # midió lo que dice medir es peor que un rojo. El rojo se apaga solo el
+      # día que la Preview tenga `DATABASE_URL`, no hay que volver acá.
+      - name: Correr público (el destino no tiene base)
+        # Pedir `publico` a mano NO es medir a medias: es lo que se pidió, y ahí
+        # lo corre el paso de arriba y sale verde. Este paso es sólo para el
+        # caso en que se pidió medir adentro y no se pudo.
+        if: >-
+          steps.llave.outputs.hay == '1' && steps.base.outputs.hay != '1'
+          && steps.plan.outputs.escenario != 'publico'
+        run: |
+          mkdir -p resultados
+          k6 run tests/load/scenarios/publico.js
+          echo "::error title=Carga a medias::El destino contesta sin base de datos, así que se midió sólo la mitad pública (/privacy, /demo, /terms, /restablecer) y NO se midió nada detrás de la sesión. Los números que sí se tomaron están en el artefacto. Para medir la otra mitad hacen falta DATABASE_URL, DATABASE_URL_APP y BETTER_AUTH_SECRET en el alcance Preview del proyecto claimmix; las tres salidas están en docs/PROMOCION.md, paso 5."
+          exit 1
+        env:
+          BASE_URL: ${{ steps.destino.outputs.url }}
+          VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+      # ── Cuando el login se cae, preguntar qué más está caído ───────────────
+      #
+      # Un 500 en el login puede ser del login o de todo el deploy, y son dos
+      # problemas distintos. Estas tres rutas lo separan sin mandar credenciales:
+      # `/` y `/login` no piden sesión, y `/api/health` contesta 401 cuando la
+      # aplicación está viva. Si las tres se caen, lo que falla es el arranque
+      # —`instrumentation.ts` corta el proceso sin `BETTER_AUTH_SECRET`, por
+      # ejemplo—; si sólo se cae el login, el problema está en Better Auth o en su
+      # base.
+      #
+      # Sólo corre cuando el paso de arriba falló, y sólo imprime códigos.
+      - name: ¿Qué contesta el resto del deploy?
+        if: failure() && steps.llave.outputs.hay == '1'
+        env:
+          URL: ${{ steps.destino.outputs.url }}
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          # `/privacy`, `/demo`, `/terms` y `/restablecer` están en la lista
+          # porque son las rutas de página que NO consultan la sesión: son
+          # públicas y no están en `SOLO_ANONIMOS`, así que el middleware las
+          # deja pasar sin tocar la base (`src/proxy.ts:30,40,53-55`). `/` y
+          # `/login` sí la consultan. Si estas cuatro contestan 200 y esas dos
+          # 500, el que no contesta es la capa de datos y no queda nada más que
+          # mirar. Son las mismas cuatro que mide `scenarios/publico.js`.
+          # `/api/admin/health` es el único que dice POR QUÉ: es público —está
+          # en `PUBLIC_PREFIXES`— y su `dbError` trae el código de Postgres o
+          # los primeros 50 caracteres del mensaje. Eso separa «la variable no
+          # está» de «la variable está y la base no contesta», que es lo último
+          # que queda por saber y no se puede mirar desde afuera.
+          for RUTA in / /login /privacy /demo /terms /restablecer /api/health /api/admin/health; do
+            CUERPO=$(curl -s -D - -o cuerpo.txt -H "x-vercel-protection-bypass: $BYPASS" "$URL$RUTA")
+            COD=$(printf '%s' "$CUERPO" | head -1)
+            # `x-vercel-error` es lo que separa un fallo de la plataforma
+            # —FUNCTION_INVOCATION_FAILED, DEPLOYMENT_NOT_FOUND— de un 500 que
+            # devolvió la aplicación con su propia página de error.
+            ERR=$(printf '%s' "$CUERPO" | grep -i '^x-vercel-error:' || true)
+            echo "$RUTA -> $COD ${ERR:-sin x-vercel-error}"
+            head -c 200 cuerpo.txt | tr '\n' ' '
+            echo
+          done
+
+      # Y una vez que se sabe que el 500 es de la aplicación y no de la
+      # plataforma, falta cuál de las dependencias es la que no contesta.
+      #
+      # `/api/health` es el único que lo dice desde ADENTRO del deploy: corre
+      # con las variables de ESE entorno y reporta, dependencia por
+      # dependencia, qué alcanza. Sin esto el diagnóstico se queda en «algo
+      # tira 500» y hay que adivinar cuál de las once variables falta.
+      #
+      # Sale el nombre, el estado y el detalle recortado de cada chequeo. No
+      # son secretos: es el mapa de qué está configurado, que es justamente lo
+      # que el `Bearer CRON_SECRET` protege de los de afuera.
+      - name: ¿Qué dependencia del deploy no contesta?
+        if: failure() && steps.llave.outputs.hay == '1'
+        env:
+          URL: ${{ steps.destino.outputs.url }}
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "Sin CRON_SECRET del repositorio no se puede interrogar a /api/health."
+            exit 0
+          fi
+          COD=$(curl -s -o salud.json -w '%{http_code}' \
+            -H "x-vercel-protection-bypass: $BYPASS" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$URL/api/health")
+          echo "/api/health -> $COD"
+          if jq -e . salud.json > /dev/null 2>&1; then
+            jq -r '"entorno=" + (.environment // "?") + " commit=" + (.commit // "?") + " estado=" + (.status // "?")' salud.json
+            jq -r '.checks[]? | "  " + .name + ": " + .status + " — " + (.detail // "" | .[0:120])' salud.json
+          else
+            head -c 300 salud.json
+            echo
+          fi
 
       # `always()`: el reporte de la corrida que FALLÓ es el que hay que mirar.
       - name: Guardar el reporte
         if: always() && steps.llave.outputs.hay == '1' 
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: carga-${{ steps.plan.outputs.escenario }}
+          # El nombre dice lo que se MIDIÓ, no lo que se pidió: sin base corre
+          # `publico.js`, y un archivo llamado `carga-smoke` con adentro una
+          # corrida pública miente sobre lo que hay en él.
+          name: carga-${{ steps.base.outputs.hay == '1' && steps.plan.outputs.escenario || 'publico' }}
           path: resultados/
           retention-days: 30

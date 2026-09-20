@@ -296,6 +296,13 @@ console.log("\n▸ Los jobs de CI conocen los dos roles");
      *
      * Ahora, por cada `DATABASE_URL:` se busca su compañero entre las líneas de
      * la misma sangría, que es lo que delimita un bloque `env:` en YAML.
+     *
+     * Las líneas MÁS sangradas se saltean en vez de cortar el bloque: en un
+     * `env:` una clave no tiene hijos, pero en el `secrets:` de un
+     * `workflow_call` sí —`DATABASE_URL:` seguido de `required: false`—, y ahí
+     * el corte dejaba a cada secreto solo en su propio bloque de una línea. La
+     * declaración también tiene que nombrar a los dos: un caller que puede
+     * mapear uno y no el otro arma exactamente el job cojo que esto busca.
      */
     for (let i = 0; i < lineas.length; i++) {
       const m = /^(\s+)DATABASE_URL:/.exec(lineas[i]);
@@ -308,6 +315,7 @@ console.log("\n▸ Los jobs de CI conocen los dos roles");
           const l = lineas[k];
           if (l.trim() === "") continue;
           const propia = /^(\s*)/.exec(l)[1];
+          if (propia.length > sangria.length) continue;
           if (propia.length !== sangria.length) break;
           if (l.trim().startsWith("DATABASE_URL_APP:")) tieneApp = true;
         }
@@ -732,27 +740,38 @@ console.log("\n▸ Lo previo al merge no apunta a producción");
 
 // ── 15. La guarda de post-deploy no es sólo el entorno ─────────────────────
 //
-// `environment == 'Production'` es una etiqueta que pone CADA proyecto de
-// Vercel sobre su propio entorno de producción. Con un segundo proyecto para
-// QA, su deploy llega con el mismo evento —`deployment_status`— y la misma
-// etiqueta, así que una guarda que sólo mire el entorno correría el smoke de
-// producción, el ensayo y la carga de lectura contra el alias de producción
-// para un deploy que nunca lo tocó.
+// `Production` es una etiqueta que pone CADA proyecto de Vercel sobre su
+// propio entorno de producción. Con un segundo proyecto para QA, su deploy
+// llega con el mismo evento —`deployment_status`— y la misma etiqueta, así
+// que una guarda que sólo mire que el entorno empieza con `Production`
+// correría el smoke de producción, el ensayo y la carga de lectura contra el
+// alias de producción para un deploy que nunca lo tocó.
 //
-// Lo único que distingue a los dos proyectos es el HOST del deploy, así que
-// todo job que gatee EXIGIENDO ese entorno tiene que mirar además
-// `deployment_status.environment_url`.
+// Lo que distingue a los dos proyectos es el SUFIJO del nombre del entorno:
+// cuando hay más de un proyecto, GitHub le agrega el nombre del proyecto y
+// quedan `Production – claimmix` y `Production – claimmix-qa`. Así que todo
+// job que gatee EXIGIENDO ese entorno tiene que mirar además el sufijo, con
+// `endsWith(github.event.deployment.environment, …)`.
+//
+// ⛔ Acá se exigía mirar `deployment_status.environment_url`, y era una
+// premisa falsa: Vercel arma ese host con el nombre del proyecto MÁS un hash,
+// y para los dos proyectos el prefijo es el mismo —`claimmix-`—. Las tres
+// condiciones que cumplían esta invariante en `post-deploy.yml` no excluían a
+// QA: la corrida 35352800702 corrió el job de producción para un deploy de
+// QA. Una invariante verde sobre una premisa falsa es peor que no tenerla.
 //
 // La invariante busca `startsWith(github.event.deployment.environment` sin `!`
-// adelante, y no la comparación exacta que había antes: desde que Vercel
-// renombró el entorno a `Production – claimmix`, esa comparación no es cierta
-// nunca y la invariante no activaba en un solo job. El `!` importa:
-// `load-tests.yml` gatea con `!startsWith(...)` —una exclusión, que corre en
-// previews de cualquier proyecto— y no tiene por qué mirar ninguna URL.
+// adelante. El `!` importa: `load-tests.yml` gatea con `!startsWith(...)`
+// —una exclusión, que corre en previews de cualquier proyecto— y no tiene por
+// qué distinguir ningún proyecto.
 //
-// Los comentarios se borran antes de buscar: el bloque de `post-deploy.yml`
-// nombra `environment_url` en prosa, y un job no queda protegido por un
-// comentario.
+// El grupo de `concurrency` entra como un job más: es la otra copia de la
+// misma condición, y ya se olvidó una vez (#199 arregló el `if` del job y
+// dejó el grupo con la guarda vieja, que no era cierta nunca).
+//
+// Los comentarios se borran antes de buscar: los bloques de `post-deploy.yml`
+// explican el defecto citando la expresión, y un job no queda protegido por
+// un comentario.
 console.log("\n▸ La guarda de post-deploy no es sólo el entorno");
 {
   const flujos = existsSync(".github/workflows")
@@ -782,26 +801,38 @@ console.log("\n▸ La guarda de post-deploy no es sólo el entorno");
       if (actual) trabajos.push(actual);
     }
 
+    // El grupo de `concurrency` cuelga de la raíz, no de `jobs:`, y dura hasta
+    // la próxima clave sin sangrar.
+    const iConc = lineas.findIndex((l) => l.trim() === "concurrency:" && !/^\s/.test(l));
+    if (iConc !== -1) {
+      let bloque = "";
+      for (let i = iConc + 1; i < lineas.length && /^(\s|$)/.test(lineas[i]); i++) {
+        bloque += lineas[i] + "\n";
+      }
+      trabajos.push(bloque);
+    }
+
     for (const trabajo of trabajos) {
       const sinComentar = trabajo
         .split(/\r?\n/)
         .map((l) => l.replace(/(^|\s)#.*$/, "$1"))
         .join("\n");
       if (!/(^|[^!])startsWith\(github\.event\.deployment\.environment/.test(sinComentar)) continue;
-      if (!/deployment_status\.environment_url/.test(sinComentar)) cojos.push(nombre);
+      if (!/endsWith\(github\.event\.deployment\.environment/.test(sinComentar)) cojos.push(nombre);
     }
   }
 
   if (flujos.length === 0) {
     console.log("     (no hay workflows: nada que comprobar)");
   } else if (cojos.length === 0) {
-    bien("todo job que gatea por entorno mira también el host del deploy");
+    bien("todo job que gatea por entorno mira también de qué proyecto es");
   } else {
     mal(`${cojos.length} workflow(s) con un job que gatea sólo por entorno`);
     for (const w of [...new Set(cojos)]) console.log(`     .github/workflows/${w}`);
-    console.log("     Con dos proyectos de Vercel, un deploy de QA también llega con");
-    console.log("     environment == 'Production' —la etiqueta de SU entorno, en SU");
-    console.log("     proyecto—. Mirá el host de `deployment_status.environment_url`.");
+    console.log("     Con dos proyectos de Vercel, un deploy de QA también llega con un");
+    console.log("     entorno que empieza con 'Production' —la etiqueta de SU entorno, en");
+    console.log("     SU proyecto—. Distinguilos por el sufijo del nombre, con");
+    console.log("     endsWith(github.event.deployment.environment, '-qa').");
   }
 }
 

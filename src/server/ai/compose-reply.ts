@@ -19,7 +19,7 @@
 import "server-only";
 
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
-import { callGemini } from "@/server/ai/gemini-extractor";
+import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
@@ -369,9 +369,14 @@ export async function composeReply(input: ComposeReplyInput): Promise<string> {
       }, "compose.rejected");
     return withUnansweredQuestion(input);
   } catch (err) {
+    const meta = errMeta(err);
     logger.error({
         intent: input.intent,
-        error: err instanceof Error ? err.name : "UnknownError",
+        channel: input.channel,
+        error_name: meta.name,
+        status: meta.status,
+        code: meta.code,
+        detalle: err instanceof Error ? err.message.slice(0, 200) : undefined,
       }, "compose.failed");
     return withUnansweredQuestion(input);
   }

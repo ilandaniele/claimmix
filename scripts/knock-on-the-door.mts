@@ -188,26 +188,62 @@ async function waitForCase(
  * Lo que SÍ hay que mirar si esto empieza a agotarse de verdad: que las tres
  * llamadas no tienen timeout de proveedor. Un modelo que no contesta nunca
  * deja al asegurado esperando, y eso no lo arregla esperarlo más tiempo acá.
+ *
+ * ── Y acá `seconds` también son segundos ──────────────────────────────────
+ *
+ * El mismo desfasaje que `waitForCase` arregló arriba seguía vivo acá: cada
+ * vuelta costaba un segundo MÁS lo que tardara la consulta, así que aquellos
+ * «120 segundos» eran unos 138 de reloj —la base contesta en ~150 ms, la
+ * misma cuenta que está escrita arriba—. Con una fecha límite el número dice
+ * lo que mide.
+ *
+ * Y por eso el número pasó de 120 a 150, que NO es ensanchar la ventana: es
+ * dejarla donde ya estaba medida. Poner la fecha límite en 120 la habría
+ * acortado dieciocho segundos sin que lo pidiera nadie, justo en el borde
+ * donde el 18/09 este chequeo reportó «sin registro» una vez y la corrida
+ * siguiente salió verde sin tocar una línea.
+ *
+ * Lo de arriba sigue en pie: si esto empieza a agotarse de verdad, el número
+ * no es la cura.
  */
-async function replyFor(caseId: string, seconds = 120) {
-  for (let i = 0; i < seconds; i++) {
+async function replyFor(caseId: string, seconds = 150) {
+  const limite = Date.now() + seconds * 1000;
+
+  for (;;) {
     const rows = await db
       .select({ status: outboundMessages.status, template: outboundMessages.template })
       .from(outboundMessages)
-      .where(eq(outboundMessages.case_id, caseId))
+      .where(
+        and(
+          eq(outboundMessages.tenant_id, TENANT!),
+          eq(outboundMessages.case_id, caseId)
+        )
+      )
       .orderBy(desc(outboundMessages.created_at))
       .limit(1);
     if (rows.length > 0) return rows;
+    if (Date.now() >= limite) return [];
     await sleep(1000);
   }
-  return [];
 }
 
+/*
+ * El `tenant_id` va en las dos lecturas de acá aunque el `case_id` sea un UUID
+ * y alcance para traer la fila. Toda escritura de este esquema lo lleva, y
+ * toda otra consulta de este guión también (`cases.tenant_id` en los tres
+ * lugares donde busca un caso): una lectura que no lo lleva es la que un día
+ * se copia a un endpoint donde el identificador SÍ lo elige quien pregunta.
+ */
 async function fieldsFor(caseId: string) {
   return db
     .select({ n: sql<number>`count(*)::int` })
     .from(extractedFields)
-    .where(eq(extractedFields.case_id, caseId));
+    .where(
+      and(
+        eq(extractedFields.tenant_id, TENANT!),
+        eq(extractedFields.case_id, caseId)
+      )
+    );
 }
 
 const created: string[] = [];
@@ -307,11 +343,17 @@ async function knockByMail(): Promise<void> {
 
   const [reply] = await replyFor(found.id);
   check("el agente contestó", Boolean(reply), reply?.template);
-  check(
-    "y la respuesta NO salió del edificio",
-    reply?.status === "skipped_simulated",
-    reply?.status ?? "sin registro"
-  );
+  /*
+   * Sin fila de respuesta, la aserción de arriba ya lo dijo. Mirar el estado
+   * igual hacía que las dos cruces contaran el mismo hecho como dos problemas.
+   */
+  if (reply) {
+    check(
+      "y la respuesta NO salió del edificio",
+      reply.status === "skipped_simulated",
+      reply.status
+    );
+  }
 
   if (!KEEP && body.message_id) {
     await fetch(`${BASE}/api/health/knock`, {
@@ -405,11 +447,13 @@ async function knockByWhatsApp(): Promise<void> {
 
   const [reply] = await replyFor(found.id);
   check("el agente contestó", Boolean(reply), reply?.template);
-  check(
-    "y no le escribió a un número inventado",
-    reply?.status === "skipped_simulated",
-    reply?.status ?? "sin registro"
-  );
+  if (reply) {
+    check(
+      "y no le escribió a un número inventado",
+      reply.status === "skipped_simulated",
+      reply.status
+    );
+  }
 }
 
 // ── Correr ───────────────────────────────────────────────────────────────────

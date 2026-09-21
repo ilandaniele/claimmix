@@ -1314,8 +1314,57 @@ async function refuseIfBudgetSpent(): Promise<void> {
   process.exit(1);
 }
 
+/**
+ * Refuse to rehearse when the tenant already has a book of policies.
+ *
+ * `seedPolicy` says it out loud — this tenant's book is empty — and every
+ * scenario without a `policy` block is written on that assumption. The
+ * assumption is not about one policy number, it is about the whole table:
+ * `verificar_poliza` answers "this insurer has not loaded its book yet, do not
+ * treat this as a policy that does not exist" while the table is empty, and
+ * "there is no policy with that number" as soon as it holds a single row. The
+ * second answer is the one that makes the agent escalate the case to a
+ * specialist on the very first turn, and from then on every message opens a
+ * NEW case, because an escalated case is deliberately outside the threading
+ * window — a human owns it. Nine behavioural differences, not one of them
+ * about the agent, and a day to read them.
+ *
+ * Production has an empty book today and will not on the day it has customers,
+ * so this is not a QA quirk to paper over. The rehearsal says what it found and
+ * stops.
+ */
+async function refuseIfPadronCargado(): Promise<void> {
+  const filas = await db
+    .select({ numero: policies.policy_number })
+    .from(policies)
+    .where(eq(policies.tenant_id, TENANT_ID!))
+    .limit(5);
+  if (filas.length === 0) return;
+
+  console.error(
+    [
+      `El padrón de este inquilino tiene pólizas cargadas (${filas
+        .map((f) => f.numero)
+        .join(", ")}…).`,
+      "",
+      "Los escenarios sin bloque `policy` están escritos para un padrón vacío:",
+      "ahí `verificar_poliza` contesta que la aseguradora todavía no cargó el",
+      "padrón, y el agente pide la documentación. Con una sola fila cargada",
+      "contesta que esa póliza no existe, el caso se deriva a un especialista en",
+      "el primer turno, y los mensajes siguientes abren casos nuevos: el informe",
+      "sale lleno de diferencias que no son del agente.",
+      "",
+      "Vaciá el padrón de este inquilino antes de ensayar, o dale a cada",
+      "escenario su propio bloque `policy` para que el ensayo siembre el titular",
+      "que corresponde.",
+    ].join("\n")
+  );
+  process.exit(1);
+}
+
 await refuseIfMocked();
 await refuseIfBudgetSpent();
+await refuseIfPadronCargado();
 await sweepOldRehearsalCases();
 
 const created: string[] = [];

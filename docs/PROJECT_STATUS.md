@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-19. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-20. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -19,9 +19,12 @@ Update it at the end of a work session so the next one can recover quickly._
 > `p95 530 ms · 0% fallidos · 67 pedidos`, run 35466095444 — after the Preview
 > scope of `claimmix` got `DATABASE_URL`, `DATABASE_URL_APP` and
 > `BETTER_AUTH_SECRET` pointing at the Neon rehearsal branch and the k6 account
-> was swapped to an admin. One red is left and named here so it is not read as
-> green: a QA deploy verifies nothing until the `QA_*` repository secrets exist.
-> What is left is commercial: paid plans, and a first client.
+> was swapped to an admin. The last red is closed: the nine `QA_*` repository
+> secrets exist, so a QA deploy now runs its checks and its rehearsal. That
+> needed QA to get a bucket of its own — `claimmix-qa-attachments`, separate
+> from production's `claim-attachments` — which happened on the way out of the
+> personal Cloudflare account and into Veltra's. What is left is commercial:
+> paid plans, and a first client.
 
 ## What ClaimMix is
 

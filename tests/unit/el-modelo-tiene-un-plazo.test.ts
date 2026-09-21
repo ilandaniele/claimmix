@@ -2,10 +2,11 @@
  * Una llamada al modelo que no vuelve tiene un plazo.
  *
  * `fetch` iba sin `AbortSignal`. El default de undici son 300 s — cinco veces
- * el `maxDuration` de 60 s que `vercel.json` le da al webhook y al worker. O
- * sea que Vercel mataba la función ANTES de que el `catch` que escala el caso
- * llegara a correr: Vertex acepta la conexión, se queda callado, y el caso
- * queda como estaba, la persona sin respuesta y sin una línea que lo diga.
+ * el `maxDuration` de 60 s que `vercel.json` le daba entonces al webhook y al
+ * worker. O sea que Vercel mataba la función ANTES de que el `catch` que
+ * escala el caso llegara a correr: Vertex acepta la conexión, se queda
+ * callado, y el caso queda como estaba, la persona sin respuesta y sin una
+ * línea que lo diga.
  *
  * El valor —20 s— no es 60/3. Es unas dos veces la llamada sana más lenta que
  * hay medida: 23 extracciones reales del ensayo del 2026-08-20, la más rápida
@@ -85,8 +86,9 @@ describe("el transporte del modelo corta por tiempo", () => {
 
   it("el corte NO se reintenta como un socket caído", async () => {
     // Una conexión que se cae falla en milisegundos y reintentarla sale gratis
-    // — eso justifica el bucle. Esperar el plazo cuatro veces son 80 s contra
-    // una función de 60: el reintento garantizaría lo que el corte evita.
+    // — eso justifica el bucle. Esperar el plazo cuatro veces son dos minutos
+    // contra los 40 s de la corrida: el reintento garantizaría lo que el
+    // corte evita.
     process.env.GEMINI_TIMEOUT_MS = "30";
 
     let llamadas = 0;

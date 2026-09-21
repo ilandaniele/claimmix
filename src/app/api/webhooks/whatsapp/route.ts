@@ -38,6 +38,8 @@ import {
 } from "@/server/whatsapp/cloud-api";
 
 export const dynamic = "force-dynamic";
+// El `after()` corre con este mismo techo, contado desde que entra el pedido.
+export const maxDuration = 300;
 
 const WhatsAppWebhookSchema = z.object({
   from: z.string().min(3).max(100),
@@ -129,7 +131,9 @@ function scheduleAgent(
    * False para el camino simulado. Decide UNA cosa: si despues del agente se
    * pasa el barrido de casos trabados.
    */
-  trafficoReal: boolean
+  trafficoReal: boolean,
+  /** Cuándo mata Vercel esta invocación (epoch ms). */
+  hasta: number
 ): void {
   after(async () => {
     try {
@@ -197,13 +201,13 @@ function scheduleAgent(
      * el de GitHub Actions dispara siete veces de noventa y seis. El tráfico de
      * verdad es el único planificador confiable que hay.
      *
-     * Con tope de DOS, que es lo que distingue esto del cron: cada retomado es
-     * una extracción entera, y esto corre en el `after()` de un webhook que
-     * comparte los 60 s de la función con la corrida del mensaje que acaba de
-     * llegar. Ese mensaje va primero.
+     * Con tope de DOS y con el reloj de esta invocación: cada retomado es una
+     * corrida entera y comparte el techo de la función con la del mensaje que
+     * acaba de llegar, que va primero. `hasta` hace que no se empiece uno que
+     * ya no entra.
      */
     try {
-      const retomados = await retomarExtraccionesPendientes({ tenantId, limit: 2 });
+      const retomados = await retomarExtraccionesPendientes({ tenantId, limit: 2, hasta });
       if (retomados.retomados > 0) {
         logger.warn({
         cuantos: retomados.retomados,
@@ -237,6 +241,9 @@ export function GET(request: NextRequest): NextResponse {
 // ── POST: inbound messages ───────────────────────────────────────────────────
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // El reloj de Vercel corre desde acá, no desde el `after()`.
+  const hasta = Date.now() + maxDuration * 1000;
+
   // Read the raw body once — required for HMAC signature validation. Parsing
   // then re-serializing would change bytes and break the signature check.
   const rawBody = await request.text();
@@ -291,7 +298,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         // esto se llamaba igual: cada reintento de Meta era otra extracción
         // contra Vertex y un segundo mensaje al asegurado diciendo lo mismo.
         // Meta reintenta cuando el acuse tarda, y el acuse mide 2,9 s p95.
-        if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId, true);
+        if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId, true, hasta);
       } catch (err) {
         sinGuardar++;
         // El mensaje del error, no su nombre: `insertWhatsAppMessage` se toma
@@ -398,7 +405,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       simulated: true,
     });
     // Igual que arriba: un adaptador que reintenta no dispara otra extracción.
-    if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId, false);
+    if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId, false, hasta);
 
     return NextResponse.json(
       { ok: true, case_id: stored.caseId, created: stored.created, status: "received" },

@@ -314,7 +314,7 @@ export async function orchestratePostExtraction(
    * pagar dieciocho viajes reescribiendo filas idénticas.
    *
    * Corre después de CADA mensaje entrante, en el mismo tramo donde el agente
-   * llama a Gemini y contra un tope de 180 segundos.
+   * llama a Gemini y contra el techo de la función.
    *
    * La forma ya estaba en este archivo: `resolveAnsweredConfirmations` hace un
    * solo UPDATE con `inArray` sobre esta misma tabla.

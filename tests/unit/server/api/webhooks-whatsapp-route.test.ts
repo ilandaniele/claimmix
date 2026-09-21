@@ -5,20 +5,22 @@
  * Path 2: normalized payload + Bearer secret (simulation / BSP adapters).
  *
  * The real cloud-api helpers run (signature math is part of what we're testing);
- * only the DB-backed intake + agent are mocked.
+ * only the DB-backed intake, the agent and the two sweeps are mocked.
  */
 
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createHmac } from "crypto";
 
-const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent } = vi.hoisted(() => {
+const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent, mockReap, mockRetomar } = vi.hoisted(() => {
   const afterCallbacks: Array<() => unknown | Promise<unknown>> = [];
   return {
     afterCallbacks,
     mockAfter: vi.fn((cb: () => unknown | Promise<unknown>) => { afterCallbacks.push(cb); }),
     mockCreateWhatsAppIntake: vi.fn(),
     mockRunIntakeAgent: vi.fn(),
+    mockReap: vi.fn(),
+    mockRetomar: vi.fn(),
   };
 });
 
@@ -31,8 +33,10 @@ vi.mock("@/server/agents/intake-agent", () => ({
   createWhatsAppIntake: mockCreateWhatsAppIntake,
   runIntakeAgent: mockRunIntakeAgent,
 }));
+vi.mock("@/server/intake/reap-stuck", () => ({ reapStuckProcessingCases: mockReap }));
+vi.mock("@/server/intake/retomar-pendientes", () => ({ retomarExtraccionesPendientes: mockRetomar }));
 
-import { GET, POST } from "@/app/api/webhooks/whatsapp/route";
+import { GET, POST, maxDuration } from "@/app/api/webhooks/whatsapp/route";
 
 const APP_SECRET = "test-app-secret";
 const VERIFY_TOKEN = "verify-tok";
@@ -70,8 +74,13 @@ describe("/api/webhooks/whatsapp", () => {
       duplicado: false,
     });
     mockRunIntakeAgent.mockResolvedValue(undefined);
+    mockReap.mockResolvedValue({ reaped: 0, caseIds: [] });
+    mockRetomar.mockResolvedValue({ retomados: 0, caseIds: [] });
   });
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
+  });
 
   // ── GET verification handshake ──────────────────────────────────────────────
 
@@ -121,6 +130,25 @@ describe("/api/webhooks/whatsapp", () => {
     );
   });
 
+  it("retoma con el reloj del pedido, no del after()", async () => {
+    const T0 = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"], now: T0 });
+
+    mockCreateWhatsAppIntake.mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 20_000);
+      return { caseId: "case-1", tenantId: TENANT, created: true, duplicado: false };
+    });
+    mockRunIntakeAgent.mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 100_000);
+    });
+
+    const res = await POST(metaReq(TEXT_PAYLOAD, sign(TEXT_PAYLOAD)));
+    expect(res.status).toBe(200);
+    await afterCallbacks[0]();
+
+    expect(mockRetomar).toHaveBeenCalledWith({ tenantId: TENANT, limit: 2, hasta: T0 + maxDuration * 1000 });
+  });
+
   it("ACKs a validly-signed status event (no messages) without creating a case", async () => {
     const statusBody = JSON.stringify({
       object: "whatsapp_business_account",
@@ -144,6 +172,21 @@ describe("/api/webhooks/whatsapp", () => {
     expect(mockCreateWhatsAppIntake).toHaveBeenCalledWith(
       expect.objectContaining({ from: "5492916426930", body: "Choque en la ruta 3" })
     );
+  });
+
+  it("la simulación no barre ni retoma", async () => {
+    const req = new NextRequest("http://localhost/api/webhooks/whatsapp", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer bearer-secret" },
+      body: JSON.stringify({ from: "5492916426930", body: "Ensayo" }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(202);
+
+    await afterCallbacks[0]();
+
+    expect(mockReap).not.toHaveBeenCalled();
+    expect(mockRetomar).not.toHaveBeenCalled();
   });
 
   // ── El nombre de perfil ─────────────────────────────────────────────────────

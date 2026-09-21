@@ -43,9 +43,9 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 
 ## Cómo probar que todo anda
 
-`pnpm check` corre todo: tipos, lint, ~1960 tests, doce conversaciones enteras
-por WhatsApp y por mail sobre los canales simulados, y un chequeo contra el
-deploy que está corriendo. **No le manda un mensaje a nadie.**
+`pnpm check` corre todo: tipos, lint, ~1960 tests, catorce conversaciones
+enteras por WhatsApp y por mail sobre los canales simulados, y un chequeo
+contra el deploy que está corriendo. **No le manda un mensaje a nadie.**
 
 `pnpm prove --whatsapp <número>` / `--email <dirección>` es el único que manda
 algo de verdad, para comprobar que la salida funciona.
@@ -141,7 +141,9 @@ Corrélo después de cada deploy. Detalle completo en
     missing, and also when QA's database string equals production's (compared
     without printing either). The last QA deploy (`28249b4`, run 35551526692)
     ran smoke, permisos, código y base, the rehearsal and «Qué se preguntó»,
-    all green; doorbell, pen test and load are off on QA by design.
+    all green; doorbell, pen test and this workflow's load check are off on
+    QA by design — `load-tests.yml`'s k6 does run against QA's public alias,
+    separately.
   - **✅ QA can be logged into.** On 2026-09-18 `POST /api/auth/sign-in/email`
     answered `403 INVALID_ORIGIN` because `NEXT_PUBLIC_SITE_URL` was empty, so
     `resolveBaseURL()` (`src/lib/auth/index.ts:14-18`) fell back to the hash
@@ -3055,6 +3057,59 @@ donde hay uno (#223), y las dos lecturas del guión no seguían la regla del
 archivo — `replyFor` contaba vueltas en vez de mirar el reloj, y ni ella ni
 `fieldsFor` filtraban por `tenant_id` (#224).
 
+### ⏱️ El webhook de WhatsApp moría a los 60 s (2026-09-21)
+
+El 21/09 a las 14:47 el log de producción mostró cuatro veces
+`POST /api/webhooks/whatsapp 200 … Task timed out after 60 seconds`. El 200 ya
+había salido; lo que se cortaba era el `after()`, que corre con el techo de la
+ruta contado desde que entra el pedido. Adentro del `after()` van, en fila, la
+corrida del mensaje que llegó, el barrido de trabados y hasta dos retomados, y
+cada una puede llamar al modelo varias veces con 30 s de plazo. En 60 s no
+entraban.
+
+**Qué cambió:**
+
+- El techo pasa a 300 s y vive en cada ruta que corre al agente
+  (`export const maxDuration = 300`): los dos webhooks, los dos crons,
+  `worker/extract` y `cases/[id]/re-analyze`. `vercel.json` ya no tiene bloque
+  `functions`, porque una entrada ahí pisaría en silencio el número que el
+  webhook usa para su reloj.
+- El webhook y el cron de trabados le pasan a `retomarExtraccionesPendientes`
+  cuándo se corta la invocación (`hasta`), y el barrido no empieza un retomado
+  si quedan menos de `MINIMO_PARA_RETOMAR_MS` (120 s). Cuando corta, deja
+  `retomar_pendientes.sin_tiempo` en el log.
+- La reserva de extracción pasa de 3 a 5 min (`RESERVA_DE_EXTRACCION_MS`): una
+  reserva más corta que la función deja que otra corrida tome el caso con la
+  primera todavía viva. `tests/unit/techo-de-las-funciones.test.ts` exige que
+  ninguna ruta del agente dure más que la reserva y que `vercel.json` no vuelva a
+  tener `functions`.
+- `barrer-trabados.yml` espera 320 s por intento (antes 60) y el job tiene 17
+  min, así curl ve el 504 de Vercel en vez de abandonar un barrido vivo.
+
+**Lo que no cambió:** los 40 s de presupuesto de la corrida, los 30 s de plazo
+del modelo, el techo de 55 s de la variable, la espera del mail y los 500 ms de
+Carga. Tampoco cuesta plata: en Hobby con Fluid el techo por defecto ya era 300.
+
+**Lo que queda, visto y sin arreglar:**
+
+- El `SELECT` de retomar no filtra por estado: un caso `escalado` que sigue
+  pendiente ocupa un lugar en cada barrido y escribe una auditoría cada vez.
+- El barrido de trabados corre antes que el de pendientes, así que un pendiente
+  en `recibido` con más de veinte minutos sale escalado en vez de retomado.
+- El cron de las 04:00 de Vercel y el barrido de GitHub pueden coincidir; la
+  corrida que pierde la reserva vuelve a correr y puede mandar la respuesta dos
+  veces.
+- La espera de 20 s del mail más los 40 s de la corrida devuelven seguido los
+  casos de mail a la cola.
+- Un lote de Meta con varios mensajes agenda un `after()` por mensaje, y Next
+  los corre a la vez: cada uno barre y retoma sobre el mismo tenant. Los que
+  pierden la reserva vuelven a marcar el caso y el que la tiene lo redespacha.
+  Con 60 s esas colas morían; con 300 terminan. Barrer y retomar una vez por
+  pedido, no una vez por mensaje, lo cierra.
+- Una corrida en el peor caso (unas ocho llamadas de 30 s más los reintentos por
+  429) todavía puede pasar los 300 s. Y si la matan después de mandar la
+  respuesta, un retomado podría mandarla otra vez; no está verificado.
+
 ### 🙋 Waiting on you (not code)
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,
@@ -3110,6 +3165,16 @@ archivo — `replyFor` contaba vueltas en vez de mirar el reloj, y ni ella ni
   el mismo `runIntakeAgent` que usa el barrido. Ante un rojo, mirar primero
   `--log-failed` por `transport_timeout`; regla de la casa: hasta dos reruns, el
   umbral no se toca.
+
+- **Dos decisiones sobre el 429 que siguen sin tomarse** (salieron del
+  diagnóstico del ensayo contra el padrón, #229-#231). Un 429 en la
+  deliberación hoy es invisible: `src/server/ai/deliberate.ts:172-181` lo traga y devuelve `null`,
+  el caso sigue con estado normal y la respuesta sale con la plantilla
+  determinista — el mismo «verde por ausencia» de las últimas PR, pero acá
+  vive en el producto. Y un TIMEOUT deja el caso marcado para retomar
+  (`src/server/worker/extract.ts:1555-1556`) y un 429 no, aunque los dos son
+  transitorios. Cambiar cualquiera de las dos es una decisión de producto, no
+  una corrección.
 
 - ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
   356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`

@@ -35,8 +35,10 @@ import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { cases } from "@/lib/db/schema";
 import { logger } from "@/lib/observability/logger";
+import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
+import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 
-/** Cuántos se retoman por corrida. El cron tiene 60 s y cada uno cuesta una extracción. */
+/** Cuántos se retoman por corrida, como mucho. Lo que corta de verdad es el reloj: ver `MINIMO_PARA_RETOMAR_MS`. */
 const TOPE_POR_CORRIDA = 20;
 
 /**
@@ -48,6 +50,16 @@ const TOPE_POR_CORRIDA = 20;
  * contra las catorce días que tarda el barrido de abandonados en cerrarlo.
  */
 const ESPERA_MS = 2 * 60_000;
+
+/**
+ * Lo que tiene que quedarle a la invocación para empezar otro.
+ *
+ * Cada retomado es una corrida entera: extracción, deliberación y redacción.
+ * Cuatro llamadas al modelo a plazo completo es una corrida lenta, no la
+ * peor. Empezar una que no entra es peor que dejarla: la matan a mitad de
+ * una escritura, con la reserva tomada y la marca puesta.
+ */
+export const MINIMO_PARA_RETOMAR_MS = 4 * PLAZO_DEL_MODELO_MS;
 
 export interface RetomadosResult {
   retomados: number;
@@ -65,10 +77,14 @@ export async function retomarExtraccionesPendientes(opts?: {
   tenantId?: string;
   limit?: number;
   leaseMs?: number;
+  /** Cuándo se corta la invocación (epoch ms). Sin esto no se mira el reloj. */
+  hasta?: number;
 }): Promise<RetomadosResult> {
   const limit = opts?.limit ?? TOPE_POR_CORRIDA;
   const corte = new Date(Date.now() - ESPERA_MS).toISOString();
-  const leaseVencido = new Date(Date.now() - (opts?.leaseMs ?? 3 * 60_000)).toISOString();
+  const leaseVencido = new Date(
+    Date.now() - (opts?.leaseMs ?? RESERVA_DE_EXTRACCION_MS)
+  ).toISOString();
 
   let pendientes: Array<{ id: string; tenant_id: string }>;
   try {
@@ -112,7 +128,11 @@ export async function retomarExtraccionesPendientes(opts?: {
   const { runIntakeAgent } = await import("@/server/agents/intake-agent");
   const hechos: string[] = [];
 
-  for (const caso of pendientes) {
+  for (const [i, caso] of pendientes.entries()) {
+    if (opts?.hasta !== undefined && opts.hasta - Date.now() < MINIMO_PARA_RETOMAR_MS) {
+      logger.warn({ quedaron: pendientes.length - i }, "retomar_pendientes.sin_tiempo");
+      break;
+    }
     try {
       /*
        * De a uno y en serie, a propósito.

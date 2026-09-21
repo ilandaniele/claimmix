@@ -34,6 +34,7 @@ import { logger } from "@/lib/observability/logger";
 
 /** Required: prevent Vercel from statically optimising this dynamic route. */
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 // ── Singleton OAuth2Client ────────────────────────────────────────────────────
 //

@@ -8,7 +8,7 @@
     },
     {
       "path": "/api/cron/reap-stuck",
-      "schedule": "0 4 * * *"
+      "schedule": "7 4 * * *"
     }
   ]
 }

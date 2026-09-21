@@ -12,18 +12,27 @@
  * con «sin respuesta del denunciante», habiendo contestado.
  */
 
+import { readFileSync } from "node:fs";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSelect, mockRunIntakeAgent } = vi.hoisted(() => ({
+const { mockSelect, mockUpdate, mockRunIntakeAgent } = vi.hoisted(() => ({
   mockSelect: vi.fn(),
+  mockUpdate: vi.fn(),
   mockRunIntakeAgent: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/db", () => ({ db: { select: mockSelect }, tables: {} }));
+vi.mock("@/lib/db", () => ({ db: { select: mockSelect, update: mockUpdate }, tables: {} }));
+vi.mock("@/data/scope", async () => {
+  const mod = await import("@/lib/db");
+  return {
+    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) => Promise.resolve(armar(mod.db)),
+  };
+});
 vi.mock("@/server/agents/intake-agent", () => ({ runIntakeAgent: mockRunIntakeAgent }));
 
-import { retomarExtraccionesPendientes, MINIMO_PARA_RETOMAR_MS } from "@/server/intake/retomar-pendientes";
+import { retomarExtraccionesPendientes, marcarPendientes, MINIMO_PARA_RETOMAR_MS } from "@/server/intake/retomar-pendientes";
 
 /** El `select(...).from(...).where(...).limit(n)` del barrido. */
 function devuelve(filas: Array<{ id: string; tenant_id: string }> | Error) {
@@ -60,6 +69,7 @@ describe("retomarExtraccionesPendientes", () => {
       caseId: "caso-1",
       tenantId: "t-1",
       source: "worker",
+      retoma: true,
     });
   });
 
@@ -162,5 +172,48 @@ describe("con el reloj", () => {
     expect(r.retomados).toBe(1);
     expect(r.caseIds).toEqual(["caso-1"]);
     expect(avisos.join(" ")).toMatch(/quedaron\D+1/);
+  });
+});
+
+it("la consulta filtra estado, usa coalesce y toma huérfanas", () => {
+  // Normalizado: el archivo llega con CRLF acá y con LF en el checkout de CI.
+  const fuente = readFileSync("src/server/intake/retomar-pendientes.ts", "utf8").replace(/\r\n/g, "\n");
+
+  expect(fuente).toContain("inArray(cases.status, ESTADOS_DE_ARRANQUE)");
+  expect(fuente).toContain("coalesce(${cases.updated_at}, ${cases.created_at}) < ${corte}::timestamptz");
+  expect(fuente).toContain("gt(cases.extraction_lease_at, huerfanosDesde)");
+});
+
+describe("marcarPendientes", () => {
+  it("marcarPendientes escribe una vez", async () => {
+    const donde = vi.fn().mockResolvedValue(undefined);
+    mockUpdate.mockReturnValue({ set: () => ({ where: donde }) });
+
+    await marcarPendientes(["caso-1", "caso-2"], "t-1");
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(donde).toHaveBeenCalledTimes(1);
+  });
+
+  it("lista vacía no toca la base", async () => {
+    await marcarPendientes([], "t-1");
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("si falla lo dice y no tira", async () => {
+    const err = new Error("no anda");
+    (err as unknown as { code: string }).code = "40001";
+    mockUpdate.mockReturnValue({ set: () => ({ where: () => Promise.reject(err) }) });
+    const errores: string[] = [];
+    const espia = vi
+      .spyOn(console, "error")
+      .mockImplementation((...a: unknown[]) => { errores.push(a.map(String).join(" ")); });
+
+    await expect(marcarPendientes(["caso-1"], "t-1")).resolves.toBeUndefined();
+    espia.mockRestore();
+
+    expect(errores.join(" ")).toContain("retomar_pendientes.marcar_fallo");
+    expect(errores.join(" ")).toContain("40001");
   });
 });

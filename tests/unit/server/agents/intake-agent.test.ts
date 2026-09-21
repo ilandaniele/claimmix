@@ -188,7 +188,9 @@ describe("runIntakeAgent", () => {
 
     expect(result.action).toBe("extract_whatsapp");
     expect(result.ok).toBe(true);
-    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-001", "tenant-001", null);
+    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-001", "tenant-001", null, {
+      retoma: false,
+    });
     expect(mockWriteAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
         event_type: "intake.agent_decision",
@@ -213,7 +215,9 @@ describe("runIntakeAgent", () => {
 
     expect(result.action).toBe("extract_email");
     expect(result.ok).toBe(true);
-    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-002", "tenant-001", null);
+    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-002", "tenant-001", null, {
+      retoma: false,
+    });
   });
 
   it("chooses email extraction for email_sim cases", async () => {
@@ -230,7 +234,29 @@ describe("runIntakeAgent", () => {
 
     expect(result.action).toBe("extract_email");
     expect(result.ok).toBe(true);
-    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-sim-001", "tenant-001", "user-001");
+    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith(
+      "case-sim-001",
+      "tenant-001",
+      "user-001",
+      { retoma: false }
+    );
+  });
+
+  it("retoma llega al worker", async () => {
+    setupSelectResults([
+      [{ id: "case-003", tenant_id: "tenant-001", channel: "email", status: "procesando" }],
+    ]);
+
+    await runIntakeAgent({
+      caseId: "case-003",
+      tenantId: "tenant-001",
+      source: "worker",
+      retoma: true,
+    });
+
+    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-003", "tenant-001", null, {
+      retoma: true,
+    });
   });
 
   it("returns case_not_found when db returns no rows", async () => {
@@ -300,7 +326,8 @@ describe("createWhatsAppIntakeAndRunAgent", () => {
     expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith(
       "case-whatsapp-001",
       "tenant-001",
-      null
+      null,
+      { retoma: false }
     );
 
     // Verify inserts were made (cases, claimMessages, rawMessages).

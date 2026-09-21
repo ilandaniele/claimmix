@@ -34,6 +34,7 @@ import { labelForField } from "@/lib/labels/claim-fields";
 import { describeTools, runTool, type ToolContext } from "@/server/ai/agent-tools";
 import { redactObject, redactString } from "@/lib/audit/redact";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
+import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
 
 export type AgentIntent =
@@ -178,6 +179,18 @@ export async function deliberate(
         code: meta.code,
         detalle: err instanceof Error ? err.message.slice(0, 200) : undefined,
       }, "deliberate.failed");
+
+    // El log de arriba se va a Vercel; esto queda en `audit_log`, que sí se
+    // exporta y se muestra. `writeAuditLog` no tira — no hace falta un catch acá.
+    await writeAuditLog({
+      tenant_id: input.tenantId,
+      actor_id: null,
+      event_type: AuditEvent.AGENT_DELIBERATION_FAILED,
+      target_type: "case",
+      target_id: input.caseId,
+      payload: { status: meta.status, code: meta.code, error_name: meta.name },
+    });
+
     return null;
   }
 }

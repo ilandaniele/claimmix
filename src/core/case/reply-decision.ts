@@ -90,3 +90,23 @@ export function queHacer(s: SeñalesDeRespuesta): QueHacer {
 
   return "callar";
 }
+
+/**
+ * ¿La última salida contestó la última entrada?
+ *
+ * Para la corrida heredada: una reserva vencida sin marca de pendiente puede
+ * ser una corrida muerta que ya alcanzó a escribir. `null` en cualquiera de
+ * los dos —o una fecha que no se puede leer— es "no lo sabemos", y ahí la
+ * respuesta es que no: para la corrida heredada, la dirección seguridad es
+ * seguir de largo como si no hubiera contestado.
+ */
+export function yaSeLeContesto(
+  ultimaEntrada: string | null,
+  ultimaSalida: string | null
+): boolean {
+  if (!ultimaEntrada || !ultimaSalida) return false;
+  const entrada = Date.parse(ultimaEntrada);
+  const salida = Date.parse(ultimaSalida);
+  if (Number.isNaN(entrada) || Number.isNaN(salida)) return false;
+  return salida >= entrada;
+}

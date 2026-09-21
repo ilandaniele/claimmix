@@ -18,6 +18,8 @@ export interface IntakeAgentInput {
   tenantId: string;
   userId?: string | null;
   source?: "gmail" | "whatsapp" | "worker" | "cron" | "simulate" | "manual";
+  /** Viene del barrido de pendientes: el worker no marca si sigue ocupado. */
+  retoma?: boolean;
 }
 
 export interface IntakeAgentResult {
@@ -168,7 +170,9 @@ export async function runIntakeAgent(input: IntakeAgentInput): Promise<IntakeAge
   });
 
   if (action === "extract_email" || action === "extract_whatsapp") {
-    await runEmailExtractionWorker(input.caseId, input.tenantId, input.userId ?? null);
+    await runEmailExtractionWorker(input.caseId, input.tenantId, input.userId ?? null, {
+      retoma: input.retoma === true,
+    });
     return {
       ok: true,
       caseId: input.caseId,

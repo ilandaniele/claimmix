@@ -74,8 +74,8 @@ describe("la reserva de extracción", () => {
    * que esta corrida nunca tomó. Le rompía el lock al que sí lo tenía y le
    * borraba su marca de mensaje pendiente.
    */
-  it("tiene tres respuestas, no dos", () => {
-    expect(WORKER).toContain('"tomada" | "ocupada" | "no_se_pudo"');
+  it("tiene cuatro respuestas", () => {
+    expect(WORKER).toContain('"tomada" | "heredada" | "ocupada" | "no_se_pudo"');
   });
 
   it("y el error no dice que la tomó", () => {

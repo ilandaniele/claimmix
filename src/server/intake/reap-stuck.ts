@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { cases } from "@/lib/db/schema";
@@ -101,7 +101,13 @@ export async function reapStuckProcessingCases(opts?: {
       .where(
         and(
           inArray(cases.status, ESTADOS_TRABABLES),
-          lt(cases.created_at, cutoff),
+          // Pendiente es de retomar-pendientes, no de este barrido: escalarlo
+          // mientras hay una corrida por venir le pisa el trabajo.
+          eq(cases.extraction_pending, false),
+          // `updated_at` queda NULL al insertar; coalesce cae a `created_at`
+          // para ese caso, y de paso le da 20 minutos frescos a un caso
+          // reabierto (`reabrir-no-relevante.ts`) o que el worker tocó.
+          sql`coalesce(${cases.updated_at}, ${cases.created_at}) < ${cutoff}::timestamptz`,
           opts?.tenantId ? eq(cases.tenant_id, opts.tenantId) : undefined
         )
       )
@@ -125,7 +131,11 @@ export async function reapStuckProcessingCases(opts?: {
       .update(cases)
       .set({ status: "escalado", updated_at: sql`now()` })
       .where(
-        and(inArray(cases.id, ids), inArray(cases.status, ESTADOS_TRABABLES))
+        and(
+          inArray(cases.id, ids),
+          inArray(cases.status, ESTADOS_TRABABLES),
+          eq(cases.extraction_pending, false)
+        )
       )
       .returning({ id: cases.id, tenant_id: cases.tenant_id });
     reapedIds = updated.map((r) => r.id);

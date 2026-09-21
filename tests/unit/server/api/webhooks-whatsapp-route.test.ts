@@ -12,7 +12,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createHmac } from "crypto";
 
-const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent, mockReap, mockRetomar } = vi.hoisted(() => {
+const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent, mockReap, mockRetomar, mockMarcarPendientes } = vi.hoisted(() => {
   const afterCallbacks: Array<() => unknown | Promise<unknown>> = [];
   return {
     afterCallbacks,
@@ -21,6 +21,7 @@ const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent,
     mockRunIntakeAgent: vi.fn(),
     mockReap: vi.fn(),
     mockRetomar: vi.fn(),
+    mockMarcarPendientes: vi.fn(),
   };
 });
 
@@ -34,7 +35,11 @@ vi.mock("@/server/agents/intake-agent", () => ({
   runIntakeAgent: mockRunIntakeAgent,
 }));
 vi.mock("@/server/intake/reap-stuck", () => ({ reapStuckProcessingCases: mockReap }));
-vi.mock("@/server/intake/retomar-pendientes", () => ({ retomarExtraccionesPendientes: mockRetomar }));
+vi.mock("@/server/intake/retomar-pendientes", () => ({
+  retomarExtraccionesPendientes: mockRetomar,
+  marcarPendientes: mockMarcarPendientes,
+  MINIMO_PARA_RETOMAR_MS: 120_000,
+}));
 
 import { GET, POST, maxDuration } from "@/app/api/webhooks/whatsapp/route";
 
@@ -76,6 +81,7 @@ describe("/api/webhooks/whatsapp", () => {
     mockRunIntakeAgent.mockResolvedValue(undefined);
     mockReap.mockResolvedValue({ reaped: 0, caseIds: [] });
     mockRetomar.mockResolvedValue({ retomados: 0, caseIds: [] });
+    mockMarcarPendientes.mockResolvedValue(undefined);
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -147,6 +153,79 @@ describe("/api/webhooks/whatsapp", () => {
     await afterCallbacks[0]();
 
     expect(mockRetomar).toHaveBeenCalledWith({ tenantId: TENANT, limit: 2, hasta: T0 + maxDuration * 1000 });
+  });
+
+  it("varios mensajes: un after(), agente por caso en serie, un barrido", async () => {
+    const dosMensajes = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ changes: [{ value: {
+        contacts: [{ wa_id: "5492916426930", profile: { name: "Ilan" } }],
+        messages: [
+          { from: "5492916426930", id: "wamid.1", type: "text", text: { body: "Choqué" } },
+          { from: "5491112345678", id: "wamid.2", type: "text", text: { body: "Choqué yo también" } },
+        ],
+      } }] }],
+    });
+
+    let llamada = 0;
+    mockCreateWhatsAppIntake.mockImplementation(async () => {
+      llamada++;
+      return { caseId: `case-${llamada}`, tenantId: TENANT, created: true, duplicado: false };
+    });
+
+    const orden: string[] = [];
+    mockRunIntakeAgent.mockImplementation(async ({ caseId }: { caseId: string }) => {
+      orden.push(caseId);
+    });
+    mockMarcarPendientes.mockImplementation(async (ids: string[]) => {
+      orden.push(`marca:${ids.join(",")}`);
+    });
+
+    const res = await POST(metaReq(dosMensajes, sign(dosMensajes)));
+    expect(res.status).toBe(200);
+    expect(afterCallbacks).toHaveLength(1);
+
+    await afterCallbacks[0]();
+
+    // El segundo queda marcado ANTES de correr el primero: si matan la
+    // invocación a mitad del primero, el barrido igual lo encuentra.
+    expect(orden).toEqual(["marca:case-2", "case-1", "case-2"]);
+    expect(mockMarcarPendientes).toHaveBeenCalledWith(["case-2"], TENANT);
+    expect(mockReap).toHaveBeenCalledTimes(1);
+    expect(mockRetomar).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin tiempo para el segundo, lo marca pendiente", async () => {
+    const T0 = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"], now: T0 });
+
+    const dosMensajes = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ changes: [{ value: {
+        contacts: [{ wa_id: "5492916426930", profile: { name: "Ilan" } }],
+        messages: [
+          { from: "5492916426930", id: "wamid.1", type: "text", text: { body: "Choqué" } },
+          { from: "5491112345678", id: "wamid.2", type: "text", text: { body: "Choqué yo también" } },
+        ],
+      } }] }],
+    });
+
+    let llamada = 0;
+    mockCreateWhatsAppIntake.mockImplementation(async () => {
+      llamada++;
+      return { caseId: `case-${llamada}`, tenantId: TENANT, created: true, duplicado: false };
+    });
+    mockRunIntakeAgent.mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 200_000); // sólo quedan 100 s, menos que MINIMO_PARA_RETOMAR_MS
+    });
+
+    const res = await POST(metaReq(dosMensajes, sign(dosMensajes)));
+    expect(res.status).toBe(200);
+
+    await afterCallbacks[0]();
+
+    expect(mockRunIntakeAgent).toHaveBeenCalledTimes(1);
+    expect(mockMarcarPendientes).toHaveBeenCalledWith(["case-2"], TENANT);
   });
 
   it("ACKs a validly-signed status event (no messages) without creating a case", async () => {

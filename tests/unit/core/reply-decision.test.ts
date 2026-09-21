@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 import {
   queHacer,
   elPedidoQuedaEnEspera,
+  yaSeLeContesto,
   type SeñalesDeRespuesta,
 } from "@/core/case/reply-decision";
 
@@ -96,5 +97,25 @@ describe("qué rompe la espera", () => {
     // Aunque nunca se haya pedido: si el agente deliberó y decidió esperar,
     // es porque el último mensaje no pide una respuesta.
     expect(elPedidoQuedaEnEspera(con({ elAgenteEspera: true }))).toBe(true);
+  });
+});
+
+describe("yaSeLeContesto: posterior sí, anterior no, nulos no", () => {
+  it("la salida es posterior a la entrada: contestado", () => {
+    expect(
+      yaSeLeContesto("2026-09-21T10:00:00.000Z", "2026-09-21T10:05:00.000Z")
+    ).toBe(true);
+  });
+
+  it("la salida es anterior a la entrada: no contestado", () => {
+    expect(
+      yaSeLeContesto("2026-09-21T10:05:00.000Z", "2026-09-21T10:00:00.000Z")
+    ).toBe(false);
+  });
+
+  it("nulos: no se sabe, y eso no es un sí", () => {
+    expect(yaSeLeContesto(null, "2026-09-21T10:00:00.000Z")).toBe(false);
+    expect(yaSeLeContesto("2026-09-21T10:00:00.000Z", null)).toBe(false);
+    expect(yaSeLeContesto(null, null)).toBe(false);
   });
 });

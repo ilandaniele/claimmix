@@ -24,8 +24,10 @@ import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendiente
 import { logger } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const hasta = Date.now() + maxDuration * 1000;
   const secret = process.env.CRON_SECRET;
   if (!secret) {
     logger.error({}, "cron_reap_stuck.cron_secret_is_not_configured");
@@ -53,7 +55,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const result = await reapStuckProcessingCases();
 
   /*
-   * Y antes de escalar nada, retomar lo que quedó marcado y sin hacer.
+   * Y después, retomar lo que quedó marcado y sin hacer.
    *
    * `extraction_pending` la escriben cuatro caminos del worker y hasta ahora la
    * leía uno solo: el mismo proceso que la escribía. Sin este barrido, un
@@ -62,10 +64,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
    * abandonados lo cerraba diciendo que la persona no contestó.
    *
    * Va acá y no en su propio cron porque Hobby da dos por día y los dos ya
-   * están usados. Va PRIMERO porque un caso que se retoma bien deja de ser
-   * candidato a que lo escalen.
+   * están usados. Va DESPUÉS del barrido de trabados —un pendiente que sigue
+   * en `recibido` pasados los veinte minutos ya salió escalado arriba— y
+   * ANTES del de abandonados, que no mira la marca. Con el reloj de la
+   * invocación: veinte corridas enteras no entran en ninguna función, así que
+   * se corta cuando no queda para una más.
    */
-  const retomados = await retomarExtraccionesPendientes();
+  const retomados = await retomarExtraccionesPendientes({ hasta });
 
   // Same nightly pass, second sweep: conversations the claimant abandoned.
   // Piggybacking rather than adding a cron because the Hobby plan allows one

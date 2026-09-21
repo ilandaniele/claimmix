@@ -28,6 +28,6 @@
  *
  * Treinta deja pasar hasta cerca del p99 y sigue entrando en el presupuesto de
  * 40 s de la corrida — porque un timeout ya no reintenta. Con reintento no
- * entraría: 2 × 30 s son 60 s, que es la función entera.
+ * entraría: 2 × 30 s son 60 s, más que los 40 s de la corrida.
  */
 export const PLAZO_DEL_MODELO_MS = 30_000;

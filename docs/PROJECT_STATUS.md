@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-20. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-21. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -23,7 +23,8 @@ Update it at the end of a work session so the next one can recover quickly._
 > secrets exist, so a QA deploy now runs its checks and its rehearsal. That
 > needed QA to get a bucket of its own — `claimmix-qa-attachments`, separate
 > from production's `claim-attachments` — which happened on the way out of the
-> personal Cloudflare account and into Veltra's. What is left is commercial:
+> personal Cloudflare account and into Veltra's; the old bucket and its token
+> were deleted on 2026-09-21. What is left is commercial:
 > paid plans, and a first client.
 
 ## What ClaimMix is
@@ -42,9 +43,9 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 
 ## Cómo probar que todo anda
 
-`pnpm check` corre todo: tipos, lint, ~1960 tests, doce conversaciones enteras
-por WhatsApp y por mail sobre los canales simulados, y un chequeo contra el
-deploy que está corriendo. **No le manda un mensaje a nadie.**
+`pnpm check` corre todo: tipos, lint, ~1960 tests, catorce conversaciones
+enteras por WhatsApp y por mail sobre los canales simulados, y un chequeo
+contra el deploy que está corriendo. **No le manda un mensaje a nadie.**
 
 `pnpm prove --whatsapp <número>` / `--email <dirección>` es el único que manda
 algo de verdad, para comprobar que la salida funciona.
@@ -105,6 +106,18 @@ Corrélo después de cada deploy. Detalle completo en
   instead of at the first request that needs the column.
 - **Neon DATABASE_URL** is in `.env.local` (prod). `vercel env pull` returns blank
   values for secrets — use `vercel env ls` to check presence.
+- **Which Neon database is which — the names lie.** Production serves from
+  `ep-proud-resonance-acbz9jqu`, a project outside the Veltra org. That is
+  `.env.local`'s `DATABASE_URL`, Vercel Production's, and also the repository
+  secrets `DATABASE_URL` and `DATABASE_URL_APP`: the post-deploy jobs that
+  write (doorbell, rehearsal, pen test) write into the customers' database and
+  sweep their own rows afterwards. `STAGING_DATABASE_URL` is the Veltra branch
+  that is *named* `production` (`ep-damp-meadow-ac1xqhzs`), and only
+  `ci.yml`'s integration and tenancy tests use it. Proved on 2026-09-21: the
+  doorbell job found and deleted the case the deploy had just written to
+  proud-resonance. Tell them apart by what is in them — real `email` and
+  `whatsapp` cases — never by name. The live database was missing the 41
+  global `known_claim_patterns`; they were seeded into it that day.
 - **Second Vercel project: `claimmix-qa`.** Deploys the `qa` branch, reads the
   `qa` Neon branch (`br-muddy-mountain-acxm92sh`), public alias
   https://claimmix-qa.vercel.app. First real deploy: 2026-09-18. What that day
@@ -126,15 +139,22 @@ Corrélo después de cada deploy. Detalle completo en
     failed, or did not run and why — so a run is never green by absence. The
     `qa_secretos` gate refuses to start when the three required secrets are
     missing, and also when QA's database string equals production's (compared
-    without printing either). None of it fires until those `QA_*` repository
-    secrets are created: step 10 of `docs/PROMOCION.md`.
-  - **Nobody can log into QA yet.** `POST /api/auth/sign-in/email` answers
-    `403 INVALID_ORIGIN` because `NEXT_PUBLIC_SITE_URL` is empty in that project,
-    so `resolveBaseURL()` (`src/lib/auth/index.ts:14-18`) falls back to the
-    per-deployment hash host and Better Auth rejects the alias it is served from.
-    Production, same probe, answers `401 INVALID_EMAIL_OR_PASSWORD`. Load the
-    variable and redeploy; it is the last of the twelve in `docs/PROMOCION.md`
-    step 4bis, and k6 stays red until it is there.
+    without printing either). The last QA deploy (`28249b4`, run 35551526692)
+    ran smoke, permisos, código y base, the rehearsal and «Qué se preguntó»,
+    all green; doorbell, pen test and this workflow's load check are off on
+    QA by design — `load-tests.yml`'s k6 does run against QA's public alias,
+    separately.
+  - **✅ QA can be logged into.** On 2026-09-18 `POST /api/auth/sign-in/email`
+    answered `403 INVALID_ORIGIN` because `NEXT_PUBLIC_SITE_URL` was empty, so
+    `resolveBaseURL()` (`src/lib/auth/index.ts:14-18`) fell back to the hash
+    host. The variable was loaded on 2026-09-20 and the same probe now answers
+    `401 INVALID_EMAIL_OR_PASSWORD`, like production. «Continuar con Google»
+    works too: Google accepts QA's `redirect_uri`, while a made-up one gets
+    `redirect_uri_mismatch` (measured 2026-09-21). An address in QA's
+    `ADMIN_EMAILS` that signs in with Google is provisioned as admin into
+    `GOOGLE_DEFAULT_TENANT_ID`. A password signup gets an account with no
+    profile, by design, until an admin attaches it. QA has no mailbox, so the
+    password-reset mail never leaves.
   - **The two projects are told apart by the environment NAME, never the URL.**
     With more than one project GitHub disambiguates the environment as
     `Production – claimmix` / `Production – claimmix-qa` (en dash), while
@@ -143,16 +163,19 @@ Corrélo después de cada deploy. Detalle completo en
     enforces it, in the job `if:` and in the `concurrency` group alike.
   - The QA hash URL sits behind Vercel Auth and the repo's automation bypass
     secret belongs to the other project, so k6 measures the public alias.
-- **⛔ The Preview environment of `claimmix` has no `DATABASE_URL`.** That is
-  the whole 500, diagnosed and closed on 2026-09-18. The deploy says it itself:
+- **✅ The Preview environment of `claimmix` had no `DATABASE_URL`.** That was
+  the whole 500, diagnosed on 2026-09-18 and closed on 2026-09-19 (see "Carga on
+  previews" below). The deploy said it itself:
 
       GET /api/admin/health
       {"status":"degraded","db":"error","db_error":"DATABASE_URL is not set"}
 
-  Fix it in the Vercel dashboard — Settings → Environment Variables, and tick
-  **Preview**, not only Production. `CRON_SECRET` is missing from that scope
-  too: `/api/health` answers 401 to the repo secret that production accepts.
-  Nothing in this repo can set either one.
+  `CRON_SECRET` was missing from that scope too. Preview now carries the same
+  value as production and the repository secret, because `load-tests.yml`
+  sends the repository secret to previews. That value was rotated on
+  2026-09-21 after it showed up in a screenshot: production, Preview, the
+  repository secret and `.env.local` changed together, and the old value gets
+  401.
   - **How it was narrowed, so nobody redoes it.** Measured from CI with the
     automation bypass, on the same preview deploy:
 
@@ -3034,6 +3057,59 @@ donde hay uno (#223), y las dos lecturas del guión no seguían la regla del
 archivo — `replyFor` contaba vueltas en vez de mirar el reloj, y ni ella ni
 `fieldsFor` filtraban por `tenant_id` (#224).
 
+### ⏱️ El webhook de WhatsApp moría a los 60 s (2026-09-21)
+
+El 21/09 a las 14:47 el log de producción mostró cuatro veces
+`POST /api/webhooks/whatsapp 200 … Task timed out after 60 seconds`. El 200 ya
+había salido; lo que se cortaba era el `after()`, que corre con el techo de la
+ruta contado desde que entra el pedido. Adentro del `after()` van, en fila, la
+corrida del mensaje que llegó, el barrido de trabados y hasta dos retomados, y
+cada una puede llamar al modelo varias veces con 30 s de plazo. En 60 s no
+entraban.
+
+**Qué cambió:**
+
+- El techo pasa a 300 s y vive en cada ruta que corre al agente
+  (`export const maxDuration = 300`): los dos webhooks, los dos crons,
+  `worker/extract` y `cases/[id]/re-analyze`. `vercel.json` ya no tiene bloque
+  `functions`, porque una entrada ahí pisaría en silencio el número que el
+  webhook usa para su reloj.
+- El webhook y el cron de trabados le pasan a `retomarExtraccionesPendientes`
+  cuándo se corta la invocación (`hasta`), y el barrido no empieza un retomado
+  si quedan menos de `MINIMO_PARA_RETOMAR_MS` (120 s). Cuando corta, deja
+  `retomar_pendientes.sin_tiempo` en el log.
+- La reserva de extracción pasa de 3 a 5 min (`RESERVA_DE_EXTRACCION_MS`): una
+  reserva más corta que la función deja que otra corrida tome el caso con la
+  primera todavía viva. `tests/unit/techo-de-las-funciones.test.ts` exige que
+  ninguna ruta del agente dure más que la reserva y que `vercel.json` no vuelva a
+  tener `functions`.
+- `barrer-trabados.yml` espera 320 s por intento (antes 60) y el job tiene 17
+  min, así curl ve el 504 de Vercel en vez de abandonar un barrido vivo.
+
+**Lo que no cambió:** los 40 s de presupuesto de la corrida, los 30 s de plazo
+del modelo, el techo de 55 s de la variable, la espera del mail y los 500 ms de
+Carga. Tampoco cuesta plata: en Hobby con Fluid el techo por defecto ya era 300.
+
+**Lo que queda, visto y sin arreglar:**
+
+- El `SELECT` de retomar no filtra por estado: un caso `escalado` que sigue
+  pendiente ocupa un lugar en cada barrido y escribe una auditoría cada vez.
+- El barrido de trabados corre antes que el de pendientes, así que un pendiente
+  en `recibido` con más de veinte minutos sale escalado en vez de retomado.
+- El cron de las 04:00 de Vercel y el barrido de GitHub pueden coincidir; la
+  corrida que pierde la reserva vuelve a correr y puede mandar la respuesta dos
+  veces.
+- La espera de 20 s del mail más los 40 s de la corrida devuelven seguido los
+  casos de mail a la cola.
+- Un lote de Meta con varios mensajes agenda un `after()` por mensaje, y Next
+  los corre a la vez: cada uno barre y retoma sobre el mismo tenant. Los que
+  pierden la reserva vuelven a marcar el caso y el que la tiene lo redespacha.
+  Con 60 s esas colas morían; con 300 terminan. Barrer y retomar una vez por
+  pedido, no una vez por mensaje, lo cierra.
+- Una corrida en el peor caso (unas ocho llamadas de 30 s más los reintentos por
+  429) todavía puede pasar los 300 s. Y si la matan después de mandar la
+  respuesta, un retomado podría mandarla otra vez; no está verificado.
+
 ### 🙋 Waiting on you (not code)
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,
@@ -3089,6 +3165,16 @@ archivo — `replyFor` contaba vueltas en vez de mirar el reloj, y ni ella ni
   el mismo `runIntakeAgent` que usa el barrido. Ante un rojo, mirar primero
   `--log-failed` por `transport_timeout`; regla de la casa: hasta dos reruns, el
   umbral no se toca.
+
+- **Dos decisiones sobre el 429 que siguen sin tomarse** (salieron del
+  diagnóstico del ensayo contra el padrón, #229-#231). Un 429 en la
+  deliberación hoy es invisible: `src/server/ai/deliberate.ts:172-181` lo traga y devuelve `null`,
+  el caso sigue con estado normal y la respuesta sale con la plantilla
+  determinista — el mismo «verde por ausencia» de las últimas PR, pero acá
+  vive en el producto. Y un TIMEOUT deja el caso marcado para retomar
+  (`src/server/worker/extract.ts:1555-1556`) y un 429 no, aunque los dos son
+  transitorios. Cambiar cualquiera de las dos es una decisión de producto, no
+  una corrección.
 
 - ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
   356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`

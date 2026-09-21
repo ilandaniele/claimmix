@@ -190,7 +190,7 @@ function resolveTenantId(): string | null {
  * ── Qué costaba esperarla ──────────────────────────────────────────────────
  *
  * `/api/worker/extract` corre `runIntakeAgent` entero y recién ahí contesta,
- * y tiene su propio techo de 60 s. El poller lo esperaba con `await fetch`,
+ * y tenía su propio techo de 60 s. El poller lo esperaba con `await fetch`,
  * o sea que gastaba SU techo de 60 s en el trabajo del otro. Los dos se
  * morían juntos.
  *

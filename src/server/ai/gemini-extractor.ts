@@ -71,11 +71,11 @@ const DEFAULT_GEMINI_MAX_RETRIES = 3;
  * respuesta desbocada, la misma que rechaza la guarda de MAX_TOKENS.
  *
  * Hasta acá no había corte ninguno: el default de undici son 300 s, cinco
- * veces el `maxDuration` de 60 s que `vercel.json` le da al webhook y al
- * worker. O sea que Vercel mataba la función ANTES de que el `catch` que
- * escala el caso llegara a correr: el caso quedaba como estaba, la persona
- * sin respuesta, y la única red era el lease de tres minutos más un
- * barredor que en la práctica pasa en horas.
+ * veces el `maxDuration` de 60 s que `vercel.json` le daba entonces al
+ * webhook y al worker. O sea que Vercel mataba la función ANTES de que el
+ * `catch` que escala el caso llegara a correr: el caso quedaba como estaba,
+ * la persona sin respuesta, y la única red era el lease de tres minutos más
+ * un barredor que en la práctica pasa en horas.
  *
  * En 0 no se corta nada. Está para el ensayo y para una emergencia, no
  * para producción.
@@ -145,8 +145,8 @@ function backoffMs(attempt: number): number {
 }
 
 function retryAfterMs(headers: Headers, attempt: number, status: number): number {
-  // Cap 429 retries at 10s so the Vercel after() worker (maxDuration=180s) has
-  // time to run the GeminiExtractionError catch + escalate the case.
+  // Cap 429 retries at 10s so the run still has time to reach the
+  // GeminiExtractionError catch and escalate the case.
   // Daily quota exhaustion (RESOURCE_EXHAUSTED) won't recover in minutes anyway —
   // failing fast lets the case escalate so a human can re-trigger it.
   const capMs = status === 429 ? 10_000 : 30_000;
@@ -167,8 +167,9 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
     DEFAULT_GEMINI_MAX_RETRIES,
     5
   );
-  // El tope es 55 s a propósito: un corte más largo que la función (60 s en
-  // vercel.json) no corta nada, sólo lo mira desde afuera.
+  // El tope de 55 s viene de cuando la función tenía 60 s. Se deja: el
+  // plazo de 30 s está medido (ver `plazo-del-modelo`) y la perilla es
+  // para emergencias, no para estirarlo.
   const timeoutMs = getNumberEnv(
     "GEMINI_TIMEOUT_MS",
     DEFAULT_GEMINI_TIMEOUT_MS,
@@ -196,9 +197,9 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
        * Un corte por tiempo no se reintenta acá.
        *
        * Una conexión que se cae falla en milisegundos y volver a intentarla
-       * sale gratis; eso es lo que justifica el bucle de abajo. Esperar 20 s
-       * cuatro veces son 80 s contra una función de 60: el reintento
-       * garantizaría justo lo que este corte viene a evitar.
+       * sale gratis; eso es lo que justifica el bucle de abajo. Esperar el
+       * plazo cuatro veces son dos minutos contra los 40 s de la corrida: el
+       * reintento garantizaría justo lo que este corte viene a evitar.
        *
        * El reintento que corresponde es el del extractor, que además manda
        * una corrección. Se tira con code TIMEOUT y no como error de red

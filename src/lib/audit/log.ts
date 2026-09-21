@@ -382,6 +382,17 @@ export const AuditEvent = {
   FINETUNE_MODEL_DEPLOYED: "training.finetune_model_deployed",
   FINETUNE_MODEL_ROLLED_BACK: "training.finetune_model_rolled_back",
   AGENT_MEMORY_CONFIG_EXPORTED: "agent.memory_config_exported",
+
+  /**
+   * AGENT_DELIBERATION_FAILED: la deliberación tiró — 429, MAX_TOKENS, un
+   * JSON que no parseó. Payload: { status, code, error_name }.
+   *
+   * El catch ya lo mandaba al log de Vercel y ahí se quedaba: nada en
+   * `audit_log` decía que una decisión se cayó al árbol determinístico ni
+   * cuántas veces. Sin esto, un 429 sostenido es indistinguible de que el
+   * agente nunca deliberó nada raro.
+   */
+  AGENT_DELIBERATION_FAILED: "agent.deliberation_failed",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

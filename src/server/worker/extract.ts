@@ -36,7 +36,7 @@
  */
 
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   enTenant,
@@ -75,6 +75,7 @@ import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { polizaParaCompletar } from "@/core/case/poliza-encontrada";
 import { mirarPolizas } from "@/core/case/poliza-vigente";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
+import { puedeArrancar } from "@/core/case/estados-de-arranque";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
@@ -460,8 +461,13 @@ const MINIMO_PARA_REDESPACHAR_MS = 15_000;
  * `no_se_pudo` no es `ocupada`: la corrida sigue igual —no correr es peor que
  * correr dos veces— pero NO puede decir que la tomó, porque el `finally` libera
  * basándose en eso y liberaría la de otro.
+ *
+ * `heredada` también la tomó esta corrida, pero de una que murió sin
+ * liberarla y sin dejar `extraction_pending` en true: nada nuevo le llegó
+ * mientras corría, pero puede que ya haya contestado. El orquestador usa esa
+ * diferencia para no contestar lo mismo dos veces.
  */
-type Reserva = "tomada" | "ocupada" | "no_se_pudo";
+type Reserva = "tomada" | "heredada" | "ocupada" | "no_se_pudo";
 
 /**
  * Take the case, or record that it needs running again.
@@ -474,39 +480,92 @@ type Reserva = "tomada" | "ocupada" | "no_se_pudo";
  *
  * The UPDATE is the lock: Postgres serialises writes to the row, so exactly
  * one caller matches the free-lease predicate and gets a row back.
+ *
+ * Antes era un solo UPDATE con el lease libre O vencido en el mismo WHERE, y
+ * nunca tocaba `extraction_pending` al tomar: una corrida heredada arrancaba
+ * con esa marca en lo que hubiera quedado de la corrida muerta, y liberar
+ * disparaba un rerun aunque no hubiera llegado nada nuevo. Ahora son tres
+ * intentos en orden, cada uno la limpia al tomar, y `retoma` —el barrido— no
+ * pisa una reserva que sigue viva.
  */
 async function acquireExtractionLease(
   caseId: string,
-  tenantCtx: TenantContext
+  tenantCtx: TenantContext,
+  retoma = false
 ): Promise<Reserva> {
   try {
-    const taken = await enTenant(tenantCtx, (db) =>
+    const marca = {
+      extraction_lease_at: new Date().toISOString(),
+      extraction_pending: false,
+    };
+
+    // 1. Nadie la tiene.
+    const tomarLibre = async () =>
+      (
+        await enTenant(tenantCtx, (db) =>
+          db
+            .update(cases)
+            .set(marca)
+            .where(and(eq(cases.id, caseId), isNull(cases.extraction_lease_at)))
+            .returning({ id: cases.id })
+        )
+      ).length > 0;
+    if (await tomarLibre()) return "tomada";
+
+    // 2. La tenía una corrida que murió sin marcar pendiente: nada le llegó
+    // mientras corría, pero puede que ya haya contestado.
+    const heredada = await enTenant(tenantCtx, (db) =>
       db
         .update(cases)
-        .set({ extraction_lease_at: new Date().toISOString() })
+        .set(marca)
         .where(
           and(
             eq(cases.id, caseId),
-            or(
-              isNull(cases.extraction_lease_at),
-              sql`${cases.extraction_lease_at} < now() - interval '${sql.raw(String(EXTRACTION_LEASE_MS))} milliseconds'`
-            )
+            sql`${cases.extraction_lease_at} < now() - interval '${sql.raw(String(EXTRACTION_LEASE_MS))} milliseconds'`,
+            eq(cases.extraction_pending, false)
           )
         )
         .returning({ id: cases.id })
     );
+    if (heredada.length > 0) return "heredada";
 
-    if (taken.length > 0) return "tomada";
+    // 3. También murió, pero le llegó un mensaje mientras corría: hace falta
+    // una respuesta, no sólo terminar lo que ya estaba haciendo.
+    const vencida = await enTenant(tenantCtx, (db) =>
+      db
+        .update(cases)
+        .set(marca)
+        .where(
+          and(
+            eq(cases.id, caseId),
+            sql`${cases.extraction_lease_at} < now() - interval '${sql.raw(String(EXTRACTION_LEASE_MS))} milliseconds'`
+          )
+        )
+        .returning({ id: cases.id })
+    );
+    if (vencida.length > 0) return "tomada";
+
+    // La tiene una corrida VIVA. El barrido (retoma) no marca: remarcar acá
+    // sería pisar lo que esa corrida ya sabe.
+    if (retoma) {
+      logger.info({ case_id: caseId }, "email_worker.retoma_ya_tomada");
+      return "ocupada";
+    }
 
     // Someone else holds it. Their run started before this message was stored,
     // so it cannot see it — flag the case so the holder runs again rather than
     // letting the message go unread.
-    await enTenant(tenantCtx, (db) =>
+    //
+    // Sólo si la sigue teniendo: si la soltó entre medio, la marca quedaría
+    // sin nadie que la consuma hasta el próximo barrido. Ahí se la toma.
+    const marcada = await enTenant(tenantCtx, (db) =>
       db
         .update(cases)
         .set({ extraction_pending: true })
-        .where(eq(cases.id, caseId))
+        .where(and(eq(cases.id, caseId), isNotNull(cases.extraction_lease_at)))
+        .returning({ id: cases.id })
     );
+    if (marcada.length === 0 && (await tomarLibre())) return "tomada";
 
     logger.info({
         case_id: caseId,
@@ -547,7 +606,9 @@ async function acquireExtractionLease(
  */
 async function releaseExtractionLease(
   caseId: string,
-  tenantCtx: TenantContext
+  tenantCtx: TenantContext,
+  /** Deja la marca puesta: el caso vuelve por el barrido, no por redespacho. */
+  conservarPendiente = false
 ): Promise<boolean> {
   try {
     // Las dos van juntas en un lote: un solo viaje, y la lectura y la escritura
@@ -564,7 +625,11 @@ async function releaseExtractionLease(
           .limit(1),
         db
           .update(cases)
-          .set({ extraction_lease_at: null, extraction_pending: false })
+          .set(
+            conservarPendiente
+              ? { extraction_lease_at: null }
+              : { extraction_lease_at: null, extraction_pending: false }
+          )
           .where(eq(cases.id, caseId)),
       ]
     );
@@ -573,6 +638,33 @@ async function releaseExtractionLease(
   } catch (err) {
     logger.error({ code: dbErrCode(err) }, "email_worker.lease_release_error");
     return false;
+  }
+}
+
+/**
+ * Suelta una reserva heredada sin haber contestado, como la encontró.
+ *
+ * La corrida muerta pudo haber contestado; esta se difirió antes de mirar.
+ * Liberarla como siempre —reserva nula— haría que la próxima la tome como
+ * nueva y conteste otra vez. Vencida y sin la marca, la próxima la vuelve a
+ * heredar, y el barrido la encuentra como huérfana.
+ */
+async function devolverReservaHeredada(
+  caseId: string,
+  tenantCtx: TenantContext
+): Promise<void> {
+  try {
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(cases)
+        .set({
+          extraction_lease_at: sql`now() - interval '${sql.raw(String(EXTRACTION_LEASE_MS + 60_000))} milliseconds'`,
+          extraction_pending: false,
+        })
+        .where(eq(cases.id, caseId))
+    );
+  } catch (err) {
+    logger.error({ code: dbErrCode(err) }, "email_worker.devolver_heredada_fallo");
   }
 }
 
@@ -719,7 +811,8 @@ async function reintentarPorTimeout(
 export async function runEmailExtractionWorker(
   caseId: string,
   tenantId: string,
-  userId: string | null
+  userId: string | null,
+  opts?: { retoma?: boolean }
 ): Promise<void> {
   // El contexto se arma una vez, acá, a partir del inquilino que llega en la
   // firma. Todo lo que consulte o escriba abajo lo recibe: esa es la única
@@ -737,6 +830,13 @@ export async function runEmailExtractionWorker(
   let claimMessageId: string | null = null;
   let providerMessageId: string | null = null;
   let leaseHeld = false;
+  // Cuándo se pidió la reserva, sólo si vino de una corrida muerta que puede
+  // ya haber contestado. El orquestador lo usa para no mandar lo mismo dos veces.
+  let heredadaEn: string | undefined;
+  // Salió sin contestar y vuelve a la cola. `sin_tiempo` se redespacha como
+  // siempre; `reintento` (TIMEOUT o 429) espera al barrido: redespacharlo en el
+  // acto gasta los tres intentos contra el mismo proveedor saturado.
+  let diferida: "sin_tiempo" | "reintento" | null = null;
 
   try {
     // ── a) Fetch case + raw_messages ──────────────────────────────────────────
@@ -770,25 +870,10 @@ export async function runEmailExtractionWorker(
       return;
     }
 
-    // Statuses a new inbound message may re-open.
-    //
-    // `confirmacion_pendiente` was missing, and it is exactly the state a case
-    // is in after the agent asks the claimant to confirm something. They
-    // answered, the reply attached to the case — and the worker declined to
-    // look at it, so the case sat waiting for a reply that had already
-    // arrived. `info_faltante` was on the list, which is why the identical
-    // flow worked whenever the question happened to be phrased as a gap.
-    //
-    // `requiere_especialista` stays off: a person owns that case and will read
-    // the thread themselves. Re-extracting could also silently downgrade the
-    // severity that put it there.
-    const allowedStartStatuses = [
-      "recibido",
-      "procesando",
-      "info_faltante",
-      "confirmacion_pendiente",
-    ];
-    if (!allowedStartStatuses.includes(caseRow.status)) {
+    // Estados desde los que un mensaje nuevo reabre el caso. Lista y
+    // razones en `@/core/case/estados-de-arranque`: también la usa el
+    // barrido de pendientes, para no retomar lo que el worker no va a leer.
+    if (!puedeArrancar(caseRow.status)) {
       /*
        * El mensaje se guardó y NO se va a leer. Que se sepa.
        *
@@ -870,11 +955,15 @@ export async function runEmailExtractionWorker(
 
     // One run per case at a time. Everything below reads the conversation and
     // writes back to it, so two runs overlapping corrupt each other.
-    const reserva = await acquireExtractionLease(caseId, tenantCtx);
+    // Antes de pedirla: lo que llegue después no lo contestó la corrida muerta.
+    const pedidaEn = new Date().toISOString();
+    const reserva = await acquireExtractionLease(caseId, tenantCtx, opts?.retoma);
     if (reserva === "ocupada") return;
-    // Sólo cuando la tomamos de verdad: el `finally` libera basándose en esto,
-    // y liberar una que no es nuestra es peor que no haberla tomado.
-    leaseHeld = reserva === "tomada";
+    // Tomada o heredada: las dos la tomaron de verdad, y el `finally` libera
+    // basándose en esto — liberar una que no es nuestra es peor que no
+    // haberla tomado.
+    leaseHeld = reserva === "tomada" || reserva === "heredada";
+    if (reserva === "heredada") heredadaEn = pedidaEn;
 
     // Fetch the message body.
     //
@@ -999,6 +1088,7 @@ export async function runEmailExtractionWorker(
           .set({ extraction_pending: true })
           .where(eq(cases.id, caseId))
       );
+      diferida = "sin_tiempo";
       return;
     }
 
@@ -1477,6 +1567,7 @@ export async function runEmailExtractionWorker(
           inReplyToMessageId: undefined,
           latestMessageText: latestInboundText,
           polizas,
+          heredadaEn,
         },
         customerMatches,
         messengerFor(caseRow.channel)
@@ -1542,19 +1633,26 @@ export async function runEmailExtractionWorker(
        * producto hizo lo que estaba escrito; lo que estaba mal era lo escrito.
        *
        * Con la marca de pendiente lo levanta `retomarExtraccionesPendientes`
-       * dos minutos después. Sólo para TIMEOUT: un 400 no mejora reintentando,
-       * y una cuota agotada tampoco.
+       * dos minutos después.
+       *
+       * Un 429 entra por la misma puerta: Vertex acá es pospago, sobre un
+       * cupo compartido y dinámico entre todos los proyectos, así que un 429
+       * es tan transitorio como un TIMEOUT — no «se te acabó la cuota del
+       * día», sino que en ESE instante no había lugar. Mismo tope de por
+       * vida. Un 400 sigue escalando: reintentar eso no cambia nada.
        *
        * Y con tope, porque `extraction_pending` no distingue «se cayó una vez»
        * de «este caso rompe siempre»: un mensaje que agota el plazo SIEMPRE se
        * reintentaría en cada barrido, pagando una llamada cada vez.
        */
-      if (errCode === "TIMEOUT") {
+      if (errCode === "TIMEOUT" || errStatus === 429) {
         const reintentado = await reintentarPorTimeout(caseId, tenantCtx);
         if (reintentado) {
           logger.warn({
         case_id: caseId,
+        motivo: errCode === "TIMEOUT" ? "timeout" : "429",
       }, "email_worker.timeout_a_la_cola");
+          diferida = "reintento";
           return;
         }
       }
@@ -1591,11 +1689,17 @@ export async function runEmailExtractionWorker(
       }, "email_worker.unhandled_error");
     // Do not rethrow — fire-and-forget callers must not crash.
   } finally {
-    if (leaseHeld) {
+    if (leaseHeld && heredadaEn && diferida) {
+      await devolverReservaHeredada(caseId, tenantCtx);
+    } else if (leaseHeld) {
       // A message that landed while we were running was never read: the run
       // that would have read it deferred to us. Run again for it.
-      const arrivedWhileBusy = await releaseExtractionLease(caseId, tenantCtx);
-      if (arrivedWhileBusy) {
+      const arrivedWhileBusy = await releaseExtractionLease(
+        caseId,
+        tenantCtx,
+        diferida === "reintento"
+      );
+      if (arrivedWhileBusy && diferida !== "reintento") {
         logger.info({
         case_id: caseId,
       }, "email_worker.rerun_for_deferred_message");

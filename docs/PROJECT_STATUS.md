@@ -3090,25 +3090,55 @@ entraban.
 del modelo, el techo de 55 s de la variable, la espera del mail y los 500 ms de
 Carga. Tampoco cuesta plata: en Hobby con Fluid el techo por defecto ya era 300.
 
-**Lo que queda, visto y sin arreglar:**
+### 🧹 Los barridos, la corrida muerta y el 429 (2026-09-21)
 
-- El `SELECT` de retomar no filtra por estado: un caso `escalado` que sigue
-  pendiente ocupa un lugar en cada barrido y escribe una auditoría cada vez.
-- El barrido de trabados corre antes que el de pendientes, así que un pendiente
-  en `recibido` con más de veinte minutos sale escalado en vez de retomado.
-- El cron de las 04:00 de Vercel y el barrido de GitHub pueden coincidir; la
-  corrida que pierde la reserva vuelve a correr y puede mandar la respuesta dos
-  veces.
-- La espera de 20 s del mail más los 40 s de la corrida devuelven seguido los
-  casos de mail a la cola.
-- Un lote de Meta con varios mensajes agenda un `after()` por mensaje, y Next
-  los corre a la vez: cada uno barre y retoma sobre el mismo tenant. Los que
-  pierden la reserva vuelven a marcar el caso y el que la tiene lo redespacha.
-  Con 60 s esas colas morían; con 300 terminan. Barrer y retomar una vez por
-  pedido, no una vez por mensaje, lo cierra.
-- Una corrida en el peor caso (unas ocho llamadas de 30 s más los reintentos por
-  429) todavía puede pasar los 300 s. Y si la matan después de mandar la
-  respuesta, un retomado podría mandarla otra vez; no está verificado.
+Lo que la nota de arriba dejó «visto y sin arreglar», más las dos decisiones
+sobre el 429 que esperaban. Una línea por arreglo:
+
+- **Retomar filtra por estado.** `ESTADOS_DE_ARRANQUE`
+  (`src/core/case/estados-de-arranque.ts`) es la lista única de estados desde
+  los que el worker arranca; el barrido, `marcarPendientes` y el worker la usan.
+  Un `escalado` pendiente ya no ocupa lugar ni escribe auditoría en cada barrido.
+- **Trabados no se come a los pendientes.** `reap-stuck` saltea los casos con
+  `extraction_pending` y mide la antigüedad con `coalesce(updated_at, created_at)`.
+- **Los dos crons ya no coinciden.** El de Vercel pasa a las 04:07. Y si igual
+  se cruzan, la corrida que encuentra una reserva vencida sin marca la hereda y,
+  antes de contestar, mira si ya salió una respuesta al último mensaje que la
+  corrida muerta vio (`src/server/confirmations/ya-contestado.ts`). Si salió, no
+  manda nada.
+- **Los mails dejan de volver a la cola por el freno.** Un caso reencolado sin
+  reserva viva ya no cuenta como «mail anterior en curso» en
+  `simulation-throttle`.
+- **Un lote de Meta corre una vez por pedido.** El webhook junta los casos del
+  lote, marca pendientes todos menos el primero antes de empezar, y los corre en
+  fila. Si el reloj no alcanza para el siguiente, corta y deja
+  `webhooks_whatsapp.sin_tiempo`; los que quedaron los toma el barrido.
+- **Una corrida muerta no manda la respuesta dos veces.** Ver el tercer punto.
+  Y si la corrida heredada se queda sin reloj o reencola por un 429, devuelve la
+  reserva vencida como la encontró, para que la próxima siga sabiendo que es
+  heredada.
+- **Un 429 de extracción es transitorio, como un TIMEOUT.** Vuelve a la cola con
+  la marca puesta y no escala hasta el tercer intento. No se redespacha al
+  instante: lo retoma el barrido, así un cupo agotado no quema los tres intentos
+  en segundos.
+- **Un 429 en la deliberación queda a la vista.** `deliberate.ts` sigue
+  cayendo a la plantilla, pero escribe `agent.deliberation_failed` en la
+  auditoría con el estado y el código del proveedor.
+
+**Riesgos que quedan, sabidos:**
+
+- Si matan la corrida entre el envío por WhatsApp y la fila del registro, la
+  heredada lo manda otra vez. Cerrarlo pide escribir la fila antes de enviar, y
+  eso pide una migración.
+- La heredada se pierde en dos caminos: cuando el freno del mail difiere antes
+  de tomar la reserva, y cuando falla el redespacho. Esa corrida contesta sin
+  mirar si ya se contestó.
+- Un 429 de cupo diario gasta los tres intentos a lo largo de tres barridos y
+  escala. Aceptado.
+- `reap-stuck` saltea los pendientes, así que un caso que retomar difiere para
+  siempre nunca escala.
+- Un lote con varios remitentes comparte los 300 s de una sola invocación; los
+  que no entran esperan al barrido, dos minutos después.
 
 ### 🙋 Waiting on you (not code)
 
@@ -3145,8 +3175,9 @@ Carga. Tampoco cuesta plata: en Hobby con Fluid el techo por defecto ya era 300.
   **#182** subió better-auth a 1.7.4: su adapter de Drizzle lee `db._` al
   cargar el módulo y el proxy perezoso conectaba para contestar, así que el
   build de Vercel, sin `DATABASE_URL`, reventaba (#169); ahora el proxy
-  contesta el esquema sin conectar, con test. No queda ningún PR de dependabot
-  abierto.
+  contesta el esquema sin conectar, con test. La tanda del 21/09 (#239-#248)
+  entró junta en **#251**, con post-deploy y Carga de QA en verde. No queda
+  ningún PR de dependabot abierto.
 
 - **La última alerta de Dependabot no tenía PR que mergear: `devalue` < 5.9.1.**
   Cerrada el 18/09 con #221. No hay dependencia directa sobre `devalue`: entra
@@ -3166,15 +3197,10 @@ Carga. Tampoco cuesta plata: en Hobby con Fluid el techo por defecto ya era 300.
   `--log-failed` por `transport_timeout`; regla de la casa: hasta dos reruns, el
   umbral no se toca.
 
-- **Dos decisiones sobre el 429 que siguen sin tomarse** (salieron del
-  diagnóstico del ensayo contra el padrón, #229-#231). Un 429 en la
-  deliberación hoy es invisible: `src/server/ai/deliberate.ts:172-181` lo traga y devuelve `null`,
-  el caso sigue con estado normal y la respuesta sale con la plantilla
-  determinista — el mismo «verde por ausencia» de las últimas PR, pero acá
-  vive en el producto. Y un TIMEOUT deja el caso marcado para retomar
-  (`src/server/worker/extract.ts:1555-1556`) y un 429 no, aunque los dos son
-  transitorios. Cambiar cualquiera de las dos es una decisión de producto, no
-  una corrección.
+- ~~**Dos decisiones sobre el 429**~~ ✅ **DECIDIDAS 2026-09-21.** Un 429 de
+  extracción vuelve a la cola como un TIMEOUT, y uno en la deliberación sigue
+  cayendo a la plantilla pero deja `agent.deliberation_failed` en la
+  auditoría. Detalle en «Los barridos, la corrida muerta y el 429».
 
 - ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
   356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`

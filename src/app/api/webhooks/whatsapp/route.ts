@@ -28,7 +28,11 @@ import { z } from "zod";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 import { createWhatsAppIntake, runIntakeAgent } from "@/server/agents/intake-agent";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
-import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
+import {
+  marcarPendientes,
+  MINIMO_PARA_RETOMAR_MS,
+  retomarExtraccionesPendientes,
+} from "@/server/intake/retomar-pendientes";
 import { logger } from "@/lib/observability/logger";
 import {
   parseCloudApiMessages,
@@ -123,9 +127,13 @@ function resolveTenantId(): string | null {
  * row about the same crash still produce one reply: the extraction lease
  * serialises the runs, and the run that loses re-runs afterwards over the
  * whole conversation rather than answering its own fragment.
+ *
+ * Un `after()` para todos los casos del pedido, no uno por caso: corren en
+ * serie con el mismo reloj de la invocación. Lo que no entra se marca
+ * pendiente en vez de arrancarse a mitad de camino y que lo mate Vercel.
  */
 function scheduleAgent(
-  caseId: string,
+  caseIds: string[],
   tenantId: string,
   /**
    * False para el camino simulado. Decide UNA cosa: si despues del agente se
@@ -135,13 +143,24 @@ function scheduleAgent(
   /** Cuándo mata Vercel esta invocación (epoch ms). */
   hasta: number
 ): void {
+  if (caseIds.length === 0) return;
+
   after(async () => {
-    try {
-      await runIntakeAgent({ caseId, tenantId, source: "whatsapp" });
-    } catch (err) {
-      const name = err instanceof Error ? err.name : "UnknownError";
-      logger.error({ error_name: name, case_id: caseId }, "webhooks_whatsapp.agent_error");
-      return; // no extraction result — nothing worth saying to the claimant yet
+    // Marcados antes de empezar, no al quedarse sin reloj: si Vercel mata la
+    // invocación a mitad del primero, los demás igual quedan para el barrido.
+    // Tomar la reserva limpia la marca de cada uno cuando le toca.
+    await marcarPendientes(caseIds.slice(1), tenantId);
+    for (let i = 0; i < caseIds.length; i++) {
+      if (i > 0 && hasta - Date.now() < MINIMO_PARA_RETOMAR_MS) {
+        logger.warn({ quedaron: caseIds.length - i }, "webhooks_whatsapp.sin_tiempo");
+        break;
+      }
+      try {
+        await runIntakeAgent({ caseId: caseIds[i], tenantId, source: "whatsapp" });
+      } catch (err) {
+        const name = err instanceof Error ? err.name : "UnknownError";
+        logger.error({ error_name: name, case_id: caseIds[i] }, "webhooks_whatsapp.agent_error");
+      }
     }
 
     // Nothing to send from here. The extraction worker runs the same
@@ -277,6 +296,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const messages = parseCloudApiMessages(payload);
     const caseIds: string[] = [];
+    // Junta casos, no mensajes: dos mensajes del mismo remitente en el mismo
+    // pedido caen en el mismo caso, y el agente corre una vez por caso.
+    const paraElAgente = new Set<string>();
     let sinGuardar = 0;
     let deOtroNumero = 0;
 
@@ -298,7 +320,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         // esto se llamaba igual: cada reintento de Meta era otra extracción
         // contra Vertex y un segundo mensaje al asegurado diciendo lo mismo.
         // Meta reintenta cuando el acuse tarda, y el acuse mide 2,9 s p95.
-        if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId, true, hasta);
+        if (!stored.duplicado) paraElAgente.add(stored.caseId);
       } catch (err) {
         sinGuardar++;
         // El mensaje del error, no su nombre: `insertWhatsAppMessage` se toma
@@ -310,6 +332,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }, "whatsapp.webhook.intake_failed");
       }
     }
+
+    scheduleAgent([...paraElAgente], tenantId, true, hasta);
 
     /*
      * Si algún mensaje no se guardó, esto NO es un 200.
@@ -405,7 +429,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       simulated: true,
     });
     // Igual que arriba: un adaptador que reintenta no dispara otra extracción.
-    if (!stored.duplicado) scheduleAgent(stored.caseId, tenantId, false, hasta);
+    if (!stored.duplicado) scheduleAgent([stored.caseId], tenantId, false, hasta);
 
     return NextResponse.json(
       { ok: true, case_id: stored.caseId, created: stored.created, status: "received" },

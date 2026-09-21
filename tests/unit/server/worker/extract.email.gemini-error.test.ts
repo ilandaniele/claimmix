@@ -244,11 +244,11 @@ describe("GEMINI-ERR: logAgentRunError is called when GeminiExtractionError is t
     mockLogAgentRunError.mockResolvedValue("err-run-id");
     mockLogAgentRun.mockResolvedValue(undefined);
 
-    // Simulate a Gemini 429 failure
+    // Un error del proveedor que no se reintenta: el 429 va a la cola (abajo).
     mockExtractEmailClaimGemini.mockRejectedValue(
-      new GeminiExtractionError("429 RESOURCE_EXHAUSTED: quota exceeded", {
-        status: 429,
-        code: "RESOURCE_EXHAUSTED",
+      new GeminiExtractionError("500 INTERNAL: backend error", {
+        status: 500,
+        code: "INTERNAL",
       })
     );
   });
@@ -325,7 +325,7 @@ describe("GEMINI-ERR: logAgentRunError is called when GeminiExtractionError is t
     expect(escalado).toBeDefined();
     const payload = escalado!.payload as Record<string, unknown>;
     expect(payload.reason).toBe("provider_error");
-    expect(payload.error_status).toBe(429);
+    expect(payload.error_status).toBe(500);
     expect(payload.error_name).toBeDefined();
   });
 
@@ -333,6 +333,48 @@ describe("GEMINI-ERR: logAgentRunError is called when GeminiExtractionError is t
     await expect(
       runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001")
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("un 429 de cupo no escala: vuelve a la cola como un TIMEOUT", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.MOCK_AI;
+    setupDbMock();
+    mockCheckBudget.mockResolvedValue({ exceeded: false });
+    mockFindCustomerMatches.mockResolvedValue([]);
+    mockFindPolicyMatches.mockResolvedValue([]);
+    mockExtractEmailClaimGemini.mockRejectedValue(
+      new GeminiExtractionError("429 RESOURCE_EXHAUSTED: quota exceeded", {
+        status: 429,
+        code: "RESOURCE_EXHAUSTED",
+      })
+    );
+  });
+
+  it("el caso no queda escalado ni se registra como error del agente", async () => {
+    await runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001");
+
+    expect(capturedCaseUpdates.find((u) => u.status === "escalado")).toBeUndefined();
+    expect(mockLogAgentRunError).not.toHaveBeenCalled();
+  });
+
+  /*
+   * Redespachar al instante quemaba los tres intentos en segundos contra el
+   * mismo cupo agotado. El caso queda marcado y lo retoma el barrido.
+   */
+  it("suelta la reserva con la marca puesta y no redespacha", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001");
+
+    const soltada = capturedCaseUpdates.filter(
+      (u) => "extraction_lease_at" in u && (u as Record<string, unknown>).extraction_lease_at === null
+    );
+    expect(soltada).toHaveLength(1);
+    expect(soltada[0]).not.toHaveProperty("extraction_pending");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
 

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockDbSelect } = vi.hoisted(() => ({
@@ -162,4 +164,13 @@ describe("simulation worker throttle", () => {
     });
     expect(mockDbSelect).toHaveBeenCalledTimes(2);
   });
+});
+
+it("un reencolado sin reserva viva no bloquea", () => {
+  // Normalizado: el archivo llega con CRLF acá y con LF en el checkout de CI.
+  const fuente = readFileSync("src/server/intake/simulation-throttle.ts", "utf8").replace(/\r\n/g, "\n");
+
+  expect(fuente).toContain(
+    "or(eq(cases.extraction_pending, false), gte(cases.extraction_lease_at, leaseVivo))"
+  );
 });

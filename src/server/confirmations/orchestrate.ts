@@ -74,6 +74,7 @@ import {
   nombresEnElLibro,
   type AgentMessenger,
 } from "@/server/confirmations/messenger";
+import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contestado";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { redactObject } from "@/lib/audit/redact";
 import { logger } from "@/lib/observability/logger";
@@ -94,6 +95,16 @@ export interface ExtractedClaimOutput {
   latestMessageText?: string;
   /** Lo que el worker vio de las pólizas encontradas. */
   polizas?: PolizasDelCaso;
+  /**
+   * La reserva de extracción la heredó una corrida muerta.
+   *
+   * `acquireExtractionLease` puede encontrar la reserva vencida sin la marca
+   * de pendiente: la corrida que la tenía murió, pero antes pudo haber llegado
+   * a contestar. Retomar de cero manda lo mismo otra vez, así que acá se avisa
+   * —con la hora en que se pidió la reserva— para que el orquestador pueda
+   * comprobarlo contra lo que había llegado hasta entonces.
+   */
+  heredadaEn?: string;
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -163,6 +174,22 @@ export function loQueYaAveriguamos(
   return [...lineas, ...resto].join("\n");
 }
 
+/**
+ * El mensajero de una corrida heredada que ya contestó.
+ *
+ * No manda nada — la corrida que murió se adelantó. Existe para que las cinco
+ * salidas y `escalate()` no tengan que enterarse de por qué se callan: siguen
+ * llamando a `messenger.send(...)` igual que siempre.
+ */
+const mudo: AgentMessenger = {
+  async send(message) {
+    logger.info(
+      { case_id: message.caseId, template: message.template },
+      "orchestrate.envio_omitido"
+    );
+  },
+};
+
 export async function orchestratePostExtraction(
   caseId: string,
   tenantId: string,
@@ -173,9 +200,9 @@ export async function orchestratePostExtraction(
    * decision tree grew up; WhatsApp passes its own so the two channels share
    * the reasoning instead of each keeping a copy that drifts.
    */
-  messenger: AgentMessenger = emailMessenger
+  messengerPedido: AgentMessenger = emailMessenger
 ): Promise<void> {
-  const { extractedClaim, senderEmail, inReplyToMessageId, latestMessageText } =
+  const { extractedClaim, senderEmail, inReplyToMessageId, latestMessageText, heredadaEn } =
     extractedOutput;
 
   // ── A. Non-claim email — return early ─────────────────────────────────────
@@ -184,6 +211,23 @@ export async function orchestratePostExtraction(
     // No email should be sent for non-claim emails (AC5).
     return;
   }
+
+  /*
+   * ¿Esto ya lo contestó la corrida que murió?
+   *
+   * `heredadaEn` sólo dice que la reserva estaba vencida sin la marca de
+   * pendiente — la corrida anterior pudo haber muerto ANTES o DESPUÉS de
+   * escribir. Sólo acá, y sólo en ese caso, vale la pena la consulta extra:
+   * una corrida heredada que nunca llegó a contestar tiene que seguir de
+   * largo igual que cualquier otra.
+   */
+  const yaContestada =
+    heredadaEn !== undefined &&
+    (await yaContestamosElUltimoMensaje(caseId, tenantId, heredadaEn));
+  if (yaContestada) {
+    logger.warn({ case_id: caseId }, "orchestrate.ya_contestado_por_la_corrida_muerta");
+  }
+  const messenger: AgentMessenger = yaContestada ? mudo : messengerPedido;
 
   let confirmationEmailDispatched = false;
 

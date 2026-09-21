@@ -45,7 +45,14 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  cases: { id: "id", tenant_id: "tenant_id", status: "status", created_at: "created_at", updated_at: "updated_at" },
+  cases: {
+    id: "id",
+    tenant_id: "tenant_id",
+    status: "status",
+    created_at: "created_at",
+    updated_at: "updated_at",
+    extraction_pending: "extraction_pending",
+  },
 }));
 
 vi.mock("@/lib/audit/log", () => ({
@@ -161,6 +168,19 @@ describe("el barredor ve los casos que entran de verdad", () => {
     // la del SELECT y la guarda del UPDATE.
     expect(fuente).not.toContain('eq(cases.status, "procesando")');
     expect(fuente.split("inArray(cases.status, ESTADOS_TRABABLES)").length - 1).toBe(2);
+  });
+
+  it("no escala lo que es de retomar", () => {
+    const fuente = readFileSync("src/server/intake/reap-stuck.ts", "utf8").replace(/\r\n/g, "\n");
+
+    // Una vez en el SELECT y otra en la guarda del UPDATE.
+    expect(fuente.split("eq(cases.extraction_pending, false)").length - 1).toBe(2);
+  });
+
+  it("el reloj es coalesce", () => {
+    const fuente = readFileSync("src/server/intake/reap-stuck.ts", "utf8").replace(/\r\n/g, "\n");
+
+    expect(fuente).toContain("coalesce(${cases.updated_at}, ${cases.created_at}) < ${cutoff}::timestamptz");
   });
 
   it("una denuncia trabada en `recibido` se barre", async () => {

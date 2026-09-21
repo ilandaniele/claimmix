@@ -167,7 +167,7 @@ function buildPrompt(input: ComposeReplyInput): string {
     const { label, instruction, kind } = labelForField(key);
     const known = input.knownValues?.[key];
     return known
-      ? `- ${label} (ya entendimos "${known}", pedir corrección sólo si no es correcto)`
+      ? `- ${label}: ya entendimos "${known}". Preguntá si es correcto citando ese valor tal cual; no pidas más precisión ni digas que la persona lo escribió así`
       : `- ${label} — ${instruction} (${kind === "documento" ? "archivo o foto" : "dato"})`;
   });
 
@@ -179,7 +179,8 @@ function buildPrompt(input: ComposeReplyInput): string {
   const intentBrief: Record<ReplyIntent, string> = {
     ask: "Pedir los datos listados. No pidas nada que no esté en la lista.",
     escalation:
-      "Avisar que la denuncia se derivó a un especialista que se va a comunicar a la brevedad, " +
+      "Avisar que la denuncia se derivó a un especialista que se va a comunicar a la brevedad " +
+      "(decí «un especialista», nunca «él» ni «ella»: no sabemos quién es), " +
       "y que si necesita asistencia urgente llame a la línea de emergencias de su póliza. " +
       "NO pidas ningún dato: un especialista se encarga.",
     closing:
@@ -211,12 +212,12 @@ denunciar un siniestro. Escribís en castellano rioplatense, con voseo, claro y 
 
 LO QUE HAY QUE DECIR (no lo cambies, no agregues ni saques temas):
 ${intentBrief[input.intent]}
+${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(input.question)}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia y qué falta para avanzar. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder.` : ""}
 
 ${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}` : ""}
 ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de cada uno, copiados tal cual):\n${conflictos.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName)}. Podés llamarla por su nombre de pila.` : ""}
-${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(input.question)}"\nContestá con lo que sabemos de verdad: en qué estado está su denuncia y qué falta para avanzar. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder.` : ""}
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}
 ${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto):\n"""${sinCentinelas(sinNumerosEnteros(input.lastMessage)).slice(0, 600)}"""` : ""}
 
@@ -249,11 +250,14 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   // Every field we decided to ask about has to survive into the message. The
   // model rewording "DNI del titular" is fine; dropping it is the orchestrator
   // asking for four things and the claimant seeing three.
+  // Citing a value we already hold counts: "¿fue en Villa Mitre?" asks about
+  // the place without saying "lugar", and the brief tells it to write exactly that.
   if (input.intent === "ask") {
+    const lower = trimmed.toLowerCase();
     for (const key of input.fields ?? []) {
-      const { label } = labelForField(key);
-      const head = label.split(" ")[0].toLowerCase();
-      if (!trimmed.toLowerCase().includes(head)) return `dropped_field:${key}`;
+      const head = labelForField(key).label.split(" ")[0].toLowerCase();
+      const known = input.knownValues?.[key]?.toLowerCase();
+      if (!lower.includes(head) && !(known && lower.includes(known))) return `dropped_field:${key}`;
     }
   }
 
@@ -273,6 +277,12 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   // pile-up is why escalated cases send one message and nothing else.
   if (input.intent === "escalation" && /necesitamos que nos|envianos|mandanos/i.test(trimmed)) {
     return "escalation_asks_for_data";
+  }
+
+  // Nadie sabe quién va a tomar el caso: "Él se va a comunicar" salió en un
+  // ensayo, y le pone género a una persona que todavía no existe.
+  if (input.intent === "escalation" && /(?<!\p{L})(?:él|ella)\s+(?:se|te|va)\b/iu.test(trimmed)) {
+    return "escalation_gendered";
   }
 
   return null;
@@ -334,6 +344,9 @@ function explain(problem: string): string {
   if (problem === "too_short") return "es demasiado corto.";
   if (problem === "escalation_asks_for_data") {
     return "pediste datos en un mensaje de derivación. No hay que pedir nada: se encarga un especialista.";
+  }
+  if (problem === "escalation_gendered") {
+    return "le pusiste género al especialista. No sabemos quién es: decí «un especialista».";
   }
   return problem;
 }

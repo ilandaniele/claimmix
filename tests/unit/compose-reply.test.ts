@@ -82,6 +82,17 @@ describe("composeReply — what it refuses to send", () => {
     expect(out).toBe(FALLBACK);
   });
 
+  it("takes a quoted known value as asking for it", async () => {
+    // The brief says to cite the value; "¿fue en Villa Mitre?" never says "lugar".
+    replies("¿Es correcto que el choque fue en Villa Mitre? Si no, contanos dónde fue.");
+
+    const out = await composeReply(
+      base({ fields: ["accident_location"], knownValues: { accident_location: "Villa Mitre" } })
+    );
+
+    expect(out).not.toBe(FALLBACK);
+  });
+
   it("refuses an escalation that turns around and asks for data", async () => {
     // The exact contradiction that reached a real chat: "no hace falta que
     // hagas nada" followed by a list of requests.
@@ -92,6 +103,23 @@ describe("composeReply — what it refuses to send", () => {
     const out = await composeReply(base({ intent: "escalation" }));
 
     expect(out).toBe(FALLBACK);
+  });
+
+  it("refuses an escalation that gives the specialist a gender", async () => {
+    replies("Ya derivamos tu denuncia a un especialista. Él se va a comunicar con vos a la brevedad.");
+
+    const out = await composeReply(base({ intent: "escalation" }));
+
+    expect(out).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("le pusiste género al especialista");
+  });
+
+  it("does not mistake an ordinary word for a pronoun", async () => {
+    replies("Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad.");
+
+    const out = await composeReply(base({ intent: "escalation" }));
+
+    expect(out).not.toBe(FALLBACK);
   });
 
   it("refuses to promise anything about the money", async () => {
@@ -182,7 +210,16 @@ describe("composeReply — the brief it hands the model", () => {
 
     const prompt = mockCall.mock.calls[0][0] as string;
     expect(prompt).toContain("16/08/2026");
-    expect(prompt).toContain("pedir corrección");
+    expect(prompt).toContain("Preguntá si es correcto");
+    expect(prompt).toContain("no pidas más precisión");
+  });
+
+  it("puts the answer to a question before what is still missing", async () => {
+    replies("No te puedo dar un plazo todavía. Mientras, necesito el número de póliza.");
+
+    await composeReply(base({ fields: ["policy_number"], question: "¿Cuánto tarda?" }));
+
+    expect(mockCall.mock.calls[0][0] as string).toContain("Empezá el mensaje contestándola");
   });
 
   it("says whether this is a first contact or a conversation already underway", async () => {

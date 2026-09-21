@@ -139,15 +139,20 @@ Corrélo después de cada deploy. Detalle completo en
     failed, or did not run and why — so a run is never green by absence. The
     `qa_secretos` gate refuses to start when the three required secrets are
     missing, and also when QA's database string equals production's (compared
-    without printing either). None of it fires until those `QA_*` repository
-    secrets are created: step 10 of `docs/PROMOCION.md`.
-  - **Nobody can log into QA yet.** `POST /api/auth/sign-in/email` answers
-    `403 INVALID_ORIGIN` because `NEXT_PUBLIC_SITE_URL` is empty in that project,
-    so `resolveBaseURL()` (`src/lib/auth/index.ts:14-18`) falls back to the
-    per-deployment hash host and Better Auth rejects the alias it is served from.
-    Production, same probe, answers `401 INVALID_EMAIL_OR_PASSWORD`. Load the
-    variable and redeploy; it is the last of the twelve in `docs/PROMOCION.md`
-    step 4bis, and k6 stays red until it is there.
+    without printing either). The last QA deploy (`28249b4`, run 35551526692)
+    ran smoke, permisos, código y base, the rehearsal and «Qué se preguntó»,
+    all green; doorbell, pen test and load are off on QA by design.
+  - **✅ QA can be logged into.** On 2026-09-18 `POST /api/auth/sign-in/email`
+    answered `403 INVALID_ORIGIN` because `NEXT_PUBLIC_SITE_URL` was empty, so
+    `resolveBaseURL()` (`src/lib/auth/index.ts:14-18`) fell back to the hash
+    host. The variable was loaded on 2026-09-20 and the same probe now answers
+    `401 INVALID_EMAIL_OR_PASSWORD`, like production. «Continuar con Google»
+    works too: Google accepts QA's `redirect_uri`, while a made-up one gets
+    `redirect_uri_mismatch` (measured 2026-09-21). An address in QA's
+    `ADMIN_EMAILS` that signs in with Google is provisioned as admin into
+    `GOOGLE_DEFAULT_TENANT_ID`. A password signup gets an account with no
+    profile, by design, until an admin attaches it. QA has no mailbox, so the
+    password-reset mail never leaves.
   - **The two projects are told apart by the environment NAME, never the URL.**
     With more than one project GitHub disambiguates the environment as
     `Production – claimmix` / `Production – claimmix-qa` (en dash), while

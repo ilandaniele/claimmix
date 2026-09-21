@@ -169,8 +169,7 @@ pnpm smoke --tolera almacenamiento   # ese chequeo no está configurado en este 
 ```
 
 `--tolera` (o `SMOKE_TOLERA`) recibe nombres separados por comas y es para los
-entornos que a propósito no tienen todo —QA no tiene R2, ni WhatsApp, ni la
-casilla—. Un chequeo tolerado no cuenta como falla, pero no se calla: se
+entornos que a propósito no tienen todo —QA no tiene WhatsApp ni casilla—. Un chequeo tolerado no cuenta como falla, pero no se calla: se
 imprime con otra marca y el resumen lo lista como **NO verificado**. Tolerado
 no es probado. Un nombre mal escrito tampoco pasa desapercibido: el script
 avisa que `--tolera` nombra chequeos que no existen.

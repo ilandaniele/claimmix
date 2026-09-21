@@ -2,9 +2,9 @@
 
 El camino de tres escalones ya tiene sus piezas: la rama `qa`, el proyecto
 `claimmix-qa` en Vercel, su propia rama de Neon y un job que lo verifica después
-de cada deploy. Lo que falta es de a mano —cargarle un par de variables y crear
-los secretos `QA_*`—, y los pasos numerados de abajo dicen cuál y qué se rompe si
-se saltea. Este documento cuenta cómo queda el camino, qué parte ya está hecha en
+de cada deploy. La parte de a mano —las variables de `claimmix-qa` y los
+secretos `QA_*`— quedó hecha el 2026-09-20, y los pasos numerados de abajo dicen
+cuál es cada una y qué se rompe si se deshace. Este documento cuenta cómo queda el camino, qué parte ya está hecha en
 el repositorio, y qué parte hay que hacer en Vercel, GitHub y Google Cloud,
 porque ningún script puede hacerla.
 
@@ -16,8 +16,9 @@ Se eligió que todo entre en el plan gratuito. No hace falta pagar nada.
 rama de trabajo  →  PR a  qa   →  deploy de QA   →  PR de qa a main  →  deploy de producción
 ```
 
-Una rama de trabajo no despliega nada. `qa` despliega al proyecto de QA, contra
-su propia rama de Neon —no la del ensayo, que la CI ya usa: ver el paso 4—. `main` despliega a producción. **Cuesta un despliegue por
+Una rama de trabajo despliega sólo una vista previa de `claimmix`, detrás de
+Vercel Auth y contra la base de ensayo (paso 5); no toca QA ni producción. `qa` despliega al proyecto de QA, contra
+su propia rama de Neon —no la del ensayo, que la CI ya usa: ver el paso 4—. `main` despliega a producción. **A QA y a producción llega un despliegue por
 promoción, no uno por PR**, que es lo que hace que entre en el plan gratuito.
 
 ## Qué gatea cada paso
@@ -425,9 +426,10 @@ done | grep -E '^(Bundle size check|Tenencia y capa de datos|Pen test)' | sort |
 ```
 
 
-### 10. Los secretos `QA_*` del repositorio — FALTA
+### 10. Los secretos `QA_*` del repositorio — HECHO
 
-Es lo único que separa a QA de que sus deploys empiecen a verificarse. Van en
+Los nueve existen desde el 2026-09-20, y el deploy de QA de esa noche corrió
+todos sus chequeos, ensayo incluido, en verde. Van en
 Settings → Secrets and variables → Actions del repositorio, y la tabla de
 «Después del deploy» dice qué apaga cada ausencia.
 
@@ -444,12 +446,11 @@ donde apunte. La comparación es la última red, no el permiso para probar.
 
 Los otros seis —`QA_GMAIL_TENANT_ID`, `QA_BETTER_AUTH_SECRET` y los cuatro
 `QA_R2_*`— son opcionales y encienden el ensayo de conversaciones. El inquilino
-y el secreto de Better Auth ya existen en `claimmix-qa`; los de R2 piden una
-decisión que todavía no está tomada: **QA necesita un balde propio**. Pasarle
-los de producción haría que el ensayo de QA suba y borre adjuntos en el balde
-de los clientes, así que el ensayo queda apagado hasta que exista ese balde —y
-el job `alcance` lo nombra como no verificado en cada corrida, para que la
-decisión siga a la vista en vez de olvidarse.
+y el secreto de Better Auth ya existen en `claimmix-qa`; los de R2 son los del
+balde propio de QA, `claimmix-qa-attachments`. Pasarle los de producción haría
+que el ensayo de QA suba y borre adjuntos en el balde de los clientes: sin los
+cuatro el ensayo queda apagado, y el job `alcance` lo nombra como no verificado
+en cada corrida.
 
 ## Dos trampas que ya están resueltas, y conviene no reabrir
 

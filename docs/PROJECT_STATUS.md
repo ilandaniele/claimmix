@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-09. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-19. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -12,9 +12,16 @@ Update it at the end of a work session so the next one can recover quickly._
 > simultaneous claimants, onboarding a second client was rehearsed end to end, a closed
 > month's invoice is frozen, billing + portfolio have screens, and **both channels were
 > driven end to end with real messages from a real person** — a mail, two WhatsApps and a
-> photograph, all answered. **Every check is green** (CI, CodeQL, secret scan, and the
-> five post-deploy jobs), and the extraction now bills to **Veltra's own Google Cloud
-> project**. What is left is commercial: paid plans, and a first client.
+> photograph, all answered. **In production every check is green** (CI, CodeQL, secret
+> scan and the seven post-deploy jobs, plus the `alcance` job that writes down what each
+> run did and did not verify), and the extraction now bills to **Veltra's own Google
+> Cloud project**. Carga now measures previews for real —
+> `p95 530 ms · 0% fallidos · 67 pedidos`, run 35466095444 — after the Preview
+> scope of `claimmix` got `DATABASE_URL`, `DATABASE_URL_APP` and
+> `BETTER_AUTH_SECRET` pointing at the Neon rehearsal branch and the k6 account
+> was swapped to an admin. One red is left and named here so it is not read as
+> green: a QA deploy verifies nothing until the `QA_*` repository secrets exist.
+> What is left is commercial: paid plans, and a first client.
 
 ## What ClaimMix is
 
@@ -95,6 +102,91 @@ Corrélo después de cada deploy. Detalle completo en
   instead of at the first request that needs the column.
 - **Neon DATABASE_URL** is in `.env.local` (prod). `vercel env pull` returns blank
   values for secrets — use `vercel env ls` to check presence.
+- **Second Vercel project: `claimmix-qa`.** Deploys the `qa` branch, reads the
+  `qa` Neon branch (`br-muddy-mountain-acxm92sh`), public alias
+  https://claimmix-qa.vercel.app. First real deploy: 2026-09-18. What that day
+  taught, all of it verified against the live deploy:
+  - **A QA deploy now runs what QA can run — and says out loud what it cannot.**
+    `post-deploy.yml` has a `qa` caller that maps every secret one by one (never
+    `secrets: inherit`, which would aim its six runner jobs at the PRODUCTION
+    database, three of them writing) and switches each check on or off. QA runs
+    the smoke — light, tolerating `almacenamiento`, since the project has no R2 —
+    plus `listas-parejas` and `permisos`; it runs the rehearsal only once the
+    `QA_R2_*`, `QA_GMAIL_TENANT_ID` and `QA_BETTER_AUTH_SECRET` secrets exist,
+    and it never runs the doorbell, the pen test or the load check. A new
+    `alcance` job writes one row per check into the run summary — ran, ran and
+    failed, or did not run and why — so a run is never green by absence. The
+    `qa_secretos` gate refuses to start when the three required secrets are
+    missing, and also when QA's database string equals production's (compared
+    without printing either). None of it fires until those `QA_*` repository
+    secrets are created: step 10 of `docs/PROMOCION.md`.
+  - **Nobody can log into QA yet.** `POST /api/auth/sign-in/email` answers
+    `403 INVALID_ORIGIN` because `NEXT_PUBLIC_SITE_URL` is empty in that project,
+    so `resolveBaseURL()` (`src/lib/auth/index.ts:14-18`) falls back to the
+    per-deployment hash host and Better Auth rejects the alias it is served from.
+    Production, same probe, answers `401 INVALID_EMAIL_OR_PASSWORD`. Load the
+    variable and redeploy; it is the last of the twelve in `docs/PROMOCION.md`
+    step 4bis, and k6 stays red until it is there.
+  - **The two projects are told apart by the environment NAME, never the URL.**
+    With more than one project GitHub disambiguates the environment as
+    `Production – claimmix` / `Production – claimmix-qa` (en dash), while
+    `environment_url` is `claimmix-<hash>-…vercel.app` for both. Every gate that
+    must exclude QA reads the name; invariant 15 of `check-architecture.mjs`
+    enforces it, in the job `if:` and in the `concurrency` group alike.
+  - The QA hash URL sits behind Vercel Auth and the repo's automation bypass
+    secret belongs to the other project, so k6 measures the public alias.
+- **⛔ The Preview environment of `claimmix` has no `DATABASE_URL`.** That is
+  the whole 500, diagnosed and closed on 2026-09-18. The deploy says it itself:
+
+      GET /api/admin/health
+      {"status":"degraded","db":"error","db_error":"DATABASE_URL is not set"}
+
+  Fix it in the Vercel dashboard — Settings → Environment Variables, and tick
+  **Preview**, not only Production. `CRON_SECRET` is missing from that scope
+  too: `/api/health` answers 401 to the repo secret that production accepts.
+  Nothing in this repo can set either one.
+  - **How it was narrowed, so nobody redoes it.** Measured from CI with the
+    automation bypass, on the same preview deploy:
+
+        /                  500   (sin x-vercel-error, "Internal Server Error")
+        /login             500   (idem)
+        /privacy           200   <!DOCTYPE html>…
+        /demo              200   <!DOCTYPE html>…
+        /api/health        401
+        /api/admin/health  200   db_error: DATABASE_URL is not set
+
+    `/privacy` and `/demo` are pages the middleware returns without consulting
+    the session — public and not in `SOLO_ANONIMOS`. So are `/terms` and
+    `/restablecer` (`src/proxy.ts:30,40,53-55`); an earlier version of this note
+    called those two the only ones, and that was wrong. They
+    serve whole HTML, which rules out the build, the runtime, the CSP and
+    `instrumentation.ts`: a failing `exigirSecretoDeSesion()` would take them
+    down as well. The split leaves exactly one suspect, `auth.api.getSession`,
+    and `/api/admin/health` names it.
+  - **A database outage takes `/login` down with it.** `src/proxy.ts` lists
+    `/login` in `SOLO_ANONIMOS`, so even though the path is public the
+    middleware still calls `auth.api.getSession` on it to bounce anyone who is
+    already signed in. That is a query. There is no "degraded but you can still
+    log in" mode: if the data layer is unreachable, the login page 500s too.
+  - **Carga on previews is green since 2026-09-19.** The Preview scope of
+    `claimmix` now carries `DATABASE_URL`, `DATABASE_URL_APP` and
+    `BETTER_AUTH_SECRET` against the Neon rehearsal branch, and the k6 account
+    was swapped from Paula (`analyst`) to Mariela (`admin`) because
+    `/api/customers` and `/api/policies` require `CUSTOMER_PII_ROLES`, which
+    excludes analysts on purpose. Run 35466095444: `p95 530 ms · 0% fallidos ·
+    67 pedidos`. Carga is still not a required check on `main`.
+  - **And when a target has no database it no longer dies without measuring
+    anything.** Since 2026-09-18 the
+    job probes `/api/admin/health` first — reading the body, not the status,
+    because that endpoint answers 200 with the database down — and when there is
+    no database it runs `tests/load/scenarios/publico.js` instead: the four
+    session-free pages, one VU, thirty seconds, its own p(95) < 1000 ms budget.
+    It still ends **red**, with an `::error title=Carga a medias` naming the half
+    that was not measured, and the artifact is called `carga-publico` so the name
+    does not lie about what is inside it. That fallback stays for any target
+    that comes up without a database.
+  - The `if: failure()` diagnostics that produced the table above live in
+    `load-tests.yml` and cost nothing on a green run. Leave them.
 
 ## Status by area
 
@@ -1782,9 +1874,11 @@ inquilinos, 9.891 contra 5.
 `22P02` y el tope no veía nada. (Yo mismo había dicho antes que sí registraba:
 había comprobado que `recordUsage` se llama, no que el INSERT entrara.)
 
-**Pendiente, y es una decisión de producto, no un defecto:** `renderConflict` de
-WhatsApp muestra los valores del conflicto **sin enmascarar**, y siempre lo
-hizo — AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee un asegurado.
+~~**Pendiente, y es una decisión de producto, no un defecto:** `renderConflict`
+de WhatsApp muestra los valores del conflicto **sin enmascarar**~~ ✅ **HECHO
+después:** el enmascarado se mudó a una sola función que corre en los dos lados
+(`src/server/confirmations/messenger.ts:217-222,388-404`), así que el DNI entero
+ya no sale por WhatsApp cuando el redactor está apagado.
 
 **También:** los hallazgos de la auditoría pasaron por verificación adversarial
 de dos lentes: 116 veredictos sobre los 62 hallazgos —los 42 que habían quedado sin votar, incluidos—, 36 refutados, 26 en pie, 23 distintos. Lo arreglado esta sesión son
@@ -1870,9 +1964,9 @@ comentario de la vez anterior que pasó lo mismo, el 1º de septiembre.
 - **Tres de las cuatro consultas del tablero recorren `cases` entera** (Seq
   Scan). Con 484 casos no se nota; el reporte de `pnpm load` lo imprime en cada
   corrida para cuando sí. Es otro cambio, con su propia medición.
-- **`renderConflict` de WhatsApp muestra los valores sin enmascarar**, y
-  siempre lo hizo — AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee
-  un asegurado: es una decisión de producto.
+- ~~**`renderConflict` de WhatsApp muestra los valores sin enmascarar**~~ ✅
+  **HECHO después.** Sale enmascarado, con la misma función que el prompt
+  (`src/server/confirmations/messenger.ts:217-222`).
 - **El barredor no corre cada quince minutos en la práctica.** El `schedule`
   dice `*/15`, y las corridas reales del 8 de septiembre fueron 11:42, 15:22 y
   18:55. GitHub demora las tareas programadas cuando está cargado, cosa que el
@@ -2131,9 +2225,10 @@ solo lado de la llave.
 
 - ~~**Los tres Seq Scan del tablero**~~ — **medido el 2026-09-08: no hacen falta
   índices nuevos, y ya no son tres sino uno.** Ver abajo.
-- **`renderConflict` de WhatsApp muestra los valores sin enmascarar**, y siempre
-  lo hizo. AC24 nunca existió de ese lado. Cambiarlo cambia lo que lee un
-  asegurado: es decisión de producto.
+- ~~**`renderConflict` de WhatsApp muestra los valores sin enmascarar**~~ ✅
+  **HECHO.** `enmascarar` se sacó de `conflictosParaElRedactor` y ahora corre
+  también en `renderConflict` (`src/server/confirmations/messenger.ts:217-222`),
+  que es el texto que sale cuando el redactor está apagado o falla.
 - **Un adjunto rechazado por tamaño ya no deja fila con `rejected_reason`** — el
   camino es `null`, el mismo de las otras fallas de descarga, así que queda en
   el log y no en la pantalla del analista. Devolver ese rastro pide tocar el que
@@ -2872,6 +2967,65 @@ comprueba el hueco en píxeles bajo la tarjeta a 1280×800 y que el contenedor d
 la lista tenga de verdad a dónde scrollear. Una captura no habría servido: lo
 que falla acá es aritmética de layout.
 
+### 🔔 «Sin registro» en el timbre: lo que puede y lo que no puede significar (2026-09-18)
+
+El post-deploy de `5e63300` salió rojo en `Tocar el timbre`, sólo en la rama de
+mail, con el caso creado, 18 campos extraídos y ninguna respuesta:
+
+```
+   ✓ se creó el caso — e3c06ece-89f8-4f50-bd63-847a3d27de09
+   ✓ extrajo los datos — 18 campo(s)
+   ✓ no lo tomó por spam — info_faltante
+   ✗ el agente contestó
+   ✗ y la respuesta NO salió del edificio — sin registro
+```
+
+La re-corrida dio los siete jobs en verde sin tocar una línea, y el commit
+siguiente también, así que como suceso es varianza. Lo que queda escrito acá es
+lo otro: qué puede significar ese «sin registro», porque se investigó entero y
+la próxima vez no hay que volver a hacerlo.
+
+**«Sin registro» sólo puede ser cero filas.** `outbound_messages.status` tiene
+`.default("queued")` (`src/lib/db/schema/core.ts:266`), así que no existe la
+fila a medio escribir sin estado: o hay respuesta compuesta, o no hay fila.
+
+**El `info_faltante` de la línea de arriba NO lo puso el agente.** Lo pone la
+extracción: `status-after-extraction.ts:63` devuelve `info_faltante` en cuanto
+falta un campo obligatorio, y `src/server/worker/extract.ts:790` lo escribe.
+O sea que la extracción llegó al final, y lo que no dejó nada es la etapa del
+agente.
+
+**La rama silenciosa del orquestador no es candidata, y conviene saberlo.**
+`orchestrate.ts:737` fija el estado y no escribe ningún mensaje —es correcto: no
+se vuelve a preguntar lo mismo—, pero para entrar ahí hace falta `askOnHold`, y
+`elPedidoQuedaEnEspera` es `(yaSePidio || elAgenteEspera) && …`
+(`src/core/case/reply-decision.ts:70-72`). En un caso al que nadie le escribió
+todavía las dos son falsas. El timbre crea un caso nuevo en cada corrida, así
+que por ahí no pasa. Un silencio deliberado y una invocación cortada se ven
+igual en el reporte; acá se distinguen por el código, no por el síntoma.
+
+**Queda una sola explicación: la invocación no llegó al mensajero.** Es el
+incidente que ya está contado en `src/server/email/gmail/gmail-poller.ts:193-205`
+(08/09). El mail paga un salto más que WhatsApp: el poller le pasa el trabajo a
+`/api/worker/extract`, que es otra invocación con su propio techo de 60 s
+(`vercel.json:19`) y su propio arranque en frío, mientras que WhatsApp resuelve
+`runIntakeAgent` adentro del `after()` de su propio webhook. Y el mail corre
+primero, que es cuando la función está más fría. La asimetría es
+infraestructural, no del agente: las dos ramas esperan lo mismo.
+
+**Lo que esto NO arregla, y por eso no se tocó el camino del mail:** las tres
+llamadas al modelo —extracción, deliberación y redacción— no tienen timeout de
+proveedor por debajo del techo de la función. Un modelo que no contesta nunca
+deja al asegurado esperando, y eso no se arregla esperándolo más tiempo desde el
+guión. Lo que cubre ese caso es `barrer-trabados.yml`, que escala lo trabado
+cada quince minutos.
+
+**Lo que sí se arregló, que era del reporte y no del producto:** las dos cruces
+de arriba contaban el mismo hecho dos veces y el resumen decía «2 problema(s)»
+donde hay uno (#223), y las dos lecturas del guión no seguían la regla del
+archivo — `replyFor` contaba vueltas en vez de mirar el reloj, y ni ella ni
+`fieldsFor` filtraban por `tenant_id` (#224).
+
 ### 🙋 Waiting on you (not code)
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,
@@ -2909,6 +3063,16 @@ que falla acá es aritmética de layout.
   build de Vercel, sin `DATABASE_URL`, reventaba (#169); ahora el proxy
   contesta el esquema sin conectar, con test. No queda ningún PR de dependabot
   abierto.
+
+- **La última alerta de Dependabot no tenía PR que mergear: `devalue` < 5.9.1.**
+  Cerrada el 18/09 con #221. No hay dependencia directa sobre `devalue`: entra
+  por `workflow@4.8.5` → `@workflow/core@4.8.5`, así que dependabot no podía
+  abrir un bump y actualizar el `package.json` no la movía. Se fija en
+  `pnpm.overrides` con `">=5.9.2"`, que es lo que el repositorio ya hace con
+  otras ocho transitivas (`esbuild`, `browserslist`, `postcss`, `fast-uri`,
+  `nanoid`, `qs`, `undici`, `sharp`). Cuando una alerta señale una transitiva,
+  ése es el camino: override, `pnpm install --lockfile-only`, `pnpm verify`.
+  Hoy no queda ninguna alerta abierta.
 
 - **El ensayo del post-deploy ya no cae por un pico de Gemini.** El 15/09 dio
   rojo 5 de 8 veces por `transport_timeout` (30 s) en dos a cinco casos de mail

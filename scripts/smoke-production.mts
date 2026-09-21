@@ -17,6 +17,7 @@
  *   pnpm smoke                 # configuration and connectivity, free
  *   pnpm smoke --deep          # also uploads a file and calls the model
  *   pnpm smoke --url https://…  # a preview deployment instead of production
+ *   pnpm smoke --tolera almacenamiento   # ese chequeo no está configurado acá
  */
 
 import { execFileSync } from "node:child_process";
@@ -52,6 +53,24 @@ const BASE = (
  */
 const EXPECT_COMMIT = flag("expect-commit")?.slice(0, 7) ?? null;
 const WAIT_FOR_ALIAS_MS = 3 * 60 * 1000;
+
+/**
+ * Chequeos que este entorno no tiene configurados a propósito.
+ *
+ * QA no lleva R2 ni WhatsApp ni Gmail: no le escribe a nadie, y eso es una
+ * decisión, no un olvido. Sin esta lista el smoke de QA sale rojo siempre por
+ * lo mismo, y un rojo permanente se deja de leer — que es la forma lenta de
+ * volver al verde por ausencia.
+ *
+ * Lo que NO hace: callarse. Un chequeo tolerado no cuenta como falla, pero se
+ * imprime con otra marca y el resumen del final lo nombra. La diferencia entre
+ * este entorno y producción tiene que estar escrita en la salida, no en la
+ * cabeza de quien la lee.
+ */
+const TOLERADOS = (flag("tolera") ?? process.env.SMOKE_TOLERA ?? "")
+  .split(",")
+  .map((nombre) => nombre.trim())
+  .filter(Boolean);
 
 const SECRET = process.env.CRON_SECRET;
 
@@ -242,10 +261,21 @@ async function main() {
     process.exit(1);
   }
 
+  const sinVerificar: string[] = [];
   for (const check of body.checks ?? []) {
-    console.log(`  ${MARK[check.status]} ${check.name}: ${check.detail}`);
-    if (check.status === "down") failures++;
+    const tolerado = check.status === "down" && TOLERADOS.includes(check.name);
+    const marca = tolerado ? "·" : MARK[check.status];
+    const nota = tolerado ? " (no configurado acá: NO verificado)" : "";
+    console.log(`  ${marca} ${check.name}: ${check.detail}${nota}`);
+    if (tolerado) sinVerificar.push(check.name);
+    else if (check.status === "down") failures++;
   }
+
+  // Un nombre mal escrito en --tolera no tolera nada y nadie se entera: el
+  // chequeo cuenta como falla y la lista parece estar haciendo algo.
+  const inventados = TOLERADOS.filter(
+    (nombre) => !(body.checks ?? []).some((c) => c.name === nombre)
+  );
 
   const version = body.commit ? `commit ${body.commit}` : "commit desconocido";
   console.log(`\n${"─".repeat(60)}`);
@@ -261,6 +291,14 @@ async function main() {
     if (!deep) console.log("  (corré con --deep para probar R2 y el modelo de verdad)");
   } else {
     console.log(`✗ ${failures} problema(s). No lo dejes así.`);
+  }
+
+  if (sinVerificar.length > 0) {
+    console.log(`· Sin verificar en este entorno: ${sinVerificar.join(", ")}.`);
+    console.log("  Están apagados a propósito. Acá no se comprobó nada de eso.");
+  }
+  if (inventados.length > 0) {
+    console.log(`· --tolera nombra chequeos que no existen: ${inventados.join(", ")}.`);
   }
 
   // exitCode rather than exit(): calling process.exit() while sockets are

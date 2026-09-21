@@ -9,6 +9,26 @@
  * El `stdout` se deja porque si no, la corrida no dice nada mientras pasa.
  */
 
+/**
+ * Los chequeos que fallaron, con nombre.
+ *
+ * `http_req_failed` dice qué porcentaje falló y ninguna otra cosa. La corrida
+ * 35464921889 salió roja con «32.9% fallidos · 79 pedidos» y hubo que deducir a
+ * mano —26 = 13 iteraciones × 2 rutas— cuáles de las seis rutas no contestaban,
+ * porque ni el JSON ni la consola nombraban una. El nombre estaba ahí al lado:
+ * cada `check()` ya lo lleva puesto.
+ *
+ * Los grupos se recorren aunque hoy ningún escenario use `group()`: si mañana
+ * alguno lo usa, sus chequeos no quedan afuera del reporte.
+ */
+function rotos(grupo) {
+  if (!grupo) return [];
+  const propios = (grupo.checks || [])
+    .filter((c) => (c.fails ?? 0) > 0)
+    .map((c) => ({ nombre: c.name, fallos: c.fails, pases: c.passes ?? 0 }));
+  return [...propios, ...(grupo.groups || []).flatMap(rotos)];
+}
+
 /** Redondea a un decimal, o `null` cuando la métrica no existe en ese escenario. */
 function ms(valor) {
   return typeof valor === "number" ? Math.round(valor * 10) / 10 : null;
@@ -62,6 +82,7 @@ export function resumen(datos, escenario, notas = {}) {
           ),
         ])
     ),
+    chequeos_rotos: rotos(datos.root_group),
     notas,
   };
 }
@@ -83,6 +104,14 @@ function html(r) {
   const notas = Object.entries(r.notas)
     .map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`)
     .join("");
+  const fallados = (r.chequeos_rotos || [])
+    .map(
+      (c) =>
+        `<tr><th>${c.nombre}</th><td class="mal">${c.fallos} de ${
+          c.fallos + c.pases
+        }</td></tr>`
+    )
+    .join("");
 
   return `<!doctype html><meta charset="utf-8"><title>Carga — ${r.escenario}</title>
 <style>
@@ -101,6 +130,7 @@ function html(r) {
   }% fallidos</p>
 <h2>Latencia</h2><table>${filas}</table>
 <h2>Umbrales</h2><table>${umbrales || "<tr><td>ninguno</td></tr>"}</table>
+${fallados ? `<h2>Chequeos que fallaron</h2><table>${fallados}</table>` : ""}
 ${notas ? `<h2>Lo que este perfil fue a medir</h2><table>${notas}</table>` : ""}`;
 }
 
@@ -112,7 +142,13 @@ export function guardar(datos, escenario, notas = {}) {
   const r = resumen(datos, escenario, notas);
   const base = `resultados/carga-${escenario}`;
   return {
-    stdout: `\n${escenario}: p95 ${r.latencia_ms.p95} ms · ${r.fallidos_pct}% fallidos · ${r.pedidos} pedidos\n`,
+    // Sin la segunda línea, un rojo obliga a bajar el artefacto para saber qué
+    // se rompió; el log de la CI es lo primero que se mira.
+    stdout:
+      `\n${escenario}: p95 ${r.latencia_ms.p95} ms · ${r.fallidos_pct}% fallidos · ${r.pedidos} pedidos\n` +
+      r.chequeos_rotos
+        .map((c) => `  ROTO: ${c.nombre} — ${c.fallos} de ${c.fallos + c.pases}\n`)
+        .join(""),
     [`${base}.json`]: JSON.stringify(r, null, 2),
     [`${base}.html`]: html(r),
   };

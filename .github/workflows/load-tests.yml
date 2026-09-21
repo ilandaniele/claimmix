@@ -365,7 +365,14 @@ jobs:
         env:
           URL: ${{ steps.destino.outputs.url }}
           BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          # Cada proyecto de Vercel tiene su propio CRON_SECRET. Contra QA, el
+          # de producción no abre nada: `/api/health` contesta 401 y el
+          # diagnóstico terminaría diciendo que no contesta una dependencia que
+          # sí contesta. Y de paso le manda el secreto de producción a un deploy
+          # que no es el suyo. Se elige por el destino ya resuelto y no por el
+          # entorno del deployment, así vale también para el disparo a mano
+          # contra el alias de QA.
+          CRON_SECRET: ${{ steps.destino.outputs.url == 'https://claimmix-qa.vercel.app' && secrets.QA_CRON_SECRET || secrets.CRON_SECRET }}
         run: |
           if [ -z "${CRON_SECRET}" ]; then
             echo "Sin CRON_SECRET del repositorio no se puede interrogar a /api/health."

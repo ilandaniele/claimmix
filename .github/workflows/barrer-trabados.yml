@@ -95,7 +95,11 @@ jobs:
     steps:
       - name: Pedirle al barredor que pase
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          # El dispatch puede apuntar a QA, y el secreto de producción no
+          # abre esa puerta: cada proyecto de Vercel tiene el suyo y
+          # `/api/cron/reap-stuck` compara contra el del deploy al que se le
+          # pega. Barrer QA con el de producción devuelve 401 tres veces.
+          CRON_SECRET: ${{ endsWith(github.event.inputs.url || 'https://claimmix.vercel.app', '-qa.vercel.app') && secrets.QA_CRON_SECRET || secrets.CRON_SECRET }}
           URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
         run: |
           set -uo pipefail
@@ -155,7 +159,11 @@ jobs:
       # dia para pegarle a una URL seria el gasto mas tonto del repositorio.
       - name: Preguntarle al deploy que alcanza a ver
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          # El dispatch puede apuntar a QA, y el secreto de producción no
+          # abre esa puerta: cada proyecto de Vercel tiene el suyo y
+          # `/api/cron/reap-stuck` compara contra el del deploy al que se le
+          # pega. Barrer QA con el de producción devuelve 401 tres veces.
+          CRON_SECRET: ${{ endsWith(github.event.inputs.url || 'https://claimmix.vercel.app', '-qa.vercel.app') && secrets.QA_CRON_SECRET || secrets.CRON_SECRET }}
           URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
         run: node scripts/mirar-salud.mjs
 

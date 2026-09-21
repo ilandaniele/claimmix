@@ -60,8 +60,8 @@ chequeo.
 
 | Chequeo           | Producción   | QA                  | Por qué                                                                  |
 | ----------------- | ------------ | ------------------- | ------------------------------------------------------------------------ |
-| Smoke             | sí, `--deep` | sí, liviano         | `--deep` sube a R2 y llama al modelo, y QA no tiene R2                   |
-| Ensayo            | sí           | sólo con los `QA_R2_*` | sube adjuntos de verdad, y QA no escribe en el balde de producción   |
+| Smoke             | sí, `--deep` | sí, liviano         | `--deep` sube un archivo y llama al modelo; no es lo que ese run prueba  |
+| Ensayo            | sí           | sí                  | sube adjuntos de verdad, al balde propio de QA, no al de producción      |
 | Timbre            | sí           | no                  | QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito         |
 | Listas y parejas  | sí           | sí                  | sólo le pregunta al catálogo                                             |
 | Permisos del rol  | sí           | sí                  | sólo le pregunta al catálogo                                             |
@@ -73,10 +73,12 @@ rojo, y escribe en el resumen del run una fila por chequeo: corrió, corrió y
 falló, o NO corrió y por qué. De ahí venía el verde por ausencia — cuatro jobs
 verdes de los que tres ni arrancaron se leen igual que siete chequeos pasados.
 
-El smoke de QA además tolera `almacenamiento` (input `smoke_tolera`). Tolerado
-no es probado: el script lo imprime con `·` y termina nombrándolo bajo «Sin
-verificar en este entorno». `whatsapp` y `gmail` no hace falta tolerarlos, que
-sin configurar avisan y no fallan.
+El smoke de QA toleraba `almacenamiento` (input `smoke_tolera`) mientras QA no
+tenía balde; desde el 20/09 lo tiene y el chequeo liviano da verde solo, así que
+la tolerancia se sacó. Tolerado no es probado: cuando algo se tolera, el script
+lo imprime con `·` y termina nombrándolo bajo «Sin verificar en este entorno».
+`whatsapp` y `gmail` no hace falta tolerarlos, que sin configurar avisan y no
+fallan.
 
 #### Los secretos de repositorio que necesita QA
 
@@ -91,12 +93,19 @@ el ensayo.
 | `QA_CRON_SECRET`                                                               | el `CRON_SECRET` cargado en `claimmix-qa`    | ídem: el smoke no puede preguntar   |
 | `QA_GMAIL_TENANT_ID`                                                           | el inquilino de QA                           | el ensayo no corre                  |
 | `QA_BETTER_AUTH_SECRET`                                                        | el de `claimmix-qa`                          | el ensayo no corre                  |
-| `QA_R2_ACCOUNT_ID`, `QA_R2_ACCESS_KEY_ID`, `QA_R2_SECRET_ACCESS_KEY`, `QA_R2_BUCKET` | un balde de R2 propio de QA           | el ensayo no corre                  |
+| `QA_R2_ACCOUNT_ID`, `QA_R2_ACCESS_KEY_ID`, `QA_R2_SECRET_ACCESS_KEY`, `QA_R2_BUCKET` | el balde propio de QA, `claimmix-qa-attachments` (misma cuenta de Cloudflare que producción, otro token) | el ensayo no corre |
 
 ⛔ **`QA_DATABASE_URL` no es la de producción, nunca.** `qa_secretos` compara
 las dos cadenas sin imprimir ninguna y corta si son la misma. Sin esa
 comparación, el ensayo escribiría y borraría casos en la base de un cliente y
 no habría nada que lo mostrara hasta después.
+
+⛔ **`QA_R2_BUCKET` tampoco es el de producción.** `qa_secretos` compara el
+balde y la llave contra los de producción, igual que las cadenas de la base, y
+corta si coinciden: con los de producción el ensayo subiría y borraría adjuntos
+de un cliente. La cuenta sí es la misma a propósito —los dos baldes viven en la
+misma cuenta de Cloudflare, con un token cada uno—, así que `QA_R2_ACCOUNT_ID`
+no se compara.
 
 ## Lo que hay que hacer a mano, en orden
 

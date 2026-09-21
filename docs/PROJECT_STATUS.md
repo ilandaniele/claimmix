@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-20. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-21. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -23,7 +23,8 @@ Update it at the end of a work session so the next one can recover quickly._
 > secrets exist, so a QA deploy now runs its checks and its rehearsal. That
 > needed QA to get a bucket of its own — `claimmix-qa-attachments`, separate
 > from production's `claim-attachments` — which happened on the way out of the
-> personal Cloudflare account and into Veltra's. What is left is commercial:
+> personal Cloudflare account and into Veltra's; the old bucket and its token
+> were deleted on 2026-09-21. What is left is commercial:
 > paid plans, and a first client.
 
 ## What ClaimMix is
@@ -105,6 +106,18 @@ Corrélo después de cada deploy. Detalle completo en
   instead of at the first request that needs the column.
 - **Neon DATABASE_URL** is in `.env.local` (prod). `vercel env pull` returns blank
   values for secrets — use `vercel env ls` to check presence.
+- **Which Neon database is which — the names lie.** Production serves from
+  `ep-proud-resonance-acbz9jqu`, a project outside the Veltra org. That is
+  `.env.local`'s `DATABASE_URL`, Vercel Production's, and also the repository
+  secrets `DATABASE_URL` and `DATABASE_URL_APP`: the post-deploy jobs that
+  write (doorbell, rehearsal, pen test) write into the customers' database and
+  sweep their own rows afterwards. `STAGING_DATABASE_URL` is the Veltra branch
+  that is *named* `production` (`ep-damp-meadow-ac1xqhzs`), and only
+  `ci.yml`'s integration and tenancy tests use it. Proved on 2026-09-21: the
+  doorbell job found and deleted the case the deploy had just written to
+  proud-resonance. Tell them apart by what is in them — real `email` and
+  `whatsapp` cases — never by name. The live database was missing the 41
+  global `known_claim_patterns`; they were seeded into it that day.
 - **Second Vercel project: `claimmix-qa`.** Deploys the `qa` branch, reads the
   `qa` Neon branch (`br-muddy-mountain-acxm92sh`), public alias
   https://claimmix-qa.vercel.app. First real deploy: 2026-09-18. What that day
@@ -143,16 +156,19 @@ Corrélo después de cada deploy. Detalle completo en
     enforces it, in the job `if:` and in the `concurrency` group alike.
   - The QA hash URL sits behind Vercel Auth and the repo's automation bypass
     secret belongs to the other project, so k6 measures the public alias.
-- **⛔ The Preview environment of `claimmix` has no `DATABASE_URL`.** That is
-  the whole 500, diagnosed and closed on 2026-09-18. The deploy says it itself:
+- **✅ The Preview environment of `claimmix` had no `DATABASE_URL`.** That was
+  the whole 500, diagnosed on 2026-09-18 and closed on 2026-09-19 (see "Carga on
+  previews" below). The deploy said it itself:
 
       GET /api/admin/health
       {"status":"degraded","db":"error","db_error":"DATABASE_URL is not set"}
 
-  Fix it in the Vercel dashboard — Settings → Environment Variables, and tick
-  **Preview**, not only Production. `CRON_SECRET` is missing from that scope
-  too: `/api/health` answers 401 to the repo secret that production accepts.
-  Nothing in this repo can set either one.
+  `CRON_SECRET` was missing from that scope too. Preview now carries the same
+  value as production and the repository secret, because `load-tests.yml`
+  sends the repository secret to previews. That value was rotated on
+  2026-09-21 after it showed up in a screenshot: production, Preview, the
+  repository secret and `.env.local` changed together, and the old value gets
+  401.
   - **How it was narrowed, so nobody redoes it.** Measured from CI with the
     automation bypass, on the same preview deploy:
 

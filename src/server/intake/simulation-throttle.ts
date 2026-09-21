@@ -201,7 +201,7 @@ export async function getEarlierPendingSimulationCount(input: {
  * Cuanto puede esperar un worker su turno.
  *
  * Era 300.000 ms por defecto, con techo de media hora. La ruta que lo llama
- * —`/api/worker/extract`— tiene `maxDuration: 60` en `vercel.json`. O sea que
+ * —`/api/worker/extract`— tenía `maxDuration: 60` en `vercel.json`. O sea que
  * el que esperaba mas de un minuto no llegaba a existir: la invocacion se moria
  * primero, sin haber llamado a Gemini y sin escribir nada.
  *
@@ -277,8 +277,9 @@ async function getEarlierPendingEmailCount(input: {
  * Wait until fewer than GEMINI_WORKER_CONCURRENCY earlier real-email cases are
  * being processed. Enforces FIFO ordering — older emails always get priority.
  * Times out after EMAIL_WORKER_MAX_WAIT_MS (default 20 s, techo 40 s) rather than
- * blocking forever. El techo esta por DEBAJO del maxDuration de 60 s de la ruta:
- * esperar mas de lo que dura la funcion es morirse callado.
+ * blocking forever. La espera corre dentro de los 40 s de la corrida
+ * (`PRESUPUESTO_DE_CORRIDA_MS`): esperar mas es quedarse sin tiempo para el
+ * modelo y volver a la cola.
  */
 export async function waitForEmailExtractionTurn(input: {
   tenantId: string;

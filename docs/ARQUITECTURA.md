@@ -113,7 +113,7 @@ MAX_CHAIN = 6, BATCH_BUDGET_MS = 240_000   ← planificador de continuaciones ca
 ```
 
 ```
-/api/worker/extract   maxDuration = 60 s   ← el que hace el trabajo
+/api/worker/extract   maxDuration = 60 s   ← el que hace el trabajo (300 s desde el 2026-09-21)
 un caso tarda         ~15 s
 → entran ~4 casos por invocación, y de ahí MAX_CHAIN = 6
 

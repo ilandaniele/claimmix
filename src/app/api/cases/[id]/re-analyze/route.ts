@@ -33,6 +33,8 @@ import {
   type RateLimitResult,
 } from "@/lib/rate-limit/index";
 
+export const maxDuration = 300;
+
 const ParamsSchema = z.object({
   id: z.string().uuid("ID de caso inválido."),
 });

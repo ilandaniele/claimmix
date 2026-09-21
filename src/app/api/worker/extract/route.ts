@@ -23,6 +23,8 @@ import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { isInternalRequest } from "@/lib/security/internal-auth";
 import { logger } from "@/lib/observability/logger";
 
+export const maxDuration = 300;
+
 const WorkerBodySchema = z.object({
   caseId: z.string().uuid("caseId must be a valid UUID."),
   tenantId: z.string().uuid("tenantId must be a valid UUID."),

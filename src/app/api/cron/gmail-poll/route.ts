@@ -43,6 +43,7 @@ const RENEWAL_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 /** Required: mark route as dynamic so Vercel doesn't statically optimize it. */
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const secret = process.env.CRON_SECRET;

@@ -43,7 +43,7 @@ import { logger } from "@/lib/observability/logger";
  *   · en `recibido` ahora mismo: 1, de hace más de un día
  *
  * Ese caso es el agujero. El worker se murió en el medio — su invocación
- * tiene techo de 60 s — y nadie lo volvió a tomar nunca.
+ * tenía techo de 60 s — y nadie lo volvió a tomar nunca.
  *
  * El corte de 20 minutos es holgado contra una mediana de 8 segundos, y el
  * repo ya trataba un `recibido` de más de 10 minutos como muerto: la cuenta

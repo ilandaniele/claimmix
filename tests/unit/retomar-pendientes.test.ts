@@ -23,7 +23,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: { select: mockSelect }, tables: {} }));
 vi.mock("@/server/agents/intake-agent", () => ({ runIntakeAgent: mockRunIntakeAgent }));
 
-import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
+import { retomarExtraccionesPendientes, MINIMO_PARA_RETOMAR_MS } from "@/server/intake/retomar-pendientes";
 
 /** El `select(...).from(...).where(...).limit(n)` del barrido. */
 function devuelve(filas: Array<{ id: string; tenant_id: string }> | Error) {
@@ -40,7 +40,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockRunIntakeAgent.mockResolvedValue(undefined);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 describe("retomarExtraccionesPendientes", () => {
   it("corre el agente sobre cada caso marcado", async () => {
@@ -107,5 +110,57 @@ describe("retomarExtraccionesPendientes", () => {
     expect(r.retomados).toBe(0);
     expect(errores.join(" ")).toContain("retomar_pendientes.consulta_fallo");
     expect(errores.join(" ")).toContain("42P01");
+  });
+});
+
+describe("con el reloj", () => {
+  const T0 = 1_700_000_000_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"], now: T0 });
+  });
+
+  it("sin tiempo para uno más, no lo empieza", async () => {
+    devuelve([{ id: "caso-1", tenant_id: "t-1" }]);
+    const avisos: string[] = [];
+    const espia = vi
+      .spyOn(console, "warn")
+      .mockImplementation((...a: unknown[]) => { avisos.push(a.map(String).join(" ")); });
+
+    const r = await retomarExtraccionesPendientes({ hasta: T0 + MINIMO_PARA_RETOMAR_MS - 1 });
+    espia.mockRestore();
+
+    expect(mockRunIntakeAgent).not.toHaveBeenCalled();
+    expect(r.retomados).toBe(0);
+    expect(avisos.join(" ")).toContain("retomar_pendientes.sin_tiempo");
+  });
+
+  it("con margen de sobra, corre igual", async () => {
+    devuelve([{ id: "caso-1", tenant_id: "t-1" }]);
+
+    const r = await retomarExtraccionesPendientes({ hasta: T0 + MINIMO_PARA_RETOMAR_MS + 1_000 });
+
+    expect(r.retomados).toBe(1);
+  });
+
+  it("el reloj corta a mitad de la lista", async () => {
+    devuelve([
+      { id: "caso-1", tenant_id: "t-1" },
+      { id: "caso-2", tenant_id: "t-1" },
+    ]);
+    mockRunIntakeAgent.mockImplementationOnce(async () => {
+      vi.setSystemTime(Date.now() + 200_000);
+    });
+    const avisos: string[] = [];
+    const espia = vi
+      .spyOn(console, "warn")
+      .mockImplementation((...a: unknown[]) => { avisos.push(a.map(String).join(" ")); });
+
+    const r = await retomarExtraccionesPendientes({ hasta: T0 + 300_000 });
+    espia.mockRestore();
+
+    expect(r.retomados).toBe(1);
+    expect(r.caseIds).toEqual(["caso-1"]);
+    expect(avisos.join(" ")).toMatch(/quedaron\D+1/);
   });
 });

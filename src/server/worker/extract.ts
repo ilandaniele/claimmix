@@ -60,6 +60,7 @@ import { analyzeGaps, UMBRAL_POR_OMISION } from "@/core/case/gap-analysis";
 import { checkBudget, recordUsage } from "@/server/ai/budget";
 import { ClaimAgentError, runClaimTextAgent, runEmailClaimAgent } from "@/server/ai/claim-agent";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
+import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 import { GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
 import { findCustomerMatches, MATCH_QUE_VINCULA } from "@/server/matching/customer-matcher";
@@ -410,23 +411,21 @@ export async function runExtractionWorker(
 /**
  * How long a run may hold a case before another may take it.
  *
- * Longer than any real extraction (they run 10-20s) and short enough that a
- * function evicted mid-run does not strand the case. A lease, not a lock: a
- * crash must not wedge a claim forever.
+ * At least the longest function that runs the agent, or a live run loses
+ * it to a second one. A lease, not a lock: a crash must not wedge a claim
+ * forever. Shared with the pending sweep, which reads it as "expired".
  */
-const EXTRACTION_LEASE_MS = 3 * 60 * 1000;
+const EXTRACTION_LEASE_MS = RESERVA_DE_EXTRACCION_MS;
 
 /**
  * Cuánto puede durar una corrida antes de que la corte alguien más.
  *
- * La función tiene 60 s (`vercel.json`) y cuando se acaban no hay aviso: el
- * proceso se corta donde esté. Una corrida real tarda 10-20 s, así que sola no
- * llega — el problema es que no corre sola. Antes de esta corrida ya se
- * bajaron los adjuntos del mensaje (hasta cuatro, 10 s cada uno) y después de
- * ella puede venir un redespacho, que corre OTRA corrida entera adentro de
- * esta misma invocación.
+ * La función tiene 300 s (el `maxDuration` de cada ruta) y cuando se acaban
+ * no hay aviso: el proceso se corta donde esté. Estos 40 s sólo deciden si
+ * empieza la extracción; lo que viene después no lo cuentan: deliberación y
+ * redacción, hasta seis llamadas más al modelo, y en el webhook el barrido
+ * y hasta dos retomados. Por eso no crecieron cuando creció la función.
  *
- * Cuarenta segundos es lo que queda para lo caro dejando margen para cerrar.
  * Pasado eso la corrida no empieza la llamada al modelo: marca el caso para
  * que lo tome la próxima y se va ordenada, que es lo contrario de que la maten
  * a mitad de una escritura.
@@ -613,8 +612,7 @@ async function redispatchExtraction(
    * de contestar, y acá se la espera. La corrida hija se paga con lo que le
    * quede a la invocación de la madre, y la madre ya gastó lo suyo.
    *
-   * Dos corridas de 10-20 s dentro de una función de 60 s entran; tres no. Y
-   * la cadena no tiene tope: cada mensaje que llega a mitad de corrida agrega
+   * La cadena no tiene tope: cada mensaje que llega a mitad de corrida agrega
    * un eslabón, todos anidados adentro de la misma invocación. Cuando se
    * acaba el tiempo mueren TODAS juntas, la de más adentro a mitad de una
    * escritura.
@@ -830,8 +828,8 @@ export async function runEmailExtractionWorker(
      * ── El freno va ANTES de la reserva, y si se vence el caso vuelve a la cola
      *
      * Estaba al reves: se tomaba la reserva y RECIEN DESPUES se entraba a
-     * esperar el turno, hasta cinco minutos, adentro de una funcion que dura
-     * sesenta segundos.
+     * esperar el turno, hasta cinco minutos, adentro de una funcion que
+     * entonces duraba sesenta segundos.
      *
      * En una rafaga de correos reales —un lunes a la mañana— el caso numero
      * tres en adelante se moria esperando: nunca llamaba a Gemini, nunca
@@ -842,9 +840,8 @@ export async function runEmailExtractionWorker(
      *
      * Dos cambios y el agujero se cierra:
      *
-     *   · esperar SIN la reserva tomada. Sostenerla mientras se duerme bloquea
-     *     a los demas y, como dura tres minutos contra los sesenta segundos de
-     *     la funcion, sobrevive a quien la tomo;
+     *   · esperar SIN la reserva tomada. Sostenerla mientras se duerme
+     *     bloquea a los demas;
      *   · si el turno no llega, marcar el caso como pendiente y devolver. Vuelve
      *     a la cola en vez de morirse.
      */

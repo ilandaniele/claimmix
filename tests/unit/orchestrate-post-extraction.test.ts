@@ -83,6 +83,11 @@ vi.mock("@/server/ai/deliberate", () => ({
   deliberate: vi.fn().mockResolvedValue(null),
 }));
 
+// Mock ya-contestado: si la corrida heredada ya mandó el último mensaje, no repetir.
+vi.mock("@/server/confirmations/ya-contestado", () => ({
+  yaContestamosElUltimoMensaje: vi.fn().mockResolvedValue(false),
+}));
+
 // Mock gap analyzer.
 vi.mock("@/server/cases/gap-analyzer", () => ({
   // Real value: the orchestrator resolves pending confirmations against the
@@ -103,6 +108,7 @@ import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import { writeAuditLog } from "@/lib/audit/log";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { deliberate } from "@/server/ai/deliberate";
+import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contestado";
 
 // ── DB mock builder ───────────────────────────────────────────────────────────
 
@@ -275,6 +281,7 @@ beforeEach(() => {
   setupDbMocks();
 
   vi.mocked(deliberate).mockResolvedValue(null);
+  vi.mocked(yaContestamosElUltimoMensaje).mockResolvedValue(false);
 
   // Reset gap analyzer to default (complete claim) for each test.
   vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
@@ -3292,5 +3299,64 @@ describe("orchestratePostExtraction — la derivación no manda un segundo mensa
 
     expect(titularWhereSpy.mock.calls.flat().join(" ")).toContain("POL-3390-F");
     expect(derivacion?.data).toMatchObject({ titularIniciales: "R*** P***" });
+  });
+});
+
+// ── Test suite: corrida heredada — no duplicar lo que una corrida muerta ya mandó ──
+
+describe("orchestratePostExtraction — corrida heredada", () => {
+  const HEREDADA_EN = "2026-09-21T10:00:00.000Z";
+
+  it("heredada ya contestada no manda nada", async () => {
+    const claim = extractEmailClaimMock();
+    setupDbMocks({ outboundMessagesRows: [] });
+    vi.mocked(yaContestamosElUltimoMensaje).mockResolvedValue(true);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL, heredadaEn: HEREDADA_EN },
+      NO_MATCHES
+    );
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+    // Contra lo que había llegado cuando se pidió la reserva, no contra lo último.
+    expect(yaContestamosElUltimoMensaje).toHaveBeenCalledWith(CASE_ID, TENANT_ID, HEREDADA_EN);
+  });
+
+  it("heredada sin contestar manda", async () => {
+    const claim = extractEmailClaimMock();
+    setupDbMocks({ outboundMessagesRows: [] });
+    vi.mocked(yaContestamosElUltimoMensaje).mockResolvedValue(false);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL, heredadaEn: HEREDADA_EN },
+      NO_MATCHES
+    );
+
+    const confirmationCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
+      (call) => call[0].template === "confirmation_received"
+    );
+    expect(confirmationCall).toBeDefined();
+  });
+
+  it("sin heredada ni pregunta", async () => {
+    const claim = extractEmailClaimMock();
+    setupDbMocks({ outboundMessagesRows: [] });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(yaContestamosElUltimoMensaje).not.toHaveBeenCalled();
+    const confirmationCall = vi.mocked(dispatchOutboundEmail).mock.calls.find(
+      (call) => call[0].template === "confirmation_received"
+    );
+    expect(confirmationCall).toBeDefined();
   });
 });

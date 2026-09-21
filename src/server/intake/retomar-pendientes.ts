@@ -30,13 +30,15 @@
 
 import "server-only";
 
-import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { cases } from "@/lib/db/schema";
+import { enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
+import { ESTADOS_DE_ARRANQUE } from "@/core/case/estados-de-arranque";
 
 /** Cuántos se retoman por corrida, como mucho. Lo que corta de verdad es el reloj: ver `MINIMO_PARA_RETOMAR_MS`. */
 const TOPE_POR_CORRIDA = 20;
@@ -60,6 +62,17 @@ const ESPERA_MS = 2 * 60_000;
  * una escritura, con la reserva tomada y la marca puesta.
  */
 export const MINIMO_PARA_RETOMAR_MS = 4 * PLAZO_DEL_MODELO_MS;
+
+/**
+ * Hasta dónde mirar atrás por una corrida muerta sin marca.
+ *
+ * El release nula la reserva al terminar, marca puesta o no. Una reserva
+ * vencida y SIN la marca es entonces una corrida que no llegó a soltarla: se
+ * la mató a mitad de camino. Un día es de sobra contra los minutos que dura
+ * una corrida real, y evita que este barrido retome algo tan viejo que ya
+ * lo alcanzó `close-abandoned`.
+ */
+const VENTANA_DE_HUERFANOS_MS = 24 * 60 * 60_000;
 
 export interface RetomadosResult {
   retomados: number;
@@ -85,6 +98,7 @@ export async function retomarExtraccionesPendientes(opts?: {
   const leaseVencido = new Date(
     Date.now() - (opts?.leaseMs ?? RESERVA_DE_EXTRACCION_MS)
   ).toISOString();
+  const huerfanosDesde = new Date(Date.now() - VENTANA_DE_HUERFANOS_MS).toISOString();
 
   let pendientes: Array<{ id: string; tenant_id: string }>;
   try {
@@ -95,14 +109,20 @@ export async function retomarExtraccionesPendientes(opts?: {
       .from(cases)
       .where(
         and(
-          eq(cases.extraction_pending, true),
-          // Con la reserva tomada y fresca hay una corrida viva que va a
-          // consumir la marca sola. Sólo se retoma lo que quedó huérfano.
+          inArray(cases.status, ESTADOS_DE_ARRANQUE),
+          // `updated_at` queda NULL al insertar: coalesce cae a `created_at`
+          // para ese caso.
+          sql`coalesce(${cases.updated_at}, ${cases.created_at}) < ${corte}::timestamptz`,
           or(
-            isNull(cases.extraction_lease_at),
-            lt(cases.extraction_lease_at, leaseVencido)
+            // Con la reserva tomada y fresca hay una corrida viva que va a
+            // consumir la marca sola. Sólo se retoma lo que quedó huérfano.
+            and(
+              eq(cases.extraction_pending, true),
+              or(isNull(cases.extraction_lease_at), lt(cases.extraction_lease_at, leaseVencido))
+            ),
+            // Reserva vencida y SIN la marca: la corrida murió antes de soltarla.
+            and(lt(cases.extraction_lease_at, leaseVencido), gt(cases.extraction_lease_at, huerfanosDesde))
           ),
-          lt(cases.updated_at, corte),
           opts?.tenantId ? eq(cases.tenant_id, opts.tenantId) : undefined
         )
       )
@@ -146,6 +166,7 @@ export async function retomarExtraccionesPendientes(opts?: {
         caseId: caso.id,
         tenantId: caso.tenant_id,
         source: "worker",
+        retoma: true,
       });
       hechos.push(caso.id);
     } catch (e) {
@@ -164,4 +185,28 @@ export async function retomarExtraccionesPendientes(opts?: {
   }
 
   return { retomados: hechos.length, caseIds: hechos };
+}
+
+/**
+ * Marca pendientes los casos que el webhook todavía no corrió: si se queda sin
+ * reloj (ver `MINIMO_PARA_RETOMAR_MS`) o lo matan, los toma este mismo barrido
+ * más tarde.
+ *
+ * Nunca tira: a quien reencola no le corresponde fallar por esto.
+ */
+export async function marcarPendientes(caseIds: string[], tenantId: string): Promise<void> {
+  if (caseIds.length === 0) return;
+  try {
+    await enTenant({ tenantId }, (db) =>
+      db
+        .update(cases)
+        .set({ extraction_pending: true })
+        // Fuera de estos estados el barrido no lo toma nunca: la marca
+        // quedaría puesta para nadie.
+        .where(and(inArray(cases.id, caseIds), inArray(cases.status, ESTADOS_DE_ARRANQUE)))
+    );
+  } catch (e) {
+    const code = (e as { code?: string })?.code ?? "unknown";
+    logger.error({ code }, "retomar_pendientes.marcar_fallo");
+  }
 }

@@ -7,6 +7,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
 import { enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
+import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 
 const DEFAULT_SIMULATE_WORKER_DELAY_MS =
   process.env.NODE_ENV === "test" ? 0 : 5_000;
@@ -243,6 +244,9 @@ async function getEarlierPendingEmailCount(input: {
   // `return 0` de arriba no cruza el borde de la función flecha.
   const desdeCuando = input.caseCreatedAt;
   const staleCutoff = new Date(Date.now() - 10 * 60_000).toISOString();
+  // Un reencolado (`extraction_pending`) sin reserva viva no bloquea a nadie:
+  // no hay una corrida corriendo ahora mismo, lo toma retomar-pendientes.
+  const leaseVivo = new Date(Date.now() - RESERVA_DE_EXTRACCION_MS).toISOString();
 
   try {
     const row = firstRow(
@@ -257,6 +261,7 @@ async function getEarlierPendingEmailCount(input: {
               eq(cases.status, "recibido"),
               gte(cases.created_at, lookbackStart),
               gte(cases.created_at, staleCutoff),
+              or(eq(cases.extraction_pending, false), gte(cases.extraction_lease_at, leaseVivo)),
               or(
                 lt(cases.created_at, desdeCuando),
                 and(eq(cases.created_at, desdeCuando), lt(cases.id, input.caseId))

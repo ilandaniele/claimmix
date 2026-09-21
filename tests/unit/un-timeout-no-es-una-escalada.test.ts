@@ -26,8 +26,16 @@ const MIGRACION = readFileSync(
 
 describe("el reintento por timeout", () => {
   it("sólo para TIMEOUT, no para cualquier error del proveedor", () => {
-    // Un 400 no mejora reintentando, y una cuota agotada tampoco.
-    expect(WORKER).toContain('if (errCode === "TIMEOUT")');
+    // Vertex es pospago sobre un cupo compartido y dinámico: un 429 es tan
+    // transitorio como un TIMEOUT, con el mismo tope de por vida. Un 400
+    // sigue escalando.
+    expect(WORKER).toContain('if (errCode === "TIMEOUT" || errStatus === 429)');
+  });
+
+  it("un 429 va a la cola, un 400 no", () => {
+    const i = WORKER.indexOf('if (errCode === "TIMEOUT" || errStatus === 429)');
+    const bloque = WORKER.slice(i, WORKER.indexOf("await escalateCase(", i));
+    expect(bloque).not.toContain("400");
   });
 
   it("marca pendiente para que lo levante el barrido", () => {
@@ -58,7 +66,7 @@ describe("el reintento por timeout", () => {
     // reintentaría en cada barrido, pagando una llamada cada vez.
     // Desde el if hacia adelante:  se DEFINE antes en el archivo,
     // así que buscarlo desde el principio da un tramo vacío.
-    const i = WORKER.indexOf('if (errCode === "TIMEOUT")');
+    const i = WORKER.indexOf('if (errCode === "TIMEOUT" || errStatus === 429)');
     const bloque = WORKER.slice(i, WORKER.indexOf("await escalateCase(", i));
     expect(bloque).toContain("if (reintentado)");
     expect(bloque).toContain("return;");

@@ -13,10 +13,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { mockLogError } = vi.hoisted(() => ({ mockLogError: vi.fn() }));
+const { mockLogError, mockWriteAuditLog } = vi.hoisted(() => ({
+  mockLogError: vi.fn(),
+  mockWriteAuditLog: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock("@/lib/observability/logger", () => ({
   logger: { error: mockLogError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+
+vi.mock("@/lib/audit/log", () => ({
+  writeAuditLog: mockWriteAuditLog,
+  AuditEvent: { AGENT_DELIBERATION_FAILED: "agent.deliberation_failed" },
 }));
 
 const originalFetch = globalThis.fetch;
@@ -33,6 +41,8 @@ function respuesta429(body: unknown) {
 
 beforeEach(() => {
   mockLogError.mockClear();
+  mockWriteAuditLog.mockClear();
+  mockWriteAuditLog.mockResolvedValue(undefined);
   for (const k of [
     "GEMINI_TRANSPORT",
     "GEMINI_API_KEY",
@@ -100,5 +110,25 @@ describe("deliberate ante un 429 de Gemini", () => {
     expect(msg).toBe("deliberate.failed");
     expect(payload.status).toBe(429);
     expect(payload.code).toBe("RESOURCE_EXHAUSTED");
+  });
+
+  it("deja rastro en la auditoría", async () => {
+    const { deliberate } = await import("@/server/ai/deliberate");
+    const situacion = situation();
+
+    const plan = await deliberate(situacion);
+
+    expect(plan).toBeNull();
+    expect(mockWriteAuditLog).toHaveBeenCalledTimes(1);
+
+    const [entrada] = mockWriteAuditLog.mock.calls[0] as [Record<string, unknown>];
+    expect(entrada.tenant_id).toBe(situacion.tenantId);
+    expect(entrada.target_id).toBe(situacion.caseId);
+    expect(entrada.event_type).toBe("agent.deliberation_failed");
+    expect(entrada.payload).toEqual({
+      status: 429,
+      code: "RESOURCE_EXHAUSTED",
+      error_name: "GeminiExtractionError",
+    });
   });
 });

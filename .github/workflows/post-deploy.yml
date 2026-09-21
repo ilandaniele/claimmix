@@ -215,6 +215,8 @@ jobs:
           R2_LLAVE: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
           R2_SECRETO: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
           R2_BALDE: ${{ secrets.QA_R2_BUCKET }}
+          R2_BALDE_PROD: ${{ secrets.R2_BUCKET }}
+          R2_LLAVE_PROD: ${{ secrets.R2_ACCESS_KEY_ID }}
         run: |
           faltan=""
           [ -n "$BASE" ] || faltan="$faltan QA_DATABASE_URL"
@@ -248,8 +250,26 @@ jobs:
             echo "::error title=QA apunta a producción::Los secretos de QA son los de producción."
             exit 1
           fi
-          # El ensayo sube adjuntos de verdad. Los secretos de R2 que ya existen
-          # son los del balde de producción, y QA no escribe ahí.
+          # Lo mismo para el almacenamiento: con el balde o la llave de
+          # producción, el ensayo sube y borra adjuntos de un cliente. La
+          # cuenta sí es la misma a propósito, así que no se compara.
+          if { [ -n "$R2_BALDE_PROD" ] && [ "$R2_BALDE" = "$R2_BALDE_PROD" ]; } ||
+             { [ -n "$R2_LLAVE_PROD" ] && [ "$R2_LLAVE" = "$R2_LLAVE_PROD" ]; }; then
+            {
+              echo "### QA apunta al balde de PRODUCCIÓN"
+              echo ""
+              echo "QA_R2_BUCKET (o QA_R2_ACCESS_KEY_ID) es el de producción."
+              echo "Si esto corriera, el ensayo subiría y borraría adjuntos"
+              echo "en el balde de un cliente."
+              echo ""
+              echo "QA tiene el suyo: claimmix-qa-attachments, con su token."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=QA apunta al balde de producción::Los secretos de R2 de QA son los de producción."
+            exit 1
+          fi
+          # El ensayo sube adjuntos de verdad, y desde el 20/09 QA tiene balde
+          # propio para eso: claimmix-qa-attachments, con su propio token. Sin
+          # los cuatro QA_R2_* no hay dónde subirlos y el ensayo no corre.
           if [ -n "$INQUILINO" ] && [ -n "$AUTH" ] && [ -n "$R2_CUENTA" ] &&
              [ -n "$R2_LLAVE" ] && [ -n "$R2_SECRETO" ] && [ -n "$R2_BALDE" ]; then
             echo "ensayo=1" >> "$GITHUB_OUTPUT"
@@ -266,11 +286,15 @@ jobs:
   # demo), ni la carga (cuatrocientos casos contra los cientos de miles de
   # producción no comparan con el mismo presupuesto).
   #
-  # El smoke va liviano: `--deep` sube a R2 y llama al modelo, y el proyecto de
-  # QA no tiene R2. Por eso además tolera `almacenamiento`: sin esa lista el
-  # smoke de QA sale rojo SIEMPRE por lo mismo, y un rojo permanente se deja de
-  # leer. Tolerado no es probado — el script lo imprime con otra marca y su
-  # resumen lo nombra.
+  # El smoke va liviano: `--deep` sube un archivo a R2 y llama al modelo, y eso
+  # no es lo que este run viene a probar. Hasta el 20/09 además toleraba
+  # `almacenamiento`, porque el proyecto de QA no tenía R2 y el chequeo salía
+  # rojo SIEMPRE por lo mismo. Ahora QA tiene balde propio
+  # (`claimmix-qa-attachments`, misma cuenta de Cloudflare que producción pero
+  # con un token que no alcanza al balde de los clientes, ni el de producción
+  # al de QA), así que el chequeo liviano —que sólo mira que las cuatro
+  # variables llegaron al deploy— contesta ok sin tolerar nada. Liviano igual
+  # quiere decir que la subida no se ejerció.
   #
   # `whatsapp` y `gmail` no hace falta tolerarlos: sin configurar avisan, no
   # fallan.
@@ -293,7 +317,6 @@ jobs:
       url: https://claimmix-qa.vercel.app
       entorno: QA
       smoke_profundo: false
-      smoke_tolera: almacenamiento
       correr_ensayo: ${{ needs.qa_secretos.outputs.ensayo == '1' }}
       correr_timbre: false
       correr_pentest: false

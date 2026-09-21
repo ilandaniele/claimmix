@@ -605,9 +605,9 @@ producción hereda los secretos del repositorio; el de QA no puede —eso
 apuntaría a la base de producción los seis trabajos que corren en el runner, y
 tres de ellos escriben—, así que `deploy-checks.yml` declara sus secretos uno
 por uno y el caller de QA mapea cada uno con su nombre `QA_*`. QA corre el
-smoke liviano tolerando `almacenamiento`, más los dos chequeos que sólo le
-preguntan al catálogo; el ensayo espera a que exista un balde de R2 propio, y
-el timbre, el pen test y la carga no corren nunca ahí. Nada de eso arranca
+smoke liviano, más los dos chequeos que sólo le preguntan al catálogo; el
+ensayo corre desde que QA tiene balde de R2 propio (`claimmix-qa-attachments`,
+20/09), y el timbre, el pen test y la carga no corren nunca ahí. Nada de eso arranca
 hasta que existan los secretos `QA_*` del repositorio: paso 10 de
 [docs/PROMOCION.md](PROMOCION.md).
 

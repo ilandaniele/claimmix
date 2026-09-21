@@ -43,9 +43,9 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 
 ## Cómo probar que todo anda
 
-`pnpm check` corre todo: tipos, lint, ~1960 tests, doce conversaciones enteras
-por WhatsApp y por mail sobre los canales simulados, y un chequeo contra el
-deploy que está corriendo. **No le manda un mensaje a nadie.**
+`pnpm check` corre todo: tipos, lint, ~1960 tests, catorce conversaciones
+enteras por WhatsApp y por mail sobre los canales simulados, y un chequeo
+contra el deploy que está corriendo. **No le manda un mensaje a nadie.**
 
 `pnpm prove --whatsapp <número>` / `--email <dirección>` es el único que manda
 algo de verdad, para comprobar que la salida funciona.
@@ -141,7 +141,9 @@ Corrélo después de cada deploy. Detalle completo en
     missing, and also when QA's database string equals production's (compared
     without printing either). The last QA deploy (`28249b4`, run 35551526692)
     ran smoke, permisos, código y base, the rehearsal and «Qué se preguntó»,
-    all green; doorbell, pen test and load are off on QA by design.
+    all green; doorbell, pen test and this workflow's load check are off on
+    QA by design — `load-tests.yml`'s k6 does run against QA's public alias,
+    separately.
   - **✅ QA can be logged into.** On 2026-09-18 `POST /api/auth/sign-in/email`
     answered `403 INVALID_ORIGIN` because `NEXT_PUBLIC_SITE_URL` was empty, so
     `resolveBaseURL()` (`src/lib/auth/index.ts:14-18`) fell back to the hash
@@ -3110,6 +3112,16 @@ archivo — `replyFor` contaba vueltas en vez de mirar el reloj, y ni ella ni
   el mismo `runIntakeAgent` que usa el barrido. Ante un rojo, mirar primero
   `--log-failed` por `transport_timeout`; regla de la casa: hasta dos reruns, el
   umbral no se toca.
+
+- **Dos decisiones sobre el 429 que siguen sin tomarse** (salieron del
+  diagnóstico del ensayo contra el padrón, #229-#231). Un 429 en la
+  deliberación hoy es invisible: `src/server/ai/deliberate.ts:172-181` lo traga y devuelve `null`,
+  el caso sigue con estado normal y la respuesta sale con la plantilla
+  determinista — el mismo «verde por ausencia» de las últimas PR, pero acá
+  vive en el producto. Y un TIMEOUT deja el caso marcado para retomar
+  (`src/server/worker/extract.ts:1555-1556`) y un 429 no, aunque los dos son
+  transitorios. Cambiar cualquiera de las dos es una decisión de producto, no
+  una corrección.
 
 - ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
   356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`

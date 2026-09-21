@@ -67,7 +67,7 @@ chequeo.
 | Listas y parejas  | sí           | sí                  | sólo le pregunta al catálogo                                             |
 | Permisos del rol  | sí           | sí                  | sólo le pregunta al catálogo                                             |
 | Pen test          | sí           | no                  | la pared entre inquilinos necesita el inquilino de demo, que en QA no está |
-| Carga             | sí           | no                  | 400 casos contra cientos de miles no comparan con el mismo presupuesto   |
+| Carga (lectura)   | sí           | no                  | 400 casos contra cientos de miles no comparan con el mismo presupuesto; el k6 de `load-tests.yml` sí corre contra QA, aparte, contra su alias público |
 
 **Lo apagado no queda callado.** El job `alcance` corre al final, aun con todo
 rojo, y escribe en el resumen del run una fila por chequeo: corrió, corrió y
@@ -190,14 +190,18 @@ marcando Production, Preview y Development.
 
 ⛔ **Nunca las de producción.** QA existe para poder romper cosas.
 
-### 4bis. Las doce variables de `claimmix-qa`
+### 4bis. Las dieciocho variables de `claimmix-qa`
 
 Las 63 que Vercel creó al importar salen de `.env.example` y vienen VACÍAS. Estas
-doce hay que llenarlas, en los tres entornos del proyecto (Production, Preview,
-Development).
+dieciocho hay que llenarlas. La que cuenta es Production: `claimmix-qa` sólo
+construye la rama `qa`, y ése es su entorno de producción. Hoy casi todas están
+también en Preview, y las dos `DATABASE_URL*` también en Development; no hace
+falta, pero no molesta. `NEXT_PUBLIC_SITE_URL` está sólo en Production.
 
-Dos se **crean**, porque hasta #212 no estaban en `.env.example` y por eso Vercel
-no las detectó. Las otras diez ya existen vacías: se **editan**.
+Tres se **crean**: `GEMINI_TRANSPORT` y `VERTEX_EXTRACTION_MODEL` porque hasta
+#212 no estaban en `.env.example` y Vercel no las detectó; `ADMIN_EMAILS` porque
+nunca estuvo ahí, sólo nombrada en un comentario. Las otras quince ya existen
+vacías: se **editan**.
 
 | variable | valor | tipo | crear o editar |
 |---|---|---|---|
@@ -208,20 +212,33 @@ no las detectó. Las otras diez ya existen vacías: se **editan**.
 | `AI_TENANT_DAILY_TOKEN_CAP` | `20000000` | Config | editar |
 | `DATABASE_URL` | la rama `qa` de Neon | Secret | editar |
 | `DATABASE_URL_APP` | la rama `qa` de Neon | Secret | editar |
-| `GMAIL_TENANT_ID` | `10000000-0000-0000-0000-000000000001` | Config | editar |
-| `GOOGLE_DEFAULT_TENANT_ID` | el mismo UUID | Config | editar |
+| `GOOGLE_DEFAULT_TENANT_ID` | `10000000-0000-0000-0000-000000000001` | Config | editar |
 | `BETTER_AUTH_SECRET` | uno NUEVO: `openssl rand -base64 32` | Secret | editar |
 | `CRON_SECRET` | uno NUEVO: `openssl rand -hex 32` | Secret | editar |
 | `NEXT_PUBLIC_SITE_URL` | `https://claimmix-qa.vercel.app` | Config | editar |
+| `R2_ACCOUNT_ID` | la cuenta de Cloudflare donde vive `claimmix-qa-attachments` | Config | editar |
+| `R2_ACCESS_KEY_ID` | token propio de QA | Secret | editar |
+| `R2_SECRET_ACCESS_KEY` | token propio de QA | Secret | editar |
+| `R2_BUCKET` | `claimmix-qa-attachments` | Config | editar |
+| `GOOGLE_CLIENT_ID` | de Google Cloud (OAuth) | Config | editar |
+| `GOOGLE_CLIENT_SECRET` | de Google Cloud (OAuth) | Secret | editar |
+| `ADMIN_EMAILS` | direcciones admin, mismo formato que `SIGNUP_ALLOWED_EMAILS` | Config | **crear** |
 
 Ese UUID es el inquilino «Seguros del Sur S.A.», y la rama `qa` ya lo tiene: se
 sacó de la rama de ensayo, así que se llevó los tres inquilinos con ella.
 
 `GOOGLE_DEFAULT_TENANT_ID` no figura en `.env.local` porque producción no la
-define: el código cae a `GMAIL_TENANT_ID`. En QA hay que ponerle igual el mismo
-UUID. Una variable declarada y vacía no es una variable ausente — `??` la da por
-buena, devuelve la cadena vacía, y el alta de cualquier usuario nuevo muere con
-«GOOGLE_DEFAULT_TENANT_ID … is required to provision new users».
+define: ahí el código cae a `GMAIL_TENANT_ID`
+(`src/lib/auth/provision.ts:106-108`). En QA no hay tal red —`GMAIL_TENANT_ID`
+queda vacía, sin casilla—, así que `GOOGLE_DEFAULT_TENANT_ID` es la única
+variable que lleva el UUID. Una variable declarada y vacía no es una variable
+ausente — `??` la da por buena, devuelve la cadena vacía, y el alta de
+cualquier usuario nuevo muere con «GOOGLE_DEFAULT_TENANT_ID … is required to
+provision new users».
+
+Los cuatro `R2_*` sostienen el smoke de almacenamiento; `GOOGLE_CLIENT_ID` y
+`GOOGLE_CLIENT_SECRET`, el login con Google; `ADMIN_EMAILS`, que esa primera
+entrada por Google quede de admin (`src/lib/auth/provision.ts:36-39`).
 
 **`NEXT_PUBLIC_SITE_URL` no es cosmética: sin ella no se entra a QA.** Better
 Auth sólo acepta pedidos cuyo origen sea su propia `baseURL`, y esa URL sale de
@@ -253,9 +270,9 @@ portapapeles, listo para pegar en Vercel sin que pase por pantalla.
 por dónde sale la extracción y con qué modelo, y su ausencia no rompe el build ni
 el arranque: el síntoma llega recién con el primer mensaje que nadie contesta.
 
-⛔ **Gmail y WhatsApp se dejan vacías.** Así QA lee, extrae, clasifica y decide,
-pero no le escribe a nadie. Un QA que puede mandar mensajes es un QA que puede
-mandárselos a un asegurado real el día que alguien se equivoque de base.
+⛔ **`GMAIL_TENANT_ID`, `GMAIL_USER_EMAIL` y `WHATSAPP_ACCESS_TOKEN` se dejan
+vacías.** Así QA lee, extrae, clasifica y decide, pero no le escribe a nadie.
+Un QA que puede mandar mensajes es un QA que puede mandárselos a un asegurado real el día que alguien se equivoque de base.
 Habilitarlo pide una casilla y un número de prueba propios — cuentas nuevas, no
 configuración.
 
@@ -341,10 +358,10 @@ aplicación— y el secreto de automatización que hay en el repositorio es el d
 OTRO proyecto, así que ahí k6 mediría la puerta. El alias de producción de QA es
 público, y además es la URL contra la que prueba una persona.
 
-⛔ **Va a salir rojo hasta que `NEXT_PUBLIC_SITE_URL` esté cargada en
-`claimmix-qa`** (paso 4bis): el login de `setup()` se come un `403
-INVALID_ORIGIN` y la corrida muere antes de medir nada. El mensaje de error lo
-dice con esas palabras (`tests/load/helpers/auth.js:99-106`).
+✅ **Cargada.** `NEXT_PUBLIC_SITE_URL` está en `claimmix-qa` desde el paso 4bis:
+el login de `setup()` ya no choca con el `403 INVALID_ORIGIN`
+(`tests/load/helpers/auth.js:99-106`) y k6 contra QA corrió verde (run
+35551526536).
 
 #### Cuando el destino no tiene base
 
@@ -400,7 +417,8 @@ empeorarlo sin motivo.
 ### 7. El entorno `QA` en GitHub — HECHO
 
 Creado, con las ramas de despliegue restringidas a `qa`. `Preview` y `Production`
-no se tocaron: esos los creó Vercel.
+no se tocaron: esos los creó Vercel. Ningún workflow declara `environment:`,
+así que hoy no cuida nada.
 
 ### 8. La regla de rama para `qa` — HECHA
 
@@ -446,8 +464,10 @@ donde apunte. La comparación es la última red, no el permiso para probar.
 
 Los otros seis —`QA_GMAIL_TENANT_ID`, `QA_BETTER_AUTH_SECRET` y los cuatro
 `QA_R2_*`— son opcionales y encienden el ensayo de conversaciones. El inquilino
-y el secreto de Better Auth ya existen en `claimmix-qa`; los de R2 son los del
-balde propio de QA, `claimmix-qa-attachments`. Pasarle los de producción haría
+ya existe: como fila en la rama `qa` de Neon y como `GOOGLE_DEFAULT_TENANT_ID`
+en `claimmix-qa` —no como `GMAIL_TENANT_ID`, que ahí queda vacía—; el secreto
+de Better Auth también existe en `claimmix-qa`. Los de R2 son los del balde
+propio de QA, `claimmix-qa-attachments`. Pasarle los de producción haría
 que el ensayo de QA suba y borre adjuntos en el balde de los clientes: sin los
 cuatro el ensayo queda apagado, y el job `alcance` lo nombra como no verificado
 en cada corrida.

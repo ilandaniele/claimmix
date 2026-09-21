@@ -606,9 +606,11 @@ tres de ellos escriben—, así que `deploy-checks.yml` declara sus secretos uno
 por uno y el caller de QA mapea cada uno con su nombre `QA_*`. QA corre el
 smoke liviano, más los dos chequeos que sólo le preguntan al catálogo; el
 ensayo corre desde que QA tiene balde de R2 propio (`claimmix-qa-attachments`,
-20/09), y el timbre, el pen test y la carga no corren nunca ahí. Nada de eso arranca
-hasta que existan los secretos `QA_*` del repositorio: paso 10 de
-[docs/PROMOCION.md](PROMOCION.md).
+20/09), y el timbre, el pen test y la «Carga (lectura)» de este workflow no
+corren nunca ahí —el k6 de `load-tests.yml` sí, aparte, contra el alias
+público de QA. Los secretos `QA_*` del repositorio existen desde el 20/09
+(paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el post-deploy de esa noche,
+run 35551526692, corrió todo en verde, ensayo incluido.
 
 También se puede disparar a mano desde la pestaña *Actions* → *Post-deploy* →
 *Run workflow*, con una URL distinta si querés apuntar a un preview.

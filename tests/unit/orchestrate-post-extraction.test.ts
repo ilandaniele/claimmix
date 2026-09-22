@@ -161,6 +161,12 @@ function setupDbMocks({
    * `inicialesDelTitularAjeno` en el camino de escalado.
    */
   titularRows = [] as Array<{ nombre: string | null; dni: string | null }>,
+  /**
+   * Lo que devuelve el UPDATE de `claim_field_confirmations`: las filas que
+   * estaban pendientes y este mensaje cerró. No vacío significa que la persona
+   * contestó lo que le habíamos preguntado.
+   */
+  confirmacionesCerradas = [] as Array<{ campo: string }>,
 } = {}) {
   const mockDbTyped = db as unknown as MockDb;
 
@@ -256,9 +262,19 @@ function setupDbMocks({
   }));
 
   // db.update(table).set({...}).where(...) — track all updates.
+  // `.where(...)` tiene que ser esperable Y encadenable: `resolveAnsweredConfirmations`
+  // le pide `.returning()` para saber qué filas cerró de verdad, y el resto de
+  // las escrituras lo esperan a secas.
   mockDbTyped.update.mockImplementation(() => ({
     set: (data: unknown) => ({
-      where: () => updateSpy(data),
+      where: () => {
+        const escrito = updateSpy(data);
+        return {
+          returning: () => Promise.resolve(confirmacionesCerradas),
+          then: (r: (v: unknown) => void, j?: (e: unknown) => void) =>
+            Promise.resolve(escrito).then(r, j),
+        };
+      },
     }),
   }));
 
@@ -2262,6 +2278,56 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
     );
 
     expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  /**
+   * El caso que dejó mudo al ensayo, en producción, dos corridas seguidas.
+   *
+   * Le pedimos dos cosas. La persona contestó una —«no completamos ningún
+   * parte amistoso»—, el resolutor la cerró, y el agente, que en su resumen
+   * todavía veía los dos pedidos abiertos, dijo que esperaba. Un «espero» del
+   * agente apagaba la respuesta y también la red de contención: el caso quedaba
+   * en silencio con la otra mitad del pedido sin pedir, y a las dos semanas se
+   * moría por abandono. Contestar lo que pedimos ahora gana sobre ese juicio.
+   */
+  it("pero contesta cuando la persona respondió lo que le preguntamos", async () => {
+    setupDbMocks({
+      lastAskRows: [
+        {
+          asked_keys: ["parte_amistoso", "licencia_conducir"],
+          created_at: "2026-08-20T18:00:00Z",
+        },
+      ],
+      newAttachmentRows: [],
+      confirmacionesCerradas: [{ campo: "licencia_conducir" }],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "wait",
+      askFor: [],
+      question: null,
+      reasoning: "creo que el pedido no cambió",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect(ask).toBeDefined();
   });
 });
 

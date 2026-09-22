@@ -484,21 +484,21 @@ export async function resolveDeclinedDocs(
    * makes that a fact rather than a hope about the model's judgement.
    */
   alreadyAsked: string[]
-): Promise<void> {
+): Promise<string[]> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const said = (latestMessageText ?? "").trim();
-  if (said.length === 0) return;
-  if (alreadyAsked.length === 0) return;
+  if (said.length === 0) return [];
+  if (alreadyAsked.length === 0) return [];
 
   try {
     const asked = new Set(alreadyAsked);
     const pending = (await pendingDocKeys(caseId, tenantId)).filter((k) => asked.has(k));
-    if (pending.length === 0) return;
-    if (!MIGHT_BE_DECLINING.test(said)) return;
+    if (pending.length === 0) return [];
+    if (!MIGHT_BE_DECLINING.test(said)) return [];
 
     const declined = await identifyDeclined(tenantId, said, pending);
-    if (declined.length === 0) return;
+    if (declined.length === 0) return [];
 
     await enTenant(tenantCtx, (db) =>
       db
@@ -527,8 +527,11 @@ export async function resolveDeclinedDocs(
         case_id: caseId,
         declined,
       }, "documents.declined");
+
+    return declined;
   } catch (err) {
     logger.error({ code: errCode(err), case_id: caseId }, "documents.decline_check_failed");
+    return [];
   }
 }
 

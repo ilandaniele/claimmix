@@ -3175,6 +3175,37 @@ rojo así dos veces el 21/09, siempre con `deliberate.failed` en el log. Hay un
 test que dice que un faltante nuevo en la lista merece mensaje, así que es una
 decisión, no un arreglo de una línea.
 
+### 🤐 El caso que contestó y quedó mudo (2026-09-22)
+
+El post-deploy de QA dio rojo en `choque-completo` turno 4, en las dos
+corridas: «esperaba 1 respuesta(s), hubo 0». Le habíamos pedido dos cosas —el
+parte amistoso y la licencia—, la persona contestó una («no completamos ningún
+parte amistoso, el otro conductor no quiso»), `resolveDeclinedDocs` la cerró en
+la base, y el agente —que en su resumen seguía viendo los dos pedidos
+abiertos— deliberó `intent: "wait"`. Ese «espero» solo apagaba la respuesta y
+también la red de contención: la rama de acuse queda suprimida cuando el pedido
+está en espera, así que no salía nada. La mitad del pedido que faltaba no se
+volvía a pedir nunca y el caso se moría por abandono a los 14 días.
+
+El fondo era que ningún dato de código registraba «la persona contestó lo que
+le pedimos». Los dos resolutores escribían en la base y devolvían `void`: la
+negativa cerraba el pedido y al mismo tiempo desaparecía como motivo para
+hablar. Ahora los dos devuelven lo que cerraron, y eso entra a la decisión como
+una octava señal, `nosContestoElPedido`, con el mismo argumento que ya estaba
+escrito para el archivo que llega: fueron, lo miraron y contestaron.
+
+No es regresión de la redacción: el diff anterior sólo tocó `compose-reply.ts`,
+que corre después de la decisión y no puede cambiar `plan.intent`. Era un pozo
+viejo que el modelo destapaba a veces; la corrida verde anterior y las dos rojas
+son tiradas del mismo dado.
+
+Dos cosas que el diagnóstico costó y conviene no repetir: el
+`fsm_transition_skipped {to: "listo"}` del log es ruido estructural
+—`estadoTrasExtraer` usa la palabra del vocabulario simulado para decir «no
+falta nada» y la FSM la frena siempre—, y el `missing_fields_count` del worker
+no conoce `missing_docs` ni `claim_field_confirmations`, así que un 0 ahí no
+significa que no quede nada por pedir.
+
 ### 🙋 Waiting on you (not code)
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,

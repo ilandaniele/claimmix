@@ -288,7 +288,7 @@ export async function orchestratePostExtraction(
 
   // A field the claimant has now answered is no longer pending. Runs BEFORE
   // the gap analysis, which reads those rows straight back out.
-  await resolveAnsweredConfirmations(
+  const confirmacionesContestadas = await resolveAnsweredConfirmations(
     caseId,
     tenantId,
     extractedClaim.fields,
@@ -323,7 +323,18 @@ export async function orchestratePostExtraction(
   // and until now "no completamos ninguno" was heard as silence: the request
   // stayed open, every round asked again, and the case died of abandonment two
   // weeks later.
-  await resolveDeclinedDocs(caseId, tenantId, latestMessageText, lastAsked);
+  const documentosDeclinados = await resolveDeclinedDocs(
+    caseId,
+    tenantId,
+    latestMessageText,
+    lastAsked
+  );
+
+  // Lo que la persona acaba de cerrar con este mensaje. Los dos resolutores de
+  // arriba escriben en la base y hasta ahora no le contaban a nadie: el pedido
+  // quedaba cerrado y, al mismo tiempo, invisible como motivo para contestar.
+  const nosContestoElPedido =
+    documentosDeclinados.length > 0 || confirmacionesContestadas.length > 0;
 
   const gapResult = await analyzeEmailClaimGaps(caseId, extractedClaim.fields, tenantId);
 
@@ -720,6 +731,7 @@ export async function orchestratePostExtraction(
     elAgenteEspera: agentIsWaiting,
     nosPreguntoAlgo: owesAnAnswer,
     llegoUnArchivo: somethingArrived,
+    nosContestoElPedido,
     datosQueFaltan: askItems.fields.length,
     esGrave: derivaSola,
   } as const;
@@ -903,7 +915,7 @@ async function resolveAnsweredConfirmations(
   tenantId: string,
   fields: ExtractedClaim["fields"],
   latestMessageText?: string
-): Promise<void> {
+): Promise<string[]> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const settled = new Set(
@@ -926,10 +938,14 @@ async function resolveAnsweredConfirmations(
     }
   }
 
-  if (settled.size === 0) return;
+  if (settled.size === 0) return [];
 
   try {
-    await enTenant(tenantCtx, (db) =>
+    // `returning` y no `[...settled]`: lo que devuelve esta funcion es la senal
+    // de que la persona contesto lo que le pedimos, y para eso sirven las filas
+    // que realmente estaban pendientes, no todos los campos que vinieron con
+    // confianza alta —que en cada vuelta son casi todos.
+    const cerradas = await enTenant(tenantCtx, (db) =>
       db
         .update(claimFieldConfirmations)
         .set({ status: "confirmed" })
@@ -940,9 +956,13 @@ async function resolveAnsweredConfirmations(
             inArray(claimFieldConfirmations.field_name, [...settled])
           )
         )
+        .returning({ campo: claimFieldConfirmations.field_name })
     );
+
+    return cerradas.map((fila) => fila.campo);
   } catch (err) {
     logger.error({ code: errCode(err) }, "orchestrate.failed_to_resolve_confirmations");
+    return [];
   }
 }
 

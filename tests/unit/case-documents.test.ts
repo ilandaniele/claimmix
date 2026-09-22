@@ -393,9 +393,11 @@ describe("resolveDeclinedDocs", () => {
       throw new Error("database on fire");
     });
 
+    // Y no cierra nada: la lista vacía es la que apaga la señal de «nos
+    // contestó el pedido», así que una base caída no puede prenderla.
     await expect(
       resolveDeclinedDocs(CASE, TENANT, "no tenemos parte", ASKED)
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual([]);
   });
 });
 

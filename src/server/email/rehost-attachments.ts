@@ -9,6 +9,12 @@
  * webhook — the case + claim_messages rows are already committed by the time
  * rehostAttachments() is called.
  *
+ * Ya no es solo el correo: WhatsApp es el segundo cliente y trajo una entrada
+ * que el correo no tiene, la del adjunto sin bytes. Cuando la descarga se corta
+ * por tamano no hay nada que subir ni que validar, pero el archivo existio y el
+ * asegurado cree que lo mando; llega con `rechazoPrevio` ya puesto y se anota
+ * con ese motivo, sin decodificar, sin subir y sin pasar por la lista blanca.
+ *
  * AC7:  Valid attachment → storage upload + content_hash persisted.
  * AC8:  Disallowed content-type → stored: false, reason='content_type_not_allowed'.
  * AC9:  Oversize → stored: false, reason='size_exceeded'.
@@ -141,20 +147,28 @@ export async function rehostAttachments(
   let runningBytes = 0;
 
   for (const attachment of attachments) {
+    /*
+     * El que ya viene rechazado no se decodifica ni se sube: se anota y listo.
+     * Va ANTES de decodificar porque su `Content` esta vacio a proposito.
+     *
+     * Y va ANTES del corte por presupuesto porque no gasta presupuesto: no
+     * abre una conexion, no decodifica nada, no sube nada. Puesto despues, un
+     * mensaje con dos fotos pesadas y una grande alcanzaba para que el tercero
+     * cayera en el `remaining <= 0` y quedara anotado como "rehost_timeout":
+     * el motivo verdadero —no entraba— se cambiaba por «se acabo el tiempo», y
+     * encima rehost_timeout es el unico motivo que NO escribe evento
+     * ATTACHMENT_REJECTED, asi que el rechazo tampoco quedaba en la auditoria.
+     */
+    if (attachment.rechazoPrevio) {
+      results.push({ stored: false, reason: attachment.rechazoPrevio });
+      continue;
+    }
+
     const remaining = deadline - Date.now();
 
     // AC11: budget exhausted — mark remaining attachments without attempting upload.
     if (remaining <= 0) {
       results.push({ stored: false, reason: "rehost_timeout" });
-      continue;
-    }
-
-    /*
-     * El que ya viene rechazado no se decodifica ni se sube: se anota y listo.
-     * Va ANTES de decodificar porque su `Content` esta vacio a proposito.
-     */
-    if (attachment.rechazoPrevio) {
-      results.push({ stored: false, reason: attachment.rechazoPrevio });
       continue;
     }
 

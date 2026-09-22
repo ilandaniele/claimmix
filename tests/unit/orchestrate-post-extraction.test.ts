@@ -127,6 +127,22 @@ function getTableName(table: unknown): string {
 }
 
 /**
+ * Los nombres de columna que filtran una condición de drizzle.
+ *
+ * Un `and(...)` es un `sql` con `queryChunks` adentro, y cada comparación deja
+ * la columna como un trozo más. Las columnas son las hojas: traen `name` y no
+ * traen `queryChunks`. Serializar la condición entera no se puede —un `sql` con
+ * columnas adentro es circular—, pero recorrerla sí, y eso deja afirmar sobre
+ * LA consulta en vez de sobre el texto del archivo.
+ */
+function columnasDe(cond: unknown, acc: string[] = []): string[] {
+  const nodo = cond as { name?: string; queryChunks?: unknown[] } | null | undefined;
+  if (nodo?.name && !nodo.queryChunks) acc.push(nodo.name);
+  for (const trozo of nodo?.queryChunks ?? []) columnasDe(trozo, acc);
+  return acc;
+}
+
+/**
  * Configure the db mock chains for a single test.
  *
  * orchestrate.ts uses three chain patterns:
@@ -196,6 +212,7 @@ function setupDbMocks({
   const insertSpy = vi.fn().mockReturnValue(resultadoDeInsert);
   const updateSpy = vi.fn().mockResolvedValue([]);
   const titularWhereSpy = vi.fn();
+  const adjuntosWhereSpy = vi.fn();
 
   // db.select() returns a chainable builder; from() decides the result.
   mockDbTyped.select.mockImplementation(() => ({
@@ -215,7 +232,15 @@ function setupDbMocks({
       }
 
       if (tableName === "claim_attachments") {
-        return { where: () => ({ limit: () => Promise.resolve(newAttachmentRows) }) };
+        // Del `where` se guarda la condición, igual que en `policies` más
+        // abajo: lo que importa de esta consulta es con qué se filtra la señal
+        // de «llegó un archivo».
+        return {
+          where: (cond: unknown) => {
+            adjuntosWhereSpy(cond);
+            return { limit: () => Promise.resolve(newAttachmentRows) };
+          },
+        };
       }
 
       if (tableName === "extracted_fields") {
@@ -278,7 +303,7 @@ function setupDbMocks({
     }),
   }));
 
-  return { insertSpy, updateSpy, titularWhereSpy };
+  return { insertSpy, updateSpy, titularWhereSpy, adjuntosWhereSpy };
 }
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -2300,6 +2325,55 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
     );
 
     expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Un archivo que no entró no cuenta como que llegó un archivo.
+   *
+   * Un adjunto de WhatsApp que pasa los 10 MB ya no se pierde: deja fila en
+   * `claim_attachments`, sin bytes y con `rejected_reason` en "size_exceeded".
+   * Esa fila encendía la señal, el pedido salía de espera y a la persona le
+   * volvía la lista entera como si la foto hubiera entrado, sin una palabra
+   * sobre el tamaño. Antes del arreglo del adjunto grande no había fila y salía
+   * silencio; repetir el pedido es peor.
+   */
+  it("y una fila rechazada por tamaño no cuenta como archivo que llegó", async () => {
+    /*
+     * La fila rechazada no se puede devolver desde el andamio —el mock no
+     * compila el `where`, así que filtrar no filtra—, pero la condición sí se
+     * puede leer: es la consulta de verdad, armada por el código de verdad, y
+     * lo que se afirma es que la base nunca va a devolver esas filas.
+     */
+    const { adjuntosWhereSpy } = setupDbMocks({
+      lastAskRows: [
+        { asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" },
+      ],
+      newAttachmentRows: [{ id: "att-1" }],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(adjuntosWhereSpy).toHaveBeenCalled();
+    const columnas = columnasDe(adjuntosWhereSpy.mock.calls[0][0]);
+    // Por el caso y por la fecha, que es lo que la señal siempre miró.
+    expect(columnas).toContain("case_id");
+    expect(columnas).toContain("created_at");
+    // Y por esto, que es lo nuevo: sin el filtro, una fila sin bytes enciende
+    // «llegó un archivo», el pedido sale de espera y a la persona le vuelve la
+    // lista entera como si la foto hubiera entrado, sin una palabra sobre el
+    // tamaño porque ninguna plantilla lo menciona.
+    expect(columnas).toContain("rejected_reason");
   });
 
   /**

@@ -303,10 +303,15 @@ async function storeWhatsAppMedia(
        * foto de los daños, creía que la había mandado, y en la pantalla del
        * analista el pedido de documento seguía abierto sin explicación.
        *
-       * Acá se anota como rechazado: sin bytes —no los tenemos, y justamente
-       * por eso se rechazó— pero con su nombre, su tipo y su motivo, que es lo
-       * que el analista necesita para pedirle al asegurado que lo mande más
-       * chico.
+       * Acá se anota como rechazado: con su nombre, su tipo y su motivo, que
+       * es lo que el analista necesita para pedirle al asegurado que lo mande
+       * más chico.
+       *
+       * El tamaño que se guarda puede no ser una medición. Cuando la descarga
+       * se cortó a mitad de camino nadie contó los bytes, así que va
+       * `MAX_ATTACHMENT_SIZE_BYTES + 1`: un centinela que quiere decir «pasaba
+       * el tope» y nada más. Por eso la pantalla no lo muestra como un peso —
+       * enseñarlo como «10,0 MB» sería inventarle una precisión que no tiene.
        */
       if ("demasiadoGrande" in file) {
         downloaded.push({

@@ -95,11 +95,38 @@ function actualizacionesDePedidos(): Record<string, unknown>[] {
   );
 }
 
+// Drizzle guarda el nombre de la tabla en Symbol.for("drizzle:Name").
+const DRIZZLE_NAME = Symbol.for("drizzle:Name");
+
+/** La condición de cada select, con la tabla sobre la que se hizo. */
+let condiciones: Array<{ tabla: string; cond: unknown }>;
+
+/** La condición del primer select hecho sobre esta tabla. */
+function condicionSobre(tabla: string): unknown {
+  return condiciones.find((c) => c.tabla === tabla)?.cond;
+}
+
+/**
+ * Los nombres de columna que filtran una condición de drizzle.
+ *
+ * Un `and(...)` es un `sql` con `queryChunks` adentro, y cada comparación deja
+ * la columna como un trozo más. Las columnas son las hojas: traen `name` y no
+ * traen `queryChunks`. Serializar la condición entera no se puede —un `sql` con
+ * columnas adentro es circular—, pero recorrerla sí, y eso deja afirmar sobre
+ * LA consulta en vez de sobre el texto del archivo.
+ */
+function columnasDe(cond: unknown, acc: string[] = []): string[] {
+  const nodo = cond as { name?: string; queryChunks?: unknown[] } | null | undefined;
+  if (nodo?.name && !nodo.queryChunks) acc.push(nodo.name);
+  for (const trozo of nodo?.queryChunks ?? []) columnasDe(trozo, acc);
+  return acc;
+}
+
 /** Queue results for the selects, in the order the module issues them. */
 function queueSelects(...results: unknown[][]) {
   const queue = [...results];
   (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-    from: () => ({
+    from: (tabla: unknown) => ({
       /*
        * `where()` devuelve algo que se puede esperar Y que ademas tiene
        * `.limit()`. Las dos formas conviven en este archivo: la mayoria de las
@@ -107,7 +134,14 @@ function queueSelects(...results: unknown[][]) {
        * `.limit(MAX_ADJUNTOS_POR_CORRIDA)` para no gastar una llamada de vision
        * por archivo en el camino de respuesta al asegurado.
        */
-      where: () => {
+      where: (cond: unknown) => {
+        // La condición se guarda además de devolver las filas: el mock no la
+        // compila —filtrar no filtra—, pero es la consulta que arma el código
+        // de verdad y se puede leer con qué columnas filtra.
+        condiciones.push({
+          tabla: (tabla as Record<symbol, string>)?.[DRIZZLE_NAME] ?? "",
+          cond,
+        });
         const filas = queue.shift() ?? [];
         const esperable = Promise.resolve(filas) as Promise<unknown[]> & {
           limit?: () => Promise<unknown[]>;
@@ -123,6 +157,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   inserted = [];
   actualizaciones = [];
+  condiciones = [];
 
   (db.insert as ReturnType<typeof vi.fn>).mockReturnValue({
     values: (v: unknown) => {
@@ -541,6 +576,42 @@ describe("reconcileAttachments — el adjunto recuerda qué cerró", () => {
       fs.readFileSync("src/server/cases/documents.ts", "utf8")
     );
     expect(fuente).toContain("isNull(claimAttachments.matched_doc_key)");
+  });
+
+  it("y deja afuera a los que nunca entraron al bucket", async () => {
+    /*
+     * El adjunto rechazado no se puede devolver desde el andamio —el mock no
+     * compila el `where`, así que filtrar no filtra—, pero la condición sí se
+     * puede leer: es la consulta de verdad y lo que se afirma es que la base
+     * nunca va a devolver esas filas.
+     */
+    queueSelects(
+      [{ doc_key: "parte_amistoso" }],
+      [
+        {
+          id: "att-1",
+          filename: "parte-policial.pdf",
+          contentType: "application/pdf",
+          storagePath: null,
+        },
+      ]
+    );
+    (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({ doc_key: null }),
+      usage: {},
+    });
+
+    await reconcileAttachments(CASE, TENANT, null);
+
+    const columnas = columnasDe(condicionSobre("claim_attachments"));
+    /*
+     * Un adjunto de WhatsApp que pasa los 10 MB deja fila igual, sin bytes y
+     * con `rejected_reason`. Sin este filtro esa fila vuelve a ser candidata y
+     * se identifica con el NOMBRE del archivo como única prueba —lo pone quien
+     * manda—, cerrando el pedido con `satisfied_at` por algo que no está
+     * guardado.
+     */
+    expect(columnas).toContain("rejected_reason");
   });
 
   it("y las filas viejas, sin marca, se siguen ofreciendo", async () => {

@@ -373,6 +373,25 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.agentAnalysis": "Agent analysis",
   "case.detail.auditReason": "Reason",
 
+  // ── Why an attachment was not stored ───────────────────────────────────────
+  // These lead with the CAUSE because they are read in two places: the amber
+  // row in the panel, which already says the file did not make it, and the
+  // audit timeline behind "Reason:", where an outcome read "Reason: Not
+  // stored: the file is over…".
+  //
+  // The "10 MB" is a hand copy of `MAX_ATTACHMENT_SIZE_BYTES`
+  // (`src/server/email/attachment-validator.ts`): `t()` takes a key and does
+  // not interpolate, so copying is the only option. Whoever moves the cap has
+  // to come edit these two strings — here and in `es-AR.ts` — or they start
+  // lying.
+  "attachment.rejected.size_exceeded": "The file is over 10 MB. Ask the policyholder for a smaller one.",
+  "attachment.rejected.content_type_not_allowed": "That file type is not accepted. Ask for a photo or a PDF.",
+  "attachment.rejected.storage_upload_failed": "Could not be stored. Ask the policyholder to send it again.",
+  "attachment.rejected.rehost_timeout": "Took too long and could not be stored. Ask the policyholder to send it again.",
+  "attachment.rejected.aggregate_size_exceeded": "The files in that message were over the limit together. Ask for them one at a time.",
+  "attachment.rejected.decode_failed": "It arrived damaged and could not be read. Ask the policyholder to send it again.",
+  "attachment.rejected.unknown": "Could not be stored. Ask the policyholder to send it again.",
+
   // ── Gmail status panel ─────────────────────────────────────────────────────
   "gmail.accounts.title": "Gmail intake accounts",
   "gmail.accounts.helper": "Connect one or more Gmail inboxes to create claims automatically from each mailbox.",

@@ -322,7 +322,28 @@ async function unmatchedAttachments(
            * cuando faltaban dos puede clasificar despues, cuando la lista
            * cambio. Tres miradas dan lugar a eso sin dejar el gasto abierto.
            */
-          lt(claimAttachments.intentos_de_identificacion, MAX_MIRADAS_POR_ADJUNTO)
+          lt(claimAttachments.intentos_de_identificacion, MAX_MIRADAS_POR_ADJUNTO),
+          /*
+           * Y sólo los que de verdad entraron.
+           *
+           * Una fila rechazada —`storage_path` en NULL y `rejected_reason`
+           * puesto— salía como candidata. No es algo que trajo WhatsApp: el
+           * correo las viene escribiendo desde antes —189 con
+           * "storage_upload_failed" en producción—, y el adjunto grande de
+           * WhatsApp sumó "size_exceeded" y puso el agujero a la vista. Sin
+           * bytes, `inlineFor` devuelve undefined e `identifyDocument` juega la
+           * identificación con el NOMBRE del archivo como única prueba, y en
+           * WhatsApp el nombre lo pone quien manda: un "parte-policial.pdf" de
+           * 40 MB contra una lista pendiente que incluye esa clave cerraba el
+           * pedido con `satisfied_at` por un archivo que no está en el bucket.
+           * El asegurado no lo vuelve a recibir y el analista lo da por
+           * recibido.
+           *
+           * `rejected_reason IS NULL` es la condición de «esto entró», una
+           * sola, y vale para los otros rechazos también —tipo no permitido,
+           * subida fallida—, no sólo para el tamaño.
+           */
+          isNull(claimAttachments.rejected_reason)
         )
       )
       // Tope por corrida, aparte del tope por archivo: una tanda con quince

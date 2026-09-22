@@ -62,6 +62,27 @@ vi.mock("@/server/storage/claim-attachments-bucket", () => ({
   computeContentHash: (...args: any[]) => mockComputeContentHash(...args),
 }));
 
+// ── Espiar el validador sin cambiarle el veredicto ────────────────────────────
+//
+// El resto del archivo depende de que la lista blanca conteste de verdad, así
+// que el espía delega en la implementación real. Lo único que hace falta ver
+// desde afuera es si se la llegó a llamar: el adjunto que ya viene rechazado no
+// tiene bytes que validar.
+//
+// Va por `vi.hoisted` y no por un `const` suelto porque la fábrica le pone la
+// implementación APENAS corre, y para entonces un `const` del cuerpo del
+// archivo todavía no existe.
+const { mockValidateAttachment } = vi.hoisted(() => ({ mockValidateAttachment: vi.fn() }));
+
+vi.mock("@/server/email/attachment-validator", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/server/email/attachment-validator")>();
+  mockValidateAttachment.mockImplementation(real.validateAttachment);
+  return {
+    ...real,
+    validateAttachment: (...args: any[]) => mockValidateAttachment(...args),
+  };
+});
+
 // ── Import SUT after mocks are registered ─────────────────────────────────────
 
 import { rehostAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
@@ -367,6 +388,34 @@ describe("rehostAttachments", () => {
 
     // Upload should have been called only for the first two attachments
     expect(mockUploadAttachment).toHaveBeenCalledTimes(2);
+  });
+
+  // ── El adjunto que ya viene rechazado ─────────────────────────────────────────
+
+  it("el que llega ya rechazado se anota sin decodificar, sin validar y sin subir", async () => {
+    /*
+     * WhatsApp corta la descarga cuando el archivo pasa el tope, así que el
+     * adjunto llega con el nombre y el tipo pero sin bytes. No hay nada que
+     * validar ni que subir: lo único que importa es que el motivo verdadero
+     * llegue entero a la fila, porque es lo que distingue «no lo mandaron» de
+     * «lo mandaron y no entró».
+     */
+    const results = await rehostAttachments({
+      ...BASE_OPTS,
+      attachments: [
+        {
+          Name: "video.mp4",
+          Content: "",
+          ContentType: "video/mp4",
+          ContentLength: 10 * 1024 * 1024 + 1,
+          rechazoPrevio: "size_exceeded",
+        },
+      ],
+    });
+
+    expect(results).toEqual([{ stored: false, reason: "size_exceeded" }]);
+    expect(mockUploadAttachment).not.toHaveBeenCalled();
+    expect(mockValidateAttachment).not.toHaveBeenCalled();
   });
 
   // ── Empty attachments list ────────────────────────────────────────────────────

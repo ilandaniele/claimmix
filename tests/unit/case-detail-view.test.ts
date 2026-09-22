@@ -57,6 +57,8 @@ interface Registro {
   eventos: string[];
   /** Las tablas consultadas, en orden. */
   tablas: unknown[];
+  /** Las columnas pedidas en cada consulta, alineadas con `tablas`. */
+  columnas: Array<Record<string, unknown> | undefined>;
 }
 
 /**
@@ -67,7 +69,7 @@ interface Registro {
  * `fin`. Si salen encadenadas, se alternan.
  */
 function espiar(porTabla: PorTabla, fallan: Set<unknown> = new Set()): Registro {
-  const reg: Registro = { eventos: [], tablas: [] };
+  const reg: Registro = { eventos: [], tablas: [], columnas: [] };
   let n = 0;
 
   mockEnTenant.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) => {
@@ -75,9 +77,13 @@ function espiar(porTabla: PorTabla, fallan: Set<unknown> = new Set()): Registro 
     reg.eventos.push(`inicio:${propia}`);
 
     let tabla: unknown;
+    let columnas: Record<string, unknown> | undefined;
     const eslabon: Record<string, unknown> = {};
     Object.assign(eslabon, {
-      select: () => eslabon,
+      select: (cols?: Record<string, unknown>) => {
+        columnas = cols;
+        return eslabon;
+      },
       from: (t: unknown) => {
         tabla = t;
         return eslabon;
@@ -88,6 +94,7 @@ function espiar(porTabla: PorTabla, fallan: Set<unknown> = new Set()): Registro 
     });
     armar(eslabon);
     reg.tablas.push(tabla);
+    reg.columnas.push(columnas);
 
     await Promise.resolve();
     reg.eventos.push(`fin:${propia}`);
@@ -145,6 +152,7 @@ const TODO: PorTabla = new Map<unknown, unknown[]>([
         size_bytes: 100,
         external_url: null,
         uploaded_at: "2026-08-01T10:00:00Z",
+        rejected_reason: null,
       },
     ],
   ],
@@ -195,17 +203,25 @@ describe("cargarDetalleDeCaso — las esperas", () => {
     ]);
   });
 
-  it("un caso de WhatsApp no paga las confirmaciones ni los adjuntos", async () => {
+  it("un caso de WhatsApp SÍ paga los adjuntos", async () => {
+    /*
+     * Las confirmaciones no existen para WhatsApp: pedirlas sería pagar una
+     * consulta para recibir vacío.
+     *
+     * Los adjuntos sí. Condicionarlos al correo dejaba a un caso de WhatsApp
+     * sin ninguna fila en pantalla, incluida la que queda cuando un archivo
+     * pasa el tope de 10 MB —sin `storage_path` y con `rejected_reason`—, que
+     * se escribe justamente para que se vea que el asegurado mandó algo y no
+     * entró.
+     */
     const porTabla = new Map(TODO);
     porTabla.set(cases, [{ ...CASO_DE_CORREO, channel: "whatsapp" }]);
     const reg = espiar(porTabla);
 
     await cargarDetalleDeCaso(CTX, CASO);
 
-    // Esas dos tablas no tienen filas para un caso de WhatsApp: pedirlas sería
-    // pagar dos consultas para recibir vacío.
     expect(reg.tablas).not.toContain(claimFieldConfirmations);
-    expect(reg.tablas).not.toContain(claimAttachments);
+    expect(reg.tablas).toContain(claimAttachments);
     expect(tandas(reg.eventos)).toBe(2);
   });
 
@@ -308,6 +324,18 @@ describe("cargarDetalleDeCaso — las normalizaciones de borde", () => {
     const res = await cargarDetalleDeCaso(CTX, CASO);
 
     expect(res!.attachments[0].external_url).toBe("");
+  });
+
+  it("el select de los adjuntos trae el motivo del rechazo", async () => {
+    // Sin esta columna la fila rechazada llega a la pantalla idéntica a una
+    // guardada: insignia, nombre y tamaño. Es peor que la fila ausente, porque
+    // antes faltaba información y así hay información falsa.
+    const reg = espiar(TODO);
+
+    await cargarDetalleDeCaso(CTX, CASO);
+
+    const cual = reg.tablas.indexOf(claimAttachments);
+    expect(Object.keys(reg.columnas[cual] ?? {})).toContain("rejected_reason");
   });
 });
 

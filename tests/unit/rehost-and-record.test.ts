@@ -160,6 +160,43 @@ describe("rehostAndRecordAttachments", () => {
     ]);
   });
 
+  it("el motivo de un archivo demasiado grande sobrevive al plazo agotado", async () => {
+    /*
+     * El orden del bucle, comprobado desde afuera.
+     *
+     * El atajo del adjunto ya rechazado estaba DESPUÉS del corte por
+     * presupuesto, y un mensaje con dos fotos pesadas y una grande alcanzaba
+     * para agotar los 10 s antes de llegar al tercero. La fila salía con
+     * "rehost_timeout" —«se acabó el tiempo» en vez de «no entraba»— y, como
+     * rehost_timeout es el único motivo que no escribe evento, el rechazo
+     * tampoco quedaba en la auditoría. `budgetMs: 0` es ese mismo estado sin
+     * tener que fabricar dos archivos pesados.
+     */
+    await rehostAndRecordAttachments({
+      ...OPTS,
+      budgetMs: 0,
+      attachments: [
+        {
+          Name: "video.mp4",
+          Content: "",
+          ContentType: "video/mp4",
+          ContentLength: 10_485_761,
+          rechazoPrevio: "size_exceeded",
+        },
+      ],
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      file_name: "video.mp4",
+      storage_path: null,
+      rejected_reason: "size_exceeded",
+    });
+
+    const events = vi.mocked(writeAuditLog).mock.calls.map((c) => c[0].event_type);
+    expect(events).toEqual(["attachment.rejected"]);
+  });
+
   it("keeps going when one row fails to insert", async () => {
     // Two photos, the first insert throws. Losing the second as well would
     // turn one lost file into a lost claim.

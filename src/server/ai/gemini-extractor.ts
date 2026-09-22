@@ -201,11 +201,24 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
       { code: "TIMEOUT" }
     );
   };
-  // Una espera entre intentos que no puede comerse el plazo: si el backoff
-  // es más largo que lo que queda, espera lo que queda y la vuelta siguiente
-  // corta. Antes estas esperas se sumaban por encima del plazo.
-  const esperar = async (ms: number) => {
-    await sleep(venceEn ? Math.min(ms, Math.max(restanteMs(), 0)) : ms);
+  /*
+   * Una espera entre intentos que no puede comerse el plazo. Antes estas
+   * esperas se sumaban por encima del plazo; después pasaron a dormir lo que
+   * quedara, para que la vuelta siguiente cortara.
+   *
+   * Dormir lo que queda para cortar después es gastar el plazo entero en una
+   * espera que ya sabemos estéril: si el backoff no entra en lo que queda,
+   * tampoco entra el intento que vendría detrás. Cortamos acá, sin dormir.
+   *
+   * Y de paso se va una carrera en el borde: al dormir exactamente el resto,
+   * si el reloj del bucle de eventos viene atrasado —la máquina de CI con el
+   * instrumentador de cobertura encima— el `setTimeout` vuelve unos
+   * milisegundos antes de lo que mide `Date.now()`, queda un resto positivo y
+   * entra un intento más.
+   */
+  const esperar = async (ms: number, attempt: number) => {
+    if (venceEn && ms >= restanteMs()) throw seAcabo(attempt);
+    await sleep(ms);
   };
 
   let lastNetworkError: unknown;
@@ -252,13 +265,13 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
         attempt: attempt + 1,
         code: (err as { cause?: { code?: string } })?.cause?.code ?? "network",
       }, "ai.transport_retry");
-      await esperar(backoffMs(attempt));
+      await esperar(backoffMs(attempt), attempt);
       continue;
     }
 
     if (res.ok) return res;
     if (!isRetryableGeminiStatus(res.status) || attempt >= maxRetries) return res;
-    await esperar(retryAfterMs(res.headers, attempt, res.status));
+    await esperar(retryAfterMs(res.headers, attempt, res.status), attempt);
   }
 
   // Out of attempts on a connection that never opened. Thrown rather than

@@ -665,9 +665,22 @@ export async function orchestratePostExtraction(
     (k) => !justResolved.has(k)
   );
 
+  // Sin plan —la deliberación se cayó, un 429 del proveedor alcanza— nadie
+  // decidió que hubiera algo nuevo que pedir, así que no se inventa: se repite
+  // el pedido que ya está en pie. Un ensayo mostró lo contrario: la
+  // deliberación falló, la tabla armó la lista desde cero y la persona, que
+  // había escrito «gracias», recibió cinco puntos donde antes había cuatro. Un
+  // problema nuestro con el proveedor se leyó como que nadie estaba leyendo.
+  //
+  // Sólo cuando no queda nada de aquel pedido —o cuando nunca hubo uno— se
+  // arma con lo que falta: alguien que escribe por primera vez tiene que
+  // recibir respuesta aunque el agente no haya podido pensar.
+  const heredado = keepAskingForWhatIsStillNeeded([], lastAsked, stillOutstanding);
   const chosen = plan
     ? keepAskingForWhatIsStillNeeded(plan.askFor, lastAsked, stillOutstanding)
-    : stillOutstanding.slice(0, MAX_ASK_ITEMS);
+    : heredado.length > 0
+      ? heredado
+      : stillOutstanding.slice(0, MAX_ASK_ITEMS);
 
   const askItems = {
     fields: chosen,
@@ -742,8 +755,14 @@ export async function orchestratePostExtraction(
   // La consulta de «¿aprendimos algo?» sólo se hace si puede cambiar la
   // decisión. Antes el `&&` la salteaba por corto circuito y sería una pena
   // perder eso: es una ida a la base por cada caso que no está en espera.
+  //
+  // Y sin plan tampoco se acusa recibo. El acuse se apoya en que el agente
+  // deliberó y no dijo «espero»: eso es un juicio sobre el último mensaje. Si
+  // la deliberación se cayó no hay juicio ninguno, y la extracción —que relee
+  // la conversación entera en cada vuelta— alcanza para que un «gracias»
+  // parezca noticia.
   const aprendimosAlgo =
-    askOnHold && !agentIsWaiting && !derivaSola
+    plan && askOnHold && !agentIsWaiting && !derivaSola
       ? await factsLearnedSinceWeLastSpoke(caseId, tenantId, hablamos)
       : false;
 

@@ -3140,6 +3140,41 @@ sobre el 429 que esperaban. Una línea por arreglo:
 - Un lote con varios remitentes comparte los 300 s de una sola invocación; los
   que no entran esperan al barrido, dos minutos después.
 
+### ✍️ Lo que el ensayo dejó ver de la redacción (2026-09-21)
+
+Las 14 conversaciones pasaban todas las verificaciones y tres respuestas
+sonaban mal. Todo está en `src/server/ai/compose-reply.ts`:
+
+- **Un dato que ya entendimos se confirma, no se vuelve a pedir.** El brief
+  decía «pedir corrección sólo si no es correcto», y el modelo lo leía como
+  «pedir más precisión»: a Cecilia, que escribió «esta mañana», le citó
+  «nos dijiste "mañana"» y le pidió la hora exacta; a Diego le puso «Lugar del
+  siniestro (si no fue en Villa Mitre, correginos)». Ahora el brief pide
+  preguntar si el valor es correcto, citado tal cual, sin pedir más precisión y
+  sin atribuirle a la persona palabras que no escribió. La guarda que exige
+  cada ítem de la lista buscaba la primera palabra del rótulo («lugar»,
+  «hora»); citar el valor («¿fue en Villa Mitre?») no la dice, y en el primer
+  ensayo con el brief nuevo el mensaje caía a la plantilla dos corridas de dos.
+  Ahora citar el valor que ya tenemos también cuenta como pedirlo.
+- **La respuesta a una pregunta va primero.** Diego preguntó cuánto tardaba y
+  la respuesta llegó al final, abajo de la lista repetida entera. Pedirlo al
+  final del brief no alcanzó: la pregunta ahora va pegada a lo que hay que
+  decir, antes de la lista, con «empezá el mensaje contestándola».
+- **El especialista no tiene género.** «Él se va a comunicar» salió en
+  `poliza-vencida`. El brief lo pide y una guarda nueva
+  (`escalation_gendered`) rechaza el mensaje y lo hace reescribir.
+
+«¿Podrías ser más preciso?» no era un error: en condicional, vos y tú se
+conjugan igual.
+
+Visto y sin arreglar: cuando la deliberación falla (un 429 o un timeout de
+Gemini), el orquestador arma el pedido solo y pide los primeros cinco
+faltantes. Si el agente había pedido menos, la lista cambia, la guarda de no
+repetir no la frena, y a un «ok» le contesta la lista entera: `silencio` dio
+rojo así dos veces el 21/09, siempre con `deliberate.failed` en el log. Hay un
+test que dice que un faltante nuevo en la lista merece mensaje, así que es una
+decisión, no un arreglo de una línea.
+
 ### 🙋 Waiting on you (not code)
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,

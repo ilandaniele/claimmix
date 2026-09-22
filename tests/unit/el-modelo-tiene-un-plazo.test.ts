@@ -135,6 +135,37 @@ describe("el transporte del modelo corta por tiempo", () => {
     expect(llamadas).toBe(1);
   });
 
+  it("y una espera que no entra en lo que queda no se duerme: corta ahí", async () => {
+    /*
+     * Dormir lo que queda del plazo para cortar en la vuelta siguiente gastaba
+     * el plazo entero en una espera que ya se sabía estéril, y dejaba el corte
+     * apoyado en un borde: si el reloj del bucle de eventos viene atrasado
+     * —la máquina de CI con el instrumentador de cobertura encima— el
+     * `setTimeout` vuelve unos milisegundos antes de lo que mide `Date.now()`,
+     * queda un resto positivo y entra un intento más. Pasó en el job de
+     * Cobertura de `531b49c`, con el de Unit tests verde en el mismo commit.
+     *
+     * Con cinco segundos de plazo la diferencia no se discute: dormir el resto
+     * son cinco segundos, cortar son cero.
+     */
+    process.env.GEMINI_TIMEOUT_MS = "5000";
+
+    let llamadas = 0;
+    globalThis.fetch = vi.fn(async () => {
+      llamadas += 1;
+      return new Response("{}", { status: 503, headers: { "retry-after": "60" } });
+    }) as unknown as typeof fetch;
+
+    const { callGemini } = await import("@/server/ai/gemini-extractor");
+    const arrancó = Date.now();
+    const error = await callGemini("sistema", "usuario").catch((e: Error) => e);
+    const tardó = Date.now() - arrancó;
+
+    expect((error as { cause?: { code?: string } }).cause?.code).toBe("TIMEOUT");
+    expect(llamadas).toBe(1);
+    expect(tardó).toBeLessThan(1_000);
+  });
+
   it("y el backoff de un socket caído tampoco se lo come", async () => {
     process.env.GEMINI_TIMEOUT_MS = "300";
     process.env.GEMINI_RETRY_BASE_MS = "5000";

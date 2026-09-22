@@ -2329,6 +2329,52 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
       .mock.calls.find((c) => c[0].template === "missing_information_request");
     expect(ask).toBeDefined();
   });
+
+  /**
+   * El otro lado de la misma regla, y el rojo del ensayo del 22 de septiembre.
+   *
+   * La persona escribió «gracias». La extracción releyó la conversación entera
+   * —hace eso en cada vuelta— y volvió más confiada sobre un campo que nadie
+   * le había preguntado, así que su fila pendiente se cerró sola. Eso contaba
+   * como «contestó lo que le pedimos», y el agente le devolvió la lista de
+   * cuatro puntos completa, idéntica a la de dos mensajes antes.
+   *
+   * Cerrar la fila está bien: si no, la vuelta siguiente se la vuelve a
+   * preguntar. Lo que no es cierto es que la haya contestado ella.
+   */
+  it("y una duda que nunca le preguntamos no cuenta como que contestó", async () => {
+    setupDbMocks({
+      lastAskRows: [
+        { asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" },
+      ],
+      newAttachmentRows: [],
+      confirmacionesCerradas: [{ campo: "provincia" }],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "wait",
+      askFor: [],
+      question: null,
+      reasoning: "dijo gracias",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
 });
 
 describe("orchestratePostExtraction — the agent hands a case to a person", () => {

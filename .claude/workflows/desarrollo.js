@@ -215,6 +215,11 @@ const LENTES = [
   { clave: 'next', lente: 'uso correcto de Next.js 16 según node_modules/next/dist/docs: RSC vs cliente, server actions, caché, after(), rutas; deprecaciones' },
 ]
 const clave = (h) => `${h.archivo}::${h.titulo.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/g, ' ').trim()}`
+// Lo de seguridad va primero a Fable. Sin cuota, Fable no contesta y el mismo pedido va a Opus 5.5.
+const enFable = (pedido, opciones) => agent(pedido, { ...opciones, model: 'fable' })
+  .catch(() => null)
+  .then((r) => r ?? agent(pedido, { ...opciones, model: 'opus' }))
+const quien = (lente) => (lente === 'seguridad' ? enFable : agent)
 
 // Quien revisa mira el ÁRBOL DE TRABAJO, no `main...HEAD`.
 //
@@ -229,7 +234,7 @@ const confirmados = []
 for (let ronda = 1; ronda <= RONDAS; ronda++) {
   phase('Revisar')
   // Barrera a propósito: hay que deduplicar entre lentes antes de pagar tres refutadores por hallazgo.
-  const encontrados = (await parallel(LENTES.map((l) => () => agent(
+  const encontrados = (await parallel(LENTES.map((l) => () => quien(l.clave)(
     `Tarea: ${tarea}
 Plan: ${plan.resumen}
 Rama: ${rama}. ${DONDE_MIRAR}
@@ -238,7 +243,7 @@ Ronda ${ronda} de revisión.${ronda > 1 ? ' Ya hubo una ronda antes y lo que enc
 
 Revisá SOLO desde este lente: ${l.lente}. No cambies nada. Cada hallazgo con archivo, línea, por qué es un problema de verdad (no una preferencia) y gravedad. Si no hay nada, devolvé la lista vacía: un hallazgo inventado cuesta tres verificaciones.${REGLAS}`,
     { label: `revisar:${l.clave}:ronda${ronda}`, phase: 'Revisar', schema: HALLAZGOS },
-  )))).filter(Boolean).flatMap((r) => r.hallazgos)
+  )))).flatMap((r, i) => (r?.hallazgos ?? []).map((h) => ({ ...h, lente: LENTES[i].clave })))
 
   const nuevos = encontrados.filter((h) => !vistos.has(clave(h)))
   nuevos.forEach((h) => vistos.add(clave(h)))
@@ -246,7 +251,7 @@ Revisá SOLO desde este lente: ${l.lente}. No cambies nada. Cada hallazgo con ar
   if (nuevos.length === 0) break
 
   const juzgados = await parallel(nuevos.map((h) => () =>
-    parallel([0, 1, 2].map((i) => () => agent(
+    parallel([0, 1, 2].map((i) => () => quien(h.lente)(
       `Rama: ${rama}. ${DONDE_MIRAR}
 
 Hallazgo de una revisión: ${JSON.stringify(h)}

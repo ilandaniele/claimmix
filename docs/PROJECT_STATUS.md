@@ -3277,6 +3277,16 @@ significa que no quede nada por pedir.
   siguiente la vuelve a preguntar—, pero cuenta como respuesta suya sólo lo que
   le pusimos delante, que es la misma guarda que ya tenían los documentos
   declinados: una pregunta que nunca se hizo no se puede contestar.
+  Y todavía habló una vez más en el mismo turno, ahora porque un 429 dejó a la
+  deliberación sin plan: la tabla armaba la lista desde cero y salían cinco
+  puntos donde dos mensajes antes había cuatro. La lista crece porque la
+  extracción vuelve más segura en cada relectura —el conteo fue de 2 a 4 y a 5
+  sin que ella contara nada—, y quien decide que el pedido cambió es el agente.
+  Sin plan se repite el pedido que ya está en pie, y sólo si no queda nada de
+  aquel —o nunca hubo uno— se arma con lo que falta, porque quien escribe por
+  primera vez merece respuesta aunque el agente no haya podido pensar. El acuse
+  de recibo pide lo mismo: es un juicio sobre el último mensaje, y sin
+  deliberación no hay juicio. Todo en #257.
 
 - ~~**Dos decisiones sobre el 429**~~ ✅ **DECIDIDAS 2026-09-21.** Un 429 de
   extracción vuelve a la cola como un TIMEOUT, y uno en la deliberación sigue

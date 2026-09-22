@@ -3140,6 +3140,72 @@ sobre el 429 que esperaban. Una línea por arreglo:
 - Un lote con varios remitentes comparte los 300 s de una sola invocación; los
   que no entran esperan al barrido, dos minutos después.
 
+### ✍️ Lo que el ensayo dejó ver de la redacción (2026-09-21)
+
+Las 14 conversaciones pasaban todas las verificaciones y tres respuestas
+sonaban mal. Todo está en `src/server/ai/compose-reply.ts`:
+
+- **Un dato que ya entendimos se confirma, no se vuelve a pedir.** El brief
+  decía «pedir corrección sólo si no es correcto», y el modelo lo leía como
+  «pedir más precisión»: a Cecilia, que escribió «esta mañana», le citó
+  «nos dijiste "mañana"» y le pidió la hora exacta; a Diego le puso «Lugar del
+  siniestro (si no fue en Villa Mitre, correginos)». Ahora el brief pide
+  preguntar si el valor es correcto, citado tal cual, sin pedir más precisión y
+  sin atribuirle a la persona palabras que no escribió. La guarda que exige
+  cada ítem de la lista buscaba la primera palabra del rótulo («lugar»,
+  «hora»); citar el valor («¿fue en Villa Mitre?») no la dice, y en el primer
+  ensayo con el brief nuevo el mensaje caía a la plantilla dos corridas de dos.
+  Ahora citar el valor que ya tenemos también cuenta como pedirlo.
+- **La respuesta a una pregunta va primero.** Diego preguntó cuánto tardaba y
+  la respuesta llegó al final, abajo de la lista repetida entera. Pedirlo al
+  final del brief no alcanzó: la pregunta ahora va pegada a lo que hay que
+  decir, antes de la lista, con «empezá el mensaje contestándola».
+- **El especialista no tiene género.** «Él se va a comunicar» salió en
+  `poliza-vencida`. El brief lo pide y una guarda nueva
+  (`escalation_gendered`) rechaza el mensaje y lo hace reescribir.
+
+«¿Podrías ser más preciso?» no era un error: en condicional, vos y tú se
+conjugan igual.
+
+Visto y sin arreglar: cuando la deliberación falla (un 429 o un timeout de
+Gemini), el orquestador arma el pedido solo y pide los primeros cinco
+faltantes. Si el agente había pedido menos, la lista cambia, la guarda de no
+repetir no la frena, y a un «ok» le contesta la lista entera: `silencio` dio
+rojo así dos veces el 21/09, siempre con `deliberate.failed` en el log. Hay un
+test que dice que un faltante nuevo en la lista merece mensaje, así que es una
+decisión, no un arreglo de una línea.
+
+### 🤐 El caso que contestó y quedó mudo (2026-09-22)
+
+El post-deploy de QA dio rojo en `choque-completo` turno 4, en las dos
+corridas: «esperaba 1 respuesta(s), hubo 0». Le habíamos pedido dos cosas —el
+parte amistoso y la licencia—, la persona contestó una («no completamos ningún
+parte amistoso, el otro conductor no quiso»), `resolveDeclinedDocs` la cerró en
+la base, y el agente —que en su resumen seguía viendo los dos pedidos
+abiertos— deliberó `intent: "wait"`. Ese «espero» solo apagaba la respuesta y
+también la red de contención: la rama de acuse queda suprimida cuando el pedido
+está en espera, así que no salía nada. La mitad del pedido que faltaba no se
+volvía a pedir nunca y el caso se moría por abandono a los 14 días.
+
+El fondo era que ningún dato de código registraba «la persona contestó lo que
+le pedimos». Los dos resolutores escribían en la base y devolvían `void`: la
+negativa cerraba el pedido y al mismo tiempo desaparecía como motivo para
+hablar. Ahora los dos devuelven lo que cerraron, y eso entra a la decisión como
+una octava señal, `nosContestoElPedido`, con el mismo argumento que ya estaba
+escrito para el archivo que llega: fueron, lo miraron y contestaron.
+
+No es regresión de la redacción: el diff anterior sólo tocó `compose-reply.ts`,
+que corre después de la decisión y no puede cambiar `plan.intent`. Era un pozo
+viejo que el modelo destapaba a veces; la corrida verde anterior y las dos rojas
+son tiradas del mismo dado.
+
+Dos cosas que el diagnóstico costó y conviene no repetir: el
+`fsm_transition_skipped {to: "listo"}` del log es ruido estructural
+—`estadoTrasExtraer` usa la palabra del vocabulario simulado para decir «no
+falta nada» y la FSM la frena siempre—, y el `missing_fields_count` del worker
+no conoce `missing_docs` ni `claim_field_confirmations`, así que un 0 ahí no
+significa que no quede nada por pedir.
+
 ### 🙋 Waiting on you (not code)
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,

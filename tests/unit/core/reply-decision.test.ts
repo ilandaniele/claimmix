@@ -1,7 +1,7 @@
 /**
  * La decisión de si el asegurado recibe un mensaje.
  *
- * Sin un solo mock: entran siete booleanos y sale una decisión. Antes esto
+ * Sin un solo mock: entran ocho señales y sale una decisión. Antes esto
  * vivía dentro de una función de 1.424 líneas enredada con la base, y probar
  * un caso costaba montar media aplicación — por eso el bug de abajo se
  * descubrió con un ensayo contra el agente real, en producción, y no acá.
@@ -20,6 +20,7 @@ const base: SeñalesDeRespuesta = {
   elAgenteEspera: false,
   nosPreguntoAlgo: false,
   llegoUnArchivo: false,
+  nosContestoElPedido: false,
   aprendimosAlgo: false,
   datosQueFaltan: 3,
   esGrave: false,
@@ -97,6 +98,33 @@ describe("qué rompe la espera", () => {
     // Aunque nunca se haya pedido: si el agente deliberó y decidió esperar,
     // es porque el último mensaje no pide una respuesta.
     expect(elPedidoQuedaEnEspera(con({ elAgenteEspera: true }))).toBe(true);
+  });
+
+  it("pero contestar lo que pedimos gana sobre el juicio del agente", () => {
+    // El caso que dejó mudo al ensayo: le pedimos el parte amistoso y la
+    // licencia, la persona contestó que parte no hay, y el agente —que en su
+    // resumen todavía veía los dos pedidos abiertos— dijo que esperaba. El
+    // pedido quedaba en espera para siempre y nadie le contestaba nunca.
+    expect(
+      elPedidoQuedaEnEspera(con({ elAgenteEspera: true, nosContestoElPedido: true }))
+    ).toBe(false);
+    expect(
+      queHacer(con({ elAgenteEspera: true, nosContestoElPedido: true }))
+    ).toBe("pedir");
+  });
+
+  it("y gana también sobre la regla de no repetirse", () => {
+    expect(
+      queHacer(con({ yaSePidio: true, nosContestoElPedido: true }))
+    ).toBe("pedir");
+  });
+
+  it("contestar no inventa un mensaje cuando no queda nada que pedir", () => {
+    // El caso cierra por otro lado —pasa a listo_para_core—, no con un pedido
+    // vacío. Que la señal esté prendida no es motivo suficiente para hablar.
+    expect(
+      queHacer(con({ elAgenteEspera: true, nosContestoElPedido: true, datosQueFaltan: 0 }))
+    ).toBe("callar");
   });
 });
 

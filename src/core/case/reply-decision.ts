@@ -5,8 +5,8 @@
  * y hasta acá vivía enredada entre consultas a la base, dentro de una función
  * de mil cuatrocientas líneas. Para probarla había que montar media aplicación.
  *
- * Acá no hay base, ni red, ni reloj: entran siete señales y sale una decisión.
- * Se prueba con siete booleanos.
+ * Acá no hay base, ni red, ni reloj: entran ocho señales y sale una decisión.
+ * Se prueba con siete booleanos y un número.
  *
  * ── Por qué cada señal está ────────────────────────────────────────────────
  *
@@ -29,6 +29,14 @@
  * mismo hostigamiento, con otra plantilla. Por eso se respeta el juicio del
  * agente: si deliberó y dijo que esperaba, ya decidió que el mensaje no aportó.
  *
+ * **Y contestar lo que pedimos tampoco es silencio.** El mismo argumento que
+ * el archivo que llega: alguien que escribe «no completamos ningún parte
+ * amistoso» fue, lo miró y nos contestó. Esa frase cierra el pedido —queda
+ * escrito en la base— y hasta acá desaparecía como motivo para hablar: si el
+ * agente había deliberado «espero», el caso se quedaba mudo justo cuando la
+ * persona había hecho su parte. Del otro lado eso es un pedido que nunca se
+ * cierra y un caso que muere de abandono dos semanas después.
+ *
  * **La severidad alta manda callar.** Un caso grave lo toma una persona; el
  * agente no debe adelantarse con un mensaje automático.
  */
@@ -43,6 +51,14 @@ export type SeñalesDeRespuesta = {
   readonly nosPreguntoAlgo: boolean;
   /** ¿Llegó un archivo desde la última vez que hablamos? */
   readonly llegoUnArchivo: boolean;
+  /**
+   * ¿El último mensaje cerró algo de lo que le habíamos pedido?
+   *
+   * Verdadero sólo cuando un resolutor cerró una fila: un documento que pasó a
+   * declinado, una confirmación pendiente que pasó a confirmada. No es «dijo
+   * algo», es «contestó lo que le preguntamos».
+   */
+  readonly nosContestoElPedido: boolean;
   /** ¿Aparecieron datos que antes no teníamos? */
   readonly aprendimosAlgo: boolean;
   /** Cuántos datos faltan todavía. Cero significa que no hay nada que pedir. */
@@ -68,7 +84,12 @@ export type QueHacer = "pedir" | "acusar-recibo" | "callar";
  * mensaje.
  */
 export function elPedidoQuedaEnEspera(s: SeñalesDeRespuesta): boolean {
-  return (s.yaSePidio || s.elAgenteEspera) && !s.nosPreguntoAlgo && !s.llegoUnArchivo;
+  return (
+    (s.yaSePidio || s.elAgenteEspera) &&
+    !s.nosPreguntoAlgo &&
+    !s.llegoUnArchivo &&
+    !s.nosContestoElPedido
+  );
 }
 
 export function queHacer(s: SeñalesDeRespuesta): QueHacer {

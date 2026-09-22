@@ -933,8 +933,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
       const active: string = delivered;
       caseId = active;
 
+      // Se retoma aunque el turno no cuente respuestas. El de la foto espera que
+      // se reconozca el documento, y el reconocedor corre después de una
+      // extracción que terminó: sin retomar, el ensayo leía el timeout como
+      // «no reconoció fotos_danos en la foto».
       let said = await repliesSince(active, seen);
-      if (said.length === 0 && (turn.expect?.replies ?? 0) > 0 && (await extraccionPendiente(active))) {
+      if (said.length === 0 && turn.expect?.replies !== 0 && (await extraccionPendiente(active))) {
         console.log("       ⟳ el modelo no llegó en treinta segundos; se retoma el caso una vez");
         await runIntakeAgent({ caseId: active, tenantId: TENANT_ID!, userId: null, source: "worker" });
         said = await repliesSince(active, seen);
@@ -1057,6 +1061,15 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
             // ensayado para que la ausencia se lea al final, en vez de pasar por
             // un verde.
             unrehearsed.add(String(turn.photo));
+          } else if (await extraccionPendiente(active)) {
+            // Dos timeouts seguidos: el reconocedor no llegó a correr, así que
+            // decir que no reconoció sería culpar a la parte equivocada.
+            note(
+              scenario.id,
+              i + 1,
+              "el modelo no contestó a tiempo y el reconocedor no llegó a correr",
+              "modelo-sin-respuesta"
+            );
           } else {
             for (const key of want.recognises) {
               if (!cerroAhora.includes(key)) {

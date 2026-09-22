@@ -3262,6 +3262,31 @@ significa que no quede nada por pedir.
   el mismo `runIntakeAgent` que usa el barrido. Ante un rojo, mirar primero
   `--log-failed` por `transport_timeout`; regla de la casa: hasta dos reruns, el
   umbral no se toca.
+  El 22/09 el mismo timeout dio «no reconoció fotos_danos en la foto» en
+  `choque-completo`: el turno de la foto no cuenta respuestas, así que no se
+  retomaba, y el reconocedor sólo corre después de una extracción que terminó.
+  Ahora se retoma todo turno que no pida silencio, y si el caso sigue pendiente
+  el ensayo dice que el modelo no contestó. Y los 30 s pasaron a ser de la
+  llamada entera: `fetchGemini` armaba un `AbortSignal.timeout` nuevo por
+  intento, con backoffs en el medio, y un timeout llegó a durar 48.498 ms.
+  El mismo día, `silencio` volvió a hablar en el turno 3: un «gracias» le
+  devolvía la lista de cuatro puntos entera. La extracción relee la
+  conversación en cada vuelta, volvió más confiada sobre un campo que nadie
+  había preguntado, y al cerrarse esa fila pendiente el caso lo leía como
+  «contestó lo que le pedimos». La fila se sigue cerrando —si no, la vuelta
+  siguiente la vuelve a preguntar—, pero cuenta como respuesta suya sólo lo que
+  le pusimos delante, que es la misma guarda que ya tenían los documentos
+  declinados: una pregunta que nunca se hizo no se puede contestar.
+  Y todavía habló una vez más en el mismo turno, ahora porque un 429 dejó a la
+  deliberación sin plan: la tabla armaba la lista desde cero y salían cinco
+  puntos donde dos mensajes antes había cuatro. La lista crece porque la
+  extracción vuelve más segura en cada relectura —el conteo fue de 2 a 4 y a 5
+  sin que ella contara nada—, y quien decide que el pedido cambió es el agente.
+  Sin plan se repite el pedido que ya está en pie, y sólo si no queda nada de
+  aquel —o nunca hubo uno— se arma con lo que falta, porque quien escribe por
+  primera vez merece respuesta aunque el agente no haya podido pensar. El acuse
+  de recibo pide lo mismo: es un juicio sobre el último mensaje, y sin
+  deliberación no hay juicio. Todo en #257.
 
 - ~~**Dos decisiones sobre el 429**~~ ✅ **DECIDIDAS 2026-09-21.** Un 429 de
   extracción vuelve a la cola como un TIMEOUT, y uno en la deliberación sigue

@@ -1781,6 +1781,17 @@ describe("orchestratePostExtraction — acusar recibo sin repetir el pedido", ()
   }
 
   it("acusa recibo cuando contaron algo nuevo y el pedido no cambió", async () => {
+    // El acuse necesita que el agente haya deliberado y no haya dicho "espero":
+    // sin plan no hay juicio sobre el último mensaje, y entonces se calla.
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "acknowledge",
+      askFor: [],
+      question: null,
+      reasoning: "contó algo nuevo",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
     setupDbMocks({
       lastAskRows: [{ asked_keys: GAPS, created_at: "2026-08-23T10:00:00.000Z" }],
       newFactRows: [{ id: "un dato que antes no teníamos" }],
@@ -1989,6 +2000,17 @@ describe("orchestratePostExtraction — not asking the same thing twice", () => 
   });
 
   it("speaks again when something new joins the list", async () => {
+    // The agent is the one who decides the list grew: with no plan the ask is
+    // inherited from the last one, on purpose.
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "ask",
+      askFor: GAPS,
+      question: null,
+      reasoning: "falta algo más que antes",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
     setupDbMocks({ lastAskRows: [{ asked_keys: ["accident_date"] }] });
     gapsAre(GAPS);
 
@@ -2316,6 +2338,122 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
       resolved: [],
       toolCalls: [],
     } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect(ask).toBeDefined();
+  });
+
+  /**
+   * El otro lado de la misma regla, y el rojo del ensayo del 22 de septiembre.
+   *
+   * La persona escribió «gracias». La extracción releyó la conversación entera
+   * —hace eso en cada vuelta— y volvió más confiada sobre un campo que nadie
+   * le había preguntado, así que su fila pendiente se cerró sola. Eso contaba
+   * como «contestó lo que le pedimos», y el agente le devolvió la lista de
+   * cuatro puntos completa, idéntica a la de dos mensajes antes.
+   *
+   * Cerrar la fila está bien: si no, la vuelta siguiente se la vuelve a
+   * preguntar. Lo que no es cierto es que la haya contestado ella.
+   */
+  it("y una duda que nunca le preguntamos no cuenta como que contestó", async () => {
+    setupDbMocks({
+      lastAskRows: [
+        { asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" },
+      ],
+      newAttachmentRows: [],
+      confirmacionesCerradas: [{ campo: "provincia" }],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "wait",
+      askFor: [],
+      question: null,
+      reasoning: "dijo gracias",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  /**
+   * El mismo rojo del 22 de septiembre por el otro camino: la deliberación se
+   * cayó con un 429 del proveedor.
+   *
+   * Sin plan no hay ningún juicio sobre el último mensaje, y la tabla armaba la
+   * lista de cero: a la persona que había escrito «gracias» le volvía el pedido
+   * con un punto más que la vez anterior. Como la lista cambiaba, tampoco se
+   * reconocía como el pedido que ya estaba en pie.
+   *
+   * Un problema nuestro con el proveedor no puede convertirse en un mensaje
+   * distinto para quien está del otro lado.
+   */
+  it("y una deliberación caída no alarga el pedido que ya está en pie", async () => {
+    setupDbMocks({
+      lastAskRows: [
+        {
+          asked_keys: ["parte_amistoso", "licencia_conducir"],
+          created_at: "2026-08-20T18:00:00Z",
+        },
+      ],
+      newAttachmentRows: [],
+      // Y la extracción, que relee todo en cada vuelta, trajo filas nuevas:
+      // sin plan eso tampoco alcanza para acusar recibo.
+      newFactRows: [{ id: "f1" }],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [
+        "parte_amistoso",
+        "licencia_conducir",
+        "provincia",
+      ],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue(null);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it("pero sin plan y sin pedido previo igual contesta", async () => {
+    setupDbMocks({ lastAskRows: [], newAttachmentRows: [] });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso", "licencia_conducir"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue(null);
 
     await orchestratePostExtraction(
       CASE_ID,

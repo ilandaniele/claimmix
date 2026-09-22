@@ -21,7 +21,12 @@ const fetchOriginal = globalThis.fetch;
 const guardadas: Record<string, string | undefined> = {};
 
 beforeEach(() => {
-  for (const k of ["GEMINI_TRANSPORT", "GEMINI_API_KEY", "GEMINI_TIMEOUT_MS"]) {
+  for (const k of [
+    "GEMINI_TRANSPORT",
+    "GEMINI_API_KEY",
+    "GEMINI_TIMEOUT_MS",
+    "GEMINI_RETRY_BASE_MS",
+  ]) {
     guardadas[k] = process.env[k];
   }
   process.env.GEMINI_TRANSPORT = "";
@@ -105,6 +110,46 @@ describe("el transporte del modelo corta por tiempo", () => {
     await callGemini("sistema", "usuario").catch(() => undefined);
 
     expect(llamadas).toBe(1);
+  });
+
+  it("el plazo es de la llamada: un 503 con reintento no lo estira", async () => {
+    // El `AbortSignal.timeout` se creaba de nuevo en cada intento, y entre
+    // intentos había una espera de hasta 30 s. Una llamada con timeout llegó a
+    // tardar 48.498 ms contra un plazo de 30 s y una corrida de 40 s.
+    process.env.GEMINI_TIMEOUT_MS = "300";
+
+    let llamadas = 0;
+    globalThis.fetch = vi.fn(async () => {
+      llamadas += 1;
+      return new Response("{}", { status: 503, headers: { "retry-after": "60" } });
+    }) as unknown as typeof fetch;
+
+    const { callGemini } = await import("@/server/ai/gemini-extractor");
+    const arrancó = Date.now();
+    const error = await callGemini("sistema", "usuario").catch((e: Error) => e);
+    const tardó = Date.now() - arrancó;
+
+    expect((error as { cause?: { code?: string } }).cause?.code).toBe("TIMEOUT");
+    // Sin el arreglo, el `retry-after` de 60 s (topeado en 30 s) colgaba acá.
+    expect(tardó).toBeLessThan(2_000);
+    expect(llamadas).toBe(1);
+  });
+
+  it("y el backoff de un socket caído tampoco se lo come", async () => {
+    process.env.GEMINI_TIMEOUT_MS = "300";
+    process.env.GEMINI_RETRY_BASE_MS = "5000";
+
+    globalThis.fetch = vi.fn(async () => {
+      throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
+    }) as unknown as typeof fetch;
+
+    const { callGemini } = await import("@/server/ai/gemini-extractor");
+    const arrancó = Date.now();
+    const error = await callGemini("sistema", "usuario").catch((e: Error) => e);
+    const tardó = Date.now() - arrancó;
+
+    expect((error as { cause?: { code?: string } }).cause?.code).toBe("TIMEOUT");
+    expect(tardó).toBeLessThan(2_000);
   });
 
   it("en 0 no corta nada, para el ensayo y para una emergencia", async () => {

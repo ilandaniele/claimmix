@@ -286,13 +286,18 @@ export async function orchestratePostExtraction(
   // empty. The board said "waiting on the claimant" about a question nobody
   // had been asked, and the case would have sat there forever.
 
+  // What we have actually put in front of this person. Read before both
+  // resolvers, which need it to know what could possibly have been answered.
+  const lastAsked = await lastAskedKeys(caseId, tenantId);
+
   // A field the claimant has now answered is no longer pending. Runs BEFORE
   // the gap analysis, which reads those rows straight back out.
   const confirmacionesContestadas = await resolveAnsweredConfirmations(
     caseId,
     tenantId,
     extractedClaim.fields,
-    latestMessageText
+    latestMessageText,
+    lastAsked
   );
 
   // Documents, before the gap analysis reads what is outstanding.
@@ -305,10 +310,6 @@ export async function orchestratePostExtraction(
   const claimTypeValue =
     extractedClaim.fields.find((f) => canonicalFieldKey(f.field_key) === "claim_type")
       ?.field_value ?? null;
-
-  // What we have actually put in front of this person. Read before the
-  // documents block, which needs it to know what could possibly be refused.
-  const lastAsked = await lastAskedKeys(caseId, tenantId);
 
   await seedRequiredDocs(caseId, tenantId, claimTypeValue);
 
@@ -664,9 +665,22 @@ export async function orchestratePostExtraction(
     (k) => !justResolved.has(k)
   );
 
+  // Sin plan —la deliberación se cayó, un 429 del proveedor alcanza— nadie
+  // decidió que hubiera algo nuevo que pedir, así que no se inventa: se repite
+  // el pedido que ya está en pie. Un ensayo mostró lo contrario: la
+  // deliberación falló, la tabla armó la lista desde cero y la persona, que
+  // había escrito «gracias», recibió cinco puntos donde antes había cuatro. Un
+  // problema nuestro con el proveedor se leyó como que nadie estaba leyendo.
+  //
+  // Sólo cuando no queda nada de aquel pedido —o cuando nunca hubo uno— se
+  // arma con lo que falta: alguien que escribe por primera vez tiene que
+  // recibir respuesta aunque el agente no haya podido pensar.
+  const heredado = keepAskingForWhatIsStillNeeded([], lastAsked, stillOutstanding);
   const chosen = plan
     ? keepAskingForWhatIsStillNeeded(plan.askFor, lastAsked, stillOutstanding)
-    : stillOutstanding.slice(0, MAX_ASK_ITEMS);
+    : heredado.length > 0
+      ? heredado
+      : stillOutstanding.slice(0, MAX_ASK_ITEMS);
 
   const askItems = {
     fields: chosen,
@@ -741,8 +755,14 @@ export async function orchestratePostExtraction(
   // La consulta de «¿aprendimos algo?» sólo se hace si puede cambiar la
   // decisión. Antes el `&&` la salteaba por corto circuito y sería una pena
   // perder eso: es una ida a la base por cada caso que no está en espera.
+  //
+  // Y sin plan tampoco se acusa recibo. El acuse se apoya en que el agente
+  // deliberó y no dijo «espero»: eso es un juicio sobre el último mensaje. Si
+  // la deliberación se cayó no hay juicio ninguno, y la extracción —que relee
+  // la conversación entera en cada vuelta— alcanza para que un «gracias»
+  // parezca noticia.
   const aprendimosAlgo =
-    askOnHold && !agentIsWaiting && !derivaSola
+    plan && askOnHold && !agentIsWaiting && !derivaSola
       ? await factsLearnedSinceWeLastSpoke(caseId, tenantId, hablamos)
       : false;
 
@@ -914,7 +934,21 @@ async function resolveAnsweredConfirmations(
   caseId: string,
   tenantId: string,
   fields: ExtractedClaim["fields"],
-  latestMessageText?: string
+  latestMessageText: string | undefined,
+  /**
+   * The keys the last message we sent actually put in front of this person.
+   *
+   * Only used to decide what counts as *them answering*. A row also closes
+   * when the extraction re-reads the whole conversation and comes back more
+   * confident about something nobody ever asked them — the province inferred
+   * from an address, read twice. That is us changing our mind, not them
+   * replying, and treating it as a reply made a "gracias" pull the entire
+   * request list back onto the screen.
+   *
+   * Same guard, and the same reason, as the one `resolveDeclinedDocs` takes:
+   * a question that was never asked cannot have been answered.
+   */
+  alreadyAsked: string[]
 ): Promise<string[]> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
@@ -933,7 +967,7 @@ async function resolveAnsweredConfirmations(
   // It closes the one field we asked about, not every pending row: we only ever
   // ask about one per email, and the same ranking that picked it picks it now.
   if (isAffirmativeReply(latestMessageText)) {
-    for (const asked of await askedPendingFields(caseId, tenantId, fields)) {
+    for (const asked of await askedPendingFields(caseId, tenantId, fields, alreadyAsked)) {
       settled.add(asked);
     }
   }
@@ -959,7 +993,10 @@ async function resolveAnsweredConfirmations(
         .returning({ campo: claimFieldConfirmations.field_name })
     );
 
-    return cerradas.map((fila) => fila.campo);
+    // Se cierran todas —si no, la vuelta siguiente las vuelve a preguntar—, y
+    // cuentan como respuesta suya sólo las que le preguntamos. Ver `alreadyAsked`.
+    const preguntadas = new Set(alreadyAsked);
+    return cerradas.map((fila) => fila.campo).filter((campo) => preguntadas.has(campo));
   } catch (err) {
     logger.error({ code: errCode(err) }, "orchestrate.failed_to_resolve_confirmations");
     return [];
@@ -973,7 +1010,7 @@ async function resolveAnsweredConfirmations(
  * that never made the list. This used to re-derive the subset by running the
  * same ranking again — which only held while the ranking was the only thing
  * choosing. Now that the agent picks what is worth asking, the list it chose
- * is recorded, and reading it back is both simpler and actually true.
+ * is recorded, and the caller reads it once and hands it down.
  *
  * The re-derivation stays as the fallback, for messages sent before the keys
  * were being written down.
@@ -981,11 +1018,11 @@ async function resolveAnsweredConfirmations(
 async function askedPendingFields(
   caseId: string,
   tenantId: string,
-  fields: ExtractedClaim["fields"]
+  fields: ExtractedClaim["fields"],
+  recorded: string[]
 ): Promise<string[]> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
-  const recorded = await lastAskedKeys(caseId, tenantId);
   if (recorded.length > 0) return recorded;
 
   try {

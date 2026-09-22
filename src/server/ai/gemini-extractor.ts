@@ -176,10 +176,44 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
     55_000
   );
 
+  /*
+   * El plazo es de la llamada entera, no de cada intento.
+   *
+   * Hasta acá el `AbortSignal.timeout` se creaba de nuevo en cada vuelta, y
+   * entre vueltas hay además una espera de turno y un backoff. O sea que el
+   * plazo de 30 s que el resto del sistema da por cerrado —la guarda del
+   * worker no empieza una extracción si no le quedan 30 s de presupuesto, y
+   * el test que la cuida dice «con reintento no entraría»— era en realidad
+   * 30 s por intento, cuatro intentos. Medido en `provider_usage_events`: la
+   * llamada con `status='timeout'` más larga tardó 48.498 ms, ocho segundos
+   * más que los 40 s de presupuesto que la guarda creía estar respetando.
+   *
+   * Un `Date.now()` al entrar y cada vuelta usa lo que queda. Cuando no
+   * queda nada, es un timeout y se dice así, que es lo que el extractor
+   * necesita para no mandar una corrección a un problema que no es de JSON.
+   */
+  const venceEn = timeoutMs > 0 ? Date.now() + timeoutMs : 0;
+  const restanteMs = () => (venceEn ? venceEn - Date.now() : 0);
+  const seAcabo = (attempt: number) => {
+    logger.warn({ attempt: attempt + 1, timeout_ms: timeoutMs }, "ai.transport_timeout");
+    return new GeminiExtractionError(
+      `El modelo no contestó en ${timeoutMs} ms`,
+      { code: "TIMEOUT" }
+    );
+  };
+  // Una espera entre intentos que no puede comerse el plazo: si el backoff
+  // es más largo que lo que queda, espera lo que queda y la vuelta siguiente
+  // corta. Antes estas esperas se sumaban por encima del plazo.
+  const esperar = async (ms: number) => {
+    await sleep(venceEn ? Math.min(ms, Math.max(restanteMs(), 0)) : ms);
+  };
+
   let lastNetworkError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     await waitForGeminiSlot();
+
+    if (venceEn && restanteMs() <= 0) throw seAcabo(attempt);
 
     // A connection that drops is as retryable as a 503, and until now it was
     // not retried at all: fetch throwing went straight up, the extraction
@@ -190,7 +224,7 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
     try {
       res = await fetch(url, {
         ...init,
-        ...(timeoutMs > 0 ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+        ...(venceEn ? { signal: AbortSignal.timeout(restanteMs()) } : {}),
       });
     } catch (err) {
       /*
@@ -209,14 +243,7 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
        * indistinguible de un socket caído.
        */
       if ((err as { name?: string })?.name === "TimeoutError") {
-        logger.warn({
-        attempt: attempt + 1,
-        timeout_ms: timeoutMs,
-      }, "ai.transport_timeout");
-        throw new GeminiExtractionError(
-          `El modelo no contestó en ${timeoutMs} ms`,
-          { code: "TIMEOUT" }
-        );
+        throw seAcabo(attempt);
       }
 
       lastNetworkError = err;
@@ -225,13 +252,13 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
         attempt: attempt + 1,
         code: (err as { cause?: { code?: string } })?.cause?.code ?? "network",
       }, "ai.transport_retry");
-      await sleep(backoffMs(attempt));
+      await esperar(backoffMs(attempt));
       continue;
     }
 
     if (res.ok) return res;
     if (!isRetryableGeminiStatus(res.status) || attempt >= maxRetries) return res;
-    await sleep(retryAfterMs(res.headers, attempt, res.status));
+    await esperar(retryAfterMs(res.headers, attempt, res.status));
   }
 
   // Out of attempts on a connection that never opened. Thrown rather than

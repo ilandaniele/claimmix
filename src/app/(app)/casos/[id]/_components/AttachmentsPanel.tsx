@@ -3,6 +3,9 @@
  *
  * Lists claim_attachments for a case.
  * Shows: filename, content_type badge, file size, download link (opens in new tab).
+ * A row with `rejected_reason` shows why the file was not stored instead of its
+ * size: the reason is the part the analyst can act on. And when the download
+ * was cut midway, that size is only a sentinel.
  *
  * AC23 PII protection: attachment URLs (external_url) are NEVER logged to console
  * or sent to any analytics. They are rendered as href-only anchor tags.
@@ -11,6 +14,7 @@
 "use client";
 
 import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
 
 interface Attachment {
   id: string;
@@ -19,6 +23,8 @@ interface Attachment {
   size_bytes: number;
   external_url: string;
   uploaded_at: string | null;
+  /** Por qué no quedó guardado, o `null` si quedó. */
+  rejected_reason: string | null;
 }
 
 interface AttachmentsPanelProps {
@@ -48,6 +54,34 @@ function esEnlaceSeguro(url: string | null | undefined): boolean {
     // panel deba abrir: los adjuntos viven afuera.
     return false;
   }
+}
+
+/** Los motivos que escribe `rehostAndRecordAttachments`, y nada más. */
+const MOTIVOS_CONOCIDOS = new Set([
+  "size_exceeded",
+  "content_type_not_allowed",
+  "storage_upload_failed",
+  "rehost_timeout",
+  "aggregate_size_exceeded",
+  "decode_failed",
+]);
+
+/**
+ * El motivo del rechazo, traducido a algo que se pueda hacer.
+ *
+ * Los valores son códigos internos. Pintados crudos le dejaban al analista un
+ * «size_exceeded» que no le dice qué pedirle al asegurado.
+ *
+ * Devuelve `null` cuando el código no está en la lista. El historial guarda
+ * motivos que no son de adjuntos y que no hay que tocar: prosa fija escrita en
+ * el código —`close-abandoned.ts` cierra con «sin respuesta del denunciante»—
+ * y códigos internos de otras partes —«conflict», «unsafe_run»— que hoy salen
+ * crudos. Cada llamador decide qué hacer con eso.
+ */
+export function claveDeMotivoDeRechazo(motivo: string): TranslationKey | null {
+  return MOTIVOS_CONOCIDOS.has(motivo)
+    ? (`attachment.rejected.${motivo}` as TranslationKey)
+    : null;
 }
 
 /** Map content_type to display label */
@@ -85,10 +119,15 @@ export function AttachmentsPanel({ attachments }: AttachmentsPanelProps) {
       <div className="space-y-2">
         {attachments.map((attachment) => {
           const badge = contentTypeBadge(attachment.content_type);
+          const rechazado = attachment.rejected_reason;
           return (
             <div
               key={attachment.id}
-              className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 gap-3"
+              className={`flex items-center justify-between rounded-lg border px-4 py-3 gap-3 ${
+                rechazado
+                  ? "border-amber-300 bg-amber-50"
+                  : "border-slate-200 bg-white"
+              }`}
             >
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 {/* Content type badge */}
@@ -104,10 +143,33 @@ export function AttachmentsPanel({ attachments }: AttachmentsPanelProps) {
                 >
                   {attachment.filename}
                 </span>
-                {/* File size */}
-                <span className="text-xs text-slate-500 flex-shrink-0 hidden sm:inline">
-                  {formatBytes(attachment.size_bytes)}
-                </span>
+                {/*
+                  * Dónde va el tamaño va el motivo, cuando lo hay.
+                  *
+                  * El motivo es lo accionable, y además el tamaño a veces
+                  * miente. `downloadWhatsAppMedia` rechaza por dos caminos. Si
+                  * la metadata de Meta trae `file_size`, el número que queda en
+                  * `size_bytes` es el peso declarado: un video de 80 MB queda
+                  * en 80 MB, y eso es una medición. Si no hay `file_size`, la
+                  * descarga se corta a mitad del cuerpo y nadie cuenta los
+                  * bytes: ahí el llamador escribe `MAX_ATTACHMENT_SIZE_BYTES +
+                  * 1` —un centinela— y `formatBytes` lo pinta «10.0 MB» sobre
+                  * un archivo que podía pesar 80. La fila no dice por cuál de
+                  * los dos caminos vino, así que en los dos se muestra el
+                  * motivo.
+                  */}
+                {rechazado ? (
+                  <span className="min-w-0 text-xs text-amber-800">
+                    {t(
+                      claveDeMotivoDeRechazo(rechazado) ??
+                        "attachment.rejected.unknown"
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-xs text-slate-500 flex-shrink-0 hidden sm:inline">
+                    {formatBytes(attachment.size_bytes)}
+                  </span>
+                )}
               </div>
 
               {/*

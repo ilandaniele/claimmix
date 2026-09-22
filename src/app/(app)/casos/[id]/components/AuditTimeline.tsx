@@ -3,6 +3,7 @@
 import { formatDate } from "@/lib/utils";
 import { useT, useLocale } from "@/lib/i18n/LocaleContext";
 import { esAR, type TranslationKey } from "@/lib/i18n";
+import { claveDeMotivoDeRechazo } from "../_components/AttachmentsPanel";
 
 /*
  * Sólo lo que esta línea de tiempo pinta.
@@ -37,6 +38,14 @@ function eventLabel(
     .split(".")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" → ");
+}
+
+function motivoLegible(
+  reason: string,
+  t: (key: TranslationKey) => string
+): string {
+  const clave = claveDeMotivoDeRechazo(reason);
+  return clave ? t(clave) : reason;
 }
 
 function dotColor(eventType: string): string {
@@ -80,10 +89,20 @@ export function AuditTimeline({ events }: AuditTimelineProps) {
             >
               {formatDate(event.created_at, locale)}
             </time>
+            {/*
+              * El motivo, traducido cuando es un código de rechazo de adjunto.
+              *
+              * Acá se leía «Adjunto rechazado — Motivo: size_exceeded»: el
+              * mismo código interno que el panel de adjuntos ya no muestra, en
+              * la misma pantalla y para la misma persona. Un motivo que no sea
+              * uno de esos códigos sale como está: el historial también guarda
+              * prosa fija del código —«sin respuesta del denunciante»— y
+              * códigos de otras partes —«conflict», «unsafe_run»—.
+              */}
             {event.reason != null && (
               <p className="text-xs text-slate-500 mt-0.5">
                 {t("case.detail.auditReason")}:{" "}
-                <span className="font-medium">{event.reason}</span>
+                <span className="font-medium">{motivoLegible(event.reason, t)}</span>
               </p>
             )}
           </div>

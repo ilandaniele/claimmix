@@ -344,6 +344,19 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
               mensajes, y sin ellos la tarjeta no tiene que existir. */}
           {isEmailCase && <MessagesThread caseId={caseRow.id} />}
 
+          {/*
+            * Los adjuntos (AC23) — para todos los canales, no sólo correo.
+            *
+            * Esta sección vivía adentro del bloque de correo, así que un caso
+            * de WhatsApp no mostraba NINGÚN adjunto: ni los que sí se
+            * guardaron, ni la fila que queda cuando un archivo pasa el tope de
+            * 10 MB, que se escribe justamente para avisar que mandaron algo y
+            * no entró.
+            */}
+          <PanelSection id="attachments" titulo={t("case.detail.attachments")}>
+            <AttachmentsPanel attachments={attachments} />
+          </PanelSection>
+
           {/* Email-specific sections — only shown for email channel cases */}
           {isEmailCase && (
             <>
@@ -460,11 +473,6 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
                   caseId={caseRow.id}
                   initialConfirmations={confirmations}
                 />
-              </PanelSection>
-
-              {/* Section C: Attachments panel (AC23) */}
-              <PanelSection id="attachments" titulo={t("case.detail.attachments")}>
-                <AttachmentsPanel attachments={attachments} />
               </PanelSection>
 
               {/*

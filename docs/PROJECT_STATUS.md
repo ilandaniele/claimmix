@@ -2260,10 +2260,19 @@ solo lado de la llave.
   **HECHO.** `enmascarar` se sacó de `conflictosParaElRedactor` y ahora corre
   también en `renderConflict` (`src/server/confirmations/messenger.ts:217-222`),
   que es el texto que sale cuando el redactor está apagado o falla.
-- **Un adjunto rechazado por tamaño ya no deja fila con `rejected_reason`** — el
-  camino es `null`, el mismo de las otras fallas de descarga, así que queda en
-  el log y no en la pantalla del analista. Devolver ese rastro pide tocar el que
-  llama y `rehost-attachments`.
+- **Un adjunto rechazado por tamaño: la fila ya está y ahora se ve; falta
+  avisarle al asegurado.** La mitad vieja de esto quedó desactualizada: desde
+  `540d005` la descarga no devuelve `null` sino «demasiado grande», el intake lo
+  convierte en un adjunto con `rechazoPrevio` y `rehost-attachments` escribe la
+  fila con `rejected_reason: "size_exceeded"` y `storage_path` en null. Lo que
+  faltaba era **mostrarla** —la fila existía y la pantalla del analista la
+  salteaba—, y eso se cierra con este cambio. **La mitad que sigue abierta es la
+  otra punta: el ASEGURADO no se entera de que el archivo no entró.** Sigue
+  creyendo que lo mandó, y el agente no le pide uno más chico; hoy los
+  comentarios del código dicen que el que pide el archivo más chico es el
+  analista, que es exactamente el trabajo manual que esto tendría que ahorrar.
+  Pide una señal nueva en `src/core/case/reply-decision.ts`, una decisión nueva
+  en `queHacer`, una plantilla nueva en `src/server/email/render.ts` y su ensayo.
 - **El hueco de foco de los dos diálogos de caso**: mientras `loading` es true
   todos los enfocables quedan deshabilitados, la lista sale vacía y el Tab
   escapa por un segundo. Ya pasaba con las dos copias del bloque.

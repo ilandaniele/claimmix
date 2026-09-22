@@ -12,7 +12,53 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+/*
+ * El camino completo necesita al que llama, y al que llama hay que sostenerlo.
+ *
+ * `createWhatsAppIntake` es el que convierte «demasiado grande» en un adjunto:
+ * sin él sólo se comprueba la forma del retorno de la descarga, que es
+ * justamente lo que pasaba —nadie cubría los tres pasos que cierran el agujero,
+ * y alguien podía volver a poner el `continue` con la suite en verde.
+ *
+ * La descarga se espía DELEGANDO en la real, porque los casos de más arriba de
+ * este mismo archivo la ejercitan de verdad; sólo el caso nuevo le pone una
+ * respuesta con `mockResolvedValueOnce`, que se consume sola.
+ */
+const { espiaDeDescarga, espiaDeRehost, mockEnTenant } = vi.hoisted(() => ({
+  espiaDeDescarga: vi.fn(),
+  espiaDeRehost: vi.fn(),
+  mockEnTenant: vi.fn(),
+}));
+
+vi.mock("server-only", () => ({}));
+
+vi.mock("@/server/whatsapp/cloud-api", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/server/whatsapp/cloud-api")>();
+  espiaDeDescarga.mockImplementation(real.downloadWhatsAppMedia);
+  return {
+    ...real,
+    downloadWhatsAppMedia: (...args: Parameters<typeof real.downloadWhatsAppMedia>) =>
+      espiaDeDescarga(...args),
+  };
+});
+
+vi.mock("@/server/email/rehost-attachments", () => ({
+  rehostAndRecordAttachments: espiaDeRehost,
+}));
+
+vi.mock("@/data/scope", () => ({
+  enTenant: mockEnTenant,
+  enTenantVarias: vi.fn().mockResolvedValue([[], []]),
+}));
+
+vi.mock("@/lib/audit/log", () => ({
+  writeAuditLog: vi.fn().mockResolvedValue(undefined),
+  AuditEvent: { EMAIL_RECEIVED: "email.received" },
+}));
+
 import { parseCloudApiMessages, downloadWhatsAppMedia } from "@/server/whatsapp/cloud-api";
+import { createWhatsAppIntake } from "@/server/agents/intake-agent";
 
 function payloadWith(message: Record<string, unknown>) {
   return {
@@ -249,12 +295,146 @@ describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
 
     const file = await downloadWhatsAppMedia("media-1");
 
-    // No es `null`: `null` es «no se pudo bajar» y el que llama lo saltea sin
-    // dejar rastro. Esto dice POR QUE, y con eso queda una fila rechazada que
-    // el analista ve.
+    // Esto comprueba la FORMA del retorno y nada más: «demasiado grande» y no
+    // `null`, que es «no se pudo bajar». Que de esa forma salga después un
+    // adjunto rechazado que el analista ve no se prueba acá — lo prueba el
+    // describe del intake, más abajo.
     expect(file).toEqual({ demasiadoGrande: true, bytes: null });
     // Acá sí se abrió: no había con qué saberlo antes. Lo que no pasó es que
     // los once megas terminaran en un Buffer.
     expect(urls).toHaveLength(2);
+  });
+});
+
+/**
+ * De la descarga cortada a la fila que el analista ve.
+ *
+ * Los tres pasos que cierran el agujero son: la descarga que dice «demasiado
+ * grande» en vez de `null`, el intake que lo convierte en un adjunto sin bytes
+ * con su motivo, y rehost que le escribe la fila. El primero ya estaba
+ * cubierto; los otros dos no tenían ningún test, así que volver a poner el
+ * `continue` del intake dejaba la suite entera en verde y al asegurado
+ * creyendo que había mandado el video.
+ */
+describe("createWhatsAppIntake — el archivo que no entró queda anotado", () => {
+  const TENANT = "11111111-0000-4000-8000-000000000001";
+  const TELEFONO = "5492916426930";
+
+  /** Simula la base por turnos: buscar el caso, crearlo, guardar el mensaje. */
+  function guion(pasos: unknown[][]) {
+    let i = 0;
+    mockEnTenant.mockImplementation(async () => pasos[i++] ?? []);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    guion([[], [{ id: "caso-1" }], [{ id: "msg-1" }], []]);
+    espiaDeRehost.mockResolvedValue([{ stored: false, reason: "size_exceeded" }]);
+  });
+
+  it("el adjunto llega a rehost sin bytes, con su motivo y con su nombre", async () => {
+    espiaDeDescarga.mockResolvedValueOnce({ demasiadoGrande: true, bytes: null });
+
+    await createWhatsAppIntake({
+      tenantId: TENANT,
+      from: TELEFONO,
+      body: "te mando el video del choque",
+      media: [{ id: "media-1", mimeType: "video/mp4", filename: "el-choque.mp4" }],
+    });
+
+    expect(espiaDeRehost).toHaveBeenCalledTimes(1);
+    const { attachments } = espiaDeRehost.mock.calls[0][0] as {
+      attachments: Array<Record<string, unknown>>;
+    };
+
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({
+      // El nombre con el que lo mandó el asegurado: es lo único que le permite
+      // al analista pedirle ESE archivo y no «el que no entró».
+      Name: "el-choque.mp4",
+      // Vacío a propósito. La descarga se cortó justamente para no tenerlos.
+      Content: "",
+      ContentType: "video/mp4",
+      // El centinela, comprobado y no supuesto. Cuando la descarga se corta a
+      // mitad nadie contó los bytes, así que va `MAX_ATTACHMENT_SIZE_BYTES + 1`,
+      // que quiere decir «pasaba el tope» y nada más. Dos comentarios del código
+      // lo tratan como contrato —y la pantalla decide con él si muestra un peso
+      // o no—, así que tiene que estar escrito en algún test.
+      ContentLength: 10 * 1024 * 1024 + 1,
+      rechazoPrevio: "size_exceeded",
+    });
+  });
+
+  it("y cuando el peso sí se sabe, viaja el peso de verdad", async () => {
+    /*
+     * El otro lado del `??`. Cuando el tope se aplica por la metadata, el peso
+     * declarado está: un video de 100 MB queda con 100 MB, que es una medición.
+     * Sin este caso, cambiar el `file.bytes ?? …` por el centinela a secas
+     * dejaba todo en verde y el analista veía «10,0 MB» sobre un archivo diez
+     * veces más grande.
+     */
+    espiaDeDescarga.mockResolvedValueOnce({
+      demasiadoGrande: true,
+      bytes: 100 * 1024 * 1024,
+    });
+
+    await createWhatsAppIntake({
+      tenantId: TENANT,
+      from: TELEFONO,
+      body: "el video largo",
+      media: [{ id: "media-3", mimeType: "video/mp4", filename: "el-choque-entero.mp4" }],
+    });
+
+    const { attachments } = espiaDeRehost.mock.calls[0][0] as {
+      attachments: Array<Record<string, unknown>>;
+    };
+    expect(attachments[0]).toMatchObject({
+      Content: "",
+      ContentLength: 104857600,
+      rechazoPrevio: "size_exceeded",
+    });
+  });
+
+  it("uno que sí se baja sigue llegando con sus bytes", async () => {
+    // El control que impide que el arreglo sea «rechazar todo»: si el intake
+    // marcara cualquier media como rechazada, el test de arriba pasaría igual.
+    espiaDeDescarga.mockResolvedValueOnce({
+      data: Buffer.from("bytes"),
+      mimeType: "image/jpeg",
+    });
+
+    await createWhatsAppIntake({
+      tenantId: TENANT,
+      from: TELEFONO,
+      body: "la foto",
+      media: [{ id: "media-2", mimeType: "image/jpeg", filename: "paragolpes.jpg" }],
+    });
+
+    const { attachments } = espiaDeRehost.mock.calls[0][0] as {
+      attachments: Array<Record<string, unknown>>;
+    };
+    expect(attachments[0]).toMatchObject({
+      Name: "paragolpes.jpg",
+      Content: Buffer.from("bytes").toString("base64"),
+    });
+    expect(attachments[0].rechazoPrevio).toBeUndefined();
+  });
+
+  it("y el comentario de cloud-api ya no dice que el rastro se pierde", async () => {
+    /*
+     * Afirmación sobre la fuente. El párrafo decía «Acá devolvemos null (...)
+     * queda en el log y no en la pantalla» y las cuatro afirmaciones eran
+     * falsas diez líneas más abajo del propio comentario. Un comentario que
+     * miente sobre un agujero cerrado es el que hace que alguien lo "arregle"
+     * de nuevo por otro lado.
+     */
+    const fuente = await import("node:fs").then((fs) =>
+      fs.readFileSync("src/server/whatsapp/cloud-api.ts", "utf8")
+    );
+    expect(fuente).not.toContain("Acá devolvemos null");
+    // Y sí dice lo contrario, con esas palabras. `toContain("demasiadoGrande")`
+    // no afirmaba nada: el tipo `MediaDeWhatsApp` usa esa misma palabra, así que
+    // era verdadero mientras la función existiera.
+    expect(fuente).toContain("Y el rastro no se pierde");
   });
 });

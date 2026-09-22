@@ -223,16 +223,6 @@ function extensionFor(mimeType: string): string {
 }
 
 /**
- * Download one media file from the Graph API.
- *
- * Two calls: the id resolves to a short-lived URL on a Meta CDN, and that URL
- * needs the same bearer token — fetching it unauthenticated returns HTML, not
- * the file.
- *
- * Returns null rather than throwing. A photo that fails to download is a gap
- * in the claim, not a reason to lose the message that carried it.
- */
-/**
  * Lee el cuerpo contando bytes y corta apenas se pasa del tope.
  *
  * `file_size` es lo que Meta DICE que pesa, y con eso alcanza para el caso
@@ -288,6 +278,20 @@ export type MediaDeWhatsApp =
   | { data: Buffer; mimeType: string }
   | { demasiadoGrande: true; bytes: number | null };
 
+/**
+ * Download one media file from the Graph API.
+ *
+ * Two calls: the id resolves to a short-lived URL on a Meta CDN, and that URL
+ * needs the same bearer token — fetching it unauthenticated returns HTML, not
+ * the file.
+ *
+ * Never throws, and no longer answers only null: it returns the bytes, or
+ * `{ demasiadoGrande: true }` for a file over the storage cap, or null when the
+ * download itself failed. The three are different things. A photo that fails to
+ * download is a gap in the claim, not a reason to lose the message that carried
+ * it; a file that is too big is something the claimant did send, and the caller
+ * turns it into a rejected attachment the analyst can see.
+ */
 export async function downloadWhatsAppMedia(
   mediaId: string,
   opts?: { accessToken?: string }
@@ -335,13 +339,13 @@ export async function downloadWhatsAppMedia(
      * número: si el de descarga y el de guardado se separan, o bajás bytes
      * que se van a rechazar o rechazás bytes que se iban a guardar.
      *
-     * Lo que se pierde, y va aparte: hasta ahora un archivo demasiado grande
-     * llegaba a `rehostAttachments` y dejaba una fila con `rejected_reason`,
-     * que es lo que le dice a un analista «mandaron algo y no entró». Acá
-     * devolvemos null, que es el mismo camino que ya tienen las otras fallas
-     * de descarga (`if (!file) continue`), así que queda en el log y no en
-     * la pantalla. Devolver el rastro pide tocar el que llama y
-     * `rehost-attachments`; es un cambio aparte y con su propia decisión.
+     * Y el rastro no se pierde. Frenar acá no puede significar que el archivo
+     * nunca existió: el que lo mandó cree que lo mandó. El que se pasa del
+     * tope vuelve como «demasiado grande» —no como `null`, que es «no se
+     * pudo»—, el que llama lo convierte en un adjunto con `rechazoPrevio:
+     * "size_exceeded"`, y `rehost-attachments` le escribe su fila sin bajarlo
+     * ni decodificarlo. Eso es lo que le dice a un analista «mandaron algo y
+     * no entró».
      */
     const declarado = Number(meta.file_size);
     if (Number.isFinite(declarado) && declarado > MAX_ATTACHMENT_SIZE_BYTES) {

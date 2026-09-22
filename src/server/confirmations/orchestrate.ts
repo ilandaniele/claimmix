@@ -1913,7 +1913,22 @@ async function filesArrivedSinceWeLastSpoke(
           .where(
             and(
               eq(claimAttachments.case_id, caseId),
-              gt(claimAttachments.created_at, hablamos)
+              gt(claimAttachments.created_at, hablamos),
+              /*
+               * Sólo las filas que traen bytes. Esta señal —que se llama «llegó
+               * un archivo» y es la que el núcleo usa para sacar el pedido de
+               * espera— se encendía con CUALQUIER fila rechazada, sin que hubiera
+               * llegado nada: salía el mismo pedido de siempre, la lista entera
+               * como si la foto hubiera entrado, sin una palabra sobre el motivo
+               * porque ninguna plantilla lo menciona. No es nuevo ni es de
+               * WhatsApp: el correo viene escribiendo `rejected_reason` desde
+               * antes —189 filas con "storage_upload_failed" en producción,
+               * contadas en `api/health/trabajo.ts`—, y el adjunto grande de
+               * WhatsApp sólo sumó "size_exceeded". Repetir el pedido es peor que
+               * callarse. Decirle al asegurado que lo mande más chico es un cambio
+               * aparte, con plantilla propia.
+               */
+              isNull(claimAttachments.rejected_reason)
             )
           )
           .limit(1)

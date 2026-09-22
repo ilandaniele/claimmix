@@ -388,6 +388,28 @@ export const esAR = {
   "case.detail.agentAnalysis": "Análisis del agente",
   "case.detail.auditReason": "Motivo",
 
+  // ── Por qué un adjunto no quedó guardado ───────────────────────────────────
+  // La fila rechazada se escribe para que el analista vea que le mandaron algo
+  // y no entró. Hasta acá llegaba con el código interno en la cara —«Motivo:
+  // size_exceeded»—, que no le dice a nadie qué hacer después.
+  //
+  // Empiezan por la CAUSA porque se leen en dos lugares: en la fila ámbar del
+  // panel, que ya dice que no entró, y en el historial detrás de «Motivo:»,
+  // donde un desenlace daba «Motivo: No entró: el archivo pesa…».
+  //
+  // Los «10 MB» son una copia a mano de `MAX_ATTACHMENT_SIZE_BYTES`
+  // (`src/server/email/attachment-validator.ts`): `t()` recibe sólo una clave y
+  // no interpola, así que copiar es la única opción. Quien mueva el tope tiene
+  // que venir a tocar estas dos cadenas —acá y en `en-US.ts`— o empiezan a
+  // mentir.
+  "attachment.rejected.size_exceeded": "El archivo pesa más de 10 MB. Pedile al asegurado que lo mande más chico.",
+  "attachment.rejected.content_type_not_allowed": "Es un tipo de archivo que no aceptamos. Pedile una foto o un PDF.",
+  "attachment.rejected.storage_upload_failed": "No se pudo guardar. Pedile al asegurado que lo mande de nuevo.",
+  "attachment.rejected.rehost_timeout": "Tardó demasiado y no se pudo guardar. Pedile al asegurado que lo mande de nuevo.",
+  "attachment.rejected.aggregate_size_exceeded": "Entre todos los archivos de ese mensaje se pasaron del tope. Pedile que los mande de a uno.",
+  "attachment.rejected.decode_failed": "Llegó dañado y no se pudo leer. Pedile al asegurado que lo mande de nuevo.",
+  "attachment.rejected.unknown": "No se pudo guardar. Pedile al asegurado que lo mande de nuevo.",
+
   "gmail.accounts.title": "Cuentas Gmail de ingreso",
   "gmail.accounts.helper": "Conectá una o más casillas Gmail para crear siniestros automáticamente desde cada inbox.",
   "gmail.accounts.connect": "Conectar Gmail",

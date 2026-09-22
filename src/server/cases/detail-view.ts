@@ -71,6 +71,13 @@ export interface AdjuntoEnPantalla {
   size_bytes: number;
   external_url: string;
   uploaded_at: string | null;
+  /**
+   * Por qué el archivo no quedó guardado, o `null` si quedó.
+   *
+   * Sin esto la fila rechazada —la que se escribe justamente para avisar que
+   * mandaron algo y no entró— llegaba a la pantalla idéntica a una guardada.
+   */
+  rejected_reason: string | null;
 }
 
 export interface DetalleDeCaso {
@@ -156,6 +163,7 @@ async function fetchAdjuntos(
           size_bytes: claimAttachments.size_bytes,
           external_url: claimAttachments.external_url,
           uploaded_at: claimAttachments.created_at,
+          rejected_reason: claimAttachments.rejected_reason,
         })
         .from(claimAttachments)
         .where(eq(claimAttachments.case_id, caseId))
@@ -192,13 +200,20 @@ export async function cargarDetalleDeCaso(
   if (!caseRow) return null;
 
   /*
-   * Los adjuntos y las confirmaciones sólo existen para los casos que entraron
-   * por correo: pedirlos para uno de WhatsApp sería pagar dos consultas para
-   * recibir vacío.
+   * Las confirmaciones sólo existen para los casos que entraron por correo:
+   * pedirlas para uno de WhatsApp sería pagar una consulta para recibir vacío.
    *
-   * Los MENSAJES no: van siempre. `raw_messages` la escribe también la ingesta
-   * real de WhatsApp —`intake-agent.ts`, justo después de escribir el hilo—,
-   * así que condicionarlos al correo dejaría al acordeón de un caso de WhatsApp
+   * Los ADJUNTOS no: van siempre. Un archivo de WhatsApp que pasa el tope de
+   * 10 MB deja igual su fila en `claim_attachments` —sin `storage_path` y con
+   * `rejected_reason`—, que es lo que le dice al analista que el asegurado
+   * mandó algo y no entró. WhatsApp es el único canal que llega hasta acá sin
+   * bytes, y condicionar los adjuntos al correo dejaba a un caso de WhatsApp
+   * sin ninguna fila en pantalla, incluida ésa, que se escribe justamente para
+   * que se vea.
+   *
+   * Los MENSAJES tampoco: `raw_messages` la escribe también la ingesta real de
+   * WhatsApp —`intake-agent.ts`, justo después de escribir el hilo—, así que
+   * condicionarlos al correo dejaría al acordeón de un caso de WhatsApp
    * diciendo «sin texto original» sobre un caso que sí lo tiene.
    */
   const esDeCorreo = caseRow.channel === "email" || caseRow.channel === "email_sim";
@@ -209,7 +224,7 @@ export async function cargarDetalleDeCaso(
       fetchMissingDocs(ctx, caseId),
       fetchAuditLog(ctx, caseId),
       esDeCorreo ? fetchConfirmaciones(ctx, caseId) : Promise.resolve([]),
-      esDeCorreo ? fetchAdjuntos(ctx, caseId) : Promise.resolve([]),
+      fetchAdjuntos(ctx, caseId),
       mensajesEntrantes(ctx, caseId, { orden: "viejos", tope: MENSAJES_A_MOSTRAR }),
     ]);
 

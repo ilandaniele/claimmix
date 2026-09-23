@@ -21,7 +21,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { outboundMessages } from "@/lib/db/schema";
-import { labelForField, labelForClaimType, displayFieldValue } from "@/lib/labels/claim-fields";
+import { labelForField, labelForClaimType } from "@/lib/labels/claim-fields";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import {
   enmascararCampo,
@@ -153,10 +153,9 @@ function renderAsk(data: Record<string, unknown>): string {
 
   const items = shown.map((key) => {
     const field = labelForField(key);
-    const raw = known[key]?.trim();
-    // Through the same translator the email templates use: a claim type of
-    // `other` has no readable form and must never reach a claimant.
-    const value = raw ? displayFieldValue(key, raw)?.trim() : undefined;
+    // Llega legible desde `buildAskList`; traducirlo otra vez lo borra, porque
+    // «daño por granizo» no es un tipo.
+    const value = known[key]?.trim() || undefined;
     return {
       label: field.label,
       kind: field.kind,

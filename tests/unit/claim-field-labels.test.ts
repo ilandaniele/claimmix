@@ -114,6 +114,12 @@ describe("labelForClaimType", () => {
     expect(labelForClaimType(undefined)).toBeNull();
     expect(labelForClaimType("meteorito")).toBeNull();
   });
+
+  it("returns null for a type named like something every object has", () => {
+    for (const v of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      expect(labelForClaimType(v)).toBeNull();
+    }
+  });
 });
 
 describe("displayFieldValue", () => {

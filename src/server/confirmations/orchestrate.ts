@@ -31,6 +31,9 @@ import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import { db } from "@/lib/db";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
+import { esSoloUnAcuse } from "@/core/mensajes/acuse";
+import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
+import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {
@@ -291,13 +294,17 @@ export async function orchestratePostExtraction(
   // resolvers, which need it to know what could possibly have been answered.
   const lastAsked = await lastAskedKeys(caseId, tenantId);
 
+  // Un «ok» o un «gracias» a una lista de varias cosas no contesta ninguna.
+  // Ver `esSoloUnAcuse`.
+  const soloAcuse = lastAsked.length > 1 && esSoloUnAcuse(latestMessageText);
+
   // A field the claimant has now answered is no longer pending. Runs BEFORE
   // the gap analysis, which reads those rows straight back out.
   const confirmacionesContestadas = await resolveAnsweredConfirmations(
     caseId,
     tenantId,
     extractedClaim.fields,
-    latestMessageText,
+    soloAcuse ? undefined : latestMessageText,
     lastAsked
   );
 
@@ -335,8 +342,10 @@ export async function orchestratePostExtraction(
   // Lo que la persona acaba de cerrar con este mensaje. Los dos resolutores de
   // arriba escriben en la base y hasta ahora no le contaban a nadie: el pedido
   // quedaba cerrado y, al mismo tiempo, invisible como motivo para contestar.
+  // Con un acuse solo, lo que se haya cerrado lo cerró la extracción al releer
+  // la conversación, no la persona.
   const nosContestoElPedido =
-    documentosDeclinados.length > 0 || confirmacionesContestadas.length > 0;
+    !soloAcuse && (documentosDeclinados.length > 0 || confirmacionesContestadas.length > 0);
 
   const gapResult = await analyzeEmailClaimGaps(caseId, extractedClaim.fields, tenantId);
 
@@ -705,9 +714,13 @@ export async function orchestratePostExtraction(
   // Silence when the answer would be word for word the request we already
   // made. See alreadyAskedFor: this is the difference between following up and
   // nagging, and the claimant experiences it as whether anyone is reading.
+  //
+  // Y tras un acuse solo, lo que queda de aquel pedido tampoco es un pedido
+  // nuevo: si la lista se achicó, fue porque la extracción cambió de idea.
   const askAlreadyMade =
     askItems.fields.length > 0 &&
-    (await alreadyAskedFor(caseId, tenantId, askItems.fields));
+    ((soloAcuse && askItems.fields.every((k) => lastAsked.includes(k))) ||
+      (await alreadyAskedFor(caseId, tenantId, askItems.fields)));
   // The agent can also decide there is nothing worth saying — someone who
   // wrote "ok" after being asked for a document has not moved the claim, and
   // repeating the request at them is the difference between following up and
@@ -970,8 +983,8 @@ async function resolveAnsweredConfirmations(
   // and the identical email went out again. Answering the way we asked left
   // them where they started.
   //
-  // It closes the one field we asked about, not every pending row: we only ever
-  // ask about one per email, and the same ranking that picked it picks it now.
+  // It closes what we asked about, not every pending row. A bare «ok» to a
+  // list of several things never gets here: the caller drops the text.
   if (isAffirmativeReply(latestMessageText)) {
     for (const asked of await askedPendingFields(caseId, tenantId, fields, alreadyAsked)) {
       settled.add(asked);
@@ -1121,18 +1134,23 @@ function buildAskList(
   // is worth asking has to see everything before it decides what to leave out.
   const fields = opts.cap === false ? ordered : ordered.slice(0, MAX_ASK_ITEMS);
 
+  // Lo que ya tenemos, dicho como una persona: un solo lugar, y de acá lo
+  // toman el agente, el redactor y los pisos. La base guarda el valor crudo.
+  const hoy = diaArgentino();
+  const propuestos = new Map(pending.map((p) => [canonicalFieldKey(p.fieldKey), p.proposedValue]));
   const knownValues: Record<string, string> = {};
-  for (const d of doubts) {
-    if (fields.includes(d.fieldKey) && d.proposedValue) {
-      knownValues[d.fieldKey] = d.proposedValue;
-    }
-  }
-
-  // And anything we hold a value for, however it got onto the list.
   for (const key of fields) {
-    if (knownValues[key]) continue;
-    const value = opts.held?.[key] ?? opts.held?.[canonicalFieldKey(key)];
-    if (value) knownValues[key] = value;
+    // Un documento se manda, no se confirma: el «si» del extractor dice que lo
+    // nombró, no qué es.
+    if (isDocument(key)) continue;
+    const canon = canonicalFieldKey(key);
+    // Con fila pendiente se muestra ése y ningún otro: es el valor que cierra
+    // un «Confirmo».
+    const crudo = propuestos.has(canon)
+      ? propuestos.get(canon)
+      : (opts.held?.[key] ?? opts.held?.[canon]);
+    const legible = valorLegible(key, crudo, hoy);
+    if (legible !== null) knownValues[key] = legible;
   }
 
   return { fields, knownValues };
@@ -1533,7 +1551,7 @@ function valuesWeHold(fields: ExtractedClaim["fields"]): Record<string, string> 
 
   for (const field of fields) {
     const value = field.field_value?.trim();
-    if (!value) continue;
+    if (!value || esValorVacio(value)) continue;
 
     const key = canonicalFieldKey(field.field_key);
     const confidence = Number(field.confidence) || 0;

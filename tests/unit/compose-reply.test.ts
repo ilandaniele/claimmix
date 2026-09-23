@@ -93,6 +93,109 @@ describe("composeReply — what it refuses to send", () => {
     expect(out).not.toBe(FALLBACK);
   });
 
+  // El valor llega dicho como una persona, y así lo repite el redactor.
+  it.each([
+    ["accident_date", "22 de septiembre", "¿El choque fue el 22 de septiembre? Si no, contanos qué día fue."],
+    ["hora_siniestro", "tarde", "¿Fue a la tarde, más o menos?"],
+    ["claim_type", "daño por granizo", "¿Fue un daño por granizo? Si no, contanos qué pasó."],
+    ["accident_date", "15 de marzo de 2024", "¿Fue el 15 de marzo de 2024? Si no, contanos qué día."],
+    // Un booleano llega como «no»: la pregunta lo cita nombrando el campo.
+    ["testigos", "no", "¿Es correcto que no hubo testigos? Si hubo, pasanos sus datos."],
+  ])("toma %s dicho con su valor legible como pedido", async (campo, valor, mensaje) => {
+    replies(mensaje);
+
+    const out = await composeReply(base({ fields: [campo], knownValues: { [campo]: valor } }));
+
+    expect(out).not.toBe(FALLBACK);
+  });
+
+  it("no toma como citado un valor del que sólo quedan palabras chicas", async () => {
+    replies("Para seguir necesitamos que nos pases el número de póliza, por favor.");
+
+    const out = await composeReply(
+      base({ fields: ["claim_type"], knownValues: { claim_type: "choque de vehículo" } })
+    );
+
+    expect(out).toBe(FALLBACK);
+  });
+
+  // Se saltea la confirmación, pero una palabra del valor sale por otro lado: el
+  // nombre de pila en el saludo, la etiqueta de otro campo, la empatía, o un
+  // «no» cualquiera. Pasarlo es dar por preguntado lo que la persona no vio.
+  // Los otros campos del pedido sí están nombrados, así que lo único que falta
+  // es la confirmación; con ella, el mismo mensaje pasa.
+  const sinConfirmar = [
+    [
+      "full_name",
+      "Roberto Paz",
+      ["dni"],
+      "¡Gracias, Roberto! Para seguir necesitamos el DNI del titular.",
+      "¿Sos Roberto Paz?",
+    ],
+    [
+      "claim_type",
+      "daño por granizo",
+      ["fotos_danos", "dni"],
+      "Para seguir, mandanos las fotos de los daños y el DNI del titular.",
+      "¿Fue un daño por granizo?",
+    ],
+    [
+      "claim_type",
+      "choque de vehículo",
+      ["dni", "patente_vehiculo"],
+      "Lamentamos lo del choque. Pasanos el DNI del titular y la patente del vehículo.",
+      "¿Fue un choque de vehículo?",
+    ],
+    [
+      "accident_date",
+      "22 de septiembre",
+      ["dni"],
+      "Recibimos tu denuncia de septiembre. Pasanos el DNI del titular, por favor.",
+      "¿Fue el 22 de septiembre?",
+    ],
+    [
+      "testigos",
+      "no",
+      ["dni"],
+      "Para seguir necesitamos el DNI del titular, así no se demora tu denuncia.",
+      "¿Es correcto que no hubo testigos?",
+    ],
+  ] as const;
+
+  it.each(
+    sinConfirmar.flatMap((c) => (["whatsapp", "email"] as const).map((canal) => [...c, canal] as const))
+  )("no da por citado %s «%s» por una palabra suelta (%#)", async (campo, valor, otros, mensaje, _, canal) => {
+    replies(mensaje);
+
+    const out = await composeReply(
+      base({
+        channel: canal,
+        claimantName: "Roberto Paz",
+        fields: [campo, ...otros],
+        knownValues: { [campo]: valor },
+      })
+    );
+
+    expect(out).toBe(FALLBACK);
+  });
+
+  it.each(sinConfirmar)(
+    "toma %s «%s» cuando la pregunta sí está",
+    async (campo, valor, otros, mensaje, pregunta) => {
+      replies(`${mensaje} ${pregunta}`);
+
+      const out = await composeReply(
+        base({
+          claimantName: "Roberto Paz",
+          fields: [campo, ...otros],
+          knownValues: { [campo]: valor },
+        })
+      );
+
+      expect(out).not.toBe(FALLBACK);
+    }
+  );
+
   it("refuses an escalation that turns around and asks for data", async () => {
     // The exact contradiction that reached a real chat: "no hace falta que
     // hagas nada" followed by a list of requests.
@@ -212,6 +315,9 @@ describe("composeReply — the brief it hands the model", () => {
     expect(prompt).toContain("16/08/2026");
     expect(prompt).toContain("Preguntá si es correcto");
     expect(prompt).toContain("no pidas más precisión");
+    // Con comillas y «tal cual» el modelo escribió «hora aproximada fue "tarde"».
+    expect(prompt).not.toContain('"16/08/2026"');
+    expect(prompt).not.toContain("tal cual");
   });
 
   it("puts the answer to a question before what is still missing", async () => {

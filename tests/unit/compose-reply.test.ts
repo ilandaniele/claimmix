@@ -419,3 +419,59 @@ describe("la respuesta pendiente vive una sola vez", () => {
     expect(out).toContain(RESPUESTA_PENDIENTE);
   });
 });
+
+describe("composeReply — quien escribe no es el titular", () => {
+  /*
+   * Escribe la hija por el auto del padre. Los dos nombres son correctos, así
+   * que «¿cuál es el correcto?» no tiene respuesta, y el caso ya lo tiene un
+   * especialista: nadie del lado del agente lee lo que conteste.
+   */
+  const ajeno = (over: Partial<Parameters<typeof composeReply>[0]> = {}) =>
+    base({
+      intent: "conflict",
+      titularAjeno: true,
+      conflicts: [
+        { fieldKey: "full_name", proposed: "Lucía Paz", stored: "R*** P***" },
+        { fieldKey: "dni", proposed: "****0140", stored: "****7663" },
+      ],
+      ...over,
+    });
+
+  const DICE_LA_DIFERENCIA =
+    "Recibimos tu denuncia. La póliza figura a nombre de R*** P*** (DNI ****7663) " +
+    "y vos nos decís Lucía Paz (DNI ****0140).";
+
+  it("rechaza que pregunte cuál es el correcto", async () => {
+    replies(`${DICE_LA_DIFERENCIA} ¿Cuál es el correcto?`);
+
+    expect(await composeReply(ajeno())).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("hiciste una pregunta");
+  });
+
+  it("toma el que nombra la diferencia y avisa que la revisa un especialista", async () => {
+    replies(`${DICE_LA_DIFERENCIA} Un especialista va a revisar tu caso y se va a comunicar con vos.`);
+
+    expect(await composeReply(ajeno())).not.toBe(FALLBACK);
+    expect(mockCall.mock.calls[0][0] as string).toContain("sin preguntar cuál es el correcto");
+  });
+
+  it("rechaza que le atribuya el auto a quien escribe", async () => {
+    // Lucía escribió «el auto de mi viejo» y le contestaron «tu auto».
+    replies(`${DICE_LA_DIFERENCIA} Un especialista va a revisar el siniestro de tu auto.`);
+
+    expect(await composeReply(ajeno())).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("son del titular");
+  });
+
+  it("tampoco le pone género al especialista", async () => {
+    replies(`${DICE_LA_DIFERENCIA} Un especialista va a revisar tu caso. Él se va a comunicar con vos.`);
+
+    expect(await composeReply(ajeno())).toBe(FALLBACK);
+  });
+
+  it("el conflicto de siempre sigue preguntando", async () => {
+    replies(`${DICE_LA_DIFERENCIA} ¿Cuál es el correcto?`);
+
+    expect(await composeReply(ajeno({ titularAjeno: false }))).not.toBe(FALLBACK);
+  });
+});

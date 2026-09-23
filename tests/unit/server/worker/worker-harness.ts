@@ -211,6 +211,7 @@ export function registrarMocks(opciones: {
   const espiaDeBusqueda = vi.fn().mockResolvedValue([]);
   vi.doMock("@/server/matching/customer-matcher", () => ({
     findCustomerMatches: espiaDeBusqueda,
+    MATCH_QUE_VINCULA: new Set(["policy_number", "dni"]),
   }));
 
   vi.doMock("@/server/matching/policy-matcher", () => ({

@@ -22,6 +22,10 @@
 import { displayFieldValue, labelForField } from "@/lib/labels/claim-fields";
 import { escapeHtml, enmascararCampo, type OrigenDelValor } from "@/server/email/render";
 import { textoAHtml } from "@/core/email/html";
+import {
+  LO_REVISA_UN_ESPECIALISTA,
+  NO_COINCIDE_CON_EL_TITULAR,
+} from "@/core/mensajes/titular-que-no-coincide";
 
 /** Un dato sobre el que se pregunta. */
 export interface CampoAConfirmar {
@@ -50,6 +54,8 @@ export interface DataConfirmationRequestData extends CampoAConfirmar {
    * comentario afirmara algo que el código dejó de hacer.
    */
   cuerpo?: string | null;
+  /** Quien escribe no es el titular y el caso ya se derivó: no se pregunta nada. */
+  titularAjeno?: boolean;
 }
 
 const SENSITIVE_FIELDS = new Set(["dni", "policy_number"]);
@@ -145,16 +151,21 @@ export function renderDataConfirmationRequest(
    */
   const isOpenQuestion = bloques.every((b) => b.abierto);
   const varios = bloques.length > 1;
+  const ajeno = data.titularAjeno === true && !isOpenQuestion;
 
-  const subject = isOpenQuestion
-    ? `${varios ? "Nos faltan datos" : "Nos falta un dato"} de tu reclamo - Caso #${data.caseId}`
-    : `Confirmar datos de reclamo - Caso #${data.caseId}`;
+  const subject = ajeno
+    ? `Tu reclamo pasa a un especialista - Caso #${data.caseId}`
+    : isOpenQuestion
+      ? `${varios ? "Nos faltan datos" : "Nos falta un dato"} de tu reclamo - Caso #${data.caseId}`
+      : `Confirmar datos de reclamo - Caso #${data.caseId}`;
 
-  const heading = isOpenQuestion
-    ? varios
-      ? "Nos faltan algunos datos"
-      : "Nos falta un dato"
-    : "Confirmación de datos requerida";
+  const heading = ajeno
+    ? "Tu reclamo pasa a un especialista"
+    : isOpenQuestion
+      ? varios
+        ? "Nos faltan algunos datos"
+        : "Nos falta un dato"
+      : "Confirmación de datos requerida";
 
   // Abre acusando recibo: es el único correo que le llega al asegurado cuando
   // hay algo dudoso, así que tiene que hacer el trabajo que hacía el
@@ -167,24 +178,29 @@ export function renderDataConfirmationRequest(
       ? "necesitamos que confirmes los siguientes datos:"
       : "necesitamos que confirmes el siguiente dato:";
 
-  const introHtml = `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${escapeHtml(data.caseId)}</strong>, y ${queSigue}</p>`;
-  const introText = `Gracias por tu reclamo. Lo registramos como caso #${data.caseId}, y ${queSigue}`;
+  const tras = ajeno ? `. ${NO_COINCIDE_CON_EL_TITULAR}` : `, y ${queSigue}`;
+  const introHtml = `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${escapeHtml(data.caseId)}</strong>${escapeHtml(tras)}</p>`;
+  const introText = `Gracias por tu reclamo. Lo registramos como caso #${data.caseId}${tras}`;
 
-  const actionHtml = isOpenQuestion
-    ? `<p>Respondé este correo con ${varios ? "los datos" : "el dato"} y seguimos con tu reclamo.</p>`
-    : `<p>Por favor respondé este correo con una de las siguientes opciones:</p>
+  const actionHtml = ajeno
+    ? `<p>${escapeHtml(LO_REVISA_UN_ESPECIALISTA)}</p>`
+    : isOpenQuestion
+      ? `<p>Respondé este correo con ${varios ? "los datos" : "el dato"} y seguimos con tu reclamo.</p>`
+      : `<p>Por favor respondé este correo con una de las siguientes opciones:</p>
   <ul>
     <li>Escribí <strong>"Confirmo"</strong> si ${varios ? "los datos son correctos" : "el dato es correcto"}.</li>
     <li>O bien, escribí ${varios ? "los valores correctos" : "el valor correcto"} directamente en tu respuesta.</li>
   </ul>`;
 
-  const actionText = isOpenQuestion
-    ? `Respondé este correo con ${varios ? "los datos" : "el dato"} y seguimos con tu reclamo.`
-    : [
-        "Por favor respondé este correo con una de las siguientes opciones:",
-        `- Escribí "Confirmo" si ${varios ? "los datos son correctos" : "el dato es correcto"}.`,
-        `- O bien, escribí ${varios ? "los valores correctos" : "el valor correcto"} directamente en tu respuesta.`,
-      ].join("\n");
+  const actionText = ajeno
+    ? LO_REVISA_UN_ESPECIALISTA
+    : isOpenQuestion
+      ? `Respondé este correo con ${varios ? "los datos" : "el dato"} y seguimos con tu reclamo.`
+      : [
+          "Por favor respondé este correo con una de las siguientes opciones:",
+          `- Escribí "Confirmo" si ${varios ? "los datos son correctos" : "el dato es correcto"}.`,
+          `- O bien, escribí ${varios ? "los valores correctos" : "el valor correcto"} directamente en tu respuesta.`,
+        ].join("\n");
 
   const cuerpo = [
     introText,

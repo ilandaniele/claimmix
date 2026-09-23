@@ -356,6 +356,30 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).toMatch(/cuál es el correcto/i);
   });
 
+  it("si quien escribe no es el titular, nombra la diferencia y no pregunta", async () => {
+    // Los dos valores son correctos —la hija escribe por el auto del padre— y
+    // el caso ya se derivó en esta vuelta: no hay a quién contestarle.
+    await send("data_confirmation_request", {
+      caseId: CASE,
+      titularAjeno: true,
+      fields: [
+        { fieldKey: "full_name", proposedValue: "Lucía Paz", conflictWithValue: "Roberto Paz" },
+        { fieldKey: "dni", proposedValue: "30120140", conflictWithValue: "14937663" },
+      ],
+    });
+
+    const body = sentBody();
+    expect(body).toContain("no coinciden con los del titular");
+    expect(body).toContain("un especialista va a revisar tu caso");
+    expect(body).not.toContain("?");
+    expect(body).not.toMatch(/respondé/i);
+    expect(body).toContain("Lucía Paz");
+    expect(body).toContain("R*** P***");
+    expect(body).not.toContain("Roberto Paz");
+    expect(body).toContain("****0140");
+    expect(body).not.toContain("14937663");
+  });
+
   it("sin valores que mostrar, pide los datos por su nombre", async () => {
     await send("data_confirmation_request", {
       caseId: CASE,

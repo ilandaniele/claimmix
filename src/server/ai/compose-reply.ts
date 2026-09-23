@@ -86,6 +86,13 @@ export interface ComposeReplyInput {
    * lo puede repetir.
    */
   conflicts?: Array<{ fieldKey: string; proposed: string; stored: string }>;
+  /**
+   * El conflicto es con el titular de la póliza, y el caso ya se derivó.
+   *
+   * Los dos valores pueden ser correctos —escribe la hija por el auto del
+   * padre—, así que preguntar cuál es el bueno no tiene respuesta.
+   */
+  titularAjeno?: boolean;
   /** The claimant's most recent message, for tone only. */
   lastMessage?: string;
   /** The deterministic text. The model is asked to do better, not different. */
@@ -185,7 +192,13 @@ function buildPrompt(input: ComposeReplyInput): string {
       "NO pidas ningún dato: un especialista se encarga.",
     closing:
       "Avisar que ya tenemos todo lo necesario y que la denuncia pasa a análisis. NO pidas nada.",
-    conflict: "Señalar la diferencia entre los dos valores y preguntar cuál es el correcto.",
+    conflict: input.titularAjeno
+      ? "La póliza está a nombre de otra persona que quien escribe —puede ser un familiar—, así " +
+        "que los dos valores pueden ser correctos. Señalá la diferencia sin preguntar cuál es el " +
+        "correcto y sin decir que la póliza o el vehículo son de quien escribe. Avisá que un " +
+        "especialista va a revisar el caso y se va a comunicar (decí «un especialista», nunca " +
+        "«él» ni «ella»). NO preguntes ni pidas nada: el caso ya lo tiene un especialista."
+      : "Señalar la diferencia entre los dos valores y preguntar cuál es el correcto.",
     // Es la única intención donde la lista de campos se pasa para que NO se
     // use: el redactor la necesita para no volver a pedir eso mismo con
     // otras palabras, que es como se rompería la regla sin darse cuenta.
@@ -278,15 +291,25 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     }
   }
 
+  // El titular ajeno ya se derivó en esta vuelta: lo que conteste no lo lee el
+  // agente, y «¿cuál es el correcto?» salió en un ensayo con los dos correctos.
+  const titularAjeno = input.intent === "conflict" && input.titularAjeno === true;
+  if (titularAjeno && trimmed.includes("?")) return "titular_ajeno_pregunta";
+  // Escribió «el auto de mi viejo» y le contestaron «el siniestro de tu auto».
+  if (titularAjeno && /\btu\s+(?:auto|veh[ií]culo|coche|camioneta|moto|p[oó]liza)\b/iu.test(trimmed)) {
+    return "titular_ajeno_se_lo_atribuye";
+  }
+  const deriva = input.intent === "escalation" || titularAjeno;
+
   // An escalation that asks for something contradicts itself — that exact
   // pile-up is why escalated cases send one message and nothing else.
-  if (input.intent === "escalation" && /necesitamos que nos|envianos|mandanos/i.test(trimmed)) {
+  if (deriva && /necesitamos que nos|envianos|mandanos/i.test(trimmed)) {
     return "escalation_asks_for_data";
   }
 
   // Nadie sabe quién va a tomar el caso: "Él se va a comunicar" salió en un
   // ensayo, y le pone género a una persona que todavía no existe.
-  if (input.intent === "escalation" && /(?<!\p{L})(?:él|ella)\s+(?:se|te|va)\b/iu.test(trimmed)) {
+  if (deriva && /(?<!\p{L})(?:él|ella)\s+(?:se|te|va)\b/iu.test(trimmed)) {
     return "escalation_gendered";
   }
 
@@ -352,6 +375,12 @@ function explain(problem: string): string {
   }
   if (problem === "escalation_gendered") {
     return "le pusiste género al especialista. No sabemos quién es: decí «un especialista».";
+  }
+  if (problem === "titular_ajeno_pregunta") {
+    return "hiciste una pregunta. La póliza es de otra persona y el caso ya lo tiene un especialista: nombrá la diferencia y avisá eso, sin preguntar nada.";
+  }
+  if (problem === "titular_ajeno_se_lo_atribuye") {
+    return "dijiste que el vehículo o la póliza son de quien escribe, y son del titular. Decí «el auto» o «la póliza».";
   }
   return problem;
 }

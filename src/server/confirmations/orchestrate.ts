@@ -46,7 +46,7 @@ import {
   outboundMessages,
   policies,
 } from "@/lib/db/schema";
-import { normalizarDni, normalizarNumeroPoliza } from "@/core/matching/normalizar";
+import { mismoNombre, normalizarDni, normalizarNumeroPoliza } from "@/core/matching/normalizar";
 import { maskFullName } from "@/server/email/render";
 import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
@@ -99,6 +99,11 @@ export interface ExtractedClaimOutput {
   latestMessageText?: string;
   /** Lo que el worker vio de las pólizas encontradas. */
   polizas?: PolizasDelCaso;
+  /**
+   * Ni el nombre ni el DNI son los del titular de la póliza (`esTitularAjeno`):
+   * se deriva después del pedido de confirmación, sin preguntarle al modelo.
+   */
+  titularAjeno?: boolean;
   /**
    * La reserva de extracción la heredó una corrida muerta.
    *
@@ -511,6 +516,8 @@ export async function orchestratePostExtraction(
             proposedValue: c.proposedValue,
             conflictWithValue: c.conflictWithValue,
           })),
+          // Se deriva abajo en esta misma vuelta: el pedido no pregunta nada.
+          titularAjeno: extractedOutput.titularAjeno === true,
         },
         inReplyToMessageId,
       });
@@ -527,6 +534,31 @@ export async function orchestratePostExtraction(
         payload: { field_keys: conflictos.map((c) => c.fieldKey), reason: "conflict" },
       });
     }
+  }
+
+  /*
+   * Quien escribe no es el titular, y el worker ya lo sabía: igual que la
+   * póliza vencida (#187), no se espera a que el modelo lo note. Va acá y no
+   * con `derivaSola` porque el único mensaje de la vuelta es el pedido de
+   * confirmación que D acaba de mandar con los dos valores; `escalate` sólo
+   * suprime el segundo. Con `derivaSola` el caso ya se derivó arriba.
+   */
+  if (extractedOutput.titularAjeno === true && !derivaSola) {
+    await escalate({
+      caseId,
+      tenantId,
+      senderEmail,
+      latestMessageText,
+      inReplyToMessageId,
+      messenger,
+      severity,
+      claimantName,
+      claimTypeValue,
+      summary: extractedClaim.summary ?? null,
+      reason: "quien escribe no es el titular de la póliza",
+      yaLeEscribimos: confirmationEmailDispatched,
+    });
+    return;
   }
 
   const missingInfoEmailComing = gapResult.missingRequiredFields.length > 0;
@@ -1396,18 +1428,6 @@ async function inicialesDelTitularAjeno(
     logger.error({ code: errCode(err) }, "orchestrate.holder_lookup_failed");
     return null;
   }
-}
-
-/** Sin acentos, sin mayúsculas y sin espacios de más: «Lucía  PAZ» es «lucia paz». */
-function mismoNombre(uno: string, otro: string): boolean {
-  const plano = (s: string) =>
-    s
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .trim();
-  return plano(uno) === plano(otro);
 }
 
 /**

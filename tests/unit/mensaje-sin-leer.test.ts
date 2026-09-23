@@ -137,6 +137,28 @@ describe("un mensaje a un caso que no se puede reabrir", () => {
     expect(dichos.join(" ")).toContain("email_worker.mensaje_sin_leer");
   });
 
+  it("un caso derivado tampoco se lee: «el del padrón era el correcto» queda para el especialista", async () => {
+    /*
+     * El titular ajeno deriva en la misma vuelta en que pide la confirmación.
+     * Si la persona contesta que el dato del padrón era el correcto, el caso
+     * sigue en `requiere_especialista`: esto es lo que le pasa a esa respuesta.
+     */
+    elCasoEsta("requiere_especialista");
+
+    await correr();
+
+    const entrada = mockAudit.mock.calls.find(
+      (c) => (c[0] as { event_type?: string })?.event_type === "claim.message_not_read"
+    );
+    expect((entrada?.[0] as { payload?: unknown })?.payload).toEqual({
+      status: "requiere_especialista",
+      motivo: "estado_no_reanudable",
+    });
+    expect(dichos.join(" ")).toContain("email_worker.mensaje_sin_leer");
+    // Leyó el caso y nada más: ni el mensaje, ni una extracción.
+    expect(mockSelect).toHaveBeenCalledTimes(1);
+  });
+
   it("pero un caso en un estado normal NO genera el aviso", async () => {
     /*
      * El control. Sin esto, un aviso que se escribiera siempre pasaría los tres

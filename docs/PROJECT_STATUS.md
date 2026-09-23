@@ -3373,7 +3373,89 @@ Queda sin arreglar, de antes: el DNI y la póliza siguen yendo enteros en
 `knownValues` hasta el redactor (AC24), y un «Confirmo» cierra todas las
 filas preguntadas, no sólo las que la persona vio con valor.
 
+### 🪪 Quien escribe no es el titular: se deriva sola, sin esperar al modelo (2026-09-23)
+
+El ensayo `mail-que-no-coincide-con-el-padron` terminaba en
+`confirmacion_pendiente` en vez de `requiere_especialista`. Lucía escribe por la
+póliza de su padre: el padrón la encuentra, y ni el nombre ni el DNI son los del
+titular. El pedido de confirmación salía bien. Lo que fallaba era la derivación.
+
+**La causa era la misma que la de la póliza vencida (#187).** El worker ya sabía
+que quien escribe no es el titular, pero la derivación dependía de que el modelo
+deliberara `escalate`. Algunas corridas lo hacía y otras no.
+
+**Lo que cambia.** `esTitularAjeno` (`src/core/case/titular-ajeno.ts`) decide con
+lo que el worker ya buscó: todas las pólizas encontradas por número son de otra
+persona, y en cada una el buscador marcó el nombre Y el DNI como distintos. El
+worker lo pasa en `extractedOutput.titularAjeno`, y el orquestador deriva por el
+mismo `escalate` que la severidad y la vencida, justo después de la rama D.
+
+- **Un mensaje por vuelta.** El único que sale es el pedido de confirmación, con
+  los dos valores enmascarados («R*** P***», «****0140»). `escalate` recibe
+  `yaLeEscribimos` y suprime «tu reclamo fue asignado a un especialista». El
+  estado, el evento `SPECIALIST_REQUIRED` y el aviso al especialista pasan
+  igual. El motivo del registro es un texto fijo, sin nombres ni documentos.
+- **Ese mensaje no pregunta nada.** El pedido llega con `titularAjeno` y, en vez
+  de «¿Cuál es el correcto? Respondé por acá y seguimos», dice que los datos no
+  coinciden con los del titular y que un especialista va a revisar el caso. El
+  ensayo lo mostró: los dos valores son correctos (la póliza es del padre, el
+  nombre es de la hija), así que la pregunta no tiene respuesta, y la
+  respuesta no la lee el agente. Lo cambian los dos pisos (`renderConflict` y
+  la plantilla de correo, que además titula «Tu reclamo pasa a un
+  especialista») y la consigna del redactor. Dos guardas nuevas en
+  `violation()` rechazan un «?» y un «tu auto» / «tu póliza», que también salió
+  en el ensayo. Las de la derivación (pedir datos, darle género al
+  especialista) valen igual para este mensaje.
+- **Sin consultas nuevas.** Usa las coincidencias que el worker ya tenía, y no
+  busca las iniciales del titular. Se ahorra la deliberación: al menos una
+  llamada a Gemini menos por vuelta.
+- **El formato no es otra persona.** Los puntos del DNI, las mayúsculas, los
+  acentos, la coma y el orden del nombre no derivan: `mismoNombre` y
+  `normalizarNombre` están en `src/core/matching/normalizar.ts`, y
+  `inicialesDelTitularAjeno` usa la misma comparación. Una parte del nombre
+  («Roberto» frente a «Roberto Paz») no es el mismo nombre.
+- **Sin doble derivación.** Con severidad alta o una póliza a derivar, el caso
+  ya se derivó arriba y esto no corre.
+
+**Si la persona contesta después que el dato del padrón era el correcto, el caso
+sigue derivado.** Es lo esperado: que la póliza sea del padre es justo lo que
+tiene que mirar el especialista. Pero la respuesta no la lee nadie más que él:
+
+- **Mail.** `requiere_especialista` no es un estado de arranque. El worker
+  guarda el mensaje sin leerlo, deja `email_worker.mensaje_sin_leer` en `warn` y
+  `MESSAGE_NOT_READ` (`estado_no_reanudable`) en la auditoría del caso.
+- **WhatsApp.** `findExistingWhatsAppCase` sólo retoma `recibido`,
+  `info_faltante` y `confirmacion_pendiente`, así que la respuesta abre un caso
+  nuevo, sin el contexto del anterior.
+- **La máquina de estados** sólo deja salir de `requiere_especialista` a
+  `listo_para_core` o `cerrado`. Nada lo devuelve solo.
+- **El pedido ya no invita a contestar.** Antes cerraba con «Respondé por acá y
+  seguimos», una lectura que el agente no hace. Si igual contesta, pasa lo de
+  arriba.
+
+**Lo que sigue en manos del modelo.** Cero coincidencias porque el número de
+póliza está escrito con otro formato (el guion no se normaliza, a propósito),
+un padre y un hijo con el mismo nombre y distinto DNI, una coincidencia sólo
+por DNI, y un solo dato en conflicto. Aparte, `detectConflicts` sigue marcando
+como conflicto una diferencia de formato en el nombre y pide confirmarla. No
+deriva, pero pregunta de más. Es deuda aparte.
+
+Verificado: 40 tests nuevos (la regla pura, la comparación de nombres, la señal
+del worker por mail y WhatsApp, y la derivación en el orquestador con un solo
+mensaje por los dos canales, sin deliberar y sin doble derivación), y 8 más
+para el mensaje: los dos pisos sin pregunta y con los valores enmascarados, la
+señal hasta el redactor, y las guardas del redactor. El ensayo del escenario
+evita ahora «¿» y «tu auto», y exige «especialista».
+
 ### 🙋 Waiting on you (not code)
+
+- **Qué hacer con la respuesta a un caso ya derivado.** Desde que el titular
+  ajeno se deriva solo, el pedido de confirmación sale y el caso queda en
+  `requiere_especialista` en la misma vuelta. Si la persona contesta, por mail
+  el mensaje queda sin leer (`MESSAGE_NOT_READ`) y por WhatsApp abre un caso
+  nuevo. Falta decidir si `findExistingWhatsAppCase` incluye
+  `requiere_especialista`. El pedido ya no invita a contestar, así que pasa
+  menos, pero sigue pudiendo pasar.
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,
   seguridad, rate-limit, `src/app/api`; 15/09, `cc89d00`): 74/74 archivos, 0

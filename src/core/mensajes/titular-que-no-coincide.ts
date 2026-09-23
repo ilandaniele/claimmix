@@ -11,6 +11,19 @@
  * incumplida en los dos, porque nadie la mira.
  */
 
+/*
+ * El pedido de confirmación cuando quien escribe no es el titular.
+ *
+ * «¿Cuál es el correcto?» no tiene respuesta: la póliza es del padre y el
+ * nombre es de la hija, los dos valores son correctos. Y el caso ya quedó
+ * derivado en esa vuelta, así que tampoco hay nadie del lado del agente que
+ * lea lo que conteste. Se nombra la diferencia y se dice qué pasa.
+ */
+export const NO_COINCIDE_CON_EL_TITULAR =
+  "Los datos que nos pasaste no coinciden con los del titular de la póliza:";
+export const LO_REVISA_UN_ESPECIALISTA =
+  "Como la póliza está a nombre de otra persona, un especialista va a revisar tu caso y se va a comunicar con vos.";
+
 export interface TitularQueNoCoincide {
   /** El titular del padrón, en iniciales: «R*** P***». Nunca el nombre entero. */
   titularIniciales?: string | null;

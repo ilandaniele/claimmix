@@ -94,3 +94,25 @@ export const MINIMO_DNI = 6;
 
 /** Un teléfono con menos de siete dígitos no identifica a nadie. */
 export const MINIMO_TELEFONO = 7;
+
+/**
+ * Un nombre sin acentos, sin mayúsculas, sin signos y con las palabras en orden.
+ *
+ * El orden no cuenta porque el padrón guarda «Apellido Nombre» y la gente
+ * escribe «Nombre Apellido». Sólo signos da `""`: no es un nombre.
+ */
+export function normalizarNombre(crudo: string): string {
+  return crudo
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
+
+/** Una parte del nombre no es el mismo nombre: «Roberto» no es «Roberto Paz». */
+export function mismoNombre(uno: string, otro: string): boolean {
+  return normalizarNombre(uno) === normalizarNombre(otro);
+}

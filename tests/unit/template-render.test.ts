@@ -694,6 +694,23 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
     // Y sigue habiendo algo que confirmar, así que el asunto es el de confirmar.
     expect(result.subject).toContain("Confirmar datos");
   });
+
+  it("si quien escribe no es el titular, dice la diferencia y no pide confirmar nada", () => {
+    // Los dos valores son correctos y el caso ya se derivó en esta vuelta.
+    const result = renderTemplate("data_confirmation_request", { ...TRES, titularAjeno: true });
+
+    expect(result.subject).toContain("Tu reclamo pasa a un especialista");
+    for (const cuerpo of [result.text, result.html]) {
+      expect(cuerpo).toContain("no coinciden con los del titular");
+      expect(cuerpo).toContain("un especialista va a revisar tu caso");
+      expect(cuerpo).not.toContain("Confirmo");
+      expect(cuerpo).not.toContain("?");
+      expect(cuerpo).toContain("Pedro García");
+      expect(cuerpo).toContain("J*** P***");
+      expect(cuerpo).not.toContain("Juan Pérez");
+      expect(cuerpo).not.toContain("20345678");
+    }
+  });
 });
 
 /**

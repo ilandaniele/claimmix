@@ -950,6 +950,16 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         console.log(`       🤖 ${readable(reply.body).replace(/\n/g, "\n          ")}`);
       }
 
+      // Sobre el texto legible, no sobre el HTML crudo: una frase con comilla o
+      // con `&` está ahí como entidad y no machearía nunca, así que la
+      // afirmación daría verde sin haber mirado nada.
+      const all = said.map((r) => readable(r.body)).join("\n").toLowerCase();
+
+      // Un valor de la base dicho tal cual («(null)», «fue 2026-09-22»). Vale
+      // para cada vuelta, espere algo o no.
+      const crudo = /\b(?:null|undefined|true|false)\b|\b\d{4}-\d{2}-\d{2}\b/.exec(all);
+      if (crudo) note(scenario.id, i + 1, `dice el valor crudo "${crudo[0]}"`, "valor-crudo");
+
       const want = turn.expect;
       if (!want) continue;
 
@@ -962,10 +972,6 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         );
       }
 
-      // Sobre el texto legible, no sobre el HTML crudo: una frase con comilla o
-      // con `&` está ahí como entidad y no machearía nunca, así que la
-      // afirmación daría verde sin haber mirado nada.
-      const all = said.map((r) => readable(r.body)).join("\n").toLowerCase();
       const pedidas = new Set(said.flatMap((r) => r.askedKeys));
 
       for (const phrase of want.mentions ?? []) {

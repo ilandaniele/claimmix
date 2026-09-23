@@ -566,8 +566,12 @@ const CLAIM_TYPE_LABELS: Record<string, string> = {
  * synonym for "thing" does not.
  */
 export function labelForClaimType(claimType: string | null | undefined): string | null {
-  if (!claimType) return null;
-  return CLAIM_TYPE_LABELS[claimType] ?? null;
+  // El tipo es texto libre del extractor: "constructor" indexado a secas
+  // devuelve una función.
+  if (!claimType || !Object.prototype.hasOwnProperty.call(CLAIM_TYPE_LABELS, claimType)) {
+    return null;
+  }
+  return CLAIM_TYPE_LABELS[claimType];
 }
 
 /** True when the extractor did not land on a real, nameable kind of accident. */

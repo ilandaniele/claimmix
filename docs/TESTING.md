@@ -83,6 +83,11 @@ nadie lo viera, porque no había un ensayo que lo imprimiera.
 Imprime la conversación completa. **Leela.** La mitad del valor está en que una
 persona note una respuesta que pasa todas las verificaciones y suena mal.
 
+Además de lo que espera cada vuelta, en todas se corre la comprobación
+`valor-crudo`: un `null`, `undefined`, `true`, `false` o una fecha ISO en una
+respuesta es un valor de la base dicho tal cual. La traducción la cubren los
+tests `core/valor-legible` y `orchestrate-post-extraction`.
+
 ```bash
 pnpm rehearse                  # todos
 pnpm rehearse poliza-vencida   # uno solo, por nombre

@@ -3260,6 +3260,51 @@ ya en pie `elPedidoQuedaEnEspera` callaba el caso.
 El ensayo no puede forzar un 429 de la deliberación: este camino lo cubren
 sólo los tests unitarios, en los dos canales.
 
+### 🗓️ Lo que ya entendimos, dicho como lo diría una persona (2026-09-22)
+
+El ensayo del 22/09 mandó cuatro frases con el valor de la base tal cual:
+«¿…la fecha del siniestro fue 2026-09-22?», «no hubo personas lastimadas
+(null)», «(false)» y «la hora aproximada fue "tarde"». El extractor escribe
+`"null"` y `"false"` como texto, y un texto no vacío pasaba por valor; la fecha
+iba en ISO; y el prompt del redactor pedía citar el valor «tal cual» y entre
+comillas.
+
+- **Se traduce una vez, en `buildAskList`.** `valorLegible`
+  (`src/core/mensajes/valor-legible.ts`) dice la fecha como «22 de septiembre»
+  (con año si no es el de hoy, en hora argentina y sin correr el día), los
+  booleanos como sí o no, la gravedad de los heridos como sí o no, y el tipo con
+  su nombre en castellano. Lo demás sale igual. De ahí lo toman el agente, el
+  redactor, su control de campos y los dos pisos.
+- **La base no cambia.** `claim_field_confirmations.suggested_value` y los campos
+  extraídos siguen con el valor crudo. Sólo cambia lo que se muestra.
+- **Lo que no se puede decir se pide, no se confirma.** `null`, `undefined`, el
+  vacío, el tipo `other` o uno desconocido, una fecha ISO que no existe y
+  cualquier documento («si» sólo dice que el extractor lo nombró) quedan fuera
+  de `knownValues`: el campo sale como pedido. `valuesWeHold` ya no toma un
+  `"null"` por valor, así que no tapa al alias que sí lo tiene.
+- **Los pisos ya no traducen.** WhatsApp (`renderAsk`) y el mail
+  (`missing-information-request`) usan el valor como llega. Traducir dos veces
+  borraba el tipo, porque «daño por granizo» no es un tipo.
+- **Con fila pendiente se muestra el valor de esa fila o ninguno.** Es el valor
+  que cierra un «Confirmo»; mostrar el de un alias sería confirmar algo que no
+  se preguntó.
+- **El ensayo lo vigila en cada vuelta.** La comprobación `valor-crudo` marca un
+  `null`, `undefined`, `true`, `false` o una fecha ISO en cualquier respuesta,
+  aunque la vuelta no espere nada.
+- **Un «ok» a una lista no la contesta.** Con los valores legibles, la duda
+  inferida sobre los heridos llegó a la lista, y en el ensayo `silencio` el «ok»
+  de Ana la daba por confirmada, eso contaba como respuesta y le volvía el
+  pedido entero. Ahora un acuse solo (`esSoloUnAcuse`,
+  `src/core/mensajes/acuse.ts`: «ok», «gracias», «dale, gracias», «👍»,
+  mirando el mensaje entero) frente a un pedido de más de una cosa no cierra
+  nada por afirmación, no cuenta como que contestó, y lo que queda de aquel
+  pedido tampoco cuenta como pedido nuevo. «Sí», «Confirmo» y «correcto» siguen
+  contestando, y un «ok» a una sola pregunta también.
+
+Queda sin arreglar, de antes: el DNI y la póliza siguen yendo enteros en
+`knownValues` hasta el redactor (AC24), y un «Confirmo» cierra todas las
+filas preguntadas, no sólo las que la persona vio con valor.
+
 ### 🙋 Waiting on you (not code)
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,

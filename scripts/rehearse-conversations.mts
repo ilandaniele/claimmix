@@ -235,10 +235,13 @@ const SCENARIOS: Scenario[] = [
       },
       {
         say: "No completamos ningún parte amistoso, el otro conductor no quiso",
-        expect: { replies: 1 },
+        // El papel negado no vuelve a la lista, ni como duda del extractor.
+        expect: { replies: 1, noAsked: ["parte_amistoso"] },
       },
     ],
     finally: {
+      // Que el otro no firmara el parte no es motivo para derivar.
+      status: "listo_para_core",
       docsDeclined: ["parte_amistoso"],
       knows: ["policy_number", "full_name"],
     },
@@ -477,7 +480,7 @@ const SCENARIOS: Scenario[] = [
           "> - Parte amistoso de accidente",
           "> - Fotos de los daños",
         ].join("\n"),
-        expect: { replies: 1 },
+        expect: { replies: 1, noAsked: ["parte_amistoso"] },
       },
     ],
     finally: {
@@ -897,6 +900,10 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
   const byEmail = scenario.channel === "email";
   let caseId: string | null = null;
   let seen = 0;
+  // Un estado final que depende de reconocer fotos no se puede exigir con el
+  // marcador de 1×1: el CI no tiene los fixtures y el caso queda esperando lo
+  // que nunca va a reconocer.
+  let fotosSinEnsayar = false;
 
   const seeded = scenario.policy ? await seedPolicy(scenario.policy) : null;
   try {
@@ -1067,6 +1074,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
             // ensayado para que la ausencia se lea al final, en vez de pasar por
             // un verde.
             unrehearsed.add(String(turn.photo));
+            fotosSinEnsayar = true;
           } else if (await extraccionPendiente(active)) {
             // Dos timeouts seguidos: el reconocedor no llegó a correr, así que
             // decir que no reconoció sería culpar a la parte equivocada.
@@ -1090,7 +1098,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
     if (caseId && scenario.finally) {
       const want = scenario.finally;
       const [row] = await db.select({ status: cases.status }).from(cases).where(eq(cases.id, caseId));
-      if (want.status && row?.status !== want.status) {
+      if (want.status && !fotosSinEnsayar && row?.status !== want.status) {
         note(
           scenario.id,
           0,

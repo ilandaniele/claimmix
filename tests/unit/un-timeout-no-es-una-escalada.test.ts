@@ -16,24 +16,38 @@
 
 import { readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+import { esPasajero, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 
 const WORKER = readFileSync("src/server/worker/extract.ts", "utf8");
+// El mismo predicado que usa el reconocedor de negativas: un solo criterio.
+const REINTENTA = "if (esPasajero(err))";
 const MIGRACION = readFileSync(
   "neon/migrations/0030_un_timeout_no_es_una_escalada.sql",
   "utf8"
 );
 
 describe("el reintento por timeout", () => {
-  it("sólo para TIMEOUT, no para cualquier error del proveedor", () => {
+  it.each([
+    ["un TIMEOUT", new GeminiExtractionError("plazo", { code: "TIMEOUT" }), true],
+    ["un 429", new GeminiExtractionError("cupo", { status: 429, code: "RESOURCE_EXHAUSTED" }), true],
+    ["una conexión que no abrió", new GeminiExtractionError("red", { code: "ECONNRESET", red: true }), true],
+    ["un 400", new GeminiExtractionError("400", { status: 400, code: "INVALID_ARGUMENT" }), false],
+    ["un error que no es del proveedor", Object.assign(new Error("x"), { cause: { status: 429 } }), false],
+  ])("sólo para TIMEOUT, 429 y red, no para cualquier error: %s", (_, err, pasajero) => {
     // Vertex es pospago sobre un cupo compartido y dinámico: un 429 es tan
-    // transitorio como un TIMEOUT, con el mismo tope de por vida. Un 400
-    // sigue escalando.
-    expect(WORKER).toContain('if (errCode === "TIMEOUT" || errStatus === 429)');
+    // transitorio como un TIMEOUT, con el mismo tope de por vida. Un socket
+    // que no abrió tras los reintentos de transporte también. Un 400 sigue
+    // escalando.
+    expect(esPasajero(err)).toBe(pasajero);
+    expect(WORKER).toContain(REINTENTA);
   });
 
   it("un 429 va a la cola, un 400 no", () => {
-    const i = WORKER.indexOf('if (errCode === "TIMEOUT" || errStatus === 429)');
+    const i = WORKER.indexOf(REINTENTA);
     const bloque = WORKER.slice(i, WORKER.indexOf("await escalateCase(", i));
     expect(bloque).not.toContain("400");
   });
@@ -66,7 +80,7 @@ describe("el reintento por timeout", () => {
     // reintentaría en cada barrido, pagando una llamada cada vez.
     // Desde el if hacia adelante:  se DEFINE antes en el archivo,
     // así que buscarlo desde el principio da un tramo vacío.
-    const i = WORKER.indexOf('if (errCode === "TIMEOUT" || errStatus === 429)');
+    const i = WORKER.indexOf(REINTENTA);
     const bloque = WORKER.slice(i, WORKER.indexOf("await escalateCase(", i));
     expect(bloque).toContain("if (reintentado)");
     expect(bloque).toContain("return;");

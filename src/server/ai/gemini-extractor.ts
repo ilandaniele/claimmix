@@ -276,9 +276,11 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
 
   // Out of attempts on a connection that never opened. Thrown rather than
   // returned so the caller's own error handling sees it as the failure it is.
+  // `red` marks it as transport, whatever the socket's code: `esPasajero`
+  // reads it.
   throw new GeminiExtractionError(
     `No se pudo conectar con el modelo tras ${maxRetries + 1} intentos`,
-    { code: (lastNetworkError as { cause?: { code?: string } })?.cause?.code }
+    { code: (lastNetworkError as { cause?: { code?: string } })?.cause?.code, red: true }
   );
 }
 
@@ -500,11 +502,33 @@ export function errMeta(e: unknown): { name: string; status: number | null; code
   const cause = (e as GeminiExtractionError)?.cause as
     | { status?: number; code?: string }
     | undefined;
+  // Un error de la base sin envolver —el NeonDbError de un lote de neon-http—
+  // trae el código de Postgres arriba y no tiene causa.
+  const propio = (e as { code?: unknown } | null)?.code;
   return {
     name,
     status: cause?.status ?? null,
-    code: cause?.code ?? null,
+    code: cause?.code ?? (typeof propio === "string" ? propio : null),
   };
+}
+
+/**
+ * Un TIMEOUT, un 429 o una conexión que no abrió: «probá de nuevo», no un
+ * pedido roto.
+ *
+ * El único criterio con el que un turno vuelve a la cola: lo usan el catch del
+ * worker y el reconocedor de negativas. El instanceof no sobra: un
+ * DrizzleQueryError también trae `cause` con `code`.
+ *
+ * La conexión cuenta cuando ya se agotaron los reintentos de transporte. En el
+ * ensayo del 23/09 cuatro ECONNRESET seguidos en ocho segundos escalaron un
+ * caso en una corrida y dejaron mudo el turno en la otra: el mismo pedido, un
+ * rato después, salía bien.
+ */
+export function esPasajero(e: unknown): boolean {
+  if (!(e instanceof GeminiExtractionError)) return false;
+  const { status, code } = errMeta(e);
+  return code === "TIMEOUT" || status === 429 || (e.cause as { red?: unknown })?.red === true;
 }
 
 // ── Email claim extractor (primary production path) ───────────────────────────

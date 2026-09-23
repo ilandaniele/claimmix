@@ -78,13 +78,15 @@ describe("el transporte del modelo corta por tiempo", () => {
         })
     ) as unknown as typeof fetch;
 
-    const { callGemini } = await import("@/server/ai/gemini-extractor");
+    const { callGemini, esPasajero } = await import("@/server/ai/gemini-extractor");
     const arrancó = Date.now();
     const error = await callGemini("sistema", "usuario").catch((e: Error) => e);
     const tardó = Date.now() - arrancó;
 
     // El code viaja en `cause`, que es donde `errMeta` lo lee.
     expect((error as { cause?: { code?: string } }).cause?.code).toBe("TIMEOUT");
+    // Y con esa forma el turno vuelve a la cola en vez de escalar.
+    expect(esPasajero(error)).toBe(true);
     // Y no se reintentó cuatro veces: 4 × 50 ms más los backoffs se notaría.
     expect(tardó).toBeLessThan(1_000);
   });
@@ -181,6 +183,21 @@ describe("el transporte del modelo corta por tiempo", () => {
 
     expect((error as { cause?: { code?: string } }).cause?.code).toBe("TIMEOUT");
     expect(tardó).toBeLessThan(2_000);
+  });
+
+  it("un socket que no abre en ningún intento vuelve a la cola, con su código", async () => {
+    process.env.GEMINI_TIMEOUT_MS = "0";
+    process.env.GEMINI_RETRY_BASE_MS = "1";
+
+    globalThis.fetch = vi.fn(async () => {
+      throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
+    }) as unknown as typeof fetch;
+
+    const { callGemini, errMeta, esPasajero } = await import("@/server/ai/gemini-extractor");
+    const error = await callGemini("sistema", "usuario").catch((e: Error) => e);
+
+    expect(errMeta(error).code).toBe("ECONNRESET");
+    expect(esPasajero(error)).toBe(true);
   });
 
   it("en 0 no corta nada, para el ensayo y para una emergencia", async () => {

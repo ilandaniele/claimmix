@@ -24,7 +24,7 @@ import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments, missingDocs, requiredDocsConfig } from "@/lib/db/schema";
-import { callGemini } from "@/server/ai/gemini-extractor";
+import { callGemini, errMeta, esPasajero } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
@@ -504,7 +504,16 @@ export async function resolveDeclinedDocs(
    * A request that was never made cannot be refused. Passing what we asked for
    * makes that a fact rather than a hope about the model's judgement.
    */
-  alreadyAsked: string[]
+  alreadyAsked: string[],
+  /**
+   * El turno puede volver a la cola si el reconocedor se cae de paso.
+   *
+   * Un 429 o un TIMEOUT leídos como [] son un dato falso —«no negó nada»— y
+   * no un piso honesto como la frase de la deliberación: el pedido queda en
+   * pie por un papel que no existe y el turno se calla. Sólo el llamador sabe
+   * si retomar el turno es posible; si no lo es, se sigue con [] como antes.
+   */
+  vuelveALaCola = false
 ): Promise<string[]> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
@@ -518,7 +527,7 @@ export async function resolveDeclinedDocs(
     if (pending.length === 0) return [];
     if (!MIGHT_BE_DECLINING.test(said)) return [];
 
-    const declined = await identifyDeclined(tenantId, said, pending);
+    const declined = await identifyDeclined(caseId, tenantId, said, pending);
     if (declined.length === 0) return [];
 
     await enTenant(tenantCtx, (db) =>
@@ -551,7 +560,16 @@ export async function resolveDeclinedDocs(
 
     return declined;
   } catch (err) {
-    logger.error({ code: errCode(err), case_id: caseId }, "documents.decline_check_failed");
+    // El pasajero ya lo logueó identifyDeclined.
+    if (esPasajero(err)) {
+      if (vuelveALaCola) throw err;
+      return [];
+    }
+    const { name, status, code } = errMeta(err);
+    logger.error(
+      { error_name: name, status, code, case_id: caseId },
+      "documents.decline_check_failed"
+    );
     return [];
   }
 }
@@ -573,6 +591,7 @@ function normalize(text: string): string {
  * it returns that we were not waiting for is dropped.
  */
 async function identifyDeclined(
+  caseId: string,
   tenantId: string,
   said: string,
   pending: string[]
@@ -642,7 +661,12 @@ Lista vacía si no niega ninguno.`;
       .map((d) => d.clave.trim())
       .filter((k) => pending.includes(k));
   } catch (err) {
-    logger.error({ code: errCode(err) }, "documents.decline_identify_failed");
+    const { name, status, code } = errMeta(err);
+    logger.error(
+      { error_name: name, status, code, case_id: caseId },
+      "documents.decline_identify_failed"
+    );
+    if (esPasajero(err)) throw err;
     return [];
   }
 }

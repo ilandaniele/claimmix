@@ -288,10 +288,10 @@ export function BotonDeFiltros({
         aria-controls={ID_PANEL}
         data-testid="filtros-boton"
         className={[
-          "inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[13px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500",
+          "inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[13px] font-medium shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500",
           puestos.length > 0
             ? "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
-            : "border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+            : "border-control text-slate-600 hover:bg-slate-50 hover:text-slate-900",
         ].join(" ")}
       >
         <ListFilter size={15} aria-hidden="true" />
@@ -384,7 +384,7 @@ export function MarcasDeFiltros() {
   return (
     <div
       ref={franjaRef}
-      className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-2"
+      className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-2"
     >
       {/*
         * Las marcas de lo que está puesto.
@@ -407,7 +407,7 @@ export function MarcasDeFiltros() {
           data-marca={`${f.param}:${f.valor}`}
           onClick={() => sacar(f.param, f.valor, i)}
           aria-label={`${t("filter.quitar")} ${t(f.rotulo)}: ${t(f.etiqueta)}`}
-          className="group inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white py-1 pl-2.5 pr-2 text-[12.5px] font-medium text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+          className="group inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border border-control bg-white py-1 pl-2.5 pr-2 text-[12.5px] font-medium text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
         >
           {/*
             * El punto de color de la severidad. Adentro del panel el nivel se ve

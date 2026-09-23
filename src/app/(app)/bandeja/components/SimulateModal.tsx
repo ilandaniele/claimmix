@@ -127,7 +127,10 @@ export function SimulateModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={handleBackdropClick}
     >
-      <div ref={panelRef} className="relative w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+      <div
+        ref={panelRef}
+        className="relative w-full max-w-lg rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+      >
         {/* Title */}
         <h2
           id="simulate-modal-title"
@@ -177,7 +180,7 @@ export function SimulateModal({
               id="scenario-select"
               value={selectedScenarioId}
               onChange={(e) => setSelectedScenarioId(e.target.value)}
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              className="w-full rounded-md border border-control bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400"
             >
               {scenarios.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -213,7 +216,7 @@ export function SimulateModal({
                 value={customText}
                 onChange={(e) => setCustomText(e.target.value)}
                 placeholder={t("simulate.textoPlaceholder")}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
+                className="w-full rounded-md border border-control px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
               />
             </div>
           </div>

@@ -26,6 +26,10 @@ import { useDialogoModal } from "../_components/dialogo-modal";
 
 const SKIP_CONFIRM_KEY = "claimmix:skip-delete-confirm";
 
+// «Seleccionar» y «Exportar CSV»: mismo botón de contorno, dos veces en el encabezado.
+const BOTON_CONTORNO =
+  "rounded-lg border border-control px-3 py-1.5 text-[13px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900";
+
 // ── Delete confirmation dialog ────────────────────────────────────────────────
 
 interface DeleteConfirmDialogProps {
@@ -58,7 +62,10 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }: DeleteConfirmDialog
         if (e.target === e.currentTarget) onCancel();
       }}
     >
-      <div ref={panelRef} className="w-full max-w-sm rounded-xl bg-white shadow-xl p-6 mx-4">
+      <div
+        ref={panelRef}
+        className="w-full max-w-sm rounded-xl border border-slate-200 bg-white shadow-xl p-6 mx-4"
+      >
         {/* Icon */}
         <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
           <svg
@@ -101,7 +108,7 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }: DeleteConfirmDialog
             ref={cancelarRef}
             type="button"
             onClick={onCancel}
-            className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            className="flex-1 rounded-lg border border-control px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
           >
             {t("bandeja.deleteCancel")}
           </button>
@@ -170,7 +177,7 @@ function Pagination({ page, perPage, total, onPageChange, onPerPageChange }: Pag
     "rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40";
 
   return (
-    <div className="flex flex-shrink-0 flex-col gap-3 border-t border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-shrink-0 flex-col gap-3 border-t border-slate-200 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-3">
         <p className="text-[13px] text-slate-500">
           {t("bandeja.showing")} {from}-{to} {t("pagination.of")} {total} {t("bandeja.claims")}
@@ -185,7 +192,7 @@ function Pagination({ page, perPage, total, onPageChange, onPerPageChange }: Pag
               onPerPageChange(n);
             }}
             aria-label={t("pagination.perPage")}
-            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[13px] text-slate-700 hover:border-slate-300 focus:border-violet-400 focus:outline-none"
+            className="rounded-lg border border-control bg-white px-2 py-1 text-[13px] text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
           >
             {PER_PAGE_OPTIONS.map((n) => (
               <option key={n} value={n}>
@@ -551,8 +558,8 @@ function DashboardClientInterno({
               onClick={() => setSeleccionando((v) => !v)}
               className={
                 seleccionando
-                  ? "rounded-lg bg-slate-900 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-slate-700"
-                  : "rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                  ? "rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-[13px] font-medium text-violet-700 shadow-sm transition-colors hover:bg-violet-100"
+                  : BOTON_CONTORNO
               }
             >
               {seleccionando ? t("bandeja.listo") : t("bandeja.seleccionar")}
@@ -572,7 +579,7 @@ function DashboardClientInterno({
              * mandarlos sólo invita a que alguien los interprete.
              */
             href={`/api/cases/export.csv${exportQuery ? `?${exportQuery}` : ""}`}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            className={BOTON_CONTORNO}
             aria-label={t("bandeja.export")}
           >
             {t("bandeja.export")}
@@ -581,7 +588,7 @@ function DashboardClientInterno({
             type="button"
             onClick={() => setShowSimulateModal(true)}
             data-testid="simulate-button"
-            className="rounded-lg bg-violet-600 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-violet-700"
+            className="rounded-lg bg-violet-600 px-3 py-1.5 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-violet-700"
           >
             {t("bandeja.simulate")}
           </button>

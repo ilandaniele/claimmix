@@ -3129,7 +3129,9 @@ sobre el 429 que esperaban. Una línea por arreglo:
 - **Un 429 de extracción es transitorio, como un TIMEOUT.** Vuelve a la cola con
   la marca puesta y no escala hasta el tercer intento. No se redespacha al
   instante: lo retoma el barrido, así un cupo agotado no quema los tres intentos
-  en segundos.
+  en segundos. *Ampliado 2026-09-23:* un 429 o un TIMEOUT del reconocedor de
+  negativas entra por la misma puerta y con el mismo tope. Ver «El parte que un
+  429 daba por no rechazado».
 - **Un 429 en la deliberación queda a la vista.** `deliberate.ts` sigue
   cayendo a la plantilla, pero escribe `agent.deliberation_failed` en la
   auditoría con el estado y el código del proveedor. *Enmendado 2026-09-22:*
@@ -3259,6 +3261,72 @@ ya en pie `elPedidoQuedaEnEspera` callaba el caso.
 
 El ensayo no puede forzar un 429 de la deliberación: este camino lo cubren
 sólo los tests unitarios, en los dos canales.
+
+### 🧾 El parte que un 429 daba por no rechazado (2026-09-23)
+
+El ensayo `mail-completo` dio rojo en el turno 2 del 23/09. La persona escribió
+que no habían completado ningún parte amistoso, el reconocedor de negativas
+(`identifyDeclined`) cayó por un 429 y su catch devolvió `[]`.
+`resolveDeclinedDocs` leyó eso como «no negó nada»: el turno terminó callado y
+`parte_amistoso` quedó pedido.
+
+- **Un 429 o un TIMEOUT del reconocedor devuelven el turno a la cola.**
+  `identifyDeclined` relanza, el error sube por `orchestratePostExtraction` y lo
+  agarra el catch del worker, el mismo de la extracción: marca pendiente, suma
+  un intento y lo levanta el barrido. No se contesta, no se delibera y no se
+  cierra nada.
+- **Por qué no se sigue sin el dato, como con la pregunta.** Allá el piso es
+  honesto: se contesta el pedido que estaba en pie. Acá seguir sin el
+  reconocedor es afirmar algo falso, que la persona no negó nada, y volver a
+  pedirle un papel que ya dijo que no existe.
+- **Qué cuenta como pasajero.** `GeminiExtractionError` con `TIMEOUT` o 429:
+  `esPasajero`, al lado de `errMeta` en `src/server/ai/gemini-extractor.ts`, y
+  es el mismo predicado en el catch del worker y en el reconocedor. Un 400, un
+  JSON inválido o cualquier otro error siguen como antes: se loguean y el turno
+  sigue sin negativas. `documents.decline_identify_failed` y
+  `documents.decline_check_failed` ahora llevan `error_name`, `status` y `code`,
+  sin el mensaje. `errMeta` lee el `code` de la causa y, si no hay, el de arriba:
+  así un `NeonDbError` sin envolver sigue diciendo su código de Postgres.
+- **Cuándo se sigue sin él.** Si el turno no se puede retomar, relanzar lo
+  mata: con la derivación ya mandada (severidad alta o póliza a derivar), con
+  la corrida heredada ya contestada, o con el caso en un estado del que el
+  worker no arranca (`listo`, `requiere_especialista`). El worker lo avisa con
+  `sePuedeRetomar: puedeArrancar(newStatus)`; sin el aviso, se sigue con `[]`.
+  En el turno 2 real el caso ya está en `info_faltante` o
+  `confirmacion_pendiente`, así que sí vuelve a la cola.
+- **El tope es el de la extracción.** Mismo contador `intentos_de_extraccion`,
+  tres de por vida. Agotado, el caso escala por `provider_error` con el estado
+  del proveedor en el registro. Antes ese turno quedaba mudo; ahora queda a la
+  vista.
+- **Qué rehace la retoma.** Vuelve a extraer (se paga otra llamada), a escribir
+  el caso con los mismos valores y a pasar por el alta de documentos y el
+  contacto, que son idempotentes. Lo que no lo es corre después del
+  reconocedor: `resolveAnsweredConfirmations`, que consume la señal de la
+  confirmación, y `reconcileAttachments`, que gasta una de las tres miradas de
+  cada adjunto. Así la retoma encuentra las confirmaciones intactas y no mira
+  dos veces un archivo por el mismo mensaje. Efecto de ese orden con el
+  reconocedor sano: le llegan también los pedidos que un adjunto de este mismo
+  mensaje va a cerrar, y el adjunto ya no se compara con un papel negado.
+- **Queda afuera `identifyDocument`.** Un 429 al mirar un adjunto sigue
+  leyéndose como «no es ninguno de los pedidos», y esa mirada cuenta.
+- **Un documento no es una duda.** El `pnpm check` del 23/09 mostró otra puerta
+  en `choque-completo`, turno 4: la negativa se reconoció y el parte quedó
+  negado, pero el extractor leyó la misma frase como `parte_amistoso = "no"` a
+  confianza media, `collectConfirmableFields` lo tomó como duda y el piso sin
+  plan le volvió a pedir el papel. Ahora un documento no entra nunca por las
+  confirmaciones: se pide sólo por `missing_docs`, que sabe si llegó y si se
+  negó. El ensayo lo vigila con `noAsked: ["parte_amistoso"]` en ese turno y en
+  el 2 de `mail-completo`.
+- **Que no haya parte no es motivo para derivar.** Sin la duda fantasma la
+  lista quedó vacía y la deliberación derivó el caso a un especialista en 3 de
+  3 ensayos: leyó «el otro conductor no quiso» como algo que excede el trámite
+  (criterio 6). El prompt ahora dice que un papel que no existe es lo más común
+  en un choque y que, sin nada más pendiente, se elige `acknowledge`.
+  `choque-completo` exige `status: "listo_para_core"` al final, como decía su
+  descripción y nadie verificaba.
+
+El ensayo no puede forzar un 429 del reconocedor: este camino lo cubren sólo
+los tests unitarios, en los dos canales, con la retoma incluida.
 
 ### 🗓️ Lo que ya entendimos, dicho como lo diría una persona (2026-09-22)
 

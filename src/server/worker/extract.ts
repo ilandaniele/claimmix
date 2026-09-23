@@ -61,7 +61,7 @@ import { checkBudget, recordUsage } from "@/server/ai/budget";
 import { ClaimAgentError, runClaimTextAgent, runEmailClaimAgent } from "@/server/ai/claim-agent";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
-import { GeminiExtractionError } from "@/server/ai/gemini-extractor";
+import { errMeta, esPasajero, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
 import { findCustomerMatches, MATCH_QUE_VINCULA } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
@@ -1568,6 +1568,7 @@ export async function runEmailExtractionWorker(
           latestMessageText: latestInboundText,
           polizas,
           heredadaEn,
+          sePuedeRetomar: puedeArrancar(newStatus),
         },
         customerMatches,
         messengerFor(caseRow.channel)
@@ -1614,11 +1615,7 @@ export async function runEmailExtractionWorker(
     if (err instanceof GeminiExtractionError) {
       // The error carries the real provider status/code (e.g. 429 /
       // RESOURCE_EXHAUSTED) on its cause — surface it instead of a generic label.
-      const cause = (err as GeminiExtractionError).cause as
-        | { status?: number; code?: string }
-        | undefined;
-      const errStatus = typeof cause?.status === "number" ? cause.status : null;
-      const errCode = typeof cause?.code === "string" ? cause.code : null;
+      const { status: errStatus, code: errCode } = errMeta(err);
 
       /*
        * Un TIMEOUT no es una escalada. Es «probá de nuevo».
@@ -1645,7 +1642,7 @@ export async function runEmailExtractionWorker(
        * de «este caso rompe siempre»: un mensaje que agota el plazo SIEMPRE se
        * reintentaría en cada barrido, pagando una llamada cada vez.
        */
-      if (errCode === "TIMEOUT" || errStatus === 429) {
+      if (esPasajero(err)) {
         const reintentado = await reintentarPorTimeout(caseId, tenantCtx);
         if (reintentado) {
           logger.warn({

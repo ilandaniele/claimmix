@@ -109,6 +109,13 @@ export interface ExtractedClaimOutput {
    * comprobarlo contra lo que había llegado hasta entonces.
    */
   heredadaEn?: string;
+  /**
+   * El barrido retoma el caso si este turno vuelve a la cola.
+   *
+   * Sólo el worker sabe en qué estado dejó el caso, y un caso que ya no está
+   * en uno de arranque no lo retoma nadie: ahí el turno sigue como pueda.
+   */
+  sePuedeRetomar?: boolean;
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -298,16 +305,6 @@ export async function orchestratePostExtraction(
   // Ver `esSoloUnAcuse`.
   const soloAcuse = lastAsked.length > 1 && esSoloUnAcuse(latestMessageText);
 
-  // A field the claimant has now answered is no longer pending. Runs BEFORE
-  // the gap analysis, which reads those rows straight back out.
-  const confirmacionesContestadas = await resolveAnsweredConfirmations(
-    caseId,
-    tenantId,
-    extractedClaim.fields,
-    soloAcuse ? undefined : latestMessageText,
-    lastAsked
-  );
-
   // Documents, before the gap analysis reads what is outstanding.
   //
   // Register what this kind of claim needs — required_docs_config was seeded
@@ -325,17 +322,41 @@ export async function orchestratePostExtraction(
   // es el remitente, y pedirle a alguien el número desde el que está escribiendo
   // es de las cosas que hacen que deje de contestar.
   await satisfyContactDocsWeAlreadyHave(caseId, tenantId, extractedClaim.fields);
-  await reconcileAttachments(caseId, tenantId, labelForClaimType(claimTypeValue));
 
   // And close the ones they have just told us do not exist. Most crashes have
   // no friendly accident report — our own message says "si lo completaron" —
   // and until now "no completamos ninguno" was heard as silence: the request
   // stayed open, every round asked again, and the case died of abandonment two
   // weeks later.
+  //
+  // Un 429 o un TIMEOUT del reconocedor devuelven el turno a la cola: no se
+  // contesta, no se delibera y no se cierra nada. Con la derivación ya hecha,
+  // o con el caso en un estado que el barrido no retoma, se sigue sin él.
   const documentosDeclinados = await resolveDeclinedDocs(
     caseId,
     tenantId,
     latestMessageText,
+    lastAsked,
+    !derivaSola && !yaContestada && extractedOutput.sePuedeRetomar === true
+  );
+
+  // Los adjuntos, recién después del reconocedor: cada mirada gasta una de las
+  // tres que el archivo tiene de por vida, y si el turno vuelve a la cola la
+  // retoma los miraría otra vez por el mismo mensaje. Lo de arriba es
+  // idempotente.
+  await reconcileAttachments(caseId, tenantId, labelForClaimType(claimTypeValue));
+
+  // A field the claimant has now answered is no longer pending. Runs BEFORE
+  // the gap analysis, which reads those rows straight back out.
+  //
+  // Y después del reconocedor de negativas, que es lo único que puede devolver
+  // el turno a la cola: este UPDATE consume la señal, y la retoma tiene que
+  // encontrarla intacta.
+  const confirmacionesContestadas = await resolveAnsweredConfirmations(
+    caseId,
+    tenantId,
+    extractedClaim.fields,
+    soloAcuse ? undefined : latestMessageText,
     lastAsked
   );
 
@@ -1598,6 +1619,11 @@ function collectConfirmableFields(
 
   for (const rawKey of uncertainKeys) {
     if (!isWorthConfirming(rawKey)) continue;
+    // Un documento se pide por `missing_docs`, que sabe si llegó y si la
+    // persona dijo que no existe. Como duda volvía por la puerta de atrás: el
+    // extractor lee «no completamos ningún parte» como parte_amistoso = "no" a
+    // confianza media, y se le volvía a pedir el papel que acababa de negar.
+    if (isDocument(rawKey)) continue;
     // Worked out from something we already read well — an analyst can correct
     // it without costing the claimant an email.
     if (isDerivable(rawKey, confidenceOf)) continue;

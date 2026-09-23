@@ -37,8 +37,17 @@ vi.mock("@/lib/db", () => ({
   db: { select: vi.fn(), insert: vi.fn(), update: vi.fn() },
 }));
 
-vi.mock("@/server/ai/gemini-extractor", () => ({
+// El GeminiExtractionError y el errMeta de verdad: con qué criterio se
+// relanza una caída del reconocedor es justo lo que se prueba más abajo.
+vi.mock("@/server/ai/gemini-extractor", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/ai/gemini-extractor")>()),
   callGemini: vi.fn(),
+}));
+
+const { mockLogError } = vi.hoisted(() => ({ mockLogError: vi.fn() }));
+
+vi.mock("@/lib/observability/logger", () => ({
+  logger: { error: mockLogError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
 vi.mock("@/lib/audit/log", () => ({
@@ -57,7 +66,7 @@ import {
   resolveDeclinedDocs,
 } from "@/server/cases/documents";
 import { db } from "@/lib/db";
-import { callGemini } from "@/server/ai/gemini-extractor";
+import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { writeAuditLog } from "@/lib/audit/log";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
@@ -623,5 +632,208 @@ describe("reconcileAttachments — el adjunto recuerda qué cerró", () => {
     );
     expect(esquema).toContain('matched_doc_key: text("matched_doc_key")');
     expect(esquema).not.toContain('matched_doc_key: text("matched_doc_key").notNull()');
+  });
+});
+
+/**
+ * Un reconocedor caído no es un «no negó nada».
+ *
+ * El `pnpm check` del 23/09, `mail-completo` turno 2: la persona escribió que
+ * no había parte amistoso, `identifyDeclined` recibió un 429 a los 8,7 s y su
+ * catch devolvió []. Eso se leyó como que no había negado nada, la deliberación
+ * también cayó, el turno terminó mudo y el parte quedó pedido para siempre. Un
+ * fallo técnico convertido en dato.
+ */
+describe("resolveDeclinedDocs — un reconocedor caído no es un «no negó nada»", () => {
+  const DICHO = "No completamos ningún parte amistoso, el otro conductor no quiso.";
+  const ASKED = ["parte_amistoso"];
+  const MENSAJE = "Quota exceeded for generate_content_requests_per_minute";
+
+  const cupo = () =>
+    new GeminiExtractionError(MENSAJE, { status: 429, code: "RESOURCE_EXHAUSTED" });
+
+  function caeCon(err: unknown) {
+    queueSelects([{ doc_key: "parte_amistoso" }]);
+    vi.mocked(callGemini).mockRejectedValue(err);
+  }
+
+  function reconoce() {
+    queueSelects([{ doc_key: "parte_amistoso" }]);
+    vi.mocked(callGemini).mockResolvedValue({
+      text: JSON.stringify({
+        declined: [{ clave: "parte_amistoso", cita: "No completamos ningún parte amistoso" }],
+      }),
+      usage: { promptTokens: 0, completionTokens: 0 },
+      model: "gemini-2.5-flash",
+    });
+  }
+
+  it("un 429 vuelve a la cola si el turno se puede retomar", async () => {
+    const err = cupo();
+    caeCon(err);
+
+    await expect(resolveDeclinedDocs(CASE, TENANT, DICHO, ASKED, true)).rejects.toBe(err);
+
+    expect(db.update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    expect(db.select).toHaveBeenCalledTimes(1);
+  });
+
+  it("un TIMEOUT se comporta igual", async () => {
+    const err = new GeminiExtractionError("plazo", { code: "TIMEOUT" });
+    caeCon(err);
+
+    await expect(resolveDeclinedDocs(CASE, TENANT, DICHO, ASKED, true)).rejects.toBe(err);
+
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("sin el aviso, el mismo 429 no corta el turno", async () => {
+    // El default es la conducta de antes: quien no puede retomar el turno
+    // sigue sin la negativa.
+    caeCon(cupo());
+
+    await expect(resolveDeclinedDocs(CASE, TENANT, DICHO, ASKED)).resolves.toEqual([]);
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, () => void]>([
+    ["un 400", () => caeCon(new GeminiExtractionError("400", { status: 400, code: "INVALID_ARGUMENT" }))],
+    ["un MAX_TOKENS", () => caeCon(new GeminiExtractionError("max", { status: 200, code: "MAX_TOKENS" }))],
+    ["un 503 agotado", () => caeCon(new GeminiExtractionError("503", { status: 503, code: "UNAVAILABLE" }))],
+    ["un GeminiExtractionError sin causa", () => caeCon(new GeminiExtractionError("sin clave"))],
+    [
+      "un JSON inválido",
+      () => {
+        queueSelects([{ doc_key: "parte_amistoso" }]);
+        vi.mocked(callGemini).mockResolvedValue({
+          text: "esto no es JSON",
+          usage: { promptTokens: 0, completionTokens: 0 },
+          model: "gemini-2.5-flash",
+        });
+      },
+    ],
+    [
+      "un Error común con causa 429",
+      () => caeCon(Object.assign(new Error("otra cosa"), { cause: { status: 429 } })),
+    ],
+  ])("%s no corta el turno aunque se pueda retomar", async (_nombre, preparar) => {
+    preparar();
+
+    await expect(resolveDeclinedDocs(CASE, TENANT, DICHO, ASKED, true)).resolves.toEqual([]);
+    expect(db.update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  const drizzle = () =>
+    Object.assign(new Error("Failed query"), {
+      name: "DrizzleQueryError",
+      cause: Object.assign(new Error("terminating connection"), { code: "57P01" }),
+    });
+  // Lo que tira el lote de neon-http que usa `enTenant`: el código arriba, sin causa.
+  const neon = () =>
+    Object.assign(new Error("permission denied for table missing_docs"), {
+      name: "NeonDbError",
+      code: "42501",
+    });
+
+  it.each([
+    ["DrizzleQueryError", true, drizzle, "57P01"],
+    ["DrizzleQueryError", false, drizzle, "57P01"],
+    ["NeonDbError", true, neon, "42501"],
+    ["NeonDbError", false, neon, "42501"],
+  ] as const)(
+    "la base caída (%s) sigue tragándose y dice su código (vuelveALaCola=%s)",
+    async (error_name, vuelve, caida, code) => {
+      reconoce();
+      (db.update as ReturnType<typeof vi.fn>).mockReturnValue({
+        set: () => ({ where: () => Promise.reject(caida()) }),
+      });
+
+      await expect(resolveDeclinedDocs(CASE, TENANT, DICHO, ASKED, vuelve)).resolves.toEqual([]);
+
+      expect(mockLogError).toHaveBeenCalledTimes(1);
+      expect(mockLogError).toHaveBeenCalledWith(
+        { error_name, status: null, code, case_id: CASE },
+        "documents.decline_check_failed"
+      );
+    }
+  );
+
+  it.each([true, false])(
+    "el log dice el estado del proveedor, una sola vez (vuelveALaCola=%s)",
+    async (vuelve) => {
+      caeCon(cupo());
+
+      await resolveDeclinedDocs(CASE, TENANT, DICHO, ASKED, vuelve).catch(() => undefined);
+
+      expect(mockLogError).toHaveBeenCalledTimes(1);
+      expect(mockLogError).toHaveBeenCalledWith(
+        { error_name: "GeminiExtractionError", status: 429, code: "RESOURCE_EXHAUSTED", case_id: CASE },
+        "documents.decline_identify_failed"
+      );
+      // Ni lo que escribió la persona ni el texto del proveedor.
+      const logueado = JSON.stringify(mockLogError.mock.calls);
+      expect(logueado).not.toContain("parte amistoso");
+      expect(logueado).not.toContain(MENSAJE);
+    }
+  );
+
+  it("con el reconocedor sano, el aviso no cambia nada", async () => {
+    reconoce();
+    const sinAviso = await resolveDeclinedDocs(CASE, TENANT, DICHO, ASKED);
+    const escriturasSinAviso = actualizacionesDePedidos().length;
+
+    reconoce();
+    const conAviso = await resolveDeclinedDocs(CASE, TENANT, DICHO, ASKED, true);
+
+    expect(sinAviso).toEqual(["parte_amistoso"]);
+    expect(conAviso).toEqual(sinAviso);
+    expect(actualizacionesDePedidos()).toHaveLength(escriturasSinAviso * 2);
+    expect(mockLogError).not.toHaveBeenCalled();
+  });
+
+  it("un 429 real de Vertex llega con la forma que se relanza", async () => {
+    // El callGemini de verdad contra un fetch que devuelve 429: lo que importa
+    // es que el error que arma el proveedor sea el que `esPasajero` reconoce.
+    const real = await vi.importActual<typeof import("@/server/ai/gemini-extractor")>(
+      "@/server/ai/gemini-extractor"
+    );
+    const guardadas = {
+      GEMINI_TRANSPORT: process.env.GEMINI_TRANSPORT,
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+      GEMINI_MAX_RETRIES: process.env.GEMINI_MAX_RETRIES,
+      GEMINI_RETRY_BASE_MS: process.env.GEMINI_RETRY_BASE_MS,
+      GEMINI_MIN_REQUEST_INTERVAL_MS: process.env.GEMINI_MIN_REQUEST_INTERVAL_MS,
+    };
+    const fetchOriginal = globalThis.fetch;
+    process.env.GEMINI_TRANSPORT = "";
+    process.env.GEMINI_API_KEY = "clave-de-prueba";
+    process.env.GEMINI_MAX_RETRIES = "0";
+    process.env.GEMINI_RETRY_BASE_MS = "0";
+    process.env.GEMINI_MIN_REQUEST_INTERVAL_MS = "0";
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 429,
+      headers: new Headers(),
+      json: async () => ({ error: { status: "RESOURCE_EXHAUSTED", message: MENSAJE } }),
+    })) as unknown as typeof fetch;
+
+    try {
+      queueSelects([{ doc_key: "parte_amistoso" }]);
+      vi.mocked(callGemini).mockImplementation(real.callGemini);
+
+      const err = await resolveDeclinedDocs(CASE, TENANT, DICHO, ASKED, true).catch((e) => e);
+
+      expect(err).toBeInstanceOf(GeminiExtractionError);
+      expect((err as GeminiExtractionError).cause).toMatchObject({ status: 429 });
+      expect(db.update).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = fetchOriginal;
+      for (const [k, v] of Object.entries(guardadas)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 });

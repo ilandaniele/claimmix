@@ -15,7 +15,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ── Hoisted shared state ───────────────────────────────────────────────────────
 
 const {
-  GeminiExtractionError,
   mockExtractEmailClaimGemini,
   mockLogAgentRunError,
   mockLogAgentRun,
@@ -23,23 +22,7 @@ const {
   mockFindCustomerMatches,
   mockFindPolicyMatches,
 } = vi.hoisted(() => {
-  /*
-   * El doble tiene que llevar `cause`, como la clase de verdad.
-   *
-   * Sin eso, el `error_status` y el `error_code` que el worker saca del `cause`
-   * salían siempre null, y el registro de un caso escalado por proveedor no
-   * decía si había sido un 429 de cupo o un 500. El doble aceptaba un mensaje y
-   * nada más, así que ese camino no se ejercitaba: la firma de la clase real es
-   * `(message, cause?)`.
-   */
-  const GeminiErrClass = class GeminiExtractionError extends Error {
-    constructor(msg: string, public readonly cause?: unknown) {
-      super(msg);
-      this.name = "GeminiExtractionError";
-    }
-  };
   return {
-    GeminiExtractionError: GeminiErrClass,
     mockExtractEmailClaimGemini: vi.fn(),
     mockLogAgentRunError: vi.fn(),
     mockLogAgentRun: vi.fn(),
@@ -80,10 +63,12 @@ vi.mock("@/data/scope", async () => {
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/server/ai/gemini-extractor", () => ({
+// La clase, `errMeta` y `esPasajero` de verdad: con qué criterio el worker
+// reintenta o escala es lo que se prueba acá, y un doble de la clase no lo ve.
+vi.mock("@/server/ai/gemini-extractor", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/ai/gemini-extractor")>()),
   extractEmailClaimGemini: mockExtractEmailClaimGemini,
   runGeminiExtractor: vi.fn(),
-  GeminiExtractionError,
 }));
 
 vi.mock("@/server/ai/openai-extractor", () => ({
@@ -180,7 +165,7 @@ vi.mock("@/server/training/custom-fields", () => ({
 }));
 
 vi.mock("@/server/ai/hydrate-fields", () => ({
-  hydrateFieldsFromExtracted: vi.fn((c: unknown) => c),
+  hydrateFieldsFromExtracted: vi.fn().mockReturnValue([]),
   scrubPiiFromSummary: vi.fn((s: string) => s),
 }));
 
@@ -206,17 +191,22 @@ vi.mock("@/lib/db", () => {
 // ── Import worker AFTER all mocks ─────────────────────────────────────────────
 
 import { runEmailExtractionWorker } from "@/server/worker/extract";
+import { GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { db } from "@/lib/db";
 import { instalarDbSimulado } from "./db-simulado";
+import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
+import { requiresSpecialist } from "@/server/ai/severity-classifier";
+import { writeAuditLog } from "@/lib/audit/log";
+import { extraccion } from "../../../helpers/extraccion";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function setupDbMock() {
+function setupDbMock(channel = "email_sim") {
   capturedCaseUpdates = [];
   instalarDbSimulado(db as unknown as Record<string, unknown>, {
     caso: {
       id: "case-gemini-err",
-      channel: "email_sim",
+      channel,
       email_thread_id: null,
       policyholder_name: "Ana García",
       policy_number: "POL-987",
@@ -432,5 +422,132 @@ describe("BUDGET-EXCEEDED: case is escalated when internal budget guard fires", 
     await expect(
       runEmailExtractionWorker("case-budget-exceeded", "tenant-001", "user-001")
     ).resolves.toBeUndefined();
+  });
+});
+
+/*
+ * El reconocedor de negativas corre adentro de `orchestratePostExtraction`, y
+ * cuando Gemini le contesta 429 o TIMEOUT el error sube hasta acá. Este catch es
+ * el mismo de la extracción: el turno vuelve a la cola con el mismo tope, en vez
+ * de terminar callado con el parte todavía pedido.
+ */
+describe("un reconocedor caído en la orquestación devuelve el turno a la cola", () => {
+  const reclamo = (missing_fields: string[]) =>
+    extraccion({
+      extraction_model: "gemini-2.5-flash",
+      fields: [],
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      cost_usd: 0,
+      is_claim: true,
+      missing_fields,
+      severity: "medium",
+      requires_specialist: false,
+    });
+  const RECLAMO = reclamo(["dni"]);
+  const ERRORES = [
+    ["429", () => new GeminiExtractionError("429 RESOURCE_EXHAUSTED", { status: 429, code: "RESOURCE_EXHAUSTED" })],
+    ["TIMEOUT", () => new GeminiExtractionError("timeout", { code: "TIMEOUT" })],
+  ] as const;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.MOCK_AI;
+    mockCheckBudget.mockResolvedValue({ exceeded: false });
+    mockFindCustomerMatches.mockResolvedValue([]);
+    mockFindPolicyMatches.mockResolvedValue([]);
+    mockLogAgentRunError.mockResolvedValue("err-run-id");
+    mockLogAgentRun.mockResolvedValue(undefined);
+    mockExtractEmailClaimGemini.mockResolvedValue(RECLAMO);
+    vi.mocked(requiresSpecialist).mockReturnValue(false);
+  });
+
+  const extraccionCompleta = () =>
+    vi
+      .mocked(writeAuditLog)
+      .mock.calls.some((c) => c[0].event_type === "claim.extraction_complete");
+
+  describe.each(["email_sim", "whatsapp_sim"])("%s", (canal) => {
+    it.each(ERRORES)("un %s marca el caso pendiente y no escala", async (_, error) => {
+      setupDbMock(canal);
+      vi.mocked(orchestratePostExtraction).mockRejectedValueOnce(error());
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      await expect(
+        runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001")
+      ).resolves.toBeUndefined();
+
+      expect(capturedCaseUpdates).toContainEqual(
+        expect.objectContaining({ extraction_pending: true, intentos_de_extraccion: expect.anything() })
+      );
+      expect(capturedCaseUpdates.find((u) => u.status === "escalado")).toBeUndefined();
+      expect(mockLogAgentRunError).not.toHaveBeenCalled();
+      expect(extraccionCompleta()).toBe(false);
+      const soltada = capturedCaseUpdates.filter(
+        (u) => "extraction_lease_at" in u && (u as Record<string, unknown>).extraction_lease_at === null
+      );
+      expect(soltada).toHaveLength(1);
+      expect(soltada[0]).not.toHaveProperty("extraction_pending");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+  });
+
+  it("con los intentos agotados escala como error del proveedor", async () => {
+    setupDbMock();
+    type Cadena = { set: (datos: Record<string, unknown>) => unknown };
+    const actualizar = db.update as unknown as ReturnType<typeof vi.fn>;
+    const armar = actualizar.getMockImplementation() as (...a: unknown[]) => Cadena;
+    actualizar.mockImplementation((...a: unknown[]) => {
+      const cadena = armar(...a);
+      return {
+        set: (datos: Record<string, unknown>) =>
+          "intentos_de_extraccion" in datos
+            ? { where: () => Object.assign(Promise.resolve({ rowCount: 0 }), { returning: () => Promise.resolve([]) }) }
+            : cadena.set(datos),
+      };
+    });
+    vi.mocked(orchestratePostExtraction).mockRejectedValueOnce(ERRORES[0][1]());
+
+    await runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001");
+
+    expect(capturedCaseUpdates.find((u) => u.status === "escalado")).toBeDefined();
+    const escalado = vi
+      .mocked(writeAuditLog)
+      .mock.calls.map((c) => c[0].payload as Record<string, unknown>)
+      .find((p) => p?.new_status === "escalado");
+    expect(escalado).toMatchObject({ reason: "provider_error", error_status: 429 });
+    expect(mockLogAgentRunError).toHaveBeenCalledTimes(1);
+  });
+
+  it("un 400 no se reintenta: escala", async () => {
+    setupDbMock();
+    vi.mocked(orchestratePostExtraction).mockRejectedValueOnce(
+      new GeminiExtractionError("400 INVALID_ARGUMENT", { status: 400, code: "INVALID_ARGUMENT" })
+    );
+
+    await runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001");
+
+    expect(capturedCaseUpdates.find((u) => u.status === "escalado")).toBeDefined();
+    expect(capturedCaseUpdates.some((u) => "intentos_de_extraccion" in u)).toBe(false);
+  });
+
+  /*
+   * Devolver el turno sólo sirve si el barrido lo puede levantar. Un caso que
+   * queda en `listo` o en `requiere_especialista` no arranca más, así que ahí la
+   * orquestación tiene que seguir sin el reconocedor.
+   */
+  it.each([
+    ["info_faltante", RECLAMO, false, true],
+    ["requiere_especialista", RECLAMO, true, false],
+    ["listo", reclamo([]), false, false],
+  ] as const)("sePuedeRetomar con el caso en %s", async (_, reclamo, especialista, esperado) => {
+    setupDbMock();
+    mockExtractEmailClaimGemini.mockResolvedValue(reclamo);
+    vi.mocked(requiresSpecialist).mockReturnValue(especialista);
+
+    await runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001");
+
+    expect(vi.mocked(orchestratePostExtraction).mock.calls[0][2].sePuedeRetomar).toBe(esperado);
   });
 });

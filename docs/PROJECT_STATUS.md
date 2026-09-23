@@ -3132,7 +3132,9 @@ sobre el 429 que esperaban. Una línea por arreglo:
   en segundos.
 - **Un 429 en la deliberación queda a la vista.** `deliberate.ts` sigue
   cayendo a la plantilla, pero escribe `agent.deliberation_failed` en la
-  auditoría con el estado y el código del proveedor.
+  auditoría con el estado y el código del proveedor. *Enmendado 2026-09-22:*
+  si el último mensaje traía una pregunta, se contesta igual en la misma
+  vuelta. Ver «La pregunta que un 429 dejaba sin respuesta».
 
 **Riesgos que quedan, sabidos:**
 
@@ -3148,6 +3150,13 @@ sobre el 429 que esperaban. Una línea por arreglo:
   siempre nunca escala.
 - Un lote con varios remitentes comparte los 300 s de una sola invocación; los
   que no entran esperan al barrido, dos minutos después.
+- Sin deliberación, una pregunta se reconoce sólo por los signos `?` y `¿`. Un
+  «cuánto tarda» sin signos, un `?` pegado a una letra («tarda?Necesito») o
+  una pregunta más allá de los primeros 4.000 caracteres quedan sin contestar,
+  como antes. Un «¿Viste?» se toma por pregunta y reenvía el pedido que ya
+  estaba en pie, con la frase honesta.
+- Una pregunta que llega después del cierre, o en la vuelta en que sale un
+  conflicto, sigue sin respuesta propia. Son huecos anteriores y no se tocaron.
 
 ### ✍️ Lo que el ensayo dejó ver de la redacción (2026-09-21)
 
@@ -3214,6 +3223,42 @@ Dos cosas que el diagnóstico costó y conviene no repetir: el
 falta nada» y la FSM la frena siempre—, y el `missing_fields_count` del worker
 no conoce `missing_docs` ni `claim_field_confirmations`, así que un 0 ahí no
 significa que no quede nada por pedir.
+
+### ❓ La pregunta que un 429 dejaba sin respuesta (2026-09-22)
+
+El ensayo `pregunta` dio rojo en el turno 2: la persona preguntó «¿cuánto
+suele tardar esto?», la deliberación cayó por un 429 (`RESOURCE_EXHAUSTED`) y
+no salió nada. Sin plan, `nosPreguntoAlgo` era siempre falso, y con el pedido
+ya en pie `elPedidoQuedaEnEspera` callaba el caso.
+
+- **Sin plan, la pregunta sale del mensaje.** `laPreguntaDelMensaje`
+  (`src/core/mensajes/pregunta.ts`) la toma sólo por los signos `?` y `¿`, sin
+  las URLs, con cuatro letras o más y hasta 400 caracteres. Con plan, manda el
+  plan y el detector no se usa.
+- **Sólo mira lo que escribió la persona, y sólo el principio.** Lee los
+  primeros 4.000 caracteres, el tope por mensaje del extractor: la búsqueda es
+  cuadrática en un tramo sin puntuación y un mail de un mega trababa el worker
+  minutos. Corta la cita, también la de Outlook y Hotmail (guiones bajos, «De:»
+  y «Enviado:», sin `>`), que traía nuestra propia pregunta, y la firma («--»),
+  y descarta el pie de «¿necesitás imprimir este correo?»: con un «?» fijo,
+  cada «gracias» de esa persona reenviaba el pedido. Esos cortes no van en
+  `stripQuotedReply`: la firma trae nombre y teléfono, y un reenvío desde
+  Outlook trae el siniestro debajo del mismo encabezado; el extractor necesita
+  los dos.
+- **Se contesta en la misma vuelta.** Sale el pedido que ya estaba en pie, sin
+  alargarlo (#257 sigue valiendo), o el cierre si no falta nada. El turno no se
+  reintenta ni se difiere.
+- **La frase honesta vive en el piso, una vez.** `conRespuestaPendiente` la
+  agrega al piso de WhatsApp (pedido y cierre) y la plantilla de cierre por
+  mail la trae cuando hay pregunta, como ya la traía la de datos faltantes. Con
+  el redactor apagado o caído, el piso es lo que sale.
+- **La pregunta entra al redactor sin números enteros.** Ya no viene del
+  resumen del agente sino del mensaje crudo, así que pasa por
+  `sinNumerosEnteros` antes del prompt. No se anota en la auditoría ni en los
+  logs.
+
+El ensayo no puede forzar un 429 de la deliberación: este camino lo cubren
+sólo los tests unitarios, en los dos canales.
 
 ### 🙋 Waiting on you (not code)
 
@@ -3297,10 +3342,13 @@ significa que no quede nada por pedir.
   de recibo pide lo mismo: es un juicio sobre el último mensaje, y sin
   deliberación no hay juicio. Todo en #257.
 
-- ~~**Dos decisiones sobre el 429**~~ ✅ **DECIDIDAS 2026-09-21.** Un 429 de
+- ~~**Dos decisiones sobre el 429**~~ ✅ **DECIDIDAS 2026-09-21, enmendada
+  2026-09-22.** Un 429 de
   extracción vuelve a la cola como un TIMEOUT, y uno en la deliberación sigue
   cayendo a la plantilla pero deja `agent.deliberation_failed` en la
-  auditoría. Detalle en «Los barridos, la corrida muerta y el 429».
+  auditoría. Detalle en «Los barridos, la corrida muerta y el 429». La
+  enmienda: si el mensaje traía una pregunta, se contesta igual en la misma
+  vuelta; ver «La pregunta que un 429 dejaba sin respuesta».
 
 - ~~**¿Corro `pnpm achicar-payloads --apply` contra producción?**~~ ✅ **HECHO 2026-09-11.**
   356 filas, 12.808 → 2.518 kB. Nadie en `src/` lee `body.data` de `raw_payload`

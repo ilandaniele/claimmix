@@ -178,6 +178,7 @@ export function renderTemplate(
         policyNumber: data.policyNumber != null ? String(data.policyNumber) : null,
         isFollowUp: data.isFollowUp === true,
         claimantName: data.claimantName != null ? String(data.claimantName) : null,
+        question: data.question != null ? String(data.question) : null,
         cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
       });
 

@@ -74,6 +74,7 @@ import { CLAIM_FIELD_KEYS } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { polizaParaCompletar } from "@/core/case/poliza-encontrada";
 import { mirarPolizas } from "@/core/case/poliza-vigente";
+import { esTitularAjeno } from "@/core/case/titular-ajeno";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
 import { puedeArrancar } from "@/core/case/estados-de-arranque";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
@@ -1382,6 +1383,10 @@ export async function runEmailExtractionWorker(
     // dejó de hacer 7 de 7 corridas.
     const polizas = mirarPolizas(policyNumber, policyMatches, diaArgentino());
 
+    // Lo mismo con quien escribe: si ni el nombre ni el DNI son los del
+    // titular de la póliza, el orquestador deriva sin preguntarle al modelo.
+    const titularAjeno = esTitularAjeno(extractedClaimFields, customerMatches);
+
     /*
      * ── j bis) La póliza que encontramos deja de ser algo que le pedimos ──────
      *
@@ -1567,6 +1572,7 @@ export async function runEmailExtractionWorker(
           inReplyToMessageId: undefined,
           latestMessageText: latestInboundText,
           polizas,
+          titularAjeno,
           heredadaEn,
           sePuedeRetomar: puedeArrancar(newStatus),
         },

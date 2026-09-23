@@ -387,16 +387,29 @@ const SCENARIOS: Scenario[] = [
         //
         // `replies: 1` es la mitad que más costó. Salían DOS: el pedido de
         // confirmación y, segundos después, «tu reclamo fue asignado a un
-        // especialista» —porque el agente delibera, ve que el titular no
-        // coincide, y decide bien que esto lo mire una persona—. Los dos
-        // mensajes son razonables y juntos son un problema: uno le pide que
-        // conteste, el otro que espere.
-        expect: { replies: 1, mentions: ["R*** P***", "Lucía Paz"], avoids: ["Roberto Paz"] },
+        // especialista». Los dos mensajes son razonables y juntos son un
+        // problema: uno le pide que conteste, el otro que espere. Sale sólo el
+        // pedido; la derivación que viene atrás no le escribe.
+        //
+        // Y el pedido no pregunta nada. Salía «¿Cuál es el correcto?» entre el
+        // nombre de Lucía y el del padre, que son los dos correctos, en un caso
+        // que ya tiene un especialista. Dice la diferencia y avisa eso. Tampoco
+        // le atribuye el auto: es «el auto de mi viejo».
+        expect: {
+          replies: 1,
+          mentions: ["R*** P***", "Lucía Paz", "especialista"],
+          avoids: ["Roberto Paz", "¿", "tu auto"],
+        },
       },
     ],
     // Y la derivación ocurre igual: lo que se suprime es el mensaje al
     // asegurado, no el aviso al especialista ni el estado del caso. Sin esto,
     // « un mensaje por vuelta » se podría cumplir no derivando nunca.
+    //
+    // Ya no depende de que el modelo delibere «escalate»: las corridas en que
+    // no lo hacía terminaban en `confirmacion_pendiente`. El worker ve que ni
+    // el nombre ni el DNI son los del titular (`esTitularAjeno`) y el
+    // orquestador deriva después del pedido de confirmación, sin preguntarle.
     finally: { status: "requiere_especialista" },
   },
 

@@ -369,7 +369,22 @@ describe("emailMessenger — el conflicto lleva sus valores", () => {
         { fieldKey: "dni", proposed: "****1222", stored: "****5678" },
         { fieldKey: "full_name", proposed: "Juan Perez", stored: "R*** P***" },
       ],
+      titularAjeno: false,
     });
+  });
+
+  it("y sabe cuándo quien escribe no es el titular", async () => {
+    // Sin la señal, el redactor vuelve a preguntar «¿cuál es el correcto?» a
+    // alguien cuyos dos valores son correctos y cuyo caso ya se derivó.
+    escribe(
+      "Ilan, los datos que nos pasaste no coinciden con los del titular: el documento " +
+        'termina en ****1222 y en la póliza ****5678, y el nombre es "Juan Perez" contra ' +
+        '"R*** P***". Un especialista va a revisar tu caso y se va a comunicar con vos.'
+    );
+
+    await mandar("data_confirmation_request", { ...CONFLICTO, titularAjeno: true });
+
+    expect(compose.mock.calls[0][0]).toMatchObject({ intent: "conflict", titularAjeno: true });
   });
 
   it("el DNI le llega enmascarado, no entero", async () => {

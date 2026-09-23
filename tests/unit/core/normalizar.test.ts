@@ -11,8 +11,10 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  mismoNombre,
   normalizarDni,
   normalizarEmail,
+  normalizarNombre,
   normalizarNumeroPoliza,
   normalizarTelefono,
   sirveParaBuscar,
@@ -97,5 +99,31 @@ describe("sirveParaBuscar", () => {
   it("un teléfono necesita al menos siete", () => {
     expect(sirveParaBuscar(normalizarTelefono("123"), MINIMO_TELEFONO)).toBe(false);
     expect(sirveParaBuscar(normalizarTelefono("+54 9 11 0000-0000"), MINIMO_TELEFONO)).toBe(true);
+  });
+});
+
+describe("mismoNombre", () => {
+  it.each([
+    "ROBERTO PAZ",
+    "Róberto  Paz",
+    "Paz Roberto",
+    "Paz, Roberto",
+    "roberto-paz",
+    " roberto paz ",
+  ])("«%s» es Roberto Paz", (nombre) => {
+    expect(mismoNombre(nombre, "Roberto Paz")).toBe(true);
+  });
+
+  it("una parte del nombre no es el mismo nombre", () => {
+    expect(mismoNombre("Roberto", "Roberto Paz")).toBe(false);
+  });
+
+  it("otra persona de la familia no es el mismo nombre", () => {
+    expect(mismoNombre("Lucía Paz", "Roberto Paz")).toBe(false);
+  });
+
+  it("sólo signos no es un nombre", () => {
+    expect(normalizarNombre("  ,  ")).toBe("");
+    expect(normalizarNombre("—")).toBe("");
   });
 });

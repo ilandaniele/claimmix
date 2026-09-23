@@ -225,6 +225,7 @@ export function renderTemplate(
             }))
           : undefined,
         cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
+        titularAjeno: data.titularAjeno === true,
       });
 
     case "specialist_escalation":

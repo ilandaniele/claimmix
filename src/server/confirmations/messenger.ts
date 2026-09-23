@@ -34,7 +34,11 @@ import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
 import { isReservedTestNumber } from "@/core/phone/reserved";
 import { enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
-import { laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
+import {
+  laDiferencia,
+  LO_REVISA_UN_ESPECIALISTA,
+  NO_COINCIDE_CON_EL_TITULAR,
+} from "@/core/mensajes/titular-que-no-coincide";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 
 export interface AgentMessage {
@@ -224,13 +228,17 @@ function renderConflict(data: Record<string, unknown>): string {
     return `${label}: vos nos decís "${propuesto}" y en nuestro sistema figura "${guardado}".`;
   });
 
-  const encabezado =
-    lineas.length > 1
+  const ajeno = data.titularAjeno === true;
+
+  const encabezado = ajeno
+    ? `Recibimos tu denuncia. ${NO_COINCIDE_CON_EL_TITULAR}`
+    : lineas.length > 1
       ? "Recibimos tu denuncia. Hay algunos datos que no coinciden con lo que tenemos registrado."
       : "Recibimos tu denuncia. Hay un dato que no coincide con lo que tenemos registrado.";
 
-  const cierre =
-    lineas.length > 1
+  const cierre = ajeno
+    ? LO_REVISA_UN_ESPECIALISTA
+    : lineas.length > 1
       ? "¿Cuáles son los correctos? Respondé por acá y seguimos."
       : "¿Cuál es el correcto? Respondé por acá y seguimos.";
 
@@ -439,6 +447,7 @@ async function writeReply(
       message.template === "data_confirmation_request"
         ? conflictosParaElRedactor(message.data)
         : undefined,
+    titularAjeno: message.data.titularAjeno === true,
     knownValues: (message.data.knownValues ?? undefined) as
       | Record<string, string>
       | undefined,

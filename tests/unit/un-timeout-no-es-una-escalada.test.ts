@@ -34,12 +34,14 @@ describe("el reintento por timeout", () => {
   it.each([
     ["un TIMEOUT", new GeminiExtractionError("plazo", { code: "TIMEOUT" }), true],
     ["un 429", new GeminiExtractionError("cupo", { status: 429, code: "RESOURCE_EXHAUSTED" }), true],
+    ["una conexión que no abrió", new GeminiExtractionError("red", { code: "ECONNRESET", red: true }), true],
     ["un 400", new GeminiExtractionError("400", { status: 400, code: "INVALID_ARGUMENT" }), false],
     ["un error que no es del proveedor", Object.assign(new Error("x"), { cause: { status: 429 } }), false],
-  ])("sólo para TIMEOUT y 429, no para cualquier error: %s", (_, err, pasajero) => {
+  ])("sólo para TIMEOUT, 429 y red, no para cualquier error: %s", (_, err, pasajero) => {
     // Vertex es pospago sobre un cupo compartido y dinámico: un 429 es tan
-    // transitorio como un TIMEOUT, con el mismo tope de por vida. Un 400
-    // sigue escalando.
+    // transitorio como un TIMEOUT, con el mismo tope de por vida. Un socket
+    // que no abrió tras los reintentos de transporte también. Un 400 sigue
+    // escalando.
     expect(esPasajero(err)).toBe(pasajero);
     expect(WORKER).toContain(REINTENTA);
   });

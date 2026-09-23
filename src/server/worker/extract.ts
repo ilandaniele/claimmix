@@ -1647,7 +1647,8 @@ export async function runEmailExtractionWorker(
         if (reintentado) {
           logger.warn({
         case_id: caseId,
-        motivo: errCode === "TIMEOUT" ? "timeout" : "429",
+        motivo: errCode === "TIMEOUT" ? "timeout" : errStatus === 429 ? "429" : "red",
+        code: errCode,
       }, "email_worker.timeout_a_la_cola");
           diferida = "reintento";
           return;

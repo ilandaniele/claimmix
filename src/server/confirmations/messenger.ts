@@ -35,6 +35,7 @@ import { isReservedTestNumber } from "@/core/phone/reserved";
 import { enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
 import { laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
+import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 
 export interface AgentMessage {
   caseId: string;
@@ -310,7 +311,13 @@ function intentFor(template: EmailTemplate): ReplyIntent {
   }
 }
 
+// La frase va en el piso: con el redactor apagado, el piso es lo que sale.
 function renderForWhatsApp(message: AgentMessage): string | null {
+  const piso = pisoDeWhatsApp(message);
+  return piso && conRespuestaPendiente(piso, message.data.question);
+}
+
+function pisoDeWhatsApp(message: AgentMessage): string | null {
   switch (message.template) {
     case "specialist_escalation":
       return renderEscalation(message.data);

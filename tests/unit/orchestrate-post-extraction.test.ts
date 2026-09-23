@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
+import type { AgentMessenger } from "@/server/confirmations/messenger";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -2540,6 +2541,215 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
       .mocked(dispatchOutboundEmail)
       .mock.calls.find((c) => c[0].template === "missing_information_request");
     expect(ask).toBeDefined();
+  });
+});
+
+/*
+ * El 429 que dejó una pregunta sin contestar (ensayo `pregunta`, 22/09).
+ *
+ * Sin plan, `nosPreguntoAlgo` salía siempre falso: con el pedido ya en pie, el
+ * caso quedaba mudo y «¿cuánto suele tardar esto?» no recibía nada. Ahora la
+ * pregunta sale del mensaje mismo, y se contesta en la misma vuelta con el
+ * pedido que ya estaba en pie, sin alargarlo.
+ */
+describe("orchestratePostExtraction — una deliberación caída no deja una pregunta sin respuesta", () => {
+  const PREGUNTA = "¿Cuánto suele tardar esto?";
+  const MENSAJE = `${PREGUNTA} Necesito el auto para trabajar.`;
+  const PEDIDO = ["parte_amistoso", "licencia_conducir"];
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  beforeEach(() => {
+    // El piso, sin redactor: lo que se afirma es la decisión, no la prosa.
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+  });
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+  });
+
+  function pedidoEnPie() {
+    const spies = setupDbMocks({
+      lastAskRows: [{ asked_keys: PEDIDO, created_at: "2026-08-20T18:00:00Z" }],
+      newAttachmentRows: [],
+      newFactRows: [{ id: "f1" }],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [...PEDIDO, "provincia"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue(null);
+    return spies;
+  }
+
+  async function correr(
+    latestMessageText: string,
+    extra: { heredadaEn?: string; messenger?: AgentMessenger } = {},
+    claim = extractEmailClaimMock()
+  ) {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: claim,
+        senderEmail: SENDER_EMAIL,
+        latestMessageText,
+        heredadaEn: extra.heredadaEn,
+      },
+      NO_MATCHES,
+      extra.messenger
+    );
+  }
+
+  const plantillas = () =>
+    vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+
+  it("contesta con el pedido que ya estaba en pie, sin alargarlo", async () => {
+    const { updateSpy } = pedidoEnPie();
+
+    await correr(MENSAJE);
+
+    expect(plantillas()).toEqual(["missing_information_request"]);
+    const data = vi.mocked(dispatchOutboundEmail).mock.calls[0][0].data;
+    expect(data.missingFields).toEqual(PEDIDO);
+    expect(data.question).toBe(PREGUNTA);
+    expect(
+      updateSpy.mock.calls.some(
+        (c) => (c[0] as { status?: string })?.status === "info_faltante"
+      )
+    ).toBe(true);
+    // La pregunta es texto del asegurado: no se anota en la auditoría.
+    expect(JSON.stringify(vi.mocked(writeAuditLog).mock.calls)).not.toContain("tardar");
+  });
+
+  it("por WhatsApp también: el mismo mensaje por el mensajero del canal", async () => {
+    pedidoEnPie();
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) };
+
+    await correr(MENSAJE, { messenger });
+
+    expect(messenger.send).toHaveBeenCalledTimes(1);
+    expect(messenger.send.mock.calls[0][0]).toMatchObject({
+      template: "missing_information_request",
+      data: { missingFields: PEDIDO, question: PREGUNTA },
+    });
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it.each(["gracias", "ok", "ok?"])("«%s» no es una pregunta: sigue en espera", async (texto) => {
+    pedidoEnPie();
+
+    await correr(texto);
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it("un «Gracias» desde Outlook con nuestra pregunta citada sigue en espera", async () => {
+    pedidoEnPie();
+
+    await correr(
+      "Gracias\n\n________________________________\n" +
+        "De: ClaimMix <siniestros@claimmix.com>\n" +
+        "Enviado: lunes, 22 de septiembre de 2026 10:15\n" +
+        "Para: Diego <diego@example.com>\n" +
+        "Asunto: Re: Choque\n\n" +
+        "Diego, ¿el choque fue en Villa Mitre?"
+    );
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it("un caso grave no recibe ni el pedido ni el cierre", async () => {
+    pedidoEnPie();
+
+    await correr(
+      MENSAJE,
+      {},
+      extractEmailClaimMock({ severity: "critical", requires_specialist: true })
+    );
+
+    expect(plantillas()).not.toContain("missing_information_request");
+    expect(plantillas()).not.toContain("confirmation_received");
+  });
+
+  it("una corrida heredada que ya contestó no contesta de nuevo", async () => {
+    pedidoEnPie();
+    vi.mocked(yaContestamosElUltimoMensaje).mockResolvedValue(true);
+
+    await correr(MENSAJE, { heredadaEn: "2026-09-22T10:00:00.000Z" });
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it("con plan, manda el plan: un «espero» sin pregunta no se contradice", async () => {
+    pedidoEnPie();
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "wait",
+      askFor: PEDIDO,
+      question: null,
+      reasoning: "",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
+
+    await correr(MENSAJE);
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it("sin nada que pedir, el cierre la contesta", async () => {
+    setupDbMocks({ outboundMessagesRows: [] });
+
+    await correr(MENSAJE);
+
+    const cierres = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.filter((c) => c[0].template === "confirmation_received");
+    expect(cierres).toHaveLength(1);
+    expect(cierres[0][0].data.question).toBe(PREGUNTA);
+  });
+
+  it("un conflicto que ya salió es lo único que sale", async () => {
+    setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        {
+          fieldName: "full_name",
+          suggestedValue: "Pedro García",
+          conflictValue: "Juan Pérez",
+          reason: "conflict",
+        },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+    const claim = extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "full_name"),
+        { field_key: "full_name", field_value: "Pedro García", confidence: 0.92, source: "ai" as const },
+      ],
+    });
+    const conflicto: CustomerMatch = {
+      customerId: "cust-003",
+      matchType: "email",
+      storedValues: {},
+      confidence: 0.75,
+      customerName: "Juan Pérez",
+      conflictsWithExtracted: ["full_name"],
+    };
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL, latestMessageText: MENSAJE },
+      [conflicto]
+    );
+
+    expect(plantillas()).toEqual(["data_confirmation_request"]);
   });
 });
 

@@ -30,6 +30,7 @@ import "server-only";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
+import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {
@@ -719,7 +720,12 @@ export async function orchestratePostExtraction(
   // while the same two documents are still missing has changed nothing about
   // the request and everything about whether we owe them a message. Silence
   // there is the exact robot behaviour this was all meant to fix.
-  const owesAnAnswer = Boolean(plan?.question);
+  //
+  // Sin plan —un 429, un timeout— la pregunta sale del mensaje mismo: si no,
+  // con el pedido en pie, «¿cuánto tarda?» quedaba sin respuesta. Con plan,
+  // manda el plan.
+  const pregunta = plan ? plan.question : laPreguntaDelMensaje(latestMessageText);
+  const owesAnAnswer = Boolean(pregunta);
 
   // Same for a file that just arrived. They went and photographed something;
   // getting nothing back reads as nobody looking, whether or not we managed to
@@ -783,7 +789,7 @@ export async function orchestratePostExtraction(
         knownValues: askItems.knownValues,
         claimantName,
         // What they asked, so the reply answers it instead of talking past it.
-        question: plan?.question ?? null,
+        question: pregunta,
         // Fourth message in, the reply still opened with "gracias por
         // contactarnos". Thanking someone for getting in touch three rounds
         // after they did is the tell that nobody is really reading.
@@ -907,7 +913,7 @@ export async function orchestratePostExtraction(
         policyNumber: policyField?.field_value ?? null,
         isFollowUp,
         claimantName,
-        question: plan?.question ?? null,
+        question: pregunta,
       },
       inReplyToMessageId,
     });

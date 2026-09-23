@@ -134,3 +134,26 @@ describe("la frase de la pregunta pendiente vive una sola vez", () => {
     expect(veces).toBe(1);
   });
 });
+
+describe("el cierre también contesta lo que preguntaron", () => {
+  const cerrar = (data: Record<string, unknown>) =>
+    renderTemplate("confirmation_received", { caseId: CASO, ...data });
+  const veces = (s: string) => s.split(RESPUESTA_PENDIENTE).length - 1;
+
+  it("el cierre con pregunta trae la frase una vez", () => {
+    // Sin deliberación, la pregunta llega al cierre y el piso tiene que
+    // contestarla solo: el redactor puede estar apagado o caído.
+    const { html, text } = cerrar({ question: "¿Cuánto tarda?" });
+
+    expect(veces(html)).toBe(1);
+    expect(veces(text)).toBe(1);
+    expect(text).not.toMatch(/\d+\s*(?:horas?|d[íi]as?|semanas?)/i);
+  });
+
+  it("sin pregunta sale igual que antes", () => {
+    const sin = cerrar({});
+
+    expect(cerrar({ question: null })).toEqual(sin);
+    expect(veces(sin.text)).toBe(0);
+  });
+});

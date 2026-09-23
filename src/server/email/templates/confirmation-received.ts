@@ -17,6 +17,7 @@
 import { labelForClaimType } from "@/lib/labels/claim-fields";
 import { escapeHtml, maskPolicyNumber } from "@/server/email/render";
 import { textoAHtml } from "@/core/email/html";
+import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 
 export interface ConfirmationReceivedData {
   caseId: string;
@@ -31,6 +32,8 @@ export interface ConfirmationReceivedData {
    * saludaba por nombre en el mensaje que pide datos y en el siguiente no.
    */
   claimantName?: string | null;
+  /** Lo que preguntó, cuando el cierre sale igual: se le contesta en el piso. */
+  question?: string | null;
   /** La prosa ya redactada. Reemplaza el cuerpo y nada más. */
   cuerpo?: string | null;
 }
@@ -99,13 +102,18 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
   const referenciaHtml = `<p>Tu número de caso es: <strong>#${escapeHtml(data.caseId)}</strong></p>
   ${policyLine}`;
 
-  const cuerpo = `${openingText}\n\n${nextStep}\n\n${closing}`;
+  const pregunta = data.question?.trim();
+  const respuestaHtml = pregunta ? `<p>${escapeHtml(RESPUESTA_PENDIENTE)}</p>` : "";
+  const respuestaText = pregunta ? `\n\n${RESPUESTA_PENDIENTE}` : "";
+
+  const cuerpo = `${openingText}\n\n${nextStep}${respuestaText}\n\n${closing}`;
   const redactado = data.cuerpo?.trim();
 
   const prosaHtml = redactado
     ? textoAHtml(redactado)
     : `<p>${openingHtml}</p>
   <p>${nextStep}</p>
+  ${respuestaHtml}
   <p>${closing}</p>`;
 
   const html = `<!DOCTYPE html>

@@ -21,7 +21,7 @@ import "server-only";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
-import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
+import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { logger } from "@/lib/observability/logger";
 
@@ -212,7 +212,7 @@ denunciar un siniestro. Escribís en castellano rioplatense, con voseo, claro y 
 
 LO QUE HAY QUE DECIR (no lo cambies, no agregues ni saques temas):
 ${intentBrief[input.intent]}
-${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(input.question)}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia y qué falta para avanzar. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder.` : ""}
+${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(sinNumerosEnteros(input.question))}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia y qué falta para avanzar. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder.` : ""}
 
 ${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}` : ""}
 ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de cada uno, copiados tal cual):\n${conflictos.join("\n")}` : ""}
@@ -410,12 +410,5 @@ export async function composeReply(input: ComposeReplyInput): Promise<string> {
  * but it does not pretend the question was not asked.
  */
 function withUnansweredQuestion(input: ComposeReplyInput): string {
-  if (!input.question) return input.fallback;
-  // El piso del correo ya la trae: la plantilla de datos faltantes la agrega
-  // cuando hay pregunta. Pegarla otra vez mandaba la misma frase dos veces
-  // seguidas, salida del archivo cuya razón de existir es que viva una sola
-  // vez — y además rompía la comparación del mensajero contra el piso, que es
-  // cómo se sabe que un rechazo devuelve la plantilla intacta.
-  if (input.fallback.includes(RESPUESTA_PENDIENTE)) return input.fallback;
-  return `${input.fallback}\n\n${RESPUESTA_PENDIENTE}`;
+  return conRespuestaPendiente(input.fallback, input.question);
 }

@@ -711,6 +711,12 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
   camino lo cubren sólo los tests unitarios, en los dos canales:
   `orchestrate-post-extraction`, `whatsapp-messenger`, `email-messenger` y
   `core/pregunta`.
+- **Una negativa cuando el reconocedor se cae.** Un 429 o un TIMEOUT de
+  `identifyDeclined` devuelven el turno a la cola en vez de leerse como «no
+  negó nada». El ensayo no puede forzarlos, así que lo cubren sólo los tests
+  unitarios, en los dos canales y con la retoma: `case-documents`,
+  `orchestrate-post-extraction`, `extract.email.gemini-error`,
+  `un-timeout-no-es-una-escalada` y `el-modelo-tiene-un-plazo`.
 
 - **La sincronización con el core del asegurador**, que nunca se ejercitó contra
   un sistema real.

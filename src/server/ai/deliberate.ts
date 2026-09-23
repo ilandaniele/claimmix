@@ -378,6 +378,10 @@ Criterios, en orden:
    la aseguradora todavía no cargó sus datos, o que falló, seguí con el trámite
    normal como si no la hubieras hecho.
 
+   Tampoco derives porque no exista un papel: que el otro conductor no quiso
+   hacer el parte amistoso o que no hubo denuncia policial es lo más común en un
+   choque. Se sigue sin ese papel y, si no falta nada más, "acknowledge".
+
 Nunca pidas algo que no esté en la lista de arriba, ni con otro nombre.
 ${toolSection(lastChance)}
 Devolvé UNA de estas dos cosas, nada más:

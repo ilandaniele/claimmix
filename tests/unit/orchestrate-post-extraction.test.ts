@@ -11,10 +11,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { is, Param } from "drizzle-orm";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import type { AgentMessenger } from "@/server/confirmations/messenger";
+import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -102,6 +104,14 @@ vi.mock("@/server/cases/gap-analyzer", () => ({
   }),
 }));
 
+// El reconocedor de negativas de `resolveDeclinedDocs` es la única llamada al
+// modelo que estos caminos no simulan. Por defecto sigue siendo la de verdad;
+// los tests de la negativa la reemplazan y la devuelven.
+vi.mock("@/server/ai/gemini-extractor", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/server/ai/gemini-extractor")>();
+  return { ...real, callGemini: vi.fn(real.callGemini) };
+});
+
 // ── Import mocked modules for assertion ──────────────────────────────────────
 
 import { db } from "@/lib/db";
@@ -110,6 +120,7 @@ import { writeAuditLog } from "@/lib/audit/log";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { deliberate } from "@/server/ai/deliberate";
 import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contestado";
+import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 
 // ── DB mock builder ───────────────────────────────────────────────────────────
 
@@ -140,6 +151,16 @@ function columnasDe(cond: unknown, acc: string[] = []): string[] {
   const nodo = cond as { name?: string; queryChunks?: unknown[] } | null | undefined;
   if (nodo?.name && !nodo.queryChunks) acc.push(nodo.name);
   for (const trozo of nodo?.queryChunks ?? []) columnasDe(trozo, acc);
+  return acc;
+}
+
+/** Los valores con que filtra una condición de drizzle; un `inArray` los deja en un arreglo. */
+function valoresDe(cond: unknown, acc: unknown[] = []): unknown[] {
+  if (is(cond, Param)) acc.push(cond.value);
+  const trozos = Array.isArray(cond)
+    ? cond
+    : ((cond as { queryChunks?: unknown[] } | null)?.queryChunks ?? []);
+  for (const trozo of trozos) valoresDe(trozo, acc);
   return acc;
 }
 
@@ -184,6 +205,8 @@ function setupDbMocks({
    * contestó lo que le habíamos preguntado.
    */
   confirmacionesCerradas = [] as Array<{ campo: string }>,
+  /** Los documentos pendientes del caso, como los lee `pendingDocKeys`. */
+  missingDocsRows = [] as Array<{ doc_key: string }>,
 } = {}) {
   const mockDbTyped = db as unknown as MockDb;
 
@@ -248,6 +271,10 @@ function setupDbMocks({
         return { where: () => ({ limit: () => Promise.resolve(newFactRows) }) };
       }
 
+      if (tableName === "missing_docs") {
+        return { where: () => Promise.resolve(missingDocsRows) };
+      }
+
       // La única consulta con join del orquestador: la póliza y su titular.
       //
       // Del `where` se guardan los valores, que es lo que importa de esa
@@ -291,10 +318,16 @@ function setupDbMocks({
   // `.where(...)` tiene que ser esperable Y encadenable: `resolveAnsweredConfirmations`
   // le pide `.returning()` para saber qué filas cerró de verdad, y el resto de
   // las escrituras lo esperan a secas.
-  mockDbTyped.update.mockImplementation(() => ({
-    set: (data: unknown) => ({
-      where: () => {
+  mockDbTyped.update.mockImplementation((table: unknown) => ({
+    set: (data: Record<string, unknown>) => ({
+      where: (cond: unknown) => {
         const escrito = updateSpy(data);
+        // Un documento cerrado o negado deja de estar pendiente, como en la
+        // base: sin esto, un turno que lo niega se lo seguía ofreciendo al adjunto.
+        if (getTableName(table) === "missing_docs" && ("declined_at" in data || "satisfied_at" in data)) {
+          const cerrados = valoresDe(cond);
+          missingDocsRows = missingDocsRows.filter((r) => !cerrados.includes(r.doc_key));
+        }
         return {
           returning: () => Promise.resolve(confirmacionesCerradas),
           then: (r: (v: unknown) => void, j?: (e: unknown) => void) =>
@@ -4107,5 +4140,322 @@ describe("orchestratePostExtraction — corrida heredada", () => {
       (call) => call[0].template === "confirmation_received"
     );
     expect(confirmationCall).toBeDefined();
+  });
+});
+
+/*
+ * El rojo de `mail-completo` del 23/09, turno 2.
+ *
+ * Le habíamos pedido el parte amistoso y la persona contestó que no lo
+ * completaron. El reconocedor de negativas se cayó con un 429, eso se leía
+ * como «no negó nada», el pedido quedó en pie por un papel que no existe y el
+ * turno terminó callado. Un 429 o un TIMEOUT ahora devuelven el turno a la
+ * cola, igual que en la extracción.
+ */
+describe("orchestratePostExtraction — un reconocedor de negativas caído devuelve el turno a la cola", () => {
+  const NEGATIVA = "No completamos ningún parte amistoso, el otro conductor no quiso.";
+  const NIEGA = JSON.stringify({
+    declined: [{ clave: "parte_amistoso", cita: "No completamos ningún parte amistoso" }],
+  });
+  const CANALES = [
+    ["correo", false],
+    ["WhatsApp", true],
+  ] as const;
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  beforeEach(() => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+  });
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+    vi.mocked(callGemini).mockReset();
+  });
+
+  const cae429 = () =>
+    new GeminiExtractionError("Gemini devolvió 429", { status: 429, code: "RESOURCE_EXHAUSTED" });
+
+  /** Lo que contesta el reconocedor: un error, o el JSON del modelo. Lo demás sigue igual. */
+  function reconocedor(respuesta: Error | string) {
+    vi.mocked(callGemini).mockImplementation(async (...args) => {
+      if (!args[0].includes("NO existe")) {
+        const real = await vi.importActual<typeof import("@/server/ai/gemini-extractor")>(
+          "@/server/ai/gemini-extractor"
+        );
+        return real.callGemini(...args);
+      }
+      if (respuesta instanceof Error) throw respuesta;
+      return { text: respuesta, usage: { promptTokens: 0, completionTokens: 0 }, model: "gemini-2.5-flash" };
+    });
+  }
+
+  function pedidoDelParte(adjuntos: Array<{ id: string }> = [], pendientes = ["parte_amistoso"]) {
+    const spies = setupDbMocks({
+      lastAskRows: [{ asked_keys: ["parte_amistoso"], created_at: "2026-09-23T10:00:00Z" }],
+      missingDocsRows: pendientes.map((doc_key) => ({ doc_key })),
+      newAttachmentRows: adjuntos,
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    return spies;
+  }
+
+  const mensajero = (porMensajero: boolean) =>
+    porMensajero
+      ? { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) }
+      : undefined;
+
+  async function correr(
+    extra: { sePuedeRetomar?: boolean; heredadaEn?: string; polizas?: PolizasDelCaso } = {},
+    messenger?: AgentMessenger,
+    claim = extractEmailClaimMock()
+  ) {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL, latestMessageText: NEGATIVA, ...extra },
+      NO_MATCHES,
+      messenger
+    );
+  }
+
+  const escrituras = (updateSpy: ReturnType<typeof vi.fn>) =>
+    updateSpy.mock.calls.map((c) => c[0] as Record<string, unknown>);
+
+  it.each(CANALES)("por %s: un 429 no contesta, no delibera y no cierra nada", async (_canal, porMensajero) => {
+    const { updateSpy } = pedidoDelParte();
+    const err = cae429();
+    reconocedor(err);
+    const messenger = mensajero(porMensajero);
+
+    await expect(correr({ sePuedeRetomar: true }, messenger)).rejects.toBe(err);
+
+    expect(callGemini).toHaveBeenCalledTimes(1);
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+    if (messenger) expect(messenger.send).not.toHaveBeenCalled();
+    expect(deliberate).not.toHaveBeenCalled();
+    expect(analyzeEmailClaimGaps).not.toHaveBeenCalled();
+    // Ni estado nuevo, ni la negativa, ni las confirmaciones que la retoma
+    // tiene que encontrar pendientes.
+    expect(escrituras(updateSpy).filter((d) => "status" in d || "declined_at" in d)).toEqual([]);
+  });
+
+  it("un TIMEOUT también", async () => {
+    pedidoDelParte();
+    const err = new GeminiExtractionError("plazo", { code: "TIMEOUT" });
+    reconocedor(err);
+
+    await expect(correr({ sePuedeRetomar: true })).rejects.toBe(err);
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, () => Promise<void>]>([
+    [
+      "un caso grave, que ya se derivó",
+      () =>
+        correr(
+          { sePuedeRetomar: true },
+          undefined,
+          extractEmailClaimMock({ severity: "critical", requires_specialist: true })
+        ),
+    ],
+    [
+      "una póliza sin vigencia, que ya se derivó",
+      () =>
+        correr({
+          sePuedeRetomar: true,
+          polizas: { vigentes: 0, noVigentes: 1, vencioEl: null, derivar: true },
+        }),
+    ],
+    ["un caso que el barrido ya no retoma", () => correr({ sePuedeRetomar: false })],
+    ["un worker que no avisa", () => correr()],
+    [
+      "una corrida heredada que ya contestó",
+      () => {
+        vi.mocked(yaContestamosElUltimoMensaje).mockResolvedValue(true);
+        return correr({ sePuedeRetomar: true, heredadaEn: "2026-09-23T10:00:00.000Z" });
+      },
+    ],
+  ])("%s sigue sin el reconocedor", async (_caso, turno) => {
+    pedidoDelParte();
+    reconocedor(cae429());
+
+    await expect(turno()).resolves.toBeUndefined();
+
+    expect(callGemini).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(CANALES)(
+    "por %s: con el reconocedor sano, el aviso del worker no cambia nada",
+    async (_canal, porMensajero) => {
+      async function vuelta(sePuedeRetomar?: boolean) {
+        vi.clearAllMocks();
+        const { updateSpy } = pedidoDelParte();
+        reconocedor(NIEGA);
+        const messenger = mensajero(porMensajero);
+
+        await correr({ sePuedeRetomar }, messenger);
+
+        const enviados = messenger
+          ? messenger.send.mock.calls.map((c) => c[0].template)
+          : vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+        return {
+          // Las fechas cambian entre vueltas; lo que se compara es qué se escribió.
+          escrito: JSON.parse(
+            JSON.stringify(escrituras(updateSpy), (k, v) => (k.endsWith("_at") ? "<fecha>" : v))
+          ),
+          enviados,
+          consultas: (db as unknown as MockDb).select.mock.calls.length,
+        };
+      }
+
+      const sinAviso = await vuelta(undefined);
+      const conAviso = await vuelta(true);
+
+      expect(conAviso).toEqual(sinAviso);
+      expect(conAviso.escrito).toContainEqual(
+        expect.objectContaining({ declined_at: "<fecha>" })
+      );
+      expect(conAviso.enviados.length).toBeGreaterThan(0);
+    }
+  );
+
+  it("la retoma mira el adjunto una sola vez, y sólo contra lo que no se negó", async () => {
+    // Cada mirada gasta una de las tres de por vida del archivo. Mirarlo
+    // antes de un turno que vuelve a la cola lo gastaba dos veces por el
+    // mismo mensaje, y con Gemini caído el archivo no se ofrecía nunca más.
+    //
+    // La foto es la denuncia, que el mensaje no niega: la retoma la cierra, y
+    // el parte que sí niega ya no se le ofrece.
+    const foto = { id: "adj-1", filename: "denuncia.jpg", contentType: "image/jpeg", storagePath: null };
+    const { updateSpy } = pedidoDelParte([foto], ["parte_amistoso", "denuncia_policial"]);
+    const miradas = () =>
+      escrituras(updateSpy).filter((d) => "intentos_de_identificacion" in d).length;
+    const ofrecidos: string[][] = [];
+    const err = cae429();
+    let reconocedorSano = false;
+    vi.mocked(callGemini).mockImplementation(async (prompt) => {
+      const niega = prompt.includes("NO existe");
+      if (niega && !reconocedorSano) throw err;
+      if (prompt.includes("Estamos esperando estos documentos")) {
+        ofrecidos.push(["parte_amistoso", "denuncia_policial"].filter((k) => prompt.includes(`- ${k}:`)));
+      }
+      return {
+        text: niega ? NIEGA : JSON.stringify({ doc_key: "denuncia_policial" }),
+        usage: { promptTokens: 0, completionTokens: 0 },
+        model: "gemini-2.5-flash",
+      };
+    });
+
+    await expect(correr({ sePuedeRetomar: true })).rejects.toBe(err);
+    expect(callGemini).toHaveBeenCalledTimes(1);
+    expect(miradas()).toBe(0);
+
+    reconocedorSano = true;
+    await correr({ sePuedeRetomar: true });
+
+    expect(miradas()).toBe(1);
+    expect(ofrecidos).toEqual([["denuncia_policial"]]);
+    expect(escrituras(updateSpy)).toContainEqual({ matched_doc_key: "denuncia_policial" });
+  });
+
+  it("la retoma encuentra las confirmaciones intactas y las consume una sola vez", async () => {
+    const { updateSpy } = pedidoDelParte();
+    const confirmadas = () =>
+      escrituras(updateSpy).filter((d) => d.status === "confirmed").length;
+    const err = cae429();
+    reconocedor(err);
+
+    await expect(correr({ sePuedeRetomar: true })).rejects.toBe(err);
+    expect(confirmadas()).toBe(0);
+
+    reconocedor(NIEGA);
+    await correr({ sePuedeRetomar: true });
+
+    expect(confirmadas()).toBe(1);
+    expect(escrituras(updateSpy)).toContainEqual(
+      expect.objectContaining({ declined_at: expect.any(String) })
+    );
+  });
+});
+
+/*
+ * El re-pedido de `choque-completo` del 23/09, turno 4.
+ *
+ * La negativa se reconoció y el parte quedó negado, pero el extractor leyó la
+ * misma frase como parte_amistoso = "no" a confianza media. Como duda, el
+ * papel volvía a la lista y se le pedía otra vez lo que acababa de negar.
+ */
+describe("orchestratePostExtraction — un documento negado no vuelve como duda", () => {
+  const NEGATIVA = "No completamos ningún parte amistoso, el otro conductor no quiso";
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  beforeEach(() => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+    vi.mocked(callGemini).mockResolvedValue({
+      text: JSON.stringify({ declined: [{ clave: "parte_amistoso", cita: NEGATIVA }] }),
+      usage: { promptTokens: 0, completionTokens: 0 },
+      model: "gemini-2.5-flash",
+    });
+  });
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+    vi.mocked(callGemini).mockReset();
+  });
+
+  it.each([
+    ["correo", false],
+    ["WhatsApp", true],
+  ] as const)("por %s", async (_canal, porMensajero) => {
+    const { insertSpy, updateSpy } = setupDbMocks({
+      lastAskRows: [{ asked_keys: ["parte_amistoso"], created_at: "2026-09-23T10:00:00Z" }],
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        { fieldName: "parte_amistoso", suggestedValue: "no", reason: "medium_confidence" },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: ["parte_amistoso"],
+      fields: [
+        ...extractEmailClaimMock().fields,
+        { field_key: "parte_amistoso", field_value: "no", confidence: 0.7, source: "ai" as const },
+      ],
+    });
+    const messenger = porMensajero
+      ? { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) }
+      : undefined;
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL, latestMessageText: NEGATIVA },
+      NO_MATCHES,
+      messenger
+    );
+
+    expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({ declined_at: expect.any(String) }));
+    const enviados = messenger
+      ? messenger.send.mock.calls.map((c) => c[0])
+      : vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0]);
+    expect(enviados.length).toBeGreaterThan(0);
+    expect(enviados.flatMap((m) => (m.data.missingFields as string[] | undefined) ?? [])).not.toContain(
+      "parte_amistoso"
+    );
+    // Ni una fila de confirmación por el papel.
+    const filas = insertSpy.mock.calls.flatMap((c) => [c[0]].flat() as Array<{ field_name?: string }>);
+    expect(filas.map((f) => f.field_name)).not.toContain("parte_amistoso");
   });
 });

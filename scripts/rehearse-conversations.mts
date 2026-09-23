@@ -235,10 +235,13 @@ const SCENARIOS: Scenario[] = [
       },
       {
         say: "No completamos ningún parte amistoso, el otro conductor no quiso",
-        expect: { replies: 1 },
+        // El papel negado no vuelve a la lista, ni como duda del extractor.
+        expect: { replies: 1, noAsked: ["parte_amistoso"] },
       },
     ],
     finally: {
+      // Que el otro no firmara el parte no es motivo para derivar.
+      status: "listo_para_core",
       docsDeclined: ["parte_amistoso"],
       knows: ["policy_number", "full_name"],
     },
@@ -477,7 +480,7 @@ const SCENARIOS: Scenario[] = [
           "> - Parte amistoso de accidente",
           "> - Fotos de los daños",
         ].join("\n"),
-        expect: { replies: 1 },
+        expect: { replies: 1, noAsked: ["parte_amistoso"] },
       },
     ],
     finally: {

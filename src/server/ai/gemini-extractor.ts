@@ -500,11 +500,27 @@ export function errMeta(e: unknown): { name: string; status: number | null; code
   const cause = (e as GeminiExtractionError)?.cause as
     | { status?: number; code?: string }
     | undefined;
+  // Un error de la base sin envolver —el NeonDbError de un lote de neon-http—
+  // trae el código de Postgres arriba y no tiene causa.
+  const propio = (e as { code?: unknown } | null)?.code;
   return {
     name,
     status: cause?.status ?? null,
-    code: cause?.code ?? null,
+    code: cause?.code ?? (typeof propio === "string" ? propio : null),
   };
+}
+
+/**
+ * Un TIMEOUT o un 429 del proveedor: «probá de nuevo», no un pedido roto.
+ *
+ * El único criterio con el que un turno vuelve a la cola: lo usan el catch del
+ * worker y el reconocedor de negativas. El instanceof no sobra: un
+ * DrizzleQueryError también trae `cause` con `code`.
+ */
+export function esPasajero(e: unknown): boolean {
+  if (!(e instanceof GeminiExtractionError)) return false;
+  const { status, code } = errMeta(e);
+  return code === "TIMEOUT" || status === 429;
 }
 
 // ── Email claim extractor (primary production path) ───────────────────────────

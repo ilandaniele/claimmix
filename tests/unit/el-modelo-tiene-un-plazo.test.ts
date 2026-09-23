@@ -78,13 +78,15 @@ describe("el transporte del modelo corta por tiempo", () => {
         })
     ) as unknown as typeof fetch;
 
-    const { callGemini } = await import("@/server/ai/gemini-extractor");
+    const { callGemini, esPasajero } = await import("@/server/ai/gemini-extractor");
     const arrancó = Date.now();
     const error = await callGemini("sistema", "usuario").catch((e: Error) => e);
     const tardó = Date.now() - arrancó;
 
     // El code viaja en `cause`, que es donde `errMeta` lo lee.
     expect((error as { cause?: { code?: string } }).cause?.code).toBe("TIMEOUT");
+    // Y con esa forma el turno vuelve a la cola en vez de escalar.
+    expect(esPasajero(error)).toBe(true);
     // Y no se reintentó cuatro veces: 4 × 50 ms más los backoffs se notaría.
     expect(tardó).toBeLessThan(1_000);
   });

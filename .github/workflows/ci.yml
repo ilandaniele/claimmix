@@ -36,9 +36,9 @@ env:
   # recién publicado, se pone en ese PR y se saca en el siguiente.
 
 jobs:
-  # ── 1. Type check ────────────────────────────────────────────────────────────
+  # ── 1. Tipos ─────────────────────────────────────────────────────────────────
   typecheck:
-    name: Type check
+    name: Tipos
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -105,9 +105,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-  # ── 3. Unit tests ────────────────────────────────────────────────────────────
+  # ── 3. Tests unitarios ───────────────────────────────────────────────────────
   unit-tests:
-    name: Unit tests
+    name: Tests unitarios
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -197,11 +197,11 @@ jobs:
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN || '' }}
           MOCK_AI: "true"
 
-  # ── 5. Integration tests ─────────────────────────────────────────────────────
+  # ── 5. Tests de integración ──────────────────────────────────────────────────
   # Runs when INTEGRATION_ENABLED secret is set; skipped otherwise (no live Neon DB).
   # To enable: set INTEGRATION_ENABLED=true in GitHub Actions secrets.
   integration-tests:
-    name: Integration tests
+    name: Tests de integración
     runs-on: ubuntu-latest
     # Una corrida por vez contra la base de ensayo, aunque sean ramas distintas.
     #
@@ -456,7 +456,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # ── 6. E2E tests ─────────────────────────────────────────────────────────────
+  # ── 6. Tests E2E ─────────────────────────────────────────────────────────────
   #
   # Requiere una base viva para que arranque el servidor. Sin el secreto: aviso
   # en un pull request —puede venir de un fork, que no recibe secretos— y ERROR
@@ -470,7 +470,7 @@ jobs:
   # Una suite que no puede hacer fallar el build no es una suite, es un adorno.
   # Si esto se pone inestable, lo que hay que arreglar es la inestabilidad.
   e2e-tests:
-    name: E2E tests (Playwright)
+    name: Tests E2E
     runs-on: ubuntu-latest
     env:
       # Mismo motivo que en `integration-tests`.
@@ -649,9 +649,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # ── 7. Security audit ────────────────────────────────────────────────────────
+  # ── 7. Vulnerabilidades ──────────────────────────────────────────────────────
   security-audit:
-    name: Security audit
+    name: Vulnerabilidades
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -720,7 +720,7 @@ jobs:
         # actualización de reglas trae ruido nuevo, esto se pone rojo — que es
         # exactamente lo que tiene que pasar para que alguien lo mire.
 
-  # ── 8. Bundle size check ─────────────────────────────────────────────────────
+  # ── 8. Peso del bundle ───────────────────────────────────────────────────────
   #
   # El presupuesto de 500 ms (`PRESUPUESTO_P95_MS`) se mide sólo en el
   # post-deploy, contra producción: el ensayo tiene cuatrocientos casos contra
@@ -735,7 +735,7 @@ jobs:
   # real ni el arranque en frío del runtime — eso lo mide `pnpm load` después
   # de cada deploy contra la base de producción, con la mesa llena de verdad.
   bundle-size:
-    name: Bundle size check
+    name: Peso del bundle
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -797,11 +797,11 @@ jobs:
           echo "  Si el peso nuevo hace falta de verdad, subí el tope en"
           echo "  scripts/medir-peso.mjs y decí en el commit por qué. Un tope que"
           echo "  se sube solo cada vez que alguien lo pasa no es un tope."
-  # ── 9. Integration tests (Gmail polling) ────────────────────────────────────
+  # ── 9. Tests de Gmail ───────────────────────────────────────────────────────
   # Replaces the old Postmark intake integration tests (W5: Postmark removed).
   # Tests Gmail polling, 410 stub, and route auth — all mock-only (no real Gmail creds).
   integration-tests-email:
-    name: Integration tests (Gmail polling)
+    name: Tests de Gmail
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -841,9 +841,9 @@ jobs:
           DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
           MOCK_AI: "true"
 
-  # ── 10. License audit ────────────────────────────────────────────────────────
+  # ── 10. Licencias ────────────────────────────────────────────────────────────
   license-audit:
-    name: License audit
+    name: Licencias
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -873,7 +873,7 @@ jobs:
         # el checker a mano antes de sacarle la red. Si mañana entra una
         # dependencia GPL, ahora se entera alguien.
 
-  # ── 11. Tenencia y capa de datos ─────────────────────────────────────────────
+  # ── 11. Aislamiento de tenants ───────────────────────────────────────────────
   #
   # `pnpm tenancy` le pregunta a la base si separa a las aseguradoras; `pnpm
   # capa-datos` prueba que el código que la usa no la deja abierta igual. Los
@@ -886,7 +886,7 @@ jobs:
   # ensayo — ver el comentario largo en `integration-tests` sobre la corrida de
   # main y la de un PR encimándose el 2026-09-07.
   tenencia-capa-datos:
-    name: Tenencia y capa de datos
+    name: Aislamiento de tenants
     runs-on: ubuntu-latest
     needs: [integration-tests]
     permissions:
@@ -933,7 +933,7 @@ jobs:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           DATABASE_URL_APP: ${{ secrets.STAGING_DATABASE_URL_APP }}
 
-  # ── 12. Pen test (local) ─────────────────────────────────────────────────────
+  # ── 12. Pen test local ───────────────────────────────────────────────────────
   #
   # `pnpm pentest --solo-superficie`: sólo LA SUPERFICIE de `scripts/pen-test.mts`
   # — cada ruta de `src/app/api` sin credenciales, el subárbol admin de Better
@@ -959,7 +959,7 @@ jobs:
   # que responde sin credenciales, en el mismo PR que la agrega; no cubre las
   # garantías que dependen del deploy.
   pen-test-local:
-    name: Pen test (local)
+    name: Pen test local
     runs-on: ubuntu-latest
     permissions:
       contents: read

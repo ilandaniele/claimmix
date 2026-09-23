@@ -87,7 +87,7 @@ concurrency:
 
 jobs:
   barrer:
-    name: Escalar lo que quedó trabado
+    name: Escalar casos trabados
     runs-on: ubuntu-latest
     timeout-minutes: 17
     permissions:
@@ -146,7 +146,7 @@ jobs:
           exit 1
 
   salud:
-    name: Mirar la salud del deploy
+    name: Salud del deploy
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

@@ -31,7 +31,7 @@
 # llamó — hoy ningún job de acá adentro lo usa todavía, queda declarado para
 # cuando un caller lo necesite (por ejemplo, para distinguirlo en un mensaje).
 
-name: Deploy checks
+name: Chequeos del deploy
 
 on:
   workflow_call:
@@ -179,7 +179,7 @@ permissions:
 
 jobs:
   smoke:
-    name: Smoke de producción
+    name: Smoke del deploy
     runs-on: ubuntu-latest
     # Sin guarda de entorno acá: la decide quien llama. Por workflow_call es
     # el job `produccion` de post-deploy.yml (o, mañana, el de QA); por
@@ -327,7 +327,7 @@ jobs:
       # nuevo lo resuelve sin tocar nada.
       #
       # Cuesta una corrida más, y sólo cuando algo difirió.
-      - name: Ensayar las doce conversaciones
+      - name: Ensayar las conversaciones
         run: |
           if pnpm rehearse --reporte primera.json; then
             exit 0
@@ -390,7 +390,7 @@ jobs:
   # La mitad de WhatsApp necesita WHATSAPP_APP_SECRET para firmar como Meta. Si
   # no está, se saltea y lo dice — que es distinto de darla por probada.
   timbre:
-    name: Tocar el timbre
+    name: Canales de entrada
     runs-on: ubuntu-latest
     needs: [smoke]
     # QA no tiene ni casilla ni WhatsApp: no hay timbre que tocar. Lo apaga su
@@ -506,7 +506,7 @@ jobs:
   # que la tabla es chica. Un rojo así se deja de mirar, igual que el del
   # sorteo de arriba.
   carga:
-    name: Carga (lectura)
+    name: Carga de lectura
     runs-on: ubuntu-latest
     needs: [smoke, rehearse, timbre, pentest, listas-parejas, permisos]
     if: always() && needs.smoke.result == 'success' && inputs.medir_carga
@@ -605,7 +605,7 @@ jobs:
   #
   # Sólo lee.
   listas-parejas:
-    name: Código y base dicen lo mismo
+    name: Paridad de documentos
     runs-on: ubuntu-latest
     needs: [smoke]
     steps:
@@ -692,7 +692,7 @@ jobs:
           echo "Reproducilo con: pnpm permisos"
 
   pentest:
-    name: Pen test (superficie)
+    name: Pen test del deploy
     runs-on: ubuntu-latest
     needs: [smoke]
     # La fase de la pared necesita dos inquilinos, y en QA el de demo no existe.
@@ -754,7 +754,7 @@ jobs:
   # a fallar por lo que ya falló arriba — ese rojo ya está en su propio job — y
   # tampoco lo tapa.
   alcance:
-    name: Qué se preguntó y qué no
+    name: Resumen de chequeos
     runs-on: ubuntu-latest
     needs: [smoke, rehearse, timbre, carga, listas-parejas, permisos, pentest]
     if: always()
@@ -803,11 +803,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           fila "Smoke del deploy" "$SMOKE" "propio"
           fila "Ensayo de conversaciones" "$ENSAYO" "correr_ensayo"
-          fila "Timbre (Gmail y WhatsApp)" "$TIMBRE" "correr_timbre"
+          fila "Canales de entrada (Gmail y WhatsApp)" "$TIMBRE" "correr_timbre"
           fila "Pen test (superficie y pared)" "$PENTEST" "correr_pentest"
-          fila "Código y base dicen lo mismo" "$LISTAS" "-"
+          fila "Paridad de documentos" "$LISTAS" "-"
           fila "Permisos del rol" "$PERMISOS" "-"
-          fila "Carga (lectura)" "$CARGA" "medir_carga"
+          fila "Carga de lectura" "$CARGA" "medir_carga"
           {
             echo ""
             if [ "$PROFUNDO" = "true" ]; then

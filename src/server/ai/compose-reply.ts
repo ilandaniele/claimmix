@@ -167,7 +167,7 @@ function buildPrompt(input: ComposeReplyInput): string {
     const { label, instruction, kind } = labelForField(key);
     const known = input.knownValues?.[key];
     return known
-      ? `- ${label}: ya entendimos "${known}". Preguntá si es correcto citando ese valor tal cual; no pidas más precisión ni digas que la persona lo escribió así`
+      ? `- ${label}: ya entendimos: ${known}. Preguntá si es correcto usando ese mismo valor, sin comillas ni paréntesis; no pidas más precisión ni digas que la persona lo escribió así`
       : `- ${label} — ${instruction} (${kind === "documento" ? "archivo o foto" : "dato"})`;
   });
 
@@ -251,13 +251,18 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   // model rewording "DNI del titular" is fine; dropping it is the orchestrator
   // asking for four things and the claimant seeing three.
   // Citing a value we already hold counts: "¿fue en Villa Mitre?" asks about
-  // the place without saying "lugar", and the brief tells it to write exactly that.
+  // the place without saying "lugar", and the brief tells it to use that value.
+  // Entero: una sola de sus palabras sale por otras razones —«Roberto» en el
+  // saludo, «daños» en «Fotos de los daños»— y el campo pasaría por pedido sin
+  // que la persona viera la pregunta. Y un «sí» o un «no», que es como llega un
+  // booleano, están en cualquier texto: ése tiene que nombrar el campo.
   if (input.intent === "ask") {
     const lower = trimmed.toLowerCase();
     for (const key of input.fields ?? []) {
       const head = labelForField(key).label.split(" ")[0].toLowerCase();
-      const known = input.knownValues?.[key]?.toLowerCase();
-      if (!lower.includes(head) && !(known && lower.includes(known))) return `dropped_field:${key}`;
+      const known = input.knownValues?.[key]?.trim().toLowerCase();
+      const citado = !!known && known.length > 2 && lower.includes(known);
+      if (!lower.includes(head) && !citado) return `dropped_field:${key}`;
     }
   }
 

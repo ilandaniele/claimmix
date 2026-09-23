@@ -783,6 +783,7 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
         { field_key: "accident_date", field_value: "2024-03-15", confidence: 0.70, source: "ai" as const },
       ],
     });
+    const { insertSpy } = setupDbMocks();
 
     await orchestratePostExtraction(
       CASE_ID,
@@ -800,6 +801,19 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
     expect(confirmationAudit?.[0].payload?.field_keys).toContain("accident_date");
     // PII check: the proposed value must NOT appear in the audit payload
     expect(JSON.stringify(confirmationAudit?.[0].payload)).not.toContain("2024-03-15");
+    expect(JSON.stringify(confirmationAudit?.[0].payload)).not.toContain("marzo");
+
+    // A la persona se le dice como una persona; en la base queda lo del extractor.
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect((ask?.[0].data.knownValues as Record<string, string>).accident_date).toBe(
+      "15 de marzo de 2024"
+    );
+    const fila = insertSpy.mock.calls
+      .flatMap((c) => [c[0]].flat() as Array<{ field_name?: string; suggested_value?: string }>)
+      .find((r) => r?.field_name === "accident_date");
+    expect(fila?.suggested_value).toBe("2024-03-15");
   });
 
   it("asks about an uncertain field in the same email as everything else", async () => {
@@ -2545,6 +2559,117 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
 });
 
 /*
+ * El rojo del ensayo `silencio` del 23/09.
+ *
+ * La lista traía varias cosas y una era la duda sobre los heridos. La persona
+ * escribió «ok»: eso daba la duda por confirmada, contaba como que había
+ * contestado, y le volvía el pedido entero. Un acuse solo no contesta una
+ * lista de varias cosas.
+ */
+describe("orchestratePostExtraction — un «ok» a una lista no la contesta", () => {
+  const LISTA = ["parte_amistoso", "licencia_conducir"];
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  beforeEach(() => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+  });
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+  });
+
+  function pedido(
+    asked: string[],
+    faltan: string[],
+    intent: "ask" | "wait",
+    confirmacionesCerradas: Array<{ campo: string }> = []
+  ) {
+    const spies = setupDbMocks({
+      lastAskRows: [{ asked_keys: asked, created_at: "2026-08-20T18:00:00Z" }],
+      newAttachmentRows: [],
+      confirmacionesCerradas,
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: faltan,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent,
+      askFor: intent === "ask" ? faltan : [],
+      question: null,
+      reasoning: "",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
+    return spies;
+  }
+
+  async function correr(latestMessageText: string, claim = extractEmailClaimMock()) {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL, latestMessageText },
+      NO_MATCHES
+    );
+  }
+
+  const pidio = () =>
+    vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.some((c) => c[0].template === "missing_information_request");
+
+  it.each(["ok", "gracias", "Dale, gracias!"])(
+    "«%s»: una fila que se cerró no cuenta como que contestó",
+    async (texto) => {
+      pedido(LISTA, ["parte_amistoso"], "wait", [{ campo: "licencia_conducir" }]);
+
+      await correr(texto);
+
+      expect(pidio()).toBe(false);
+    }
+  );
+
+  it("ni da por confirmado lo que se le preguntó", async () => {
+    const { updateSpy } = pedido(LISTA, LISTA, "wait");
+
+    await correr("ok", extractEmailClaimMock({ fields: [] }));
+
+    expect(updateSpy.mock.calls.map((c) => c[0])).not.toContainEqual({ status: "confirmed" });
+  });
+
+  it("y lo que queda de aquel pedido no es un pedido nuevo", async () => {
+    pedido(LISTA, ["parte_amistoso"], "ask");
+
+    await correr("ok");
+
+    expect(pidio()).toBe(false);
+  });
+
+  it("un «Confirmo» sí contesta, y cierra lo que se le preguntó", async () => {
+    const { updateSpy } = pedido(LISTA, ["parte_amistoso"], "wait", [
+      { campo: "licencia_conducir" },
+    ]);
+
+    await correr("Confirmo", extractEmailClaimMock({ fields: [] }));
+
+    expect(pidio()).toBe(true);
+    expect(updateSpy.mock.calls.map((c) => c[0])).toContainEqual({ status: "confirmed" });
+  });
+
+  it("y un «ok» a una sola pregunta sigue siendo la respuesta", async () => {
+    const { updateSpy } = pedido(["licencia_conducir"], ["licencia_conducir"], "wait");
+
+    await correr("ok", extractEmailClaimMock({ fields: [] }));
+
+    expect(updateSpy.mock.calls.map((c) => c[0])).toContainEqual({ status: "confirmed" });
+  });
+});
+
+/*
  * El 429 que dejó una pregunta sin contestar (ensayo `pregunta`, 22/09).
  *
  * Sin plan, `nosPreguntoAlgo` salía siempre falso: con el pedido ya en pie, el
@@ -3030,6 +3155,142 @@ describe("orchestratePostExtraction — never ask for what we can quote back", (
       .mock.calls.find((c) => c[0].template === "missing_information_request");
 
     expect(ask?.[0].data?.knownValues).not.toHaveProperty("policy_number");
+  });
+});
+
+/**
+ * El ensayo del 22/09 preguntó «¿fue el 2026-09-22?», «no hubo personas
+ * lastimadas (null)» y «(false)»: el valor de la base viajaba crudo hasta la
+ * pregunta. Se traduce una vez, al armar la lista, y lo mismo le llega al
+ * agente, al redactor y a los pisos.
+ */
+describe("orchestratePostExtraction — lo que ya entendimos se dice como una persona", () => {
+  async function pedido(
+    faltan: string[],
+    campos: Array<{ field_key: string; field_value: string; confidence: number }>,
+    dudosos: string[] = []
+  ) {
+    vi.mocked(dispatchOutboundEmail).mockClear();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: faltan,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    const claim = extractEmailClaimMock({ fields_pending_confirmation: dudosos });
+    claim.fields = campos.map((c) => ({ ...c, source: "ai" })) as never;
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect(ask).toBeDefined();
+    return ask![0].data as { missingFields: string[]; knownValues: Record<string, string> };
+  }
+
+  it("la fecha le llega legible también al agente", async () => {
+    const data = await pedido(
+      ["accident_date"],
+      [{ field_key: "accident_date", field_value: "2024-03-15", confidence: 0.9 }]
+    );
+
+    expect(data.knownValues.accident_date).toBe("15 de marzo de 2024");
+    expect(vi.mocked(deliberate).mock.calls[0][0].knownValues.accident_date).toBe(
+      "15 de marzo de 2024"
+    );
+  });
+
+  it("un null se pide igual que si no tuviéramos nada, y un false es un no", async () => {
+    const conNull = await pedido(
+      ["hay_heridos"],
+      [{ field_key: "hay_heridos", field_value: "null", confidence: 0.9 }]
+    );
+    const sinNada = await pedido(["hay_heridos"], []);
+
+    expect(conNull.knownValues).not.toHaveProperty("hay_heridos");
+    expect(conNull.missingFields).toEqual(sinNada.missingFields);
+
+    const conFalse = await pedido(
+      ["hay_heridos"],
+      [{ field_key: "hay_heridos", field_value: "false", confidence: 0.9 }]
+    );
+    expect(conFalse.knownValues.hay_heridos).toBe("no");
+  });
+
+  it("un tipo que no sabemos nombrar se pide, y uno que sí se dice en castellano", async () => {
+    const otro = await pedido(
+      ["claim_type"],
+      [{ field_key: "claim_type", field_value: "other", confidence: 0.9 }]
+    );
+    expect(otro.missingFields).toContain("claim_type");
+    expect(otro.knownValues).not.toHaveProperty("claim_type");
+
+    const granizo = await pedido(
+      ["claim_type"],
+      [{ field_key: "claim_type", field_value: "granizo", confidence: 0.9 }]
+    );
+    expect(granizo.knownValues.claim_type).toBe("daño por granizo");
+  });
+
+  it("un documento se pide aunque el extractor diga que lo nombró", async () => {
+    const data = await pedido(
+      ["fotos_danos"],
+      [{ field_key: "fotos_danos", field_value: "si", confidence: 0.9 }]
+    );
+
+    expect(data.missingFields).toContain("fotos_danos");
+    expect(data.knownValues).not.toHaveProperty("fotos_danos");
+  });
+
+  it("un null con más confianza no tapa el valor que dio el alias", async () => {
+    const data = await pedido(
+      ["accident_location"],
+      [
+        { field_key: "accident_location", field_value: "null", confidence: 0.9 },
+        { field_key: "lugar_siniestro", field_value: "Villa Mitre", confidence: 0.7 },
+      ]
+    );
+
+    expect(data.knownValues.accident_location).toBe("Villa Mitre");
+  });
+
+  // «Confirmo» cierra la fila con su valor propuesto: mostrar otro sería
+  // confirmar algo que no se preguntó.
+  it("con una fila pendiente se muestra el valor de esa fila o ninguno", async () => {
+    const data = await pedido(
+      [],
+      [
+        { field_key: "accident_location", field_value: "null", confidence: 0.9 },
+        { field_key: "lugar_siniestro", field_value: "Villa Mitre", confidence: 0.7 },
+      ],
+      ["accident_location"]
+    );
+
+    expect(data.missingFields).toContain("accident_location");
+    expect(data.knownValues).not.toHaveProperty("accident_location");
+  });
+
+  it("ningún valor sale como lo guarda la base", async () => {
+    const data = await pedido(
+      ["accident_date", "hay_heridos", "testigos", "claim_type", "accident_location"],
+      [
+        { field_key: "accident_date", field_value: "2026-09-22", confidence: 0.9 },
+        { field_key: "hay_heridos", field_value: "false", confidence: 0.9 },
+        { field_key: "testigos", field_value: "true", confidence: 0.9 },
+        { field_key: "claim_type", field_value: "other", confidence: 0.9 },
+        { field_key: "accident_location", field_value: "null", confidence: 0.9 },
+      ]
+    );
+
+    for (const valor of Object.values(data.knownValues)) {
+      expect(valor).not.toMatch(/^(null|undefined|true|false|other)$|^\d{4}-\d{2}-\d{2}/);
+    }
   });
 });
 

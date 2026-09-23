@@ -164,17 +164,16 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).toContain("• Número de póliza");
   });
 
-  it("never quotes an enum member back at a person", async () => {
-    // On the email side, entendimos "other" reached a real inbox.
+  // El valor llega legible desde el orquestador. Traducirlo otra vez lo
+  // borraba: «daño por granizo» no es un tipo.
+  it("no traduce dos veces lo que ya llega legible", async () => {
     await send("missing_information_request", {
       caseId: CASE,
       missingFields: ["claim_type"],
-      knownValues: { claim_type: "other" },
+      knownValues: { claim_type: "daño por granizo" },
     });
 
-    const body = sentBody();
-    expect(body).not.toContain("other");
-    expect(body).toContain("• Tipo de siniestro");
+    expect(sentBody()).toContain('Tipo de siniestro: entendimos "daño por granizo"');
   });
 
   it("asks for at most five things, and says the rest is coming", async () => {

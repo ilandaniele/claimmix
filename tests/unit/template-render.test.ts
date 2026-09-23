@@ -539,28 +539,30 @@ describe("renderTemplate — missing_information_request with values we hold", (
   });
 });
 
-describe("renderTemplate — a value we hold but cannot say", () => {
-  it("asks outright instead of quoting the enum member back", () => {
-    // `entendimos "other"` reached a real inbox through this list, after the
-    // same enum had already been chased out of two other templates.
+/*
+ * El orquestador ya traduce el valor, y deja afuera el que no sabe decir
+ * (`other` llegó a una casilla real como `entendimos "other"`). El piso lo usa
+ * como viene: traducirlo otra vez borraba el tipo.
+ */
+describe("renderTemplate — lo que ya entendimos", () => {
+  it("sin valor, pide el dato", () => {
     const result = renderTemplate("missing_information_request", {
       caseId: "c-3",
       missingFields: ["claim_type"],
-      knownValues: { claim_type: "other" },
+      knownValues: {},
     });
 
-    expect(result.html).not.toContain("other");
-    expect(result.text).not.toContain("other");
     expect(result.html).toContain("Decinos qué tipo de siniestro fue");
   });
 
-  it("shows a claim type it can name", () => {
+  it("con valor legible, lo muestra sin traducirlo otra vez", () => {
     const result = renderTemplate("missing_information_request", {
       caseId: "c-4",
       missingFields: ["claim_type"],
-      knownValues: { claim_type: "granizo" },
+      knownValues: { claim_type: "daño por granizo" },
     });
     expect(result.html).toContain("daño por granizo");
+    expect(result.html).not.toContain("Decinos qué tipo de siniestro fue");
   });
 });
 

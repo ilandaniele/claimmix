@@ -16,3 +16,13 @@
 export const RESPUESTA_PENDIENTE =
   "Sobre lo que preguntás: todavía no podemos darte una respuesta, porque " +
   "nadie revisó tu caso aún. En cuanto un analista lo mire te avisamos por acá.";
+
+/**
+ * El texto con la frase, cuando hubo pregunta. Una sola vez aunque se aplique
+ * dos veces: el piso ya la trae y el redactor caído la volvía a pegar.
+ */
+export function conRespuestaPendiente(texto: string, pregunta: unknown): string {
+  if (typeof pregunta !== "string" || !pregunta.trim()) return texto;
+  if (texto.includes(RESPUESTA_PENDIENTE)) return texto;
+  return `${texto}\n\n${RESPUESTA_PENDIENTE}`;
+}

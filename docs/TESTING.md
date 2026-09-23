@@ -700,6 +700,12 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
   intentó un escenario para forzarlo y salía verde o rojo según el día, que es
   peor que no tenerlo: un ensayo que falla por azar deja de mirarse. Cuando pasa
   de verdad, `goteo` lo agarra.
+- **Una pregunta cuando la deliberación se cae.** Sin plan, la pregunta sale
+  del mensaje (`laPreguntaDelMensaje`) y se contesta en la misma vuelta. El
+  ensayo no puede forzar un 429 ni un timeout de la deliberación, así que ese
+  camino lo cubren sólo los tests unitarios, en los dos canales:
+  `orchestrate-post-extraction`, `whatsapp-messenger`, `email-messenger` y
+  `core/pregunta`.
 
 - **La sincronización con el core del asegurador**, que nunca se ejercitó contra
   un sistema real.

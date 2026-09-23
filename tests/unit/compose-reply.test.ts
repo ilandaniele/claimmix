@@ -222,6 +222,20 @@ describe("composeReply — the brief it hands the model", () => {
     expect(mockCall.mock.calls[0][0] as string).toContain("Empezá el mensaje contestándola");
   });
 
+  it("la pregunta llega al prompt sin el DNI entero", async () => {
+    // Sin plan, la pregunta sale del mensaje crudo y no del resumen del agente.
+    replies("Todavía no te puedo decir. Mientras, necesito el número de póliza.");
+
+    await composeReply(
+      base({ fields: ["policy_number"], question: "¿Les mando el DNI 28.400.900?" })
+    );
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).toContain("****0900");
+    expect(prompt).not.toContain("28.400.900");
+    expect(prompt).not.toContain("28400900");
+  });
+
   it("says whether this is a first contact or a conversation already underway", async () => {
     replies("Ya tenemos todo lo necesario, tu denuncia pasa a análisis.");
     await composeReply(base({ intent: "closing", isFollowUp: true }));

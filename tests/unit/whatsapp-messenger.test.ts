@@ -39,7 +39,13 @@ vi.mock("@/server/email/dispatch", () => ({
   dispatchOutboundEmail: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+// Sin modelo: lo que se prueba acá es el piso, y un test no llama a Gemini.
+vi.mock("@/server/ai/gemini-extractor", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/ai/gemini-extractor")>()),
+  callGemini: vi.fn().mockRejectedValue(new Error("sin modelo en tests")),
+}));
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   whatsappMessenger,
   simulatedWhatsappMessenger,
@@ -48,6 +54,8 @@ import {
 } from "@/server/confirmations/messenger";
 import { db } from "@/lib/db";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
+import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
+import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import type { EmailTemplate } from "@/server/email/render";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
@@ -457,6 +465,76 @@ describe("whatsappMessenger — tomar nota sin repetir el pedido", () => {
     await send("information_received", { caseId: CASE });
     expect(inserted[0]?.template).toBe("wa_information_received");
   });
+});
+
+/*
+ * Una pregunta se contesta aunque el redactor no escriba nada.
+ *
+ * Con el interruptor apagado `composeReply` devuelve el piso crudo, y el piso
+ * de WhatsApp no traía la frase: la pregunta del ensayo `pregunta` del 22/09
+ * quedó sin respuesta. La frase vive en el piso, una sola vez.
+ */
+describe("whatsappMessenger — la pregunta tiene respuesta sin redactor", () => {
+  const PREGUNTA = "¿Cuánto suele tardar esto?";
+  const FALTAN = ["parte_amistoso", "licencia_conducir"];
+  const veces = (s: string) => s.split(RESPUESTA_PENDIENTE).length - 1;
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+  });
+
+  function redactorCaido() {
+    delete process.env.AGENT_COMPOSE_REPLIES;
+    (callGemini as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new GeminiExtractionError("429", { status: 429, code: "RESOURCE_EXHAUSTED" })
+    );
+  }
+
+  it("el pedido con pregunta la contesta una vez, con el redactor apagado", async () => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: FALTAN,
+      question: PREGUNTA,
+    });
+
+    expect(veces(sentBody())).toBe(1);
+    expect(inserted[0]?.asked_keys).toEqual(FALTAN);
+  });
+
+  it("y con el redactor caído por un 429", async () => {
+    redactorCaido();
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: FALTAN,
+      question: PREGUNTA,
+    });
+
+    expect(veces(sentBody())).toBe(1);
+    expect(inserted[0]?.asked_keys).toEqual(FALTAN);
+  });
+
+  it("el cierre con pregunta también, apagado y caído", async () => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+    await send("confirmation_received", { caseId: CASE, question: PREGUNTA });
+    expect(veces(sentBody())).toBe(1);
+
+    resetSend();
+    redactorCaido();
+    await send("confirmation_received", { caseId: CASE, question: PREGUNTA });
+    expect(veces(sentBody())).toBe(1);
+  });
+
+  it.each(["missing_information_request", "confirmation_received"] as const)(
+    "%s sin pregunta no la dice",
+    async (template) => {
+      process.env.AGENT_COMPOSE_REPLIES = "off";
+      await send(template, { caseId: CASE, missingFields: FALTAN });
+      expect(veces(sentBody())).toBe(0);
+    }
+  );
 });
 
 describe("whatsappMessenger — the record", () => {

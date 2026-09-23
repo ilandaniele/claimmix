@@ -57,8 +57,8 @@ vi.mock("@/server/ai/compose-reply", async (importOriginal) => {
 /*
  * Y el modelo, explícitamente.
  *
- * No alcanza con que `callGemini` tire por falta de entorno —que es como pasan
- * hoy los tests del mensajero de WhatsApp—: el día que alguien tenga
+ * No alcanza con que `callGemini` tire por falta de entorno —que es como
+ * pasaban los tests del mensajero de WhatsApp—: el día que alguien tenga
  * GEMINI_API_KEY en su shell, esta suite sale a la red de verdad.
  */
 vi.mock("@/server/ai/gemini-extractor", () => ({ callGemini: vi.fn() }));
@@ -69,6 +69,7 @@ import { emailMessenger } from "@/server/confirmations/messenger";
 import { composeReply } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { renderTemplate, type EmailTemplate } from "@/server/email/render";
+import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
@@ -240,6 +241,29 @@ describe("emailMessenger — cuando el redactor no puede", () => {
     await mandar("missing_information_request", PEDIDO);
 
     expect(cuerpoEnviado()).toBe(renderTemplate("missing_information_request", PEDIDO).html);
+  });
+
+  it("confirmation_received con pregunta: un rechazo y el interruptor apagado devuelven la plantilla byte a byte", async () => {
+    /*
+     * El piso del cierre no traía la frase y el redactor caído la pegaba: el
+     * mail dejaba de ser la plantilla. Apagado, ni eso — la pregunta quedaba
+     * sin contestar.
+     */
+    const CIERRE = { caseId: CASE, question: "¿Cuánto tarda?" };
+    const piso = renderTemplate("confirmation_received", CIERRE).html;
+    const veces = (s: string) => s.split(RESPUESTA_PENDIENTE).length - 1;
+
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+    await mandar("confirmation_received", CIERRE);
+    expect(cuerpoEnviado()).toBe(piso);
+    expect(veces(cuerpoEnviado())).toBe(1);
+
+    delete process.env.AGENT_COMPOSE_REPLIES;
+    filas = [];
+    modelo.mockRejectedValue(new Error("429"));
+    await mandar("confirmation_received", CIERRE);
+    expect(cuerpoEnviado()).toBe(piso);
+    expect(veces(cuerpoEnviado())).toBe(1);
   });
 });
 

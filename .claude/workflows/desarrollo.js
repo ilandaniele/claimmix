@@ -200,7 +200,7 @@ const impl = await agent(
 Plan acordado: ${JSON.stringify(plan)}
 Mapas del terreno: ${JSON.stringify(mapas)}
 
-Sos el ÚNICO que toca código. Creá la rama "${rama}" desde main actualizada (git fetch, git checkout -b) y seguí el plan paso a paso. Escribí los tests del plan; cuando la tarea es un bug tienen que fallar antes del arreglo y pasar después. Corré los tests que tocaste, "pnpm tsc --noEmit" y eslint sobre los archivos tocados hasta que todo quede limpio. No hagas commit todavía. Si algo del plan no cierra con lo que ves en el código, resolvelo con el criterio de las reglas y anotalo en dudas.${REGLAS}`,
+Sos el ÚNICO que toca código. Creá la rama "${rama}" desde qa actualizada (git fetch, git checkout -b ${rama} origin/qa) y seguí el plan paso a paso. Escribí los tests del plan; cuando la tarea es un bug tienen que fallar antes del arreglo y pasar después. Corré los tests que tocaste, "pnpm tsc --noEmit" y eslint sobre los archivos tocados hasta que todo quede limpio. No hagas commit todavía. Si algo del plan no cierra con lo que ves en el código, resolvelo con el criterio de las reglas y anotalo en dudas.${REGLAS}`,
   { label: 'implementar', schema: IMPL },
 )
 if (!impl) throw new Error('El implementador no devolvió nada')
@@ -299,7 +299,7 @@ Rama: ${rama}. Plan: ${plan.resumen}
 Hallazgos confirmados y corregidos: ${JSON.stringify(confirmados)}
 Comprobación: ${JSON.stringify(comprobacion)}
 
-Hacé UN commit con todo lo de la rama (git add de los archivos tocados, nada de "git add -A" a ciegas): mensaje de una línea en castellano, presente, que diga qué cambia y por qué, como los del historial ("git log --oneline -15"), y el trailer de coautoría "Co-Authored-By: <modelo> <noreply@anthropic.com>", donde <modelo> es el nombre del modelo con el que estás corriendo VOS. No lo copies de un commit viejo ni de acá: el historial tiene que decir quién lo escribió. Pusheá la rama y abrí el PR con "gh pr create": título = la línea del commit; cuerpo con el porqué, qué se probó y qué NO se pudo probar${verde ? '' : ' (el check NO quedó verde: decilo arriba de todo)'}, y al final "🤖 Generated with [Claude Code](https://claude.com/claude-code)". NO mergees.${REGLAS}`,
+Hacé UN commit con todo lo de la rama (git add de los archivos tocados, nada de "git add -A" a ciegas): mensaje de una línea en castellano, presente, que diga qué cambia y por qué, como los del historial ("git log --oneline -15"), y el trailer de coautoría "Co-Authored-By: <modelo> <noreply@anthropic.com>", donde <modelo> es el nombre del modelo con el que estás corriendo VOS. No lo copies de un commit viejo ni de acá: el historial tiene que decir quién lo escribió. Pusheá la rama y abrí el PR con "gh pr create --base qa": título = la línea del commit; cuerpo con el porqué, qué se probó y qué NO se pudo probar${verde ? '' : ' (el check NO quedó verde: decilo arriba de todo)'}, y al final "🤖 Generated with [Claude Code](https://claude.com/claude-code)". NO mergees.${REGLAS}`,
   { label: 'pr', schema: ENTREGA },
 )
 
@@ -314,6 +314,6 @@ return {
   verde,
   pendiente: [
     ...(verde ? [] : ['el check no quedó verde: leé el PR antes de mergear']),
-    'mergear el PR cuando el CI esté verde (gh pr merge --rebase --delete-branch) y mirar el post-deploy',
+    'mergear el PR cuando el CI esté verde (gh pr merge --merge --delete-branch, a qa) y mirar el post-deploy',
   ],
 }

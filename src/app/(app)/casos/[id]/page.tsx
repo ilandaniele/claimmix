@@ -339,10 +339,10 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
             <RawEmailAccordion messages={messages} t={t} />
           </PanelSection>
 
-          {/* Messages thread — only shown for email channel cases (AC11, AC12).
+          {/* La conversación, para todos los canales (AC11, AC12).
               El marco y el titulo los pone el componente: solo el sabe si hay
               mensajes, y sin ellos la tarjeta no tiene que existir. */}
-          {isEmailCase && <MessagesThread caseId={caseRow.id} />}
+          <MessagesThread caseId={caseRow.id} />
 
           {/*
             * Los adjuntos (AC23) — para todos los canales, no sólo correo.

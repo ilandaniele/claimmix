@@ -452,7 +452,7 @@ export const esAR = {
   "provider.sim": "Sim",
 
   // ── Messages thread (W2) ────────────────────────────────────────────────────
-  "messages.thread.title": "Mensajes recibidos",
+  "messages.thread.title": "Conversación",
   "messages.thread.from": "De",
   "messages.thread.subject": "Asunto",
   "messages.thread.received_at": "Recibido",
@@ -460,6 +460,12 @@ export const esAR = {
   "messages.thread.no_subject": "(sin asunto)",
   "messages.thread.expand": "Ver más",
   "messages.thread.collapse": "Ver menos",
+  "messages.thread.denunciante": "Denunciante",
+  "messages.thread.agente": "Agente",
+  "messages.thread.no_enviado": "No se envió",
+  "messages.thread.simulado": "Simulado",
+  "messages.thread.sin_confirmar": "Sin confirmar",
+  "messages.thread.recortada": "Se muestran sólo los mensajes más recientes.",
 
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clientes",

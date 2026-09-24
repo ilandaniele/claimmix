@@ -435,7 +435,7 @@ export const enUS: Record<TranslationKey, string> = {
   "provider.sim": "Sim",
 
   // ── Messages thread ────────────────────────────────────────────────────────
-  "messages.thread.title": "Received messages",
+  "messages.thread.title": "Conversation",
   "messages.thread.from": "From",
   "messages.thread.subject": "Subject",
   "messages.thread.received_at": "Received",
@@ -443,6 +443,12 @@ export const enUS: Record<TranslationKey, string> = {
   "messages.thread.no_subject": "(no subject)",
   "messages.thread.expand": "Show more",
   "messages.thread.collapse": "Show less",
+  "messages.thread.denunciante": "Claimant",
+  "messages.thread.agente": "Agent",
+  "messages.thread.no_enviado": "Not sent",
+  "messages.thread.simulado": "Simulated",
+  "messages.thread.sin_confirmar": "Unconfirmed",
+  "messages.thread.recortada": "Showing only the most recent messages.",
 
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clients",

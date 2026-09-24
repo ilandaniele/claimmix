@@ -2711,7 +2711,7 @@ la sesión, que se borran al cerrar.
   aplicar migraciones) y `create-app-role.mts` (escribe ahí la contraseña rotada,
   y NO la imprime, así que ponerla en la línea equivocada no se nota). 14 tests;
   el que más importa es el de la colisión de prefijos.
-- **`readable()` del ensayo** → `scripts/lib/texto-legible.mjs`. Se cambió cuatro
+- **`readable()` del ensayo** → `src/core/email/texto-legible.ts` (antes `scripts/lib/texto-legible.mjs`). Se cambió cuatro
   veces en un día y no se podía probar porque vivía en un script de top-level
   await: importarlo lo corre. 13 tests, incluido el que fija la propiedad de la
   que depende que su bucle sin tope termine —ninguna pasada alarga el texto— y el

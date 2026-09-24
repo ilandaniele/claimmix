@@ -6,11 +6,15 @@
  * AC12: Returns null (no messages-thread element) when messages array is empty.
  * AC13: body_text preview is at most 300 chars and ends with "…" when long.
  * AC14: Attachment count badge is visible when attachment_count > 0.
+ * Conversación: lo entrante y lo saliente, cada uno con su autor, el estado
+ *       de envío cuando lo saliente no llegó a la persona, y el aviso cuando
+ *       se muestran sólo los últimos.
  *
  * Uses vi.stubGlobal("fetch", ...) to mock the fetch call.
  */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { vi, beforeEach, describe, it, expect } from "vitest";
 import { MessagesThread } from "../../src/app/(app)/casos/[id]/_components/MessagesThread";
 
@@ -37,6 +41,7 @@ function makeMessage(overrides: Partial<{
   from_addr: string | null;
   body_text: string | null;
   received_at: string;
+  estado_envio: string | null;
   attachment_count: number;
 }> = {}) {
   return {
@@ -47,6 +52,7 @@ function makeMessage(overrides: Partial<{
     from_addr: "claimant@example.com",
     body_text: "This is the body of the email message.",
     received_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days ago
+    estado_envio: null,
     attachment_count: 0,
     ...overrides,
   };
@@ -290,6 +296,15 @@ describe("MessagesThread", () => {
     });
   });
 
+  it("el viewer ve '?' y no '[': su remitente llega como «[oculto]»", async () => {
+    mockFetch.mockReturnValue(makeJsonResponse({ messages: [makeMessage({ from_addr: "[oculto]" })] }));
+
+    render(<MessagesThread caseId={CASE_ID} />);
+
+    await waitFor(() => expect(screen.getByText("?")).toBeInTheDocument());
+    expect(screen.queryByText("[")).not.toBeInTheDocument();
+  });
+
   it("shows '?' avatar when from_addr is null", async () => {
     mockFetch.mockReturnValue(
       makeJsonResponse({
@@ -302,5 +317,134 @@ describe("MessagesThread", () => {
     await waitFor(() => {
       expect(screen.getByText("?")).toBeInTheDocument();
     });
+  });
+
+  describe("la conversación", () => {
+    const respuesta = (o: Parameters<typeof makeMessage>[0] = {}) =>
+      makeMessage({
+        id: "msg-out",
+        direction: "outbound",
+        subject: "Re: Test subject for the email",
+        from_addr: "siniestros@aseguradora.com",
+        body_text: "Nos falta la foto del registro.",
+        estado_envio: "sent",
+        received_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        ...o,
+      });
+
+    it("muestra lo entrante y lo saliente en el orden en que llegan, cada uno con su autor", async () => {
+      mockFetch.mockReturnValue(makeJsonResponse({ messages: [makeMessage(), respuesta()] }));
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => {
+        const cards = screen.getAllByTestId("message-card");
+        expect(cards.map((c) => c.getAttribute("data-direction"))).toEqual(["inbound", "outbound"]);
+        expect(within(cards[0]!).getByText("Denunciante")).toBeInTheDocument();
+        expect(within(cards[1]!).getByText("Agente")).toBeInTheDocument();
+      });
+    });
+
+    it("lo que se mandó bien no lleva etiqueta de estado", async () => {
+      mockFetch.mockReturnValue(makeJsonResponse({ messages: [respuesta()] }));
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getByText("Agente")).toBeInTheDocument());
+      expect(screen.queryByText("No se envió")).not.toBeInTheDocument();
+      expect(screen.queryByText("Simulado")).not.toBeInTheDocument();
+    });
+
+    it("avisa cuando una respuesta no se envió", async () => {
+      mockFetch.mockReturnValue(makeJsonResponse({ messages: [respuesta({ estado_envio: "failed" })] }));
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getByText("No se envió")).toBeInTheDocument());
+    });
+
+    it("el mail que quedó a medio mandar no se muestra como entregado", async () => {
+      mockFetch.mockReturnValue(makeJsonResponse({ messages: [respuesta({ estado_envio: "queued" })] }));
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getByText("Sin confirmar")).toBeInTheDocument());
+    });
+
+    it("marca como simulado el mail que no salió de verdad, sin asunto que no tiene", async () => {
+      // Como llega la vista previa del mail simulado: sin asunto ni remitente.
+      mockFetch.mockReturnValue(
+        makeJsonResponse({
+          messages: [
+            respuesta({ provider: "email", subject: null, from_addr: null, estado_envio: "skipped_simulated" }),
+          ],
+        })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getByText("Simulado")).toBeInTheDocument());
+      expect(screen.queryByText("(sin asunto)")).not.toBeInTheDocument();
+      expect(screen.getByText("A")).toBeInTheDocument();
+    });
+
+    it("lo saliente lleva la inicial del agente aunque el viewer vea el remitente oculto", async () => {
+      mockFetch.mockReturnValue(makeJsonResponse({ messages: [respuesta({ from_addr: "[oculto]" })] }));
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getByText("A")).toBeInTheDocument());
+      expect(screen.queryByText("[")).not.toBeInTheDocument();
+    });
+
+    it("avisa cuando se muestran sólo los últimos mensajes", async () => {
+      mockFetch.mockReturnValue(makeJsonResponse({ messages: [makeMessage()], recortada: true }));
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() =>
+        expect(screen.getByText("Se muestran sólo los mensajes más recientes.")).toBeInTheDocument()
+      );
+    });
+
+    it("y no avisa nada cuando está entera", async () => {
+      mockFetch.mockReturnValue(makeJsonResponse({ messages: [makeMessage()], recortada: false }));
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getByTestId("message-card")).toBeInTheDocument());
+      expect(screen.queryByText("Se muestran sólo los mensajes más recientes.")).not.toBeInTheDocument();
+    });
+
+    it("WhatsApp no muestra asunto, y lo saliente sin remitente lleva la inicial del agente", async () => {
+      mockFetch.mockReturnValue(
+        makeJsonResponse({
+          messages: [
+            makeMessage({ provider: "whatsapp", subject: "WhatsApp", from_addr: "5491100000000" }),
+            respuesta({ provider: "whatsapp", subject: null, from_addr: null }),
+          ],
+        })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getAllByTestId("message-card")).toHaveLength(2));
+      expect(screen.queryByText("WhatsApp")).not.toBeInTheDocument();
+      expect(screen.queryByText("(sin asunto)")).not.toBeInTheDocument();
+      const [, saliente] = screen.getAllByTestId("message-card");
+      expect(within(saliente!).getByText("A")).toBeInTheDocument();
+    });
+  });
+});
+
+describe("la página del caso", () => {
+  it("muestra la conversación para todos los canales, no sólo mail", () => {
+    // Estaba detrás de `isEmailCase &&`: un caso de WhatsApp no la veía.
+    const pagina = readFileSync("src/app/(app)/casos/[id]/page.tsx", "utf8");
+    const hilo = "<MessagesThread caseId={caseRow.id} />";
+    expect(pagina).toContain(hilo);
+
+    const antes = pagina.slice(0, pagina.indexOf(hilo)).trimEnd();
+    expect(antes).not.toMatch(/(&&|\?|:|\(|=>)$/);
   });
 });

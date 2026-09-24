@@ -59,6 +59,24 @@ describe("mensajesSinPiiSiNoCorresponde", () => {
     const vacio = { id: "m-2", subject: null, body_text: null, from_addr: null };
     expect(mensajesSinPiiSiNoCorresponde([vacio], "viewer")).toEqual([vacio]);
   });
+
+  it("lo que contestó el agente pasa por el mismo corte: repite el DNI y la póliza", () => {
+    // La respuesta de WhatsApp no tiene asunto ni remitente; el cuerpo sí.
+    const saliente = {
+      id: "m-3",
+      direction: "outbound",
+      subject: null,
+      from_addr: null,
+      body_text: `Ana, registramos tu DNI ${DNI} y la póliza ${POLIZA}.`,
+    };
+
+    const [visto] = mensajesSinPiiSiNoCorresponde([saliente], "viewer");
+    expect(visto!.body_text).not.toContain(DNI);
+    expect(visto!.body_text).not.toContain(POLIZA);
+    expect(visto!.from_addr).toBeNull();
+
+    expect(mensajesSinPiiSiNoCorresponde([saliente], "analyst")).toEqual([saliente]);
+  });
 });
 
 describe("sinPiiSiNoCorresponde", () => {

@@ -64,7 +64,7 @@ function desfasajeArgentino(instante: Date): number {
 }
 
 /** El instante exacto en que empieza un día argentino, en ISO (UTC). */
-function medianocheArgentina(anio: number, mes: number, dia: number): string {
+export function medianocheArgentina(anio: number, mes: number, dia: number): string {
   const tentativo = Date.UTC(anio, mes - 1, dia, 0, 0, 0, 0);
   return new Date(tentativo + desfasajeArgentino(new Date(tentativo))).toISOString();
 }

@@ -19,8 +19,20 @@ import {
   ESTADOS_ESCALADO,
 } from "@/core/case/fsm";
 
-import { mesArgentino } from "@/core/fecha/dia-argentino";
-import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
+import { mesArgentino, ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
+import {
+  completarSerie,
+  desdeDe,
+  FORMATO_DE,
+  type PuntoSerie,
+  type Unidad,
+} from "@/core/metricas/serie";
+import {
+  enTenant,
+  enTenantVarias,
+  type ClienteDatos,
+  type TenantContext,
+} from "@/data/scope";
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 
@@ -45,6 +57,8 @@ export interface MetricasData {
     by_model: AiUsageByModel[];
   };
   period: { start: string; end: string };
+  /** Sólo si se pidió: /api/metricas no la pide y devuelve null. */
+  serie: PuntoSerie[] | null;
 }
 
 export interface AiUsageSummary {
@@ -82,9 +96,43 @@ function normalizeUsage(row?: {
   };
 }
 
-/** Todo lo que muestra la pantalla, para un inquilino. */
+/**
+ * Reclamos abiertos, WhatsApps y mails atendidos por período, desde `desde`.
+ *
+ * El período se corta en hora argentina, igual que la ventana del mes: en UTC
+ * los casos de las 21 a las 24 caerían en el día siguiente. Las tres series
+ * miran sólo WhatsApp y mail reales: batch-simulate crea cientos de `email_sim`
+ * que después quedan como reclamo, y un día de escenarios se leía como un día
+ * de 108 reclamos sin ningún mensaje atendido.
+ *
+ * Agrupa y ordena por ordinal: drizzle manda cada interpolación como un
+ * parámetro distinto, así que repetir la expresión en el GROUP BY no sería la
+ * misma que la del SELECT para Postgres.
+ */
+export function consultaDeActividad(db: ClienteDatos, unidad: Unidad, desde: string) {
+  const { trunc, fmt } = FORMATO_DE[unidad];
+  return db
+    .select({
+      clave: sql<string>`to_char(date_trunc(${trunc}, ${cases.created_at} at time zone ${ZONA_ARGENTINA}), ${fmt})`,
+      reclamos: sql<number>`count(*) filter (where ${cases.is_claim} is true)::int`,
+      whatsapps: sql<number>`count(*) filter (where ${cases.channel} = 'whatsapp')::int`,
+      mails: sql<number>`count(*) filter (where ${cases.channel} = 'email')::int`,
+    })
+    .from(cases)
+    .where(and(gte(cases.created_at, desde), inArray(cases.channel, ["whatsapp", "email"])))
+    .groupBy(sql`1`)
+    .orderBy(sql`1`);
+}
+
+/**
+ * Todo lo que muestra la pantalla, para un inquilino.
+ *
+ * `serie` agrega la consulta de actividad al MISMO lote, así la pantalla sigue
+ * en un viaje. Sin ella no se lee y vuelve null.
+ */
 export async function getTenantKpis(
-  tenantCtx: TenantContext
+  tenantCtx: TenantContext,
+  opts?: { serie?: Unidad }
 ): Promise<MetricasData> {
   /*
    * ── La ventana del mes, en horario argentino ────────────────────────────────
@@ -96,6 +144,9 @@ export async function getTenantKpis(
    * horas de agosto, y no había forma de verlo desde acá.
    */
   const { inicio: monthStart, fin: monthEnd } = mesArgentino();
+  // Uno solo para la consulta y el relleno: si cambia el día entre los dos, la
+  // ventana leída y la dibujada no coinciden.
+  const ahora = new Date();
 
   type Usos = {
     calls: number;
@@ -114,8 +165,9 @@ export async function getTenantKpis(
     [usageAllTimeRow],
     usageByUserRows,
     usageByModelRows,
+    serieFilas,
   /*
-   * Nueve consultas en UN viaje, no en nueve.
+   * Nueve consultas —diez con la serie— en UN viaje, no en nueve.
    *
    * Estaba en `Promise.all([enTenant(...), enTenant(...), ...])`, que las pone
    * en paralelo pero NO las junta: cada `enTenant` abre su propio `batch()` con
@@ -140,6 +192,7 @@ export async function getTenantKpis(
       [Usos],
       Array<Usos & { user_id: string | null; full_name: string | null; email: string | null }>,
       Array<Usos & { model: string }>,
+      PuntoSerie[]?,
     ]
   >(tenantCtx, (db) => [
       /*
@@ -267,6 +320,9 @@ export async function getTenantKpis(
             lt(aiUsage.created_at, monthEnd),
           ))
           .groupBy(aiUsage.model),
+      ...(opts?.serie
+        ? [consultaDeActividad(db, opts.serie, desdeDe(opts.serie, ahora))]
+        : []),
     ]);
 
   const totalCasesMonth = resumenMes?.total ?? 0;
@@ -335,5 +391,8 @@ export async function getTenantKpis(
       by_model: usageByModel,
     },
     period: { start: monthStart, end: monthEnd },
+    serie: opts?.serie
+      ? completarSerie(opts.serie, ahora, serieFilas ?? [])
+      : null,
   };
 }

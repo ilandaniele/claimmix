@@ -784,7 +784,7 @@ function lineasDelPlan(resultado: unknown): string {
  * where tenant_id = '…'` escrito a mano y ejecutado con el rol dueño: otro rol,
  * otro predicado y otra forma. Se podía cambiar el orden, el filtro o los
  * índices del listado y este chequeo seguía verde, que es la única razón por la
- * que el trabajo «Carga (lectura)» existe en el post-deploy.
+ * que el trabajo «Carga de lectura» existe en el post-deploy.
  */
 async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
   console.log("\nCómo las resuelve Postgres:\n");

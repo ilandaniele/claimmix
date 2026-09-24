@@ -15,6 +15,7 @@ import { hrefActivo } from "@/app/(app)/_components/nav-activo";
 const BARRA = [
   "/bandeja",
   "/bandeja?status=escalado",
+  "/bandeja?is_claim=false",
   "/clientes",
   "/metricas",
   "/admin/users",
@@ -42,6 +43,16 @@ describe("hrefActivo", () => {
   it("un filtro cualquiera que no sea escalados sigue siendo «Bandeja»", () => {
     expect(hrefActivo(BARRA, "/bandeja", q("type=choque"))).toBe("/bandeja");
     expect(hrefActivo(BARRA, "/bandeja", q("status=listo"))).toBe("/bandeja");
+  });
+
+  it("la bandeja de no relevantes resalta «No relevantes», no «Bandeja»", () => {
+    expect(hrefActivo(BARRA, "/bandeja", q("is_claim=false"))).toBe("/bandeja?is_claim=false");
+    expect(hrefActivo(BARRA, "/bandeja", q("is_claim=false&page=2"))).toBe("/bandeja?is_claim=false");
+  });
+
+  it("sumar «No relevantes» no le roba el resaltado a «Bandeja» ni a «Escalados»", () => {
+    expect(hrefActivo(BARRA, "/bandeja", q("is_claim=true"))).toBe("/bandeja");
+    expect(hrefActivo(BARRA, "/bandeja", q("status=escalado"))).toBe("/bandeja?status=escalado");
   });
 
   it("una subruta resalta a su padre por prefijo, pero solo por `/`", () => {

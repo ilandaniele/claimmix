@@ -412,7 +412,7 @@ describe.skipIf(shouldSkip)("GET /api/cases/export.csv", () => {
     expect(firstLine).toContain("Asegurado");
     expect(firstLine).toContain("Póliza");
     expect(firstLine).toContain("Tipo");
-    expect(firstLine).toContain("Estado");
+    expect(firstLine).toContain("Situación");
     expect(firstLine).toContain("Confianza");
     expect(firstLine).toContain("Fecha");
     expect(firstLine).toContain("Analista");

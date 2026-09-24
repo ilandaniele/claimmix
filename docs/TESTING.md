@@ -88,6 +88,13 @@ Además de lo que espera cada vuelta, en todas se corre la comprobación
 respuesta es un valor de la base dicho tal cual. La traducción la cubren los
 tests `core/valor-legible` y `orchestrate-post-extraction`.
 
+También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
+hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún
+turno de la persona habló de heridos. Si no dijo nada, se le pregunta abierto.
+Un «No» o un «Sí» sueltos a esa pregunta abierta cuentan como hablar de heridos
+(`respuestaAHeridos`, en `src/core/case/heridos-supuestos.ts`).
+Qué cuenta como propuesta lo fija `tests/unit/propone-sin-heridos.test.ts`.
+
 ```bash
 pnpm rehearse                  # todos
 pnpm rehearse poliza-vencida   # uno solo, por nombre
@@ -292,7 +299,7 @@ esa parte no se mide y se avisa — que es distinto de darla por medida.
 
 **El resumen se guarda.** `--reporte carga.json` escribe el JSON y, al lado, el
 mismo objeto como `carga.html`. El post-deploy lo sube como artefacto del
-trabajo *Carga (lectura)*, que es lo que hacía falta para que «comparalo con la
+trabajo *Carga de lectura*, que es lo que hacía falta para que «comparalo con la
 corrida del deploy anterior» quiera decir algo.
 
 **La mitad de escritura** manda N asegurados inventados al webhook del deploy de
@@ -562,6 +569,40 @@ producción.
 **En cada push a `main`** — `.github/workflows/ci.yml`, que ya existía: tipos,
 lint, tests, build, auditoría de dependencias.
 
+### Cómo se llama cada check, después de septiembre de 2026
+
+Los nombres cambiaron para que un check leído sin el prefijo del workflow —el
+que arma GitHub en la lista de un PR— siga diciendo qué mira. Catorce son
+obligatorios en `main` y en `qa` (ver el paso 9 de
+[docs/PROMOCION.md](PROMOCION.md)); los demás corren en cada PR pero no
+bloquean el merge.
+
+`ci.yml`:
+
+- **Tipos** (obligatorio) — `pnpm type-check`.
+- **Lint** (obligatorio) — `pnpm lint`.
+- **Tests unitarios** (obligatorio) — la suite unitaria, más los flujos durables.
+- **Build** (obligatorio) — `pnpm build`.
+- **Tests de integración** — contra el ensayo, si `STAGING_DATABASE_URL` está.
+- **Cobertura** — el piso de `vitest.config.ts`, como trinquete.
+- **Tests E2E** (obligatorio) — Playwright contra su propia base.
+- **Vulnerabilidades** (obligatorio) — `pnpm audit` de alto para arriba, y semgrep.
+- **Peso del bundle** (obligatorio) — gzip de los chunks contra un presupuesto.
+- **Tests de Gmail** — polling, el stub 410 y la auth de las rutas, todo mock.
+- **Licencias** (obligatorio) — sin GPL/AGPL/LGPL/SSPL.
+- **Aislamiento de tenants** (obligatorio) — `pnpm tenancy` y `pnpm capa-datos`.
+- **Pen test local** (obligatorio) — `pnpm pentest --solo-superficie` contra un build local.
+
+`codeql.yml`:
+
+- **Análisis CodeQL** (obligatorio) — estático, `security-extended`.
+
+`secrets.yml`:
+
+- **Credenciales** (obligatorio) — gitleaks sobre el push; el historial entero corre aparte, los domingos.
+- **Datos personales** (obligatorio) — `bash scripts/check-personal-data.sh`.
+- **Invariantes de arquitectura** (obligatorio) — `node scripts/check-architecture.mjs`.
+
 **Después de cada deploy de producción** — `.github/workflows/post-deploy.yml`,
 que llama al workflow reusable `.github/workflows/deploy-checks.yml`. GitHub
 recibe de Vercel el aviso de que el deploy terminó bien y dispara siete
@@ -611,7 +652,7 @@ tres de ellos escriben—, así que `deploy-checks.yml` declara sus secretos uno
 por uno y el caller de QA mapea cada uno con su nombre `QA_*`. QA corre el
 smoke liviano, más los dos chequeos que sólo le preguntan al catálogo; el
 ensayo corre desde que QA tiene balde de R2 propio (`claimmix-qa-attachments`,
-20/09), y el timbre, el pen test y la «Carga (lectura)» de este workflow no
+20/09), y el timbre, el pen test y la «Carga de lectura» de este workflow no
 corren nunca ahí —el k6 de `load-tests.yml` sí, aparte, contra el alias
 público de QA. Los secretos `QA_*` del repositorio existen desde el 20/09
 (paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el post-deploy de esa noche,

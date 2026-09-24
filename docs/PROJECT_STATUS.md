@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-21. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-23. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -2711,7 +2711,7 @@ la sesión, que se borran al cerrar.
   aplicar migraciones) y `create-app-role.mts` (escribe ahí la contraseña rotada,
   y NO la imprime, así que ponerla en la línea equivocada no se nota). 14 tests;
   el que más importa es el de la colisión de prefijos.
-- **`readable()` del ensayo** → `scripts/lib/texto-legible.mjs`. Se cambió cuatro
+- **`readable()` del ensayo** → `src/core/email/texto-legible.ts` (antes `scripts/lib/texto-legible.mjs`). Se cambió cuatro
   veces en un día y no se podía probar porque vivía en un script de top-level
   await: importarlo lo corre. 13 tests, incluido el que fija la propiedad de la
   que depende que su bucle sin tope termine —ninguna pasada alarga el texto— y el
@@ -3367,7 +3367,9 @@ comillas.
   mirando el mensaje entero) frente a un pedido de más de una cosa no cierra
   nada por afirmación, no cuenta como que contestó, y lo que queda de aquel
   pedido tampoco cuenta como pedido nuevo. «Sí», «Confirmo» y «correcto» siguen
-  contestando, y un «ok» a una sola pregunta también.
+  contestando, y un «ok» a una sola pregunta también. Esa duda sobre los
+  heridos no tendría que haber existido: Ana nunca habló de heridos. Ver «Nadie
+  dijo que no hubo heridos» (23/09).
 
 Queda sin arreglar, de antes: el DNI y la póliza siguen yendo enteros en
 `knownValues` hasta el redactor (AC24), y un «Confirmo» cierra todas las
@@ -3446,6 +3448,87 @@ mensaje por los dos canales, sin deliberar y sin doble derivación), y 8 más
 para el mensaje: los dos pisos sin pregunta y con los valores enmascarados, la
 señal hasta el redactor, y las guardas del redactor. El ensayo del escenario
 evita ahora «¿» y «tu auto», y exige «especialista».
+
+### 🩹 Nadie dijo que no hubo heridos: se pregunta abierto (2026-09-23)
+
+Los ensayos `goteo`, `silencio` y `foto-que-no-es-nada` le propusieron
+«• ¿Hubo personas lastimadas?: no» a personas que nunca hablaron de heridos. El
+prompt del extractor pedía `"none"` cuando no se mencionaba a nadie herido, así
+que el silencio se guardaba como «no», se ofrecía para confirmar, y un «ok» lo
+cerraba.
+
+- **El prompt.** `"none"` sólo cuando la persona dice que nadie se lastimó; si
+  no dijo nada, `null`, y ni `hay_heridos` ni sus alias van a `fields` ni a las
+  dudas.
+- **La guarda en el worker.** `sinHeridosSupuestos`
+  (`src/core/case/heridos-supuestos.ts`) corre después de la hidratación y antes
+  de la severidad. Si el texto de la persona no nombra heridos, borra el
+  negativo de `hay_heridos` y sus alias, deja `hay_heridos` como duda sin valor
+  (sale como pregunta abierta) y pone en `null` una `injury_severity` «none».
+  Sólo borra negativos: un herido no se toca nunca, y borrar no cambia la
+  severidad, `requiresSpecialist` ni la derivación. Mail y WhatsApp pasan por el
+  mismo worker. Qué cuenta como nombrar heridos (`hablaDeHeridos`): herid, hiri,
+  lastim (no «qué lastima»), lesión, lesionad, ileso/a/s, «sin víctimas» o «no
+  hubo víctimas», «todos bien» o «todos estamos/están bien», «no nos/me pasó
+  nada», «sólo daños materiales», y en inglés injur, hurt, wounded y
+  «everyone/everybody is fine/ok/safe». «Víctima» sola no, ni «quemaduras»: fuera
+  del léxico cuesta una pregunta de más, no tapa nada.
+- **La respuesta a la pregunta abierta.** El extractor no ve nuestra pregunta,
+  así que un «No» o un «Sí» sueltos no le dicen nada. `respuestaAHeridos` los lee
+  sólo si `hay_heridos` fue lo único que pidió el último mensaje y se preguntó
+  abierto: si la fila pendiente tiene un valor —«¿es correcto que no hubo
+  personas lastimadas?», o un «none» de antes de este cambio—, un «Sí» es «sí,
+  nadie» y lo cierra la confirmación. Lee cada mensaje que llegó después del
+  pedido, sin saludos, firma (con o sin «Saludos»: nombre, teléfono, mail,
+  «Enviado desde…») ni adjuntos sin texto, así que un «No» con un «gracias» o
+  una foto atrás sigue siendo un «no». Un «no», «nadie», «ninguno», «todos
+  bien» o «sólo el auto» cierra `hay_heridos` en «no» e `injury_severity` en
+  «none», salvo que el modelo haya leído una herida. Un «sí» cierra en «sí»,
+  sube la severidad a `high` (una `critical` queda), marca
+  `requires_specialist` y deja `injury_severity` sin saber: el caso se deriva.
+  Sin conversación cargada o sin la hora del pedido, lee el último mensaje. La
+  consulta del pedido trae, en el mismo viaje, las claves, cuándo salió y las
+  confirmaciones pendientes (`ultimoPedido`,
+  `src/server/confirmations/ultimo-pedido.ts`); el orquestador recibe las
+  claves y no la repite.
+- **Un «ok» no confirma heridos sin valor.** En `resolveAnsweredConfirmations`,
+  una afirmación no cierra `hay_heridos` si esta corrida no trae un valor para
+  ese campo. Sí cierra lo demás que se preguntó. Un «sí» a un «no» que la
+  persona dijo a medias (confianza entre 0,60 y 0,85) lo confirma como antes.
+- **Lo confirmado no vuelve.** `analyzeEmailClaimGaps` devuelve
+  `camposResueltos` (filas `confirmed`/`corrected`, en clave canónica, de la
+  misma consulta; una `rejected` no, se vuelve a preguntar), y el orquestador
+  los saca de las dudas del extractor, que relee toda la conversación y los
+  listaba otra vez.
+- **El redactor.** La consigna pide meter el valor adentro de la pregunta y
+  nunca «¿pregunta?: valor». `violation()` rechaza como `pregunta_con_valor` un
+  renglón, de lista o de prosa, con un valor pegado a la pregunta. La consigna
+  también dice cómo va la lista: el verbo una sola vez en la frase que la abre,
+  ítems sin «Decinos…» ni «Mandanos…», y lo que ya entendimos se confirma
+  aparte, en su propia oración. Un ítem que igual arranca con «Decinos…» o
+  «Mandanos…», solo o después de un «—» o un «:», se rechaza como
+  `item_con_verbo`. Si la lista viene pegada a esa frase,
+  `attempt()` le agrega el renglón en blanco. A un «perdón» se le contesta «no
+  hay problema», no «gracias». La respuesta a una pregunta ya no dice «qué falta
+  para avanzar», que la hacía pedir la documentación dos veces, y la consigna
+  pide hablar en plural: nunca «te pido» ni «entiendo». El control de campos
+  omitidos ya no toma «Si» como palabra clave de «Si hubo personas lastimadas»:
+  para `hay_heridos` busca la raíz (lastim, herid, lesion), así que «¿Alguien
+  resultó lastimado?» o «¿Es correcto que nadie resultó lastimado?» pasan.
+- **El piso del mail.** Cuando el redactor se cae (un 429, por ejemplo), la
+  plantilla pide cada dato por su etiqueta sola, como WhatsApp. Antes pegaba la
+  instrucción atrás: «Fotos de los daños: Mandanos fotos de los daños.».
+- **El ensayo lo vigila en cada vuelta.** La comprobación `propone-sin-heridos`
+  (`scripts/lib/propone-sin-heridos.mjs`) falla si una respuesta propone «no
+  hubo heridos» y ningún turno de la persona habló de heridos.
+
+**Lo que queda.** Los casos abiertos antes de este cambio pueden tener una fila
+vieja con el «no» supuesto: un «ok» ya no la confirma y un «Sí» o un «No»
+sueltos no se leen como respuesta abierta, pero no se hizo backfill. Una
+respuesta abierta que no es un «sí» o un «no» enteros («No, pero mi hijo se
+golpeó», «No sé») queda para el extractor, y si no nombra heridos la pregunta
+puede repetirse. Un negativo por debajo de 0,60 antes iba a `missing_docs`;
+ahora queda como pregunta abierta.
 
 ### 🙋 Waiting on you (not code)
 

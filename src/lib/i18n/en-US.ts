@@ -15,6 +15,7 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Navigation ─────────────────────────────────────────────────────────────
   "nav.bandeja": "Inbox",
   "nav.escalados": "Escalated",
+  "nav.noRelevantes": "Not relevant",
   "nav.clientes": "Clients",
   "nav.analisis": "Analysis",
   "nav.metricas": "Metrics",
@@ -353,6 +354,7 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.proposedValue": "Proposed value",
   "case.detail.conflictValue": "Conflicting value",
   "case.detail.status": "Status",
+  "case.detail.statusUpdated": "Status updated.",
   "case.detail.sendToCore": "Send to core system",
   "case.detail.sendingToCore": "Sending...",
   "case.detail.coreSyncSuccess": "Case sent to core system.",
@@ -435,7 +437,7 @@ export const enUS: Record<TranslationKey, string> = {
   "provider.sim": "Sim",
 
   // ── Messages thread ────────────────────────────────────────────────────────
-  "messages.thread.title": "Received messages",
+  "messages.thread.title": "Conversation",
   "messages.thread.from": "From",
   "messages.thread.subject": "Subject",
   "messages.thread.received_at": "Received",
@@ -443,6 +445,12 @@ export const enUS: Record<TranslationKey, string> = {
   "messages.thread.no_subject": "(no subject)",
   "messages.thread.expand": "Show more",
   "messages.thread.collapse": "Show less",
+  "messages.thread.denunciante": "Claimant",
+  "messages.thread.agente": "Agent",
+  "messages.thread.no_enviado": "Not sent",
+  "messages.thread.simulado": "Simulated",
+  "messages.thread.sin_confirmar": "Unconfirmed",
+  "messages.thread.recortada": "Showing only the most recent messages.",
 
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clients",
@@ -540,6 +548,7 @@ export const enUS: Record<TranslationKey, string> = {
   "cartera.col.cliente": "Client",
   "cartera.col.costoIa": "AI cost",
   "cartera.col.denuncias": "Claims",
+  "cartera.col.estado": "Status",
   "cartera.col.margen": "Margin",
   "cartera.col.plan": "Plan",
   "cartera.deMargen": "margin",
@@ -592,6 +601,14 @@ export const enUS: Record<TranslationKey, string> = {
   "facturacion.verMesEnCurso": "View the current month",
 
   // ── Metricas — el tablero del mes ─────────────────────────────────
+  "metricas.actividad.titulo": "Activity",
+  "metricas.actividad.dia": "By day",
+  "metricas.actividad.mes": "By month",
+  "metricas.actividad.anio": "By year",
+  "metricas.actividad.reclamos": "Claims opened",
+  "metricas.actividad.whatsapps": "WhatsApps handled",
+  "metricas.actividad.mails": "Emails handled",
+  "metricas.actividad.nota": "Real WhatsApp and email only, no simulations. A claim opened is a case confirmed as a claim, so there can be fewer than the month's total.",
   "metricas.card.completitudAuto": "Auto-completion rate",
   "metricas.card.escalados": "Escalated claims",
   "metricas.card.tiempoApertura": "Average time to open",

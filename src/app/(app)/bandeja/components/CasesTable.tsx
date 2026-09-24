@@ -119,7 +119,7 @@ export function CasesTable({
                       "inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 transition-colors",
                       marcado
                         ? "border-violet-600 bg-violet-600 text-white"
-                        : "border-slate-300 bg-white group-hover:border-violet-400",
+                        : "border-slate-500 bg-white group-hover:border-violet-400",
                     ].join(" ")}
                   >
                     {marcado && (
@@ -525,7 +525,7 @@ export function CasesTable({
                      * 2.6:1, muy por debajo del 4.5:1 que pide texto. El 500 da
                      * 4.8:1. Es el nombre de la columna, no una decoracion.
                      */
-                    className="rotulo sticky top-0 whitespace-nowrap bg-slate-50 px-3 py-2.5 text-slate-500 shadow-[inset_0_-1px_0_0_theme(colors.slate.200)] first:pl-5 last:pr-5"
+                    className="rotulo linea-inferior sticky top-0 whitespace-nowrap bg-slate-50 px-3 py-2.5 text-slate-500 first:pl-5 last:pr-5"
                   >
                     {flexRender(
                       header.column.columnDef.header,
@@ -558,7 +558,7 @@ export function CasesTable({
                    * por dentro (`ring-inset`) porque una fila de tabla recorta
                    * lo que se dibuja afuera.
                    */
-                  className={`group cursor-pointer border-b border-slate-100 transition-colors last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500 ${
+                  className={`group cursor-pointer border-b border-slate-200 transition-colors last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500 ${
                     /*
                      * Seleccionar es un ESTADO; borrar es una ACCION. El rojo
                      * es de la accion, y pintaba de alarma diez filas que la

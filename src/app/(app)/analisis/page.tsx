@@ -292,7 +292,7 @@ export default async function AnalisisPage() {
             {/* By status */}
             <div className="rounded-lg border border-slate-200 bg-white p-5">
               <h2 className="mb-5 text-sm font-semibold text-slate-700">
-                Distribución por estado
+                Distribución por situación
               </h2>
               <div className="space-y-3">
                 {STATUS_OPCIONES.map(({ value: key, label }) => (

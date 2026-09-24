@@ -376,7 +376,7 @@ const COMO_USAR_PASOS = [
   {
     titulo: "2. La bandeja",
     texto:
-      "Cada caso aparece en la bandeja. Se filtra por estado, tipo de siniestro, severidad y canal desde el panel de filtros.",
+      "Cada caso aparece en la bandeja. Se filtra por situación, tipo de siniestro, severidad y canal desde el panel de filtros.",
   },
   {
     titulo: "3. Confirmar un campo",

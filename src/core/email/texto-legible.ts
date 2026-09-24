@@ -11,12 +11,16 @@
  * Se cambió cuatro veces en un día y cada vez se verificó a mano, en un
  * archivo del directorio temporal que ya no existe. Acá tiene su test.
  *
+ * Vive en el núcleo porque la conversación del caso también lo usa: la vista
+ * previa del mail simulado se guarda sólo en HTML.
+ *
  * ── Lo que este archivo NO es ───────────────────────────────────────────────
  *
- * Un saneador. La salida va a `console.log` y a un `.toLowerCase()` para buscar
- * una frase; no hay nada que renderice HTML. Lo que se cuida es que el
- * transcripto no TAPE: que un `<` que escribió un desconocido y el escape
- * convirtió bien no se lea igual de tranquilizador que uno mal escapado.
+ * Un saneador. La salida va a `console.log`, a un `.toLowerCase()` para buscar
+ * una frase y a un nodo de texto de React; nada la renderiza como HTML. Lo
+ * que se cuida es que el transcripto no TAPE: que un `<` que escribió un
+ * desconocido y el escape convirtió bien no se lea igual de tranquilizador que
+ * uno mal escapado.
  */
 
 /**
@@ -30,7 +34,7 @@
  * un `<` que alguien escribió y el escape convirtió bien, y mostrarlo como `<`
  * lo hace indistinguible de uno que se escapó mal.
  */
-export function sinEntidades(texto) {
+export function sinEntidades(texto: string): string {
   return texto
     .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
@@ -41,7 +45,7 @@ export function sinEntidades(texto) {
 }
 
 /** Una pasada de todo lo que hay que sacar o traducir. Ver `sinEtiquetas`. */
-export function unaPasada(texto) {
+export function unaPasada(texto: string): string {
   return texto
     .replace(/<head[\s\S]*?<\/head[^>]*>/gi, "")
     .replace(/<(script|style)[\s\S]*?<\/\1[^>]*>/gi, "")
@@ -72,7 +76,7 @@ export function unaPasada(texto) {
  * Un tope parecía prudente y era peor: salir en la vuelta ocho deja el texto a
  * medio limpiar y nadie se entera.
  */
-export function sinEtiquetas(texto) {
+export function sinEtiquetas(texto: string): string {
   let antes = texto;
   for (;;) {
     const despues = unaPasada(antes);
@@ -82,7 +86,7 @@ export function sinEtiquetas(texto) {
 }
 
 /** El cuerpo de un mensaje, listo para imprimir en el transcripto. */
-export function readable(body) {
+export function readable(body: string): string {
   if (!/<[a-z!]/i.test(body) && !/&[a-z#]/i.test(body)) return body;
   return sinEtiquetas(sinEntidades(body))
     .split("\n")

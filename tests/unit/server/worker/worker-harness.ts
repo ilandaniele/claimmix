@@ -46,6 +46,9 @@ export function filaDeCaso(
  * Un `db` simulado que:
  *   · devuelve la fila del caso en el primer SELECT,
  *   · el mensaje crudo en el segundo,
+ *   · `pedido` como `asked_keys` del último mensaje que salió,
+ *   · `conversacion` —si viene— como los mensajes entrantes del caso,
+ *   · `propuestos` como las confirmaciones pendientes,
  *   · nada en los demás,
  *   · y le pasa a `espiaDeUpdate` todo lo que se escriba con `.set(...)`.
  *
@@ -54,19 +57,25 @@ export function filaDeCaso(
  */
 export function dbSimulado(
   fila: FilaDeCaso,
-  espiaDeUpdate: Mock<(data: Record<string, unknown>) => void>
+  espiaDeUpdate: Mock<(data: Record<string, unknown>) => void>,
+  cuerpo = "Buenos días, tuve un choque ayer.",
+  pedido: string[] = [],
+  { conversacion, propuestos = {} }: Conversacion = {}
 ) {
   let n = 0;
 
   const mensajeCrudo = {
-    body: "Buenos días, tuve un choque ayer.",
+    body: cuerpo,
     subject: "Siniestro",
     from_addr: "asegurado@ejemplo.com",
   };
 
-  const mockSelect = vi.fn().mockImplementation(() => {
+  const mockSelect = vi.fn().mockImplementation((columnas?: Record<string, unknown>) => {
     n++;
     const idx = n;
+    const ultimoPedido = pedido.length > 0 && !!columnas && "asked_keys" in columnas;
+    const entrantes = !!columnas && "profile_name" in columnas;
+    const pendientes = !!columnas && "suggested_value" in columnas;
 
     const limit = vi.fn().mockImplementation(() => {
       if (idx === 1) return Promise.resolve([fila]);
@@ -74,15 +83,29 @@ export function dbSimulado(
       return Promise.resolve([]);
     });
     const orderBy = vi.fn().mockReturnValue({
-      limit: vi.fn().mockImplementation(() =>
-        idx === 2 ? Promise.resolve([mensajeCrudo]) : Promise.resolve([])
-      ),
+      limit: vi.fn().mockImplementation(() => {
+        if (ultimoPedido) return Promise.resolve([{ asked_keys: pedido, created_at: conversacion?.enviado }]);
+        return idx === 2 ? Promise.resolve([mensajeCrudo]) : Promise.resolve([]);
+      }),
     });
+    if (entrantes && conversacion) {
+      orderBy.mockReturnValue(
+        Promise.resolve(
+          conversacion.mensajes.map(([body_text, received_at]) => ({ body_text, received_at, subject: "Siniestro" }))
+        )
+      );
+    }
     const where = vi.fn().mockReturnValue({ limit, orderBy });
 
     return {
       from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({ limit, orderBy, where }),
+        where: vi.fn().mockReturnValue(
+          pendientes
+            ? Promise.resolve(
+                Object.entries(propuestos).map(([field_name, suggested_value]) => ({ field_name, suggested_value }))
+              )
+            : { limit, orderBy, where }
+        ),
         limit,
         orderBy,
         innerJoin: vi.fn().mockReturnValue({ where, limit, orderBy }),
@@ -116,6 +139,16 @@ export function dbSimulado(
     insert: vi.fn().mockReturnValue(cadenaInsert),
     delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
   };
+}
+
+export interface Conversacion {
+  /**
+   * Los mensajes entrantes del caso, `[texto, recibido]`, y cuándo salió el
+   * último pedido. Sin esto el worker lee el mensaje crudo, como el simulador.
+   */
+  conversacion?: { enviado: string; mensajes: Array<[string, string]> };
+  /** Las confirmaciones pendientes: `{ clave: valor propuesto }`. */
+  propuestos?: Record<string, string>;
 }
 
 export interface OpcionesDelExtractor {
@@ -154,7 +187,11 @@ export function registrarMocks(opciones: {
   /** Reemplaza el mock de `isValidTransition`. Por omisión, todo vale. */
   transicionValida?: boolean;
   extractor?: OpcionesDelExtractor;
-}) {
+  /** Lo que escribió la persona. Por omisión, un choque sin más detalle. */
+  cuerpo?: string;
+  /** Lo que le preguntó el último mensaje que salió. Por omisión, nada. */
+  pedido?: string[];
+} & Conversacion) {
   const {
     fila,
     espiaDeUpdate,
@@ -162,9 +199,13 @@ export function registrarMocks(opciones: {
     necesitaEspecialista = false,
     transicionValida = true,
     extractor = {},
+    cuerpo,
+    pedido,
+    conversacion,
+    propuestos,
   } = opciones;
 
-  const mockDb = dbSimulado(fila, espiaDeUpdate);
+  const mockDb = dbSimulado(fila, espiaDeUpdate, cuerpo, pedido, { conversacion, propuestos });
 
   vi.doMock("@/lib/db", () => ({
     db: mockDb,

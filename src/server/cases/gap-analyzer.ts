@@ -75,6 +75,8 @@ export interface FieldNeedingConfirmation {
   suggestedValue: string;
   conflictValue?: string;
   reason: "low_confidence" | "conflict" | "medium_confidence";
+  /** La de la fila o la del extractor: la rama C la usa cuando esta corrida no trae el campo. */
+  confidence?: number;
 }
 
 export interface GapAnalysisResult {
@@ -214,6 +216,7 @@ export async function analyzeEmailClaimGaps(
       suggestedValue: row.proposed_value ?? "",
       conflictValue: row.conflict_with_value ?? undefined,
       reason: determineConfirmationReason(row.confidence, !!row.conflict_with_value),
+      confidence: row.confidence,
     })
   );
 
@@ -240,6 +243,7 @@ export async function analyzeEmailClaimGaps(
         fieldName: f.field_key,
         suggestedValue: f.field_value,
         reason: "medium_confidence",
+        confidence: f.confidence,
       });
     }
   }

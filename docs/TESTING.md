@@ -95,6 +95,24 @@ Un «No» o un «Sí» sueltos a esa pregunta abierta cuentan como hablar de her
 (`respuestaAHeridos`, en `src/core/case/heridos-supuestos.ts`).
 Qué cuenta como propuesta lo fija `tests/unit/propone-sin-heridos.test.ts`.
 
+`goteo` corre dos más (`sinEco` en el escenario). `confirma-lo-dicho` marca una
+confirmación («¿…, correcto?» o un piso con `entendimos "X"`) que no trae nada
+más que lo que la persona escribió en ese mismo turno sobre algo que se le pidió
+en la vuelta anterior: el 23/09 a «Fue un choque, ayer a la tarde» se le
+contestó «¿Fue a la tarde, correcto?». Qué se pidió y con qué valor lo leen de
+`asked_keys`, de `claim_field_confirmations` y de `extracted_fields` (la póliza
+que encontró el agente no deja fila de confirmación: así se escapó
+«Entendemos que tu póliza es POL-3311-B, ¿es correcto?»). Lo inferido («ayer» confirmado
+como fecha), lo que no se pidió y un número suelto (el DNI) siguen pasando,
+porque el orquestador los confirma a propósito, y «¿me confirmás a qué hora
+fue?» pide un dato, no lo confirma. `hora-en-una-forma` falla si a lo largo
+del escenario la hora se pidió de las dos formas: confirmando la franja y
+pidiendo la hora (aclarar que alcanza con una aproximada es la misma); ese mismo día la
+confirmación de la franja se cambió por «Más o menos a qué hora fue.» sin que la
+persona contestara. Las dos miran la prosa del modelo, y por eso van sólo en
+`goteo`. Qué cuenta como eco lo fija `tests/unit/ensayo-confirmaciones.test.ts`;
+la regla del orquestador, `core/lo-dicho` y `orchestrate-post-extraction`.
+
 ```bash
 pnpm rehearse                  # todos
 pnpm rehearse poliza-vencida   # uno solo, por nombre

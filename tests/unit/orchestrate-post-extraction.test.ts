@@ -4625,3 +4625,331 @@ describe("orchestratePostExtraction — un documento negado no vuelve como duda"
     expect(filas.map((f) => f.field_name)).not.toContain("parte_amistoso");
   });
 });
+
+/*
+ * El ensayo `goteo` del 23/09. A «Fue un choque, ayer a la tarde» se le
+ * contestó «¿Fue a la tarde, correcto?», y en la vuelta siguiente esa pregunta
+ * desapareció sin respuesta y apareció «Más o menos a qué hora fue.».
+ *
+ * Lo que la persona escribió recién no vuelve como duda. Una franja del día se
+ * pide como hora, siempre con la misma forma, hasta que la dé. Lo inferido y
+ * lo que choca con el padrón se sigue preguntando.
+ */
+describe("orchestratePostExtraction — lo dicho recién no vuelve como «¿…, correcto?»", () => {
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  beforeEach(() => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+  });
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+  });
+
+  const campo = (field_key: string, field_value: string, confidence = 0.7) => ({
+    field_key,
+    field_value,
+    confidence,
+    source: "ai" as const,
+  });
+
+  /** Lo que marca el analizador: la banda media de esta corrida o una fila pendiente. */
+  const duda = (fieldName: string, suggestedValue: string, confidence = 0.7) => ({
+    fieldName,
+    suggestedValue,
+    reason: "medium_confidence" as const,
+    confidence,
+  });
+
+  async function vuelta(opts: {
+    texto: string;
+    fields: ReturnType<typeof campo>[];
+    dudas?: ReturnType<typeof duda>[];
+    preguntadas?: string[];
+    matches?: CustomerMatch[];
+    messenger?: AgentMessenger;
+  }) {
+    const spies = setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["policy_number"],
+      fieldsNeedingConfirmation: opts.dudas ?? [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extractEmailClaimMock({
+          fields: opts.fields,
+          fields_pending_confirmation: [],
+        }),
+        senderEmail: SENDER_EMAIL,
+        latestMessageText: opts.texto,
+        preguntadas: opts.preguntadas,
+      },
+      opts.matches ?? NO_MATCHES,
+      opts.messenger
+    );
+
+    const filas = spies.insertSpy.mock.calls.flatMap((c) => [c[0]].flat()) as Array<{
+      field_name?: string;
+      suggested_value?: string;
+      status?: string;
+    }>;
+    const salidas = opts.messenger
+      ? vi.mocked(opts.messenger.send).mock.calls
+      : vi.mocked(dispatchOutboundEmail).mock.calls;
+    const ask = salidas.find((c) => c[0].template === "missing_information_request");
+    const pedidas = vi
+      .mocked(writeAuditLog)
+      .mock.calls.filter((c) => c[0].event_type === "claim.confirmation_requested")
+      .flatMap((c) => (c[0].payload as { field_keys: string[] }).field_keys);
+    const cerradas = spies.updateValoresSpy.mock.calls
+      .filter((c) => (c[0] as { status?: string }).status === "confirmed")
+      .flatMap((c) => c[1] as unknown[]);
+
+    return {
+      fila: (clave: string) => filas.find((f) => f.field_name === clave),
+      pedido: ask?.[0].data as
+        | { missingFields: string[]; knownValues: Record<string, string> }
+        | undefined,
+      pedidas,
+      cerradas,
+    };
+  }
+
+  it.each([
+    ["es-AR", "Fue un choque, ayer a la tarde", "tarde"],
+    ["en-US", "It was a crash, yesterday afternoon", "afternoon"],
+  ])("%s: la franja que acaba de decir se pide como hora, no «¿fue a la tarde?»", async (_l, texto, franja) => {
+    const { fila, pedido } = await vuelta({
+      texto,
+      fields: [campo("hora_siniestro", franja)],
+      dudas: [duda("hora_siniestro", franja)],
+    });
+
+    expect(pedido?.missingFields).toContain("hora_siniestro");
+    expect(pedido?.knownValues).not.toHaveProperty("hora_siniestro");
+    expect(fila("hora_siniestro")).toMatchObject({ status: "pending", suggested_value: franja });
+  });
+
+  it("por WhatsApp igual", async () => {
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) };
+
+    const { pedido } = await vuelta({
+      texto: "Fue un choque, ayer a la tarde",
+      fields: [campo("hora_siniestro", "tarde")],
+      dudas: [duda("hora_siniestro", "tarde")],
+      messenger,
+    });
+
+    expect(pedido?.missingFields).toContain("hora_siniestro");
+    expect(pedido?.knownValues).not.toHaveProperty("hora_siniestro");
+  });
+
+  it("la vuelta siguiente, sin la hora en la extracción, no pisa la fila ni cambia la pregunta", async () => {
+    const { fila, pedido } = await vuelta({
+      texto: "Soy Roberto Paz, DNI 25.888.101",
+      fields: [campo("full_name", "Roberto Paz", 0.95)],
+      dudas: [duda("hora_siniestro", "tarde")],
+    });
+
+    expect(fila("hora_siniestro")?.suggested_value).toBe("tarde");
+    expect(pedido?.missingFields).toContain("hora_siniestro");
+    expect(pedido?.knownValues).not.toHaveProperty("hora_siniestro");
+  });
+
+  it("un valor que escribió recién, contestando lo pedido, queda confirmado y no se pregunta", async () => {
+    const { fila, pedido, pedidas } = await vuelta({
+      texto: "Soy Roberto Paz, DNI 25.888.101",
+      fields: [campo("full_name", "Roberto Paz", 0.75)],
+      dudas: [duda("full_name", "Roberto Paz", 0.75)],
+      preguntadas: ["full_name"],
+    });
+
+    expect(fila("full_name")).toMatchObject({ status: "confirmed", suggested_value: "Roberto Paz" });
+    expect(pedidas).not.toContain("full_name");
+    expect(pedido?.missingFields).not.toContain("full_name");
+    expect(pedido?.knownValues).not.toHaveProperty("full_name");
+  });
+
+  it.each([
+    // No se lo pedimos: de quién es el nombre lo infirió el extractor.
+    ["sin pedirlo", "Mi esposa es Ana Paz", "full_name", "Ana Paz", []],
+    // Un número suelto puede ser el DNI o la póliza.
+    ["un número suelto", "mi número es 25888101", "policy_number", "25888101", ["policy_number", "dni"]],
+    // Lo escribió para decir que no.
+    ["negado", "No, no soy Roberto Paz", "full_name", "Roberto Paz", ["full_name"]],
+  ])("%s: escrito tal cual, se sigue preguntando", async (_c, texto, clave, valor, preguntadas) => {
+    const { fila } = await vuelta({
+      texto,
+      fields: [campo(clave, valor, 0.6)],
+      dudas: [duda(clave, valor, 0.6)],
+      preguntadas,
+    });
+
+    expect(fila(clave)?.status).toBe("pending");
+  });
+
+  it("lo inferido se sigue confirmando: dijo «ayer», no la fecha", async () => {
+    const { fila, pedido } = await vuelta({
+      texto: "Fue un choque, ayer a la tarde",
+      fields: [campo("accident_date", "2026-09-22")],
+      dudas: [duda("accident_date", "2026-09-22")],
+      preguntadas: ["accident_date"],
+    });
+
+    expect(fila("accident_date")?.status).toBe("pending");
+    expect(pedido?.missingFields).toContain("accident_date");
+    expect(pedido?.knownValues).toHaveProperty("accident_date");
+  });
+
+  it("lo que choca con el padrón se sigue preguntando aunque lo haya escrito", async () => {
+    const { fila } = await vuelta({
+      texto: "Soy Pedro García",
+      fields: [campo("full_name", "Pedro García", 0.75)],
+      dudas: [duda("full_name", "Pedro García", 0.75)],
+      preguntadas: ["full_name"],
+      matches: [
+        {
+          customerId: "cust-001",
+          matchType: "email",
+          storedValues: {},
+          confidence: 0.75,
+          customerName: "Juan Pérez",
+          conflictsWithExtracted: ["full_name"],
+        },
+      ],
+    });
+
+    expect(fila("full_name")?.status).not.toBe("confirmed");
+  });
+
+  it("si no contesta la hora, la franja segura no la cierra y se pide igual", async () => {
+    const { cerradas, fila, pedido } = await vuelta({
+      texto: "Soy Roberto Paz, DNI 25.888.101",
+      fields: [campo("full_name", "Roberto Paz", 0.95), campo("hora_siniestro", "tarde", 0.9)],
+      dudas: [duda("hora_siniestro", "tarde")],
+      preguntadas: ["hora_siniestro", "full_name"],
+    });
+
+    expect(cerradas).not.toContain("hora_siniestro");
+    expect(fila("hora_siniestro")?.status).toBe("pending");
+    expect(pedido?.missingFields).toContain("hora_siniestro");
+    expect(pedido?.knownValues).not.toHaveProperty("hora_siniestro");
+  });
+
+  it("la franja de otra cosa no contesta la hora", async () => {
+    const { fila } = await vuelta({
+      texto: "esta tarde te mando las fotos",
+      fields: [campo("hora_siniestro", "tarde")],
+      dudas: [duda("hora_siniestro", "tarde")],
+      preguntadas: ["hora_siniestro"],
+    });
+
+    expect(fila("hora_siniestro")?.status).toBe("pending");
+  });
+
+  it.each([
+    ["«sí» a la hora vaga", "tarde"],
+    // La extracción de esta vuelta no trae la hora: cierra la fila que se preguntó.
+    ["«sí» a una hora precisa", "18:30"],
+  ])("%s la cierra", async (_c, valor) => {
+    const { cerradas } = await vuelta({
+      texto: "Sí",
+      fields: [],
+      dudas: [duda("hora_siniestro", valor)],
+      preguntadas: ["hora_siniestro"],
+    });
+
+    expect(cerradas).toContain("hora_siniestro");
+  });
+
+  it.each([
+    ["es-AR", "No me acuerdo la hora", "tarde"],
+    ["es-AR", "no sé", "desconocida"],
+    ["en-US", "I don't remember", "afternoon"],
+  ])("%s: «%s» cierra la pregunta por la hora", async (_l, texto, valor) => {
+    const { fila, pedido } = await vuelta({
+      texto,
+      fields: [campo("hora_siniestro", valor, 0.9)],
+      dudas: [duda("hora_siniestro", valor)],
+      preguntadas: ["hora_siniestro"],
+    });
+
+    expect(fila("hora_siniestro")?.status).toBe("confirmed");
+    expect(pedido?.missingFields ?? []).not.toContain("hora_siniestro");
+  });
+
+  it("por WhatsApp, «no me acuerdo» también la cierra", async () => {
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) };
+
+    const { fila } = await vuelta({
+      texto: "no me acuerdo",
+      fields: [campo("hora_siniestro", "tarde", 0.9)],
+      dudas: [duda("hora_siniestro", "tarde")],
+      preguntadas: ["hora_siniestro"],
+      messenger,
+    });
+
+    expect(fila("hora_siniestro")?.status).toBe("confirmed");
+  });
+
+  it("si ya se le pidió la hora y contesta con la franja, se toma: no se pregunta dos veces", async () => {
+    const { fila } = await vuelta({
+      texto: "No sé bien, a la tarde",
+      fields: [campo("hora_siniestro", "a la tarde")],
+      dudas: [duda("hora_siniestro", "a la tarde")],
+      preguntadas: ["hora_siniestro"],
+    });
+
+    expect(fila("hora_siniestro")?.status).toBe("confirmed");
+  });
+
+  it.each([
+    ["una franja segura que nadie marcó como duda se pide, y el caso espera", "a la tarde", "confirmacion_pendiente"],
+    ["una hora segura no", "18:30", "listo_para_core"],
+  ])("%s", async (_c, hora, estado) => {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [],
+      isComplete: true,
+      status: "listo_para_core",
+    });
+    const { insertSpy, updateSpy } = setupDbMocks();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extractEmailClaimMock({
+          fields: [...extractEmailClaimMock().fields, campo("hora_siniestro", hora, 0.95)],
+          fields_pending_confirmation: [],
+        }),
+        senderEmail: SENDER_EMAIL,
+      },
+      NO_MATCHES
+    );
+
+    const filas = insertSpy.mock.calls.flatMap((c) => [c[0]].flat()) as Array<{
+      field_name?: string;
+    }>;
+    const estados = updateSpy.mock.calls.map((c) => (c[0] as { status?: string })?.status);
+    expect(filas.some((f) => f.field_name === "hora_siniestro")).toBe(estado !== "listo_para_core");
+    expect(estados).toContain(estado);
+  });
+
+  it("una fila vieja de heridos con «no» no vuelve cuando la extracción lo borró", async () => {
+    const { fila, pedido } = await vuelta({
+      texto: "Soy Roberto Paz",
+      fields: [],
+      dudas: [duda("hay_heridos", "no")],
+    });
+
+    expect(fila("hay_heridos")?.suggested_value).toBe("");
+    expect(pedido?.knownValues).not.toHaveProperty("hay_heridos");
+  });
+});

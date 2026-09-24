@@ -33,6 +33,7 @@ import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { esSoloUnAcuse } from "@/core/mensajes/acuse";
 import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
+import { contestaSinHora, dichoRecien, esValorVago } from "@/core/mensajes/lo-dicho";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -370,14 +371,6 @@ export async function orchestratePostExtraction(
     lastAsked
   );
 
-  // Lo que la persona acaba de cerrar con este mensaje. Los dos resolutores de
-  // arriba escriben en la base y hasta ahora no le contaban a nadie: el pedido
-  // quedaba cerrado y, al mismo tiempo, invisible como motivo para contestar.
-  // Con un acuse solo, lo que se haya cerrado lo cerró la extracción al releer
-  // la conversación, no la persona.
-  const nosContestoElPedido =
-    !soloAcuse && (documentosDeclinados.length > 0 || confirmacionesContestadas.length > 0);
-
   const gapResult = await analyzeEmailClaimGaps(caseId, extractedClaim.fields, tenantId);
 
   // ── C. Medium-confidence fields → confirmation rows — AC7 ─────────────────
@@ -387,21 +380,63 @@ export async function orchestratePostExtraction(
   // show alongside.
   //
   // Lo que ya se confirmó o corrigió no vuelve: el extractor relee toda la
-  // conversación y lo lista otra vez como duda.
+  // conversación y lo lista otra vez como duda, a veces con otro nombre.
+  //
+  // Una franja del día entra aunque el extractor la dé por segura: «a la tarde»
+  // no es una hora. Ver `esValorVago`.
   const resueltos = new Set(gapResult.camposResueltos ?? []);
-  const uncertainKeys = [
-    ...(extractedClaim.fields_pending_confirmation ?? []).filter(
-      (k) => !resueltos.has(canonicalFieldKey(k))
-    ),
-    ...gapResult.fieldsNeedingConfirmation
-      .filter((f) => f.reason !== "conflict")
-      .map((f) => f.fieldName),
-  ];
-
-  const pendingConfirmationFields = collectConfirmableFields(
-    uncertainKeys,
-    extractedClaim.fields
+  const dudasDelAnalizador = gapResult.fieldsNeedingConfirmation.filter(
+    (f) => f.reason !== "conflict"
   );
+  const uncertainKeys = [
+    ...(extractedClaim.fields_pending_confirmation ?? []),
+    ...extractedClaim.fields
+      .filter((f) => esValorVago(f.field_key, f.field_value))
+      .map((f) => f.field_key),
+    ...dudasDelAnalizador.map((f) => f.fieldName),
+  ].filter((k) => !resueltos.has(canonicalFieldKey(k)));
+
+  const confirmables = collectConfirmableFields(
+    uncertainKeys,
+    extractedClaim.fields,
+    new Map(
+      dudasDelAnalizador
+        // Heridos no: `sinHeridosSupuestos` borró el «no» que nadie dijo para
+        // preguntarlo abierto, y la fila vieja lo traería de vuelta.
+        .filter((f) => canonicalFieldKey(f.fieldName) !== "hay_heridos")
+        .map((f) => [
+          canonicalFieldKey(f.fieldName),
+          { valor: f.suggestedValue, confianza: f.confidence ?? 0 },
+        ])
+    )
+  );
+
+  /*
+   * Lo que la persona escribió en este mismo mensaje, contestando lo que le
+   * pedimos, no se le devuelve como «¿…, correcto?»: queda confirmado. El 23/09
+   * a «Fue un choque, ayer a la tarde» se le contestó «¿Fue a la tarde, correcto?».
+   *
+   * Sólo lo pedido: que el valor esté escrito no dice de qué campo ni de quién
+   * es —el número puede ser el DNI, el nombre el del cónyuge— y eso sí se
+   * pregunta. Lo inferido, los conflictos con el padrón (rama D) y los heridos
+   * también.
+   *
+   * Una franja del día se pide como hora hasta que conteste: con una hora (la
+   * extracción la trae y deja de ser vaga), con la franja otra vez o con que no
+   * sabe. Un «sí» la cierra en `resolveAnsweredConfirmations`.
+   */
+  const pedidoRecien = new Set(lastAsked.map(canonicalFieldKey));
+  const enConflicto = new Set(customerMatches.flatMap((m) => m.conflictsWithExtracted));
+  const loQueEscribio = soloAcuse ? undefined : latestMessageText;
+  const loDijoRecien = (c: ConfirmableField) =>
+    pedidoRecien.has(c.fieldKey) &&
+    !enConflicto.has(c.fieldKey) &&
+    c.fieldKey !== "hay_heridos" &&
+    (esValorVago(c.fieldKey, c.proposedValue)
+      ? contestaSinHora(loQueEscribio)
+      : dichoRecien(c.proposedValue, loQueEscribio));
+  const dichos = confirmables.filter(loDijoRecien);
+  const pendingConfirmationFields = confirmables.filter((c) => !loDijoRecien(c));
 
   /*
    * Todos los campos de una, no tres viajes por campo.
@@ -422,9 +457,14 @@ export async function orchestratePostExtraction(
    * La forma ya estaba en este archivo: `resolveAnsweredConfirmations` hace un
    * solo UPDATE con `inArray` sobre esta misma tabla.
    */
-  if (pendingConfirmationFields.length > 0) {
-    await guardarConfirmaciones(caseId, tenantId, pendingConfirmationFields);
+  if (confirmables.length > 0) {
+    await guardarConfirmaciones(caseId, tenantId, [
+      ...pendingConfirmationFields,
+      ...dichos.map((d) => ({ ...d, estado: "confirmed" as const })),
+    ]);
+  }
 
+  if (pendingConfirmationFields.length > 0) {
     /*
      * Un evento con todas las claves, y no uno por campo.
      *
@@ -441,6 +481,16 @@ export async function orchestratePostExtraction(
       payload: { field_keys: pendingConfirmationFields.map((f) => f.fieldKey) },
     });
   }
+
+  // Lo que la persona acaba de cerrar con este mensaje. Los dos resolutores de
+  // arriba escriben en la base y hasta ahora no le contaban a nadie: el pedido
+  // quedaba cerrado y, al mismo tiempo, invisible como motivo para contestar.
+  // Con un acuse solo, lo que se haya cerrado lo cerró la extracción al releer
+  // la conversación, no la persona. Lo que dijo recién de lo pedido también
+  // cuenta: la rama C lo confirma sin pasar por los resolutores.
+  const nosContestoElPedido =
+    !soloAcuse &&
+    (documentosDeclinados.length > 0 || confirmacionesContestadas.length > 0 || dichos.length > 0);
 
   // ── D. Customer conflict → confirmation rows — AC9 ────────────────────────
   //
@@ -1035,9 +1085,12 @@ async function resolveAnsweredConfirmations(
 ): Promise<string[]> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
+  // Una franja del día segura sigue sin ser una hora: la fila queda pendiente.
   const settled = new Set(
     fields
-      .filter((f) => f.confidence >= MEDIUM_CONFIDENCE_HIGH)
+      .filter(
+        (f) => f.confidence >= MEDIUM_CONFIDENCE_HIGH && !esValorVago(f.field_key, f.field_value)
+      )
       .map((f) => canonicalFieldKey(f.field_key))
   );
 
@@ -1052,7 +1105,9 @@ async function resolveAnsweredConfirmations(
   //
   // Menos heridos sin valor en esta corrida: un «ok» a «¿Hubo personas
   // lastimadas?» abierta no dice si hubo, y a una fila vieja con un «no» que la
-  // persona nunca dijo no la puede confirmar.
+  // persona nunca dijo no la puede confirmar. La hora sí: a «¿más o menos a qué
+  // hora fue?» un «sí» es que no sabe más que la franja, y sin esto la pregunta
+  // no se cerraba nunca.
   if (isAffirmativeReply(latestMessageText)) {
     const hayHeridosDicho = fields.some(
       (f) => canonicalFieldKey(f.field_key) === "hay_heridos" && !esValorVacio(f.field_value)
@@ -1221,7 +1276,8 @@ function buildAskList(
     const crudo = propuestos.has(canon)
       ? propuestos.get(canon)
       : (opts.held?.[key] ?? opts.held?.[canon]);
-    const legible = valorLegible(key, crudo, hoy);
+    // Una franja del día no se confirma: se pide la hora, siempre igual.
+    const legible = esValorVago(key, crudo) ? null : valorLegible(key, crudo, hoy);
     if (legible !== null) knownValues[key] = legible;
   }
 
@@ -1648,7 +1704,15 @@ interface ConfirmableField {
  */
 function collectConfirmableFields(
   uncertainKeys: string[],
-  extracted: ExtractedClaim["fields"]
+  extracted: ExtractedClaim["fields"],
+  /**
+   * El valor que ya teníamos, por clave canónica: la fila pendiente.
+   *
+   * La extracción relee la conversación y a veces se saltea un campo. Pisar la
+   * fila con "" convirtió «¿Fue a la tarde, correcto?» en «Más o menos a qué
+   * hora fue.» en la vuelta siguiente, sin que la persona contestara (23/09).
+   */
+  guardados: Map<string, { valor: string; confianza: number }> = new Map()
 ): ConfirmableField[] {
   const byCanonical = new Map<string, ConfirmableField>();
 
@@ -1678,13 +1742,16 @@ function collectConfirmableFields(
       null
     );
 
+    const guardado =
+      best && !esValorVacio(best.field_value) ? undefined : guardados.get(canonical);
+
     const existing = byCanonical.get(canonical);
-    const confidence = best?.confidence ?? 0;
+    const confidence = guardado?.confianza ?? best?.confidence ?? 0;
     if (existing && existing.confidence >= confidence) continue;
 
     byCanonical.set(canonical, {
       fieldKey: canonical,
-      proposedValue: best?.field_value ?? "",
+      proposedValue: guardado?.valor ?? best?.field_value ?? "",
       confidence,
     });
   }
@@ -1757,6 +1824,8 @@ async function guardarConfirmaciones(
      * usar esta función y escribía fila por fila.
      */
     conflictWithValue?: string | null;
+    /** `confirmed` para lo que la persona escribió recién. Ver la rama C. */
+    estado?: "pending" | "confirmed";
   }>
 ): Promise<void> {
   const tenantCtx: TenantContext = { tenantId };
@@ -1795,7 +1864,7 @@ async function guardarConfirmaciones(
             suggested_value: c.proposedValue,
             conflict_with_value: c.conflictWithValue ?? null,
             confidence: c.confidence.toFixed(2),
-            status: "pending",
+            status: c.estado ?? "pending",
             created_at: ahora,
           }))
         )
@@ -1818,7 +1887,7 @@ async function guardarConfirmaciones(
             suggested_value: c.proposedValue,
             conflict_with_value: c.conflictWithValue ?? null,
             confidence: c.confidence.toFixed(2),
-            status: "pending",
+            status: c.estado ?? "pending",
             created_at: ahora,
           })
           /*

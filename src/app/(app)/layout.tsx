@@ -10,9 +10,10 @@
  * It fetches the current user's profile (Drizzle) to display name/initials.
  */
 
+import { esPlanPro } from "@/core/billing/plan-pro";
 import { getSessionContext } from "@/lib/auth/session";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
-import { getUserRow } from "@/lib/auth/user-row";
+import { getUserRow, type UserRow } from "@/lib/auth/user-row";
 import { users } from "@/lib/db/schema";
 import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
@@ -31,8 +32,7 @@ export default async function AppLayout({
 
   // Direct lookup by PK — graceful null handling: a missing/failed profile row
   // must never crash the shell (falls back to session email / defaults).
-  let userRow: { full_name: string; role: string; locale: string | null } | null =
-    null;
+  let userRow: UserRow | null = null;
   // La misma fila que despues pide la pagina: `getUserRow` la dedupe por
   // pedido, asi que entre el layout y la pagina la base la entrega una vez.
   if (user?.id) userRow = await getUserRow(user.id);
@@ -106,8 +106,11 @@ export default async function AppLayout({
             {t("nav.saltarAlContenido")}
           </a>
 
-          {/* Left sidebar */}
-          <Sidebar role={role} isOperator={isOperator} />
+          {/*
+           * Sólo el booleano: el nombre del plan es dato de admin, y todo lo
+           * que recibe la barra viaja al navegador de cualquier rol.
+           */}
+          <Sidebar role={role} isOperator={isOperator} esPro={esPlanPro(userRow?.plan)} />
 
           {/* Main content area */}
           <div className="flex flex-1 flex-col overflow-hidden">

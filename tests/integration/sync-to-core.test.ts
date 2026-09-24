@@ -104,7 +104,7 @@ function makeContext(caseId = VALID_CASE_ID) {
   return { params: Promise.resolve({ id: caseId }) };
 }
 
-const DEFAULT_USER_ROW = { id: "user-1", tenant_id: "tenant-1", role: "admin" as const };
+const DEFAULT_USER_ROW = { id: "user-1", tenant_id: "tenant-1", role: "admin" as const, plan: "piloto" };
 
 const DEFAULT_CASE_ROW = {
   id: VALID_CASE_ID,

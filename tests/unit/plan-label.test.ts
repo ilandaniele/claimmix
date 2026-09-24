@@ -34,6 +34,14 @@ describe("nombreDePlan", () => {
     }
   });
 
+  // La sección `plan.*` del diccionario es la de los nombres del catálogo.
+  it("bajo `plan.*` hay sólo planes del catálogo", () => {
+    const planes = Object.keys(esAR)
+      .filter((k) => k.startsWith("plan."))
+      .map((k) => k.slice("plan.".length));
+    expect(planes.sort()).toEqual([...PLANS].sort());
+  });
+
   it("un plan que no está en el catálogo cae en la etiqueta guardada", () => {
     expect(nombreDePlan("a-medida", "A medida", tEn)).toBe("A medida");
   });

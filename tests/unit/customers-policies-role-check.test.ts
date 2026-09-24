@@ -80,6 +80,7 @@ function pedir(url: string): NextRequest {
 function conRol(role: string | null) {
   mockDb.select.mockReturnValue({
     from: vi.fn().mockReturnThis(),
+    innerJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     limit: vi
       .fn()

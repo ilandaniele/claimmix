@@ -281,7 +281,7 @@ Sos el único que toca código. Corregí cada uno con el cambio más chico que l
 // ── Comprobar ───────────────────────────────────────────────────────────
 phase('Comprobar')
 const PEDIDO_CHECK = `Rama: ${rama}. Corré "pnpm check --local" (tarda unos quince minutos: lanzalo en segundo plano y esperá a que termine; no lo cortes). Es la herramienta del repo y limpia lo suyo. Informá capa por capa. Si falla el ensayo en UN escenario, corré ese escenario solo con "pnpm rehearse <nombre>": una regresión aparece las dos veces, una variación casi nunca. Si el proceso muere con un código raro (por ejemplo 3221226505) es el runtime, no el código: reintentá una vez. Y LEÉ el transcripto del ensayo entero: media respuesta puede pasar todas las verificaciones y sonar mal, y eso sólo lo nota alguien que lee. transcripto_suena_bien=false si alguna respuesta del agente suena repetida, fría, incoherente con lo que el denunciante dijo, o pide algo que ya le dieron.${REGLAS}`
-let comprobacion = await agent(PEDIDO_CHECK, { label: 'check', schema: COMPROBACION })
+let comprobacion = await agent(PEDIDO_CHECK, { label: 'check', schema: COMPROBACION, model: 'sonnet' })
 if (comprobacion && (comprobacion.capas.some((c) => !c.ok) || !comprobacion.transcripto_suena_bien)) {
   log('El check no quedó verde: una ronda de corrección y se vuelve a correr')
   await agent(
@@ -291,7 +291,7 @@ Rama: ${rama}. Resultado del check: ${JSON.stringify(comprobacion)}
 Sos el único que toca código. Diagnosticá y corregí lo que falló (si es el transcripto, el problema está en cómo suena el agente: prompts, redactor u orquestador). Cambio mínimo, con su test cuando aplique. No hagas commit.${REGLAS}`,
     { label: 'corregir:check', phase: 'Comprobar', schema: IMPL },
   )
-  comprobacion = await agent(PEDIDO_CHECK, { label: 'check:2', phase: 'Comprobar', schema: COMPROBACION })
+  comprobacion = await agent(PEDIDO_CHECK, { label: 'check:2', phase: 'Comprobar', schema: COMPROBACION, model: 'sonnet' })
 }
 const verde = !!comprobacion && comprobacion.capas.every((c) => c.ok) && comprobacion.transcripto_suena_bien
 
@@ -304,7 +304,7 @@ Hallazgos confirmados y corregidos: ${JSON.stringify(confirmados)}
 Comprobación: ${JSON.stringify(comprobacion)}
 
 Hacé UN commit con todo lo de la rama (git add de los archivos tocados, nada de "git add -A" a ciegas): mensaje de una línea en castellano, presente, que diga qué cambia y por qué, como los del historial ("git log --oneline -15"), y el trailer de coautoría "Co-Authored-By: <modelo> <noreply@anthropic.com>", donde <modelo> es el nombre del modelo con el que estás corriendo VOS. No lo copies de un commit viejo ni de acá: el historial tiene que decir quién lo escribió. Pusheá la rama y abrí el PR con "gh pr create --base qa": título = la línea del commit; cuerpo con el porqué, qué se probó y qué NO se pudo probar${verde ? '' : ' (el check NO quedó verde: decilo arriba de todo)'}, y al final "🤖 Generated with [Claude Code](https://claude.com/claude-code)". NO mergees.${REGLAS}`,
-  { label: 'pr', schema: ENTREGA },
+  { label: 'pr', schema: ENTREGA, model: 'sonnet' },
 )
 
 return {

@@ -5,7 +5,7 @@
  *   node scripts/migrate.mjs --apply          # run every pending migration
  *   node scripts/migrate.mjs --baseline 0009  # record 0001..0009 as applied WITHOUT running them
  *   node scripts/migrate.mjs --forget 0010    # el ledger miente sobre ésta: sacarla para re-aplicarla
- *   node scripts/migrate.mjs --exigir-al-dia  # sale 1 si falta alguna (para CI)
+ *   node scripts/migrate.mjs --exigir-al-dia  # sale 1 si falta alguna (CI y post-deploy); sólo lee
  *
  * Why this exists: migrations here were applied by hand, with nothing recording
  * which ones had run. That is exactly what caused the 0006-0009 outage — those
@@ -148,17 +148,31 @@ if (urlIdx !== -1) {
 const c = await connect(conn);
 
 try {
-  // The ledger bootstraps itself rather than living in a migration file —
-  // otherwise the runner would need the very table it is trying to create.
-  await c.query(`
-    create table if not exists schema_migrations (
-      version     text primary key,
-      filename    text        not null,
-      checksum    text        not null,
-      applied_at  timestamptz not null default now(),
-      applied_by  text
-    )
-  `);
+  if (EXIGIR_AL_DIA) {
+    // Corre también después del deploy, contra la base viva: un chequeo no
+    // crea tablas. Y un ledger vacío recién creado diría «todo pendiente», que
+    // es mentira; sin ledger lo único cierto es que no se sabe.
+    const { rows } = await c.query(`select to_regclass('schema_migrations') as t`);
+    if (rows[0].t == null) {
+      console.error(
+        "✖ La base no tiene schema_migrations (ledger ausente): no hay forma de saber qué migraciones corrieron."
+      );
+      console.error("  Si ya están aplicadas a mano, adoptalas con --baseline <última> --apply.");
+      process.exit(1);
+    }
+  } else {
+    // The ledger bootstraps itself rather than living in a migration file —
+    // otherwise the runner would need the very table it is trying to create.
+    await c.query(`
+      create table if not exists schema_migrations (
+        version     text primary key,
+        filename    text        not null,
+        checksum    text        not null,
+        applied_at  timestamptz not null default now(),
+        applied_by  text
+      )
+    `);
+  }
 
   const migrations = readMigrations();
   const { rows: appliedRows } = await c.query(
@@ -264,7 +278,8 @@ try {
   }
 
   /*
-   * Lo que corre en CI: pendientes es un error, no un informe.
+   * Lo que corre en CI y tras el deploy de QA y de producción: pendientes es
+   * un error, no un informe.
    *
    * El PR #132 agregó `cases.intentos_de_extraccion` y la CI se cayó con
    * `error_code: 42703`, columna inexistente, en dos jobs. Pasaron horas hasta
@@ -278,9 +293,10 @@ try {
   if (EXIGIR_AL_DIA) {
     console.error(`
 ✖ La base tiene ${pending.length} migración(es) sin aplicar.`);
-    console.error("  Los tests corren contra el esquema viejo y fallan con errores");
-    console.error("  de Postgres que parecen del código del PR. Aplicalas:");
-    console.error("      node scripts/migrate.mjs --env STAGING_DATABASE_URL --apply");
+    console.error("  El código que las espera corre contra el esquema viejo y falla con");
+    console.error("  errores de Postgres que parecen de otra cosa. Aplicalas:");
+    console.error('      node scripts/migrate.mjs --url "<la cadena de ESTA base>" --apply');
+    console.error("      (staging: --env STAGING_DATABASE_URL)");
     process.exit(1);
   }
 

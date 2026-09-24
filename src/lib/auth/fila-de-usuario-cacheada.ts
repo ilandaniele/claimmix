@@ -27,7 +27,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
-import { users } from "@/lib/db/schema";
+import { tenants, users } from "@/lib/db/schema";
 
 export interface FilaUsuario {
   id: string;
@@ -35,6 +35,8 @@ export interface FilaUsuario {
   role: string;
   full_name: string;
   locale: string | null;
+  /** `tenants.plan` del inquilino de la sesión; decide lo del Plan Pro. */
+  plan: string;
 }
 
 /**
@@ -43,6 +45,8 @@ export interface FilaUsuario {
  * La invalidación explícita en el PATCH que cambia el rol sólo limpia la
  * instancia que atendió esa petición — las demás instancias calientes siguen
  * sirviendo la fila vieja hasta que el `vence` de su propia entrada expira.
+ * Lo mismo con el plan: un cambio de `tenants.plan` por SQL tarda hasta 30 s
+ * en cada instancia caliente, y nada lo invalida.
  */
 export const TTL_FILA_MS = 30_000;
 
@@ -86,8 +90,13 @@ export async function filaDeUsuario(userId: string): Promise<FilaUsuario | null>
         role: users.role,
         full_name: users.full_name,
         locale: users.locale,
+        plan: tenants.plan,
       })
       .from(users)
+      // El plan viaja en la misma consulta: sin un segundo viaje por pedido.
+      // Inner y no left: `users.tenant_id` es NOT NULL con FK a `tenants`, así
+      // que no se pierde ninguna fila y `plan` nunca llega nulo.
+      .innerJoin(tenants, eq(tenants.id, users.tenant_id))
       .where(eq(users.id, userId))
       .limit(1)
   );

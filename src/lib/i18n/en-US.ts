@@ -541,6 +541,10 @@ export const enUS: Record<TranslationKey, string> = {
   "plan.corporativo": "Corporate",
   "plan.enterprise": "Enterprise",
 
+  // ── Plan Pro — las funciones que el plan abre, no un plan del catálogo ─
+  "planPro.nombre": "Pro plan",
+  "planPro.bloqueado": "Available on the Pro plan",
+
   // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
   "cartera.aFacturar": "To bill",
   "cartera.ayuda.alta": "A new client is created with",

@@ -317,7 +317,7 @@ esa parte no se mide y se avisa — que es distinto de darla por medida.
 
 **El resumen se guarda.** `--reporte carga.json` escribe el JSON y, al lado, el
 mismo objeto como `carga.html`. El post-deploy lo sube como artefacto del
-trabajo *Carga (lectura)*, que es lo que hacía falta para que «comparalo con la
+trabajo *Carga de lectura*, que es lo que hacía falta para que «comparalo con la
 corrida del deploy anterior» quiera decir algo.
 
 **La mitad de escritura** manda N asegurados inventados al webhook del deploy de
@@ -587,6 +587,40 @@ producción.
 **En cada push a `main`** — `.github/workflows/ci.yml`, que ya existía: tipos,
 lint, tests, build, auditoría de dependencias.
 
+### Cómo se llama cada check, después de septiembre de 2026
+
+Los nombres cambiaron para que un check leído sin el prefijo del workflow —el
+que arma GitHub en la lista de un PR— siga diciendo qué mira. Catorce son
+obligatorios en `main` y en `qa` (ver el paso 9 de
+[docs/PROMOCION.md](PROMOCION.md)); los demás corren en cada PR pero no
+bloquean el merge.
+
+`ci.yml`:
+
+- **Tipos** (obligatorio) — `pnpm type-check`.
+- **Lint** (obligatorio) — `pnpm lint`.
+- **Tests unitarios** (obligatorio) — la suite unitaria, más los flujos durables.
+- **Build** (obligatorio) — `pnpm build`.
+- **Tests de integración** — contra el ensayo, si `STAGING_DATABASE_URL` está.
+- **Cobertura** — el piso de `vitest.config.ts`, como trinquete.
+- **Tests E2E** (obligatorio) — Playwright contra su propia base.
+- **Vulnerabilidades** (obligatorio) — `pnpm audit` de alto para arriba, y semgrep.
+- **Peso del bundle** (obligatorio) — gzip de los chunks contra un presupuesto.
+- **Tests de Gmail** — polling, el stub 410 y la auth de las rutas, todo mock.
+- **Licencias** (obligatorio) — sin GPL/AGPL/LGPL/SSPL.
+- **Aislamiento de tenants** (obligatorio) — `pnpm tenancy` y `pnpm capa-datos`.
+- **Pen test local** (obligatorio) — `pnpm pentest --solo-superficie` contra un build local.
+
+`codeql.yml`:
+
+- **Análisis CodeQL** (obligatorio) — estático, `security-extended`.
+
+`secrets.yml`:
+
+- **Credenciales** (obligatorio) — gitleaks sobre el push; el historial entero corre aparte, los domingos.
+- **Datos personales** (obligatorio) — `bash scripts/check-personal-data.sh`.
+- **Invariantes de arquitectura** (obligatorio) — `node scripts/check-architecture.mjs`.
+
 **Después de cada deploy de producción** — `.github/workflows/post-deploy.yml`,
 que llama al workflow reusable `.github/workflows/deploy-checks.yml`. GitHub
 recibe de Vercel el aviso de que el deploy terminó bien y dispara siete
@@ -608,7 +642,10 @@ chequeos: el smoke primero, y colgando de él los otros seis.
 5. `pnpm pentest`: cada ruta de la API sin credenciales, las firmas de webhook,
    las cabeceras y lo que cuenta un error. Gratis. Falla si algo quedó abierto.
 6. `pnpm docs-config`: el código y la base tienen que decir lo mismo sobre qué
-   papeles pide cada tipo de siniestro. Sólo le pregunta al catálogo.
+   papeles pide cada tipo de siniestro. Sólo le pregunta al catálogo. Antes,
+   que no haya una migración del repo sin registrar en `schema_migrations`
+   (`migrate.mjs --exigir-al-dia`, sólo SELECT); si ésa falla, la paridad
+   corre igual.
 7. `pnpm permisos`: el rol restringido con el que consulta la aplicación puede
    hacer lo que la capa de datos le pide. Sólo lee.
 
@@ -634,13 +671,14 @@ producción hereda los secretos del repositorio; el de QA no puede —eso
 apuntaría a la base de producción los seis trabajos que corren en el runner, y
 tres de ellos escriben—, así que `deploy-checks.yml` declara sus secretos uno
 por uno y el caller de QA mapea cada uno con su nombre `QA_*`. QA corre el
-smoke liviano, más los dos chequeos que sólo le preguntan al catálogo; el
-ensayo corre desde que QA tiene balde de R2 propio (`claimmix-qa-attachments`,
-20/09), y el timbre, el pen test y la «Carga (lectura)» de este workflow no
-corren nunca ahí —el k6 de `load-tests.yml` sí, aparte, contra el alias
-público de QA. Los secretos `QA_*` del repositorio existen desde el 20/09
-(paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el post-deploy de esa noche,
-run 35551526692, corrió todo en verde, ensayo incluido.
+smoke liviano, más los dos chequeos que sólo leen el catálogo y el registro
+de migraciones; el ensayo corre desde que QA tiene balde de R2 propio
+(`claimmix-qa-attachments`, 20/09), y el timbre, el pen test y la «Carga de
+lectura» de este workflow no corren nunca ahí —el k6 de `load-tests.yml` sí,
+aparte, contra el alias público de QA. Los secretos `QA_*` del repositorio
+existen desde el 20/09 (paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el
+post-deploy de esa noche, run 35551526692, corrió todo en verde, ensayo
+incluido.
 
 También se puede disparar a mano desde la pestaña *Actions* → *Post-deploy* →
 *Run workflow*, con una URL distinta si querés apuntar a un preview.

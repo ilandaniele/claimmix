@@ -24,6 +24,7 @@ vi.mock("@/lib/auth/session", () => ({ getSessionContext: mockSession }));
 vi.mock("@/lib/db", () => ({ db: { select: mockSelect } }));
 vi.mock("@/lib/db/schema", () => ({
   users: { id: "id", tenant_id: "tenant_id", role: "role" },
+  tenants: { id: "id", plan: "plan" },
 }));
 
 import { requireRole, ADMIN_ROLES, CASE_EDITOR_ROLES } from "@/lib/auth/require-role";
@@ -37,7 +38,11 @@ const FILA = { id: "u-1", tenant_id: "aaaaaaaa-0000-0000-0000-00000000000a", rol
 /** La cadena de drizzle, devolviendo la fila que se le pase. */
 function conFila(fila: unknown | null) {
   mockSelect.mockReturnValue({
-    from: () => ({ where: () => ({ limit: () => Promise.resolve(fila ? [fila] : []) }) }),
+    from: () => ({
+      innerJoin: () => ({
+        where: () => ({ limit: () => Promise.resolve(fila ? [fila] : []) }),
+      }),
+    }),
   });
 }
 

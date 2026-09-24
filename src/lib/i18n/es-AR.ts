@@ -568,6 +568,10 @@ export const esAR = {
   "plan.corporativo": "Corporativo",
   "plan.enterprise": "Enterprise",
 
+  // ── Plan Pro — las funciones que el plan abre, no un plan del catálogo ─
+  "planPro.nombre": "Plan Pro",
+  "planPro.bloqueado": "Disponible en el Plan Pro",
+
   // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
   "cartera.aFacturar": "A facturar",
   "cartera.ayuda.alta": "Un cliente nuevo se da de alta con",

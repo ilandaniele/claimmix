@@ -6,7 +6,7 @@
  *   - Text input: user must type the case number (e.g. "SIN-XXXX-XXXX") to enable button.
  *   - On confirm: PATCH /api/cases/:id { status: "cerrado" }.
  *   - Shows success toast and redirects to /bandeja.
- *   - On 409 FSM conflict: shows error "Transición de estado no válida."
+ *   - On 409 FSM conflict: shows error t("close.errorFsm").
  */
 
 "use client";

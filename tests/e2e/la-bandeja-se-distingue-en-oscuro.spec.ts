@@ -50,7 +50,9 @@ test.describe("la bandeja en modo oscuro", () => {
      */
     await page.addInitScript((clave) => window.localStorage.setItem(clave, "light"), CLAVE_TEMA);
     await page.goto("/bandeja");
-    await expect(page.locator('[data-scroll="lista"]')).toBeVisible();
+    await expect(page.locator('[data-scroll="lista"]').filter({ visible: true })).toBeVisible({
+      timeout: 15_000,
+    });
     await testInfo.attach("bandeja-claro", {
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",
@@ -65,8 +67,13 @@ test.describe("la bandeja en modo oscuro", () => {
     await page.addInitScript((clave) => window.localStorage.setItem(clave, "dark"), CLAVE_TEMA);
     await page.goto("/bandeja");
 
-    const lista = page.locator('[data-scroll="lista"]');
-    await expect(lista).toBeVisible();
+    /*
+     * Mientras el servidor manda la página por partes, la lista puede estar dos
+     * veces en el DOM —la que ya llegó, todavía escondida, y la que se ve— y
+     * con staging lento eso dura más que los cinco segundos por omisión.
+     */
+    const lista = page.locator('[data-scroll="lista"]').filter({ visible: true });
+    await expect(lista).toBeVisible({ timeout: 15_000 });
 
     const quedoEnOscuro = await page.evaluate(() =>
       document.documentElement.classList.contains("dark")

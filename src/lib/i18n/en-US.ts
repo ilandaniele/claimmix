@@ -15,6 +15,7 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Navigation ─────────────────────────────────────────────────────────────
   "nav.bandeja": "Inbox",
   "nav.escalados": "Escalated",
+  "nav.noRelevantes": "Not relevant",
   "nav.clientes": "Clients",
   "nav.analisis": "Analysis",
   "nav.metricas": "Metrics",
@@ -353,6 +354,7 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.proposedValue": "Proposed value",
   "case.detail.conflictValue": "Conflicting value",
   "case.detail.status": "Status",
+  "case.detail.statusUpdated": "Status updated.",
   "case.detail.sendToCore": "Send to core system",
   "case.detail.sendingToCore": "Sending...",
   "case.detail.coreSyncSuccess": "Case sent to core system.",
@@ -540,6 +542,7 @@ export const enUS: Record<TranslationKey, string> = {
   "cartera.col.cliente": "Client",
   "cartera.col.costoIa": "AI cost",
   "cartera.col.denuncias": "Claims",
+  "cartera.col.estado": "Status",
   "cartera.col.margen": "Margin",
   "cartera.col.plan": "Plan",
   "cartera.deMargen": "margin",

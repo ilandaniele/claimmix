@@ -55,7 +55,7 @@ export function EscalateDialog({
       if (res.ok) {
         onSuccess();
       } else if (res.status === 409) {
-        onError("Transición de estado no válida.");
+        onError(t("close.errorFsm"));
         onClose();
       } else {
         onError(t("escalate.error"));

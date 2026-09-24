@@ -22,6 +22,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import type { CaseRow } from "@/server/cases/list";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import { PARAMS_DE_FILTRO } from "./grupos-de-filtro";
@@ -61,8 +62,7 @@ const POLL_MAX_MS = 30000;
 export const FILTER_PARAMS = PARAMS_DE_FILTRO;
 
 /** Build the /api/cases query string from the current location filters. */
-function buildQuery(): string {
-  const current = new URLSearchParams(window.location.search);
+function buildQuery(current: URLSearchParams): string {
   const params = new URLSearchParams();
   for (const key of FILTER_PARAMS) {
     // `getAll` + `append`: cada parámetro puede venir repetido en la URL
@@ -93,6 +93,16 @@ export function useCasesRealtime(handlers: RealtimeHandlers) {
     handlersRef.current = handlers;
   });
 
+  /*
+   * La bandeja no se vuelve a montar al cambiar la query (Bandeja → «No
+   * relevantes» es la misma ruta), así que el sondeo se reinicia con la
+   * consulta: siembra en el acto, como al montar, y lo que estaba en vuelo con
+   * la anterior se descarta. Sembrar recién en el próximo turno —hasta treinta
+   * segundos después— se tragaba lo que entrara en el medio, y una respuesta
+   * vieja comparada contra la base vieja sumaba altas a la lista nueva.
+   */
+  const consulta = buildQuery(useSearchParams());
+
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
@@ -105,7 +115,7 @@ export function useCasesRealtime(handlers: RealtimeHandlers) {
       if (inFlight || document.visibilityState === "hidden") return false;
       inFlight = true;
       try {
-        const res = await fetch(`/api/cases?${buildQuery()}`, {
+        const res = await fetch(`/api/cases?${consulta}`, {
           headers: { accept: "application/json" },
           cache: "no-store",
         });
@@ -176,7 +186,7 @@ export function useCasesRealtime(handlers: RealtimeHandlers) {
       window.clearTimeout(timerId);
       document.removeEventListener("visibilitychange", alVolver);
     };
-  }, []); // Empty deps — polling is set up once and uses refs for handlers.
+  }, [consulta]); // Handlers go through the ref; only the query restarts it.
 }
 
 // Re-export pure utils from casesRealtimeUtils.ts for backward compatibility.

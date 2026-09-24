@@ -341,26 +341,28 @@ export async function orchestratePostExtraction(
   // Un 429 o un TIMEOUT del reconocedor devuelven el turno a la cola: no se
   // contesta, no se delibera y no se cierra nada. Con la derivación ya hecha,
   // o con el caso en un estado que el barrido no retoma, se sigue sin él.
+  const vuelveALaCola = !derivaSola && !yaContestada && extractedOutput.sePuedeRetomar === true;
   const documentosDeclinados = await resolveDeclinedDocs(
     caseId,
     tenantId,
     latestMessageText,
     lastAsked,
-    !derivaSola && !yaContestada && extractedOutput.sePuedeRetomar === true
+    vuelveALaCola
   );
 
   // Los adjuntos, recién después del reconocedor: cada mirada gasta una de las
   // tres que el archivo tiene de por vida, y si el turno vuelve a la cola la
   // retoma los miraría otra vez por el mismo mensaje. Lo de arriba es
-  // idempotente.
-  await reconcileAttachments(caseId, tenantId, labelForClaimType(claimTypeValue));
+  // idempotente. Un 429 al mirar la foto también vuelve a la cola, sin gastar
+  // la mirada.
+  await reconcileAttachments(caseId, tenantId, labelForClaimType(claimTypeValue), vuelveALaCola);
 
   // A field the claimant has now answered is no longer pending. Runs BEFORE
   // the gap analysis, which reads those rows straight back out.
   //
-  // Y después del reconocedor de negativas, que es lo único que puede devolver
-  // el turno a la cola: este UPDATE consume la señal, y la retoma tiene que
-  // encontrarla intacta.
+  // Y después del reconocedor de negativas y de los adjuntos, que son lo único
+  // que puede devolver el turno a la cola: este UPDATE consume la señal, y la
+  // retoma tiene que encontrarla intacta.
   const confirmacionesContestadas = await resolveAnsweredConfirmations(
     caseId,
     tenantId,

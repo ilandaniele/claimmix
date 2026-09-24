@@ -4501,6 +4501,36 @@ describe("orchestratePostExtraction — un reconocedor de negativas caído devue
     expect(escrituras(updateSpy)).toContainEqual({ matched_doc_key: "denuncia_policial" });
   });
 
+  it("un 429 al mirar la foto también vuelve a la cola, y la retoma la reconoce", async () => {
+    // El `choque-completo` del 24/09, turno 3: la licencia llegó, el 429 se leyó
+    // como «no la reconocí» y eso fue lo que se le contestó a la persona.
+    const foto = { id: "adj-1", filename: "licencia.jpg", contentType: "image/jpeg", storagePath: null };
+    const { updateSpy } = pedidoDelParte([foto], ["licencia_conducir"]);
+    const miradas = () =>
+      escrituras(updateSpy).filter((d) => "intentos_de_identificacion" in d).length;
+    const err = cae429();
+    let visionSana = false;
+    vi.mocked(callGemini).mockImplementation(async (prompt) => {
+      if (prompt.includes("Estamos esperando estos documentos") && !visionSana) throw err;
+      return {
+        text: JSON.stringify({ doc_key: "licencia_conducir" }),
+        usage: { promptTokens: 0, completionTokens: 0 },
+        model: "gemini-2.5-flash",
+      };
+    });
+
+    await expect(correr({ sePuedeRetomar: true })).rejects.toBe(err);
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+    expect(analyzeEmailClaimGaps).not.toHaveBeenCalled();
+    expect(miradas()).toBe(0);
+
+    visionSana = true;
+    await correr({ sePuedeRetomar: true });
+
+    expect(miradas()).toBe(1);
+    expect(escrituras(updateSpy)).toContainEqual({ matched_doc_key: "licencia_conducir" });
+  });
+
   it("la retoma encuentra las confirmaciones intactas y las consume una sola vez", async () => {
     const { updateSpy } = pedidoDelParte();
     const confirmadas = () =>

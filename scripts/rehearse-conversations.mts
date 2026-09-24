@@ -37,7 +37,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as dotenv from "dotenv";
-import { readable } from "./lib/texto-legible.mjs";
+import { readable } from "@/core/email/texto-legible";
 import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
 
 const envPath = path.resolve(process.cwd(), ".env.local");
@@ -856,8 +856,8 @@ async function deliverEmail(
  * día —el cierre de etiqueta, el borrado de una pasada, el orden del decode— y
  * cada vez se verificó a mano, en un archivo temporal que ya no existe.
  *
- * Ahora vive en `lib/texto-legible.mjs` con su test. Lo que hace y por qué está
- * explicado allá, al lado del código.
+ * Ahora vive en `src/core/email/texto-legible.ts` con su test. Lo que hace y
+ * por qué está explicado allá, al lado del código.
  */
 
 /**

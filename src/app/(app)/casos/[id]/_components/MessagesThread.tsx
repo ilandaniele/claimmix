@@ -1,8 +1,10 @@
 /**
- * MessagesThread — Client Component for the inbound email thread panel.
+ * MessagesThread — Client Component for the case conversation panel: lo que
+ * escribió la persona y lo que le contestó el agente, por mail o por WhatsApp.
  *
- * AC11: Renders one card per inbound message with from_addr, subject,
- *       body_text preview, and relative received_at.
+ * AC11: Renders one card per message, oldest first, with who wrote it,
+ *       from_addr, subject (email only), body_text preview, and relative
+ *       received_at. Outbound cards sit on the right with another background.
  * AC12: Returns null (renders nothing) when messages array is empty.
  * AC13: body_text preview truncated to 300 chars in collapsed state.
  * AC14: Shows attachment count badge (paperclip icon + count) when > 0.
@@ -11,26 +13,20 @@
  * They are rendered in the UI but NEVER logged to console.
  *
  * Fetches GET /api/cases/[caseId]/messages on mount.
- * Uses collapsible cards (click to expand full body_text up to 500 chars from API).
+ * Uses collapsible cards (click to expand full body_text up to 2000 chars from API).
  */
 
 "use client";
 
 import { useState, useEffect } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
+import type {
+  Conversacion,
+  MensajeDeLaConversacion as Message,
+} from "@/server/cases/conversacion";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-interface Message {
-  id: string;
-  direction: string;
-  provider: string;
-  subject: string | null;
-  from_addr: string | null;
-  body_text: string | null;
-  received_at: string;
-  attachment_count: number;
-}
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -39,6 +35,17 @@ type LoadState = "loading" | "ready" | "error";
 const PREVIEW_MAX_CHARS = 300;
 const SUBJECT_MAX_CHARS = 60;
 const LOCALE = "es-AR";
+
+/*
+ * Lo saliente que no llegó, o no se sabe si llegó, lo dice. 'queued' es un
+ * mail que no terminó de salir: el envío se cortó o no se pudo anotar cómo
+ * terminó.
+ */
+const ESTADOS: Record<string, { clave: TranslationKey; clase: string }> = {
+  failed: { clave: "messages.thread.no_enviado", clase: "bg-red-50 text-red-700" },
+  queued: { clave: "messages.thread.sin_confirmar", clase: "bg-amber-50 text-amber-800" },
+  skipped_simulated: { clave: "messages.thread.simulado", clase: "bg-amber-50 text-amber-800" },
+};
 
 // ── Relative time formatter ────────────────────────────────────────────────────
 
@@ -61,10 +68,9 @@ function formatRelative(isoTimestamp: string): string {
 // ── Avatar helper ─────────────────────────────────────────────────────────────
 
 function getAvatarLetter(fromAddr: string | null): string {
-  if (!fromAddr) return "?";
-  // Extract the first letter of the local part (before @), uppercased.
-  const local = fromAddr.split("@")[0];
-  return local.charAt(0).toUpperCase() || "?";
+  const letra = fromAddr?.charAt(0).toUpperCase() ?? "";
+  // «[oculto]», lo que ve un viewer, no tiene inicial.
+  return /[\p{L}\p{N}]/u.test(letra) ? letra : "?";
 }
 
 // ── Paperclip icon ────────────────────────────────────────────────────────────
@@ -119,7 +125,15 @@ function MessageCard({ message }: MessageCardProps) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
 
-  const avatarLetter = getAvatarLetter(message.from_addr);
+  const saliente = message.direction === "outbound";
+  const autor = t(saliente ? "messages.thread.agente" : "messages.thread.denunciante");
+  // Lo saliente lleva la inicial del agente: el remitente es el buzón de la
+  // aseguradora o no hay ninguno.
+  const avatarLetter = saliente ? autor.charAt(0) : getAvatarLetter(message.from_addr);
+  // WhatsApp no tiene asunto; el alta guarda "WhatsApp" ahí y no dice nada. La
+  // vista previa del mail simulado tampoco lo guarda.
+  const conAsunto = message.provider !== "whatsapp" && !(saliente && !message.subject);
+  const estado = message.estado_envio ? ESTADOS[message.estado_envio] : undefined;
 
   // Truncate subject to SUBJECT_MAX_CHARS for display in collapsed header.
   const subjectDisplay =
@@ -129,17 +143,24 @@ function MessageCard({ message }: MessageCardProps) {
         : message.subject
       : t("messages.thread.no_subject");
 
-  // Body preview: collapsed = first 300 chars; expanded = full body_text (≤500 from API).
+  // Body preview: collapsed = first 300 chars; expanded = full body_text (≤2000 from API).
   const bodyText = message.body_text ?? "";
   const isLong = bodyText.length > PREVIEW_MAX_CHARS;
   const previewText = isLong && !expanded
     ? `${bodyText.slice(0, PREVIEW_MAX_CHARS)}…`
     : bodyText;
 
+  // Sólo clases con par oscuro en globals.css, y sin bg-blue-50 de fondo: el
+  // slate-500 de la hora no llega a 4,5:1 sobre ese azul.
   return (
     <article
       data-testid="message-card"
-      className="rounded-lg border border-slate-200 bg-white"
+      data-direction={message.direction}
+      className={
+        saliente
+          ? "ml-8 rounded-lg border border-blue-200 bg-slate-50"
+          : "mr-8 rounded-lg border border-slate-200 bg-white"
+      }
     >
       {/* Card header — always visible */}
       <div className="px-4 py-3">
@@ -155,9 +176,29 @@ function MessageCard({ message }: MessageCardProps) {
           <div className="flex-1 min-w-0">
             {/* From address + relative time row */}
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="text-sm font-medium text-slate-800 truncate">
-                {message.from_addr ?? "—"}
-              </span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span
+                  className={
+                    saliente
+                      ? "flex-shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700"
+                      : "flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
+                  }
+                >
+                  {autor}
+                </span>
+                {message.from_addr && (
+                  <span className="text-sm font-medium text-slate-800 truncate">
+                    {message.from_addr}
+                  </span>
+                )}
+                {estado && (
+                  <span
+                    className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${estado.clase}`}
+                  >
+                    {t(estado.clave)}
+                  </span>
+                )}
+              </div>
               {/*
                 slate-500, no 400: esto es TEXTO, no un icono.
 
@@ -177,9 +218,11 @@ function MessageCard({ message }: MessageCardProps) {
             </div>
 
             {/* Subject */}
-            <div className="mt-0.5 text-sm font-semibold text-slate-900 truncate">
-              {subjectDisplay}
-            </div>
+            {conAsunto && (
+              <div className="mt-0.5 text-sm font-semibold text-slate-900 truncate">
+                {subjectDisplay}
+              </div>
+            )}
 
             {/* Attachment badge — AC14 */}
             {message.attachment_count > 0 && (
@@ -256,6 +299,7 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
   const t = useT();
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [recortada, setRecortada] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,9 +313,10 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
           return;
         }
 
-        const data: { messages: Message[] } = await res.json();
+        const data: Conversacion = await res.json();
         if (!cancelled) {
           setMessages(data.messages);
+          setRecortada(data.recortada);
           setLoadState("ready");
         }
       } catch {
@@ -332,6 +377,9 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
   return (
     <Marco>
       <div data-testid="messages-thread">
+        {recortada && (
+          <p className="mb-3 text-xs text-slate-500">{t("messages.thread.recortada")}</p>
+        )}
         <div className="space-y-3">
           {messages.map((message) => (
             <MessageCard key={message.id} message={message} />

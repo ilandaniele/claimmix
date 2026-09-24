@@ -1,29 +1,28 @@
 /**
- * GET /api/cases/:id/messages — inbound email thread for a case.
+ * GET /api/cases/:id/messages — la conversación completa del caso, entrante y
+ * saliente, por mail o por WhatsApp.
  *
  * AC8: Returns 200 + messages array (id, direction, provider, subject,
- *      from_addr, body_text, received_at, attachment_count) for valid case.
+ *      from_addr, body_text, received_at, estado_envio, attachment_count),
+ *      oldest first: the last 50, with `recortada` true when there were more.
  * AC9: Returns 404 NOT_FOUND when case belongs to a different tenant (IDOR safe).
- * AC10: Returns 200 + { messages: [] } when no claim_messages rows exist.
- * AC13: body_text is truncated to 500 chars server-side before sending to client.
+ * AC10: Returns 200 + { messages: [], recortada: false } when the case has no messages.
+ * AC13: body_text is truncated to 2000 chars server-side, after masking.
  * AC14: attachment_count aggregated from claim_attachments per message.
  *
  * Security:
- * - Auth: Better Auth session; explicit tenant_id filters (RLS is gone).
- * - IDOR: case ownership verified first (404 not 403 for wrong-tenant).
- * - PII: from_addr, subject, body_text are PII — NEVER logged.
+ * - Auth: Better Auth session; tenant isolation by RLS through `enTenantVarias`.
+ * - IDOR: case lookup travels in the same batch (404 not 403 for wrong-tenant).
+ * - PII: from_addr, subject, body_text are PII — NEVER logged; masked for viewer.
  * - Rate limit: CASES_API (100/min per user).
  */
 
 import { type NextRequest } from "next/server";
-import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { mensajesSinPiiSiNoCorresponde } from "@/server/cases/pii";
+import { conversacionDelCaso, type Conversacion } from "@/server/cases/conversacion";
 import { entrar } from "@/lib/api/entrada";
-import { db } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
-import { firstRow } from "@/lib/db/helpers";
-import { cases, claimAttachments, claimMessages } from "@/lib/db/schema";
+import { type TenantContext } from "@/data/scope";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
@@ -41,8 +40,7 @@ const ParamsSchema = z.object({
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const BODY_TEXT_MAX_CHARS = 500;
-const MESSAGES_LIMIT = 50;
+const BODY_TEXT_MAX_CHARS = 2000;
 
 /** Extract a loggable error code from a thrown DB error (PII-safe). */
 function dbErrCode(e: unknown): string {
@@ -85,133 +83,30 @@ export async function GET(
 
   const { id: caseId } = parsedParams.data;
 
-  // ── 4. IDOR pre-check: verify case exists AND belongs to user's tenant ────
-  //    Explicit tenant_id filter — wrong-tenant case yields no row → 404.
+  // ── 4. La conversación, en un solo viaje ─────────────────────────────────
   try {
-    let caseRow: { id: string } | null;
-    try {
-      caseRow = firstRow(
-        await enTenant(tenantCtx, (db) =>
-          db
-            .select({ id: cases.id })
-            .from(cases)
-            .where(eq(cases.id, caseId))
-            .limit(1)
-        )
-      );
-    } catch (e) {
-      logger.error({ code: dbErrCode(e) }, "get_api_cases_id_messages.case_lookup_error");
-      return err(new AppError("INTERNAL_ERROR"));
-    }
-
-    if (!caseRow) {
-      // Case not found OR belongs to different tenant — always 404, never 403.
+    const conversacion = await conversacionDelCaso(tenantCtx, caseId);
+    if (!conversacion) {
+      // Caso inexistente o de otro inquilino: siempre 404, nunca 403.
       return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
     }
 
-    // ── 5. Fetch inbound messages with attachment counts ────────────────────
-    //    body_text truncated server-side to BODY_TEXT_MAX_CHARS.
-    //    attachment_count aggregated from claim_attachments per message.
-    let messages: Array<{
-      id: string;
-      direction: string;
-      provider: string;
-      subject: string | null;
-      from_addr: string | null;
-      body_text: string | null;
-      received_at: string;
-    }>;
-    try {
-      messages = await enTenant(tenantCtx, (db) =>
-        db
-          .select({
-            id: claimMessages.id,
-            direction: claimMessages.direction,
-            provider: claimMessages.provider,
-            subject: claimMessages.subject,
-            from_addr: claimMessages.from_addr,
-            body_text: claimMessages.body_text,
-            received_at: claimMessages.received_at,
-          })
-          .from(claimMessages)
-          .where(
-            and(
-              eq(claimMessages.case_id, caseId),
-              eq(claimMessages.direction, "inbound")
-            )
-          )
-          .orderBy(asc(claimMessages.received_at))
-          .limit(MESSAGES_LIMIT)
-      );
-    } catch (e) {
-      logger.error({ code: dbErrCode(e) }, "get_api_cases_id_messages.messages_query_error");
-      return err(new AppError("INTERNAL_ERROR"));
-    }
-
-    // AC14: count attachments linked to each message (was a PostgREST join).
-    const attachmentCounts = new Map<string, number>();
-    if (messages.length > 0) {
-      try {
-        const attachmentRows = await enTenant(tenantCtx, (db) =>
-          db
-            .select({ claim_message_id: claimAttachments.claim_message_id })
-            .from(claimAttachments)
-            .where(
-              and(
-                eq(claimAttachments.case_id, caseId),
-                isNotNull(claimAttachments.claim_message_id),
-                inArray(
-                  claimAttachments.claim_message_id,
-                  messages.map((m) => m.id)
-                )
-              )
-            )
-        );
-
-        for (const row of attachmentRows) {
-          if (!row.claim_message_id) continue;
-          attachmentCounts.set(
-            row.claim_message_id,
-            (attachmentCounts.get(row.claim_message_id) ?? 0) + 1
-          );
-        }
-      } catch (e) {
-        logger.error({ code: dbErrCode(e) }, "get_api_cases_id_messages.messages_query_error");
-        return err(new AppError("INTERNAL_ERROR"));
-      }
-    }
-
     /*
-     * Lo que escribió la persona no sale crudo para quien sólo mira.
+     * Lo que escribió la persona no sale crudo para quien sólo mira, y lo que
+     * le contestó el agente tampoco: repite su DNI y su póliza. El corte y su
+     * porqué están en `@/server/cases/pii`.
      *
-     * `body_text` y `from_addr` salían a `...ALL_ROLES` —el cuerpo de cada
-     * mensaje, con el DNI y el teléfono adentro, y la dirección desde la que
-     * escribió—. Es la misma fuga que se cerró en `agent-run`, por la puerta de
-     * al lado. El corte y su porqué están en `@/server/cases/pii`.
+     * Primero se enmascara y después se recorta: cortar antes puede partir un
+     * DNI al medio y dejar pedazos que la redacción ya no reconoce.
      */
-    const visibles = mensajesSinPiiSiNoCorresponde(messages, userRow.role);
-
-    const result = visibles.map((msg) => ({
-      id: msg.id,
-      direction: msg.direction,
-      provider: msg.provider,
-      subject: msg.subject,
-      from_addr: msg.from_addr,
-      // Truncate body_text server-side — AC13 (first 500 chars max).
-      // PII: body_text is never logged — only truncated and forwarded.
-      body_text:
-        msg.body_text != null && msg.body_text.length > BODY_TEXT_MAX_CHARS
-          ? msg.body_text.slice(0, BODY_TEXT_MAX_CHARS)
-          : msg.body_text,
-      received_at: msg.received_at,
-      // AC14: count attachments linked to this message.
-      attachment_count: attachmentCounts.get(msg.id) ?? 0,
+    const messages = mensajesSinPiiSiNoCorresponde(conversacion.messages, userRow.role).map((m) => ({
+      ...m,
+      body_text: m.body_text?.slice(0, BODY_TEXT_MAX_CHARS) ?? null,
     }));
 
-    return ok({ messages: result });
-  } catch (error) {
-    const errName = error instanceof Error ? error.name : "UnknownError";
-    logger.error({ error_name: errName }, "get_api_cases_id_messages.unhandled_error");
+    return ok({ messages, recortada: conversacion.recortada } satisfies Conversacion);
+  } catch (e) {
+    logger.error({ code: dbErrCode(e) }, "get_api_cases_id_messages.messages_query_error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 }

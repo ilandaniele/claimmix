@@ -85,6 +85,14 @@ describe("GET /api/cases/export.csv — filtros multi-select", () => {
     expect(mockListCasesForExport).not.toHaveBeenCalled();
   });
 
+  it("el encabezado dice «Situación», como la columna de la bandeja", async () => {
+    const res = await GET(makeRequest(""));
+
+    const encabezado = (await res.text()).split("\r\n")[0];
+    expect(encabezado).toContain("Situación");
+    expect(encabezado).not.toContain("Estado");
+  });
+
   it("status/type/severity/channel llegan a listCasesForExport ya como array, sin convertir", async () => {
     const res = await GET(
       makeRequest("?status=listo&severity=high&severity=critical&channel=email")

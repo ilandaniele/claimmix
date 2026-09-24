@@ -18,6 +18,7 @@ import {
   Play,
   Receipt,
   Briefcase,
+  MailX,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -118,6 +119,7 @@ export function Sidebar({
      * guardado; la barra ya no pasa por ella.
      */
     { label: t("nav.escalados") || "Escalados", href: "/bandeja?status=escalado", icon: AlertTriangle },
+    { label: t("nav.noRelevantes"), href: "/bandeja?is_claim=false", icon: MailX },
     /*
      * «Clientes» sólo para quien puede ver datos personales.
      *

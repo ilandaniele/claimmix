@@ -6,7 +6,7 @@
  *       Max 1000 rows per export.
  *       Same explicit tenant_id isolation as GET /api/cases (RLS is gone).
  *
- * Columns: Nro. Siniestro, Asegurado, Póliza, Tipo, Estado, Confianza, Fecha, Analista.
+ * Columns: Nro. Siniestro, Asegurado, Póliza, Tipo, Situación, Confianza, Fecha, Analista.
  * Filters: same query params as GET /api/cases (status, type, q).
  *
  * Rate limit: 100 req/min per user (CASES_API config — export is heavier but same bucket).
@@ -37,7 +37,7 @@ const CSV_HEADERS = [
   "Asegurado",
   "Póliza",
   "Tipo",
-  "Estado",
+  "Situación",
   "Confianza",
   "Fecha",
   "Analista",
@@ -208,7 +208,7 @@ export async function GET(request: NextRequest) {
     c.policyholder_name ?? "",                           // Asegurado
     c.policy_number ?? "",                               // Póliza
     c.claim_type ? (TIPOS[c.claim_type as ClaimType] ?? c.claim_type) : "",  // Tipo
-    ESTADOS[c.status as CaseStatus] ?? c.status,        // Estado
+    ESTADOS[c.status as CaseStatus] ?? c.status,        // Situación
     // Drizzle numeric → string; convert to number at the boundary.
     formatConfidence(c.confidence_min === null ? null : Number(c.confidence_min)), // Confianza
     formatDateCsv(c.created_at, locale),                 // Fecha

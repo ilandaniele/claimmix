@@ -7,9 +7,10 @@
 // Quién hace qué: un explorador ubica el terreno y lectores en paralelo lo
 // mapean; tres diseñadores proponen desde lentes distintos, dos jueces puntúan
 // y uno sintetiza; UN solo implementador toca código; cinco revisores buscan
-// problemas y cada hallazgo lo intentan refutar tres adversarios antes de que
-// alguien lo corrija; un comprobador corre `pnpm check --local` y LEE el
-// transcripto del ensayo; el último abre el PR. Nadie mergea.
+// problemas y cada hallazgo lo intenta refutar un adversario (tres si es de
+// seguridad o grave) antes de que alguien lo corrija; un comprobador corre
+// `pnpm check --local` y LEE el transcripto del ensayo; el último abre el PR.
+// Nadie mergea.
 
 export const meta = {
   name: 'desarrollo',
@@ -19,7 +20,7 @@ export const meta = {
     { title: 'Entender', detail: 'un explorador ubica el terreno; lectores en paralelo lo mapean' },
     { title: 'Diseñar', detail: 'tres enfoques, dos jueces, una síntesis' },
     { title: 'Implementar', detail: 'un solo implementador, en rama, con tests' },
-    { title: 'Revisar', detail: 'cinco lentes; cada hallazgo lo intentan refutar tres' },
+    { title: 'Revisar', detail: 'cinco lentes; tres refutadores para seguridad o gravedad alta; uno en Sonnet para el resto' },
     { title: 'Comprobar', detail: 'pnpm check --local, y alguien lee el transcripto' },
     { title: 'Entregar', detail: 'commit, push y PR; no mergea' },
   ],
@@ -220,6 +221,9 @@ const enFable = (pedido, opciones) => agent(pedido, { ...opciones, model: 'fable
   .catch(() => null)
   .then((r) => r ?? agent(pedido, { ...opciones, model: 'opus' }))
 const quien = (lente) => (lente === 'seguridad' ? enFable : agent)
+// Refutar cuesta más que encontrar: tres votos sólo para seguridad o gravedad alta, y fuera de seguridad refuta Sonnet.
+const votos = (h) => (h.lente === 'seguridad' || h.gravedad === 'alta' ? 3 : 1)
+const refutador = (h) => (h.lente === 'seguridad' ? enFable : (pedido, opciones) => agent(pedido, { ...opciones, model: 'sonnet', effort: 'medium' }))
 
 // Quien revisa mira el ÁRBOL DE TRABAJO, no `main...HEAD`.
 //
@@ -233,7 +237,7 @@ const confirmados = []
 
 for (let ronda = 1; ronda <= RONDAS; ronda++) {
   phase('Revisar')
-  // Barrera a propósito: hay que deduplicar entre lentes antes de pagar tres refutadores por hallazgo.
+  // Barrera a propósito: hay que deduplicar entre lentes antes de pagar refutadores por hallazgo.
   const encontrados = (await parallel(LENTES.map((l) => () => quien(l.clave)(
     `Tarea: ${tarea}
 Plan: ${plan.resumen}
@@ -241,7 +245,7 @@ Rama: ${rama}. ${DONDE_MIRAR}
 
 Ronda ${ronda} de revisión.${ronda > 1 ? ' Ya hubo una ronda antes y lo que encontró se corrigió: el árbol cambió, miralo de nuevo. Los de antes no hace falta repetirlos.' : ''}
 
-Revisá SOLO desde este lente: ${l.lente}. No cambies nada. Cada hallazgo con archivo, línea, por qué es un problema de verdad (no una preferencia) y gravedad. Si no hay nada, devolvé la lista vacía: un hallazgo inventado cuesta tres verificaciones.${REGLAS}`,
+Revisá SOLO desde este lente: ${l.lente}. No cambies nada. Cada hallazgo con archivo, línea, por qué es un problema de verdad (no una preferencia) y gravedad. Si no hay nada, devolvé la lista vacía: un hallazgo inventado cuesta verificaciones.${REGLAS}`,
     { label: `revisar:${l.clave}:ronda${ronda}`, phase: 'Revisar', schema: HALLAZGOS },
   )))).flatMap((r, i) => (r?.hallazgos ?? []).map((h) => ({ ...h, lente: LENTES[i].clave })))
 
@@ -251,14 +255,14 @@ Revisá SOLO desde este lente: ${l.lente}. No cambies nada. Cada hallazgo con ar
   if (nuevos.length === 0) break
 
   const juzgados = await parallel(nuevos.map((h) => () =>
-    parallel([0, 1, 2].map((i) => () => quien(h.lente)(
+    parallel(Array.from({ length: votos(h) }, (_, i) => () => refutador(h)(
       `Rama: ${rama}. ${DONDE_MIRAR}
 
 Hallazgo de una revisión: ${JSON.stringify(h)}
 
-Sos el refutador ${i + 1} de 3. Tu trabajo es DEMOSTRAR que el hallazgo está mal, no aplica, o no tiene impacto real, leyendo el código. Si no lo podés refutar con evidencia concreta, refutado=false. Ante la duda, refutado=true.${REGLAS}`,
+Sos el refutador ${i + 1} de ${votos(h)}. Tu trabajo es DEMOSTRAR que el hallazgo está mal, no aplica, o no tiene impacto real, leyendo el código. Si no lo podés refutar con evidencia concreta, refutado=false. Ante la duda, refutado=true.${REGLAS}`,
       { label: `refutar:${h.titulo.slice(0, 30)}`, phase: 'Revisar', schema: REFUTACION, effort: 'high' },
-    ))).then((votos) => ({ h, sobrevive: votos.filter(Boolean).filter((v) => !v.refutado).length >= 2 })),
+    ))).then((vs) => ({ h, sobrevive: vs.filter(Boolean).filter((v) => !v.refutado).length >= Math.ceil(votos(h) / 2) })),
   ))
   const sobrevivientes = juzgados.filter(Boolean).filter((j) => j.sobrevive).map((j) => j.h)
   confirmados.push(...sobrevivientes)

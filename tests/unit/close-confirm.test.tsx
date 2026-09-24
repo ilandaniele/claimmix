@@ -141,7 +141,7 @@ describe("CloseConfirmDialog — typed confirmation", () => {
 
     await waitFor(() => {
       expect(defaultProps.onError).toHaveBeenCalledWith(
-        "Transición de estado no válida."
+        "Ese cambio de situación no es válido."
       );
     });
   });

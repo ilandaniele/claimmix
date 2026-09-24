@@ -24,9 +24,13 @@ vi.mock("@/data/scope", () => ({
   enTenant: vi.fn(),
 }));
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getTenantKpis } from "@/server/metrics/kpis";
+import { describe, it, expect, expectTypeOf, vi, beforeEach, afterEach } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect, QueryBuilder } from "drizzle-orm/pg-core";
+import { consultaDeActividad, getTenantKpis } from "@/server/metrics/kpis";
+import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
+import type { PuntoSerie } from "@/core/metricas/serie";
 
 const CTX = { tenantId: "10000000-0000-0000-0000-000000000001" };
 
@@ -50,6 +54,7 @@ function baseCon(over: Partial<{
   usoHistorico: typeof SIN_USO;
   porPersona: Array<Record<string, unknown>>;
   porModelo: Array<Record<string, unknown>>;
+  serie: PuntoSerie[];
 }> = {}) {
   mockVarias.mockImplementation(async () => [
     [over.resumen ?? { total: 0, listo: 0, cerrados: 0, minutos: 0 }],
@@ -61,6 +66,8 @@ function baseCon(over: Partial<{
     [over.usoHistorico ?? SIN_USO],
     over.porPersona ?? [],
     over.porModelo ?? [],
+    // La décima va sólo cuando se pidió la serie, como en el lote de verdad.
+    ...(over.serie ? [over.serie] : []),
   ]);
 }
 
@@ -205,5 +212,103 @@ describe("getTenantKpis — los escalados", () => {
 
     expect(summary.escalated_count).toBe(43);
     expect(by_status.requiere_especialista).toBe(260);
+  });
+});
+
+describe("getTenantKpis — la serie de actividad", () => {
+  afterEach(() => vi.useRealTimers());
+
+  /*
+   * Un cliente que acepta cualquier cadena y se devuelve a sí mismo: alcanza
+   * para ejecutar el armador y contar cuántas consultas mete en el lote, sin
+   * base. Lo que se afirma es que la serie viaja en el MISMO lote y que
+   * /api/metricas, que no la pide, sigue en nueve.
+   */
+  const cadena: unknown = new Proxy(() => cadena, {
+    get: () => cadena,
+    apply: () => cadena,
+  });
+  const consultasDelLote = () =>
+    (mockVarias.mock.calls[0]![1] as (db: unknown) => unknown[])(cadena).length;
+
+  it("sin pedirla vuelve null y el lote sigue en nueve consultas", async () => {
+    baseCon();
+
+    const { serie } = await getTenantKpis(CTX);
+
+    expect(serie).toBeNull();
+    expect(mockVarias).toHaveBeenCalledTimes(1);
+    expect(consultasDelLote()).toBe(9);
+  });
+
+  it("pedida, va como décima consulta del mismo viaje", async () => {
+    baseCon({ serie: [] });
+
+    await getTenantKpis(CTX, { serie: "dia" });
+
+    expect(mockVarias).toHaveBeenCalledTimes(1);
+    expect(consultasDelLote()).toBe(10);
+  });
+
+  it("pone las filas en su mes y rellena los doce con cero", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-15T12:00:00Z"));
+    const septiembre = { clave: "2026-09", reclamos: 5, whatsapps: 3, mails: 2 };
+    baseCon({ serie: [septiembre] });
+
+    const { serie } = await getTenantKpis(CTX, { serie: "mes" });
+
+    expect(serie).toHaveLength(12);
+    expect(serie!.at(-1)).toEqual(septiembre);
+    expect(serie![0]!.clave).toBe("2025-10");
+    expect(serie!.slice(0, -1).every((p) => p.reclamos + p.whatsapps + p.mails === 0)).toBe(true);
+  });
+});
+
+describe("consultaDeActividad — el SQL que arma", () => {
+  /*
+   * Sin base: `QueryBuilder` arma el mismo SQL que el cliente y no conecta.
+   * Ejecutarlo lo hace `pnpm capa-datos`, contra los casos contados en JS.
+   */
+  const consulta = consultaDeActividad(
+    new QueryBuilder() as never,
+    "dia",
+    "2026-08-02T03:00:00.000Z"
+  );
+  const { sql, params } = consulta.toSQL();
+
+  it("agrupa por el día argentino, no por el de UTC", () => {
+    const zona = params.indexOf(ZONA_ARGENTINA) + 1;
+
+    expect(zona).toBeGreaterThan(0);
+    expect(sql).toContain(`"created_at" at time zone $${zona}`);
+    expect(params).toEqual(expect.arrayContaining(["day", "YYYY-MM-DD"]));
+  });
+
+  it("las tres series cuentan sólo WhatsApp y mail reales, sin simulaciones", () => {
+    expect(sql).toMatch(/"cases"\."channel" in \(\$\d+, \$\d+\)/);
+    expect(params).toEqual(expect.arrayContaining(["whatsapp", "email"]));
+    expect(params.filter((p) => String(p).endsWith("_sim"))).toEqual([]);
+  });
+
+  it("cada columna cuenta lo suyo: reclamos los que son, y cada canal el suyo", () => {
+    // Estos literales van en el texto y no como parámetros, así que el test de
+    // arriba no los ve: invertir los dos canales, o sumar los `null` a los
+    // reclamos con un `is not false`, pasaba verde.
+    // Drizzle tipa cada campo como «ponele alias»; en ejecución es el SQL tal cual.
+    const campos = consulta._.selectedFields as unknown as Record<keyof PuntoSerie, SQL>;
+    const dialecto = new PgDialect();
+    const columna = (campo: keyof PuntoSerie) => dialecto.sqlToQuery(campos[campo]).sql;
+
+    expect(columna("reclamos")).toMatch(/filter \(where "cases"\."is_claim" is true\)/);
+    expect(columna("whatsapps")).toMatch(/filter \(where "cases"\."channel" = 'whatsapp'\)/);
+    expect(columna("mails")).toMatch(/filter \(where "cases"\."channel" = 'email'\)/);
+  });
+
+  it("devuelve filas con la forma de PuntoSerie", () => {
+    // El lote de getTenantKpis y el cruce de `pnpm capa-datos` afirman
+    // PuntoSerie en vez de inferirlo del armador: si el SELECT y el tipo se
+    // separan, esto deja de compilar.
+    expectTypeOf<Awaited<ReturnType<typeof consultaDeActividad>>[number]>().toEqualTypeOf<PuntoSerie>();
   });
 });

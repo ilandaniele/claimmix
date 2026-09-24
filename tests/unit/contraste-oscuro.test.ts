@@ -45,14 +45,14 @@ function contraste(a: string, b: string): number {
 /** AA para texto normal. */
 const MINIMO = 4.5;
 
-describe("el contraste del modo oscuro", () => {
-  // Las tres superficies sobre las que se dibuja texto.
-  const superficies = {
-    "la tarjeta (.bg-white)": colorEnOscuro("bg-white"),
-    "el fondo (.bg-slate-50)": colorEnOscuro("bg-slate-50"),
-    "la fila resaltada (.bg-slate-100)": colorEnOscuro("bg-slate-100"),
-  };
+// Las tres superficies sobre las que se dibuja texto, compartidas por los dos describe.
+const superficies = {
+  "la tarjeta (.bg-white)": colorEnOscuro("bg-white"),
+  "el fondo (.bg-slate-50)": colorEnOscuro("bg-slate-50"),
+  "la fila resaltada (.bg-slate-100)": colorEnOscuro("bg-slate-100"),
+};
 
+describe("el contraste del modo oscuro", () => {
   it("el texto secundario —DNI, correo, teléfono— llega a AA en las tres superficies", () => {
     const gris = colorEnOscuro("text-slate-600");
     for (const [donde, fondo] of Object.entries(superficies)) {
@@ -98,5 +98,55 @@ describe("el contraste del modo oscuro", () => {
       superficies["la tarjeta (.bg-white)"]
     );
     expect(Math.abs(enOscuro - enClaro)).toBeLessThan(1.5);
+  });
+});
+
+/** El valor de `--control-border` que `globals.css` le pone al bloque `.dark`. */
+function controlBorderEnOscuro(): string {
+  const re = new RegExp(`\\.dark\\s*\\{[^}]*?--control-border:\\s*(#[0-9a-fA-F]{6})`, "s");
+  const m = re.exec(CSS);
+  if (!m) throw new Error("no encontré --control-border en el bloque .dark de globals.css");
+  return m[1];
+}
+
+/** El color de `.dark .linea-inferior`, la regla del encabezado de la tabla. */
+function lineaInferiorEnOscuro(): string {
+  const re = new RegExp(`\\.dark\\s+\\.linea-inferior\\s*\\{[^}]*?(#[0-9a-fA-F]{6})`, "s");
+  const m = re.exec(CSS);
+  if (!m) throw new Error("no encontré .dark .linea-inferior en globals.css");
+  return m[1];
+}
+
+describe("los bordes del modo oscuro", () => {
+  const tarjeta = superficies["la tarjeta (.bg-white)"];
+  const fondo = superficies["el fondo (.bg-slate-50)"];
+
+  it("el borde de tarjeta (.border-slate-200) se distingue de la tarjeta y del fondo", () => {
+    const borde = colorEnOscuro("border-slate-200");
+    expect(contraste(borde, tarjeta)).toBeGreaterThanOrEqual(1.5);
+    expect(contraste(borde, fondo)).toBeGreaterThanOrEqual(1.5);
+  });
+
+  it("el divisor interno (.border-slate-100) se ve, pero un escalón por debajo del borde", () => {
+    const divisor = colorEnOscuro("border-slate-100");
+    const borde = colorEnOscuro("border-slate-200");
+    expect(contraste(divisor, tarjeta)).toBeGreaterThanOrEqual(1.3);
+    expect(contraste(divisor, tarjeta)).toBeLessThan(contraste(borde, tarjeta));
+  });
+
+  it("la línea del encabezado de la tabla se distingue más que el borde de tarjeta", () => {
+    const linea = lineaInferiorEnOscuro();
+    const borde = colorEnOscuro("border-slate-200");
+    expect(contraste(linea, fondo)).toBeGreaterThan(contraste(borde, fondo));
+  });
+
+  it("el borde de los controles (botones, select, chips de filtro) llega a SC 1.4.11", () => {
+    const control = controlBorderEnOscuro();
+    // SC 1.4.11 (Non-text Contrast) pide 3:1 para el borde de un control.
+    expect(contraste(control, tarjeta)).toBeGreaterThanOrEqual(3);
+  });
+
+  it("las sombras oscuras pisan --tw-shadow, no box-shadow, para no tapar el anillo de foco", () => {
+    expect(CSS).not.toMatch(/\.dark\s+\.shadow-(sm|md)\s*\{[^}]*box-shadow/);
   });
 });

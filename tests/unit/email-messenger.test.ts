@@ -216,7 +216,13 @@ describe("emailMessenger — cuando el redactor no puede", () => {
     await mandar("missing_information_request", PEDIDO);
 
     const html = cuerpoEnviado();
-    for (const motivo of ["dropped_field", "forbidden", "too_long", "escalation_asks_for_data"]) {
+    for (const motivo of [
+      "dropped_field",
+      "forbidden",
+      "too_long",
+      "escalation_asks_for_data",
+      "pregunta_con_valor",
+    ]) {
       expect(html).not.toContain(motivo);
     }
   });

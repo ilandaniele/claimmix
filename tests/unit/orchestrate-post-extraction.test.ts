@@ -235,6 +235,8 @@ function setupDbMocks({
 
   const insertSpy = vi.fn().mockReturnValue(resultadoDeInsert);
   const updateSpy = vi.fn().mockResolvedValue([]);
+  // Qué se escribió y con qué valores se filtró: qué filas cerró un UPDATE.
+  const updateValoresSpy = vi.fn();
   const titularWhereSpy = vi.fn();
   const adjuntosWhereSpy = vi.fn();
 
@@ -322,6 +324,7 @@ function setupDbMocks({
     set: (data: Record<string, unknown>) => ({
       where: (cond: unknown) => {
         const escrito = updateSpy(data);
+        updateValoresSpy(data, valoresDe(cond));
         // Un documento cerrado o negado deja de estar pendiente, como en la
         // base: sin esto, un turno que lo niega se lo seguía ofreciendo al adjunto.
         if (getTableName(table) === "missing_docs" && ("declined_at" in data || "satisfied_at" in data)) {
@@ -337,7 +340,7 @@ function setupDbMocks({
     }),
   }));
 
-  return { insertSpy, updateSpy, titularWhereSpy, adjuntosWhereSpy };
+  return { insertSpy, updateSpy, updateValoresSpy, titularWhereSpy, adjuntosWhereSpy };
 }
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -2699,6 +2702,139 @@ describe("orchestratePostExtraction — un «ok» a una lista no la contesta", (
     await correr("ok", extractEmailClaimMock({ fields: [] }));
 
     expect(updateSpy.mock.calls.map((c) => c[0])).toContainEqual({ status: "confirmed" });
+  });
+});
+
+/*
+ * «¿Hubo personas lastimadas?: no», a quien nunca habló de heridos (ensayos
+ * del 23/09). Un «ok» a esa pregunta no dice si hubo: sin un valor que la
+ * persona haya dado en esta vuelta, la duda de heridos no se cierra.
+ */
+describe("orchestratePostExtraction — los heridos no se confirman con un «ok»", () => {
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  beforeEach(() => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+  });
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+  });
+
+  const heridos = (field_value: string, confidence = 0.7) => ({
+    field_key: "hay_heridos",
+    field_value,
+    confidence,
+    source: "ai" as const,
+  });
+
+  async function contesta(
+    asked: string[],
+    texto: string,
+    fields: ReturnType<typeof heridos>[] = []
+  ) {
+    const spies = setupDbMocks({
+      lastAskRows: [{ asked_keys: asked, created_at: "2026-09-23T12:00:00Z" }],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extractEmailClaimMock({ fields, fields_pending_confirmation: [] }),
+        senderEmail: SENDER_EMAIL,
+        latestMessageText: texto,
+      },
+      NO_MATCHES
+    );
+    // Los campos que cerró el UPDATE a `confirmed`.
+    return spies.updateValoresSpy.mock.calls
+      .filter((c) => (c[0] as { status?: string }).status === "confirmed")
+      .flatMap((c) => c[1] as unknown[]);
+  }
+
+  it("un «ok» a la pregunta abierta no la cierra", async () => {
+    expect(await contesta(["hay_heridos"], "ok")).not.toContain("hay_heridos");
+  });
+
+  it("un «Confirmo» a la lista cierra lo demás y deja pendiente la de heridos", async () => {
+    const cerradas = await contesta(["hay_heridos", "licencia_conducir"], "Confirmo");
+
+    expect(cerradas).toContain("licencia_conducir");
+    expect(cerradas).not.toContain("hay_heridos");
+  });
+
+  it("un «sí» a un «no» que la persona dijo a medias sí lo confirma", async () => {
+    expect(await contesta(["hay_heridos"], "sí", [heridos("none")])).toContain("hay_heridos");
+  });
+
+  it("sin valor, se pregunta abierto y sin proponer nada", async () => {
+    setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extractEmailClaimMock({ fields_pending_confirmation: ["hay_heridos"] }),
+        senderEmail: SENDER_EMAIL,
+      },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    const data = ask?.[0].data as { missingFields: string[]; knownValues: Record<string, string> };
+    expect(data.missingFields).toContain("hay_heridos");
+    expect(data.knownValues).not.toHaveProperty("hay_heridos");
+  });
+
+  it("lo que ya se confirmó no se vuelve a preguntar aunque el extractor lo liste", async () => {
+    const { insertSpy } = setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [],
+      isComplete: true,
+      status: "listo_para_core",
+      camposResueltos: ["hay_heridos"],
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extractEmailClaimMock({
+          fields: [...extractEmailClaimMock().fields, heridos("no")],
+          fields_pending_confirmation: ["heridos"],
+        }),
+        senderEmail: SENDER_EMAIL,
+      },
+      NO_MATCHES
+    );
+
+    const escritas = insertSpy.mock.calls.flatMap((c) => [c[0]].flat()) as Array<{
+      field_name?: string;
+    }>;
+    expect(escritas.map((e) => e.field_name)).not.toContain("heridos");
+    expect(escritas.map((e) => e.field_name)).not.toContain("hay_heridos");
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect((ask?.[0].data as { missingFields?: string[] } | undefined)?.missingFields ?? []).not.toContain(
+      "hay_heridos"
+    );
   });
 });
 

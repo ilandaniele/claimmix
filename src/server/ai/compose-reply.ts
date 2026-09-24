@@ -20,7 +20,7 @@ import "server-only";
 
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
-import { labelForField } from "@/lib/labels/claim-fields";
+import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { logger } from "@/lib/observability/logger";
@@ -169,12 +169,25 @@ function sinNumerosEnteros(texto: string): string {
   );
 }
 
+/*
+ * El ensayo del 23/09 abría «necesitamos que nos mandes:» y seguía con
+ * «• Decinos si alguien resultó lastimado.» o «• ¿Tu nombre completo es…?»: el
+ * modelo copiaba la instrucción de cada campo, con su verbo, y metía la
+ * confirmación en una lista de cosas para mandar.
+ */
+const COMO_VA_LA_LISTA =
+  "CÓMO VA LA LISTA: el verbo va una sola vez, en la frase que la abre, y después un renglón " +
+  "en blanco. Cada ítem nombra lo que falta sin verbo propio —«El número de póliza (por ejemplo " +
+  "POL-12345)», «Si alguien resultó lastimado», «Fotos de los daños»—, nunca «Decinos…», " +
+  "«Mandanos…» ni «Pasanos…». Lo que ya entendimos no va en esa lista: preguntá si es correcto " +
+  "aparte, en una oración propia.";
+
 function buildPrompt(input: ComposeReplyInput): string {
   const items = (input.fields ?? []).map((key) => {
     const { label, instruction, kind } = labelForField(key);
     const known = input.knownValues?.[key];
     return known
-      ? `- ${label}: ya entendimos: ${known}. Preguntá si es correcto usando ese mismo valor, sin comillas ni paréntesis; no pidas más precisión ni digas que la persona lo escribió así`
+      ? `- ${label}: ya entendimos: ${known}. Preguntá si es correcto con ese mismo valor adentro de la pregunta, sin comillas ni paréntesis, nunca «¿pregunta?: valor» ni «¿pregunta? valor»; no pidas más precisión ni digas que la persona lo escribió así`
       : `- ${label} — ${instruction} (${kind === "documento" ? "archivo o foto" : "dato"})`;
   });
 
@@ -225,9 +238,9 @@ denunciar un siniestro. Escribís en castellano rioplatense, con voseo, claro y 
 
 LO QUE HAY QUE DECIR (no lo cambies, no agregues ni saques temas):
 ${intentBrief[input.intent]}
-${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(sinNumerosEnteros(input.question))}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia y qué falta para avanzar. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder.` : ""}
+${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(sinNumerosEnteros(input.question))}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder. Sin frases hechas como «entiendo tu preocupación», y la respuesta no nombra la documentación ni lo que falta: el pedido va una sola vez, en la lista.` : ""}
 
-${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}` : ""}
+${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}\n\n${COMO_VA_LA_LISTA}` : ""}
 ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de cada uno, copiados tal cual):\n${conflictos.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName)}. Podés llamarla por su nombre de pila.` : ""}
@@ -244,10 +257,15 @@ PROHIBIDO, sin excepción:
 - Disculpas largas, floreo, o tono de robot.
 
 TONO: si lo que contó es grave —fuego, heridos, robo— sé sobrio y breve. Si es un
-choque menor, sé cordial y directo. Nunca dramatices ni minimices.
+choque menor, sé cordial y directo. Nunca dramatices ni minimices. Si pidió perdón o
+dijo que se equivocó, no se lo agradezcas: alcanza con un «no hay problema». Hablás
+por el equipo, siempre en plural —«necesitamos», «te pedimos», «entendemos»—, nunca
+«te pido» ni «entiendo».
 
 Devolvé JSON: {"message": "<el texto del mensaje>"}`;
 }
+
+const NUCLEO: Readonly<Record<string, RegExp>> = { hay_heridos: /lastim|herid|lesion/ };
 
 /** Everything the guardrails check, in one place so a rejection is explainable. */
 function violation(text: string, input: ComposeReplyInput): string | null {
@@ -269,14 +287,42 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   // saludo, «daños» en «Fotos de los daños»— y el campo pasaría por pedido sin
   // que la persona viera la pregunta. Y un «sí» o un «no», que es como llega un
   // booleano, están en cualquier texto: ése tiene que nombrar el campo.
+  // La primera palabra con tres letras o más: «Si hubo personas lastimadas»
+  // daba «si», que está en cualquier texto, y el ítem se caía sin que se note.
+  // Donde esa palabra no es la que carga el sentido va la raíz: «¿Alguien
+  // resultó lastimado?» pregunta lo mismo sin decir «hubo».
   if (input.intent === "ask") {
     const lower = trimmed.toLowerCase();
     for (const key of input.fields ?? []) {
-      const head = labelForField(key).label.split(" ")[0].toLowerCase();
+      const palabras = labelForField(key).label.toLowerCase().split(/\s+/);
+      const head = palabras.find((p) => p.replace(/[^\p{L}\p{N}]/gu, "").length >= 3) ?? palabras[0];
+      const nombrado = NUCLEO[canonicalFieldKey(key)]?.test(lower) ?? lower.includes(head);
       const known = input.knownValues?.[key]?.trim().toLowerCase();
       const citado = !!known && known.length > 2 && lower.includes(known);
-      if (!lower.includes(head) && !citado) return `dropped_field:${key}`;
+      if (!nombrado && !citado) return `dropped_field:${key}`;
     }
+
+    // «• ¿Hubo personas lastimadas?: no» le propone a la persona un valor que
+    // quizá nunca dijo, y un «ok» lo confirma. El valor va adentro de la pregunta.
+    // Después del «?» sólo cuenta un sí, un no o un valor que ya tenemos: «¿Dónde
+    // fue? Calle y altura» dice qué mandar, no propone nada. En la lista o fuera:
+    // la confirmación ahora va en su propia oración.
+    const pegados = new Set(
+      ["sí", "si", "no", ...Object.values(input.knownValues ?? {})].map((v) => v.trim().toLowerCase())
+    );
+    const conValor = (l: string) => {
+      const cola = /\?[ \t]+([^?]+?)[ \t.!]*$/.exec(l)?.[1].toLowerCase();
+      return /\?[ \t]*:|:[ \t]*(?:s[ií]|no)[ \t]*$/i.test(l) || (!!cola && pegados.has(cola));
+    };
+    if (trimmed.split("\n").some(conValor)) {
+      return "pregunta_con_valor";
+    }
+
+    // Aun con la consigna, el ensayo del 23/09 mandó «• Hora aproximada —
+    // Decinos más o menos a qué hora fue.»: copió el renglón del brief entero.
+    const itemConVerbo =
+      /^[ \t]*(?:[•*\-]|\d+[.)])[ \t]+(?:[^\n]*?(?:—|:)[ \t]*)?(?:decinos|mandanos|pasanos|dejanos|contanos|envianos)\b/im;
+    if (itemConVerbo.test(trimmed)) return "item_con_verbo";
   }
 
   // Lo mismo para el conflicto, donde más se nota: un mensaje que dice que
@@ -348,7 +394,11 @@ Corregilo y devolvé el mensaje entero de nuevo.`
   if (!text) return { ok: false, problem: "no_output" };
 
   const parsed = JSON.parse(text) as { message?: unknown };
-  const message = typeof parsed.message === "string" ? parsed.message.trim() : "";
+  // Pegada a la frase que la abre, la lista se lee en el teléfono como un bloque.
+  const message =
+    typeof parsed.message === "string"
+      ? parsed.message.trim().replace(/:[ \t]*\n(?=[ \t]*[•*-][ \t])/g, ":\n\n")
+      : "";
   if (!message) return { ok: false, problem: "empty_message" };
 
   const problem = violation(message, input);
@@ -367,6 +417,12 @@ function explain(problem: string): string {
   }
   if (problem.startsWith("forbidden:")) {
     return "prometiste algo sobre cobertura, pagos o plazos. Nadie evaluó el siniestro todavía.";
+  }
+  if (problem === "pregunta_con_valor") {
+    return "pusiste un valor pegado a una pregunta («¿…?: no»). Si tenés un valor, metelo adentro de la pregunta; si no, preguntá abierto sin proponer nada.";
+  }
+  if (problem === "item_con_verbo") {
+    return "un ítem de la lista tiene verbo propio («Mandanos…», «Decinos…»). El verbo va una sola vez, en la frase que abre la lista; cada ítem nombra lo que falta: «Fotos de los daños».";
   }
   if (problem === "too_long") return "es demasiado largo. Cortálo.";
   if (problem === "too_short") return "es demasiado corto.";

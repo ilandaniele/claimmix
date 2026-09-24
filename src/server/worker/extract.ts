@@ -75,6 +75,8 @@ import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { polizaParaCompletar } from "@/core/case/poliza-encontrada";
 import { mirarPolizas } from "@/core/case/poliza-vigente";
 import { esTitularAjeno } from "@/core/case/titular-ajeno";
+import { respuestaAHeridos, sinHeridosSupuestos } from "@/core/case/heridos-supuestos";
+import { ultimoPedido } from "@/server/confirmations/ultimo-pedido";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
 import { puedeArrancar } from "@/core/case/estados-de-arranque";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
@@ -1142,8 +1144,17 @@ export async function runEmailExtractionWorker(
       ),
     };
 
-    // ── f) Classify severity — two-layer (pattern + AI) ──────────────────────
     const fullText = `${emailSubject}\n\n${emailBody}`;
+    const pedido = await ultimoPedido(caseId, tenantId);
+    const preguntadas = pedido.claves;
+    const contesto = loQueContesto(conversation, pedido.enviado, latestInboundText);
+    extractedClaim = sinHeridosSupuestos(
+      extractedClaim,
+      fullText,
+      respuestaAHeridos(preguntadas, contesto, pedido.propuestos)
+    );
+
+    // ── f) Classify severity — two-layer (pattern + AI) ──────────────────────
     const finalSeverity = classifySeverity(
       fullText,
       extractedClaim.severity,
@@ -1575,6 +1586,7 @@ export async function runEmailExtractionWorker(
           titularAjeno,
           heredadaEn,
           sePuedeRetomar: puedeArrancar(newStatus),
+          preguntadas,
         },
         customerMatches,
         messengerFor(caseRow.channel)
@@ -2130,6 +2142,8 @@ interface LoadedConversation {
    */
   senderName: string | null;
   latestText: string;
+  /** Cada entrante sin lo citado, con su hora: lo que contestó a un pedido. */
+  entrantes: Array<{ texto: string; recibido: string }>;
   claimMessageId: string | null;
   providerMessageId: string | null;
 }
@@ -2180,9 +2194,25 @@ export async function loadInboundConversation(
     senderEmail: latest.from_addr ?? "",
     senderName: latest.profile_name ?? null,
     latestText: stripQuotedReply(latest.body_text ?? ""),
+    entrantes: inbound.map((m) => ({ texto: stripQuotedReply(m.body_text ?? ""), recibido: m.received_at })),
     claimMessageId: latest.id ?? null,
     providerMessageId: latest.provider_message_id ?? null,
   };
+}
+
+/**
+ * Lo que escribió desde que salió el pedido, mensaje por mensaje: un «No» con
+ * un «gracias» o una foto atrás es la respuesta igual, llegue junto o en el
+ * reintento. Sin la conversación o sin la hora del pedido, el último mensaje.
+ */
+function loQueContesto(
+  conversation: LoadedConversation | null,
+  enviado: string | null,
+  ultimo: string
+): string[] {
+  if (!conversation || !enviado) return [ultimo];
+  const desde = Date.parse(enviado);
+  return conversation.entrantes.filter((m) => Date.parse(m.recibido) > desde).map((m) => m.texto);
 }
 
 // ── Lo que se mudó al núcleo ────────────────────────────────────────────────

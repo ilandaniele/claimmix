@@ -127,6 +127,7 @@ permissions:
 
 jobs:
   produccion:
+    name: Producción
     # El proyecto, no sólo el entorno: el deploy del proyecto de QA también
     # llega con un entorno que empieza con `Production` —así se llama SU
     # entorno de producción, en SU proyecto— y sin distinguirlo esto correría
@@ -191,7 +192,7 @@ jobs:
   # almacenamiento propio y un inquilino propio. Sin eso no corre, y el job
   # `alcance` de deploy-checks.yml lo nombra como no verificado.
   qa_secretos:
-    name: QA tiene lo suyo
+    name: Secretos de QA
     runs-on: ubuntu-latest
     # Misma condición que el grupo de `concurrency`, con el sufijo al revés.
     if: >
@@ -302,6 +303,7 @@ jobs:
   # Nada de esto queda implícito: el job `alcance` escribe, al final del run,
   # una fila por chequeo con lo que pasó o el motivo por el que no corrió.
   qa:
+    name: QA
     needs: [qa_secretos]
     if: >
       github.event.deployment_status.state == 'success' &&

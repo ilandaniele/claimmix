@@ -29,22 +29,22 @@ Corren en cada PR, y estos son los que **impiden** mergear:
 
 | | qué mira |
 |---|---|
-| `Type check`, `Lint`, `Build` | que compile y esté prolijo |
-| `Unit tests` | la suite entera, más los flujos |
-| `E2E tests (Playwright)` | la pantalla de verdad, contra su propia base |
-| `Security audit` | `pnpm audit` de alto para arriba, y semgrep |
-| `License audit` | ninguna licencia contagiosa |
-| `CodeQL analysis (JavaScript/TypeScript)` | análisis estático de seguridad |
-| `Buscar secretos` | gitleaks sobre el historial del PR |
+| `Tipos`, `Lint`, `Build` | que compile y esté prolijo |
+| `Tests unitarios` | la suite entera, más los flujos |
+| `Tests E2E` | la pantalla de verdad, contra su propia base |
+| `Vulnerabilidades` | `pnpm audit` de alto para arriba, y semgrep |
+| `Licencias` | ninguna licencia contagiosa |
+| `Análisis CodeQL` | análisis estático de seguridad |
+| `Credenciales` | gitleaks sobre el historial del PR |
 | `Datos personales` | que no se cuele un dato de una persona |
-| `Las invariantes se sostienen` | las reglas de arquitectura y de CI |
-| `Bundle size check` | 300 kB comprimidos de JavaScript |
-| `Tenencia y capa de datos` | que la base separe las aseguradoras |
-| `Pen test (local)` | que ninguna ruta nueva conteste sin credenciales |
+| `Invariantes de arquitectura` | las reglas de arquitectura y de CI |
+| `Peso del bundle` | 300 kB comprimidos de JavaScript |
+| `Aislamiento de tenants` | que la base separe las aseguradoras |
+| `Pen test local` | que ninguna ruta nueva conteste sin credenciales |
 
 Los tres últimos eran nuevos y ya están marcados como requeridos, en `main` y en
-`qa`: el paso 9 de más abajo cuenta cómo se decidió. `Integration tests`,
-`Integration tests (Gmail polling)` y `Cobertura` también corren en cada PR, pero
+`qa`: el paso 9 de más abajo cuenta cómo se decidió. `Tests de integración`,
+`Tests de Gmail` y `Cobertura` también corren en cada PR, pero
 no son requeridos y por eso no están en la tabla: un PR mergea con ellos en rojo.
 
 ### Después del deploy
@@ -59,15 +59,15 @@ llama al mismo workflow con los secretos de QA mapeados uno por uno —nunca
 corren en el runner, tres de los cuales escriben— y con un interruptor por
 chequeo.
 
-| Chequeo           | Producción   | QA                  | Por qué                                                                  |
-| ----------------- | ------------ | ------------------- | ------------------------------------------------------------------------ |
-| Smoke             | sí, `--deep` | sí, liviano         | `--deep` sube un archivo y llama al modelo; no es lo que ese run prueba  |
-| Ensayo            | sí           | sí                  | sube adjuntos de verdad, al balde propio de QA, no al de producción      |
-| Timbre            | sí           | no                  | QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito         |
-| Listas y parejas  | sí           | sí                  | sólo le pregunta al catálogo                                             |
-| Permisos del rol  | sí           | sí                  | sólo le pregunta al catálogo                                             |
-| Pen test          | sí           | no                  | la pared entre inquilinos necesita el inquilino de demo, que en QA no está |
-| Carga (lectura)   | sí           | no                  | 400 casos contra cientos de miles no comparan con el mismo presupuesto; el k6 de `load-tests.yml` sí corre contra QA, aparte, contra su alias público |
+| Chequeo               | Producción   | QA          | Por qué                                                                                                                                               |
+| --------------------- | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Smoke                 | sí, `--deep` | sí, liviano | `--deep` sube un archivo y llama al modelo; no es lo que ese run prueba                                                                               |
+| Ensayo                | sí           | sí          | sube adjuntos de verdad, al balde propio de QA, no al de producción                                                                                   |
+| Canales de entrada    | sí           | no          | QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito                                                                                     |
+| Paridad de documentos | sí           | sí          | sólo le pregunta al catálogo                                                                                                                          |
+| Permisos del rol      | sí           | sí          | sólo le pregunta al catálogo                                                                                                                          |
+| Pen test              | sí           | no          | la pared entre inquilinos necesita el inquilino de demo, que en QA no está                                                                            |
+| Carga de lectura      | sí           | no          | 400 casos contra cientos de miles no comparan con el mismo presupuesto; el k6 de `load-tests.yml` sí corre contra QA, aparte, contra su alias público |
 
 **Lo apagado no queda callado.** El job `alcance` corre al final, aun con todo
 rojo, y escribe en el resumen del run una fila por chequeo: corrió, corrió y
@@ -281,7 +281,7 @@ El 2026-09-17, sin QA corriendo, devolvió `RESOURCE_EXHAUSTED` tres veces.
 
 ### 5. Dónde mide k6 — HECHO contra vistas previas
 
-El job `k6` de `load-tests.yml` mide de verdad. La corrida 35466095444, contra
+El job *Carga con k6* de `load-tests.yml` mide de verdad. La corrida 35466095444, contra
 una vista previa de `claimmix`, dio `smoke: p95 530 ms · 0% fallidos · 67
 pedidos`. Llegar ahí pidió tres cosas, y ninguna de las tres se ve desde el
 workflow.
@@ -427,7 +427,7 @@ to be up to date» y resolución de conversaciones.
 
 ### 9. Marcar como requeridos los tres checks nuevos — HECHO
 
-`Bundle size check`, `Tenencia y capa de datos` y `Pen test (local)` ya son
+`Peso del bundle`, `Aislamiento de tenants` y `Pen test local` ya son
 requeridos en `main` y en `qa`. La regla pasó de 11 checks a 14.
 
 La evidencia con la que se decidió, sobre las últimas doce corridas de `ci.yml`:
@@ -440,7 +440,7 @@ Para rehacer la cuenta:
 ```bash
 for RID in $(gh run list --workflow=ci.yml --limit 12 --json databaseId --jq '.[].databaseId'); do
   gh run view "$RID" --json jobs --jq '.jobs[] | "\(.name) \(.conclusion)"'
-done | grep -E '^(Bundle size check|Tenencia y capa de datos|Pen test)' | sort | uniq -c
+done | grep -E '^(Peso del bundle|Aislamiento de tenants|Pen test local)' | sort | uniq -c
 ```
 
 
@@ -510,8 +510,8 @@ Ese NOMBRE del entorno sí distingue, entonces: el guard de producción es
 con el `endsWith` sin negar. Van escritos cuatro veces —una en el grupo de
 `concurrency`, que además tiene su propia cola para QA, y una en el `if` de cada
 job (`produccion`, `qa_secretos`, `qa`)—, porque GitHub no deja compartir una
-condición entre jobs: `post-deploy.yml:115-120`, `:152-153`, `:199-200` y
-`:284-285`.
+condición entre jobs: `post-deploy.yml:115-120`, `:153-154`, `:200-201` y
+`:310-311`.
 
 La invariante 15 de `check-architecture.mjs` exigía mirar `environment_url`: era
 una premisa falsa, y estaba verde sobre un guard roto —las tres condiciones

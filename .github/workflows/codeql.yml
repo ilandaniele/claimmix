@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   analyze:
-    name: CodeQL analysis (JavaScript/TypeScript)
+    name: Análisis CodeQL
     runs-on: ubuntu-latest
     permissions:
       # Required for CodeQL to upload results

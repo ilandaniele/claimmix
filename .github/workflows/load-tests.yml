@@ -58,7 +58,7 @@ concurrency:
 
 jobs:
   carga:
-    name: k6
+    name: Carga con k6
     runs-on: ubuntu-latest
     timeout-minutes: 180
     # El evento `deployment_status` llega también para estados intermedios y

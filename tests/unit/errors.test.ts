@@ -50,6 +50,11 @@ describe("ERROR_STATUS", () => {
     expect(ERROR_STATUS.FORBIDDEN_ROLE).toBe(403);
   });
 
+  it("maps PLAN_REQUERIDO to 403, con su mensaje", () => {
+    expect(ERROR_STATUS.PLAN_REQUERIDO).toBe(403);
+    expect(new AppError("PLAN_REQUERIDO").message).toBe("Esta función es del Plan Pro.");
+  });
+
   it("maps NOT_FOUND to 404", () => {
     expect(ERROR_STATUS.NOT_FOUND).toBe(404);
   });
@@ -86,6 +91,7 @@ describe("ErrorCode enum", () => {
     expect(codes).toContain("INVALID_CREDENTIALS");
     expect(codes).toContain("NOT_FOUND");
     expect(codes).toContain("FORBIDDEN_ROLE");
+    expect(codes).toContain("PLAN_REQUERIDO");
     expect(codes).toContain("VALIDATION_FAILED");
     expect(codes).toContain("RATE_LIMITED");
     expect(codes).toContain("AI_BUDGET_EXCEEDED");

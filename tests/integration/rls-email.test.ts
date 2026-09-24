@@ -102,7 +102,7 @@ vi.mock("@/lib/rate-limit/index", () => ({
 
 // Use "admin" role so the role guard on /api/customers passes.
 // The RLS isolation (empty result) is what we are testing here, not the role guard.
-const TENANT_A_USER = { id: "user-a", tenant_id: "tenant-a", role: "admin" as const };
+const TENANT_A_USER = { id: "user-a", tenant_id: "tenant-a", role: "admin" as const, plan: "piloto" };
 const TENANT_B_CASE_ID = "bbbbbbbb-0000-0000-0000-000000000001";
 
 /**

@@ -3577,6 +3577,44 @@ normalizó («18:00» de «a las 6») también, igual que un valor que dio sin q
 lo pidiéramos y un número suelto de confianza media. «Fue esta tarde» no cuenta
 como la franja sola, así que la hora se vuelve a pedir.
 
+### 🤝 Cuando hay heridos, la derivación empieza por el cuidado (2026-09-24)
+
+En el ensayo `incendio-grave` (23/09), a quien contó que su señora estaba
+internada con quemaduras se le contestó «Recibimos tu denuncia. Ya la derivamos
+a un especialista…»: correcto, sin pedir nada, y de trámite.
+
+- **La señal.** `hayHeridos` (`src/core/case/heridos-supuestos.ts`) lee lo ya
+  extraído: `injury_severity` o `hay_heridos` en «sí». Alcanza el «Sí» a la
+  pregunta abierta, que deriva el caso y deja `injury_severity` en null. Sin
+  llamadas nuevas al modelo ni consultas.
+- **Quién la lleva.** Sólo la derivación por gravedad (rama B), con
+  `heridos: true` en los datos del mensaje. La del titular ajeno y la que
+  decide el agente no la llevan, y la póliza vencida sin gravedad tampoco. Un
+  caso grave con heridos sí, aunque la póliza haya vencido. Viaja sólo el
+  booleano: ningún detalle médico, ni en el mensaje ni en la auditoría.
+- **Los pisos.** WhatsApp antepone `CUIDADO` («Lamentamos mucho lo que están
+  pasando.») a `ESCALATION_TEXT`; el mail lo pone como primer párrafo. Sin
+  heridos, los dos salen byte por byte como antes.
+- **El redactor.** Con `heridos` —el booleano de `message.data`, no el texto
+  del piso, que en WhatsApp trae el nombre que escribió la persona—, el brief
+  le pide abrir con una frase breve de cuidado, sin repetir lo que contó de las
+  heridas ni diagnosticar ni prometer. La guarda `dropped_care` rechaza el texto que la
+  saca, como `dropped_conflict` con los valores del conflicto, y
+  `care_names_health` el que nombra heridas, internación o salud
+  (`hablaDeLaSalud`); el resto de las guardas de la derivación siguen igual.
+- **Una sola vez.** `CUIDADO` y los predicados de la guarda (`diceCuidado`,
+  `pideDatos`, `hablaDeLaSalud`) viven en `src/core/mensajes/derivacion.ts`.
+  Los pisos usan sólo la frase.
+- **El ensayo.** `incendio-grave` y `mail-grave` corren `cuidado`,
+  `sin-pedido` con `pideAlgo` —más ancho que la guarda, para que muerda lo
+  que ella deja pasar— y no mencionan «internad», «quemadur» ni «recuper». Ver
+  `docs/TESTING.md`.
+
+**Lo que queda.** La frase existe sólo en castellano rioplatense: el mensaje al
+asegurado no tiene idioma propio (`src/lib/i18n` es la interfaz). La rama B lee
+la gravedad que dio la extracción, no `finalSeverity`. Una derivación en una
+vuelta cuya extracción ya no nombra las heridas sale sin la frase.
+
 ### 🙋 Waiting on you (not code)
 
 - **Qué hacer con la respuesta a un caso ya derivado.** Desde que el titular

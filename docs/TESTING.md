@@ -88,6 +88,15 @@ Además de lo que espera cada vuelta, en todas se corre la comprobación
 respuesta es un valor de la base dicho tal cual. La traducción la cubren los
 tests `core/valor-legible` y `orchestrate-post-extraction`.
 
+Los dos incendios con heridos (`incendio-grave` y `mail-grave`) corren además
+`cuidado` —la respuesta trae una frase de cuidado, `diceCuidado` de
+`src/core/mensajes/derivacion.ts`—, `sin-pedido` —ni claves preguntadas ni un
+pedido en el texto, con `pideAlgo` (`scripts/lib/pide-algo.mjs`), más ancho que
+la guarda del redactor para que muerda lo que ella deja pasar, sin contar «no te
+pedimos» ni el ofrecimiento de responder con más información— y `no-menciona`
+con «internad», «quemadur», «recuper», «mejoría» y «esté bien»: la frase no
+repite ni pronostica lo que contó de la salud.
+
 También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
 hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún
 turno de la persona habló de heridos. Si no dijo nada, se le pregunta abierto.

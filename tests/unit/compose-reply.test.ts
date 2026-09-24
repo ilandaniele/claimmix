@@ -23,6 +23,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { composeReply } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
+import { CUIDADO } from "@/core/mensajes/derivacion";
 
 const mockCall = callGemini as unknown as ReturnType<typeof vi.fn>;
 
@@ -755,5 +756,99 @@ describe("composeReply — lo que acaba de escribir no vuelve como «¿…, corr
     expect(mockCall.mock.calls[0][0] as string).toContain(
       "ni le preguntes si es correcto algo que escribió ahí"
     );
+  });
+});
+
+/*
+ * incendio-grave, 23/09: la derivación a quien tenía a su señora internada no
+ * decía nada de eso. Con `heridos`, el redactor abre con la frase de cuidado y
+ * no puede sacarla, como no puede sacar los valores de un conflicto.
+ */
+describe("composeReply — la derivación con heridos", () => {
+  const CON_CUIDADO = `${CUIDADO} Recibimos tu denuncia y la derivamos a un especialista.`;
+  const BRIEF = "frase breve de cuidado";
+  const SIN_FRASE = "Hola, Laura. Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.";
+  const CON_FRASE = `Hola, Laura. ${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.`;
+
+  function responde(...mensajes: string[]) {
+    for (const message of mensajes) {
+      mockCall.mockResolvedValueOnce({
+        text: JSON.stringify({ message }),
+        usage: { promptTokens: 0, completionTokens: 0 },
+      });
+    }
+  }
+
+  it("dos intentos sin la frase devuelven el piso", async () => {
+    responde(SIN_FRASE, SIN_FRASE);
+
+    const out = await composeReply(base({ intent: "escalation", heridos: true, fallback: CON_CUIDADO }));
+
+    expect(out).toBe(CON_CUIDADO);
+    expect(mockCall.mock.calls[0][0] as string).toContain(BRIEF);
+    expect(mockCall.mock.calls[1][0] as string).toContain("no abriste con la frase de cuidado");
+  });
+
+  it("el segundo intento con la frase sale", async () => {
+    responde(SIN_FRASE, CON_FRASE);
+
+    const out = await composeReply(base({ intent: "escalation", heridos: true, fallback: CON_CUIDADO }));
+
+    expect(out).toBe(CON_FRASE);
+    expect(mockCall.mock.calls[1][0] as string).toContain(`decí «${CUIDADO}»`);
+  });
+
+  it("sin heridos, ni la consigna ni la guarda", async () => {
+    responde(SIN_FRASE);
+
+    const out = await composeReply(base({ intent: "escalation" }));
+
+    expect(out).toBe(SIN_FRASE);
+    expect(mockCall.mock.calls[0][0] as string).not.toContain(BRIEF);
+    expect(mockCall.mock.calls[0][0] as string).not.toContain(CUIDADO);
+  });
+
+  it.each(["ask", "conflict"] as const)("%s con heridos no la exige", async (intent) => {
+    const mensaje = "Para seguir con tu denuncia contanos un poco más de lo que pasó, por favor.";
+    responde(mensaje);
+
+    const out = await composeReply(base({ intent, heridos: true }));
+
+    expect(out).toBe(mensaje);
+    expect(mockCall.mock.calls[0][0] as string).not.toContain(BRIEF);
+  });
+
+  // El piso de WhatsApp del titular ajeno trae el nombre que escribió la
+  // persona: la señal no puede salir de ahí.
+  it("un «Lamentamos» en el piso no la prende sin heridos", async () => {
+    responde(SIN_FRASE);
+
+    const out = await composeReply(
+      base({
+        intent: "escalation",
+        fallback: `Recibimos tu denuncia. La póliza figura a nombre de R*** P*** y nos escribió Lamentamos Paz.`,
+      })
+    );
+
+    expect(out).toBe(SIN_FRASE);
+    expect(mockCall.mock.calls[0][0] as string).not.toContain(BRIEF);
+  });
+
+  it.each([
+    ["le pone género", `${CUIDADO} Él se va a comunicar con vos a la brevedad.`, "le pusiste género"],
+    ["pide algo", `${CUIDADO} Derivamos tu denuncia; mandanos las fotos.`, "pediste datos"],
+    ["promete un plazo", `${CUIDADO} Un especialista te llama en 24 horas.`, "prometiste algo"],
+    [
+      "repite lo que contó de la salud",
+      `Hola, Laura. ${CUIDADO} Esperamos que tu señora se recupere pronto de las quemaduras. Ya derivamos tu denuncia a un especialista.`,
+      "nombraste las heridas",
+    ],
+  ])("con la frase, sigue rechazando lo que %s", async (_, mensaje, motivo) => {
+    responde(mensaje, mensaje);
+
+    const out = await composeReply(base({ intent: "escalation", heridos: true, fallback: CON_CUIDADO }));
+
+    expect(out).toBe(CON_CUIDADO);
+    expect(mockCall.mock.calls[1][0] as string).toContain(motivo);
   });
 });

@@ -64,6 +64,7 @@ import {
   satisfyContactDocsWeAlreadyHave,
 } from "@/server/cases/documents";
 import { separarPorRespaldo } from "@/core/case/respaldado-por-busqueda";
+import { hayHeridos } from "@/core/case/heridos-supuestos";
 import {
   canonicalFieldKey,
   isDocument,
@@ -288,6 +289,7 @@ export async function orchestratePostExtraction(
         (f) => canonicalFieldKey(f.field_key) === "claim_type"
       )?.field_value ?? null,
       summary: extractedClaim.summary ?? null,
+      heridos: isHighSeverity && hayHeridos(extractedClaim),
       reason: isHighSeverity
         ? `severidad ${severity}`
         : `póliza sin vigencia${extractedOutput.polizas?.vencioEl ? ` desde ${extractedOutput.polizas.vencioEl}` : ""}`,
@@ -1539,6 +1541,13 @@ async function escalate(opts: {
   summary?: string | null;
   reason: string;
   /**
+   * Alguien se lastimó: la derivación abre con una frase de cuidado. Sólo la
+   * pasa la derivación por gravedad, nunca la del titular ni la de póliza sin
+   * gravedad. Es sólo el booleano: ni el mensaje, ni el redactor, ni la
+   * auditoría necesitan el detalle médico.
+   */
+  heridos?: boolean;
+  /**
    * Ya le mandamos un mensaje a esta persona en esta vuelta.
    *
    * Suprime SÓLO el mensaje al asegurado. El estado, el registro de
@@ -1597,6 +1606,7 @@ async function escalate(opts: {
         severity,
         claimantName: opts.claimantName ?? null,
         titularIniciales: opts.titularIniciales ?? null,
+        ...(opts.heridos ? { heridos: true } : {}),
       },
       inReplyToMessageId: opts.inReplyToMessageId,
     });

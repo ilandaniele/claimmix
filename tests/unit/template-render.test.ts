@@ -14,6 +14,7 @@ import {
   maskFullName,
   maskPolicyNumber,
 } from "../../src/server/email/render";
+import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
 
 // ── PII masking unit tests ────────────────────────────────────────────────────
 
@@ -375,6 +376,73 @@ describe("renderTemplate — specialist_escalation", () => {
     const result = renderTemplate("specialist_escalation", { caseId: "esc-4" });
     expect(typeof result.text).toBe("string");
     expect(result.text.length).toBeGreaterThan(50);
+  });
+});
+
+describe("specialist_escalation — con heridos", () => {
+  const veces = (s: string) => s.split(CUIDADO).length - 1;
+
+  it("el cuerpo abre con la frase de cuidado y sigue siendo urgente", () => {
+    const r = renderTemplate("specialist_escalation", {
+      caseId: "esc-heridos",
+      severity: "critical",
+      heridos: true,
+    });
+    expect(r.cuerpo.startsWith(CUIDADO)).toBe(true);
+    expect(r.cuerpo).toContain("urgente");
+    expect(veces(r.text)).toBe(1);
+    expect(veces(r.html)).toBe(1);
+  });
+
+  it("sin heridos queda byte a byte como estaba", () => {
+    const base = { caseId: "esc-sin", severity: "critical" };
+    expect(renderTemplate("specialist_escalation", base)).toEqual(
+      renderTemplate("specialist_escalation", { ...base, heridos: false })
+    );
+  });
+
+  it("un «true» como texto no la activa", () => {
+    const r = renderTemplate("specialist_escalation", { caseId: "esc-txt", heridos: "true" });
+    expect(veces(r.text)).toBe(0);
+  });
+
+  // El redactor exige la frase cuando el piso la dice: un «lamentamos» en otro
+  // párrafo la exigiría en toda derivación por mail.
+  it.each(["critical", "high", undefined])("sin heridos (%s), ningún párrafo dice cuidado", (severity) => {
+    const r = renderTemplate("specialist_escalation", { caseId: "esc-sin", severity });
+    expect(diceCuidado(r.cuerpo)).toBe(false);
+    expect(diceCuidado(r.text)).toBe(false);
+  });
+
+  it.each(["critical", "high", undefined])("con heridos (%s), el piso pasa sus propias guardas", (severity) => {
+    const r = renderTemplate("specialist_escalation", { caseId: "esc-g", severity, heridos: true });
+    expect(diceCuidado(r.cuerpo)).toBe(true);
+    expect(hablaDeLaSalud(r.cuerpo)).toBe(false);
+    expect(pideDatos(r.cuerpo)).toBe(false);
+  });
+
+  it("con el cuerpo redactado no se antepone otra vez", () => {
+    const cuerpo = `Hola, Laura. ${CUIDADO} Un especialista se va a comunicar con vos.`;
+    const r = renderTemplate("specialist_escalation", {
+      caseId: "esc-red",
+      severity: "critical",
+      heridos: true,
+      cuerpo,
+    });
+    expect(veces(r.text)).toBe(1);
+    expect(veces(r.html)).toBe(1);
+  });
+
+  it("la diferencia con el titular sigue fuera del cuerpo", () => {
+    const r = renderTemplate("specialist_escalation", {
+      caseId: "esc-dif",
+      severity: "high",
+      heridos: true,
+      titularIniciales: "R*** P***",
+      claimantName: "Lucía Paz",
+    });
+    expect(r.cuerpo).not.toContain("R*** P***");
+    expect(r.text).toContain("R*** P***");
   });
 });
 

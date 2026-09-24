@@ -13,6 +13,11 @@
 
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// La query de la bandeja; cambiarla y volver a renderizar es navegar sin desmontar.
+const nav = vi.hoisted(() => ({ busqueda: new URLSearchParams() }));
+vi.mock("next/navigation", () => ({ useSearchParams: () => nav.busqueda }));
+
 import { useCasesRealtime } from "../../../src/app/(app)/bandeja/components/useCasesRealtime";
 import type { CaseRow } from "../../../src/server/cases/list";
 
@@ -39,6 +44,7 @@ let fetchSpy: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.useFakeTimers();
+  nav.busqueda = new URLSearchParams();
   filas = [caso("a")];
   fetchSpy = vi.fn(async () => ({
     ok: true,
@@ -100,6 +106,70 @@ describe("useCasesRealtime — cada cuánto pregunta", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(antes);
     await vi.advanceTimersByTimeAsync(1);
     expect(fetchSpy).toHaveBeenCalledTimes(antes + 1);
+  });
+
+  it("cambiar de filtro sin desmontar no hace pasar la lista nueva por altas", async () => {
+    // Bandeja → «No relevantes» es la misma ruta con otra query: el hook sigue vivo.
+    const onInsert = vi.fn();
+    const { rerender } = renderHook(() => useCasesRealtime({ onInsert, onUpdate: vi.fn() }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    nav.busqueda = new URLSearchParams("is_claim=false");
+    filas = [caso("x"), caso("y")];
+    rerender();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchSpy.mock.calls.at(-1)?.[0]).toContain("is_claim=false");
+    expect(onInsert).not.toHaveBeenCalled();
+
+    // Un alta de verdad en la vista nueva sí avisa.
+    filas = [caso("z"), caso("x"), caso("y")];
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(onInsert).toHaveBeenCalledTimes(1);
+    expect(onInsert.mock.calls[0][0].id).toBe("z");
+  });
+
+  it("con la bandeja quieta, cambiar de filtro siembra en el acto y no se traga lo que entra después", async () => {
+    const onInsert = vi.fn();
+    const { rerender } = renderHook(() => useCasesRealtime({ onInsert, onUpdate: vi.fn() }));
+    // 5 + 10 + 20 sin novedades: el próximo turno queda a treinta segundos.
+    await vi.advanceTimersByTimeAsync(35_000);
+
+    nav.busqueda = new URLSearchParams("is_claim=false");
+    filas = [caso("x")];
+    const antes = fetchSpy.mock.calls.length;
+    rerender();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(antes + 1);
+    expect(fetchSpy.mock.calls.at(-1)?.[0]).toContain("is_claim=false");
+
+    // Entra un no relevante un segundo después de pintar la lista.
+    filas = [caso("z"), caso("x")];
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(onInsert).toHaveBeenCalledTimes(1);
+    expect(onInsert.mock.calls[0][0].id).toBe("z");
+  });
+
+  it("una respuesta que salió con el filtro anterior no suma altas a la lista nueva", async () => {
+    const onInsert = vi.fn();
+    const { rerender } = renderHook(() => useCasesRealtime({ onInsert, onUpdate: vi.fn() }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // El sondeo de la Bandeja sale y queda esperando la respuesta.
+    let soltar: (r: unknown) => void = () => {};
+    fetchSpy.mockImplementationOnce(() => new Promise((r) => (soltar = r)));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchSpy.mock.calls.at(-1)?.[0]).not.toContain("is_claim");
+
+    // Se navega a «No relevantes» mientras tanto.
+    nav.busqueda = new URLSearchParams("is_claim=false");
+    filas = [caso("x")];
+    rerender();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Vuelve la respuesta vieja con un alta real de la Bandeja.
+    soltar({ ok: true, json: async () => ({ data: [caso("b"), caso("a")] }) });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(onInsert).not.toHaveBeenCalled();
   });
 
   it("al desmontar no queda ningún temporizador pidiendo", async () => {

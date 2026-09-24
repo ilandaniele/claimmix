@@ -19,10 +19,10 @@
  * ── Por qué el modo oscuro casi no aparece acá ──────────────────────────────
  *
  * Porque `globals.css` lo resuelve pisando las utilidades de Tailwind
- * (`bg-white`, `border-slate-200`, `shadow-sm`) con `!important`. Usando esas
- * mismas utilidades, el modo oscuro sale gratis. Lo que cambia el aspecto —el
- * radio, el aire, el degradado del fondo— es justamente lo que no necesita
- * variante oscura.
+ * (`bg-white`, `border-slate-200`, `shadow-sm`, `shadow-md`) con `!important`.
+ * Usando esas mismas utilidades, el modo oscuro sale gratis. Lo que cambia el
+ * aspecto —el radio, el aire, el degradado del fondo— es justamente lo que no
+ * necesita variante oscura.
  */
 
 import type { ReactNode } from "react";
@@ -30,8 +30,8 @@ import type { ReactNode } from "react";
 /**
  * La tarjeta de sección: el bloque que se repite en todo el tablero.
  *
- * Radio grande y sombra apenas perceptible. La sombra hace el trabajo que antes
- * hacía el borde: separar del fondo sin dibujar una línea.
+ * Radio grande. En claro la separa del fondo lavanda la sombra; en oscuro,
+ * donde una sombra casi no se ve sobre un fondo ya oscuro, la separa el borde.
  */
 export function Card({
   children,
@@ -42,7 +42,7 @@ export function Card({
 }) {
   return (
     <section
-      className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}
+      className={`rounded-2xl border border-slate-200 bg-white shadow-md ${className}`}
     >
       {children}
     </section>

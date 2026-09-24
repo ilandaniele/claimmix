@@ -107,7 +107,7 @@ export default async function CarteraPage({
             <tr>
               <th className="px-4 py-2.5 font-medium">{t("cartera.col.cliente")}</th>
               <th className="px-4 py-2.5 font-medium">{t("cartera.col.plan")}</th>
-              <th className="px-4 py-2.5 font-medium">{t("table.col.status")}</th>
+              <th className="px-4 py-2.5 font-medium">{t("cartera.col.estado")}</th>
               <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.denuncias")}</th>
               <th className="px-4 py-2.5 text-right font-medium">{t("cartera.aFacturar")}</th>
               <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.costoIa")}</th>

@@ -260,6 +260,8 @@ describe("analyzeEmailClaimGaps — pending confirmation", () => {
     expect(result.fieldsNeedingConfirmation).toHaveLength(1);
     expect(result.fieldsNeedingConfirmation[0].fieldName).toBe("full_name");
     expect(result.fieldsNeedingConfirmation[0].suggestedValue).toBe("Juan Pérez");
+    // La rama C la usa cuando la extracción de esta vuelta no trae el campo.
+    expect(result.fieldsNeedingConfirmation[0].confidence).toBe(0.72);
   });
 
   it("returns confirmacion_pendiente for medium-confidence extracted field (no DB row yet)", async () => {
@@ -282,6 +284,7 @@ describe("analyzeEmailClaimGaps — pending confirmation", () => {
     );
     expect(nameConfirmation).toBeDefined();
     expect(nameConfirmation?.reason).toBe("medium_confidence");
+    expect(nameConfirmation?.confidence).toBe(0.72);
   });
 
   it("lists multiple pending confirmation fields", async () => {

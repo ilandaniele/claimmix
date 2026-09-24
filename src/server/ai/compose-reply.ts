@@ -22,6 +22,7 @@ import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
+import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { logger } from "@/lib/observability/logger";
 
@@ -245,7 +246,7 @@ ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de 
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName)}. Podés llamarla por su nombre de pila.` : ""}
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}
-${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto):\n"""${sinCentinelas(sinNumerosEnteros(input.lastMessage)).slice(0, 600)}"""` : ""}
+${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${sinCentinelas(sinNumerosEnteros(input.lastMessage)).slice(0, 600)}"""` : ""}
 
 ${channelBrief}
 
@@ -323,6 +324,19 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     const itemConVerbo =
       /^[ \t]*(?:[•*\-]|\d+[.)])[ \t]+(?:[^\n]*?(?:—|:)[ \t]*)?(?:decinos|mandanos|pasanos|dejanos|contanos|envianos)\b/im;
     if (itemConVerbo.test(trimmed)) return "item_con_verbo";
+  }
+
+  // Lee el último mensaje para el tono y de ahí sacó una póliza que nadie le
+  // pidió confirmar (goteo, 23/09). El conflicto sí la nombra: es uno de los valores.
+  if (
+    input.intent !== "conflict" &&
+    confirmaLoQueEscribio(
+      trimmed,
+      input.lastMessage && sinNumerosEnteros(input.lastMessage),
+      Object.values(input.knownValues ?? {})
+    )
+  ) {
+    return "confirma_lo_que_escribio";
   }
 
   // Lo mismo para el conflicto, donde más se nota: un mensaje que dice que
@@ -423,6 +437,9 @@ function explain(problem: string): string {
   }
   if (problem === "item_con_verbo") {
     return "un ítem de la lista tiene verbo propio («Mandanos…», «Decinos…»). El verbo va una sola vez, en la frase que abre la lista; cada ítem nombra lo que falta: «Fotos de los daños».";
+  }
+  if (problem === "confirma_lo_que_escribio") {
+    return "le preguntaste si es correcto algo que la persona acaba de escribir. Eso ya lo tenemos: no se lo devuelvas. Confirmá sólo lo que dice «ya entendimos».";
   }
   if (problem === "too_long") return "es demasiado largo. Cortálo.";
   if (problem === "too_short") return "es demasiado corto.";

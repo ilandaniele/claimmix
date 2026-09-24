@@ -73,6 +73,18 @@ describe("comparar-ensayos", () => {
     expect(salida).toContain("confirmacion_pendiente");
   });
 
+  it("el eco de lo recién dicho es rojo aunque el modelo lo redacte distinto cada vez", () => {
+    // `confirma-lo-dicho` lleva en el motivo la frase que devolvió: la clave
+    // tiene que ser la comprobación, no esa frase.
+    const { salida, codigo } = comparar(
+      [dif("confirma-lo-dicho", "confirmó lo que acaba de decir: «¿fue a la tarde, correcto?»")],
+      [dif("confirma-lo-dicho", "confirmó lo que acaba de decir: «entendimos que fue a la tarde. ¿correcto?»")]
+    );
+
+    expect(codigo).toBe(1);
+    expect(salida).toContain("en LAS DOS corridas");
+  });
+
   it("dos comprobaciones distintas siguen siendo variación", () => {
     // El control. Si la clave fuera el escenario y el turno a secas, esto
     // saldría rojo y el reintento no separaría nada.

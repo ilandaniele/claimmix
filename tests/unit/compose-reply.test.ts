@@ -689,3 +689,71 @@ describe("composeReply — quien escribe no es el titular", () => {
     expect(await composeReply(ajeno({ titularAjeno: false }))).not.toBe(FALLBACK);
   });
 });
+
+/*
+ * El ensayo `goteo` del 23/09: a «La póliza es POL-3311-B», pedida en la vuelta
+ * anterior, se le contestó «Entendemos que tu póliza es POL-3311-B, ¿es
+ * correcto?». La póliza ya la tenía el agente y no estaba en la lista: el
+ * redactor la sacó del último mensaje.
+ */
+describe("composeReply — lo que acaba de escribir no vuelve como «¿…, correcto?»", () => {
+  const PIDE = "Para seguir necesitamos las fotos de los daños.";
+  const escribio = (over: Partial<Parameters<typeof composeReply>[0]> = {}) =>
+    base({
+      fields: ["fotos_danos"],
+      lastMessage: "Soy Roberto Paz, DNI 25.888.101. La póliza es POL-3311-B",
+      claimantName: "Roberto Paz",
+      ...over,
+    });
+
+  it.each(
+    [
+      `Entendemos que tu póliza es POL-3311-B, ¿es correcto? ${PIDE}`,
+      `Entendemos que el número es POL-3311-B. ¿Correcto? ${PIDE}`,
+      `¿Me confirmás que sos Roberto Paz? ${PIDE}`,
+    ].flatMap((m) => (["whatsapp", "email"] as const).map((canal) => [m, canal] as const))
+  )("rechaza «%s» por %s y el reintento dice por qué", async (mensaje, canal) => {
+    replies(mensaje);
+
+    expect(await composeReply(escribio({ channel: canal }))).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0]).toContain("algo que la persona acaba de escribir");
+  });
+
+  it.each([
+    // Lo eligió confirmar el orquestador.
+    [`Entendemos que tu póliza es POL-3311-B, ¿es correcto? ${PIDE}`, { policy_number: "POL-3311-B" }],
+    [`Entendemos que tu DNI es ****8101, ¿es correcto? ${PIDE}`, { dni: "25888101" }],
+    // El nombre de pila en el saludo, y un pedido sin confirmar nada.
+    [`¡Gracias, Roberto! ${PIDE}`, {}],
+  ] as Array<[string, Record<string, string>]>)("toma «%s»", async (mensaje, knownValues) => {
+    replies(mensaje);
+
+    const fields = ["fotos_danos", ...Object.keys(knownValues)];
+    expect(await composeReply(escribio({ fields, knownValues }))).not.toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("el conflicto nombra lo que escribió", async () => {
+    replies("Nos dijiste Pedro García y tenemos Juan Pérez. ¿Cuál es el correcto?");
+
+    const out = await composeReply(
+      base({
+        intent: "conflict",
+        lastMessage: "Soy Pedro García",
+        conflicts: [{ fieldKey: "full_name", proposed: "Pedro García", stored: "Juan Pérez" }],
+      })
+    );
+
+    expect(out).not.toBe(FALLBACK);
+  });
+
+  it("el brief lo dice junto al último mensaje", async () => {
+    replies(PIDE);
+
+    await composeReply(escribio());
+
+    expect(mockCall.mock.calls[0][0] as string).toContain(
+      "ni le preguntes si es correcto algo que escribió ahí"
+    );
+  });
+});

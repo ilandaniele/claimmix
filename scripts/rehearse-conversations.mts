@@ -38,7 +38,9 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as dotenv from "dotenv";
 import { readable } from "@/core/email/texto-legible";
+import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
+import { confirmaLoDicho, formaDePedirLaHora } from "./lib/ensayo-confirmaciones.mjs";
 
 const envPath = path.resolve(process.cwd(), ".env.local");
 dotenv.config({ path: fs.existsSync(envPath) ? envPath : undefined });
@@ -203,6 +205,14 @@ interface Scenario {
    * leaves an invented customer sitting in the real Clientes screen.
    */
   policy?: { numero: string; dni: string; nombre: string; vencida?: boolean };
+  /**
+   * Que no le devuelva como «¿…, correcto?» lo que la persona acaba de
+   * escribir, y que pida la hora siempre de la misma forma (goteo, 23/09).
+   *
+   * Por escenario y no para todos: mira la prosa del modelo, y en un escenario
+   * que no fue pensado para esto sólo agregaría ruido.
+   */
+  sinEco?: boolean;
   turns: Turn[];
   /** Checked once, after the last turn. */
   finally?: {
@@ -283,6 +293,7 @@ const SCENARIOS: Scenario[] = [
   {
     id: "goteo",
     what: "Los datos llegan de a uno; no se vuelve a pedir lo ya contestado",
+    sinEco: true,
     turns: [
       { say: "Buenas, tuve un accidente con el auto", expect: { replies: 1 } },
       /*
@@ -922,6 +933,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
   // Un «No» suelto a «¿Hubo personas lastimadas?» también es hablar de heridos.
   let pedidoAnterior: string[] = [];
   let contestoHeridos = false;
+  const formasDeLaHora = new Set<string>();
 
   const seeded = scenario.policy ? await seedPolicy(scenario.policy) : null;
   try {
@@ -999,6 +1011,38 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           "propone-sin-heridos"
         );
       }
+      if (scenario.sinEco) {
+        // Los valores de lo que se le pidió antes de este turno: lo que no se
+        // pidió el orquestador lo confirma a propósito. También lo extraído: la
+        // póliza que encontró el agente no deja fila de confirmación, y así se
+        // escapó «Entendemos que tu póliza es POL-3311-B, ¿es correcto?».
+        const pedidos = new Set(pedidoAnterior.map(canonicalFieldKey));
+        const [filas, extraidos] = await Promise.all([
+          db
+            .select({
+              campo: claimFieldConfirmations.field_name,
+              valor: claimFieldConfirmations.suggested_value,
+            })
+            .from(claimFieldConfirmations)
+            .where(eq(claimFieldConfirmations.case_id, active)),
+          db
+            .select({ campo: extractedFields.field_key, valor: extractedFields.field_value })
+            .from(extractedFields)
+            .where(eq(extractedFields.case_id, active)),
+        ]);
+        const eco = confirmaLoDicho(
+          all,
+          `${turn.subject ?? ""}\n${turn.say}`,
+          [...filas, ...extraidos]
+            .filter((f) => pedidos.has(canonicalFieldKey(f.campo)))
+            .map((f) => f.valor ?? "")
+        );
+        if (eco) {
+          note(scenario.id, i + 1, `confirmó lo que acaba de decir: «${eco}»`, "confirma-lo-dicho");
+        }
+        for (const forma of formaDePedirLaHora(all)) formasDeLaHora.add(forma);
+      }
+
       const pidio = said.filter((r) => r.askedKeys.length > 0);
       if (pidio.length > 0) pedidoAnterior = pidio[pidio.length - 1].askedKeys;
 
@@ -1128,6 +1172,17 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           }
         }
       }
+    }
+
+    // «¿Fue a la tarde, correcto?» y en la vuelta siguiente «Más o menos a qué
+    // hora fue.»: la misma pregunta cambiada sin que la persona contestara.
+    if (formasDeLaHora.size > 1) {
+      note(
+        scenario.id,
+        0,
+        `pidió la hora de ${formasDeLaHora.size} formas: ${[...formasDeLaHora].join(", ")}`,
+        "hora-en-una-forma"
+      );
     }
 
     if (caseId && scenario.finally) {

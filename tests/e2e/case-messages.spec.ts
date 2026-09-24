@@ -1,23 +1,24 @@
 /**
- * E2E tests for the email messages thread panel in /casos/[id].
+ * E2E tests for the case conversation panel in /casos/[id]: lo que escribió la
+ * persona y lo que le contestó el agente, para todos los canales.
  *
- * Scenario 1 (auth-gated): Case detail shows messages thread for a Gmail case.
+ * Scenario 1 (auth-gated): Case detail shows the conversation for a Gmail case.
  *   - Navigate to a case detail page for a case with channel='email' and at least 1 claim_message.
- *   - Expect a "Mensajes recibidos" heading to be visible.
- *   - Expect at least one message card with from_addr and subject visible.
+ *   - Expect a "Conversación" heading to be visible.
+ *   - Expect at least one message card, marked inbound or outbound.
  *
- * Scenario 2 (auth-gated): Case detail does NOT show messages thread when no messages exist.
- *   - Navigate to a case detail page with no claim_messages rows.
- *   - Expect "Mensajes recibidos" heading to NOT be present.
+ * Scenario 2 (auth-gated): Case detail does NOT show the conversation when no messages exist.
+ *   - Navigate to a case detail page with no messages.
+ *   - Expect "Conversación" heading to NOT be present.
  *
  * Scenarios 1 and 2 require a live Neon session + test case IDs with known data.
  * They are skipped in CI unless PLAYWRIGHT_TEST_EMAIL and PLAYWRIGHT_EMAIL_CASE_ID are set.
  *
  * API access control tests (no auth required) run unconditionally.
  *
- * Note: The heading text "Mensajes recibidos" corresponds to i18n key
- * "messages.thread.title" in src/lib/i18n/es-AR.ts, which is rendered by
- * casos/[id]/page.tsx only when isEmailCase=true.
+ * Note: The heading text "Conversación" corresponds to i18n key
+ * "messages.thread.title" in src/lib/i18n/es-AR.ts, rendered by MessagesThread
+ * on every channel once the case has at least one message.
  */
 
 import { test, expect } from "@playwright/test";
@@ -88,11 +89,11 @@ test.describe("Messages thread — Gmail case with messages (Scenario 1)", () =>
    */
   test.use({ storageState: SESION_ANALISTA });
 
-  test("case detail shows 'Mensajes recibidos' heading for email case", async ({ page }) => {
+  test("case detail shows 'Conversación' heading for email case", async ({ page }) => {
     await page.goto(`/casos/${EMAIL_CASE_ID}`);
     await expect(page).not.toHaveURL(/\/login/);
 
-    // The section heading is rendered by casos/[id]/page.tsx when isEmailCase=true
+    // The section heading is rendered by MessagesThread once there are messages
     const heading = page.getByRole("heading", { name: enCualquierIdioma("messages.thread.title") });
     await expect(heading).toBeVisible();
   });
@@ -105,6 +106,7 @@ test.describe("Messages thread — Gmail case with messages (Scenario 1)", () =>
     // At least one message card should appear
     const firstCard = page.locator('[data-testid="message-card"]').first();
     await expect(firstCard).toBeVisible({ timeout: 10_000 });
+    expect(["inbound", "outbound"]).toContain(await firstCard.getAttribute("data-direction"));
 
     // Each card should contain visible text for from_addr and subject
     // from_addr is in the first text-sm.font-medium element; subject is in font-semibold
@@ -131,6 +133,7 @@ test.describe("Messages thread — Gmail case with messages (Scenario 1)", () =>
     expect(msg).toHaveProperty("body_text");
     expect(msg).toHaveProperty("received_at");
     expect(msg).toHaveProperty("attachment_count");
+    for (const m of body.messages) expect(m).toHaveProperty("estado_envio");
   });
 });
 
@@ -154,7 +157,7 @@ test.describe("Messages thread — case with no messages (Scenario 2)", () => {
    */
   test.use({ storageState: SESION_ANALISTA });
 
-  test("'Mensajes recibidos' heading NOT present when case has no claim_messages (AC12)", async ({ page }) => {
+  test("'Conversación' heading NOT present when case has no messages (AC12)", async ({ page }) => {
     await page.goto(`/casos/${EMPTY_CASE_ID}`);
     await expect(page).not.toHaveURL(/\/login/);
 
@@ -170,7 +173,7 @@ test.describe("Messages thread — case with no messages (Scenario 2)", () => {
     const res = await page.request.get(`/api/cases/${EMPTY_CASE_ID}/messages`);
     expect(res.status()).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ messages: [] });
+    expect(body).toEqual({ messages: [], recortada: false });
   });
 });
 

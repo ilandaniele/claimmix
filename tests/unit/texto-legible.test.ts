@@ -19,7 +19,7 @@ import {
   sinEntidades,
   sinEtiquetas,
   unaPasada,
-} from "../../scripts/lib/texto-legible.mjs";
+} from "@/core/email/texto-legible";
 
 describe("lo que el transcripto tiene que mostrar bien", () => {
   it("un correo con formato se lee como texto", () => {

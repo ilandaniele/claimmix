@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 
 import { proponeSinHeridos } from "../../scripts/lib/propone-sin-heridos.mjs";
-import { readable } from "../../scripts/lib/texto-legible.mjs";
+import { readable } from "@/core/email/texto-legible";
 import { renderDataConfirmationRequest } from "@/server/email/templates/data-confirmation-request";
 
 const tal = (texto: string) => readable(texto).toLowerCase();

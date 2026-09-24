@@ -619,6 +619,14 @@ export const esAR = {
   "facturacion.verMesEnCurso": "Ver el mes en curso",
 
   // ── Metricas — el tablero del mes ─────────────────────────────────
+  "metricas.actividad.titulo": "Actividad",
+  "metricas.actividad.dia": "Por día",
+  "metricas.actividad.mes": "Por mes",
+  "metricas.actividad.anio": "Por año",
+  "metricas.actividad.reclamos": "Reclamos abiertos",
+  "metricas.actividad.whatsapps": "WhatsApps atendidos",
+  "metricas.actividad.mails": "Mails atendidos",
+  "metricas.actividad.nota": "Sólo WhatsApp y mail reales, sin simulaciones. Un reclamo abierto es un caso confirmado como siniestro, así que pueden ser menos que el total del mes.",
   "metricas.card.completitudAuto": "Tasa de completitud automática",
   "metricas.card.escalados": "Siniestros escalados",
   "metricas.card.tiempoApertura": "Tiempo medio de apertura",

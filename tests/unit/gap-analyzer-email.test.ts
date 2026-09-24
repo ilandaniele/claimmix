@@ -415,6 +415,41 @@ describe("analyzeEmailClaimGaps — un viaje, tres consultas", () => {
       result.fieldsNeedingConfirmation.map((f) => f.fieldName)
     ).not.toContain("claim_type");
   });
+
+  it("devuelve lo ya cerrado en su clave canónica, sin otra consulta", async () => {
+    // El orquestador lo usa para no reabrir lo que el extractor vuelve a listar
+    // como duda: una fila `injury_severity` confirmada tapa `hay_heridos`.
+    const fila = (field_key: string, status: string) => ({
+      field_key,
+      proposed_value: null,
+      conflict_with_value: null,
+      confidence: 0.7,
+      status,
+    });
+    // Una rechazada por el analista no está resuelta: se vuelve a preguntar.
+    setupDbMocks(
+      [],
+      [
+        fila("injury_severity", "confirmed"),
+        fila("heridos", "corrected"),
+        fila("dni", "pending"),
+        fila("accident_location", "rejected"),
+      ]
+    );
+
+    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, TENANT_ID);
+
+    expect(result.camposResueltos).toEqual(["hay_heridos"]);
+    expect(vi.mocked(db.select)).toHaveBeenCalledTimes(3);
+  });
+
+  it("sin filas cerradas no hay nada resuelto", async () => {
+    setupDbMocks([], []);
+
+    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, TENANT_ID);
+
+    expect(result.camposResueltos).toEqual([]);
+  });
 });
 
 // ── Test suite: DB error handling ─────────────────────────────────────────────

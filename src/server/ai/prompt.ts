@@ -487,8 +487,9 @@ Classify the injury severity of people involved (not vehicle damage). Set injury
 - "fatal"  — any mention of death, fallecido, muerto, fallecimiento
 - "severe" — hospitalizado, hospitalizada, cirugía, terapia intensiva, traumatismo grave, internado, fracturas múltiples, pérdida de conciencia
 - "minor"  — herido, herida, lesiones leves, golpe, contusión, raspón, atendido en guardia (discharged same day)
-- "none"   — no mention of any person injured (property damage only, or explicitly "sin heridos")
-- null     — cannot determine from available text (set only when unclear)
+- "none"   — ONLY when the person explicitly says nobody was hurt ("sin heridos", "no hubo lastimados", "nadie se lastimó", "salimos ilesos")
+- null     — injuries not mentioned at all, or cannot determine from available text. Silence about people is null, never "none".
+Never add hay_heridos, heridos or injury_severity to fields[] or fields_pending_confirmation unless the person said something about injuries.
 
 FRAUD RISK ASSESSMENT:
 Analyze the claim for inconsistencies and behavioral red flags. Set fraud_risk_level to:

@@ -38,6 +38,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as dotenv from "dotenv";
 import { readable } from "./lib/texto-legible.mjs";
+import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
 
 const envPath = path.resolve(process.cwd(), ".env.local");
 dotenv.config({ path: fs.existsSync(envPath) ? envPath : undefined });
@@ -52,6 +53,7 @@ if (!process.env.DATABASE_URL || !TENANT_ID) {
 const { createWhatsAppIntakeAndRunAgent } = await import("@/server/agents/intake-agent");
 const { ingestInboundEmail } = await import("@/server/email/inbound-email");
 const { runIntakeAgent } = await import("@/server/agents/intake-agent");
+const { hablaDeHeridos, respuestaAHeridos } = await import("@/core/case/heridos-supuestos");
 const { db } = await import("@/lib/db");
 const {
   cases,
@@ -917,6 +919,9 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
   // marcador de 1×1: el CI no tiene los fixtures y el caso queda esperando lo
   // que nunca va a reconocer.
   let fotosSinEnsayar = false;
+  // Un «No» suelto a «¿Hubo personas lastimadas?» también es hablar de heridos.
+  let pedidoAnterior: string[] = [];
+  let contestoHeridos = false;
 
   const seeded = scenario.policy ? await seedPolicy(scenario.policy) : null;
   try {
@@ -979,6 +984,23 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
       // para cada vuelta, espere algo o no.
       const crudo = /\b(?:null|undefined|true|false)\b|\b\d{4}-\d{2}-\d{2}\b/.exec(all);
       if (crudo) note(scenario.id, i + 1, `dice el valor crudo "${crudo[0]}"`, "valor-crudo");
+
+      // «¿Hubo personas lastimadas?: no» a quien nunca habló de heridos (23/09).
+      const dijo = scenario.turns
+        .slice(0, i + 1)
+        .map((t) => `${t.subject ?? ""}\n${t.say}`)
+        .join("\n");
+      contestoHeridos ||= respuestaAHeridos(pedidoAnterior, turn.say) !== null;
+      if (!contestoHeridos && !hablaDeHeridos(dijo) && proponeSinHeridos(all)) {
+        note(
+          scenario.id,
+          i + 1,
+          "propuso «sin heridos» sin que la persona hablara de heridos",
+          "propone-sin-heridos"
+        );
+      }
+      const pidio = said.filter((r) => r.askedKeys.length > 0);
+      if (pidio.length > 0) pedidoAnterior = pidio[pidio.length - 1].askedKeys;
 
       const want = turn.expect;
       if (!want) continue;

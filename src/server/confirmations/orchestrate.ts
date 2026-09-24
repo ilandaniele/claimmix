@@ -27,7 +27,7 @@
  */
 
 import "server-only";
-import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
@@ -79,6 +79,7 @@ import {
   type AgentMessenger,
 } from "@/server/confirmations/messenger";
 import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contestado";
+import { lastAskedKeys } from "@/server/confirmations/ultimo-pedido";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { redactObject } from "@/lib/audit/redact";
 import { logger } from "@/lib/observability/logger";
@@ -121,6 +122,8 @@ export interface ExtractedClaimOutput {
    * en uno de arranque no lo retoma nadie: ahí el turno sigue como pueda.
    */
   sePuedeRetomar?: boolean;
+  /** `asked_keys` del último mensaje que salió, si el worker ya lo leyó. */
+  preguntadas?: string[];
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -304,7 +307,7 @@ export async function orchestratePostExtraction(
 
   // What we have actually put in front of this person. Read before both
   // resolvers, which need it to know what could possibly have been answered.
-  const lastAsked = await lastAskedKeys(caseId, tenantId);
+  const lastAsked = extractedOutput.preguntadas ?? (await lastAskedKeys(caseId, tenantId));
 
   // Un «ok» o un «gracias» a una lista de varias cosas no contesta ninguna.
   // Ver `esSoloUnAcuse`.
@@ -380,8 +383,14 @@ export async function orchestratePostExtraction(
   // Union of both opinions: if either side thinks a field is uncertain, ask.
   // Conflicts are excluded — branch D owns those and has the stored value to
   // show alongside.
+  //
+  // Lo que ya se confirmó o corrigió no vuelve: el extractor relee toda la
+  // conversación y lo lista otra vez como duda.
+  const resueltos = new Set(gapResult.camposResueltos ?? []);
   const uncertainKeys = [
-    ...(extractedClaim.fields_pending_confirmation ?? []),
+    ...(extractedClaim.fields_pending_confirmation ?? []).filter(
+      (k) => !resueltos.has(canonicalFieldKey(k))
+    ),
     ...gapResult.fieldsNeedingConfirmation
       .filter((f) => f.reason !== "conflict")
       .map((f) => f.fieldName),
@@ -1038,8 +1047,16 @@ async function resolveAnsweredConfirmations(
   //
   // It closes what we asked about, not every pending row. A bare «ok» to a
   // list of several things never gets here: the caller drops the text.
+  //
+  // Menos heridos sin valor en esta corrida: un «ok» a «¿Hubo personas
+  // lastimadas?» abierta no dice si hubo, y a una fila vieja con un «no» que la
+  // persona nunca dijo no la puede confirmar.
   if (isAffirmativeReply(latestMessageText)) {
+    const hayHeridosDicho = fields.some(
+      (f) => canonicalFieldKey(f.field_key) === "hay_heridos" && !esValorVacio(f.field_value)
+    );
     for (const asked of await askedPendingFields(caseId, tenantId, fields, alreadyAsked)) {
+      if (canonicalFieldKey(asked) === "hay_heridos" && !hayHeridosDicho) continue;
       settled.add(asked);
     }
   }
@@ -1857,45 +1874,6 @@ async function alreadyAskedFor(
 
   const before = new Set(previous);
   return keys.every((k) => before.has(k));
-}
-
-/**
- * What the last message we actually sent asked for.
- *
- * Empty when nothing has gone out, or on any failure: the safe direction is to
- * believe we have never asked. A repeated question is a nuisance; a claim that
- * waits forever because we wrongly believed we had asked is a claim nobody is
- * working on.
- */
-async function lastAskedKeys(caseId: string, tenantId: string): Promise<string[]> {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
-  try {
-    const last = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select({ asked_keys: outboundMessages.asked_keys })
-          .from(outboundMessages)
-          .where(
-            and(
-              eq(outboundMessages.case_id, caseId),
-              // A simulated message counts. It is the message that would have
-              // gone out, composed by the same writer, and a rehearsal in which
-              // the agent never remembers having spoken is rehearsing something
-              // other than production.
-              inArray(outboundMessages.status, ["sent", "skipped_simulated"]),
-              isNotNull(outboundMessages.asked_keys)
-            )
-          )
-          .orderBy(desc(outboundMessages.created_at))
-          .limit(1)
-      )
-    );
-    return last?.asked_keys ?? [];
-  } catch (err) {
-    logger.error({ code: errCode(err) }, "orchestrate.failed_to_read_the_last_ask");
-    return [];
-  }
 }
 
 /**

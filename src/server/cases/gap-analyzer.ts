@@ -91,6 +91,11 @@ export interface GapAnalysisResult {
    *   'confirmacion_pendiente'— required fields present but pending confirmations
    */
   status: "listo_para_core" | "info_faltante" | "confirmacion_pendiente";
+  /**
+   * Campos con una fila ya confirmada o corregida, en su clave canónica. El
+   * extractor los vuelve a poner en su lista de dudas y no hay que reabrirlos.
+   */
+  camposResueltos?: string[];
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -260,6 +265,15 @@ export async function analyzeEmailClaimGaps(
     fieldsNeedingConfirmation,
     isComplete,
     status,
+    // Explícito y no «lo que no está pendiente»: una rechazada por el analista se
+    // vuelve a preguntar, aunque hoy la consulta ni la traiga.
+    camposResueltos: [
+      ...new Set(
+        confirmaciones
+          .filter((c) => c.status === "confirmed" || c.status === "corrected")
+          .map((c) => canonicalFieldKey(c.field_key))
+      ),
+    ],
   };
 }
 

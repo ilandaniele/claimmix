@@ -520,8 +520,7 @@ describe("renderTemplate — missing_information_request with values we hold", (
       knownValues: { accident_date: "16/08/2026" },
     });
 
-    expect(result.html).toContain("Número de póliza");
-    expect(result.html).toContain("Decinos el número de póliza");
+    expect(result.html).toContain("<li>Número de póliza</li>");
 
     expect(result.html).toContain("Fecha del siniestro");
     expect(result.html).toContain("16/08/2026");
@@ -529,13 +528,16 @@ describe("renderTemplate — missing_information_request with values we hold", (
     expect(result.html).not.toContain("Decinos qué día ocurrió");
   });
 
-  it("behaves as before when we hold nothing", () => {
+  // El ensayo del 23/09, con el redactor caído: «Fotos de los daños: Mandanos
+  // fotos de los daños.». El pedido es la etiqueta, como en WhatsApp.
+  it("names a gap by its label, without the instruction behind it", () => {
     const result = renderTemplate("missing_information_request", {
       caseId: "c-2",
-      missingFields: ["policy_number"],
+      missingFields: ["policy_number", "fotos_danos"],
     });
-    expect(result.html).toContain("Decinos el número de póliza");
-    expect(result.text).toContain("Decinos el número de póliza");
+    expect(result.html).toContain("<li>Número de póliza</li>");
+    expect(result.text).toContain("- Número de póliza\n- Fotos de los daños\n");
+    expect(result.text).not.toMatch(/Decinos|Mandanos/);
   });
 });
 
@@ -552,7 +554,7 @@ describe("renderTemplate — lo que ya entendimos", () => {
       knownValues: {},
     });
 
-    expect(result.html).toContain("Decinos qué tipo de siniestro fue");
+    expect(result.html).toContain("<li>Tipo de siniestro</li>");
   });
 
   it("con valor legible, lo muestra sin traducirlo otra vez", () => {
@@ -805,6 +807,6 @@ describe("renderTemplate — con la prosa ya redactada", () => {
 
     expect(conVacio.html).toBe(conNada.html);
     expect(conVacio.text).toBe(conNada.text);
-    expect(conNada.html).toContain("<li><strong>Número de póliza:</strong>");
+    expect(conNada.html).toContain("<li>Número de póliza</li>");
   });
 });

@@ -17,7 +17,10 @@ dotenv.config({ path: ".env.local" });
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { tables } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { consultaDeActividad } from "@/server/metrics/kpis";
+import { diaArgentino } from "@/core/fecha/dia-argentino";
+import type { PuntoSerie } from "@/core/metricas/serie";
 
 neonConfig.webSocketConstructor = globalThis.WebSocket as never;
 
@@ -141,6 +144,64 @@ const [casos, docs] = await enTenantVarias<[unknown[], unknown[]]>(ctxDe(a), (db
   db.select({ id: tables.missingDocs.id }).from(tables.missingDocs),
 ]);
 bien(`${casos.length} caso(s) y ${docs.length} documento(s) faltante(s), en una sola ida`);
+
+// ── 3b. La serie de actividad de /metricas, con el SQL de verdad ───────────
+//
+// El test de `getTenantKpis` mockea el lote, así que `to_char`, `date_trunc` y
+// `at time zone` con parámetros ligados sólo se ejecutan acá. Toda la historia
+// por día se cruza con los mismos casos contados en JS: el día sale de
+// `diaArgentino` y los filtros están escritos de nuevo, así que un corrimiento
+// de zona (los casos de 21 a 24) o un filtro mal puesto no cuadran.
+console.log("\n▸ La serie de actividad de /metricas");
+type Cuenta = Omit<PuntoSerie, "clave">;
+type Crudo = { ms: number; is_claim: boolean | null; channel: string };
+const [porDia, crudos] = await enTenantVarias<[PuntoSerie[], Crudo[]]>(
+  ctxDe(a),
+  (db) => [
+    consultaDeActividad(db, "dia", "1970-01-01T00:00:00Z"),
+    db
+      .select({
+        ms: sql<number>`(extract(epoch from ${tables.cases.created_at}) * 1000)::float8`,
+        is_claim: tables.cases.is_claim,
+        channel: tables.cases.channel,
+      })
+      .from(tables.cases),
+  ]
+);
+const enJs = new Map<string, Cuenta>();
+let deNoche = 0;
+for (const c of crudos) {
+  if (c.channel.endsWith("_sim")) continue;
+  const cuando = new Date(c.ms);
+  const dia = diaArgentino(cuando);
+  if (dia !== cuando.toISOString().slice(0, 10)) deNoche++;
+  const n = enJs.get(dia) ?? { reclamos: 0, whatsapps: 0, mails: 0 };
+  if (c.is_claim === true) n.reclamos++;
+  if (c.channel === "whatsapp") n.whatsapps++;
+  if (c.channel === "email") n.mails++;
+  enJs.set(dia, n);
+}
+const enSql = new Map(porDia.map((f) => [f.clave, f]));
+const descuadres = [...new Set([...enJs.keys(), ...enSql.keys()])].filter((dia) => {
+  const [s, j] = [enSql.get(dia), enJs.get(dia)];
+  return !s || !j || s.reclamos !== j.reclamos || s.whatsapps !== j.whatsapps || s.mails !== j.mails;
+});
+if (descuadres.length) {
+  mal(`la serie no cuadra con los casos en ${descuadres.length} día(s): ${descuadres.slice(0, 5).join(", ")}`);
+  problemas.push("la serie de actividad no cuenta lo que hay en la base");
+} else if (enJs.size === 0 || deNoche === 0) {
+  // No es una falla de la capa: faltan datos que la pongan a prueba. Pero
+  // tampoco es un ✓, que se leería como la frontera probada.
+  console.log(
+    `   ⚠ no concluyente: ${enJs.size} día(s) con WhatsApp o mail y ${deNoche} caso(s) ` +
+      "entre las 21 y las 24, que es donde se nota la zona"
+  );
+} else {
+  bien(
+    `${enJs.size} día(s) iguales a los casos contados en JS, ${deNoche} de ellos ` +
+      "entre las 21 y las 24"
+  );
+}
 
 // ── 4. Escribir en el inquilino de al lado ─────────────────────────────────
 //

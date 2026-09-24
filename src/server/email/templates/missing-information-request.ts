@@ -4,7 +4,7 @@
  * Sent when required fields are missing after extraction.
  * Lists ONLY the specific missing fields — not the full required list.
  *
- * AC10: Template lists only missing fields with clear per-field instructions.
+ * AC10: Template lists only missing fields, each by its label.
  * AC24: No DNI or full policy_number in body.
  *
  * Subject: "Información adicional requerida - Caso #{caseId}"
@@ -57,17 +57,6 @@ export interface MissingInformationRequestData {
   cuerpo?: string | null;
 }
 
-/**
- * Labels come from the shared table so email and WhatsApp name the same gap the
- * same way. The old local copy stopped at eight canonical keys and fell through
- * to "Proporcioná el valor para el campo: dni_asegurado" for everything the
- * extractor invented, which is most of them.
- */
-function getFieldInstruction(fieldKey: string): { label: string; instruction: string } {
-  const { label, instruction } = labelForField(fieldKey);
-  return { label, instruction };
-}
-
 export function renderMissingInformationRequest(
   data: MissingInformationRequestData
 ): {
@@ -106,9 +95,18 @@ export function renderMissingInformationRequest(
   const respuestaHtml = pregunta ? `<p>${escapeHtml(RESPUESTA_PENDIENTE)}</p>` : "";
   const respuestaText = pregunta ? `\n\n` + RESPUESTA_PENDIENTE : "";
 
-  /** What to say about one item: a gap to fill, or a value to check. */
-  function askFor(fieldKey: string): { label: string; ask: string } {
-    const { label, instruction } = getFieldInstruction(fieldKey);
+  /**
+   * What to say about one item: a gap to fill, or a value to check.
+   *
+   * Un pedido es la etiqueta sola, como en WhatsApp: con la instrucción atrás
+   * el ensayo del 23/09 mandó «Fotos de los daños: Mandanos fotos de los
+   * daños.», cada vez que se caía el redactor.
+   */
+  function askFor(fieldKey: string): { label: string; ask: string | null } {
+    // Labels come from the shared table so email and WhatsApp name the same gap
+    // the same way. The old local copy stopped at eight canonical keys and fell
+    // through to "Proporcioná el valor para el campo: dni_asegurado".
+    const { label } = labelForField(fieldKey);
     // Llega legible desde `buildAskList`; traducirlo otra vez lo borra, porque
     // «daño por granizo» no es un tipo.
     const value = known[fieldKey]?.trim() || undefined;
@@ -116,21 +114,23 @@ export function renderMissingInformationRequest(
       label,
       ask: value
         ? `entendimos ${JSON.stringify(value)}. Si no es así, escribinos el dato correcto.`
-        : instruction,
+        : null,
     };
   }
 
   const fieldItemsHtml = data.missingFields
     .map((fieldKey) => {
       const { label, ask } = askFor(fieldKey);
-      return `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(ask)}</li>`;
+      return ask
+        ? `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(ask)}</li>`
+        : `<li>${escapeHtml(label)}</li>`;
     })
     .join("\n");
 
   const fieldItemsText = data.missingFields
     .map((fieldKey) => {
       const { label, ask } = askFor(fieldKey);
-      return `- ${label}: ${ask}`;
+      return ask ? `- ${label}: ${ask}` : `- ${label}`;
     })
     .join("\n");
 

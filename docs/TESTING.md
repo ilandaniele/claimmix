@@ -88,6 +88,13 @@ Además de lo que espera cada vuelta, en todas se corre la comprobación
 respuesta es un valor de la base dicho tal cual. La traducción la cubren los
 tests `core/valor-legible` y `orchestrate-post-extraction`.
 
+También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
+hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún
+turno de la persona habló de heridos. Si no dijo nada, se le pregunta abierto.
+Un «No» o un «Sí» sueltos a esa pregunta abierta cuentan como hablar de heridos
+(`respuestaAHeridos`, en `src/core/case/heridos-supuestos.ts`).
+Qué cuenta como propuesta lo fija `tests/unit/propone-sin-heridos.test.ts`.
+
 ```bash
 pnpm rehearse                  # todos
 pnpm rehearse poliza-vencida   # uno solo, por nombre

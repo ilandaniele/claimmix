@@ -6,12 +6,14 @@
  *   - Cases by status (visual bar chart — HTML/CSS only, no chart library)
  *   - Cases by type (donut-style percentage bars)
  *   - Top 5 analysts table
+ *   - Actividad por día, mes o año (`?serie=`)
  *
  * Los textos salen del diccionario; los números y la moneda quedan en formato
  * es-AR en todo el producto a propósito (ver `formatUsd` en lib/utils.ts).
  */
 
 import { nombreDelMesArgentino } from "@/core/fecha/dia-argentino";
+import { unidadDe, type Unidad } from "@/core/metricas/serie";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
@@ -31,6 +33,7 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
 import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 import { logger } from "@/lib/observability/logger";
+import { SerieDeActividad } from "./_components/SerieDeActividad";
 
 /*
  * Los números salen de `getTenantKpis`, que también usa /api/metricas.
@@ -42,7 +45,7 @@ import { logger } from "@/lib/observability/logger";
  * Lo que queda acá es lo que de verdad es de la pantalla: resolver quién está
  * mirando, y dibujar.
  */
-async function fetchMetricas(): Promise<MetricasData | null> {
+async function fetchMetricas(unidad: Unidad): Promise<MetricasData | null> {
   try {
     await connection();
     const session = await getSessionContext();
@@ -54,7 +57,7 @@ async function fetchMetricas(): Promise<MetricasData | null> {
     // sesión sin perfil reventaba en la línea de abajo en vez de devolver null.
     if (!userRow) return null;
 
-    return await getTenantKpis({ tenantId: userRow.tenant_id });
+    return await getTenantKpis({ tenantId: userRow.tenant_id }, { serie: unidad });
   } catch (e) {
     unstable_rethrow(e);
     if (e instanceof AppError) throw e;
@@ -131,13 +134,18 @@ const TYPE_COLORS: Record<string, string> = {
 
 // ── Page component ────────────────────────────────────────────────────────────
 
-export default async function MetricasPage() {
+export default async function MetricasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const locale = await getServerLocale();
   const t = getT(locale);
+  const unidad = unidadDe((await searchParams).serie);
   let data: MetricasData | null;
 
   try {
-    data = await fetchMetricas();
+    data = await fetchMetricas(unidad);
   } catch (e) {
     if (e instanceof AppError && e.code === "MISSING_SESSION") {
       redirect("/login");
@@ -475,6 +483,12 @@ export default async function MetricasPage() {
               </table>
             )}
           </div>
+
+          {data!.serie && (
+            <div className="mt-8">
+              <SerieDeActividad serie={data!.serie} unidad={unidad} locale={locale} />
+            </div>
+          )}
         </>
       )}
     </div>

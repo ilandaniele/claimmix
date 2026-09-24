@@ -196,6 +196,174 @@ describe("composeReply — what it refuses to send", () => {
     }
   );
 
+  // El ensayo del 23/09 mandó «• ¿Hubo personas lastimadas?: no» a quien nunca
+  // habló de heridos, y un «ok» lo cerró.
+  const conValorPegado = [
+    "• ¿Hubo personas lastimadas?: no",
+    "• ¿No hubo personas lastimadas? no",
+    "• Personas lastimadas: no",
+  ];
+
+  it.each(
+    conValorPegado.flatMap((linea) => (["whatsapp", "email"] as const).map((canal) => [linea, canal] as const))
+  )("rechaza «%s» por %s y el reintento dice por qué", async (linea, canal) => {
+    replies(`Para seguir necesitamos confirmar si hubo heridos:\n${linea}`);
+
+    const out = await composeReply(
+      base({ channel: canal, fields: ["hay_heridos"], knownValues: { hay_heridos: "no" } })
+    );
+
+    expect(out).toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+    expect(mockCall.mock.calls[1][0]).toContain("pusiste un valor pegado a una pregunta");
+  });
+
+  it.each([
+    "Para seguir necesitamos un dato más:\n• ¿Es correcto que nadie resultó lastimado?",
+    "Para seguir necesitamos un dato más:\n• ¿Hubo personas lastimadas? Contanos.",
+    "¿Hubo personas lastimadas? No lo sabemos todavía, contanos.",
+  ])("no rechaza una pregunta con el valor adentro, ni prosa fuera de lista: %s", async (mensaje) => {
+    replies(mensaje);
+
+    expect(
+      await composeReply(base({ fields: ["hay_heridos"], knownValues: { hay_heridos: "no" } }))
+    ).not.toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  // La confirmación ahora va en su propia oración, fuera de la lista: el valor
+  // pegado se busca también ahí.
+  it.each([
+    "Para seguir necesitamos la póliza.\n\nY una consulta: ¿hubo personas lastimadas? no",
+    "Para seguir necesitamos la póliza.\n\n¿Hubo personas lastimadas?: no",
+  ])("rechaza el valor pegado también en prosa: %s", async (mensaje) => {
+    replies(mensaje);
+
+    const out = await composeReply(
+      base({ fields: ["hay_heridos"], knownValues: { hay_heridos: "no" } })
+    );
+
+    expect(out).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0]).toContain("pusiste un valor pegado a una pregunta");
+  });
+
+  // El ensayo del 23/09 copió el renglón del brief: «• Hora aproximada — Decinos…».
+  it.each([
+    "• Hora aproximada — Decinos más o menos a qué hora fue.",
+    "• Decinos más o menos a qué hora fue.",
+    "- Hora aproximada: decinos más o menos a qué hora fue.",
+  ])("rechaza un ítem con verbo propio: %s", async (linea) => {
+    replies(`Para seguir necesitamos:\n\n${linea}`);
+
+    const out = await composeReply(base({ fields: ["hora_siniestro"] }));
+
+    expect(out).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0]).toContain("un ítem de la lista tiene verbo propio");
+  });
+
+  it("deja el verbo en la frase que abre la lista", async () => {
+    replies("Mandanos esto cuando puedas:\n\n• Hora aproximada");
+
+    expect(await composeReply(base({ fields: ["hora_siniestro"] }))).not.toBe(FALLBACK);
+  });
+
+  it("separa con un renglón en blanco la lista pegada a su frase", async () => {
+    replies("Para seguir necesitamos:\n• El número de póliza\n• Tu DNI");
+    expect(await composeReply(base({ fields: ["policy_number", "dni"] }))).toBe(
+      "Para seguir necesitamos:\n\n• El número de póliza\n• Tu DNI"
+    );
+
+    replies("Para seguir necesitamos:\n\n- El número de póliza\n- Tu DNI");
+    expect(await composeReply(base({ fields: ["policy_number", "dni"] }))).toBe(
+      "Para seguir necesitamos:\n\n- El número de póliza\n- Tu DNI"
+    );
+  });
+
+  // Un booleano se pregunta de muchas formas, y ninguna tiene por qué decir «hubo».
+  it.each([
+    "Para seguir necesitamos un dato más:\n• ¿Alguien resultó lastimado?",
+    "Para seguir necesitamos un dato más:\n• ¿Se lastimó alguien?",
+    "Para seguir necesitamos un dato más:\n• ¿Hay algún herido?",
+    "Para seguir necesitamos un dato más:\n• ¿Es correcto que nadie resultó lastimado?",
+  ])("toma la pregunta de heridos dicha de otra forma: %s", async (mensaje) => {
+    replies(mensaje);
+
+    for (const knownValues of [{}, { hay_heridos: "no" }] as Array<Record<string, string>>) {
+      expect(await composeReply(base({ fields: ["hay_heridos"], knownValues }))).not.toBe(FALLBACK);
+    }
+    expect(mockCall).toHaveBeenCalledTimes(2);
+  });
+
+  // Lo que sigue al «?» dice qué mandar; no es un valor propuesto.
+  const guiaTrasLaPregunta = [
+    "• ¿Dónde fue? Calle y altura",
+    "• ¿Cuál es tu DNI? Sin puntos",
+    "• ¿Hubo testigos? Nombre y teléfono",
+    "- ¿Tenés la licencia? Mandanos una foto",
+    "- ¿Nos pasás tu DNI? El del titular",
+    "• ¿Hubo personas lastimadas? Contanos 🙏",
+    "- ¿Tu DNI? Gracias",
+  ];
+
+  it.each(
+    guiaTrasLaPregunta.flatMap((linea) => (["whatsapp", "email"] as const).map((canal) => [linea, canal] as const))
+  )("no rechaza «%s» por %s", async (linea, canal) => {
+    replies(`Para seguir necesitamos un dato más:\n${linea}`);
+
+    expect(await composeReply(base({ channel: canal, fields: [] }))).not.toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["whatsapp", "email"] as const)(
+    "rechaza por %s un valor que ya tenemos pegado después del «?»",
+    async (canal) => {
+      replies("Para seguir necesitamos confirmar un dato:\n• ¿Cuándo fue? 12/09.");
+
+      const out = await composeReply(
+        base({ channel: canal, fields: ["accident_date"], knownValues: { accident_date: "12/09" } })
+      );
+
+      expect(out).toBe(FALLBACK);
+      expect(mockCall.mock.calls[1][0]).toContain("pusiste un valor pegado a una pregunta");
+    }
+  );
+
+  it("toma la confirmación de heridos con el valor adentro de la pregunta", async () => {
+    replies("Para cerrar un punto:\n• ¿Es correcto que no hubo personas lastimadas?");
+
+    const out = await composeReply(
+      base({ fields: ["hay_heridos"], knownValues: { hay_heridos: "no" } })
+    );
+
+    expect(out).not.toBe(FALLBACK);
+  });
+
+  it("fuera de un pedido no mira las listas", async () => {
+    replies("Tomamos nota de lo que nos contaste:\n• ¿Hubo personas lastimadas?: no");
+
+    expect(await composeReply(base({ intent: "acknowledgement" }))).not.toBe(FALLBACK);
+  });
+
+  // «Si hubo personas lastimadas» y «Un dato de contacto» empezaban con «si» y
+  // «un», que están en cualquier texto: el ítem se caía sin que se note.
+  it.each([
+    ["hay_heridos", "Para seguir necesitamos el DNI del titular, si podés.", "Si hubo personas lastimadas"],
+    ["email_or_phone", "Para seguir necesitamos el DNI del titular, un saludo.", "Un dato de contacto"],
+  ])("da por caído %s aunque su primera palabra corta esté", async (campo, mensaje, etiqueta) => {
+    replies(mensaje);
+
+    const out = await composeReply(base({ fields: [campo, "dni"] }));
+
+    expect(out).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0]).toContain(`te olvidaste de pedir "${etiqueta}"`);
+  });
+
+  it("toma el dato de contacto nombrado por su palabra larga", async () => {
+    replies("Para seguir dejanos algún dato de contacto y el DNI del titular.");
+
+    expect(await composeReply(base({ fields: ["email_or_phone", "dni"] }))).not.toBe(FALLBACK);
+  });
+
   it("refuses an escalation that turns around and asks for data", async () => {
     // The exact contradiction that reached a real chat: "no hace falta que
     // hagas nada" followed by a list of requests.
@@ -318,6 +486,29 @@ describe("composeReply — the brief it hands the model", () => {
     // Con comillas y «tal cual» el modelo escribió «hora aproximada fue "tarde"».
     expect(prompt).not.toContain('"16/08/2026"');
     expect(prompt).not.toContain("tal cual");
+    expect(prompt).toContain("adentro de la pregunta");
+    expect(prompt).toContain("nunca «¿pregunta?: valor»");
+  });
+
+  // El ensayo del 23/09 abría «necesitamos que nos mandes:» y seguía con
+  // «• Decinos si alguien resultó lastimado.» y «• ¿Tu nombre completo es…?».
+  it("pide el verbo una sola vez y la confirmación fuera de la lista", async () => {
+    replies("Para seguir necesitamos:\n\n• Si alguien resultó lastimado\n• Fotos de los daños");
+
+    await composeReply(base({ fields: ["hay_heridos", "fotos_danos"] }));
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).toContain("CÓMO VA LA LISTA");
+    expect(prompt).toContain("nunca «Decinos…»");
+    expect(prompt).toContain("en una oración propia");
+  });
+
+  it("no agradece un perdón", async () => {
+    replies("No hay problema. Para seguir necesitamos el número de póliza.");
+
+    await composeReply(base({ fields: ["policy_number"] }));
+
+    expect(mockCall.mock.calls[0][0] as string).toContain("no hay problema");
   });
 
   it("puts the answer to a question before what is still missing", async () => {
@@ -326,6 +517,29 @@ describe("composeReply — the brief it hands the model", () => {
     await composeReply(base({ fields: ["policy_number"], question: "¿Cuánto tarda?" }));
 
     expect(mockCall.mock.calls[0][0] as string).toContain("Empezá el mensaje contestándola");
+  });
+
+  // El ensayo del 23/09 contestó «entiendo tu preocupación» y pidió los papeles
+  // dos veces, una en la respuesta y otra en la lista.
+  it("contesta la pregunta sin frases hechas ni el pedido repetido", async () => {
+    replies("No te puedo dar un plazo todavía. Mientras, necesito el número de póliza.");
+
+    await composeReply(base({ fields: ["policy_number"], question: "¿Cuánto tarda?" }));
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).toContain("«entiendo tu preocupación»");
+    expect(prompt).toContain("el pedido va una sola vez");
+    // «qué falta para avanzar» invitaba a nombrar la documentación en la respuesta.
+    expect(prompt).not.toContain("qué falta para avanzar");
+  });
+
+  // Y la segunda vuelta mezcló «necesitamos» con «te pido».
+  it("habla por el equipo, en plural", async () => {
+    replies("Necesitamos el número de póliza.");
+
+    await composeReply(base({ fields: ["policy_number"] }));
+
+    expect(mockCall.mock.calls[0][0] as string).toContain("nunca\n«te pido» ni «entiendo»");
   });
 
   it("la pregunta llega al prompt sin el DNI entero", async () => {

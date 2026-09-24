@@ -57,14 +57,11 @@ export function CaseDetailClient({
       });
 
       if (res.ok) {
-        addToast(
-          `Estado actualizado correctamente.`,
-          "success"
-        );
+        addToast(t("case.detail.statusUpdated"), "success");
         // Refresh server data
         router.refresh();
       } else if (res.status === 409) {
-        addToast("Transición de estado no válida.", "error");
+        addToast(t("close.errorFsm"), "error");
       } else {
         addToast(t("error.generic"), "error");
       }

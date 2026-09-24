@@ -177,7 +177,13 @@ const MAX_ADJUNTOS_POR_CORRIDA = 4;
 export async function reconcileAttachments(
   caseId: string,
   tenantId: string,
-  claimTypeLabel: string | null
+  claimTypeLabel: string | null,
+  /**
+   * Lo mismo que en `resolveDeclinedDocs`: un 429 o un TIMEOUT leídos como
+   * «no se reconoció» dejan la foto sin reconocer y el pedido en pie por un
+   * archivo que ya llegó. Sólo el llamador sabe si el turno puede retomarse.
+   */
+  vuelveALaCola = false
 ): Promise<void> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
@@ -200,7 +206,14 @@ export async function reconcileAttachments(
       if (remaining.length === 0) break;
 
       mirados.push(attachment.id);
-      const key = await identifyDocument(tenantId, attachment, remaining, claimTypeLabel);
+      const key = await identifyDocument(
+        caseId,
+        tenantId,
+        attachment,
+        remaining,
+        claimTypeLabel,
+        vuelveALaCola
+      );
       if (key) {
         satisfied.add(key);
         marcados.push([attachment.id, key]);
@@ -270,6 +283,8 @@ export async function reconcileAttachments(
         satisfied: [...satisfied],
       }, "documents.reconciled");
   } catch (err) {
+    // El pasajero ya lo logueó identifyDocument.
+    if (vuelveALaCola && esPasajero(err)) throw err;
     logger.error({ code: errCode(err), case_id: caseId }, "documents.reconcile_failed");
   }
 }
@@ -368,10 +383,12 @@ async function unmatchedAttachments(
  * enough.
  */
 async function identifyDocument(
+  caseId: string,
   tenantId: string,
   attachment: AttachmentRow,
   pending: string[],
-  claimTypeLabel: string | null
+  claimTypeLabel: string | null,
+  vuelveALaCola: boolean
 ): Promise<string | null> {
   const options = pending
     .map((key) => `- ${key}: ${labelForField(key).label}`)
@@ -421,7 +438,12 @@ Devolvé JSON: {"doc_key": "<clave exacta de la lista>" | null}`;
     // close a request that does not exist.
     return pending.includes(key) ? key : null;
   } catch (err) {
-    logger.error({ code: errCode(err) }, "documents.identify_failed");
+    const { name, status, code } = errMeta(err);
+    logger.error(
+      { error_name: name, status, code, case_id: caseId },
+      "documents.identify_failed"
+    );
+    if (vuelveALaCola && esPasajero(err)) throw err;
     return null;
   }
 }

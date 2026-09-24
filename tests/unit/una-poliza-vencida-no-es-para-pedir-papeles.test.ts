@@ -246,4 +246,38 @@ describe("una póliza vencida no es para pedir papeles", () => {
       .filter(Boolean);
     expect(statuses).not.toContain("requiere_especialista");
   });
+
+  /*
+   * La frase de cuidado es de la derivación por gravedad. Por la póliza vencida
+   * sola no se deriva por las heridas, y el mensaje no las nombra; con un caso
+   * grave, sí, venza o no la póliza.
+   */
+  async function derivacionVencida(severity: "low" | "high") {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extractEmailClaimMock({ severity, injury_severity: "severe" }),
+        senderEmail: SENDER_EMAIL,
+        polizas: POLIZA_VENCIDA,
+      },
+      NO_MATCHES
+    );
+    const salidas = vi.mocked(dispatchOutboundEmail).mock.calls;
+    expect(salidas.map((c) => c[0].template)).toEqual(["specialist_escalation"]);
+    return salidas[0][0].data as Record<string, unknown>;
+  }
+
+  it("con heridos y sin gravedad, la derivación de siempre", async () => {
+    const data = await derivacionVencida("low");
+
+    expect(data).not.toHaveProperty("heridos");
+    expect(JSON.stringify(vi.mocked(alertSpecialists).mock.calls)).not.toContain("heridos");
+  });
+
+  it("con heridos y gravedad alta, abre con el cuidado", async () => {
+    const data = await derivacionVencida("high");
+
+    expect(data).toMatchObject({ heridos: true });
+  });
 });

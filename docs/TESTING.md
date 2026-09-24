@@ -88,12 +88,39 @@ Además de lo que espera cada vuelta, en todas se corre la comprobación
 respuesta es un valor de la base dicho tal cual. La traducción la cubren los
 tests `core/valor-legible` y `orchestrate-post-extraction`.
 
+Los dos incendios con heridos (`incendio-grave` y `mail-grave`) corren además
+`cuidado` —la respuesta trae una frase de cuidado, `diceCuidado` de
+`src/core/mensajes/derivacion.ts`—, `sin-pedido` —ni claves preguntadas ni un
+pedido en el texto, con `pideAlgo` (`scripts/lib/pide-algo.mjs`), más ancho que
+la guarda del redactor para que muerda lo que ella deja pasar, sin contar «no te
+pedimos» ni el ofrecimiento de responder con más información— y `no-menciona`
+con «internad», «quemadur», «recuper», «mejoría» y «esté bien»: la frase no
+repite ni pronostica lo que contó de la salud.
+
 También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
 hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún
 turno de la persona habló de heridos. Si no dijo nada, se le pregunta abierto.
 Un «No» o un «Sí» sueltos a esa pregunta abierta cuentan como hablar de heridos
 (`respuestaAHeridos`, en `src/core/case/heridos-supuestos.ts`).
 Qué cuenta como propuesta lo fija `tests/unit/propone-sin-heridos.test.ts`.
+
+`goteo` corre dos más (`sinEco` en el escenario). `confirma-lo-dicho` marca una
+confirmación («¿…, correcto?» o un piso con `entendimos "X"`) que no trae nada
+más que lo que la persona escribió en ese mismo turno sobre algo que se le pidió
+en la vuelta anterior: el 23/09 a «Fue un choque, ayer a la tarde» se le
+contestó «¿Fue a la tarde, correcto?». Qué se pidió y con qué valor lo leen de
+`asked_keys`, de `claim_field_confirmations` y de `extracted_fields` (la póliza
+que encontró el agente no deja fila de confirmación: así se escapó
+«Entendemos que tu póliza es POL-3311-B, ¿es correcto?»). Lo inferido («ayer» confirmado
+como fecha), lo que no se pidió y un número suelto (el DNI) siguen pasando,
+porque el orquestador los confirma a propósito, y «¿me confirmás a qué hora
+fue?» pide un dato, no lo confirma. `hora-en-una-forma` falla si a lo largo
+del escenario la hora se pidió de las dos formas: confirmando la franja y
+pidiendo la hora (aclarar que alcanza con una aproximada es la misma); ese mismo día la
+confirmación de la franja se cambió por «Más o menos a qué hora fue.» sin que la
+persona contestara. Las dos miran la prosa del modelo, y por eso van sólo en
+`goteo`. Qué cuenta como eco lo fija `tests/unit/ensayo-confirmaciones.test.ts`;
+la regla del orquestador, `core/lo-dicho` y `orchestrate-post-extraction`.
 
 ```bash
 pnpm rehearse                  # todos
@@ -624,7 +651,10 @@ chequeos: el smoke primero, y colgando de él los otros seis.
 5. `pnpm pentest`: cada ruta de la API sin credenciales, las firmas de webhook,
    las cabeceras y lo que cuenta un error. Gratis. Falla si algo quedó abierto.
 6. `pnpm docs-config`: el código y la base tienen que decir lo mismo sobre qué
-   papeles pide cada tipo de siniestro. Sólo le pregunta al catálogo.
+   papeles pide cada tipo de siniestro. Sólo le pregunta al catálogo. Antes,
+   que no haya una migración del repo sin registrar en `schema_migrations`
+   (`migrate.mjs --exigir-al-dia`, sólo SELECT); si ésa falla, la paridad
+   corre igual.
 7. `pnpm permisos`: el rol restringido con el que consulta la aplicación puede
    hacer lo que la capa de datos le pide. Sólo lee.
 
@@ -650,13 +680,14 @@ producción hereda los secretos del repositorio; el de QA no puede —eso
 apuntaría a la base de producción los seis trabajos que corren en el runner, y
 tres de ellos escriben—, así que `deploy-checks.yml` declara sus secretos uno
 por uno y el caller de QA mapea cada uno con su nombre `QA_*`. QA corre el
-smoke liviano, más los dos chequeos que sólo le preguntan al catálogo; el
-ensayo corre desde que QA tiene balde de R2 propio (`claimmix-qa-attachments`,
-20/09), y el timbre, el pen test y la «Carga de lectura» de este workflow no
-corren nunca ahí —el k6 de `load-tests.yml` sí, aparte, contra el alias
-público de QA. Los secretos `QA_*` del repositorio existen desde el 20/09
-(paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el post-deploy de esa noche,
-run 35551526692, corrió todo en verde, ensayo incluido.
+smoke liviano, más los dos chequeos que sólo leen el catálogo y el registro
+de migraciones; el ensayo corre desde que QA tiene balde de R2 propio
+(`claimmix-qa-attachments`, 20/09), y el timbre, el pen test y la «Carga de
+lectura» de este workflow no corren nunca ahí —el k6 de `load-tests.yml` sí,
+aparte, contra el alias público de QA. Los secretos `QA_*` del repositorio
+existen desde el 20/09 (paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el
+post-deploy de esa noche, run 35551526692, corrió todo en verde, ensayo
+incluido.
 
 También se puede disparar a mano desde la pestaña *Actions* → *Post-deploy* →
 *Run workflow*, con una URL distinta si querés apuntar a un preview.

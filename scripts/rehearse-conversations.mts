@@ -38,7 +38,11 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as dotenv from "dotenv";
 import { readable } from "@/core/email/texto-legible";
+import { canonicalFieldKey } from "@/lib/labels/claim-fields";
+import { diceCuidado } from "@/core/mensajes/derivacion";
 import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
+import { pideAlgo } from "./lib/pide-algo.mjs";
+import { confirmaLoDicho, formaDePedirLaHora } from "./lib/ensayo-confirmaciones.mjs";
 
 const envPath = path.resolve(process.cwd(), ".env.local");
 dotenv.config({ path: fs.existsSync(envPath) ? envPath : undefined });
@@ -177,6 +181,16 @@ interface Turn {
      * modelo, así que no depende de cómo redacte ese día.
      */
     confirma?: string[];
+    /**
+     * Que la derivación abra con una frase de cuidado: alguien contó que hay
+     * heridos. Con el mismo predicado que la guarda del redactor.
+     */
+    cuidado?: boolean;
+    /**
+     * Que no pida nada. `asked_keys` de una derivación viene siempre vacío, así
+     * que lo que muerde es `pideAlgo`, más ancho que la guarda del redactor.
+     */
+    sinPedido?: boolean;
   };
 }
 
@@ -203,6 +217,14 @@ interface Scenario {
    * leaves an invented customer sitting in the real Clientes screen.
    */
   policy?: { numero: string; dni: string; nombre: string; vencida?: boolean };
+  /**
+   * Que no le devuelva como «¿…, correcto?» lo que la persona acaba de
+   * escribir, y que pida la hora siempre de la misma forma (goteo, 23/09).
+   *
+   * Por escenario y no para todos: mira la prosa del modelo, y en un escenario
+   * que no fue pensado para esto sólo agregaría ruido.
+   */
+  sinEco?: boolean;
   turns: Turn[];
   /** Checked once, after the last turn. */
   finally?: {
@@ -213,6 +235,10 @@ interface Scenario {
     knows?: string[];
   };
 }
+
+// Lo que contó de la salud, que la frase de cuidado no repite ni pronostica.
+// Aparte de la guarda del redactor: acá se mira el texto que salió.
+const LO_MEDICO = ["internad", "quemadur", "recuper", "mejoría", "esté bien"];
 
 const SCENARIOS: Scenario[] = [
   {
@@ -260,8 +286,10 @@ const SCENARIOS: Scenario[] = [
           mentions: ["especialista"],
           // The failure this branch exists for: telling someone whose partner
           // is in hospital that we need their DNI and the time of the fire.
-          avoids: ["DNI", "necesitamos que nos mandes", "fotos"],
+          avoids: ["DNI", "necesitamos que nos mandes", "fotos", ...LO_MEDICO],
           status: "requiere_especialista",
+          cuidado: true,
+          sinPedido: true,
         },
       },
     ],
@@ -283,6 +311,7 @@ const SCENARIOS: Scenario[] = [
   {
     id: "goteo",
     what: "Los datos llegan de a uno; no se vuelve a pedir lo ya contestado",
+    sinEco: true,
     turns: [
       { say: "Buenas, tuve un accidente con el auto", expect: { replies: 1 } },
       /*
@@ -587,7 +616,13 @@ const SCENARIOS: Scenario[] = [
           "Se incendió el auto en la ruta 3 y mi señora está internada con quemaduras.",
           "Soy Laura Giménez, póliza POL-9982-C.",
         ].join("\n"),
-        expect: { replies: 1, status: "requiere_especialista" },
+        expect: {
+          replies: 1,
+          status: "requiere_especialista",
+          avoids: LO_MEDICO,
+          cuidado: true,
+          sinPedido: true,
+        },
       },
     ],
     finally: { status: "requiere_especialista" },
@@ -922,6 +957,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
   // Un «No» suelto a «¿Hubo personas lastimadas?» también es hablar de heridos.
   let pedidoAnterior: string[] = [];
   let contestoHeridos = false;
+  const formasDeLaHora = new Set<string>();
 
   const seeded = scenario.policy ? await seedPolicy(scenario.policy) : null;
   try {
@@ -999,6 +1035,38 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           "propone-sin-heridos"
         );
       }
+      if (scenario.sinEco) {
+        // Los valores de lo que se le pidió antes de este turno: lo que no se
+        // pidió el orquestador lo confirma a propósito. También lo extraído: la
+        // póliza que encontró el agente no deja fila de confirmación, y así se
+        // escapó «Entendemos que tu póliza es POL-3311-B, ¿es correcto?».
+        const pedidos = new Set(pedidoAnterior.map(canonicalFieldKey));
+        const [filas, extraidos] = await Promise.all([
+          db
+            .select({
+              campo: claimFieldConfirmations.field_name,
+              valor: claimFieldConfirmations.suggested_value,
+            })
+            .from(claimFieldConfirmations)
+            .where(eq(claimFieldConfirmations.case_id, active)),
+          db
+            .select({ campo: extractedFields.field_key, valor: extractedFields.field_value })
+            .from(extractedFields)
+            .where(eq(extractedFields.case_id, active)),
+        ]);
+        const eco = confirmaLoDicho(
+          all,
+          `${turn.subject ?? ""}\n${turn.say}`,
+          [...filas, ...extraidos]
+            .filter((f) => pedidos.has(canonicalFieldKey(f.campo)))
+            .map((f) => f.valor ?? "")
+        );
+        if (eco) {
+          note(scenario.id, i + 1, `confirmó lo que acaba de decir: «${eco}»`, "confirma-lo-dicho");
+        }
+        for (const forma of formaDePedirLaHora(all)) formasDeLaHora.add(forma);
+      }
+
       const pidio = said.filter((r) => r.askedKeys.length > 0);
       if (pidio.length > 0) pedidoAnterior = pidio[pidio.length - 1].askedKeys;
 
@@ -1028,6 +1096,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
       }
       for (const key of want.noAsked ?? []) {
         if (pedidas.has(key)) note(scenario.id, i + 1, `pidió ${key} y no debía`, `pidio:${key}`);
+      }
+      if (want.cuidado && !diceCuidado(all)) {
+        note(scenario.id, i + 1, "no abre con una frase de cuidado", "cuidado");
+      }
+      if (want.sinPedido && (pedidas.size > 0 || pideAlgo(all))) {
+        note(scenario.id, i + 1, "pidió algo en una derivación", "sin-pedido");
       }
       if (want.confirma?.length) {
         const filas = await db
@@ -1128,6 +1202,17 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           }
         }
       }
+    }
+
+    // «¿Fue a la tarde, correcto?» y en la vuelta siguiente «Más o menos a qué
+    // hora fue.»: la misma pregunta cambiada sin que la persona contestara.
+    if (formasDeLaHora.size > 1) {
+      note(
+        scenario.id,
+        0,
+        `pidió la hora de ${formasDeLaHora.size} formas: ${[...formasDeLaHora].join(", ")}`,
+        "hora-en-una-forma"
+      );
     }
 
     if (caseId && scenario.finally) {
@@ -1292,6 +1377,52 @@ async function sweepOldRehearsalCases(): Promise<void> {
 }
 
 /**
+ * Sweep a seeded policyholder that a cut-short run left behind.
+ *
+ * `runScenario` deletes its seed in a `finally`. A process that dies between
+ * the seed and that `finally` (a usage limit, a closed terminal) leaves the
+ * customer and its policy in the book. From then on every rehearsal, the
+ * post-deploy one included, stops at `refuseIfPadronCargado`. It happened on
+ * 24/09 with POL-8812-R.
+ *
+ * A seed is identified by the exact name, DNI and policy number of a
+ * scenario's `policy` block, and only when it is older than an hour, like the
+ * case sweep. A seed lives for one scenario, so an hour-old seed is not in use.
+ */
+async function sweepOldSeeds(): Promise<void> {
+  const semillas = SCENARIOS.flatMap((s) => (s.policy ? [s.policy] : []));
+  if (semillas.length === 0) return;
+  try {
+    const stale = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .innerJoin(policies, eq(policies.customer_id, customers.id))
+      .where(
+        and(
+          eq(customers.tenant_id, TENANT_ID!),
+          lt(customers.created_at, sql`now() - interval '1 hour'`),
+          or(
+            ...semillas.map((p) =>
+              and(
+                eq(customers.full_name, p.nombre),
+                eq(customers.dni, p.dni.replace(/\D/g, "")),
+                eq(policies.policy_number, p.numero)
+              )
+            )
+          )
+        )
+      );
+    if (stale.length === 0) return;
+
+    // Cascades to the policy and the insured vehicle, as in runScenario.
+    await db.delete(customers).where(inArray(customers.id, [...new Set(stale.map((r) => r.id))]));
+    console.log(`Limpiados ${stale.length} titular(es) sembrado(s) que quedaron de ensayos cortados.\n`);
+  } catch (err) {
+    console.error("No se pudo limpiar titulares sembrados:", err instanceof Error ? err.name : "error");
+  }
+}
+
+/**
  * Refuse to rehearse against the mock extractor.
  *
  * The whole point is to exercise the real agent — the real model, the real
@@ -1426,6 +1557,7 @@ async function refuseIfPadronCargado(): Promise<void> {
 
 await refuseIfMocked();
 await refuseIfBudgetSpent();
+await sweepOldSeeds();
 await refuseIfPadronCargado();
 await sweepOldRehearsalCases();
 

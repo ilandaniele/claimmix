@@ -22,6 +22,8 @@ import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
+import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
+import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { logger } from "@/lib/observability/logger";
 
@@ -93,6 +95,14 @@ export interface ComposeReplyInput {
    * padre—, así que preguntar cuál es el bueno no tiene respuesta.
    */
   titularAjeno?: boolean;
+  /**
+   * Alguien se lastimó: la derivación abre con la frase de cuidado.
+   *
+   * El booleano del orquestador y no el texto del piso: el de WhatsApp trae el
+   * nombre que escribió la persona, y un «Lamentamos» ahí prendía la consigna
+   * en una derivación por titular ajeno.
+   */
+  heridos?: boolean;
   /** The claimant's most recent message, for tone only. */
   lastMessage?: string;
   /** The deterministic text. The model is asked to do better, not different. */
@@ -237,7 +247,7 @@ function buildPrompt(input: ComposeReplyInput): string {
 denunciar un siniestro. Escribís en castellano rioplatense, con voseo, claro y humano.
 
 LO QUE HAY QUE DECIR (no lo cambies, no agregues ni saques temas):
-${intentBrief[input.intent]}
+${intentBrief[input.intent]}${llevaCuidado(input) ? ` Abrí (después del saludo, si saludás) con una sola frase breve de cuidado: «${CUIDADO}». No repitas ni comentes lo que contó de las heridas, la internación o la salud de nadie, no diagnostiques, no prometas nada.` : ""}
 ${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(sinNumerosEnteros(input.question))}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder. Sin frases hechas como «entiendo tu preocupación», y la respuesta no nombra la documentación ni lo que falta: el pedido va una sola vez, en la lista.` : ""}
 
 ${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}\n\n${COMO_VA_LA_LISTA}` : ""}
@@ -245,7 +255,7 @@ ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de 
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName)}. Podés llamarla por su nombre de pila.` : ""}
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}
-${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto):\n"""${sinCentinelas(sinNumerosEnteros(input.lastMessage)).slice(0, 600)}"""` : ""}
+${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${sinCentinelas(sinNumerosEnteros(input.lastMessage)).slice(0, 600)}"""` : ""}
 
 ${channelBrief}
 
@@ -266,6 +276,12 @@ Devolvé JSON: {"message": "<el texto del mensaje>"}`;
 }
 
 const NUCLEO: Readonly<Record<string, RegExp>> = { hay_heridos: /lastim|herid|lesion/ };
+
+// Sólo la derivación: el orquestador marca `heridos` en la de gravedad, nunca en
+// la de póliza vencida sin gravedad ni en la del titular ajeno.
+function llevaCuidado(input: ComposeReplyInput): boolean {
+  return input.intent === "escalation" && input.heridos === true;
+}
 
 /** Everything the guardrails check, in one place so a rejection is explainable. */
 function violation(text: string, input: ComposeReplyInput): string | null {
@@ -325,6 +341,19 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     if (itemConVerbo.test(trimmed)) return "item_con_verbo";
   }
 
+  // Lee el último mensaje para el tono y de ahí sacó una póliza que nadie le
+  // pidió confirmar (goteo, 23/09). El conflicto sí la nombra: es uno de los valores.
+  if (
+    input.intent !== "conflict" &&
+    confirmaLoQueEscribio(
+      trimmed,
+      input.lastMessage && sinNumerosEnteros(input.lastMessage),
+      Object.values(input.knownValues ?? {})
+    )
+  ) {
+    return "confirma_lo_que_escribio";
+  }
+
   // Lo mismo para el conflicto, donde más se nota: un mensaje que dice que
   // hay una diferencia sin decir entre qué valores deja a la persona sin nada
   // que contestar, y el caso trabado esperando esa respuesta. La plantilla sí
@@ -349,7 +378,7 @@ function violation(text: string, input: ComposeReplyInput): string | null {
 
   // An escalation that asks for something contradicts itself — that exact
   // pile-up is why escalated cases send one message and nothing else.
-  if (deriva && /necesitamos que nos|envianos|mandanos/i.test(trimmed)) {
+  if (deriva && pideDatos(trimmed)) {
     return "escalation_asks_for_data";
   }
 
@@ -357,6 +386,13 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   // ensayo, y le pone género a una persona que todavía no existe.
   if (deriva && /(?<!\p{L})(?:él|ella)\s+(?:se|te|va)\b/iu.test(trimmed)) {
     return "escalation_gendered";
+  }
+
+  if (llevaCuidado(input)) {
+    // Como `dropped_conflict`: el redactor no dice menos que el piso que reemplaza.
+    if (!diceCuidado(trimmed)) return "dropped_care";
+    // Ni más: la frase acompaña, no repite ni pronostica lo que contó de la salud.
+    if (hablaDeLaSalud(trimmed)) return "care_names_health";
   }
 
   return null;
@@ -424,10 +460,19 @@ function explain(problem: string): string {
   if (problem === "item_con_verbo") {
     return "un ítem de la lista tiene verbo propio («Mandanos…», «Decinos…»). El verbo va una sola vez, en la frase que abre la lista; cada ítem nombra lo que falta: «Fotos de los daños».";
   }
+  if (problem === "confirma_lo_que_escribio") {
+    return "le preguntaste si es correcto algo que la persona acaba de escribir. Eso ya lo tenemos: no se lo devuelvas. Confirmá sólo lo que dice «ya entendimos».";
+  }
   if (problem === "too_long") return "es demasiado largo. Cortálo.";
   if (problem === "too_short") return "es demasiado corto.";
   if (problem === "escalation_asks_for_data") {
     return "pediste datos en un mensaje de derivación. No hay que pedir nada: se encarga un especialista.";
+  }
+  if (problem === "dropped_care") {
+    return `no abriste con la frase de cuidado. Después del saludo, si saludás, decí «${CUIDADO}», y no hables de las heridas ni de la salud de nadie.`;
+  }
+  if (problem === "care_names_health") {
+    return `nombraste las heridas, la internación o la salud de alguien. Alcanza con «${CUIDADO}»: no repitas lo que contó ni digas cómo va a estar nadie.`;
   }
   if (problem === "escalation_gendered") {
     return "le pusiste género al especialista. No sabemos quién es: decí «un especialista».";

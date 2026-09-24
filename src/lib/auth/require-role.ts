@@ -39,7 +39,7 @@ export type { UserRole } from "@/lib/auth/roles";
 
 export interface RoleContext {
   user: { id: string; email?: string };
-  userRow: { id: string; tenant_id: string; role: UserRole };
+  userRow: { id: string; tenant_id: string; role: UserRole; plan: string };
 }
 
 /**

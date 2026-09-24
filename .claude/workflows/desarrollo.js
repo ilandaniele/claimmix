@@ -7,9 +7,10 @@
 // Quién hace qué: un explorador ubica el terreno y lectores en paralelo lo
 // mapean; tres diseñadores proponen desde lentes distintos, dos jueces puntúan
 // y uno sintetiza; UN solo implementador toca código; cinco revisores buscan
-// problemas y cada hallazgo lo intentan refutar tres adversarios antes de que
-// alguien lo corrija; un comprobador corre `pnpm check --local` y LEE el
-// transcripto del ensayo; el último abre el PR. Nadie mergea.
+// problemas y cada hallazgo lo intenta refutar un adversario (tres si es de
+// seguridad o grave) antes de que alguien lo corrija; un comprobador corre
+// `pnpm check --local` y LEE el transcripto del ensayo; el último abre el PR.
+// Nadie mergea.
 
 export const meta = {
   name: 'desarrollo',
@@ -19,7 +20,7 @@ export const meta = {
     { title: 'Entender', detail: 'un explorador ubica el terreno; lectores en paralelo lo mapean' },
     { title: 'Diseñar', detail: 'tres enfoques, dos jueces, una síntesis' },
     { title: 'Implementar', detail: 'un solo implementador, en rama, con tests' },
-    { title: 'Revisar', detail: 'cinco lentes; cada hallazgo lo intentan refutar tres' },
+    { title: 'Revisar', detail: 'cinco lentes; tres refutadores para seguridad o gravedad alta; uno en Sonnet para el resto' },
     { title: 'Comprobar', detail: 'pnpm check --local, y alguien lee el transcripto' },
     { title: 'Entregar', detail: 'commit, push y PR; no mergea' },
   ],
@@ -220,6 +221,9 @@ const enFable = (pedido, opciones) => agent(pedido, { ...opciones, model: 'fable
   .catch(() => null)
   .then((r) => r ?? agent(pedido, { ...opciones, model: 'opus' }))
 const quien = (lente) => (lente === 'seguridad' ? enFable : agent)
+// Refutar cuesta más que encontrar: tres votos sólo para seguridad o gravedad alta, y fuera de seguridad refuta Sonnet.
+const votos = (h) => (h.lente === 'seguridad' || h.gravedad === 'alta' ? 3 : 1)
+const refutador = (h) => (h.lente === 'seguridad' ? enFable : (pedido, opciones) => agent(pedido, { ...opciones, model: 'sonnet', effort: 'medium' }))
 
 // Quien revisa mira el ÁRBOL DE TRABAJO, no `main...HEAD`.
 //
@@ -233,7 +237,7 @@ const confirmados = []
 
 for (let ronda = 1; ronda <= RONDAS; ronda++) {
   phase('Revisar')
-  // Barrera a propósito: hay que deduplicar entre lentes antes de pagar tres refutadores por hallazgo.
+  // Barrera a propósito: hay que deduplicar entre lentes antes de pagar refutadores por hallazgo.
   const encontrados = (await parallel(LENTES.map((l) => () => quien(l.clave)(
     `Tarea: ${tarea}
 Plan: ${plan.resumen}
@@ -241,7 +245,7 @@ Rama: ${rama}. ${DONDE_MIRAR}
 
 Ronda ${ronda} de revisión.${ronda > 1 ? ' Ya hubo una ronda antes y lo que encontró se corrigió: el árbol cambió, miralo de nuevo. Los de antes no hace falta repetirlos.' : ''}
 
-Revisá SOLO desde este lente: ${l.lente}. No cambies nada. Cada hallazgo con archivo, línea, por qué es un problema de verdad (no una preferencia) y gravedad. Si no hay nada, devolvé la lista vacía: un hallazgo inventado cuesta tres verificaciones.${REGLAS}`,
+Revisá SOLO desde este lente: ${l.lente}. No cambies nada. Cada hallazgo con archivo, línea, por qué es un problema de verdad (no una preferencia) y gravedad. Si no hay nada, devolvé la lista vacía: un hallazgo inventado cuesta verificaciones.${REGLAS}`,
     { label: `revisar:${l.clave}:ronda${ronda}`, phase: 'Revisar', schema: HALLAZGOS },
   )))).flatMap((r, i) => (r?.hallazgos ?? []).map((h) => ({ ...h, lente: LENTES[i].clave })))
 
@@ -251,14 +255,14 @@ Revisá SOLO desde este lente: ${l.lente}. No cambies nada. Cada hallazgo con ar
   if (nuevos.length === 0) break
 
   const juzgados = await parallel(nuevos.map((h) => () =>
-    parallel([0, 1, 2].map((i) => () => quien(h.lente)(
+    parallel(Array.from({ length: votos(h) }, (_, i) => () => refutador(h)(
       `Rama: ${rama}. ${DONDE_MIRAR}
 
 Hallazgo de una revisión: ${JSON.stringify(h)}
 
-Sos el refutador ${i + 1} de 3. Tu trabajo es DEMOSTRAR que el hallazgo está mal, no aplica, o no tiene impacto real, leyendo el código. Si no lo podés refutar con evidencia concreta, refutado=false. Ante la duda, refutado=true.${REGLAS}`,
+Sos el refutador ${i + 1} de ${votos(h)}. Tu trabajo es DEMOSTRAR que el hallazgo está mal, no aplica, o no tiene impacto real, leyendo el código. Si no lo podés refutar con evidencia concreta, refutado=false. Ante la duda, refutado=true.${REGLAS}`,
       { label: `refutar:${h.titulo.slice(0, 30)}`, phase: 'Revisar', schema: REFUTACION, effort: 'high' },
-    ))).then((votos) => ({ h, sobrevive: votos.filter(Boolean).filter((v) => !v.refutado).length >= 2 })),
+    ))).then((vs) => ({ h, sobrevive: vs.filter(Boolean).filter((v) => !v.refutado).length >= Math.ceil(votos(h) / 2) })),
   ))
   const sobrevivientes = juzgados.filter(Boolean).filter((j) => j.sobrevive).map((j) => j.h)
   confirmados.push(...sobrevivientes)
@@ -277,7 +281,7 @@ Sos el único que toca código. Corregí cada uno con el cambio más chico que l
 // ── Comprobar ───────────────────────────────────────────────────────────
 phase('Comprobar')
 const PEDIDO_CHECK = `Rama: ${rama}. Corré "pnpm check --local" (tarda unos quince minutos: lanzalo en segundo plano y esperá a que termine; no lo cortes). Es la herramienta del repo y limpia lo suyo. Informá capa por capa. Si falla el ensayo en UN escenario, corré ese escenario solo con "pnpm rehearse <nombre>": una regresión aparece las dos veces, una variación casi nunca. Si el proceso muere con un código raro (por ejemplo 3221226505) es el runtime, no el código: reintentá una vez. Y LEÉ el transcripto del ensayo entero: media respuesta puede pasar todas las verificaciones y sonar mal, y eso sólo lo nota alguien que lee. transcripto_suena_bien=false si alguna respuesta del agente suena repetida, fría, incoherente con lo que el denunciante dijo, o pide algo que ya le dieron.${REGLAS}`
-let comprobacion = await agent(PEDIDO_CHECK, { label: 'check', schema: COMPROBACION })
+let comprobacion = await agent(PEDIDO_CHECK, { label: 'check', schema: COMPROBACION, model: 'sonnet' })
 if (comprobacion && (comprobacion.capas.some((c) => !c.ok) || !comprobacion.transcripto_suena_bien)) {
   log('El check no quedó verde: una ronda de corrección y se vuelve a correr')
   await agent(
@@ -287,7 +291,7 @@ Rama: ${rama}. Resultado del check: ${JSON.stringify(comprobacion)}
 Sos el único que toca código. Diagnosticá y corregí lo que falló (si es el transcripto, el problema está en cómo suena el agente: prompts, redactor u orquestador). Cambio mínimo, con su test cuando aplique. No hagas commit.${REGLAS}`,
     { label: 'corregir:check', phase: 'Comprobar', schema: IMPL },
   )
-  comprobacion = await agent(PEDIDO_CHECK, { label: 'check:2', phase: 'Comprobar', schema: COMPROBACION })
+  comprobacion = await agent(PEDIDO_CHECK, { label: 'check:2', phase: 'Comprobar', schema: COMPROBACION, model: 'sonnet' })
 }
 const verde = !!comprobacion && comprobacion.capas.every((c) => c.ok) && comprobacion.transcripto_suena_bien
 
@@ -300,7 +304,7 @@ Hallazgos confirmados y corregidos: ${JSON.stringify(confirmados)}
 Comprobación: ${JSON.stringify(comprobacion)}
 
 Hacé UN commit con todo lo de la rama (git add de los archivos tocados, nada de "git add -A" a ciegas): mensaje de una línea en castellano, presente, que diga qué cambia y por qué, como los del historial ("git log --oneline -15"), y el trailer de coautoría "Co-Authored-By: <modelo> <noreply@anthropic.com>", donde <modelo> es el nombre del modelo con el que estás corriendo VOS. No lo copies de un commit viejo ni de acá: el historial tiene que decir quién lo escribió. Pusheá la rama y abrí el PR con "gh pr create --base qa": título = la línea del commit; cuerpo con el porqué, qué se probó y qué NO se pudo probar${verde ? '' : ' (el check NO quedó verde: decilo arriba de todo)'}, y al final "🤖 Generated with [Claude Code](https://claude.com/claude-code)". NO mergees.${REGLAS}`,
-  { label: 'pr', schema: ENTREGA },
+  { label: 'pr', schema: ENTREGA, model: 'sonnet' },
 )
 
 return {

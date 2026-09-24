@@ -157,10 +157,22 @@ export function sinHeridosSupuestos(
   };
 }
 
-function conLaRespuesta(claim: ExtractedClaim, respuesta: "sí" | "no"): ExtractedClaim {
-  const herido =
+/**
+ * Si el reclamo dice que alguien se lastimó.
+ *
+ * No alcanza con `injury_severity`: el «Sí» a la pregunta abierta deriva el
+ * caso y la deja en null, y sólo `hay_heridos` lo dice. La severidad del caso
+ * tampoco: habla del siniestro, no de las personas.
+ */
+export function hayHeridos(claim: Pick<ExtractedClaim, "injury_severity" | "fields">): boolean {
+  return (
     leido(claim.injury_severity) === "sí" ||
-    claim.fields.some((f) => esDeHeridos(f.field_key) && leido(f.field_value) === "sí");
+    claim.fields.some((f) => esDeHeridos(f.field_key) && leido(f.field_value) === "sí")
+  );
+}
+
+function conLaRespuesta(claim: ExtractedClaim, respuesta: "sí" | "no"): ExtractedClaim {
+  const herido = hayHeridos(claim);
   // Un «no» no tapa una herida que el modelo leyó en otra parte de la charla.
   if (respuesta === "no" && herido) return claim;
 

@@ -59,15 +59,15 @@ llama al mismo workflow con los secretos de QA mapeados uno por uno —nunca
 corren en el runner, tres de los cuales escriben— y con un interruptor por
 chequeo.
 
-| Chequeo               | Producción   | QA          | Por qué                                                                                                                                               |
-| --------------------- | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Smoke                 | sí, `--deep` | sí, liviano | `--deep` sube un archivo y llama al modelo; no es lo que ese run prueba                                                                               |
-| Ensayo                | sí           | sí          | sube adjuntos de verdad, al balde propio de QA, no al de producción                                                                                   |
-| Canales de entrada    | sí           | no          | QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito                                                                                     |
-| Paridad de documentos | sí           | sí          | sólo le pregunta al catálogo                                                                                                                          |
-| Permisos del rol      | sí           | sí          | sólo le pregunta al catálogo                                                                                                                          |
-| Pen test              | sí           | no          | la pared entre inquilinos necesita el inquilino de demo, que en QA no está                                                                            |
-| Carga de lectura      | sí           | no          | 400 casos contra cientos de miles no comparan con el mismo presupuesto; el k6 de `load-tests.yml` sí corre contra QA, aparte, contra su alias público |
+| Chequeo                             | Producción   | QA          | Por qué                                                                                                                                               |
+| ----------------------------------- | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Smoke                               | sí, `--deep` | sí, liviano | `--deep` sube un archivo y llama al modelo; no es lo que ese run prueba                                                                               |
+| Ensayo                              | sí           | sí          | sube adjuntos de verdad, al balde propio de QA, no al de producción                                                                                   |
+| Canales de entrada                  | sí           | no          | QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito                                                                                     |
+| Paridad de documentos y migraciones | sí           | sí          | sólo le pregunta al catálogo y al registro de migraciones                                                                                             |
+| Permisos del rol                    | sí           | sí          | sólo le pregunta al catálogo                                                                                                                          |
+| Pen test                            | sí           | no          | la pared entre inquilinos necesita el inquilino de demo, que en QA no está                                                                            |
+| Carga de lectura                    | sí           | no          | 400 casos contra cientos de miles no comparan con el mismo presupuesto; el k6 de `load-tests.yml` sí corre contra QA, aparte, contra su alias público |
 
 **Lo apagado no queda callado.** El job `alcance` corre al final, aun con todo
 rojo, y escribe en el resumen del run una fila por chequeo: corrió, corrió y

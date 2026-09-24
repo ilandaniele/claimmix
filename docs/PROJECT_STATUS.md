@@ -3530,6 +3530,91 @@ golpeó», «No sé») queda para el extractor, y si no nombra heridos la pregun
 puede repetirse. Un negativo por debajo de 0,60 antes iba a `missing_docs`;
 ahora queda como pregunta abierta.
 
+### 🔁 Lo que acaba de decir no vuelve como «¿…, correcto?» (2026-09-23)
+
+En el ensayo `goteo` (a1e0019), a «Fue un choque, ayer a la tarde» se le
+contestó «¿Fue a la tarde, correcto?». En la vuelta siguiente esa pregunta
+desapareció sin respuesta y apareció «Más o menos a qué hora fue.».
+
+- **El eco.** La rama C del orquestador ya no pregunta un valor de confianza
+  media que la persona escribió, palabra por palabra, contestando lo que se le
+  pidió en la vuelta anterior (`dichoRecien`, `src/core/mensajes/lo-dicho.ts`):
+  la fila se guarda `confirmed`. Qué campo es lo dice haberlo pedido, no el
+  texto. No cuenta si lo escribió para negarlo («No, no soy Roberto Paz», «no
+  fue un choque»), ni un número suelto (puede ser el DNI o la póliza). Lo
+  inferido («ayer» como fecha), lo que choca con el padrón (rama D) y los
+  heridos se siguen confirmando.
+- **La franja no es una hora.** `esValorVago` marca una `hora_siniestro` sin
+  dígitos ni hora dicha con palabras («a la tarde», «in the afternoon»). Entra
+  como duda aunque el extractor la dé por segura, nunca sale como valor a
+  confirmar (se pide la hora, con la misma consigna en cada vuelta), y la
+  confianza alta no cierra su fila. La cierra contestar la pregunta: con una
+  hora, con un «sí», con la franja sola («fue a la tarde») o con que no sabe
+  («no me acuerdo», «I don't remember»); lo mira `contestaSinHora`, frase por
+  frase, así que «esta tarde te mando las fotos» no la contesta. Un «sí» a una
+  hora precisa la cierra aunque la extracción de esa vuelta no traiga la hora.
+- **La pregunta que cambió sola.** La extracción relee la conversación y a
+  veces se saltea un campo; la rama C pisaba la fila pendiente con un valor
+  vacío. Ahora usa el valor y la confianza de la fila (`confidence` en
+  `FieldNeedingConfirmation`), menos heridos: `sinHeridosSupuestos` vacía el
+  «no» a propósito para preguntarlo abierto.
+- **El redactor también.** La vuelta en que la persona escribió «La póliza es
+  POL-3311-B» contestó «Entendemos que tu póliza es POL-3311-B, ¿es
+  correcto?»: la póliza la había encontrado el agente, así que no estaba en la
+  lista, y el redactor la sacó del último mensaje. El brief se lo prohíbe junto
+  a ese mensaje, y la guarda `confirma_lo_que_escribio` de `compose-reply`
+  (`confirmaLoQueEscribio`, en `lo-dicho`) rechaza una confirmación que trae un
+  número de tres cifras o dos palabras con mayúscula del último mensaje que no
+  estén en `knownValues`. El conflicto no pasa por ahí: nombra el valor a propósito.
+- **Mail y WhatsApp**, es-AR y en-US: la regla está en el orquestador y en el
+  redactor, que son los mismos para los dos canales.
+- **El ensayo.** `goteo` corre `confirma-lo-dicho` y `hora-en-una-forma`
+  (`scripts/lib/ensayo-confirmaciones.mjs`). Ver `docs/TESTING.md`.
+
+**Lo que queda.** La coincidencia es literal: un nombre dado vuelta o «Alem al
+2300» contra «Av. Alem 2300» se sigue confirmando. Una hora que el extractor
+normalizó («18:00» de «a las 6») también, igual que un valor que dio sin que se
+lo pidiéramos y un número suelto de confianza media. «Fue esta tarde» no cuenta
+como la franja sola, así que la hora se vuelve a pedir.
+
+### 🤝 Cuando hay heridos, la derivación empieza por el cuidado (2026-09-24)
+
+En el ensayo `incendio-grave` (23/09), a quien contó que su señora estaba
+internada con quemaduras se le contestó «Recibimos tu denuncia. Ya la derivamos
+a un especialista…»: correcto, sin pedir nada, y de trámite.
+
+- **La señal.** `hayHeridos` (`src/core/case/heridos-supuestos.ts`) lee lo ya
+  extraído: `injury_severity` o `hay_heridos` en «sí». Alcanza el «Sí» a la
+  pregunta abierta, que deriva el caso y deja `injury_severity` en null. Sin
+  llamadas nuevas al modelo ni consultas.
+- **Quién la lleva.** Sólo la derivación por gravedad (rama B), con
+  `heridos: true` en los datos del mensaje. La del titular ajeno y la que
+  decide el agente no la llevan, y la póliza vencida sin gravedad tampoco. Un
+  caso grave con heridos sí, aunque la póliza haya vencido. Viaja sólo el
+  booleano: ningún detalle médico, ni en el mensaje ni en la auditoría.
+- **Los pisos.** WhatsApp antepone `CUIDADO` («Lamentamos mucho lo que están
+  pasando.») a `ESCALATION_TEXT`; el mail lo pone como primer párrafo. Sin
+  heridos, los dos salen byte por byte como antes.
+- **El redactor.** Con `heridos` —el booleano de `message.data`, no el texto
+  del piso, que en WhatsApp trae el nombre que escribió la persona—, el brief
+  le pide abrir con una frase breve de cuidado, sin repetir lo que contó de las
+  heridas ni diagnosticar ni prometer. La guarda `dropped_care` rechaza el texto que la
+  saca, como `dropped_conflict` con los valores del conflicto, y
+  `care_names_health` el que nombra heridas, internación o salud
+  (`hablaDeLaSalud`); el resto de las guardas de la derivación siguen igual.
+- **Una sola vez.** `CUIDADO` y los predicados de la guarda (`diceCuidado`,
+  `pideDatos`, `hablaDeLaSalud`) viven en `src/core/mensajes/derivacion.ts`.
+  Los pisos usan sólo la frase.
+- **El ensayo.** `incendio-grave` y `mail-grave` corren `cuidado`,
+  `sin-pedido` con `pideAlgo` —más ancho que la guarda, para que muerda lo
+  que ella deja pasar— y no mencionan «internad», «quemadur» ni «recuper». Ver
+  `docs/TESTING.md`.
+
+**Lo que queda.** La frase existe sólo en castellano rioplatense: el mensaje al
+asegurado no tiene idioma propio (`src/lib/i18n` es la interfaz). La rama B lee
+la gravedad que dio la extracción, no `finalSeverity`. Una derivación en una
+vuelta cuya extracción ya no nombra las heridas sale sin la frase.
+
 ### 🙋 Waiting on you (not code)
 
 - **Qué hacer con la respuesta a un caso ya derivado.** Desde que el titular

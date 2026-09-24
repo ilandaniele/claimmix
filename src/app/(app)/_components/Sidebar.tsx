@@ -6,6 +6,7 @@ import { ADMIN_ROLES, CUSTOMER_PII_ROLES } from "@/lib/auth/roles";
 import { usePathname, useSearchParams } from "next/navigation";
 import { hrefActivo } from "./nav-activo";
 import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
 import {
   Inbox,
   AlertTriangle,
@@ -22,12 +23,34 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-interface NavItemDef {
+export interface NavItemDef {
   label: string;
   href: string;
   icon: LucideIcon;
   disabled?: boolean;
   disabledReason?: string;
+  /** Función del Plan Pro: sin ese plan, el ítem se ve con candado. */
+  pro?: true;
+  /** Lo que va en lugar del candado pelado, p. ej. «Plan Pro». */
+  insignia?: string;
+}
+
+/*
+ * Se deshabilita y no se esconde, al revés que «Clientes»: acá no hay datos
+ * de terceros del otro lado, y que la función exista es justamente lo que el
+ * plan vende. La guarda sigue siendo `exigirPlanPro` en el servidor.
+ */
+export function conCandadoPro(
+  items: NavItemDef[],
+  esPro: boolean,
+  t: (k: TranslationKey) => string
+): NavItemDef[] {
+  if (esPro) return items;
+  return items.map((item) =>
+    item.pro
+      ? { ...item, disabled: true, disabledReason: t("planPro.bloqueado"), insignia: t("planPro.nombre") }
+      : item
+  );
 }
 
 /*
@@ -39,7 +62,15 @@ interface NavItemDef {
  */
 type NavLinkProps = NavItemDef & { active: boolean };
 
-function NavLink({ href, label, icon: Icon, disabled, disabledReason, active }: NavLinkProps) {
+export function NavLink({
+  href,
+  label,
+  icon: Icon,
+  disabled,
+  disabledReason,
+  insignia,
+  active,
+}: NavLinkProps) {
   const isActive = active;
 
   if (disabled) {
@@ -65,7 +96,14 @@ function NavLink({ href, label, icon: Icon, disabled, disabledReason, active }: 
       >
         <Icon size={17} className="text-slate-300 dark:text-slate-600" />
         <span className="text-[13.5px]">{label}</span>
-        <Lock size={12} className="ml-auto text-slate-300 dark:text-slate-600" />
+        {insignia ? (
+          <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-violet-50 px-1.5 text-[10.5px] font-medium text-violet-700">
+            <Lock size={10} />
+            {insignia}
+          </span>
+        ) : (
+          <Lock size={12} className="ml-auto text-slate-300 dark:text-slate-600" />
+        )}
       </div>
     );
   }
@@ -99,10 +137,13 @@ function NavLink({ href, label, icon: Icon, disabled, disabledReason, active }: 
 export function Sidebar({
   role,
   isOperator = false,
+  esPro = false,
 }: {
   role: string;
   /** Quien opera ClaimMix, no el asegurador. Ve la cartera de clientes. */
   isOperator?: boolean;
+  /** Sin el Plan Pro, lo del Plan Pro va con candado. */
+  esPro?: boolean;
 }) {
   const t = useT();
   const pathname = usePathname();
@@ -110,7 +151,7 @@ export function Sidebar({
   const esAdmin = (ADMIN_ROLES as string[]).includes(role);
   const puedeVerClientes = (CUSTOMER_PII_ROLES as string[]).includes(role);
 
-  const operacionItems: NavItemDef[] = [
+  const operacionItems: NavItemDef[] = conCandadoPro([
     { label: t("nav.bandeja") || "Bandeja", href: "/bandeja", icon: Inbox },
     /*
      * Directo a la bandeja filtrada. `/escalados` era una pagina de nueve
@@ -139,9 +180,9 @@ export function Sidebar({
     ...(puedeVerClientes
       ? [{ label: t("nav.clientes") || "Clientes", href: "/clientes", icon: Users }]
       : []),
-  ];
+  ], esPro, t);
 
-  const analisisItems: NavItemDef[] = [
+  const analisisItems: NavItemDef[] = conCandadoPro([
     { label: t("nav.metricas") || "Métricas", href: "/metricas", icon: BarChart2 },
     { label: t("nav.demo"), href: "/demo", icon: Play },
     {
@@ -171,7 +212,7 @@ export function Sidebar({
     ...(isOperator
       ? [{ label: t("nav.cartera"), href: "/admin/cartera", icon: Briefcase }]
       : []),
-  ];
+  ], esPro, t);
 
   const CONFIG_HREF = "/configuracion";
   const activo = hrefActivo(

@@ -142,7 +142,7 @@ function buildContext(id: string) {
 function setupAuth(role: UserRole = "analyst") {
   vi.mocked(requireRole).mockResolvedValue({
     user: { id: USER_ID, email: "test@example.com" },
-    userRow: { id: USER_ID, tenant_id: TENANT_ID, role },
+    userRow: { id: USER_ID, tenant_id: TENANT_ID, role, plan: "piloto" },
   });
 }
 

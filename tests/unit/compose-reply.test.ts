@@ -23,6 +23,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { composeReply } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
+import { CUIDADO } from "@/core/mensajes/derivacion";
 
 const mockCall = callGemini as unknown as ReturnType<typeof vi.fn>;
 
@@ -687,5 +688,167 @@ describe("composeReply — quien escribe no es el titular", () => {
     replies(`${DICE_LA_DIFERENCIA} ¿Cuál es el correcto?`);
 
     expect(await composeReply(ajeno({ titularAjeno: false }))).not.toBe(FALLBACK);
+  });
+});
+
+/*
+ * El ensayo `goteo` del 23/09: a «La póliza es POL-3311-B», pedida en la vuelta
+ * anterior, se le contestó «Entendemos que tu póliza es POL-3311-B, ¿es
+ * correcto?». La póliza ya la tenía el agente y no estaba en la lista: el
+ * redactor la sacó del último mensaje.
+ */
+describe("composeReply — lo que acaba de escribir no vuelve como «¿…, correcto?»", () => {
+  const PIDE = "Para seguir necesitamos las fotos de los daños.";
+  const escribio = (over: Partial<Parameters<typeof composeReply>[0]> = {}) =>
+    base({
+      fields: ["fotos_danos"],
+      lastMessage: "Soy Roberto Paz, DNI 25.888.101. La póliza es POL-3311-B",
+      claimantName: "Roberto Paz",
+      ...over,
+    });
+
+  it.each(
+    [
+      `Entendemos que tu póliza es POL-3311-B, ¿es correcto? ${PIDE}`,
+      `Entendemos que el número es POL-3311-B. ¿Correcto? ${PIDE}`,
+      `¿Me confirmás que sos Roberto Paz? ${PIDE}`,
+    ].flatMap((m) => (["whatsapp", "email"] as const).map((canal) => [m, canal] as const))
+  )("rechaza «%s» por %s y el reintento dice por qué", async (mensaje, canal) => {
+    replies(mensaje);
+
+    expect(await composeReply(escribio({ channel: canal }))).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0]).toContain("algo que la persona acaba de escribir");
+  });
+
+  it.each([
+    // Lo eligió confirmar el orquestador.
+    [`Entendemos que tu póliza es POL-3311-B, ¿es correcto? ${PIDE}`, { policy_number: "POL-3311-B" }],
+    [`Entendemos que tu DNI es ****8101, ¿es correcto? ${PIDE}`, { dni: "25888101" }],
+    // El nombre de pila en el saludo, y un pedido sin confirmar nada.
+    [`¡Gracias, Roberto! ${PIDE}`, {}],
+  ] as Array<[string, Record<string, string>]>)("toma «%s»", async (mensaje, knownValues) => {
+    replies(mensaje);
+
+    const fields = ["fotos_danos", ...Object.keys(knownValues)];
+    expect(await composeReply(escribio({ fields, knownValues }))).not.toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("el conflicto nombra lo que escribió", async () => {
+    replies("Nos dijiste Pedro García y tenemos Juan Pérez. ¿Cuál es el correcto?");
+
+    const out = await composeReply(
+      base({
+        intent: "conflict",
+        lastMessage: "Soy Pedro García",
+        conflicts: [{ fieldKey: "full_name", proposed: "Pedro García", stored: "Juan Pérez" }],
+      })
+    );
+
+    expect(out).not.toBe(FALLBACK);
+  });
+
+  it("el brief lo dice junto al último mensaje", async () => {
+    replies(PIDE);
+
+    await composeReply(escribio());
+
+    expect(mockCall.mock.calls[0][0] as string).toContain(
+      "ni le preguntes si es correcto algo que escribió ahí"
+    );
+  });
+});
+
+/*
+ * incendio-grave, 23/09: la derivación a quien tenía a su señora internada no
+ * decía nada de eso. Con `heridos`, el redactor abre con la frase de cuidado y
+ * no puede sacarla, como no puede sacar los valores de un conflicto.
+ */
+describe("composeReply — la derivación con heridos", () => {
+  const CON_CUIDADO = `${CUIDADO} Recibimos tu denuncia y la derivamos a un especialista.`;
+  const BRIEF = "frase breve de cuidado";
+  const SIN_FRASE = "Hola, Laura. Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.";
+  const CON_FRASE = `Hola, Laura. ${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.`;
+
+  function responde(...mensajes: string[]) {
+    for (const message of mensajes) {
+      mockCall.mockResolvedValueOnce({
+        text: JSON.stringify({ message }),
+        usage: { promptTokens: 0, completionTokens: 0 },
+      });
+    }
+  }
+
+  it("dos intentos sin la frase devuelven el piso", async () => {
+    responde(SIN_FRASE, SIN_FRASE);
+
+    const out = await composeReply(base({ intent: "escalation", heridos: true, fallback: CON_CUIDADO }));
+
+    expect(out).toBe(CON_CUIDADO);
+    expect(mockCall.mock.calls[0][0] as string).toContain(BRIEF);
+    expect(mockCall.mock.calls[1][0] as string).toContain("no abriste con la frase de cuidado");
+  });
+
+  it("el segundo intento con la frase sale", async () => {
+    responde(SIN_FRASE, CON_FRASE);
+
+    const out = await composeReply(base({ intent: "escalation", heridos: true, fallback: CON_CUIDADO }));
+
+    expect(out).toBe(CON_FRASE);
+    expect(mockCall.mock.calls[1][0] as string).toContain(`decí «${CUIDADO}»`);
+  });
+
+  it("sin heridos, ni la consigna ni la guarda", async () => {
+    responde(SIN_FRASE);
+
+    const out = await composeReply(base({ intent: "escalation" }));
+
+    expect(out).toBe(SIN_FRASE);
+    expect(mockCall.mock.calls[0][0] as string).not.toContain(BRIEF);
+    expect(mockCall.mock.calls[0][0] as string).not.toContain(CUIDADO);
+  });
+
+  it.each(["ask", "conflict"] as const)("%s con heridos no la exige", async (intent) => {
+    const mensaje = "Para seguir con tu denuncia contanos un poco más de lo que pasó, por favor.";
+    responde(mensaje);
+
+    const out = await composeReply(base({ intent, heridos: true }));
+
+    expect(out).toBe(mensaje);
+    expect(mockCall.mock.calls[0][0] as string).not.toContain(BRIEF);
+  });
+
+  // El piso de WhatsApp del titular ajeno trae el nombre que escribió la
+  // persona: la señal no puede salir de ahí.
+  it("un «Lamentamos» en el piso no la prende sin heridos", async () => {
+    responde(SIN_FRASE);
+
+    const out = await composeReply(
+      base({
+        intent: "escalation",
+        fallback: `Recibimos tu denuncia. La póliza figura a nombre de R*** P*** y nos escribió Lamentamos Paz.`,
+      })
+    );
+
+    expect(out).toBe(SIN_FRASE);
+    expect(mockCall.mock.calls[0][0] as string).not.toContain(BRIEF);
+  });
+
+  it.each([
+    ["le pone género", `${CUIDADO} Él se va a comunicar con vos a la brevedad.`, "le pusiste género"],
+    ["pide algo", `${CUIDADO} Derivamos tu denuncia; mandanos las fotos.`, "pediste datos"],
+    ["promete un plazo", `${CUIDADO} Un especialista te llama en 24 horas.`, "prometiste algo"],
+    [
+      "repite lo que contó de la salud",
+      `Hola, Laura. ${CUIDADO} Esperamos que tu señora se recupere pronto de las quemaduras. Ya derivamos tu denuncia a un especialista.`,
+      "nombraste las heridas",
+    ],
+  ])("con la frase, sigue rechazando lo que %s", async (_, mensaje, motivo) => {
+    responde(mensaje, mensaje);
+
+    const out = await composeReply(base({ intent: "escalation", heridos: true, fallback: CON_CUIDADO }));
+
+    expect(out).toBe(CON_CUIDADO);
+    expect(mockCall.mock.calls[1][0] as string).toContain(motivo);
   });
 });

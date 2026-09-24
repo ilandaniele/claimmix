@@ -837,3 +837,65 @@ describe("resolveDeclinedDocs — un reconocedor caído no es un «no negó nada
     }
   });
 });
+
+/**
+ * Una foto que no se pudo mirar no es una foto que no se reconoció.
+ *
+ * El `pnpm check` del 24/09, `choque-completo` turno 3, en las dos corridas:
+ * la licencia llegó, `identifyDocument` recibió un 429, su catch devolvió null
+ * y el agente le contestó a la persona que no reconoció la licencia en la foto.
+ */
+describe("reconcileAttachments — una foto que no se pudo mirar vuelve a la cola", () => {
+  const cupo = () =>
+    new GeminiExtractionError("Quota exceeded", { status: 429, code: "RESOURCE_EXHAUSTED" });
+
+  function llegaLaLicencia(err: unknown) {
+    queueSelects(
+      [{ doc_key: "licencia_conducir" }],
+      [{ id: "att-1", filename: "licencia.jpg", contentType: "image/jpeg", storagePath: null }]
+    );
+    vi.mocked(callGemini).mockRejectedValue(err);
+  }
+
+  it.each([
+    ["un 429", cupo],
+    ["un TIMEOUT", () => new GeminiExtractionError("plazo", { code: "TIMEOUT" })],
+  ])("%s vuelve a la cola sin gastar la mirada", async (_nombre, caida) => {
+    const err = caida();
+    llegaLaLicencia(err);
+
+    await expect(reconcileAttachments(CASE, TENANT, null, true)).rejects.toBe(err);
+
+    expect(db.update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("sin el aviso, el mismo 429 sigue como antes", async () => {
+    llegaLaLicencia(cupo());
+
+    await expect(reconcileAttachments(CASE, TENANT, null)).resolves.toBeUndefined();
+
+    expect(actualizacionCon("intentos_de_identificacion")).not.toBeNull();
+    expect(actualizacionesDePedidos()).toEqual([]);
+  });
+
+  it("un 400 no corta el turno aunque se pueda retomar", async () => {
+    llegaLaLicencia(new GeminiExtractionError("400", { status: 400, code: "INVALID_ARGUMENT" }));
+
+    await expect(reconcileAttachments(CASE, TENANT, null, true)).resolves.toBeUndefined();
+
+    expect(actualizacionesDePedidos()).toEqual([]);
+  });
+
+  it.each([true, false])("el log dice el estado del proveedor, una sola vez (vuelveALaCola=%s)", async (vuelve) => {
+    llegaLaLicencia(cupo());
+
+    await reconcileAttachments(CASE, TENANT, null, vuelve).catch(() => undefined);
+
+    expect(mockLogError).toHaveBeenCalledTimes(1);
+    expect(mockLogError).toHaveBeenCalledWith(
+      { error_name: "GeminiExtractionError", status: 429, code: "RESOURCE_EXHAUSTED", case_id: CASE },
+      "documents.identify_failed"
+    );
+  });
+});

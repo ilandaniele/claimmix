@@ -17,6 +17,7 @@ vi.mock("@/lib/db/schema", () => ({
     full_name: "full_name",
     locale: "locale",
   },
+  tenants: { id: "id", plan: "plan" },
 }));
 
 import {
@@ -31,6 +32,7 @@ const FILA_A = {
   role: "analyst",
   full_name: "Ana",
   locale: "es-AR",
+  plan: "piloto",
 };
 const FILA_B = {
   id: "u-b",
@@ -38,12 +40,17 @@ const FILA_B = {
   role: "admin",
   full_name: "Beto",
   locale: null,
+  plan: "profesional",
 };
 
 /** La cadena de drizzle, devolviendo la fila que se le pase. */
 function conFila(fila: unknown | null) {
   mockSelect.mockReturnValue({
-    from: () => ({ where: () => ({ limit: () => Promise.resolve(fila ? [fila] : []) }) }),
+    from: () => ({
+      innerJoin: () => ({
+        where: () => ({ limit: () => Promise.resolve(fila ? [fila] : []) }),
+      }),
+    }),
   });
 }
 
@@ -62,14 +69,17 @@ describe("filaDeUsuario", () => {
     conFila(FILA_A);
     const a = await filaDeUsuario("u-a");
     expect(a?.tenant_id).toBe(FILA_A.tenant_id);
+    expect(a?.plan).toBe(FILA_A.plan);
 
     conFila(FILA_B);
     const b = await filaDeUsuario("u-b");
     expect(b?.tenant_id).toBe(FILA_B.tenant_id);
+    expect(b?.plan).toBe(FILA_B.plan);
 
     // u-a sigue cacheado con SU fila, aunque el mock ahora devolvería la de u-b.
     const aDeNuevo = await filaDeUsuario("u-a");
     expect(aDeNuevo?.tenant_id).toBe(FILA_A.tenant_id);
+    expect(aDeNuevo?.plan).toBe(FILA_A.plan);
     expect(mockSelect).toHaveBeenCalledTimes(2);
   });
 

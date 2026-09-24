@@ -1,6 +1,7 @@
 import { escapeHtml } from "@/server/email/render";
 import { textoAHtml } from "@/core/email/html";
 import { laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
+import { CUIDADO } from "@/core/mensajes/derivacion";
 
 /**
  * Email template: specialist_escalation
@@ -11,6 +12,7 @@ import { laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
  *
  * AC11: Sent when severity = 'high' or 'critical' and requires_specialist = true.
  * AC24: No DNI or full policy_number in body.
+ * Con `heridos`, el cuerpo abre con la frase de cuidado (`CUIDADO`).
  *
  * Subject: "Tu reclamo fue escalado a un especialista - Caso #{caseId}"
  *
@@ -34,6 +36,8 @@ export interface SpecialistEscalationData {
   claimantName?: string | null;
   /** La prosa ya redactada. Reemplaza el cuerpo y nada más. */
   cuerpo?: string | null;
+  /** Alguien se lastimó. Sólo el booleano: ningún detalle médico. */
+  heridos?: boolean;
 }
 
 
@@ -60,16 +64,20 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
   const agregar =
     "Si tenés información adicional relevante, podés responder a este correo y será incorporada a tu caso.";
 
-  const cuerpo = `${urgencyMsg}\n\n${derivacion}\n\n${sinAccion}\n\n${agregar}`;
+  const parrafos = [
+    ...(data.heridos === true ? [CUIDADO] : []),
+    urgencyMsg,
+    derivacion,
+    sinAccion,
+    agregar,
+  ];
+  const cuerpo = parrafos.join("\n\n");
   const redactado = data.cuerpo?.trim();
   const diferencia = laDiferencia(data);
 
   const prosaHtml = redactado
     ? textoAHtml(redactado)
-    : `<p>${urgencyMsg}</p>
-  <p>${escapeHtml(derivacion)}</p>
-  <p>${escapeHtml(sinAccion)}</p>
-  <p>${escapeHtml(agregar)}</p>`;
+    : parrafos.map((p) => `<p>${escapeHtml(p)}</p>`).join("\n  ");
 
   const html = `<!DOCTYPE html>
 <html lang="es">

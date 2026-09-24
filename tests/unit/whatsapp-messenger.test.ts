@@ -56,6 +56,8 @@ import { db } from "@/lib/db";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
+import { CUIDADO, diceCuidado, hablaDeLaSalud } from "@/core/mensajes/derivacion";
+import { pideAlgo } from "../../scripts/lib/pide-algo.mjs";
 import type { EmailTemplate } from "@/server/email/render";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
@@ -612,5 +614,96 @@ describe("messengerFor", () => {
     expect(messengerFor("whatsapp")).toBe(whatsappMessenger);
     expect(messengerFor("email")).toBe(emailMessenger);
     expect(messengerFor("email_sim")).toBe(emailMessenger);
+  });
+});
+
+/*
+ * incendio-grave, 23/09: a quien tenía a su señora internada con quemaduras le
+ * llegó una derivación de trámite. Con heridos, el piso abre con la frase de
+ * cuidado; sin heridos, queda como estaba.
+ */
+describe("whatsappMessenger — la derivación con heridos", () => {
+  const PREGUNTA = "¿Cuánto suele tardar esto?";
+  const veces = (s: string, frase: string) => s.split(frase).length - 1;
+
+  beforeEach(() => {
+    (callGemini as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("sin modelo en tests"));
+  });
+
+  it("abre con la frase de cuidado y no pide nada", async () => {
+    await send("specialist_escalation", { caseId: CASE, severity: "critical", heridos: true });
+
+    const body = sentBody();
+    expect(body.startsWith(CUIDADO)).toBe(true);
+    expect(body).toContain("especialista");
+    // Con el predicado del ensayo, más ancho que la guarda: el piso no puede
+    // ponerlo en rojo.
+    expect(pideAlgo(body.toLowerCase())).toBe(false);
+    expect(hablaDeLaSalud(body)).toBe(false);
+  });
+
+  it.each([
+    ["sin heridos", {}],
+    ["heridos: false", { heridos: false }],
+    ["heridos como texto", { heridos: "true" }],
+  ])("%s, el piso de siempre", async (_, extra) => {
+    await send("specialist_escalation", { caseId: CASE, severity: "critical" });
+    const deSiempre = sentBody();
+
+    resetSend();
+    await send("specialist_escalation", { caseId: CASE, severity: "critical", ...extra });
+
+    expect(diceCuidado(sentBody())).toBe(false);
+    expect(sentBody()).toBe(deSiempre);
+  });
+
+  it("con una pregunta, la frase una vez y la respuesta pendiente una vez, al final", async () => {
+    await send("specialist_escalation", {
+      caseId: CASE,
+      severity: "high",
+      heridos: true,
+      question: PREGUNTA,
+    });
+
+    const body = sentBody();
+    expect(veces(body, CUIDADO)).toBe(1);
+    expect(veces(body, RESPUESTA_PENDIENTE)).toBe(1);
+    expect(body.endsWith(RESPUESTA_PENDIENTE)).toBe(true);
+  });
+
+  describe("con el redactor", () => {
+    const BRIEF = "frase breve de cuidado";
+    const redacta = (message: string) =>
+      (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
+        text: JSON.stringify({ message }),
+        usage: { promptTokens: 0, completionTokens: 0 },
+      });
+    const prompt = () => String((callGemini as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+
+    it("con heridos, la consigna llega al redactor", async () => {
+      const redactado = `${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.`;
+      redacta(redactado);
+
+      await send("specialist_escalation", { caseId: CASE, severity: "critical", heridos: true });
+
+      expect(prompt()).toContain(BRIEF);
+      expect(sentBody()).toBe(redactado);
+    });
+
+    // El nombre que escribió la persona viaja en el piso del titular ajeno: un
+    // «Lamentamos» ahí no es alguien que se lastimó.
+    it("un nombre con «Lamentamos» no la prende en la del titular ajeno", async () => {
+      const redactado = "Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.";
+      redacta(redactado);
+
+      await send("specialist_escalation", {
+        caseId: CASE,
+        titularIniciales: "R*** P***",
+        claimantName: "Lamentamos Paz",
+      });
+
+      expect(prompt()).not.toContain(BRIEF);
+      expect(sentBody()).toBe(redactado);
+    });
   });
 });

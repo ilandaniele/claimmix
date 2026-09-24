@@ -524,6 +524,109 @@ describe("orchestratePostExtraction — high severity (AC11)", () => {
   });
 });
 
+// ── Test suite: la derivación con heridos ────────────────────────────────────
+
+/*
+ * incendio-grave, 23/09: a quien tenía a su señora internada la derivación le
+ * contestaba de trámite. Con heridos, el mensaje lleva `heridos: true` y los
+ * pisos abren con la frase de cuidado; el resto de la derivación no cambia.
+ */
+describe("orchestratePostExtraction — la derivación con heridos", () => {
+  type Grave = Parameters<typeof extractEmailClaimMock>[0];
+
+  async function derivacion(
+    over: Grave,
+    extra: { titularAjeno?: boolean } = {}
+  ) {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(over), senderEmail: SENDER_EMAIL, ...extra },
+      NO_MATCHES
+    );
+    const salidas = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.filter((c) => c[0].template === "specialist_escalation");
+    return { salidas, data: salidas[0]?.[0].data as Record<string, unknown> | undefined };
+  }
+
+  const heridos = (valor: string) => [
+    ...extractEmailClaimMock().fields,
+    { field_key: "hay_heridos", field_value: valor, confidence: 0.95, source: "ai" as const },
+  ];
+
+  it.each([
+    ["high", "severe"],
+    ["critical", "minor"],
+    ["critical", "fatal"],
+  ] as const)("%s con heridos %s: un solo mensaje, con heridos", async (severity, injury_severity) => {
+    const { salidas, data } = await derivacion({ severity, requires_specialist: true, injury_severity });
+
+    expect(salidas).toHaveLength(1);
+    expect(data).toMatchObject({ caseId: CASE_ID, severity, heridos: true });
+  });
+
+  it("el «Sí» a la pregunta abierta deja la gravedad de las heridas en null y alcanza igual", async () => {
+    const { data } = await derivacion({
+      severity: "high",
+      requires_specialist: true,
+      injury_severity: null,
+      fields: heridos("sí"),
+    });
+
+    expect(data).toMatchObject({ heridos: true });
+  });
+
+  it.each([
+    ["sin heridos", { injury_severity: "none" as const }],
+    ["sin saber", { injury_severity: null }],
+    ["con un «no»", { injury_severity: null, fields: heridos("no") }],
+  ])("grave %s: el mensaje de siempre, sin la clave", async (_, over) => {
+    const { data } = await derivacion({ severity: "high", requires_specialist: true, ...over });
+
+    expect(data).toBeDefined();
+    expect(data).not.toHaveProperty("heridos");
+  });
+
+  it("con heridos leves y gravedad media no hay derivación", async () => {
+    const { salidas } = await derivacion({ severity: "medium", injury_severity: "minor" });
+
+    expect(salidas).toHaveLength(0);
+  });
+
+  it("la del titular ajeno no la lleva, aunque haya heridos", async () => {
+    const { data } = await derivacion({ injury_severity: "severe" }, { titularAjeno: true });
+
+    expect(data).toBeDefined();
+    expect(data).not.toHaveProperty("heridos");
+  });
+
+  it("la que decide el agente tampoco", async () => {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "escalate",
+      askFor: [],
+      question: null,
+      reasoning: "la póliza venció en 2020",
+      noteForAnalyst: null,
+      resolved: [],
+    } as never);
+
+    const { data } = await derivacion({ injury_severity: "severe" });
+
+    expect(data).toBeDefined();
+    expect(data).not.toHaveProperty("heridos");
+  });
+
+  it("el registro de auditoría no se entera: sólo gravedad y motivo", async () => {
+    await derivacion({ severity: "critical", requires_specialist: true, injury_severity: "severe" });
+
+    const registro = vi
+      .mocked(writeAuditLog)
+      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
+    expect(registro?.[0].payload).toEqual({ severity: "critical", reason: "severidad critical" });
+  });
+});
+
 // ── Test suite: Medium-confidence field — AC7 ─────────────────────────────────
 
 describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {

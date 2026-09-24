@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   hablaDeHeridos,
+  hayHeridos,
   respuestaAHeridos,
   sinHeridosSupuestos,
 } from "@/core/case/heridos-supuestos";
@@ -288,5 +289,39 @@ describe("sinHeridosSupuestos con la respuesta a la pregunta abierta", () => {
     const claim = extraccion({ ...MINIMO, fields: [], injury_severity: "minor", severity: "high" });
 
     expect(sinHeridosSupuestos(claim, "No", "no")).toBe(claim);
+  });
+});
+
+/*
+ * De acá sale si la derivación abre con la frase de cuidado. El «Sí» a la
+ * pregunta abierta deriva con `injury_severity` en null: sólo el campo lo dice.
+ */
+describe("hayHeridos", () => {
+  type Severidad = Parameters<typeof hayHeridos>[0]["injury_severity"];
+
+  it.each(["minor", "severe", "fatal"] as const)("sí: injury_severity %s", (injury_severity) => {
+    expect(hayHeridos({ injury_severity, fields: [] })).toBe(true);
+  });
+
+  it("sí: el campo en «sí» con la gravedad sin saber", () => {
+    expect(hayHeridos({ injury_severity: null, fields: [campo("hay_heridos", "sí", 0.95)] })).toBe(true);
+  });
+
+  it("sí: un alias del campo", () => {
+    expect(hayHeridos({ injury_severity: null, fields: [campo("heridos", "true")] })).toBe(true);
+  });
+
+  it("sí: en mayúsculas, porque `valorLegible` lee sin distinguir", () => {
+    expect(hayHeridos({ injury_severity: "SEVERE" as Severidad, fields: [] })).toBe(true);
+  });
+
+  it.each([
+    ["none, sin campo", "none", []],
+    ["null, sin campo", null, []],
+    ["null, campo «no»", null, [campo("hay_heridos", "no")]],
+    ["null, campo «none»", null, [campo("hay_heridos", "none")]],
+    ["otro campo en «sí»", null, [campo("testigos", "sí")]],
+  ] as const)("no: %s", (_, injury_severity, fields) => {
+    expect(hayHeridos({ injury_severity, fields: [...fields] })).toBe(false);
   });
 });

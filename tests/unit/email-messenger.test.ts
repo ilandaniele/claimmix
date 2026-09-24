@@ -70,6 +70,7 @@ import { composeReply } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { renderTemplate, type EmailTemplate } from "@/server/email/render";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
+import { CUIDADO, diceCuidado } from "@/core/mensajes/derivacion";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
@@ -493,4 +494,47 @@ describe("emailMessenger — el mensaje de la persona entra sin números enteros
     // La patente no es un número entero de nadie y sirve para el tono.
     expect(prompt).toContain("ABC-321");
   });
+});
+
+/*
+ * mail-grave: la derivación con heridos abre con la frase de cuidado. El piso
+ * que recibe el redactor ya la trae, así que `render` no puede perder la clave
+ * en el camino.
+ */
+describe("emailMessenger — la derivación con heridos", () => {
+  const GRAVE = { caseId: CASE, severity: "critical", heridos: true };
+  const veces = (s: string) => s.split(CUIDADO).length - 1;
+
+  it("el redactor recibe la señal y el piso trae la frase", async () => {
+    escribe(`${CUIDADO} Un especialista se va a comunicar con vos a la brevedad.`);
+
+    await mandar("specialist_escalation", GRAVE);
+
+    expect(compose.mock.calls[0][0].heridos).toBe(true);
+    expect(String(compose.mock.calls[0][0].fallback)).toContain(CUIDADO);
+  });
+
+  it("con el redactor caído, el mail la trae una sola vez", async () => {
+    modelo.mockRejectedValueOnce(new Error("sin modelo"));
+
+    await mandar("specialist_escalation", GRAVE);
+
+    expect(veces(cuerpoEnviado())).toBe(1);
+    expect(cuerpoEnviado()).toBe(renderTemplate("specialist_escalation", GRAVE).html);
+  });
+
+  it.each(["critical", "high", undefined])(
+    "sin heridos (%s), ni la consigna ni la guarda",
+    async (severity) => {
+      const redactado = "Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad.";
+      escribe(redactado);
+
+      await mandar("specialist_escalation", { caseId: CASE, severity });
+
+      expect(diceCuidado(String(compose.mock.calls[0][0].fallback))).toBe(false);
+      expect(String(modelo.mock.calls[0][0])).not.toContain("frase breve de cuidado");
+      expect(modelo).toHaveBeenCalledTimes(1);
+      expect(cuerpoEnviado()).toContain(redactado);
+    }
+  );
 });

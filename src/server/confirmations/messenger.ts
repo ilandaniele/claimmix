@@ -40,6 +40,7 @@ import {
   NO_COINCIDE_CON_EL_TITULAR,
 } from "@/core/mensajes/titular-que-no-coincide";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
+import { CUIDADO } from "@/core/mensajes/derivacion";
 
 export interface AgentMessage {
   caseId: string;
@@ -130,13 +131,14 @@ const ESCALATION_TEXT =
  * canal y no en el otro.
  */
 function renderEscalation(data: Record<string, unknown>): string {
+  const base = data.heridos === true ? `${CUIDADO} ${ESCALATION_TEXT}` : ESCALATION_TEXT;
   const diferencia = laDiferencia({
     titularIniciales: typeof data.titularIniciales === "string" ? data.titularIniciales : null,
     claimantName: typeof data.claimantName === "string" ? data.claimantName : null,
   });
-  return diferencia ? `${ESCALATION_TEXT}
+  return diferencia ? `${base}
 
-${diferencia}` : ESCALATION_TEXT;
+${diferencia}` : base;
 }
 
 /**
@@ -448,6 +450,7 @@ async function writeReply(
         ? conflictosParaElRedactor(message.data)
         : undefined,
     titularAjeno: message.data.titularAjeno === true,
+    heridos: message.data.heridos === true,
     knownValues: (message.data.knownValues ?? undefined) as
       | Record<string, string>
       | undefined,

@@ -39,7 +39,9 @@ import * as fs from "node:fs";
 import * as dotenv from "dotenv";
 import { readable } from "@/core/email/texto-legible";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
+import { diceCuidado } from "@/core/mensajes/derivacion";
 import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
+import { pideAlgo } from "./lib/pide-algo.mjs";
 import { confirmaLoDicho, formaDePedirLaHora } from "./lib/ensayo-confirmaciones.mjs";
 
 const envPath = path.resolve(process.cwd(), ".env.local");
@@ -179,6 +181,16 @@ interface Turn {
      * modelo, así que no depende de cómo redacte ese día.
      */
     confirma?: string[];
+    /**
+     * Que la derivación abra con una frase de cuidado: alguien contó que hay
+     * heridos. Con el mismo predicado que la guarda del redactor.
+     */
+    cuidado?: boolean;
+    /**
+     * Que no pida nada. `asked_keys` de una derivación viene siempre vacío, así
+     * que lo que muerde es `pideAlgo`, más ancho que la guarda del redactor.
+     */
+    sinPedido?: boolean;
   };
 }
 
@@ -223,6 +235,10 @@ interface Scenario {
     knows?: string[];
   };
 }
+
+// Lo que contó de la salud, que la frase de cuidado no repite ni pronostica.
+// Aparte de la guarda del redactor: acá se mira el texto que salió.
+const LO_MEDICO = ["internad", "quemadur", "recuper", "mejoría", "esté bien"];
 
 const SCENARIOS: Scenario[] = [
   {
@@ -270,8 +286,10 @@ const SCENARIOS: Scenario[] = [
           mentions: ["especialista"],
           // The failure this branch exists for: telling someone whose partner
           // is in hospital that we need their DNI and the time of the fire.
-          avoids: ["DNI", "necesitamos que nos mandes", "fotos"],
+          avoids: ["DNI", "necesitamos que nos mandes", "fotos", ...LO_MEDICO],
           status: "requiere_especialista",
+          cuidado: true,
+          sinPedido: true,
         },
       },
     ],
@@ -598,7 +616,13 @@ const SCENARIOS: Scenario[] = [
           "Se incendió el auto en la ruta 3 y mi señora está internada con quemaduras.",
           "Soy Laura Giménez, póliza POL-9982-C.",
         ].join("\n"),
-        expect: { replies: 1, status: "requiere_especialista" },
+        expect: {
+          replies: 1,
+          status: "requiere_especialista",
+          avoids: LO_MEDICO,
+          cuidado: true,
+          sinPedido: true,
+        },
       },
     ],
     finally: { status: "requiere_especialista" },
@@ -1072,6 +1096,12 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
       }
       for (const key of want.noAsked ?? []) {
         if (pedidas.has(key)) note(scenario.id, i + 1, `pidió ${key} y no debía`, `pidio:${key}`);
+      }
+      if (want.cuidado && !diceCuidado(all)) {
+        note(scenario.id, i + 1, "no abre con una frase de cuidado", "cuidado");
+      }
+      if (want.sinPedido && (pedidas.size > 0 || pideAlgo(all))) {
+        note(scenario.id, i + 1, "pidió algo en una derivación", "sin-pedido");
       }
       if (want.confirma?.length) {
         const filas = await db

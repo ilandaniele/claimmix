@@ -1347,6 +1347,52 @@ async function sweepOldRehearsalCases(): Promise<void> {
 }
 
 /**
+ * Sweep a seeded policyholder that a cut-short run left behind.
+ *
+ * `runScenario` deletes its seed in a `finally`. A process that dies between
+ * the seed and that `finally` (a usage limit, a closed terminal) leaves the
+ * customer and its policy in the book. From then on every rehearsal, the
+ * post-deploy one included, stops at `refuseIfPadronCargado`. It happened on
+ * 24/09 with POL-8812-R.
+ *
+ * A seed is identified by the exact name, DNI and policy number of a
+ * scenario's `policy` block, and only when it is older than an hour, like the
+ * case sweep. A seed lives for one scenario, so an hour-old seed is not in use.
+ */
+async function sweepOldSeeds(): Promise<void> {
+  const semillas = SCENARIOS.flatMap((s) => (s.policy ? [s.policy] : []));
+  if (semillas.length === 0) return;
+  try {
+    const stale = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .innerJoin(policies, eq(policies.customer_id, customers.id))
+      .where(
+        and(
+          eq(customers.tenant_id, TENANT_ID!),
+          lt(customers.created_at, sql`now() - interval '1 hour'`),
+          or(
+            ...semillas.map((p) =>
+              and(
+                eq(customers.full_name, p.nombre),
+                eq(customers.dni, p.dni.replace(/\D/g, "")),
+                eq(policies.policy_number, p.numero)
+              )
+            )
+          )
+        )
+      );
+    if (stale.length === 0) return;
+
+    // Cascades to the policy and the insured vehicle, as in runScenario.
+    await db.delete(customers).where(inArray(customers.id, [...new Set(stale.map((r) => r.id))]));
+    console.log(`Limpiados ${stale.length} titular(es) sembrado(s) que quedaron de ensayos cortados.\n`);
+  } catch (err) {
+    console.error("No se pudo limpiar titulares sembrados:", err instanceof Error ? err.name : "error");
+  }
+}
+
+/**
  * Refuse to rehearse against the mock extractor.
  *
  * The whole point is to exercise the real agent — the real model, the real
@@ -1481,6 +1527,7 @@ async function refuseIfPadronCargado(): Promise<void> {
 
 await refuseIfMocked();
 await refuseIfBudgetSpent();
+await sweepOldSeeds();
 await refuseIfPadronCargado();
 await sweepOldRehearsalCases();
 

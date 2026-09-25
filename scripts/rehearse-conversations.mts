@@ -40,6 +40,7 @@ import * as dotenv from "dotenv";
 import { readable } from "@/core/email/texto-legible";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { diceCuidado } from "@/core/mensajes/derivacion";
+import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
 import { pideAlgo } from "./lib/pide-algo.mjs";
 import { confirmaLoDicho, formaDePedirLaHora } from "./lib/ensayo-confirmaciones.mjs";
@@ -954,6 +955,9 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
   // marcador de 1×1: el CI no tiene los fixtures y el caso queda esperando lo
   // que nunca va a reconocer.
   let fotosSinEnsayar = false;
+  // Lo último que leyó la persona: en un caso terminado tiene que decirle que
+  // por acá ya no sigue nadie.
+  let ultimo: string | null = null;
   // Un «No» suelto a «¿Hubo personas lastimadas?» también es hablar de heridos.
   let pedidoAnterior: string[] = [];
   let contestoHeridos = false;
@@ -1005,6 +1009,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         said = await repliesSince(active, seen);
       }
       seen += said.length;
+      if (said.length > 0) ultimo = readable(said[said.length - 1].body);
 
       if (said.length === 0) console.log("       🤖 (silencio)");
       for (const reply of said) {
@@ -1224,6 +1229,15 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           0,
           `estado final ${row?.status}, esperaba ${want.status}`,
           "estado-final"
+        );
+      }
+      const terminado = row?.status === "listo_para_core" || row?.status === "requiere_especialista";
+      if (terminado && ultimo !== null && !mencionaElTraspaso(ultimo)) {
+        note(
+          scenario.id,
+          0,
+          "el último mensaje no avisa que la carga termina y que escribe una persona",
+          "traspaso"
         );
       }
 

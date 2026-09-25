@@ -2,6 +2,11 @@ import { escapeHtml } from "@/server/email/render";
 import { textoAHtml } from "@/core/email/html";
 import { laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
 import { CUIDADO } from "@/core/mensajes/derivacion";
+import {
+  AVISO_DE_TRASPASO,
+  NO_HACE_FALTA_CONTESTAR,
+  SI_RESPONDES_EL_CORREO,
+} from "@/core/mensajes/traspaso";
 
 /**
  * Email template: specialist_escalation
@@ -38,6 +43,8 @@ export interface SpecialistEscalationData {
   cuerpo?: string | null;
   /** Alguien se lastimó. Sólo el booleano: ningún detalle médico. */
   heridos?: boolean;
+  /** En la misma vuelta salió un pedido de confirmación que ya no hace falta contestar. */
+  yaPreguntamos?: boolean;
 }
 
 
@@ -59,21 +66,23 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
 
   const derivacion =
     "Tu reclamo fue escalado a uno de nuestros especialistas, que se va a comunicar con vos a la brevedad.";
-  const sinAccion =
-    "No es necesario que tomes ninguna acción adicional por el momento. Un especialista revisará en detalle tu situación y te contactará para coordinar los próximos pasos.";
-  const agregar =
-    "Si tenés información adicional relevante, podés responder a este correo y será incorporada a tu caso.";
 
   const parrafos = [
     ...(data.heridos === true ? [CUIDADO] : []),
     urgencyMsg,
     derivacion,
-    sinAccion,
-    agregar,
+    AVISO_DE_TRASPASO,
   ];
   const cuerpo = parrafos.join("\n\n");
   const redactado = data.cuerpo?.trim();
   const diferencia = laDiferencia(data);
+  // Fuera de la prosa, como la diferencia: un cuerpo redactado la reemplaza
+  // entera y se los llevaba.
+  const cromo = [
+    ...(diferencia ? [diferencia] : []),
+    ...(data.yaPreguntamos === true ? [NO_HACE_FALTA_CONTESTAR] : []),
+    SI_RESPONDES_EL_CORREO,
+  ];
 
   const prosaHtml = redactado
     ? textoAHtml(redactado)
@@ -85,13 +94,13 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #b91c1c;">Tu reclamo fue asignado a un especialista</h1>
   ${prosaHtml}
-  ${diferencia ? `<p>${escapeHtml(diferencia)}</p>` : ""}
+  ${cromo.map((p) => `<p>${escapeHtml(p)}</p>`).join("\n  ")}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
   <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${escapeHtml(data.caseId)}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.</p>
 </body>
 </html>`;
 
-  const text = `Tu reclamo fue asignado a un especialista\n\n${redactado ?? cuerpo}${diferencia ? `\n\n${diferencia}` : ""}\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
+  const text = `Tu reclamo fue asignado a un especialista\n\n${[redactado ?? cuerpo, ...cromo].join("\n\n")}\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
 
   return { subject, html, text, cuerpo };
 }

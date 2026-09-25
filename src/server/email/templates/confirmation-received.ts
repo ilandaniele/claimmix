@@ -18,6 +18,7 @@ import { labelForClaimType } from "@/lib/labels/claim-fields";
 import { escapeHtml, maskPolicyNumber } from "@/server/email/render";
 import { textoAHtml } from "@/core/email/html";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
+import { AVISO_DE_TRASPASO, SI_RESPONDES_EL_CORREO } from "@/core/mensajes/traspaso";
 
 export interface ConfirmationReceivedData {
   caseId: string;
@@ -83,14 +84,6 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
     ? `${saludo}${gracias}, ya tenemos todo lo que necesitábamos. Tu reclamo${claimPhraseText} quedó completo y pasa a análisis.`
     : `${saludo}${gracias} por contactarnos. Registramos exitosamente tu reclamo${claimPhraseText}.`;
 
-  const nextStep = followUp
-    ? "Un analista lo va a revisar y te contactamos si hiciera falta algo más."
-    : "Nuestro equipo analizará tu solicitud y te contactará a la brevedad para darte novedades o solicitarte información adicional si fuera necesaria.";
-
-  const closing = followUp
-    ? "Si querés agregar algo más sobre el siniestro, respondé este correo."
-    : "Podés responder a este correo si tenés alguna consulta o si querés agregar más información sobre el siniestro.";
-
   /*
    * El número de caso y la póliza enmascarada bajan al cromo.
    *
@@ -106,15 +99,14 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
   const respuestaHtml = pregunta ? `<p>${escapeHtml(RESPUESTA_PENDIENTE)}</p>` : "";
   const respuestaText = pregunta ? `\n\n${RESPUESTA_PENDIENTE}` : "";
 
-  const cuerpo = `${openingText}\n\n${nextStep}${respuestaText}\n\n${closing}`;
+  const cuerpo = `${openingText}\n\n${AVISO_DE_TRASPASO}${respuestaText}`;
   const redactado = data.cuerpo?.trim();
 
   const prosaHtml = redactado
     ? textoAHtml(redactado)
     : `<p>${openingHtml}</p>
-  <p>${nextStep}</p>
-  ${respuestaHtml}
-  <p>${closing}</p>`;
+  <p>${escapeHtml(AVISO_DE_TRASPASO)}</p>
+  ${respuestaHtml}`;
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -122,13 +114,16 @@ export function renderConfirmationReceived(data: ConfirmationReceivedData): {
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #1a56db;">${heading}</h1>
   ${prosaHtml}
+  <p>${escapeHtml(SI_RESPONDES_EL_CORREO)}</p>
   ${referenciaHtml}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
   <p style="font-size: 12px; color: #6b7280;">Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix. Por favor no respondas si recibiste este correo por error.</p>
 </body>
 </html>`;
 
-  const text = `${heading}\n\n${redactado ?? cuerpo}\n\nTu número de caso es: #${data.caseId}\n${policyLineText}\n---\nEste mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
+  // El pie va en el cromo y no en la prosa: un cuerpo redactado la reemplaza
+  // entera y se lo llevaba.
+  const text = `${heading}\n\n${redactado ?? cuerpo}\n\n${SI_RESPONDES_EL_CORREO}\n\nTu número de caso es: #${data.caseId}\n${policyLineText}\n---\nEste mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
 
   return { subject, html, text, cuerpo };
 }

@@ -1,7 +1,6 @@
 /**
  * Lo del Plan Pro en la barra lateral: con candado y la etiqueta «Plan Pro»
- * para quien no lo tiene. Hoy ningún ítem es Pro, así que se prueba el
- * ayudante y el ítem sueltos, y que la barra de hoy no cierra nada.
+ * para quien no lo tiene. `nav.asistente` (P9) es el único ítem Pro de hoy.
  */
 
 import { isValidElement, type ReactElement, type ReactNode } from "react";
@@ -67,10 +66,21 @@ describe("NavLink con candado Pro", () => {
 });
 
 describe("la barra de hoy", () => {
-  it("sin Plan Pro no cierra nada a un admin", () => {
+  it("sin Plan Pro cierra sólo el ítem del asistente a un admin", () => {
     const { container } = render(
       <LocaleProvider locale="es-AR">
         <Sidebar role="admin" esPro={false} />
+      </LocaleProvider>
+    );
+    const cerrados = container.querySelectorAll('[aria-disabled="true"]');
+    expect(cerrados).toHaveLength(1);
+    expect(screen.getByText("Plan Pro")).toBeInTheDocument();
+  });
+
+  it("con Plan Pro no cierra nada", () => {
+    const { container } = render(
+      <LocaleProvider locale="es-AR">
+        <Sidebar role="admin" esPro={true} />
       </LocaleProvider>
     );
     expect(container.querySelectorAll('[aria-disabled="true"]')).toHaveLength(0);

@@ -395,6 +395,13 @@ export const AuditEvent = {
    * agente nunca deliberó nada raro.
    */
   AGENT_DELIBERATION_FAILED: "agent.deliberation_failed",
+
+  /**
+   * ASSISTANT_QUERY: alguien le hizo una pregunta al asistente in-app.
+   * Payload: { herramienta, casos } — nunca la pregunta ni el texto de la
+   * respuesta: son texto libre de quien pregunta y del modelo.
+   */
+  ASSISTANT_QUERY: "assistant.query",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

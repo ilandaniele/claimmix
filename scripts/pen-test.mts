@@ -621,9 +621,30 @@ function auditAdminGuards(): void {
  * tests siguen verdes.
  *
  * Esto usa la base de verdad, dos tenants de verdad y las funciones que usa la
- * aplicación. Y comprueba las dos direcciones: que B ve lo suyo, y que A no lo
- * ve. Sin la primera, la segunda no prueba nada — no encontrar un caso que no
- * existe es fácil.
+ * aplicación. Y comprueba las dos direcciones: que el dueño ve lo suyo, y que
+ * el otro no lo ve. Sin la primera, la segunda no prueba nada — no encontrar
+ * un caso que no existe es fácil.
+ *
+ * ── Por qué esto ya no escribe nada ────────────────────────────────────────
+ *
+ * El único lugar donde esto corre con credenciales de verdad es el post-deploy
+ * de PRODUCCIÓN (QA lo apaga: `correr_pentest: false`, le falta el inquilino
+ * de demo). Insertar un caso señuelo, aunque se borre al final, era escribir
+ * en la base de un cliente desde un test — la regla que este producto no se
+ * puede dar el lujo de romper.
+ *
+ * La versión anterior insertaba el señuelo en DEMO_TENANT_ID, pensando que era
+ * el lado inofensivo. No lo es: es la misma base. Y de paso esa elección era
+ * innecesaria — `/api/demo/public-analyze` no escribe casos, así que
+ * DEMO_TENANT_ID nunca tiene ninguno propio.
+ *
+ * Esto usa lo que YA existe: el caso más nuevo de GMAIL_TENANT_ID, el
+ * inquilino con denuncias de verdad. Es la misma pared mirada al revés —antes
+ * se probaba que el inquilino real no viera un caso falso de la demo; ahora se
+ * prueba que la demo no vea un caso real del inquilino real, que es la fuga
+ * que de verdad importa— y de puro no escribir nada queda además más fiel al
+ * nombre del archivo: es un ataque, y un atacante no le pide permiso a la
+ * base para dejar el señuelo.
  */
 async function attackTenantWall(): Promise<void> {
   const TENANT_A = process.env.GMAIL_TENANT_ID;
@@ -634,8 +655,8 @@ async function attackTenantWall(): Promise<void> {
    *
    * Toda la capa de datos entra por el rol restringido; sin esa variable,
    * `enTenant` lanza y `getCaseDetail` se traga el error devolviendo null. El
-   * resultado es que la sonda de control —«el caso del tenant B existe y B lo
-   * ve»— se pone en ROJO, y todas las sondas de la pared quedan en VERDE,
+   * resultado es que la sonda de control —«el caso elegido existe y su dueño
+   * lo ve»— se pone en ROJO, y todas las sondas de la pared quedan en VERDE,
    * porque tampoco encuentran nada.
    *
    * O sea: falta una variable de entorno y la salida se lee como si el
@@ -678,128 +699,150 @@ async function attackTenantWall(): Promise<void> {
   }
 
   console.log("\n" + "─".repeat(70));
-  console.log("LA PARED ENTRE TENANTS — con la base de verdad, no con un mock\n");
+  console.log("LA PARED ENTRE TENANTS — con la base de verdad, sólo lectura\n");
 
   const { db } = await import("@/lib/db");
   const { cases, customers } = await import("@/lib/db/schema");
-  const { eq } = await import("drizzle-orm");
+  const { and, desc, eq, isNotNull } = await import("drizzle-orm");
   const { listCases, listCasesForExport } = await import("@/server/cases/list");
   const { getCaseDetail } = await import("@/server/cases/get");
   const { runTool } = await import("@/server/ai/agent-tools");
 
-  const marker = `PARED-${RUN}`;
   const query = { page: 1, per_page: 100, sort: "created_at", order: "desc" } as const;
 
-  // Un caso del tenant B, con un nombre que no puede aparecer por casualidad.
+  // El caso más nuevo de TENANT_A. Ninguno se crea acá: es el que ya haya,
+  // así que esto es sólo un SELECT — con el rol dueño, que ignora RLS a
+  // propósito para poder elegir de cualquier tenant, igual que hace
+  // `prove-tenancy.mts` para lo mismo.
   const [victim] = await db
-    .insert(cases)
-    .values({
-      tenant_id: TENANT_B,
-      policyholder_name: marker,
-      policy_number: marker,
-      channel: "whatsapp_sim",
-      email_thread_id: `5490000${RUN}77`,
-      status: "recibido",
+    .select({
+      id: cases.id,
+      policyholder_name: cases.policyholder_name,
+      policy_number: cases.policy_number,
     })
-    .returning({ id: cases.id });
+    .from(cases)
+    .where(eq(cases.tenant_id, TENANT_A))
+    .orderBy(desc(cases.created_at))
+    .limit(1);
 
-  const [victimCustomer] = await db
-    .insert(customers)
-    .values({ tenant_id: TENANT_B, full_name: marker, dni: `8${RUN}888` })
-    .returning({ id: customers.id });
+  if (!victim) {
+    console.log("\n(TENANT_A no tiene ningún caso: no hay nada con qué probar la pared.)");
+    findings.push({
+      what: "la pared entre inquilinos NO se probó (TENANT_A no tiene casos)",
+      gain: "—",
+    });
+    return;
+  }
 
-  try {
-    // ── Primero: que exista de verdad ──────────────────────────────────────
-    const ownDetail = await getCaseDetail(TENANT_B, victim!.id);
+  // ── Primero: que exista de verdad ──────────────────────────────────────
+  const ownDetail = await getCaseDetail(TENANT_A, victim.id);
+  probe(
+    "el caso elegido existe y su dueño lo ve",
+    ownDetail !== null,
+    "sin esto, lo de abajo no prueba nada: no encontrar lo que no existe es gratis"
+  );
+
+  /*
+   * Y el mismo control para el listado, que es una forma distinta de fallar.
+   *
+   * Las sondas de abajo buscan el id del caso dentro del JSON del resultado.
+   * Si el listado dejara de traer esa columna, el id no aparecería nunca y
+   * las de abajo darían verde sin haber mirado nada. Esto se asegura de que,
+   * cuando el caso SÍ es tuyo, se ve.
+   */
+  const ownList = await listCases({ tenantId: TENANT_A }, { ...query } as never);
+  probe(
+    "y lo ve en su propio listado",
+    JSON.stringify(ownList).includes(victim.id),
+    "sin esto, buscar el id en el listado ajeno no prueba nada"
+  );
+
+  // ── Después: que el otro no ─────────────────────────────────────────────
+  const crossDetail = await getCaseDetail(TENANT_B, victim.id);
+  probe(
+    "el otro inquilino no puede abrir el caso por su id",
+    crossDetail === null,
+    "leer cualquier denuncia de otra aseguradora con sólo saber el id"
+  );
+
+  const list = await listCases({ tenantId: TENANT_B }, { ...query } as never);
+  probe(
+    "el caso no aparece en el listado del otro inquilino",
+    !JSON.stringify(list).includes(victim.id),
+    "la cartera de siniestros del otro asegurador, en la pantalla principal"
+  );
+
+  // El titular o la póliza, lo que haya: sin esto no hay con qué buscar.
+  const q = victim.policyholder_name || victim.policy_number;
+  if (q) {
+    const search = await listCases({ tenantId: TENANT_B }, { ...query, q } as never);
     probe(
-      "el caso del tenant B existe y B lo ve",
-      ownDetail !== null,
-      "sin esto, lo de abajo no prueba nada: no encontrar lo que no existe es gratis"
-    );
-
-    /*
-     * Y el mismo control para el listado, que es una forma distinta de fallar.
-     *
-     * Las sondas de abajo buscan el marcador dentro del JSON del resultado. Si
-     * el listado no devolviera el nombre del titular —porque se dejó de
-     * seleccionar esa columna, por ejemplo— el marcador no aparecería nunca y
-     * las cuatro darían verde sin haber mirado nada. Esto se asegura de que,
-     * cuando el caso SÍ es tuyo, el marcador se ve.
-     */
-    const ownList = await listCases({ tenantId: TENANT_B }, { ...query } as never);
-    probe(
-      "y lo ve en su propio listado",
-      JSON.stringify(ownList).includes(marker),
-      "sin esto, buscar el marcador en el listado ajeno no prueba nada"
-    );
-
-    // ── Después: que el otro no ─────────────────────────────────────────────
-    const crossDetail = await getCaseDetail(TENANT_A, victim!.id);
-    probe(
-      "el tenant A no puede abrir el caso de B por su id",
-      crossDetail === null,
-      "leer cualquier denuncia de otra aseguradora con sólo saber el id"
-    );
-
-    const list = await listCases({ tenantId: TENANT_A }, { ...query } as never);
-    probe(
-      "el caso de B no aparece en el listado de A",
-      !JSON.stringify(list).includes(marker),
-      "la cartera de siniestros del otro asegurador, en la pantalla principal"
-    );
-
-    const search = await listCases({ tenantId: TENANT_A }, { ...query, q: marker } as never);
-    probe(
-      "buscándolo por nombre tampoco aparece",
-      !JSON.stringify(search).includes(marker),
+      "buscándolo por nombre o póliza tampoco aparece",
+      !JSON.stringify(search).includes(victim.id),
       "lo mismo, y buscando a propósito"
     );
+  }
 
-    const exported = await listCasesForExport(TENANT_A, {});
-    probe(
-      "no sale en el CSV que exporta A",
-      !JSON.stringify(exported).includes(marker),
-      "un archivo con las denuncias del otro asegurador, listo para llevarse"
-    );
+  const exported = await listCasesForExport(TENANT_B, {});
+  probe(
+    "no sale en el CSV que exporta el otro inquilino",
+    !JSON.stringify(exported).includes(victim.id),
+    "un archivo con las denuncias del otro asegurador, listo para llevarse"
+  );
 
-    // ── Y las herramientas del agente, que consultan por su cuenta ──────────
+  // ── Y las herramientas del agente, que consultan por su cuenta ──────────
+  if (victim.policy_number) {
     const byPolicy = await runTool(
       "verificar_poliza",
-      { numero_poliza: marker },
-      { tenantId: TENANT_A, caseId: victim!.id }
+      { numero_poliza: victim.policy_number },
+      { tenantId: TENANT_B, caseId: victim.id }
     );
     probe(
       "verificar_poliza no cruza la pared",
-      !JSON.stringify(byPolicy).includes(marker),
+      !JSON.stringify(byPolicy).includes(victim.policy_number),
       "el agente contándole a un desconocido los datos de una póliza de otra cartera"
     );
+  }
 
+  // Cualquier cliente de TENANT_A con DNI cargado — no hace falta que sea el
+  // titular del caso elegido arriba, igual que en la versión anterior el
+  // señuelo de cliente no estaba atado al caso señuelo.
+  const [customer] = await db
+    .select({ dni: customers.dni })
+    .from(customers)
+    .where(and(eq(customers.tenant_id, TENANT_A), isNotNull(customers.dni)))
+    .orderBy(desc(customers.created_at))
+    .limit(1);
+
+  const dni = customer?.dni;
+  if (dni) {
     const byDni = await runTool(
       "polizas_por_dni",
-      { dni: `8${RUN}888` },
-      { tenantId: TENANT_A, caseId: victim!.id }
+      { dni },
+      { tenantId: TENANT_B, caseId: victim.id }
     );
     probe(
       "polizas_por_dni no cruza la pared",
-      !JSON.stringify(byDni).includes(marker),
+      !JSON.stringify(byDni).includes(dni),
       "buscar personas por DNI en la cartera del otro"
     );
-
-    const history = await runTool(
-      "historial_del_caso",
-      {},
-      { tenantId: TENANT_A, caseId: victim!.id }
-    );
-    probe(
-      "historial_del_caso no cruza la pared",
-      !JSON.stringify(history).includes(marker),
-      "leer la conversación de una denuncia ajena pasándole su id al agente"
-    );
-  } finally {
-    await db.delete(cases).where(eq(cases.id, victim!.id));
-    await db.delete(customers).where(eq(customers.id, victimCustomer!.id));
-    console.log("\nBorrado el caso señuelo del segundo tenant.");
   }
+
+  const history = await runTool(
+    "historial_del_caso",
+    {},
+    { tenantId: TENANT_B, caseId: victim.id }
+  );
+  // Sin marcador que buscar —no se escribió nada—, así que el veredicto es la
+  // forma de la respuesta: si la pared aguanta, ninguna fila cruza y las dos
+  // listas vuelven vacías.
+  probe(
+    "historial_del_caso no cruza la pared",
+    JSON.stringify(history) === JSON.stringify({ datos: [], documentos: [] }),
+    "leer la conversación de una denuncia ajena pasándole su id al agente"
+  );
+
+  console.log("\nSólo lectura: nada se escribió ni se borró.");
 }
 
 // ── Parte 3: el agente ───────────────────────────────────────────────────────

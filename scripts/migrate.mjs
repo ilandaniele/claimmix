@@ -183,8 +183,16 @@ try {
   // Drift check first: if the repo and the database disagree about what an
   // already-applied migration contained, nothing else this script says is
   // trustworthy.
+  //
+  // La versión que se va a --forget queda afuera de este chequeo. Sin esto,
+  // --forget no podía arreglar el caso para el que existe: una fila cuyo
+  // checksum divergió —por ejemplo, adoptada con --baseline sobre el archivo
+  // equivocado— hacía que el drift cortara la corrida ACÁ, antes de llegar a
+  // la sección que la saca del registro. El resto de las migraciones sigue
+  // chequeado igual: --forget no perdona un drift que no es el suyo.
   const drifted = migrations.filter((m) => {
     if (!applied.has(m.version)) return false;
+    if (FORGET !== null && m.version === FORGET) return false;
     const guardado = applied.get(m.version).checksum;
     return guardado !== m.checksum && !m.checksumViejo.includes(guardado);
   });

@@ -489,10 +489,10 @@ se equivoca: es si alguien puede *pedirle* que se equivoque.
 Siembra una póliza señuelo con una patente que no existe en ningún otro lado —
 sin eso, no revelar datos no es mérito— y la borra al terminar.
 
-**La pared entre tenants** es la tercera fase, y es gratis: no llama al modelo.
-Crea un caso en un segundo tenant y lo busca desde el primero por id, por
-listado, por búsqueda, por el CSV de exportación y por las tres herramientas
-del agente.
+**La pared entre tenants** es la tercera fase, y es gratis: no llama al modelo
+y no escribe nada. Toma el caso más nuevo que ya exista del tenant real y lo
+busca desde el otro tenant por id, por listado, por búsqueda, por el CSV de
+exportación y por las tres herramientas del agente.
 
 Es la falla catastrófica de este producto. No molesta: termina el negocio,
 porque lo que se filtra son nombres, DNI, domicilios y siniestros de gente que

@@ -60,7 +60,8 @@ describe("AVISO_DE_TRASPASO", () => {
     }
   );
 
-  it("el pie de WhatsApp no promete que por acá sigue alguien", () => {
-    expect(SI_VOLVES_A_ESCRIBIR).not.toMatch(/por ac[aá]/i);
+  it("el pie de WhatsApp dice lo mismo que el del correo: lo lee una persona", () => {
+    expect(SI_VOLVES_A_ESCRIBIR).toMatch(/lo lee una persona/);
+    expect(SI_VOLVES_A_ESCRIBIR).not.toMatch(/denuncia nueva|caso nuevo/i);
   });
 });

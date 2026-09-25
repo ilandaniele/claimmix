@@ -20,10 +20,11 @@ vi.mock("@/server/ai/gemini-extractor", () => ({
 }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { composeReply } from "@/server/ai/compose-reply";
+import { composeReply, type ComposeReplyInput } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { CUIDADO } from "@/core/mensajes/derivacion";
+import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
 
 const mockCall = callGemini as unknown as ReturnType<typeof vi.fn>;
 
@@ -47,6 +48,16 @@ function replies(message: string) {
     text: JSON.stringify({ message }),
     usage: { promptTokens: 0, completionTokens: 0 },
   });
+}
+
+/** Una respuesta por intento, en orden. */
+function responde(...mensajes: string[]) {
+  for (const message of mensajes) {
+    mockCall.mockResolvedValueOnce({
+      text: JSON.stringify({ message }),
+      usage: { promptTokens: 0, completionTokens: 0 },
+    });
+  }
 }
 
 beforeEach(() => {
@@ -387,7 +398,9 @@ describe("composeReply — what it refuses to send", () => {
   });
 
   it("does not mistake an ordinary word for a pronoun", async () => {
-    replies("Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad.");
+    replies(
+      `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad. ${AVISO_DE_TRASPASO}`
+    );
 
     const out = await composeReply(base({ intent: "escalation" }));
 
@@ -558,12 +571,12 @@ describe("composeReply — the brief it hands the model", () => {
   });
 
   it("says whether this is a first contact or a conversation already underway", async () => {
-    replies("Ya tenemos todo lo necesario, tu denuncia pasa a análisis.");
+    replies(`Ya tenemos todo lo necesario. ${AVISO_DE_TRASPASO}`);
     await composeReply(base({ intent: "closing", isFollowUp: true }));
     expect(mockCall.mock.calls[0][0] as string).toContain("Ya venimos conversando");
 
     vi.clearAllMocks();
-    replies("Recibimos tu denuncia, ya quedó registrada.");
+    replies(`Recibimos tu denuncia, ya quedó registrada. ${AVISO_DE_TRASPASO}`);
     await composeReply(base({ intent: "closing" }));
     expect(mockCall.mock.calls[0][0] as string).toContain("primer mensaje");
   });
@@ -664,7 +677,9 @@ describe("composeReply — quien escribe no es el titular", () => {
   });
 
   it("toma el que nombra la diferencia y avisa que la revisa un especialista", async () => {
-    replies(`${DICE_LA_DIFERENCIA} Un especialista va a revisar tu caso y se va a comunicar con vos.`);
+    replies(
+      `${DICE_LA_DIFERENCIA} Un especialista va a revisar tu caso y se va a comunicar con vos. ${AVISO_DE_TRASPASO}`
+    );
 
     expect(await composeReply(ajeno())).not.toBe(FALLBACK);
     expect(mockCall.mock.calls[0][0] as string).toContain("sin preguntar cuál es el correcto");
@@ -767,17 +782,8 @@ describe("composeReply — lo que acaba de escribir no vuelve como «¿…, corr
 describe("composeReply — la derivación con heridos", () => {
   const CON_CUIDADO = `${CUIDADO} Recibimos tu denuncia y la derivamos a un especialista.`;
   const BRIEF = "frase breve de cuidado";
-  const SIN_FRASE = "Hola, Laura. Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.";
-  const CON_FRASE = `Hola, Laura. ${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.`;
-
-  function responde(...mensajes: string[]) {
-    for (const message of mensajes) {
-      mockCall.mockResolvedValueOnce({
-        text: JSON.stringify({ message }),
-        usage: { promptTokens: 0, completionTokens: 0 },
-      });
-    }
-  }
+  const SIN_FRASE = `Hola, Laura. Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
+  const CON_FRASE = `Hola, Laura. ${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
 
   it("dos intentos sin la frase devuelven el piso", async () => {
     responde(SIN_FRASE, SIN_FRASE);
@@ -850,5 +856,70 @@ describe("composeReply — la derivación con heridos", () => {
 
     expect(out).toBe(CON_CUIDADO);
     expect(mockCall.mock.calls[1][0] as string).toContain(motivo);
+  });
+});
+
+/*
+ * El cierre y la derivación terminan la carga por este medio: sin decirlo, la
+ * persona sigue contestando por acá y nadie la lee, o no reconoce el número
+ * desde el que le escribe el equipo.
+ */
+describe("composeReply — el aviso de traspaso", () => {
+  const SIN_AVISO = "Ya tenemos todo lo necesario y tu denuncia pasa a análisis.";
+  const CON_AVISO = `Ya tenemos todo lo necesario. ${AVISO_DE_TRASPASO}`;
+
+  it("un cierre sin el aviso dos veces devuelve el piso", async () => {
+    responde(SIN_AVISO, SIN_AVISO);
+
+    expect(await composeReply(base({ intent: "closing" }))).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("te faltó avisar que la carga se cierra");
+  });
+
+  it("un cierre con el aviso sale", async () => {
+    responde(CON_AVISO);
+
+    expect(await composeReply(base({ intent: "closing" }))).toBe(CON_AVISO);
+  });
+
+  it.each([
+    // El brief, al pie de la letra.
+    "Ya tenemos todo lo necesario. Con esto se cierra la carga de datos por este medio y una persona del equipo te va a escribir desde otro número o desde otra dirección de correo.",
+    // El reintento.
+    "Ya tenemos todo lo necesario. La carga se cierra acá y una persona del equipo te va a escribir desde otro número o correo.",
+  ])("un cierre dicho como lo sugiere el prompt sale al primer intento: %s", async (mensaje) => {
+    responde(mensaje);
+
+    expect(await composeReply(base({ intent: "closing" }))).toBe(mensaje);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("una derivación sin el aviso se corrige en el segundo intento", async () => {
+    const sin = "Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.";
+    const con = `${sin} ${AVISO_DE_TRASPASO}`;
+    responde(sin, con);
+
+    expect(await composeReply(base({ intent: "escalation" }))).toBe(con);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+  });
+
+  it.each<[ComposeReplyInput["intent"], Partial<ComposeReplyInput>]>([
+    ["ask", { fields: ["policy_number"] }],
+    ["conflict", { titularAjeno: false }],
+  ])("%s no lo exige", async (intent, extra) => {
+    const mensaje = "Para seguir con tu denuncia necesitamos el número de póliza, por favor.";
+    responde(mensaje);
+
+    expect(await composeReply(base({ intent, ...extra }))).toBe(mensaje);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("el brief del cierre lo pide, con el literal de ejemplo", async () => {
+    responde(CON_AVISO);
+
+    await composeReply(base({ intent: "closing" }));
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).toContain("se cierra la carga de datos");
+    expect(prompt).toContain(AVISO_DE_TRASPASO);
   });
 });

@@ -752,17 +752,16 @@ export async function orchestratePostExtraction(
   // place where escalation happens, one audit event, and one guarantee that a
   // specialist is actually told.
   if (plan?.intent === "escalate" && !derivaSola) {
-    // Quién figura en el padrón, para que el mensaje pueda nombrarlo. Sólo
-    // cuando le vamos a escribir: es una consulta más a la base.
-    const titularIniciales = confirmationEmailDispatched
-      ? null
-      : await inicialesDelTitularAjeno(
-          caseId,
-          tenantId,
-          extractedClaim,
-          claimantName,
-          plan.toolCalls ?? []
-        );
+    // Quién figura en el padrón, para que el mensaje pueda nombrarlo. Aunque
+    // haya salido un conflicto: ése puede ser de otro dato, y el que explica por
+    // qué pasa a una persona es éste.
+    const titularIniciales = await inicialesDelTitularAjeno(
+      caseId,
+      tenantId,
+      extractedClaim,
+      claimantName,
+      plan.toolCalls ?? []
+    );
 
     await escalate({
       caseId,
@@ -776,8 +775,10 @@ export async function orchestratePostExtraction(
       titularIniciales,
       claimTypeValue,
       reason: plan.reasoning,
-      // Si el conflicto ya salió, el asegurado no recibe además esto.
-      yaLeEscribimos: confirmationEmailDispatched,
+      // Aunque el conflicto ya haya salido: ése le pidió que conteste por acá, y
+      // en `requiere_especialista` esa respuesta no la lee nadie. Éste la anula
+      // y avisa el traspaso. El del titular ajeno ya lo trae y no llega hasta acá.
+      yaPreguntamos: confirmationEmailDispatched,
     });
     return;
   }
@@ -1550,7 +1551,7 @@ async function escalate(opts: {
    */
   heridos?: boolean;
   /**
-   * Ya le mandamos un mensaje a esta persona en esta vuelta.
+   * Ya le mandamos en esta vuelta un mensaje que avisa el traspaso.
    *
    * Suprime SÓLO el mensaje al asegurado. El estado, el registro de
    * auditoría y el aviso al especialista pasan igual: la garantía que este
@@ -1558,6 +1559,12 @@ async function escalate(opts: {
    * que lea el asegurado.
    */
   yaLeEscribimos?: boolean;
+  /**
+   * Ya le preguntamos algo en esta vuelta —el pedido de confirmación de un
+   * conflicto común— y la derivación sale igual: el mensaje le dice que no
+   * hace falta contestarlo.
+   */
+  yaPreguntamos?: boolean;
 }): Promise<void> {
   const { caseId, tenantId, severity } = opts;
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
@@ -1567,29 +1574,21 @@ async function escalate(opts: {
   await setStatus(caseId, tenantId, "requiere_especialista");
 
   /*
-   * Un mensaje por vuelta, y no dos que se contradicen.
+   * Dos mensajes en la misma vuelta no pueden tirar para lados opuestos.
    *
-   * Un familiar del titular escribe por el auto del padre. El padrón le
-   * encuentra la póliza, no le coinciden ni el nombre ni el documento, y
-   * sale el pedido de confirmación —que es correcto y es AC7/AC9—. Después
-   * el agente delibera, ve `titular_coincide: false`, y decide con razón que
-   * esto lo tiene que mirar una persona.
+   * Un familiar del titular escribe por el auto del padre, y el conflicto con
+   * el padrón ya le dijo que esto lo revisa una persona y que sigue por otro
+   * medio: ése es `yaLeEscribimos`, y la derivación no sale.
    *
-   * Hasta acá todo bien. Lo que estaba mal es que le llegaban las DOS cosas,
-   * con segundos de diferencia y tirando para lados opuestos: una le pide
-   * que conteste cuál dato es el correcto, la otra le dice que espere a que
-   * lo llamen. La persona no sabe si contestar o esperar.
+   * Si el conflicto fue común, en cambio, le pidió que conteste cuál dato es
+   * el correcto, y en `requiere_especialista` esa respuesta no la lee nadie.
+   * Ahí la derivación sale igual, con `yaPreguntamos`: cierra la carga y le
+   * dice que no hace falta contestar. Callarla dejaba a la persona contestando
+   * a un chat que ya no lee nadie.
    *
-   * Gana el que ya salió. No por ser mejor —decirle que su caso pasó a una
-   * persona es buena información— sino porque cuando llegamos acá ese
-   * mensaje ya se fue, y elegir al otro obligaría a deliberar ANTES de
-   * responder el conflicto: otra llamada al modelo en el camino caliente,
-   * para elegir entre dos mensajes razonables. No lo vale.
-   *
-   * Lo que NO se suprime es nada de lo de abajo. El caso queda en
-   * `requiere_especialista`, el evento se registra, y al especialista se le
-   * avisa: la pregunta que le hicimos al asegurado es justamente la que ese
-   * especialista necesita contestada.
+   * Lo que NO se suprime nunca es nada de lo de abajo. El caso queda en
+   * `requiere_especialista`, el evento se registra y al especialista se le
+   * avisa.
    */
   if (opts.yaLeEscribimos) {
     logger.info({
@@ -1609,6 +1608,7 @@ async function escalate(opts: {
         claimantName: opts.claimantName ?? null,
         titularIniciales: opts.titularIniciales ?? null,
         ...(opts.heridos ? { heridos: true } : {}),
+        ...(opts.yaPreguntamos ? { yaPreguntamos: true } : {}),
       },
       inReplyToMessageId: opts.inReplyToMessageId,
     });
@@ -2142,39 +2142,48 @@ async function hasPriorOutbound(caseId: string, tenantId: string): Promise<boole
 }
 
 /**
- * ¿Ya salió el mensaje de cierre para este caso?
+ * ¿El cierre es lo último que le dijimos a este caso?
  *
- * Es la regla AC12: mandalo siempre, pero una sola vez. Preguntaba por el
- * nombre del mail y nada más, así que en WhatsApp no frenaba nada: un
- * analista tocaba «Re-analizar» sobre un caso ya completo y al asegurado
- * le llegaba por segunda vez el mensaje de que su denuncia está lista.
+ * Es la regla AC12: mandalo siempre, pero una sola vez por cierre. Preguntaba
+ * por el nombre del mail y nada más, así que en WhatsApp no frenaba nada: un
+ * analista tocaba «Re-analizar» sobre un caso ya completo y al asegurado le
+ * llegaba por segunda vez el mensaje de que su denuncia está lista.
+ *
+ * Y preguntaba si salió alguna vez: si después del cierre le pedimos algo, el
+ * caso se reabrió, y el cierre que lo termina tiene que volver a salir. Si no,
+ * la persona se queda con el último pedido y nunca se entera de que terminó.
  */
 async function checkConfirmationAlreadySent(
   caseId: string,
   tenantId: string
 ): Promise<boolean> {
+  // Los dos nombres de cada uno: el mail guarda `confirmation_received` y
+  // WhatsApp `wa_confirmation_received`.
+  const cierre = nombresEnElLibro("confirmation_received");
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
-    const data = await enTenant(tenantCtx, (db) =>
-      db
-        .select({ id: outboundMessages.id })
-        .from(outboundMessages)
-        .where(
-          and(
-            eq(outboundMessages.case_id, caseId),
-            // Los dos nombres: el mail guarda `confirmation_received` y
-            // WhatsApp `wa_confirmation_received`. Preguntando sólo por el
-            // primero, esta consulta devolvía 0 filas para todo caso de
-            // WhatsApp y la regla «mandalo siempre, pero una sola vez»
-            // quedaba viva sólo para correo.
-            inArray(outboundMessages.template, nombresEnElLibro("confirmation_received"))
+    const ultimo = firstRow(
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ template: outboundMessages.template })
+          .from(outboundMessages)
+          .where(
+            and(
+              eq(outboundMessages.case_id, caseId),
+              inArray(outboundMessages.template, [
+                ...cierre,
+                ...nombresEnElLibro("missing_information_request"),
+                ...nombresEnElLibro("data_confirmation_request"),
+              ])
+            )
           )
-        )
-        .limit(1)
+          .orderBy(desc(outboundMessages.created_at))
+          .limit(1)
+      )
     );
 
-    return data.length > 0;
+    return ultimo !== null && cierre.includes(ultimo.template);
   } catch (err) {
     logger.error({ code: errCode(err) }, "orchestrate.failed_to_check_outbound_messages");
     return false;

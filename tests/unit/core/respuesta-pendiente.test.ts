@@ -7,6 +7,16 @@ import {
 const TEXTO = "Recibimos tu denuncia.";
 const veces = (s: string) => s.split(RESPUESTA_PENDIENTE).length - 1;
 
+describe("RESPUESTA_PENDIENTE", () => {
+  it("no promete contestar por acá: en el cierre va detrás del aviso de traspaso", () => {
+    expect(RESPUESTA_PENDIENTE).not.toMatch(/por ac[aá]/i);
+  });
+
+  it("no nombra a «la persona»: también va en los pedidos, donde nadie la presentó", () => {
+    expect(RESPUESTA_PENDIENTE).not.toMatch(/\bla persona\b/i);
+  });
+});
+
 describe("conRespuestaPendiente", () => {
   it("agrega la frase una vez, después del texto", () => {
     expect(conRespuestaPendiente(TEXTO, "¿Cuánto tarda?")).toBe(

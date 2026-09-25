@@ -185,18 +185,22 @@ function sinNumerosEnteros(texto: string): string {
  * «• Decinos si alguien resultó lastimado.» o «• ¿Tu nombre completo es…?»: el
  * modelo copiaba la instrucción de cada campo, con su verbo, y metía la
  * confirmación en una lista de cosas para mandar.
+ *
+ * Los ejemplos no pueden ser campos de verdad: con un solo dato a pedir (goteo,
+ * 25/09) el modelo copiaba «Si alguien resultó lastimado» y «Fotos de los
+ * daños» como ítems, `invented_field` las dos veces y salía la plantilla.
  */
 const COMO_VA_LA_LISTA =
-  "CÓMO VA LA LISTA: el verbo va una sola vez, en la frase que la abre, y después un renglón " +
-  "en blanco. Cada ítem nombra lo que falta sin verbo propio —«El número de póliza (por ejemplo " +
-  "POL-12345)», «Si alguien resultó lastimado», «Fotos de los daños»—, nunca «Decinos…», " +
-  "«Mandanos…» ni «Pasanos…». Lo que ya entendimos no va en esa lista: preguntá si es correcto " +
-  "aparte, en una oración propia.";
+  "CÓMO VA LA LISTA: los ítems son sólo los de DATOS A PEDIR, ni uno más. Si es uno solo, " +
+  "sin lista: pedilo en una oración. Si son varios, el verbo va una sola vez, en la frase que " +
+  "abre la lista, y después un renglón en blanco. Cada ítem nombra lo que falta sin verbo " +
+  "propio —«El número de …», «Fotos de …»—, nunca «Decinos…», «Mandanos…» ni «Pasanos…». Lo " +
+  "que ya entendimos no va en esa lista: preguntá si es correcto aparte, en una oración propia.";
 
 // El literal de ejemplo, como con CUIDADO: sin él la guarda quema reintentos en paráfrasis.
 const TRASPASO =
   "con esto se cierra la carga de datos por este medio y una persona del equipo le va a " +
-  `escribir desde otro número o desde otra dirección de correo (por ejemplo: «${AVISO_DE_TRASPASO}»)`;
+  `escribir, puede ser desde otro número o desde otra dirección de correo (por ejemplo: «${AVISO_DE_TRASPASO}»)`;
 
 function buildPrompt(input: ComposeReplyInput): string {
   const items = (input.fields ?? []).map((key) => {
@@ -503,7 +507,7 @@ function explain(problem: string): string {
     return `nombraste las heridas, la internación o la salud de alguien. Alcanza con «${CUIDADO}»: no repitas lo que contó ni digas cómo va a estar nadie.`;
   }
   if (problem === "dropped_handoff") {
-    return `te faltó avisar que la carga se cierra acá y que una persona le va a escribir desde otro número o correo. Podés decirlo así: «${AVISO_DE_TRASPASO}».`;
+    return `te faltó avisar que la carga se cierra acá y que una persona le va a escribir, puede ser desde otro número o correo. Podés decirlo así: «${AVISO_DE_TRASPASO}».`;
   }
   if (problem === "escalation_gendered") {
     return "le pusiste género al especialista. No sabemos quién es: decí «un especialista».";

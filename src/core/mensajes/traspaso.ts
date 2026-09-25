@@ -7,10 +7,13 @@
  * escribe desde otro número o dirección: quien contestaba acá hablaba solo, y
  * al que le escribía el equipo no lo reconocía. Lo usan los pisos de los dos
  * canales y el redactor; el predicado, la guarda del redactor y el ensayo.
+ *
+ * «Puede ser» porque en el Plan Pro el equipo también contesta desde el caso,
+ * por el mismo número de WhatsApp (`puede-responder.ts`).
  */
 
 export const AVISO_DE_TRASPASO =
-  "Con esto cerramos la carga de datos por este medio. Una persona del equipo te va a escribir desde otro número o desde otra dirección de correo.";
+  "Con esto cerramos la carga de datos por este medio. Una persona del equipo te va a escribir, puede ser desde otro número o desde otra dirección de correo.";
 
 /** El pie de los dos mails que cierran: una respuesta a ese correo no se pierde. */
 export const SI_RESPONDES_EL_CORREO = "Si respondés este correo, lo lee una persona del equipo.";

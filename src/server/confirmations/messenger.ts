@@ -140,7 +140,7 @@ function renderEscalation(data: Record<string, unknown>): string {
   // Sin redactor —429, timeout, dos rechazos— esto es lo que llega: un caso
   // real (escribe-despues-del-cierre, 25/09) dio nombre en el mismo mensaje y
   // el piso salió sin saludo, "Lamentamos mucho lo que están pasando" seco.
-  const nombre = typeof data.claimantName === "string" ? data.claimantName.trim() : "";
+  const nombre = nombreDePila(data.claimantName);
   const saludo = nombre ? `Hola, ${nombre}. ` : "";
   const base =
     data.heridos === true ? `${saludo}${CUIDADO} ${ESCALATION_TEXT}` : `${saludo}${ESCALATION_TEXT}`;
@@ -187,7 +187,8 @@ function renderAsk(data: Record<string, unknown>): string {
   const bullet = (i: (typeof items)[number]) =>
     i.value ? `• ${i.label}: entendimos "${i.value}"` : `• ${i.label}`;
 
-  const lead = remaining > 0 ? "Para empezar, necesitamos" : "Necesitamos";
+  const vuelta = data.isFollowUp === true;
+  const lead = remaining > 0 ? "Para empezar, necesitamos" : vuelta ? "Para seguir, necesitamos" : "Necesitamos";
 
   const blocks: string[] = [];
   if (datos.length > 0) {
@@ -215,10 +216,19 @@ function renderAsk(data: Record<string, unknown>): string {
   // Sin redactor esto es lo que llega: dos casos reales (busca-la-poliza y
   // foto-que-no-es-nada, 25/09, los dos con un 429 de por medio) dieron su
   // nombre y recibieron "Recibimos tu denuncia..." sin saludo.
-  const nombre = typeof data.claimantName === "string" ? data.claimantName.trim() : "";
+  // Y en la tercera vuelta de goteo (25/09) volvió a saludar con nombre y
+  // apellido y a decir que la denuncia quedó registrada, como un primer mensaje.
+  const cuerpo = `${blocks.join("\n\n")}\n\n${how}`;
+  if (vuelta) return cuerpo;
+  const nombre = nombreDePila(data.claimantName);
   const saludo = nombre ? `Hola, ${nombre}. ` : "";
 
-  return `${saludo}Recibimos tu denuncia y ya quedó registrada.\n\n${blocks.join("\n\n")}\n\n${how}`;
+  return `${saludo}Recibimos tu denuncia y ya quedó registrada.\n\n${cuerpo}`;
+}
+
+/** «Roberto Paz» → «Roberto»: a nadie se lo saluda con nombre y apellido. */
+function nombreDePila(nombre: unknown): string {
+  return typeof nombre === "string" ? (nombre.trim().split(/\s+/)[0] ?? "") : "";
 }
 
 /**

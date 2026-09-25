@@ -3640,17 +3640,24 @@ La barra marca `/asistente` como Pro. Con la promoción, el inquilino vivo
 como «¿…, correcto?» aunque nadie lo haya pedido, salvo nombre, DNI, email y
 teléfono, que pueden ser de otra persona. Una fecha inferida no se afirma. Un
 borrador con más ítems que campos pedidos se rechaza. Las plantillas de
-respaldo saludan con el nombre.
+respaldo saludan con el nombre de pila, y sólo en el primer mensaje: en una
+vuelta posterior no vuelven a decir que la denuncia quedó registrada.
+
+**Pendientes cerrados (25/09).** El aviso de traspaso dice que la persona del
+equipo «puede» escribir desde otro número o correo, porque en el Plan Pro
+también contesta desde el mismo número (`puede-responder.ts`). En el ensayo
+`goteo`, con un solo dato pedido, el redactor copiaba como ítems los ejemplos
+de «CÓMO VA LA LISTA» («Si alguien resultó lastimado», «Fotos de los daños»),
+la regla de más ítems que campos rechazaba los dos intentos y salía la
+plantilla. Los ejemplos ya no son campos reales y un dato solo va en una
+oración, sin lista. `/metricas` no es Plan Pro (Pro son el asistente y P8):
+no le faltaba respaldo en el servidor, la nota anterior estaba equivocada.
 
 **Pen test (#294).** `attackTenantWall` ya no escribe: prueba la pared entre
 inquilinos sólo leyendo. `scripts/migrate.mjs --forget` no se marca a sí mismo
 como deriva.
 
 **Lo que queda.**
-- `AVISO_DE_TRASPASO` dice que el equipo va a escribir «desde otro número». En
-  un inquilino Pro con P8 puede escribir desde el mismo.
-- `/metricas` no tiene respaldo de Plan Pro en el servidor: sólo la barra lo
-  oculta. Es anterior a esta tanda.
 - La pregunta por heridos puede repetirse en un mismo caso. Se deja así porque
   es una guarda de seguridad.
 - La región de Vertex sigue en `us-central1`: el dueño rechazó `global` el

@@ -140,7 +140,9 @@ export function renderDataConfirmationRequest(
           },
         ];
 
-  const bloques = campos.map(armarBloque);
+  const ajeno = data.titularAjeno === true;
+  // Derivado en esta vuelta: un bloque abierto pide el dato, y nadie lee la respuesta.
+  const bloques = campos.map(armarBloque).filter((b) => !(ajeno && b.abierto));
 
   /*
    * Con que UNO traiga valor, hay algo que confirmar.
@@ -151,7 +153,6 @@ export function renderDataConfirmationRequest(
    */
   const isOpenQuestion = bloques.every((b) => b.abierto);
   const varios = bloques.length > 1;
-  const ajeno = data.titularAjeno === true && !isOpenQuestion;
 
   const subject = ajeno
     ? `Tu reclamo pasa a un especialista - Caso #${data.caseId}`
@@ -178,7 +179,11 @@ export function renderDataConfirmationRequest(
       ? "necesitamos que confirmes los siguientes datos:"
       : "necesitamos que confirmes el siguiente dato:";
 
-  const tras = ajeno ? `. ${NO_COINCIDE_CON_EL_TITULAR}` : `, y ${queSigue}`;
+  const tras = !ajeno
+    ? `, y ${queSigue}`
+    : bloques.length > 0
+      ? `. ${NO_COINCIDE_CON_EL_TITULAR}`
+      : ".";
   const introHtml = `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${escapeHtml(data.caseId)}</strong>${escapeHtml(tras)}</p>`;
   const introText = `Gracias por tu reclamo. Lo registramos como caso #${data.caseId}${tras}`;
 
@@ -202,13 +207,7 @@ export function renderDataConfirmationRequest(
           `- O bien, escribí ${varios ? "los valores correctos" : "el valor correcto"} directamente en tu respuesta.`,
         ].join("\n");
 
-  const cuerpo = [
-    introText,
-    "",
-    bloques.map((b) => b.text).join("\n\n"),
-    "",
-    actionText,
-  ].join("\n");
+  const cuerpo = [introText, ...bloques.map((b) => b.text), actionText].join("\n\n");
   const redactado = data.cuerpo?.trim();
 
   const prosaHtml = redactado

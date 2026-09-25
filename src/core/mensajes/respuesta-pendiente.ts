@@ -13,9 +13,12 @@
  * la suya, que es como se llega a dos productos con la misma cara.
  */
 
+// Sin «por acá», porque en el cierre va detrás del aviso de que por este medio
+// ya no sigue nadie. Y sin «la persona»: también va en los pedidos de datos, a
+// mitad de la carga, donde nadie presentó a ninguna.
 export const RESPUESTA_PENDIENTE =
   "Sobre lo que preguntás: todavía no podemos darte una respuesta, porque " +
-  "nadie revisó tu caso aún. En cuanto un analista lo mire te avisamos por acá.";
+  "nadie revisó tu caso aún. Te la damos cuando alguien del equipo lo revise.";
 
 /**
  * El texto con la frase, cuando hubo pregunta. Una sola vez aunque se aplique

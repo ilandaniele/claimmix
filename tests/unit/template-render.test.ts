@@ -15,6 +15,14 @@ import {
   maskPolicyNumber,
 } from "../../src/server/email/render";
 import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
+import {
+  AVISO_DE_TRASPASO,
+  NO_HACE_FALTA_CONTESTAR,
+  SI_RESPONDES_EL_CORREO,
+  mencionaElTraspaso,
+} from "@/core/mensajes/traspaso";
+import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
+import { pideAlgo } from "../../scripts/lib/pide-algo.mjs";
 
 // ── PII masking unit tests ────────────────────────────────────────────────────
 
@@ -178,6 +186,29 @@ describe("renderTemplate — confirmation_received", () => {
       policyNumber: "POL-12345678",
     });
     expect(result.html).toContain("Póliza asociada");
+  });
+
+  it.each([false, true])("avisa el traspaso y que el correo lo lee una persona (isFollowUp: %s)", (isFollowUp) => {
+    const r = renderTemplate("confirmation_received", { caseId: "x", isFollowUp });
+    for (const cuerpo of [r.text, r.html]) {
+      expect(cuerpo).toContain(AVISO_DE_TRASPASO);
+      expect(cuerpo).toContain(SI_RESPONDES_EL_CORREO);
+      expect(cuerpo).not.toContain("respondé este correo");
+      expect(cuerpo).not.toContain("Podés responder a este correo");
+    }
+    expect(mencionaElTraspaso(r.cuerpo)).toBe(true);
+  });
+
+  it("con pregunta, no promete contestar por el medio que cierra", () => {
+    const r = renderTemplate("confirmation_received", {
+      caseId: "x",
+      isFollowUp: true,
+      question: "¿Cuánto tarda?",
+    });
+    const tras = r.text.slice(r.text.indexOf(AVISO_DE_TRASPASO) + AVISO_DE_TRASPASO.length);
+    expect(tras).toContain(RESPUESTA_PENDIENTE);
+    expect(tras).not.toMatch(/por ac[aá]/i);
+    expect(pideAlgo(tras.toLowerCase())).toBe(false);
   });
 });
 
@@ -377,6 +408,44 @@ describe("renderTemplate — specialist_escalation", () => {
     expect(typeof result.text).toBe("string");
     expect(result.text.length).toBeGreaterThan(50);
   });
+
+  it.each([false, true])("avisa el traspaso (heridos: %s)", (heridos) => {
+    const r = renderTemplate("specialist_escalation", { caseId: "esc-5", severity: "critical", heridos });
+    for (const cuerpo of [r.text, r.html]) {
+      expect(cuerpo).toContain(AVISO_DE_TRASPASO);
+      expect(cuerpo).toContain(SI_RESPONDES_EL_CORREO);
+      expect(cuerpo).not.toContain("será incorporada");
+    }
+    expect(mencionaElTraspaso(r.cuerpo)).toBe(true);
+    expect(pideDatos(r.cuerpo)).toBe(false);
+  });
+
+  it("tras un pedido de confirmación, dice que no hace falta contestarlo, también redactado", () => {
+    for (const cuerpo of [undefined, `Derivamos tu caso a un especialista. ${AVISO_DE_TRASPASO}`]) {
+      const r = renderTemplate("specialist_escalation", { caseId: "esc-6", yaPreguntamos: true, cuerpo });
+      for (const salida of [r.text, r.html]) expect(salida).toContain(NO_HACE_FALTA_CONTESTAR);
+    }
+    const sin = renderTemplate("specialist_escalation", { caseId: "esc-6" });
+    for (const salida of [sin.text, sin.html]) expect(salida).not.toContain(NO_HACE_FALTA_CONTESTAR);
+  });
+});
+
+/*
+ * El pie de los mails que cierran va en el cromo: un cuerpo redactado
+ * reemplaza la prosa entera, y con el pie adentro se lo llevaba.
+ */
+describe("el pie del correo sobrevive al redactor", () => {
+  it.each(["confirmation_received", "specialist_escalation"] as const)("%s", (template) => {
+    const cuerpo = `Tu caso quedó registrado. ${AVISO_DE_TRASPASO}`;
+    const r = renderTemplate(template, { caseId: "x", cuerpo });
+    for (const salida of [r.text, r.html]) {
+      expect(salida).toContain("Tu caso quedó registrado.");
+      expect(salida).toContain(SI_RESPONDES_EL_CORREO);
+      expect(salida.split(SI_RESPONDES_EL_CORREO)).toHaveLength(2);
+    }
+    // El piso no lo trae en la prosa: lo que ve el redactor no lo duplica.
+    expect(r.cuerpo).not.toContain(SI_RESPONDES_EL_CORREO);
+  });
 });
 
 describe("specialist_escalation — con heridos", () => {
@@ -494,6 +563,14 @@ describe("specialist_escalation — el titular que no coincide", () => {
     expect(r.html).toContain("R*** P***");
     expect(r.text).toContain("R*** P***");
     expect(r.cuerpo).not.toContain("R*** P***");
+  });
+
+  it("va detrás del aviso y no invita a contestar", () => {
+    const { text } = derivacionDeTitular();
+    const tras = text.slice(text.indexOf(AVISO_DE_TRASPASO) + AVISO_DE_TRASPASO.length);
+    expect(tras).toContain("R*** P***");
+    expect(tras).not.toMatch(/contanos/i);
+    expect(pideAlgo(tras.toLowerCase())).toBe(false);
   });
 
   it("un escalado por severidad no menciona ningún padrón", () => {
@@ -779,7 +856,27 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
       expect(cuerpo).toContain("J*** P***");
       expect(cuerpo).not.toContain("Juan Pérez");
       expect(cuerpo).not.toContain("20345678");
+      expect(cuerpo).toContain(AVISO_DE_TRASPASO);
     }
+  });
+
+  it("derivado sin valores que mostrar, avisa el traspaso y no pide el dato", () => {
+    const r = renderTemplate("data_confirmation_request", {
+      caseId: "case-12",
+      fieldKey: "",
+      proposedValue: "",
+      titularAjeno: true,
+      fields: [{ fieldKey: "full_name", proposedValue: "" }],
+    });
+
+    for (const cuerpo of [r.text, r.html]) {
+      expect(cuerpo).toContain(AVISO_DE_TRASPASO);
+      expect(cuerpo).not.toContain("Respondé este correo");
+      expect(cuerpo).not.toContain("Campo:");
+    }
+    expect(r.cuerpo.trim()).not.toMatch(/:$/);
+    expect(mencionaElTraspaso(r.cuerpo)).toBe(true);
+    expect(pideAlgo(r.cuerpo.toLowerCase())).toBe(false);
   });
 });
 

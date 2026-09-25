@@ -11,6 +11,8 @@
  * incumplida en los dos, porque nadie la mira.
  */
 
+import { AVISO_DE_TRASPASO } from "./traspaso";
+
 /*
  * El pedido de confirmación cuando quien escribe no es el titular.
  *
@@ -22,7 +24,7 @@
 export const NO_COINCIDE_CON_EL_TITULAR =
   "Los datos que nos pasaste no coinciden con los del titular de la póliza:";
 export const LO_REVISA_UN_ESPECIALISTA =
-  "Como la póliza está a nombre de otra persona, un especialista va a revisar tu caso y se va a comunicar con vos.";
+  `Como la póliza está a nombre de otra persona, un especialista va a revisar tu caso y se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
 
 export interface TitularQueNoCoincide {
   /** El titular del padrón, en iniciales: «R*** P***». Nunca el nombre entero. */
@@ -41,8 +43,9 @@ export function laDiferencia(data: TitularQueNoCoincide): string | null {
   const dijo = data.claimantName?.trim();
   if (!padron || !dijo) return null;
 
+  // Sin invitar a contestar: va detrás del aviso de traspaso, y por este medio ya no lee nadie.
   return (
     `La póliza figura a nombre de ${padron} y vos nos decís que sos ${dijo}. ` +
-    `El especialista va a revisar esa diferencia; si querés, contanos qué relación tenés con el titular.`
+    `El especialista va a revisar esa diferencia.`
   );
 }

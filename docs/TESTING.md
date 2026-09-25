@@ -97,6 +97,11 @@ pedimos» ni el ofrecimiento de responder con más información— y `no-mencion
 con «internad», «quemadur», «recuper», «mejoría» y «esté bien»: la frase no
 repite ni pronostica lo que contó de la salud.
 
+Toda conversación con `finally` que termina en `listo_para_core` o
+`requiere_especialista` corre `traspaso`: el último mensaje avisa que la carga
+de datos se cierra por ese medio y que una persona escribe desde otro número o
+correo, con `mencionaElTraspaso` de `src/core/mensajes/traspaso.ts`.
+
 También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
 hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún
 turno de la persona habló de heridos. Si no dijo nada, se le pregunta abierto.

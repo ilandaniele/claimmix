@@ -24,6 +24,7 @@ import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
 import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
+import { AVISO_DE_TRASPASO, mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { logger } from "@/lib/observability/logger";
 
@@ -192,6 +193,11 @@ const COMO_VA_LA_LISTA =
   "«Mandanos…» ni «Pasanos…». Lo que ya entendimos no va en esa lista: preguntá si es correcto " +
   "aparte, en una oración propia.";
 
+// El literal de ejemplo, como con CUIDADO: sin él la guarda quema reintentos en paráfrasis.
+const TRASPASO =
+  "con esto se cierra la carga de datos por este medio y una persona del equipo le va a " +
+  `escribir desde otro número o desde otra dirección de correo (por ejemplo: «${AVISO_DE_TRASPASO}»)`;
+
 function buildPrompt(input: ComposeReplyInput): string {
   const items = (input.fields ?? []).map((key) => {
     const { label, instruction, kind } = labelForField(key);
@@ -212,15 +218,15 @@ function buildPrompt(input: ComposeReplyInput): string {
       "Avisar que la denuncia se derivó a un especialista que se va a comunicar a la brevedad " +
       "(decí «un especialista», nunca «él» ni «ella»: no sabemos quién es), " +
       "y que si necesita asistencia urgente llame a la línea de emergencias de su póliza. " +
-      "NO pidas ningún dato: un especialista se encarga.",
-    closing:
-      "Avisar que ya tenemos todo lo necesario y que la denuncia pasa a análisis. NO pidas nada.",
+      `NO pidas ningún dato: un especialista se encarga. Avisá también que ${TRASPASO}.`,
+    closing: `Avisar que ya tenemos todo lo necesario y que ${TRASPASO}. NO pidas nada.`,
     conflict: input.titularAjeno
       ? "La póliza está a nombre de otra persona que quien escribe —puede ser un familiar—, así " +
         "que los dos valores pueden ser correctos. Señalá la diferencia sin preguntar cuál es el " +
         "correcto y sin decir que la póliza o el vehículo son de quien escribe. Avisá que un " +
         "especialista va a revisar el caso y se va a comunicar (decí «un especialista», nunca " +
-        "«él» ni «ella»). NO preguntes ni pidas nada: el caso ya lo tiene un especialista."
+        "«él» ni «ella»). NO preguntes ni pidas nada: el caso ya lo tiene un especialista. " +
+        `Avisá también que ${TRASPASO}.`
       : "Señalar la diferencia entre los dos valores y preguntar cuál es el correcto.",
     // Es la única intención donde la lista de campos se pasa para que NO se
     // use: el redactor la necesita para no volver a pedir eso mismo con
@@ -395,6 +401,12 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     if (hablaDeLaSalud(trimmed)) return "care_names_health";
   }
 
+  // Último, para que cualquier otro rechazo conserve su motivo en el reintento.
+  // Sin el aviso, la persona sigue escribiendo por acá y ya no lo lee nadie.
+  if ((input.intent === "closing" || deriva) && !mencionaElTraspaso(trimmed)) {
+    return "dropped_handoff";
+  }
+
   return null;
 }
 
@@ -473,6 +485,9 @@ function explain(problem: string): string {
   }
   if (problem === "care_names_health") {
     return `nombraste las heridas, la internación o la salud de alguien. Alcanza con «${CUIDADO}»: no repitas lo que contó ni digas cómo va a estar nadie.`;
+  }
+  if (problem === "dropped_handoff") {
+    return `te faltó avisar que la carga se cierra acá y que una persona le va a escribir desde otro número o correo. Podés decirlo así: «${AVISO_DE_TRASPASO}».`;
   }
   if (problem === "escalation_gendered") {
     return "le pusiste género al especialista. No sabemos quién es: decí «un especialista».";

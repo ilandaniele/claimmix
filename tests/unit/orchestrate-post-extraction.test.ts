@@ -186,7 +186,7 @@ function setupDbMocks({
    * What the last *sent* ask on this case asked for, as alreadyAskedFor reads
    * it. Empty means we have never asked for anything, so every ask is new.
    */
-  lastAskRows = [] as Array<{ asked_keys?: string[] | null; created_at?: string }>,
+  lastAskRows = [] as Array<{ asked_keys?: string[] | null; created_at?: string; template?: string }>,
   /** Rows for filesArrivedSinceWeLastSpoke: non-empty means a file arrived. */
   newAttachmentRows = [] as Array<{ id: string }>,
   /**
@@ -248,10 +248,10 @@ function setupDbMocks({
       if (tableName === "outbound_messages") {
         return {
           where: () => ({
-            // hasPriorOutbound / checkConfirmationAlreadySent: "has anything
-            // gone out at all?"
+            // hasPriorOutbound: "has anything gone out at all?"
             limit: () => Promise.resolve(outboundMessagesRows),
-            // alreadyAskedFor: "what did the last sent ask ask for?"
+            // alreadyAskedFor: "what did the last sent ask ask for?", and
+            // checkConfirmationAlreadySent: "is the closing the last thing we said?"
             orderBy: () => ({ limit: () => Promise.resolve(lastAskRows) }),
           }),
         };
@@ -1590,7 +1590,10 @@ describe("orchestratePostExtraction — confirmation_received (AC12)", () => {
   it("does NOT dispatch confirmation_received if already sent (idempotency)", async () => {
     const claim = extractEmailClaimMock();
     // Simulate existing confirmation_received outbound_messages row.
-    setupDbMocks({ outboundMessagesRows: [{ id: "existing-msg-id" }] });
+    setupDbMocks({
+      outboundMessagesRows: [{ id: "existing-msg-id" }],
+      lastAskRows: [{ template: "confirmation_received" }],
+    });
 
     await orchestratePostExtraction(
       CASE_ID,
@@ -1603,6 +1606,27 @@ describe("orchestratePostExtraction — confirmation_received (AC12)", () => {
       (call) => call[0].template === "confirmation_received"
     );
     expect(confirmationCalls).toHaveLength(0);
+  });
+
+  it("un caso que volvió a pedir datos después del cierre cierra de nuevo, con el traspaso", async () => {
+    // Se cerró, llegó algo que abrió un pedido, y ahora vuelve a estar
+    // completo. Con «¿salió alguna vez un cierre?» el caso terminaba en
+    // `listo_para_core` sin decir que la carga termina acá: lo último que leyó
+    // la persona era el pedido.
+    setupDbMocks({
+      outboundMessagesRows: [{ id: "existing-msg-id" }],
+      lastAskRows: [{ template: "missing_information_request", asked_keys: ["parte_amistoso"] }],
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+    expect(templates).toContain("confirmation_received");
   });
 
   it("dispatches confirmation_received even for medium-severity claim", async () => {
@@ -1662,6 +1686,7 @@ describe("orchestratePostExtraction — checkConfirmationAlreadySent error paths
           return {
             where: () => ({
               limit: () => Promise.reject(new Error("DB connection lost")),
+              orderBy: () => ({ limit: () => Promise.reject(new Error("DB connection lost")) }),
             }),
           };
         }
@@ -4179,21 +4204,19 @@ describe("orchestratePostExtraction — la derivación no manda un segundo mensa
     } as unknown as Awaited<ReturnType<typeof deliberate>>);
   });
 
+  const templates = () =>
+    vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+
   it("le llega el pedido de confirmación y NADA más", async () => {
+    // El pedido del titular ajeno ya avisa el traspaso: la derivación no repite.
     await orchestratePostExtraction(
       CASE_ID,
       TENANT_ID,
-      { extractedClaim: claimDeUnFamiliar(), senderEmail: SENDER_EMAIL },
+      { extractedClaim: claimDeUnFamiliar(), senderEmail: SENDER_EMAIL, titularAjeno: true },
       [conflictoDeTitular()]
     );
 
-    const templates = vi
-      .mocked(dispatchOutboundEmail)
-      .mock.calls.map((c) => c[0].template);
-
-    expect(templates).toContain("data_confirmation_request");
-    expect(templates).not.toContain("specialist_escalation");
-    expect(templates).toHaveLength(1);
+    expect(templates()).toEqual(["data_confirmation_request"]);
   });
 
   it("pero la derivación ocurre igual: queda registrada", async () => {
@@ -4202,7 +4225,7 @@ describe("orchestratePostExtraction — la derivación no manda un segundo mensa
     await orchestratePostExtraction(
       CASE_ID,
       TENANT_ID,
-      { extractedClaim: claimDeUnFamiliar(), senderEmail: SENDER_EMAIL },
+      { extractedClaim: claimDeUnFamiliar(), senderEmail: SENDER_EMAIL, titularAjeno: true },
       [conflictoDeTitular()]
     );
 
@@ -4212,8 +4235,28 @@ describe("orchestratePostExtraction — la derivación no manda un segundo mensa
 
     expect(derivacion).toBeDefined();
     expect(derivacion?.[0].payload).toMatchObject({
-      reason: "el titular de la póliza no es quien escribe",
+      reason: "quien escribe no es el titular de la póliza",
     });
+  });
+
+  it("tras un conflicto común, la del agente sí le escribe, y es lo último que lee", async () => {
+    // El conflicto común dice «Respondé por acá y seguimos»; en
+    // `requiere_especialista` esa respuesta no la lee nadie. Sin la derivación
+    // atrás, ése era el último mensaje del caso y no avisaba el traspaso.
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claimDeUnFamiliar(), senderEmail: SENDER_EMAIL },
+      [conflictoDeTitular()]
+    );
+
+    expect(templates()).toEqual(["data_confirmation_request", "specialist_escalation"]);
+    // Y le dice que la pregunta de recién ya no hace falta contestarla: sin
+    // eso, por WhatsApp la respuesta abría un caso nuevo.
+    const derivacion = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "specialist_escalation")?.[0];
+    expect(derivacion?.data).toMatchObject({ yaPreguntamos: true });
   });
 
   it("y sin conflicto previo, la derivación sí le escribe", async () => {
@@ -4231,6 +4274,10 @@ describe("orchestratePostExtraction — la derivación no manda un segundo mensa
       .mock.calls.map((c) => c[0].template);
 
     expect(templates).toContain("specialist_escalation");
+    const derivacion = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "specialist_escalation")?.[0];
+    expect(derivacion?.data).not.toHaveProperty("yaPreguntamos");
   });
 
   /*
@@ -4277,6 +4324,34 @@ describe("orchestratePostExtraction — la derivación no manda un segundo mensa
       titularIniciales: "R*** P***",
       claimantName: "Lucía Paz",
     });
+  });
+
+  it("aunque antes haya salido un conflicto de otro dato", async () => {
+    // El conflicto era del correo; el que explica por qué pasa a una persona
+    // es el titular. Saltear la búsqueda por el conflicto dejaba la derivación
+    // sin la diferencia.
+    setupDbMocks({ titularRows: [{ nombre: "Roberto Paz", dni: "26.880.140" }] });
+    const deOtroDato: CustomerMatch = {
+      customerId: "cust-003",
+      matchType: "policy_number",
+      storedValues: { email: "roberto@example.com" },
+      confidence: 0.9,
+      customerName: "Roberto Paz",
+      conflictsWithExtracted: ["email"],
+    };
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: familiarConDni(), senderEmail: SENDER_EMAIL },
+      [deOtroDato]
+    );
+
+    expect(templates()).toEqual(["data_confirmation_request", "specialist_escalation"]);
+    const derivacion = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "specialist_escalation")?.[0];
+    expect(derivacion?.data).toMatchObject({ titularIniciales: "R*** P***", yaPreguntamos: true });
   });
 
   it("y el nombre entero no sale del servidor", async () => {

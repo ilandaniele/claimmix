@@ -18,6 +18,8 @@
  * ante la duda se descarta.
  */
 
+import { mismoNombre } from "@/core/matching/normalizar";
+
 /** Marcas de equipo: lo que un teléfono se pone a sí mismo de nombre. */
 const APARATO = /\b(iphone|ipad|galaxy|samsung|xiaomi|motorola|android|celu(?:lar)?)\b/i;
 
@@ -93,4 +95,29 @@ export function nombreDePersona(visible?: string | null): string | null {
   if (!/^[\p{L}][\p{L}\s.'’-]*$/u.test(texto)) return null;
 
   return texto;
+}
+
+/**
+ * ¿El valor propuesto para `full_name` es, letra por letra salvo acentos,
+ * mayúsculas y espacios, el nombre visible del sobre?
+ *
+ * El caso real 9f7e8c3a: el `From` decía «Ilan Daniele <…>», el cuerpo no
+ * nombraba a nadie, y el correo saludaba «Hola, Ilan» y en la misma vuelta
+ * preguntaba «¿Es correcto que tu nombre completo es Ilan Daniele?». Un
+ * `full_name` de confianza media que repite el nombre del sobre no es una
+ * duda — es el mismo dato leído dos veces — así que no hace falta
+ * confirmarlo.
+ *
+ * Compara contra el nombre visible ya juzgado por `nombreDePersona`: un sobre
+ * que no trae el nombre de una persona (una razón social, un buzón
+ * automático, una dirección pelada) no promueve nada.
+ */
+export function esNombreDelSobre(
+  propuesto?: string | null,
+  from?: string | null
+): boolean {
+  const valor = propuesto?.trim();
+  const delSobre = nombreDePersona(nombreVisibleDelSobre(from));
+  if (!valor || !delSobre) return false;
+  return mismoNombre(valor, delSobre);
 }

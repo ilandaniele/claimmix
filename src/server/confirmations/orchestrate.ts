@@ -48,6 +48,7 @@ import {
   policies,
 } from "@/lib/db/schema";
 import { mismoNombre, normalizarDni, normalizarNumeroPoliza } from "@/core/matching/normalizar";
+import { esNombreDelSobre } from "@/core/nombres/nombre-de-persona";
 import { maskFullName } from "@/server/email/render";
 import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
@@ -387,6 +388,23 @@ export async function orchestratePostExtraction(
   // Una franja del día entra aunque el extractor la dé por segura: «a la tarde»
   // no es una hora. Ver `esValorVago`.
   const resueltos = new Set(gapResult.camposResueltos ?? []);
+  /*
+   * El nombre visible del sobre y el `full_name` de confianza media dicen lo
+   * mismo con otras letras: preguntar «¿Es correcto que tu nombre completo es
+   * Ilan Daniele?» a alguien cuyo `From` ya decía «Ilan Daniele» repite la
+   * pregunta que `claimantName` (arriba) ya contestó con el saludo. Caso real
+   * 9f7e8c3a. Sólo entra por mail: por WhatsApp `senderEmail` es el teléfono
+   * pelado y `esNombreDelSobre` no encuentra ángulos, así que no toca ese canal.
+   */
+  if (
+    extractedClaim.fields.some(
+      (f) =>
+        canonicalFieldKey(f.field_key) === "full_name" &&
+        esNombreDelSobre(f.field_value, senderEmail)
+    )
+  ) {
+    resueltos.add("full_name");
+  }
   const dudasDelAnalizador = gapResult.fieldsNeedingConfirmation.filter(
     (f) => f.reason !== "conflict"
   );

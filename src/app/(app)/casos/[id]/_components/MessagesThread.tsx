@@ -21,10 +21,16 @@
 import { useState, useEffect } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
-import type {
-  Conversacion,
-  MensajeDeLaConversacion as Message,
-} from "@/server/cases/conversacion";
+import type { MensajeDeLaConversacion as Message } from "@/server/cases/conversacion";
+import type { EstadoDeRespuesta } from "@/core/whatsapp/puede-responder";
+import { BloqueoPlanPro } from "@/app/(app)/_components/BloqueoPlanPro";
+
+/** Lo que contesta `GET /api/cases/:id/messages`. */
+interface RespuestaDeMensajes {
+  messages: Message[];
+  recortada: boolean;
+  respuesta: EstadoDeRespuesta;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -300,6 +306,10 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [messages, setMessages] = useState<Message[]>([]);
   const [recortada, setRecortada] = useState(false);
+  const [respuesta, setRespuesta] = useState<EstadoDeRespuesta | null>(null);
+  const [texto, setTexto] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [envioEstado, setEnvioEstado] = useState<"enviado" | "fallo" | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -313,10 +323,11 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
           return;
         }
 
-        const data: Conversacion = await res.json();
+        const data: RespuestaDeMensajes = await res.json();
         if (!cancelled) {
           setMessages(data.messages);
           setRecortada(data.recortada);
+          setRespuesta(data.respuesta);
           setLoadState("ready");
         }
       } catch {
@@ -331,6 +342,29 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
       cancelled = true;
     };
   }, [caseId]);
+
+  async function enviarRespuesta() {
+    if (!texto.trim() || enviando) return;
+    setEnviando(true);
+    setEnvioEstado(null);
+    try {
+      const res = await fetch(`/api/cases/${caseId}/responder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto }),
+      });
+      if (res.ok) {
+        setTexto("");
+        setEnvioEstado("enviado");
+      } else {
+        setEnvioEstado("fallo");
+      }
+    } catch {
+      setEnvioEstado("fallo");
+    } finally {
+      setEnviando(false);
+    }
+  }
 
   /*
    * La tarjeta entera, titulo incluido, vive aca adentro.
@@ -385,6 +419,47 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
             <MessageCard key={message.id} message={message} />
           ))}
         </div>
+        {respuesta && respuesta.motivo !== "rol" && (
+          <div className="mt-4 border-t border-slate-200 pt-4">
+            {respuesta.motivo === "plan" ? (
+              <BloqueoPlanPro t={t} />
+            ) : respuesta.habilitada ? (
+              <div className="space-y-2">
+                <textarea
+                  value={texto}
+                  onChange={(e) => setTexto(e.target.value)}
+                  placeholder={t("messages.reply.placeholder")}
+                  maxLength={4096}
+                  rows={3}
+                  disabled={enviando}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-60"
+                />
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={enviarRespuesta}
+                    disabled={enviando || !texto.trim()}
+                    className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {t("messages.reply.enviar")}
+                  </button>
+                  {envioEstado === "enviado" && (
+                    <span className="text-xs text-green-700">{t("messages.reply.enviado")}</span>
+                  )}
+                  {envioEstado === "fallo" && (
+                    <span className="text-xs text-red-700">{t("messages.reply.fallo")}</span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">
+                {respuesta.motivo === "ventana" && t("messages.reply.ventana")}
+                {respuesta.motivo === "agente_activo" && t("messages.reply.agenteActivo")}
+                {respuesta.motivo === "canal" && t("messages.reply.canal")}
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </Marco>
   );

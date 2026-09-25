@@ -9,6 +9,8 @@
  * AC10: Returns 200 + { messages: [], recortada: false } when the case has no messages.
  * AC13: body_text is truncated to 2000 chars server-side, after masking.
  * AC14: attachment_count aggregated from claim_attachments per message.
+ * P8: also returns `respuesta` (EstadoDeRespuesta) — whether this user can
+ *     reply by WhatsApp from this case right now, and why not if not.
  *
  * Security:
  * - Auth: Better Auth session; tenant isolation by RLS through `enTenantVarias`.
@@ -20,7 +22,8 @@
 import { type NextRequest } from "next/server";
 import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { mensajesSinPiiSiNoCorresponde } from "@/server/cases/pii";
-import { conversacionDelCaso, type Conversacion } from "@/server/cases/conversacion";
+import { conversacionDelCaso } from "@/server/cases/conversacion";
+import { estadoDeRespuesta } from "@/core/whatsapp/puede-responder";
 import { entrar } from "@/lib/api/entrada";
 import { type TenantContext } from "@/data/scope";
 import { ok, err } from "@/lib/api/respond";
@@ -104,7 +107,16 @@ export async function GET(
       body_text: m.body_text?.slice(0, BODY_TEXT_MAX_CHARS) ?? null,
     }));
 
-    return ok({ messages, recortada: conversacion.recortada } satisfies Conversacion);
+    const respuesta = estadoDeRespuesta({
+      plan: userRow.plan,
+      role: userRow.role,
+      channel: conversacion.channel,
+      status: conversacion.status,
+      ultimoEntrante: conversacion.ultimoEntranteWhatsApp,
+      ahora: new Date(),
+    });
+
+    return ok({ messages, recortada: conversacion.recortada, respuesta });
   } catch (e) {
     logger.error({ code: dbErrCode(e) }, "get_api_cases_id_messages.messages_query_error");
     return err(new AppError("INTERNAL_ERROR"));

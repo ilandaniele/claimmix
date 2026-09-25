@@ -122,6 +122,21 @@ export const RATE_LIMIT_CONFIGS = {
    * Protects /api/cases/:id/sync-to-core from accidental repeated sends.
    */
   SYNC_TO_CORE: { limit: 5, windowMs: 60_000 },
+
+  /**
+   * ASISTENTE: 20 por minuto por usuario.
+   *
+   * Cada pregunta paga al menos una llamada a Gemini, y hasta dos cuando hay
+   * un solo caso para resumir. El tope está para frenar el costo, no el uso
+   * normal: nadie le hace veinte preguntas por minuto al asistente.
+   */
+  ASISTENTE: { limit: 20, windowMs: 60_000 },
+
+  /**
+   * RESPUESTA_HUMANA: 10 por minuto por usuario.
+   * Cada envío toca la API de Meta; frena un doble click o un loop, no un uso normal.
+   */
+  RESPUESTA_HUMANA: { limit: 10, windowMs: 60_000 },
 } as const;
 
 /**

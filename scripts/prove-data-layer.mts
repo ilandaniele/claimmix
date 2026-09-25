@@ -21,6 +21,7 @@ import { eq, sql } from "drizzle-orm";
 import { consultaDeActividad } from "@/server/metrics/kpis";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import type { PuntoSerie } from "@/core/metricas/serie";
+import { contarCasos, buscarCaso } from "@/server/asistente/herramientas";
 
 neonConfig.webSocketConstructor = globalThis.WebSocket as never;
 
@@ -201,6 +202,67 @@ if (descuadres.length) {
     `${enJs.size} día(s) iguales a los casos contados en JS, ${deNoche} de ellos ` +
       "entre las 21 y las 24"
   );
+}
+
+// ── 3c. El asistente: contar y buscar, sin cruzar de inquilino ─────────────
+//
+// `contarCasos`/`buscarCaso` (`src/server/asistente/herramientas.ts`) son las
+// dos únicas consultas que el modelo puede disparar. Se prueban acá, contra la
+// base de verdad, en vez de con `enTenant` mockeado como en el unit test.
+console.log("\n▸ El asistente: contarCasos y buscarCaso");
+const conteo = await contarCasos(ctxDe(a), {
+  herramienta: "contar_casos",
+  periodo: "ultimos_30_dias",
+  canal: null,
+  situacion: null,
+  solo_reclamos: false,
+});
+bien(`"${a.name}": contarCasos ve ${conteo.total} caso(s) de los últimos 30 días`);
+
+if (conDatos.length < 2) {
+  console.log("     (hace falta un segundo inquilino para cruzar buscarCaso: se saltea)");
+} else {
+  const otro = conDatos[1];
+  const [casoDeOtro] = await enTenant(ctxDe(otro), (db) =>
+    db
+      .select({ nombre: tables.cases.policyholder_name, poliza: tables.cases.policy_number })
+      .from(tables.cases)
+      .where(sql`${tables.cases.policyholder_name} is not null`)
+      .limit(1)
+  );
+
+  if (!casoDeOtro?.nombre) {
+    console.log(`     ("${otro.name}" no tiene un caso con nombre para probar: se saltea)`);
+  } else {
+    const porNombre = await buscarCaso(
+      ctxDe(a),
+      { herramienta: "buscar_caso", nombre: casoDeOtro.nombre, numero: null },
+      "admin"
+    );
+    if (porNombre.coincidencias.length > 0) {
+      mal(`desde "${a.name}" aparece el caso de "${otro.name}" buscándolo por nombre`);
+      problemas.push("buscarCaso cruza de inquilino por nombre");
+    } else {
+      bien(`desde "${a.name}", el caso de "${otro.name}" no aparece buscándolo por nombre`);
+    }
+
+    const digitos = (casoDeOtro.poliza ?? "").replace(/\D/g, "");
+    if (!digitos) {
+      console.log(`     (la póliza de "${otro.name}" no tiene dígitos: se saltea esa parte)`);
+    } else {
+      const porNumero = await buscarCaso(
+        ctxDe(a),
+        { herramienta: "buscar_caso", nombre: null, numero: digitos },
+        "admin"
+      );
+      if (porNumero.coincidencias.length > 0) {
+        mal(`desde "${a.name}" aparece el caso de "${otro.name}" buscándolo por número de póliza`);
+        problemas.push("buscarCaso cruza de inquilino por número");
+      } else {
+        bien(`desde "${a.name}", el caso de "${otro.name}" no aparece buscándolo por número de póliza`);
+      }
+    }
+  }
 }
 
 // ── 4. Escribir en el inquilino de al lado ─────────────────────────────────

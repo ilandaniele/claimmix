@@ -8,9 +8,9 @@
  * AC14: attachment_count comes from the count in the inbound query.
  *
  * Uses vi.mock("@/lib/db") and vi.mock("@/lib/auth/require-role") to exercise
- * route handler logic without a live DB or server. The batch is always four
+ * route handler logic without a live DB or server. The batch is always five
  * selects, in order: case, claim_messages (both directions), the simulated
- * intake in raw_messages, outbound_messages.
+ * intake in raw_messages, outbound_messages, last inbound WhatsApp message.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -170,23 +170,26 @@ function buildSelectChain(rows: unknown[]) {
   return chain;
 }
 
-/** The four selects of the batch, in the order the route builds them. */
+/** The five selects of the batch, in the order the route builds them. */
 function mockBatch({
-  caso = [{ id: CASE_ID }],
+  caso = [{ id: CASE_ID, status: "listo", channel: "email" }],
   hilo = [],
   simulados = [],
   whatsapps = [],
+  ultimoEntranteWhatsApp = [],
 }: {
   caso?: unknown[];
   hilo?: unknown[];
   simulados?: unknown[];
   whatsapps?: unknown[];
+  ultimoEntranteWhatsApp?: unknown[];
 } = {}) {
   vi.mocked(db.select)
     .mockReturnValueOnce(buildSelectChain(caso))
     .mockReturnValueOnce(buildSelectChain(hilo))
     .mockReturnValueOnce(buildSelectChain(simulados))
-    .mockReturnValueOnce(buildSelectChain(whatsapps));
+    .mockReturnValueOnce(buildSelectChain(whatsapps))
+    .mockReturnValueOnce(buildSelectChain(ultimoEntranteWhatsApp));
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -213,8 +216,8 @@ describe("GET /api/cases/[id]/messages", () => {
 
     expect(response.status).toBe(200);
     expect(body.messages.map((m: { id: string }) => m.id)).toEqual(["msg-001", "msg-002", "msg-003"]);
-    // One batch: the four selects and nothing else.
-    expect(db.select).toHaveBeenCalledTimes(4);
+    // One batch: the five selects and nothing else.
+    expect(db.select).toHaveBeenCalledTimes(5);
 
     // AC8: each entry has exactly the contract's fields
     expect(Object.keys(body.messages[0]).sort()).toEqual([
@@ -253,7 +256,11 @@ describe("GET /api/cases/[id]/messages", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ messages: [], recortada: false });
+    expect(body).toEqual({
+      messages: [],
+      recortada: false,
+      respuesta: { habilitada: false, motivo: "plan", vence_en: null },
+    });
   });
 
   it("returns 401 MISSING_SESSION when not authenticated", async () => {

@@ -30,7 +30,7 @@ type Sql = { sql: string; params: unknown[] };
 let armadas: Sql[] = [];
 
 /** Arma el lote con el cliente de verdad y contesta lo que se le pase. */
-function responder(filas: [unknown[], unknown[], unknown[], unknown[]]) {
+function responder(filas: [unknown[], unknown[], unknown[], unknown[], unknown[]]) {
   enTenantVarias.mockImplementation(async (_ctx, armar: (db: unknown) => Array<{ toSQL(): Sql }>) => {
     armadas = armar(cliente).map((q) => q.toSQL());
     return filas;
@@ -57,19 +57,19 @@ describe("conversacionDelCaso", () => {
     armadas = [];
   });
 
-  it("va una sola vez a la base, con las cuatro consultas en el mismo lote", async () => {
-    responder([[{ id: CASO }], [], [], []]);
+  it("va una sola vez a la base, con las cinco consultas en el mismo lote", async () => {
+    responder([[{ id: CASO }], [], [], [], []]);
 
     await conversacionDelCaso(CTX, CASO);
 
     expect(enTenantVarias).toHaveBeenCalledTimes(1);
     expect(enTenantVarias.mock.calls[0]![0]).toBe(CTX);
     expect(enTenant).not.toHaveBeenCalled();
-    expect(armadas).toHaveLength(4);
+    expect(armadas).toHaveLength(5);
   });
 
   it("devuelve null si el caso no se ve", async () => {
-    responder([[], [], [], []]);
+    responder([[], [], [], [], []]);
     expect(await conversacionDelCaso(CTX, CASO)).toBeNull();
   });
 
@@ -89,6 +89,7 @@ describe("conversacionDelCaso", () => {
         }),
         entrante(),
       ],
+      [],
       [],
       [],
     ]);
@@ -124,6 +125,7 @@ describe("conversacionDelCaso", () => {
           created_at: "2026-06-01 10:05:00+00",
         },
       ],
+      [],
     ]);
 
     const [, saliente] = (await conversacionDelCaso(CTX, CASO))!.messages;
@@ -157,6 +159,7 @@ describe("conversacionDelCaso", () => {
           created_at: "2026-06-01 10:05:00+00",
         },
       ],
+      [],
     ]);
 
     const [, saliente] = (await conversacionDelCaso(CTX, CASO))!.messages;
@@ -199,6 +202,7 @@ describe("conversacionDelCaso", () => {
           created_at: "2026-06-01 10:05:00+00",
         },
       ],
+      [],
     ]);
 
     const [entrada, respuesta] = (await conversacionDelCaso(CTX, CASO))!.messages;
@@ -234,7 +238,7 @@ describe("conversacionDelCaso", () => {
         status: "sent",
         created_at: minuto(100 - i),
       }));
-      responder([[{ id: CASO }], fotos, [], respuestas]);
+      responder([[{ id: CASO }], fotos, [], respuestas, []]);
 
       const { messages: mensajes, recortada } = (await conversacionDelCaso(CTX, CASO))!;
 
@@ -248,7 +252,7 @@ describe("conversacionDelCaso", () => {
       const entrantes = Array.from({ length: TOPE_MENSAJES }, (_, i) =>
         entrante({ id: `in-${i}`, received_at: minuto(100 - i) })
       );
-      responder([[{ id: CASO }], entrantes, [], []]);
+      responder([[{ id: CASO }], entrantes, [], [], []]);
 
       const { messages: mensajes, recortada } = (await conversacionDelCaso(CTX, CASO))!;
 
@@ -259,7 +263,7 @@ describe("conversacionDelCaso", () => {
 
   describe("el SQL del lote", () => {
     beforeEach(async () => {
-      responder([[{ id: CASO }], [], [], []]);
+      responder([[{ id: CASO }], [], [], [], []]);
       await conversacionDelCaso(CTX, CASO);
     });
 
@@ -267,14 +271,21 @@ describe("conversacionDelCaso", () => {
       for (const q of armadas) expect(q.sql).not.toMatch(/tenant_id/);
     });
 
-    it("claim_messages va una sola vez, las dos direcciones juntas y con los adjuntos contados", () => {
-      expect(armadas.filter((q) => /from "claim_messages"/.test(q.sql))).toHaveLength(1);
+    it("claim_messages: el hilo entero en un select, y aparte la ventana de WhatsApp", () => {
+      expect(armadas.filter((q) => /from "claim_messages"/.test(q.sql))).toHaveLength(2);
       const [, hilo] = armadas;
       expect(hilo!.sql).toMatch(/from "claim_messages"/);
       expect(hilo!.sql).not.toMatch(/"direction" =/);
       expect(hilo!.sql).toMatch(/left join "claim_attachments"/);
       expect(hilo!.sql).toMatch(/group by "claim_messages"\."id"/);
       expect(hilo!.params).toEqual([CASO, POR_FUENTE]);
+    });
+
+    it("la ventana de WhatsApp: último entrante de ese proveedor, aparte del hilo", () => {
+      const [, , , , ventana] = armadas;
+      expect(ventana!.sql).toMatch(/from "claim_messages"/);
+      expect(ventana!.sql).toMatch(/"direction" = \$2/);
+      expect(ventana!.params).toEqual([CASO, "inbound", "whatsapp", 1]);
     });
 
     it("de raw_messages sólo el alta simulada: lo de WhatsApp ya está en claim_messages", () => {

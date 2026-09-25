@@ -21,6 +21,7 @@ import {
   Briefcase,
   MailX,
   MessageSquareReply,
+  Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -186,6 +187,7 @@ export function Sidebar({
 
   const analisisItems: NavItemDef[] = conCandadoPro([
     { label: t("nav.metricas") || "Métricas", href: "/metricas", icon: BarChart2 },
+    { label: t("nav.asistente"), href: "/asistente", icon: Sparkles, pro: true },
     { label: t("nav.demo"), href: "/demo", icon: Play },
     {
       label: t("nav.agente"),

@@ -916,10 +916,10 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
 
   it("logs CONFIRMATION_REQUESTED audit event for medium-confidence field", async () => {
     const claim = extractEmailClaimMock({
-      fields_pending_confirmation: ["accident_date"],
+      fields_pending_confirmation: ["policy_number"],
       fields: [
-        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "accident_date"),
-        { field_key: "accident_date", field_value: "2024-03-15", confidence: 0.70, source: "ai" as const },
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "policy_number"),
+        { field_key: "policy_number", field_value: "POL-9981-C", confidence: 0.70, source: "ai" as const },
       ],
     });
     const { insertSpy } = setupDbMocks();
@@ -937,22 +937,21 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
     expect(confirmationAudit).toBeDefined();
     // Un evento con TODAS las claves, no uno por campo: es el mismo pedido, del
     // mismo caso, en el mismo instante. Antes se anotaba N veces.
-    expect(confirmationAudit?.[0].payload?.field_keys).toContain("accident_date");
+    expect(confirmationAudit?.[0].payload?.field_keys).toContain("policy_number");
     // PII check: the proposed value must NOT appear in the audit payload
-    expect(JSON.stringify(confirmationAudit?.[0].payload)).not.toContain("2024-03-15");
-    expect(JSON.stringify(confirmationAudit?.[0].payload)).not.toContain("marzo");
+    expect(JSON.stringify(confirmationAudit?.[0].payload)).not.toContain("POL-9981-C");
 
     // A la persona se le dice como una persona; en la base queda lo del extractor.
     const ask = vi
       .mocked(dispatchOutboundEmail)
       .mock.calls.find((c) => c[0].template === "missing_information_request");
-    expect((ask?.[0].data.knownValues as Record<string, string>).accident_date).toBe(
-      "15 de marzo de 2024"
+    expect((ask?.[0].data.knownValues as Record<string, string>).policy_number).toBe(
+      "POL-9981-C"
     );
     const fila = insertSpy.mock.calls
       .flatMap((c) => [c[0]].flat() as Array<{ field_name?: string; suggested_value?: string }>)
-      .find((r) => r?.field_name === "accident_date");
-    expect(fila?.suggested_value).toBe("2024-03-15");
+      .find((r) => r?.field_name === "policy_number");
+    expect(fila?.suggested_value).toBe("POL-9981-C");
   });
 
   it("asks about an uncertain field in the same email as everything else", async () => {
@@ -4811,7 +4810,10 @@ describe("orchestratePostExtraction — un documento negado no vuelve como duda"
  *
  * Lo que la persona escribió recién no vuelve como duda. Una franja del día se
  * pide como hora, siempre con la misma forma, hasta que la dé. Lo inferido y
- * lo que choca con el padrón se sigue preguntando.
+ * lo que choca con el padrón se sigue preguntando — con una excepción: la
+ * fecha inferida no se pregunta ni se afirma, porque afirmarla es dar por
+ * cierto un dato que la persona no dio (goteo del 24/09). Ver
+ * `collectConfirmableFields` y `valuesWeHold`.
  */
 describe("orchestratePostExtraction — lo dicho recién no vuelve como «¿…, correcto?»", () => {
   const previo = process.env.AGENT_COMPOSE_REPLIES;
@@ -4972,7 +4974,26 @@ describe("orchestratePostExtraction — lo dicho recién no vuelve como «¿…,
     expect(fila(clave)?.status).toBe("pending");
   });
 
-  it("lo inferido se sigue confirmando: dijo «ayer», no la fecha", async () => {
+  it("un dato sin dueño ambiguo, escrito sin que se lo pidiéramos, queda confirmado", async () => {
+    // El 25/09: a un primer mensaje con «Choqué el sábado en Villa Mitre» se
+    // le preguntó si Villa Mitre era correcto — nadie se lo había pedido, ya
+    // lo había dicho. Un lugar no es de nadie, a diferencia de un nombre.
+    const { fila, pedido } = await vuelta({
+      texto: "Choqué el sábado en Villa Mitre",
+      fields: [campo("accident_location", "Villa Mitre", 0.7)],
+      dudas: [duda("accident_location", "Villa Mitre", 0.7)],
+      preguntadas: [],
+    });
+
+    expect(fila("accident_location")).toMatchObject({
+      status: "confirmed",
+      suggested_value: "Villa Mitre",
+    });
+    expect(pedido?.missingFields).not.toContain("accident_location");
+    expect(pedido?.knownValues).not.toHaveProperty("accident_location");
+  });
+
+  it("la fecha inferida no se pregunta ni se afirma: dijo «ayer», no la fecha", async () => {
     const { fila, pedido } = await vuelta({
       texto: "Fue un choque, ayer a la tarde",
       fields: [campo("accident_date", "2026-09-22")],
@@ -4980,9 +5001,9 @@ describe("orchestratePostExtraction — lo dicho recién no vuelve como «¿…,
       preguntadas: ["accident_date"],
     });
 
-    expect(fila("accident_date")?.status).toBe("pending");
-    expect(pedido?.missingFields).toContain("accident_date");
-    expect(pedido?.knownValues).toHaveProperty("accident_date");
+    expect(fila("accident_date")).toBeUndefined();
+    expect(pedido?.missingFields).not.toContain("accident_date");
+    expect(pedido?.knownValues).not.toHaveProperty("accident_date");
   });
 
   it("lo que choca con el padrón se sigue preguntando aunque lo haya escrito", async () => {

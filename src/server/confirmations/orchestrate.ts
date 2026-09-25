@@ -414,29 +414,37 @@ export async function orchestratePostExtraction(
   );
 
   /*
-   * Lo que la persona escribió en este mismo mensaje, contestando lo que le
-   * pedimos, no se le devuelve como «¿…, correcto?»: queda confirmado. El 23/09
-   * a «Fue un choque, ayer a la tarde» se le contestó «¿Fue a la tarde, correcto?».
+   * Lo que la persona escribió en este mismo mensaje no se le devuelve como
+   * «¿…, correcto?»: queda confirmado. El 23/09 a «Fue un choque, ayer a la
+   * tarde» se le contestó «¿Fue a la tarde, correcto?»; el 25/09, a un primer
+   * mensaje con «Choqué en Villa Mitre», se le preguntó si Villa Mitre era
+   * correcto — nadie se lo había pedido, ella ya lo había dicho.
    *
-   * Sólo lo pedido: que el valor esté escrito no dice de qué campo ni de quién
-   * es —el número puede ser el DNI, el nombre el del cónyuge— y eso sí se
-   * pregunta. Lo inferido, los conflictos con el padrón (rama D) y los heridos
-   * también.
+   * No hace falta haberlo pedido: `dichoRecien` es literal y sabe de
+   * negaciones, así que un número suelto (¿DNI, póliza, teléfono?) sigue sin
+   * alcanzar. La excepción es de quién es un dato de identidad — nombre, DNI,
+   * email, teléfono—: «Mi esposa es Ana Paz» dice el nombre de Ana Paz tal
+   * cual, y no es el del asegurado. Ahí sólo cuenta como dicho si es la
+   * respuesta a lo que le pedimos. Lo inferido, los conflictos con el padrón
+   * (rama D) y los heridos también quedan afuera.
    *
-   * Una franja del día se pide como hora hasta que conteste: con una hora (la
-   * extracción la trae y deja de ser vaga), con la franja otra vez o con que no
-   * sabe. Un «sí» la cierra en `resolveAnsweredConfirmations`.
+   * Una franja del día es distinta: mencionarla al pasar («choqué ayer a la
+   * tarde») no contesta una hora que nadie preguntó todavía, así que esa rama
+   * sigue pidiendo la fila pendiente primero. Se pide como hora hasta que
+   * conteste: con una hora (la extracción la trae y deja de ser vaga), con la
+   * franja otra vez o con que no sabe. Un «sí» la cierra en
+   * `resolveAnsweredConfirmations`.
    */
   const pedidoRecien = new Set(lastAsked.map(canonicalFieldKey));
   const enConflicto = new Set(customerMatches.flatMap((m) => m.conflictsWithExtracted));
   const loQueEscribio = soloAcuse ? undefined : latestMessageText;
   const loDijoRecien = (c: ConfirmableField) =>
-    pedidoRecien.has(c.fieldKey) &&
     !enConflicto.has(c.fieldKey) &&
     c.fieldKey !== "hay_heridos" &&
     (esValorVago(c.fieldKey, c.proposedValue)
-      ? contestaSinHora(loQueEscribio)
-      : dichoRecien(c.proposedValue, loQueEscribio));
+      ? pedidoRecien.has(c.fieldKey) && contestaSinHora(loQueEscribio)
+      : (!CAMPOS_DE_IDENTIDAD.has(c.fieldKey) || pedidoRecien.has(c.fieldKey)) &&
+        dichoRecien(c.proposedValue, loQueEscribio));
   const dichos = confirmables.filter(loDijoRecien);
   const pendingConfirmationFields = confirmables.filter((c) => !loDijoRecien(c));
 
@@ -1208,6 +1216,14 @@ async function askedPendingFields(
 const MAX_ASK_ITEMS = 5;
 
 /**
+ * Campos de identidad: de quién es el valor sigue siendo una pregunta cuando
+ * nadie lo pidió. «Mi esposa es Ana Paz» dice el nombre de Ana Paz tal cual, y
+ * no es el del asegurado — un lugar o un número de póliza no tienen ese
+ * problema. Ver `loDijoRecien`.
+ */
+const CAMPOS_DE_IDENTIDAD = new Set(["full_name", "dni", "email", "phone"]);
+
+/**
  * The single list of everything we need, gaps and doubts together.
  *
  * Order is deliberate: what is missing blocks the claim, what is uncertain only
@@ -1681,6 +1697,11 @@ function valuesWeHold(fields: ExtractedClaim["fields"]): Record<string, string> 
 
     const key = canonicalFieldKey(field.field_key);
     const confidence = Number(field.confidence) || 0;
+    // La fecha a confianza baja o media no la dijo la persona, la infirió el
+    // extractor — a veces sin ningún texto que la sostenga. El goteo del
+    // 24/09 preguntó «¿es correcto que fue el 24 de septiembre?» sobre un
+    // mensaje sin ninguna fecha. Mismo resguardo que `collectConfirmableFields`.
+    if (key === "accident_date" && confidence < MEDIUM_CONFIDENCE_HIGH) continue;
     if (held[key] !== undefined && seen[key] >= confidence) continue;
 
     held[key] = value;
@@ -1740,6 +1761,16 @@ function collectConfirmableFields(
     // Worked out from something we already read well — an analyst can correct
     // it without costing the claimant an email.
     if (isDerivable(rawKey, confidenceOf)) continue;
+    // Una fecha inferida ("el sábado") o inventada sin texto que la sostenga
+    // no se afirma como si la persona la hubiera dado. El 23/09 y el 24/09 el
+    // goteo confirmó «20 de septiembre» y después «24 de septiembre» sobre
+    // mensajes que sólo decían «el sábado» o nada. A confianza alta sí es un
+    // dato que dio y se sigue preguntando como cualquier otro.
+    if (
+      canonicalFieldKey(rawKey) === "accident_date" &&
+      (confidenceOf(rawKey) ?? 0) < MEDIUM_CONFIDENCE_HIGH
+    )
+      continue;
 
     const canonical = canonicalFieldKey(rawKey);
 

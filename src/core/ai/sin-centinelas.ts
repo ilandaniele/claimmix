@@ -38,6 +38,8 @@ const CENTINELAS = [
   "custom_fields",
   "severity_patterns",
   "tenant_prompt",
+  "pregunta_del_usuario",
+  "datos_del_caso",
 ] as const;
 
 /** La forma de un centinela: `<tag>` o `</tag>`, con o sin espacios adentro. */

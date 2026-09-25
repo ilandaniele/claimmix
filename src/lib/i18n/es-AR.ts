@@ -31,6 +31,7 @@ export const esAR = {
   "nav.agenteBloqueado": "Solo administradores pueden abrir la consola del agente.",
   "nav.facturacion": "Facturación",
   "nav.cartera": "Cartera",
+  "nav.asistente": "Asistente",
 
   /*
    * La antigüedad de un siniestro. El `{n}` es el número, y es el único lugar
@@ -475,6 +476,15 @@ export const esAR = {
   "messages.thread.simulado": "Simulado",
   "messages.thread.sin_confirmar": "Sin confirmar",
   "messages.thread.recortada": "Se muestran sólo los mensajes más recientes.",
+
+  // ── Reply by WhatsApp (P8) ───────────────────────────────────────────────────
+  "messages.reply.enviar": "Enviar",
+  "messages.reply.placeholder": "Escribí la respuesta para el denunciante…",
+  "messages.reply.ventana": "Pasaron más de 24 h desde el último mensaje: WhatsApp sólo deja escribir con una plantilla aprobada.",
+  "messages.reply.agenteActivo": "El agente todavía está trabajando este caso.",
+  "messages.reply.canal": "Este caso no llegó por WhatsApp.",
+  "messages.reply.enviado": "Enviado.",
+  "messages.reply.fallo": "No se pudo enviar. Probá de nuevo.",
 
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clientes",
@@ -1025,6 +1035,16 @@ export const esAR = {
   "bandeja.quitarSeleccion": "Quitar selección",
   "bandeja.seleccionar": "Seleccionar",
   "bandeja.seleccionarPagina": "Seleccionar los {n} de esta página",
+
+  // ── Asistente — preguntas en lenguaje natural sobre los casos ──────────
+  "asistente.titulo": "Asistente",
+  "asistente.subtitulo": "Preguntá por los casos del inquilino, en lenguaje natural.",
+  "asistente.preguntaLabel": "Tu pregunta",
+  "asistente.placeholder": "¿Cuántos casos hubo este mes? ¿Qué pasó con el caso de Roberto Paz?",
+  "asistente.enviar": "Preguntar",
+  "asistente.enviando": "Consultando…",
+  "asistente.demasiadas": "Demasiadas preguntas seguidas. Esperá un momento y volvé a intentar.",
+  "asistente.error": "No se pudo responder la pregunta. Probá de nuevo.",
 
 } as const;
 

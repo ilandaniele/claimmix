@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-23. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-25. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -3614,6 +3614,47 @@ a un especialista…»: correcto, sin pedir nada, y de trámite.
 asegurado no tiene idioma propio (`src/lib/i18n` es la interfaz). La rama B lee
 la gravedad que dio la extracción, no `finalSeverity`. Una derivación en una
 vuelta cuya extracción ya no nombra las heridas sale sin la frase.
+
+### 💬 Responder por WhatsApp y el asistente, en el Plan Pro (2026-09-25)
+
+**Responder desde el caso (P8, #295).** Quien atiende un caso llegado por
+WhatsApp puede contestarle a la persona desde la conversación del caso
+(`POST /api/cases/[id]/responder`). `src/core/whatsapp/puede-responder.ts`
+decide si se puede y por qué no: plan, ventana de 24 h de Meta, agente todavía
+activo, canal o rol. Fuera de la ventana la caja queda deshabilitada: mandar
+una plantilla de Meta después de las 24 h no está hecho. La respuesta queda en
+la auditoría y tiene su propio límite (`RESPUESTA_HUMANA`, 10 por minuto).
+
+**El asistente (P9, #296).** `/asistente` responde preguntas sobre los casos
+del inquilino con herramientas de sólo lectura
+(`src/server/asistente/herramientas.ts`) y una guarda contra inyección de
+instrucciones (`src/core/asistente/intencion.ts`). Todos los roles lo usan; a
+quien sólo mira se le enmascaran los datos personales. Límite propio
+(`ASISTENTE`, 20 por minuto).
+
+**Plan.** Los dos son Plan Pro: `profesional`, `corporativo` y `enterprise`.
+La barra marca `/asistente` como Pro. Con la promoción, el inquilino vivo
+«Seguros del Sur S.A.» pasa de `piloto` a `profesional` por decisión del dueño.
+
+**Tono del agente (#297).** Lo que la persona acaba de escribir no vuelve
+como «¿…, correcto?» aunque nadie lo haya pedido, salvo nombre, DNI, email y
+teléfono, que pueden ser de otra persona. Una fecha inferida no se afirma. Un
+borrador con más ítems que campos pedidos se rechaza. Las plantillas de
+respaldo saludan con el nombre.
+
+**Pen test (#294).** `attackTenantWall` ya no escribe: prueba la pared entre
+inquilinos sólo leyendo. `scripts/migrate.mjs --forget` no se marca a sí mismo
+como deriva.
+
+**Lo que queda.**
+- `AVISO_DE_TRASPASO` dice que el equipo va a escribir «desde otro número». En
+  un inquilino Pro con P8 puede escribir desde el mismo.
+- `/metricas` no tiene respaldo de Plan Pro en el servidor: sólo la barra lo
+  oculta. Es anterior a esta tanda.
+- La pregunta por heridos puede repetirse en un mismo caso. Se deja así porque
+  es una guarda de seguridad.
+- La región de Vertex sigue en `us-central1`: el dueño rechazó `global` el
+  25/09.
 
 ### 🙋 Waiting on you (not code)
 

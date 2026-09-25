@@ -376,6 +376,35 @@ describe("composeReply — what it refuses to send", () => {
     expect(await composeReply(base({ fields: ["email_or_phone", "dni"] }))).not.toBe(FALLBACK);
   });
 
+  // choque-completo, 25/09: el gap-analysis pidió 2 cosas y el mensaje salió
+  // con 11, inventando datos de terceros que nadie mencionó. Contar renglones
+  // alcanza: no hace falta saber qué inventó cada uno.
+  it("rechaza una lista con más ítems que los pedidos", async () => {
+    replies(
+      "Para seguir necesitamos que nos mandes:\n\n" +
+        "• Parte amistoso de accidente\n" +
+        "• Fotos de los daños del vehículo de terceros\n" +
+        "• Nombre completo de terceros\n" +
+        "• Número de teléfono de terceros"
+    );
+
+    const out = await composeReply(base({ fields: ["parte_amistoso"] }));
+
+    expect(out).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0]).toContain("más ítems que los que te pasé");
+  });
+
+  it("no rechaza una lista del mismo largo que lo pedido", async () => {
+    replies(
+      "Para seguir necesitamos que nos mandes:\n\n• Parte amistoso\n• Fotos de los daños"
+    );
+
+    const out = await composeReply(base({ fields: ["parte_amistoso", "fotos_danos"] }));
+
+    expect(out).not.toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses an escalation that turns around and asks for data", async () => {
     // The exact contradiction that reached a real chat: "no hace falta que
     // hagas nada" followed by a list of requests.

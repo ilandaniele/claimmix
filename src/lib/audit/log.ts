@@ -100,6 +100,11 @@ export const AuditEvent = {
   CASE_DELETED: "case.deleted",
   /** Una persona contestó lo que llegó después de que el agente terminó. */
   CASE_MARKED_ANSWERED: "case.marked_answered",
+  /**
+   * CASE_HUMAN_REPLY: una persona respondió por WhatsApp desde el caso, sin
+   * pasar por el agente. Payload: { outbound_id, estado } — nunca el texto.
+   */
+  CASE_HUMAN_REPLY: "case.human_reply",
 
   // ── AI extraction ──────────────────────────────────────────────────────────
   AI_EXTRACTED: "ai.extracted",
@@ -395,6 +400,13 @@ export const AuditEvent = {
    * agente nunca deliberó nada raro.
    */
   AGENT_DELIBERATION_FAILED: "agent.deliberation_failed",
+
+  /**
+   * ASSISTANT_QUERY: alguien le hizo una pregunta al asistente in-app.
+   * Payload: { herramienta, casos } — nunca la pregunta ni el texto de la
+   * respuesta: son texto libre de quien pregunta y del modelo.
+   */
+  ASSISTANT_QUERY: "assistant.query",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

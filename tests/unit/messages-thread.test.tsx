@@ -15,8 +15,10 @@
 
 import { readFileSync } from "node:fs";
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { vi, beforeEach, describe, it, expect } from "vitest";
 import { MessagesThread } from "../../src/app/(app)/casos/[id]/_components/MessagesThread";
+import type { EstadoDeRespuesta } from "@/core/whatsapp/puede-responder";
 
 // ── Mock fetch globally ────────────────────────────────────────────────────────
 
@@ -433,6 +435,83 @@ describe("MessagesThread", () => {
       expect(screen.queryByText("(sin asunto)")).not.toBeInTheDocument();
       const [, saliente] = screen.getAllByTestId("message-card");
       expect(within(saliente!).getByText("A")).toBeInTheDocument();
+    });
+  });
+
+  describe("responder por WhatsApp (P8)", () => {
+    const HABILITADA: EstadoDeRespuesta = { habilitada: true, motivo: null, vence_en: "2026-09-26T12:00:00.000Z" };
+
+    it("habilitada: muestra la caja y manda el texto al enviar", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
+      );
+      mockFetch.mockReturnValueOnce(makeJsonResponse({ id: "outbound-1", estado: "sent" }));
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
+      await user.type(textarea, "Ya está resuelto.");
+      await user.click(screen.getByRole("button", { name: "Enviar" }));
+
+      await waitFor(() => expect(screen.getByText("Enviado.")).toBeInTheDocument());
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        `/api/cases/${CASE_ID}/responder`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ texto: "Ya está resuelto." }),
+        })
+      );
+    });
+
+    it("sin Plan Pro: muestra el bloqueo y no la caja de texto", async () => {
+      mockFetch.mockReturnValue(
+        makeJsonResponse({
+          messages: [makeMessage()],
+          recortada: false,
+          respuesta: { habilitada: false, motivo: "plan", vence_en: null },
+        })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getByText("Disponible en el Plan Pro")).toBeInTheDocument());
+      expect(screen.queryByPlaceholderText("Escribí la respuesta para el denunciante…")).not.toBeInTheDocument();
+    });
+
+    it("fuera de la ventana: explica por qué, sin caja de texto", async () => {
+      mockFetch.mockReturnValue(
+        makeJsonResponse({
+          messages: [makeMessage()],
+          recortada: false,
+          respuesta: { habilitada: false, motivo: "ventana", vence_en: null },
+        })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() =>
+        expect(
+          screen.getByText(/Pasaron más de 24 h desde el último mensaje/)
+        ).toBeInTheDocument()
+      );
+      expect(screen.queryByPlaceholderText("Escribí la respuesta para el denunciante…")).not.toBeInTheDocument();
+    });
+
+    it("motivo rol: no muestra nada de la caja de respuesta", async () => {
+      mockFetch.mockReturnValue(
+        makeJsonResponse({
+          messages: [makeMessage()],
+          recortada: false,
+          respuesta: { habilitada: false, motivo: "rol", vence_en: null },
+        })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getByTestId("message-card")).toBeInTheDocument());
+      expect(screen.queryByPlaceholderText("Escribí la respuesta para el denunciante…")).not.toBeInTheDocument();
+      expect(screen.queryByText("Disponible en el Plan Pro")).not.toBeInTheDocument();
     });
   });
 });

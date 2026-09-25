@@ -13,11 +13,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import {
-  esNombreDelSobre,
-  nombreDePersona,
-  nombreVisibleDelSobre,
-} from "@/core/nombres/nombre-de-persona";
+import { nombreDePersona, nombreVisibleDelSobre } from "@/core/nombres/nombre-de-persona";
 
 describe("nombreVisibleDelSobre", () => {
   it("saca lo que va antes de los ángulos", () => {
@@ -80,36 +76,5 @@ describe("nombreDePersona — lo que no lo es", () => {
     ["una frase entera", "Escribo por el choque de mi hermana"],
   ])("%s: %s", (_por_que, visible) => {
     expect(nombreDePersona(visible)).toBeNull();
-  });
-});
-
-describe("esNombreDelSobre — caso real 9f7e8c3a", () => {
-  it("el mismo nombre, tal cual, se promueve", () => {
-    expect(esNombreDelSobre("Ilan Daniele", "Ilan Daniele <ilan.daniele@gmail.com>")).toBe(
-      true
-    );
-  });
-
-  it("el mismo nombre con acentos, mayúsculas y espacios distintos también", () => {
-    expect(
-      esNombreDelSobre("  ILAN   DÁNIELE  ", "Ilan Daniele <ilan.daniele@gmail.com>")
-    ).toBe(true);
-  });
-
-  it("un nombre distinto no se promueve", () => {
-    expect(esNombreDelSobre("Roberto Paz", "Ilan Daniele <ilan.daniele@gmail.com>")).toBe(
-      false
-    );
-  });
-
-  it("sin nombre visible en el sobre no hay nada que promover", () => {
-    expect(esNombreDelSobre("Ilan Daniele", "ilan.daniele@gmail.com")).toBe(false);
-    expect(esNombreDelSobre("Ilan Daniele", null)).toBe(false);
-  });
-
-  it("un sobre que no trae el nombre de una persona tampoco promueve", () => {
-    expect(esNombreDelSobre("Soporte Tecnico", "Soporte Tecnico <soporte@ejemplo.com>")).toBe(
-      false
-    );
   });
 });

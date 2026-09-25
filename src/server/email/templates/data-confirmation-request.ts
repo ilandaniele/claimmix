@@ -26,6 +26,7 @@ import {
   LO_REVISA_UN_ESPECIALISTA,
   NO_COINCIDE_CON_EL_TITULAR,
 } from "@/core/mensajes/titular-que-no-coincide";
+import { SI_RESPONDES_EL_CORREO } from "@/core/mensajes/traspaso";
 
 /** Un dato sobre el que se pregunta. */
 export interface CampoAConfirmar {
@@ -209,6 +210,9 @@ export function renderDataConfirmationRequest(
 
   const cuerpo = [introText, ...bloques.map((b) => b.text), actionText].join("\n\n");
   const redactado = data.cuerpo?.trim();
+  // Derivado, como los otros dos mails que cierran: el pie va fuera de la prosa,
+  // que un cuerpo redactado reemplaza entera.
+  const pie = ajeno ? SI_RESPONDES_EL_CORREO : null;
 
   const prosaHtml = redactado
     ? textoAHtml(redactado)
@@ -222,6 +226,7 @@ export function renderDataConfirmationRequest(
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #1a56db;">${escapeHtml(heading)}</h1>
   ${prosaHtml}
+  ${pie ? `<p>${escapeHtml(pie)}</p>` : ""}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
   <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${escapeHtml(data.caseId)}. Este mensaje fue generado automáticamente.</p>
 </body>
@@ -231,6 +236,7 @@ export function renderDataConfirmationRequest(
     heading,
     "",
     redactado ?? cuerpo,
+    ...(pie ? ["", pie] : []),
     "",
     "---",
     `Caso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente.`,

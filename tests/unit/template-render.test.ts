@@ -857,7 +857,24 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
       expect(cuerpo).not.toContain("Juan Pérez");
       expect(cuerpo).not.toContain("20345678");
       expect(cuerpo).toContain(AVISO_DE_TRASPASO);
+      expect(cuerpo).toContain(SI_RESPONDES_EL_CORREO);
     }
+    expect(result.cuerpo).not.toContain(SI_RESPONDES_EL_CORREO);
+  });
+
+  it("derivado con cuerpo redactado, conserva el pie de la respuesta", () => {
+    const r = renderTemplate("data_confirmation_request", {
+      ...TRES,
+      titularAjeno: true,
+      cuerpo: "Hola, Pedro. Tu caso lo sigue un especialista.",
+    });
+
+    for (const salida of [r.text, r.html]) expect(salida).toContain(SI_RESPONDES_EL_CORREO);
+  });
+
+  it("pidiendo confirmar, no lleva el pie del traspaso", () => {
+    const r = renderTemplate("data_confirmation_request", TRES);
+    expect(r.text).not.toContain(SI_RESPONDES_EL_CORREO);
   });
 
   it("derivado sin valores que mostrar, avisa el traspaso y no pide el dato", () => {

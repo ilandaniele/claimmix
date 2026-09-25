@@ -43,6 +43,23 @@ describe("AuditTimeline", () => {
     expect(screen.queryByText(/size_exceeded/)).not.toBeInTheDocument();
   });
 
+  // La entrada y la salida de «Para responder»: si falta la clave, el historial
+  // pinta «Claim → Message_not_read».
+  it("traduce los eventos de «Para responder»", () => {
+    render(
+      <AuditTimeline
+        events={[
+          { id: 3, event_type: "claim.message_not_read", created_at: "2026-09-01T10:02:00Z", reason: null },
+          { id: 4, event_type: "case.marked_answered", created_at: "2026-09-01T10:03:00Z", reason: null },
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Mensaje que el agente no leyó")).toBeInTheDocument();
+    expect(screen.getByText("Marcado como respondido")).toBeInTheDocument();
+    expect(screen.queryByText(/→/)).not.toBeInTheDocument();
+  });
+
   it("un motivo escrito en prosa pasa tal cual", () => {
     render(<AuditTimeline events={[CERRADO_POR_SILENCIO]} />);
 

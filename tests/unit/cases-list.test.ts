@@ -36,7 +36,12 @@ vi.mock("@/lib/db/helpers", async (importOriginal) => {
 });
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { listCases, listCasesForExport } from "@/server/cases/list";
+import {
+  buildCaseFilters,
+  consultaListado,
+  listCases,
+  listCasesForExport,
+} from "@/server/cases/list";
 import { db } from "@/lib/db";
 import { countRows } from "@/lib/db/helpers";
 import { enTenant, enTenantVarias } from "@/data/scope";
@@ -224,6 +229,7 @@ describe("listCasesForExport", () => {
     ["is_claim", { is_claim: true }],
     ["customer_id", { customer_id: "c-1" }],
     ["policy_id", { policy_id: "p-1" }],
+    ["para_responder", { para_responder: true }],
   ])("aplica %s aunque sea el único filtro", async (_nombre, filtro) => {
     const chain: any = {
       from: vi.fn().mockReturnThis(),
@@ -282,5 +288,40 @@ describe("listCasesForExport", () => {
     await expect(listCasesForExport(TENANT_ID, {})).rejects.toThrow(
       "[listCasesForExport] error"
     );
+  });
+});
+
+describe("buildCaseFilters — «Para responder»", () => {
+  it("pide para_responder_desde no nulo, y nada por inquilino", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const where = buildCaseFilters({ para_responder: true });
+
+    expect(where).toBeDefined();
+    const compilado = new PgDialect().sqlToQuery(where!).sql;
+    expect(compilado).toContain('"para_responder_desde" is not null');
+    expect(compilado).not.toContain("tenant_id");
+  });
+
+  it("sin el parámetro no filtra", () => {
+    expect(buildCaseFilters({})).toBeUndefined();
+  });
+});
+
+describe("consultaListado — orden de «Para responder»", () => {
+  // Un cliente de drizzle que no se conecta: sólo arma el SQL.
+  async function ordenDe(query: Partial<typeof baseQuery> & { para_responder?: true }) {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const datos = drizzle(async () => ({ rows: [] }));
+    return consultaListado(datos as never, { ...baseQuery, ...query })
+      .toSQL()
+      .sql.split(" order by ")[1];
+  }
+
+  it("primero el que espera respuesta hace más tiempo", async () => {
+    expect(await ordenDe({ para_responder: true })).toMatch(/^"cases"\."para_responder_desde" asc /);
+  });
+
+  it("sin la sección ordena por la columna pedida", async () => {
+    expect(await ordenDe({})).toMatch(/^"cases"\."created_at" desc /);
   });
 });

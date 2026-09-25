@@ -30,7 +30,16 @@ import { PARAMS_DE_FILTRO } from "./grupos-de-filtro";
 interface RealtimeHandlers {
   onInsert: (newCase: CaseRow) => void;
   onUpdate: (updatedCase: CaseRow, prevStatus: CaseStatus | null) => void;
+  /**
+   * Los ids de todo lo que cumple el filtro, cuando entró en un solo pedido: lo
+   * que falta ya no lo cumple. Con el pedido lleno no se llama, porque ahí la
+   * falta no dice nada. Corre también en el primer sondeo, que es el que ve la
+   * lista vieja que restaura el Atrás del navegador.
+   */
+  onCompleta?: (ids: ReadonlySet<string>) => void;
 }
+
+const POR_PEDIDO = 100;
 
 /*
  * Cada cinco segundos, para siempre, en cada pestaña abierta: eso costaba tres
@@ -58,8 +67,11 @@ const POLL_MAX_MS = 30000;
  *
  * `status` ya viene incluido: es el primero de `PARAMS_DE_FILTRO`, aunque no
  * viva en el panel sino en las pestañas.
+ *
+ * `para_responder` va aparte: es una sección de la barra lateral y no un filtro
+ * del panel, así que «Limpiar» no lo borra, pero el sondeo lo tiene que reenviar.
  */
-export const FILTER_PARAMS = PARAMS_DE_FILTRO;
+export const FILTER_PARAMS = [...PARAMS_DE_FILTRO, "para_responder"];
 
 /** Build the /api/cases query string from the current location filters. */
 function buildQuery(current: URLSearchParams): string {
@@ -71,7 +83,7 @@ function buildQuery(current: URLSearchParams): string {
     for (const value of current.getAll(key)) params.append(key, value);
   }
   params.set("page", "1");
-  params.set("per_page", "100");
+  params.set("per_page", String(POR_PEDIDO));
   params.set("sort", "created_at");
   params.set("order", "desc");
   return params.toString();
@@ -124,6 +136,10 @@ export function useCasesRealtime(handlers: RealtimeHandlers) {
         const body = (await res.json()) as { data?: CaseRow[] };
         const rows = Array.isArray(body?.data) ? body.data : [];
         if (cancelled) return false;
+
+        if (rows.length < POR_PEDIDO) {
+          handlersRef.current.onCompleta?.(new Set(rows.map((row) => row.id)));
+        }
 
         if (snapshot === null) {
           // First poll: seed the baseline silently.

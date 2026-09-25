@@ -148,6 +148,9 @@ describe("patchCase — FSM validation", () => {
       null
     );
     expect(result.case.status).toBe("cerrado");
+    // Un caso cerrado no queda en «Para responder».
+    const escrito = vi.mocked(db.update).mock.results[0].value.set.mock.calls[0][0];
+    expect(escrito).toMatchObject({ para_responder_desde: null });
   });
 
   it("succeeds for valid FSM transition: listo → escalado", async () => {

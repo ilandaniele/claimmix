@@ -107,6 +107,7 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
         status: "cerrado",
         closed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        para_responder_desde: null,
       })
       /*
        * El tope va DENTRO del UPDATE, no sobre lo que devuelve.

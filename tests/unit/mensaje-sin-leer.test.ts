@@ -17,7 +17,8 @@
  * `listo_para_core`, `enviado_a_core`, `cerrado`, `requiere_especialista`— y el
  * `no_relevante` que llegue por un camino que no sea el ingreso de correo (un
  * re-análisis a mano de un admin, un re-despacho). Para esos el mensaje sigue
- * sin leerse, y eso es deliberado: una persona es dueña de esos casos.
+ * sin leerse, y eso es deliberado: una persona es dueña de esos casos. Por eso
+ * el ingreso deja el caso en «Para responder»: lo contesta ella, no el agente.
  *
  * Lo que NO es deliberado es que no se note. Ahora queda en `warn` y en la
  * AUDITORÍA del caso, que es donde una persona lo puede ver.
@@ -41,14 +42,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 vi.setConfig({ testTimeout: 30_000 });
 
-const { mockAudit, mockSelect } = vi.hoisted(() => ({
+const { mockAudit, mockSelect, mockUpdate, mockAgente, mockMessenger } = vi.hoisted(() => ({
   mockAudit: vi.fn(),
   mockSelect: vi.fn(),
+  mockUpdate: vi.fn(),
+  mockAgente: vi.fn(),
+  mockMessenger: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/lib/db", () => ({ db: { select: mockSelect }, tables: {} }));
+vi.mock("@/lib/db", () => ({ db: { select: mockSelect, update: mockUpdate }, tables: {} }));
+
+vi.mock("@/server/ai/claim-agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/ai/claim-agent")>()),
+  runClaimTextAgent: mockAgente,
+  runEmailClaimAgent: mockAgente,
+}));
+
+vi.mock("@/server/confirmations/messenger", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/confirmations/messenger")>()),
+  messengerFor: mockMessenger,
+}));
 
 vi.mock("@/data/scope", async () => {
   const mod = await import("@/lib/db");
@@ -95,6 +110,7 @@ let dichos: string[];
 beforeEach(() => {
   vi.clearAllMocks();
   mockAudit.mockResolvedValue(undefined);
+  mockUpdate.mockReturnValue({ set: () => ({ where: () => Promise.resolve([]) }) });
   dichos = [];
   vi.spyOn(console, "warn").mockImplementation((...a) => {
     dichos.push(a.map(String).join(" "));
@@ -157,6 +173,19 @@ describe("un mensaje a un caso que no se puede reabrir", () => {
     expect(dichos.join(" ")).toContain("email_worker.mensaje_sin_leer");
     // Leyó el caso y nada más: ni el mensaje, ni una extracción.
     expect(mockSelect).toHaveBeenCalledTimes(1);
+  });
+
+  // La marca la pone el ingreso con el mensaje de la persona. Este despacho
+  // también llega por un re-despacho sin nada nuevo, y marcar acá era un falso
+  // «Para responder».
+  it("el agente no lo contesta y el worker no toca la marca", async () => {
+    elCasoEsta("requiere_especialista");
+
+    await correr();
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockAgente).not.toHaveBeenCalled();
+    expect(mockMessenger).not.toHaveBeenCalled();
   });
 
   it("pero un caso en un estado normal NO genera el aviso", async () => {

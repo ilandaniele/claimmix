@@ -788,9 +788,9 @@ describe("whatsappMessenger — la derivación con heridos", () => {
 });
 
 /*
- * WhatsApp no tiene hilo: un mensaje después del traspaso abre un caso nuevo
- * (`findExistingWhatsAppCase`). El pie lo dice, y va fuera del redactor para
- * que no dependa de que el modelo se acuerde.
+ * Un mensaje después del traspaso se suma al caso y queda en «Para responder».
+ * El pie lo dice, y va fuera del redactor para que no dependa de que el modelo
+ * se acuerde.
  */
 describe("whatsappMessenger — después del traspaso", () => {
   const redacta = (message: string) =>

@@ -195,6 +195,11 @@ describe("POST /api/cases/:id/re-analyze", () => {
 
     // db.update was called to reset the case
     expect(mockDb.update).toHaveBeenCalledTimes(1);
+    // «Para responder» lo saca sólo una persona: si la re-extracción falla o
+    // escala, el mensaje pendiente no se pierde.
+    expect(mockDb.update.mock.results[0].value.set.mock.calls[0][0]).not.toHaveProperty(
+      "para_responder_desde"
+    );
 
     expect(mockWriteAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({

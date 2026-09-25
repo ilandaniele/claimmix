@@ -16,11 +16,11 @@ export const AVISO_DE_TRASPASO =
 export const SI_RESPONDES_EL_CORREO = "Si respondés este correo, lo lee una persona del equipo.";
 
 /**
- * El pie de WhatsApp, que no tiene hilo: un mensaje después del traspaso abre
- * un caso nuevo (`findExistingWhatsAppCase`), y «cerramos por este medio» tiene
- * que decir qué pasa si igual escribe.
+ * El pie de WhatsApp: un mensaje después del traspaso se suma al caso y queda
+ * en «Para responder» (`ESTADOS_WHATSAPP_QUE_SUMAN_MENSAJES`), y «cerramos por
+ * este medio» tiene que decir qué pasa si igual escribe.
  */
-export const SI_VOLVES_A_ESCRIBIR = "Si nos volvés a escribir a este número, lo tomamos como una denuncia nueva.";
+export const SI_VOLVES_A_ESCRIBIR = "Si nos volvés a escribir a este número, lo lee una persona del equipo.";
 
 /**
  * La derivación que sale en la misma vuelta que un pedido de confirmación: esa

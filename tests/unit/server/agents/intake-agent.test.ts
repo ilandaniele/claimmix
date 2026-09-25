@@ -6,7 +6,9 @@ const {
   mockWriteAuditLog,
   mockDbSelect,
   mockDbInsert,
+  mockMarcarParaResponder,
 } = vi.hoisted(() => ({
+  mockMarcarParaResponder: vi.fn(),
   mockRunEmailExtractionWorker: vi.fn(),
   mockWriteAuditLog: vi.fn(),
   // select chain: .select().from().where().orderBy().limit()
@@ -88,6 +90,10 @@ vi.mock("@/lib/db/helpers", () => ({
   firstRow: <T>(rows: T[]): T | null => rows[0] ?? null,
 }));
 
+vi.mock("@/server/cases/para-responder", () => ({
+  marcarParaResponder: mockMarcarParaResponder,
+}));
+
 vi.mock("@/server/worker/extract", () => ({
   runEmailExtractionWorker: mockRunEmailExtractionWorker,
 }));
@@ -99,6 +105,7 @@ vi.mock("@/lib/audit/log", () => ({
   },
 }));
 
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
   createWhatsAppIntakeAndRunAgent,
   runIntakeAgent,
@@ -322,6 +329,8 @@ describe("createWhatsAppIntakeAndRunAgent", () => {
 
     expect(result.caseId).toBe("case-whatsapp-001");
     expect(result.created).toBe(true);
+    // Un caso recién abierto lo contesta el agente.
+    expect(mockMarcarParaResponder).not.toHaveBeenCalled();
     expect(result.agent.action).toBe("extract_whatsapp");
     expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith(
       "case-whatsapp-001",
@@ -354,8 +363,8 @@ describe("createWhatsAppIntakeAndRunAgent", () => {
     //   1. findExistingWhatsAppCase → existing case id
     //   2. runIntakeAgent case lookup → case row
     setupSelectResults([
-      [{ id: "case-existing-001" }],
-      [{ id: "case-existing-001", tenant_id: "tenant-001", channel: "whatsapp", status: "recibido" }],
+      [{ id: "case-existing-001", status: "info_faltante" }],
+      [{ id: "case-existing-001", tenant_id: "tenant-001", channel: "whatsapp", status: "info_faltante" }],
     ]);
 
     // Only 2 inserts: claimMessages + rawMessages (no cases insert since case exists)
@@ -372,9 +381,85 @@ describe("createWhatsAppIntakeAndRunAgent", () => {
 
     expect(result.caseId).toBe("case-existing-001");
     expect(result.created).toBe(false);
+    // La conversación sigue con el agente: ni la marca ni su UPDATE.
+    expect(mockMarcarParaResponder).not.toHaveBeenCalled();
     expect(result.agent.action).toBe("extract_whatsapp");
     // cases insert should NOT have been called.
     expect(mockDbInsert).toHaveBeenCalledTimes(2);
+  });
+
+  // En `procesando` el worker que corre puede cerrar el caso sin leer el
+  // mensaje nuevo, y ahí nadie lo contesta.
+  it("no busca el caso entre los que el agente está procesando", async () => {
+    setupSelectResults([[], []]);
+    setupInsertResults([{ rows: [{ id: "case-nuevo" }] }, { rows: [] }, { rows: [] }]);
+
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "+5491112345678",
+      body: "Hola",
+    });
+
+    const busqueda = mockDbSelect.mock.results[0].value.where.mock.calls[0][0];
+    const { params } = new PgDialect().sqlToQuery(busqueda);
+    expect(params).toEqual(expect.arrayContaining(["info_faltante", "listo"]));
+    expect(params).not.toContain("procesando");
+  });
+
+  it("si el agente ya terminó, lo marca el ingreso antes del worker", async () => {
+    setupSelectResults([
+      [{ id: "case-listo-001", status: "listo" }],
+      [{ id: "case-listo-001", tenant_id: "tenant-001", channel: "whatsapp", status: "listo" }],
+    ]);
+    setupInsertResults([{ rows: [] }, { rows: [] }]);
+
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "+5491112345678",
+      body: "¿Y ahora qué hago?",
+      providerMessageId: "wamid-nuevo",
+    });
+
+    // Si el `after()` del webhook no llega a correr, el mensaje no queda sin marcar.
+    expect(mockMarcarParaResponder).toHaveBeenCalledWith("case-listo-001", "tenant-001", undefined);
+    expect(mockMarcarParaResponder.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRunEmailExtractionWorker.mock.invocationCallOrder[0]
+    );
+  });
+
+  // Meta reentrega el mensaje que cerró el caso: marcarlo sin condición dejaba
+  // en «Para responder» un caso que el agente ya había contestado.
+  it("una reentrega marca sólo si queda un mensaje sin contestar", async () => {
+    setupSelectResults([
+      [{ id: "case-listo-001", status: "listo" }],
+      [{ id: "case-listo-001", tenant_id: "tenant-001", channel: "whatsapp", status: "listo" }],
+    ]);
+    setupInsertResults([{ rejectWith: Object.assign(new Error("dup"), { code: "23505" }) }]);
+
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "+5491112345678",
+      body: "Listo, gracias",
+      providerMessageId: "wamid-repetido",
+    });
+
+    expect(mockMarcarParaResponder).toHaveBeenCalledWith("case-listo-001", "tenant-001", "sinContestar");
+  });
+
+  it("si marcar falla, el ingreso tira para que Meta reintente", async () => {
+    setupSelectResults([[{ id: "case-listo-001", status: "listo" }]]);
+    setupInsertResults([{ rows: [] }, { rows: [] }]);
+    mockMarcarParaResponder.mockRejectedValueOnce(new Error("neon"));
+
+    await expect(
+      createWhatsAppIntakeAndRunAgent({
+        tenantId: "tenant-001",
+        from: "+5491112345678",
+        body: "Hola",
+        providerMessageId: "wamid-x",
+      })
+    ).rejects.toThrow("neon");
+    expect(mockRunEmailExtractionWorker).not.toHaveBeenCalled();
   });
 });
 

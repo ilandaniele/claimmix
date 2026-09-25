@@ -98,7 +98,7 @@ describe("closeAbandonedConversations — what it will and will not touch", () =
     const result = await closeAbandonedConversations();
 
     expect(result.closed).toBe(1);
-    expect(updatedWith).toMatchObject({ status: "cerrado" });
+    expect(updatedWith).toMatchObject({ status: "cerrado", para_responder_desde: null });
     expect(updatedWith?.closed_at).toBeTruthy();
   });
 

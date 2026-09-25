@@ -22,18 +22,29 @@ import { CloseConfirmDialog } from "./components/CloseConfirmDialog";
 import { EscalateDialog } from "./components/EscalateDialog";
 import { ToastContainer, useToast } from "@/app/(app)/bandeja/components/Toast";
 import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
 import type { CaseStatus } from "@/lib/schemas/cases";
 
 interface CaseDetailClientProps {
   caseId: string;
   status: CaseStatus;
   caseNumber: string;
+  paraResponder: boolean;
+  /** Cuándo el servidor leyó el caso: lo que entró después, nadie lo vio. */
+  vistoEn: string;
+  /** Sin esto un viewer vería un botón que le contesta 403. */
+  puedeMarcar: boolean;
 }
+
+type Aviso = [TranslationKey, "success" | "info"];
 
 export function CaseDetailClient({
   caseId,
   status,
   caseNumber,
+  paraResponder,
+  vistoEn,
+  puedeMarcar,
 }: CaseDetailClientProps) {
   const t = useT();
   const router = useRouter();
@@ -43,56 +54,74 @@ export function CaseDetailClient({
   const [showEscalate, setShowEscalate] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   const [reAnalyzing, setReAnalyzing] = useState(false);
+  const [marcando, setMarcando] = useState(false);
 
   const dialogOpen = showClose || showEscalate || transitioning;
 
-  // ── Direct transition (no confirmation dialog) ─────────────────────────────
-  async function handleTransition(toStatus: CaseStatus) {
-    setTransitioning(true);
+  // Las acciones directas hacen lo mismo: pedir, avisar y refrescar. Cambian
+  // la ruta, el aviso y qué error se reconoce.
+  async function accion(
+    setOcupado: (ocupado: boolean) => void,
+    url: string,
+    init: RequestInit,
+    aviso: (res: Response) => Aviso | Promise<Aviso>,
+    errores: Partial<Record<number, TranslationKey>> = {}
+  ) {
+    setOcupado(true);
     try {
-      const res = await fetch(`/api/cases/${caseId}`, {
+      const res = await fetch(url, init);
+      if (res.ok) {
+        const [clave, tipo] = await aviso(res);
+        addToast(t(clave), tipo);
+        router.refresh();
+      } else {
+        addToast(t(errores[res.status] ?? "error.generic"), "error");
+      }
+    } catch {
+      addToast(t("error.generic"), "error");
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  const handleTransition = (toStatus: CaseStatus) =>
+    accion(
+      setTransitioning,
+      `/api/cases/${caseId}`,
+      {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: toStatus }),
-      });
+      },
+      () => ["case.detail.statusUpdated", "success"],
+      { 409: "close.errorFsm" }
+    );
 
-      if (res.ok) {
-        addToast(t("case.detail.statusUpdated"), "success");
-        // Refresh server data
-        router.refresh();
-      } else if (res.status === 409) {
-        addToast(t("close.errorFsm"), "error");
-      } else {
-        addToast(t("error.generic"), "error");
-      }
-    } catch {
-      addToast(t("error.generic"), "error");
-    } finally {
-      setTransitioning(false);
-    }
-  }
+  const handleReAnalyze = () =>
+    accion(
+      setReAnalyzing,
+      `/api/cases/${caseId}/re-analyze`,
+      { method: "POST" },
+      () => ["case.detail.reAnalyzeStarted", "success"],
+      { 429: "case.detail.reAnalyzeRateLimit" }
+    );
 
-  // ── Re-analyze — trigger AI re-extraction ────────────────────────────────
-  async function handleReAnalyze() {
-    setReAnalyzing(true);
-    try {
-      const res = await fetch(`/api/cases/${caseId}/re-analyze`, {
+  // Si entró algo después de `vistoEn`, el caso sigue marcado: se refresca para
+  // que se vea lo nuevo.
+  const handleMarcarRespondido = () =>
+    accion(
+      setMarcando,
+      `/api/cases/${caseId}/respondido`,
+      {
         method: "POST",
-      });
-      if (res.ok) {
-        addToast(t("case.detail.reAnalyzeStarted"), "success");
-        router.refresh();
-      } else if (res.status === 429) {
-        addToast(t("case.detail.reAnalyzeRateLimit"), "error");
-      } else {
-        addToast(t("error.generic"), "error");
-      }
-    } catch {
-      addToast(t("error.generic"), "error");
-    } finally {
-      setReAnalyzing(false);
-    }
-  }
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visto: vistoEn }),
+      },
+      async (res) =>
+        (await res.json()).actualizado
+          ? ["case.paraResponder.hecho", "success"]
+          : ["case.paraResponder.cambio", "info"]
+    );
 
   // ── Close success — show toast, redirect to /bandeja ──────────────────────
   function handleCloseSuccess() {
@@ -118,6 +147,24 @@ export function CaseDetailClient({
         data-testid="case-status-actions"
         aria-label="Acciones del caso"
       >
+        {paraResponder && (
+          <div
+            role="status"
+            className="flex max-w-md flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 sm:items-end sm:text-right"
+          >
+            <p>{t("case.paraResponder.banner")}</p>
+            {puedeMarcar && (
+              <button
+                type="button"
+                onClick={handleMarcarRespondido}
+                disabled={marcando}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+              >
+                {t("case.paraResponder.marcar")}
+              </button>
+            )}
+          </div>
+        )}
         <StatusActions
           caseId={caseId}
           status={status}

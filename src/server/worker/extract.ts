@@ -79,6 +79,7 @@ import { respuestaAHeridos, sinHeridosSupuestos } from "@/core/case/heridos-supu
 import { ultimoPedido } from "@/server/confirmations/ultimo-pedido";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
 import { puedeArrancar } from "@/core/case/estados-de-arranque";
+import { marcarParaResponder } from "@/server/cases/para-responder";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
@@ -840,6 +841,8 @@ export async function runEmailExtractionWorker(
   // siempre; `reintento` (TIMEOUT o 429) espera al barrido: redespacharlo en el
   // acto gasta los tres intentos contra el mismo proveedor saturado.
   let diferida: "sin_tiempo" | "reintento" | null = null;
+  // Los entrantes que esta corrida leyó. Lo que entre después no lo contesta.
+  let leidos: string[] | null = null;
 
   try {
     // ── a) Fetch case + raw_messages ──────────────────────────────────────────
@@ -891,8 +894,10 @@ export async function runEmailExtractionWorker(
        * acá. Que el silencio deje de ser silencio, sí: queda en `warn` y en la
        * auditoría del caso, que es donde una persona lo puede ver.
        *
-       * Medido antes de escribir esto: en la base no hay todavía ningún caso con
-       * un mensaje posterior a la última vez que se lo tocó. Es preventivo.
+       * Si el agente ya había terminado, el caso quedó en «Para responder»
+       * (`@/server/cases/para-responder`): lo marcó el ingreso o, si el mensaje
+       * entró mientras corría el worker, la corrida al terminar. No este
+       * despacho, que también llega por un re-despacho sin nada nuevo.
        */
       logger.warn({
         case_id: caseId,
@@ -995,6 +1000,7 @@ export async function runEmailExtractionWorker(
     );
 
     const conversation = await loadInboundConversation(caseId, tenantCtx);
+    leidos = conversation?.entrantes.map((m) => m.id) ?? null;
 
     if (conversation) {
       emailBody = conversation.body;
@@ -1705,6 +1711,15 @@ export async function runEmailExtractionWorker(
       }, "email_worker.unhandled_error");
     // Do not rethrow — fire-and-forget callers must not crash.
   } finally {
+    /*
+     * Lo que entró mientras corría: el ingreso no lo marcó porque el caso
+     * todavía no estaba terminado, y el re-despacho cae en un estado del que el
+     * worker no arranca. Va antes de liberar, así el re-despacho ya lo encuentra
+     * marcado. Sin tirar: el `finally` tiene que liberar la reserva igual.
+     */
+    if (leidos && !diferida) {
+      await marcarParaResponder(caseId, tenantId, { sinLeer: leidos }).catch(() => {});
+    }
     if (leaseHeld && heredadaEn && diferida) {
       await devolverReservaHeredada(caseId, tenantCtx);
     } else if (leaseHeld) {
@@ -2143,7 +2158,7 @@ interface LoadedConversation {
   senderName: string | null;
   latestText: string;
   /** Cada entrante sin lo citado, con su hora: lo que contestó a un pedido. */
-  entrantes: Array<{ texto: string; recibido: string }>;
+  entrantes: Array<{ id: string; texto: string; recibido: string }>;
   claimMessageId: string | null;
   providerMessageId: string | null;
 }
@@ -2194,7 +2209,11 @@ export async function loadInboundConversation(
     senderEmail: latest.from_addr ?? "",
     senderName: latest.profile_name ?? null,
     latestText: stripQuotedReply(latest.body_text ?? ""),
-    entrantes: inbound.map((m) => ({ texto: stripQuotedReply(m.body_text ?? ""), recibido: m.received_at })),
+    entrantes: inbound.map((m) => ({
+      id: m.id,
+      texto: stripQuotedReply(m.body_text ?? ""),
+      recibido: m.received_at,
+    })),
     claimMessageId: latest.id ?? null,
     providerMessageId: latest.provider_message_id ?? null,
   };

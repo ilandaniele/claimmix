@@ -155,6 +155,7 @@ export async function GET(request: NextRequest) {
     severity: searchParams.getAll("severity"),
     channel: searchParams.getAll("channel"),
     is_claim: searchParams.get("is_claim") ?? undefined,
+    para_responder: searchParams.get("para_responder") ?? undefined,
     customer_id: searchParams.get("customer_id") ?? undefined,
     policy_id: searchParams.get("policy_id") ?? undefined,
     // page/per_page/sort/order are ignored for export (always max 1000, date desc)
@@ -185,6 +186,7 @@ export async function GET(request: NextRequest) {
       severity: parsed.data.severity,
       channel: parsed.data.channel,
       is_claim: parsed.data.is_claim,
+      para_responder: parsed.data.para_responder,
       customer_id: parsed.data.customer_id,
       policy_id: parsed.data.policy_id,
     });

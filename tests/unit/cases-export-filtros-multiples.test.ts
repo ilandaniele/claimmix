@@ -85,6 +85,26 @@ describe("GET /api/cases/export.csv — filtros multi-select", () => {
     expect(mockListCasesForExport).not.toHaveBeenCalled();
   });
 
+  it("«Para responder» también filtra el CSV", async () => {
+    const res = await GET(makeRequest("?para_responder=true"));
+
+    expect(res.status).toBe(200);
+    expect(mockListCasesForExport).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({ para_responder: true })
+    );
+  });
+
+  it.each(["false", ""])("para_responder=%s tampoco da 400 en el CSV", async (valor) => {
+    const res = await GET(makeRequest(`?para_responder=${valor}`));
+
+    expect(res.status).toBe(200);
+    expect(mockListCasesForExport).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({ para_responder: undefined })
+    );
+  });
+
   it("el encabezado dice «Situación», como la columna de la bandeja", async () => {
     const res = await GET(makeRequest(""));
 

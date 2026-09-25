@@ -108,6 +108,28 @@ describe("useCasesRealtime — cada cuánto pregunta", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(antes + 1);
   });
 
+  // «Para responder» no es un filtro del panel, pero el sondeo lo tiene que
+  // reenviar: sin él, la sección se llena con toda la bandeja.
+  it("parado en «Para responder», el sondeo pide sólo esa sección", async () => {
+    nav.busqueda = new URLSearchParams("para_responder=true");
+    renderHook(() => useCasesRealtime(manos));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy.mock.calls.at(-1)?.[0]).toContain("para_responder=true");
+  });
+
+  // Lo que falta en un pedido entero ya no cumple el filtro; en uno lleno, puede
+  // estar en la página siguiente.
+  it("avisa la lista entera desde el primer sondeo, y no con el pedido lleno", async () => {
+    const onCompleta = vi.fn();
+    renderHook(() => useCasesRealtime({ ...manos, onCompleta }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onCompleta).toHaveBeenCalledWith(new Set(["a"]));
+
+    filas = Array.from({ length: 100 }, (_, i) => caso(`c${i}`));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(onCompleta).toHaveBeenCalledTimes(1);
+  });
+
   it("cambiar de filtro sin desmontar no hace pasar la lista nueva por altas", async () => {
     // Bandeja → «No relevantes» es la misma ruta con otra query: el hook sigue vivo.
     const onInsert = vi.fn();

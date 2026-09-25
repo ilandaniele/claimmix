@@ -70,7 +70,14 @@ describe("la situación del caso", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: status === 200, status }));
     render(
       <LocaleProvider locale={locale}>
-        <CaseDetailClient caseId="c1" status="esperando" caseNumber="#1" />
+        <CaseDetailClient
+          caseId="c1"
+          status="esperando"
+          caseNumber="#1"
+          paraResponder={false}
+          vistoEn="2026-09-25T12:00:00.000Z"
+          puedeMarcar={false}
+        />
       </LocaleProvider>
     );
     fireEvent.click(screen.getByTestId("action-marcar-completo"));

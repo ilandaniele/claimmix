@@ -8,10 +8,11 @@
 --
 -- `para_responder_desde` marca el caso para la sección «Para responder» de la
 -- bandeja: guarda cuándo llegó el primero de esos mensajes y se limpia cuando
--- alguien marca el caso como respondido o lo re-analiza.
+-- alguien marca el caso como respondido o lo cierra.
 --
 -- El índice es parcial porque casi todos los casos tienen la columna en null:
--- la sección lee sólo los marcados, por tenant y del más reciente al más viejo.
+-- la sección lee sólo los marcados, por tenant y primero el que espera hace
+-- más tiempo (el índice se recorre al revés).
 --
 -- La política de fila de `cases` y los grants por tabla de `claimmix_app`
 -- cubren la columna nueva sin tocar nada más.

@@ -22,10 +22,12 @@ import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, claimMessages } from "@/lib/db/schema";
 import { threadLookup } from "@/server/email/thread-lookup";
-import { classifyInboundEmailForIntake } from "@/server/email/relevance-prefilter";
+import { classifyInboundEmailForIntake, isBulkHeader } from "@/server/email/relevance-prefilter";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { enTenant } from "@/data/scope";
 import { reabrirSiEraNoRelevante } from "@/server/cases/reabrir-no-relevante";
+import { marcarParaResponder } from "@/server/cases/para-responder";
+import { ESTADOS_DEL_AGENTE_TERMINADO } from "@/core/case/para-responder";
 import { logger } from "@/lib/observability/logger";
 
 export interface InboundEmail {
@@ -148,13 +150,24 @@ export async function ingestInboundEmail(
    *
    * Alguien escribe «hola», queda clasificado como no-denuncia, y después manda
    * la denuncia de verdad: sin esto ese mensaje se guardaba y no lo leía nadie,
-   * porque el worker no arranca desde `no_relevante`.
+   * porque el worker no arranca desde `no_relevante`. Y si el agente ya terminó
+   * con el caso, queda en «Para responder».
    *
    * Va acá y no en el worker a propósito: el disparador tiene que ser que una
    * PERSONA mandó un mensaje, no que algo despachó una extracción.
    */
   if (existingCaseId) {
-    await reabrirSiEraNoRelevante(caseId, tenantId);
+    const status = await reabrirSiEraNoRelevante(caseId, tenantId);
+    // Un fuera de oficina o una lista en el hilo no es alguien esperando respuesta.
+    if (
+      status &&
+      (ESTADOS_DEL_AGENTE_TERMINADO as readonly string[]).includes(status) &&
+      !isBulkHeader(email.headers ?? [])
+    ) {
+      // No se tira: el mensaje ya está guardado y el reintento del poller lo
+      // saltearía por duplicado, así que tirar sólo perdería la auditoría.
+      await marcarParaResponder(caseId, tenantId).catch(() => {});
+    }
   }
 
   await writeAuditLog({

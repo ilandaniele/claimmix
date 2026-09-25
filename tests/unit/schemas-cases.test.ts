@@ -131,6 +131,17 @@ describe("CaseQuerySchema", () => {
       expect(result.data.order).toBe("asc");
     }
   });
+
+  it("para_responder=true da true, y sin el parámetro no filtra", () => {
+    expect(CaseQuerySchema.parse({ para_responder: "true" }).para_responder).toBe(true);
+    expect(CaseQuerySchema.parse({}).para_responder).toBeUndefined();
+  });
+
+  it.each(["false", "1", ""])("para_responder=%s no filtra ni da 400", (valor) => {
+    const r = CaseQuerySchema.safeParse({ para_responder: valor });
+    expect(r.success).toBe(true);
+    expect(r.data?.para_responder).toBeUndefined();
+  });
 });
 
 describe("CasePatchSchema", () => {

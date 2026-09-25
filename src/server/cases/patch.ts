@@ -105,6 +105,8 @@ export async function patchCase(
     updateData.status = patch.status;
     if (patch.status === "cerrado") {
       updateData.closed_at = new Date().toISOString();
+      // Un caso cerrado no le debe respuesta a nadie.
+      updateData.para_responder_desde = null;
     }
   }
 

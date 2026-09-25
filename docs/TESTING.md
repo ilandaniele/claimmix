@@ -637,7 +637,7 @@ chequeos: el smoke primero, y colgando de él los otros seis.
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
-2. `pnpm rehearse`: las catorce conversaciones enteras contra el agente real.
+2. `pnpm rehearse`: las quince conversaciones enteras contra el agente real.
    Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
 3. `pnpm load --reporte carga.json`: las consultas del tablero con la mesa

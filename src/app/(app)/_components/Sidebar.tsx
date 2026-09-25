@@ -20,6 +20,7 @@ import {
   Receipt,
   Briefcase,
   MailX,
+  MessageSquareReply,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -153,6 +154,7 @@ export function Sidebar({
 
   const operacionItems: NavItemDef[] = conCandadoPro([
     { label: t("nav.bandeja") || "Bandeja", href: "/bandeja", icon: Inbox },
+    { label: t("bandeja.paraResponder"), href: "/bandeja?para_responder=true", icon: MessageSquareReply },
     /*
      * Directo a la bandeja filtrada. `/escalados` era una pagina de nueve
      * lineas que hacia `redirect` aca mismo: un click, dos viajes al

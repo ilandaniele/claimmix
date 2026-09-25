@@ -161,6 +161,12 @@ interface Turn {
     prefiltered?: boolean;
     status?: string;
     /**
+     * Que el caso haya quedado (o no) en «Para responder»: llegó un mensaje
+     * después de que el agente terminó y lo contesta una persona. Con
+     * `replies: 0` solo no se distingue de un mensaje que se perdió.
+     */
+    paraResponder?: boolean;
+    /**
      * Claves que el mensaje NO tiene que haber pedido.
      *
      * Sobre `outbound_messages.asked_keys`, que es la lista que el propio
@@ -291,6 +297,22 @@ const SCENARIOS: Scenario[] = [
           cuidado: true,
           sinPedido: true,
         },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
+  {
+    id: "escribe-despues-del-cierre",
+    what: "Vuelve a escribir después de la derivación: se suma al caso, el agente calla y queda «Para responder»",
+    turns: [
+      {
+        say: "Se incendió la camioneta en la ruta 33, mi hijo está internado con quemaduras. Soy Marta Ruiz, póliza POL-7731-D.",
+        expect: { replies: 1, status: "requiere_especialista" },
+      },
+      {
+        say: "¿Me pueden llamar?",
+        expect: { replies: 0, status: "requiere_especialista", paraResponder: true },
       },
     ],
     finally: { status: "requiere_especialista" },
@@ -1134,17 +1156,28 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           );
         }
       }
-      if (want.status) {
+      if (want.status || want.paraResponder !== undefined) {
         const row = await db
-          .select({ status: cases.status })
+          .select({ status: cases.status, paraResponderDesde: cases.para_responder_desde })
           .from(cases)
           .where(eq(cases.id, active));
-        if (row[0]?.status !== want.status) {
+        if (want.status && row[0]?.status !== want.status) {
           note(
             scenario.id,
             i + 1,
             `estado ${row[0]?.status}, esperaba ${want.status}`,
             "estado"
+          );
+        }
+        if (
+          want.paraResponder !== undefined &&
+          (row[0]?.paraResponderDesde != null) !== want.paraResponder
+        ) {
+          note(
+            scenario.id,
+            i + 1,
+            want.paraResponder ? "no quedó «Para responder»" : "quedó «Para responder» y no debía",
+            "para-responder"
           );
         }
       }
@@ -1517,10 +1550,10 @@ async function refuseIfBudgetSpent(): Promise<void> {
  * treat this as a policy that does not exist" while the table is empty, and
  * "there is no policy with that number" as soon as it holds a single row. The
  * second answer is the one that makes the agent escalate the case to a
- * specialist on the very first turn, and from then on every message opens a
- * NEW case, because an escalated case is deliberately outside the threading
- * window — a human owns it. Nine behavioural differences, not one of them
- * about the agent, and a day to read them.
+ * specialist on the very first turn, and from then on every message joins that
+ * case and lands in «Para responder» instead of reaching the agent — a human
+ * owns it. Nine behavioural differences, not one of them about the agent, and a
+ * day to read them.
  *
  * Production has an empty book today and will not on the day it has customers,
  * so this is not a QA quirk to paper over. The rehearsal says what it found and
@@ -1544,8 +1577,8 @@ async function refuseIfPadronCargado(): Promise<void> {
       "ahí `verificar_poliza` contesta que la aseguradora todavía no cargó el",
       "padrón, y el agente pide la documentación. Con una sola fila cargada",
       "contesta que esa póliza no existe, el caso se deriva a un especialista en",
-      "el primer turno, y los mensajes siguientes abren casos nuevos: el informe",
-      "sale lleno de diferencias que no son del agente.",
+      "el primer turno, y los mensajes siguientes van a «Para responder» sin que",
+      "el agente conteste: el informe sale lleno de diferencias que no son del agente.",
       "",
       "Vaciá el padrón de este inquilino antes de ensayar, o dale a cada",
       "escenario su propio bloque `policy` para que el ensayo siembre el titular",

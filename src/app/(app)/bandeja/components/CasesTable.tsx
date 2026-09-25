@@ -34,15 +34,19 @@ interface CasesTableProps {
    * render.
    */
   onDeleteMany?: (ids: string[]) => void;
+  /** La sección desde la que se abre el caso, para que «Volver» vuelva a ella. */
+  desde?: "para_responder";
 }
 
 export function CasesTable({
   cases,
   onDeleteMany,
   seleccionando = false,
+  desde,
 }: CasesTableProps) {
   const { t, locale } = useLocale();
   const router = useRouter();
+  const hrefDelCaso = (id: string) => (desde ? `/casos/${id}?desde=${desde}` : `/casos/${id}`);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const allIds = useMemo(() => cases.map((c) => c.id), [cases]);
@@ -195,7 +199,7 @@ export function CasesTable({
            */
           return (
             <Link
-              href={`/casos/${id}`}
+              href={hrefDelCaso(id)}
               /*
                * Sin esto el click sube al <tr> y se empuja DOS veces al mismo
                * caso —el <Link> y el onClick de la fila—: dos entradas de
@@ -291,17 +295,20 @@ export function CasesTable({
         header: t("table.col.replied"),
         cell: ({ getValue, row }) => {
           const at = getValue<string | null>();
+          // Llegó algo después de que el agente terminó: lo que importa es que
+          // lo conteste una persona, no si antes se le había respondido.
+          const paraResponder = Boolean(row.original.para_responder_desde);
 
           // Non-claims are answered by design with silence, so "sin responder"
           // would read as a backlog item when it is the correct outcome.
-          if (row.original.is_claim === false) {
+          if (!paraResponder && row.original.is_claim === false) {
             return <Vacio />;
           }
 
-          if (!at) {
+          if (paraResponder || !at) {
             return (
               <span className="inline-flex items-center whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-0.5 text-[12px] font-medium text-amber-700">
-                {t("table.replied.pending")}
+                {t(paraResponder ? "bandeja.paraResponder" : "table.replied.pending")}
               </span>
             );
           }
@@ -419,7 +426,7 @@ export function CasesTable({
         : []),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, onDeleteMany, seleccionando, toggleOne]
+    [t, onDeleteMany, seleccionando, toggleOne, desde]
   );
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table intentionally opts out of React Compiler memoization.
@@ -545,7 +552,7 @@ export function CasesTable({
                   onClick={() =>
                     seleccionando
                       ? toggleOne(row.original.id)
-                      : router.push(`/casos/${row.original.id}`)
+                      : router.push(hrefDelCaso(row.original.id))
                   }
                   /*
                    * La ultima fila no lleva linea: el borde de la tarjeta ya
@@ -573,7 +580,7 @@ export function CasesTable({
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       if (seleccionando) toggleOne(row.original.id);
-                      else router.push(`/casos/${row.original.id}`);
+                      else router.push(hrefDelCaso(row.original.id));
                     }
                   }}
                 >

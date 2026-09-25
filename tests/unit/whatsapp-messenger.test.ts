@@ -138,7 +138,8 @@ describe("whatsappMessenger — what it says", () => {
       claimantName: "Marta Ruiz",
     });
 
-    expect(sentBody()).toContain("Hola, Marta Ruiz.");
+    expect(sentBody()).toContain("Hola, Marta.");
+    expect(sentBody()).not.toContain("Ruiz");
   });
 
   it("y el nombre del padrón nunca entero", async () => {
@@ -185,7 +186,8 @@ describe("whatsappMessenger — what it says", () => {
       claimantName: "Cecilia Ferrari",
     });
 
-    expect(sentBody()).toContain("Hola, Cecilia Ferrari.");
+    expect(sentBody()).toContain("Hola, Cecilia.");
+    expect(sentBody()).not.toContain("Ferrari");
   });
 
   it("sin nombre no saluda", async () => {
@@ -195,6 +197,21 @@ describe("whatsappMessenger — what it says", () => {
     });
 
     expect(sentBody()).not.toContain("Hola,");
+  });
+
+  // goteo, 25/09: en la tercera vuelta el piso abría como un primer mensaje.
+  it("en una vuelta posterior no saluda ni dice que la denuncia quedó registrada", async () => {
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: ["policy_number"],
+      claimantName: "Roberto Paz",
+      isFollowUp: true,
+    });
+
+    const body = sentBody();
+    expect(body).not.toContain("Hola,");
+    expect(body).not.toMatch(/recibimos tu denuncia/i);
+    expect(body.startsWith("Para seguir, necesitamos que nos cuentes:")).toBe(true);
   });
 
   it("names every field in Spanish, never the database key", async () => {

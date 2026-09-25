@@ -476,6 +476,15 @@ export const esAR = {
   "messages.thread.sin_confirmar": "Sin confirmar",
   "messages.thread.recortada": "Se muestran sólo los mensajes más recientes.",
 
+  // ── Reply by WhatsApp (P8) ───────────────────────────────────────────────────
+  "messages.reply.enviar": "Enviar",
+  "messages.reply.placeholder": "Escribí la respuesta para el denunciante…",
+  "messages.reply.ventana": "Pasaron más de 24 h desde el último mensaje: WhatsApp sólo deja escribir con una plantilla aprobada.",
+  "messages.reply.agenteActivo": "El agente todavía está trabajando este caso.",
+  "messages.reply.canal": "Este caso no llegó por WhatsApp.",
+  "messages.reply.enviado": "Enviado.",
+  "messages.reply.fallo": "No se pudo enviar. Probá de nuevo.",
+
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clientes",
   "clientes.subtitle": "Clientes y pólizas del tenant",

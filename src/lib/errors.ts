@@ -9,11 +9,12 @@
  *   401  MISSING_SESSION | INVALID_CREDENTIALS
  *   403  FORBIDDEN_ROLE | PLAN_REQUERIDO
  *   404  NOT_FOUND
- *   409  FSM_INVALID_TRANSITION
+ *   409  FSM_INVALID_TRANSITION | RESPUESTA_NO_PERMITIDA
  *   422  AI_OUTPUT_INVALID
  *   429  RATE_LIMITED | AI_BUDGET_EXCEEDED
  *   500  INTERNAL_ERROR
  *   501  NOT_IMPLEMENTED
+ *   502  ENVIO_FALLIDO
  *
  * NEVER include stack traces or internal error strings in API responses.
  */
@@ -30,8 +31,10 @@ export const ErrorCode = {
   AI_BUDGET_EXCEEDED: "AI_BUDGET_EXCEEDED",
   AI_OUTPUT_INVALID: "AI_OUTPUT_INVALID",
   FSM_INVALID_TRANSITION: "FSM_INVALID_TRANSITION",
+  RESPUESTA_NO_PERMITIDA: "RESPUESTA_NO_PERMITIDA",
   INTERNAL_ERROR: "INTERNAL_ERROR",
   NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
+  ENVIO_FALLIDO: "ENVIO_FALLIDO",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -48,8 +51,10 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   AI_BUDGET_EXCEEDED: 429,
   AI_OUTPUT_INVALID: 422,
   FSM_INVALID_TRANSITION: 409,
+  RESPUESTA_NO_PERMITIDA: 409,
   INTERNAL_ERROR: 500,
   NOT_IMPLEMENTED: 501,
+  ENVIO_FALLIDO: 502,
 };
 
 /** Default es-AR messages for each error code. */
@@ -65,8 +70,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   AI_OUTPUT_INVALID: "La respuesta de la IA no tiene el formato esperado.",
   FSM_INVALID_TRANSITION:
     "La transición de estado solicitada no está permitida.",
+  RESPUESTA_NO_PERMITIDA: "No se puede responder este caso por WhatsApp en este momento.",
   INTERNAL_ERROR: "Error interno del servidor.",
   NOT_IMPLEMENTED: "Esta función no está disponible en esta versión.",
+  ENVIO_FALLIDO: "No se pudo enviar el mensaje por WhatsApp.",
 };
 
 /** Application error — carries a typed error code and HTTP status. */

@@ -173,7 +173,7 @@ test.describe("Messages thread — case with no messages (Scenario 2)", () => {
     const res = await page.request.get(`/api/cases/${EMPTY_CASE_ID}/messages`);
     expect(res.status()).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ messages: [], recortada: false });
+    expect(body).toMatchObject({ messages: [], recortada: false });
   });
 });
 

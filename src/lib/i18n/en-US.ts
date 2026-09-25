@@ -459,6 +459,15 @@ export const enUS: Record<TranslationKey, string> = {
   "messages.thread.sin_confirmar": "Unconfirmed",
   "messages.thread.recortada": "Showing only the most recent messages.",
 
+  // ── Reply by WhatsApp (P8) ───────────────────────────────────────────────────
+  "messages.reply.enviar": "Send",
+  "messages.reply.placeholder": "Write the reply to the claimant…",
+  "messages.reply.ventana": "More than 24 h passed since the last message: WhatsApp only allows writing with an approved template.",
+  "messages.reply.agenteActivo": "The agent is still working this case.",
+  "messages.reply.canal": "This case did not arrive by WhatsApp.",
+  "messages.reply.enviado": "Sent.",
+  "messages.reply.fallo": "Could not send. Try again.",
+
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clients",
   "clientes.subtitle": "Tenant clients and policies",

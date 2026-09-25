@@ -122,6 +122,12 @@ export const RATE_LIMIT_CONFIGS = {
    * Protects /api/cases/:id/sync-to-core from accidental repeated sends.
    */
   SYNC_TO_CORE: { limit: 5, windowMs: 60_000 },
+
+  /**
+   * RESPUESTA_HUMANA: 10 por minuto por usuario.
+   * Cada envío toca la API de Meta; frena un doble click o un loop, no un uso normal.
+   */
+  RESPUESTA_HUMANA: { limit: 10, windowMs: 60_000 },
 } as const;
 
 /**

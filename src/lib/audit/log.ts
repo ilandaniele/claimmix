@@ -100,6 +100,11 @@ export const AuditEvent = {
   CASE_DELETED: "case.deleted",
   /** Una persona contestó lo que llegó después de que el agente terminó. */
   CASE_MARKED_ANSWERED: "case.marked_answered",
+  /**
+   * CASE_HUMAN_REPLY: una persona respondió por WhatsApp desde el caso, sin
+   * pasar por el agente. Payload: { outbound_id, estado } — nunca el texto.
+   */
+  CASE_HUMAN_REPLY: "case.human_reply",
 
   // ── AI extraction ──────────────────────────────────────────────────────────
   AI_EXTRACTED: "ai.extracted",

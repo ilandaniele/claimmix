@@ -35,6 +35,10 @@ export interface Conversacion {
   messages: MensajeDeLaConversacion[];
   /** Hubo más de `TOPE_MENSAJES` y se muestran sólo los últimos. */
   recortada: boolean;
+  status: string;
+  channel: string;
+  /** `received_at` del último entrante de WhatsApp, para la ventana de 24 h. */
+  ultimoEntranteWhatsApp: string | null;
 }
 
 export const TOPE_MENSAJES = 50;
@@ -61,10 +65,20 @@ export async function conversacionDelCaso(
   ctx: TenantContext,
   caseId: string
 ): Promise<Conversacion | null> {
-  const [caso, hilo, simulados, salientes] = await enTenantVarias<
-    [Array<{ id: string }>, DelHilo[], Simulado[], Saliente[]]
+  const [caso, hilo, simulados, salientes, ultimoEntrante] = await enTenantVarias<
+    [
+      Array<{ id: string; status: string; channel: string }>,
+      DelHilo[],
+      Simulado[],
+      Saliente[],
+      Array<{ received_at: string }>,
+    ]
   >(ctx, (db) => [
-    db.select({ id: cases.id }).from(cases).where(eq(cases.id, caseId)).limit(1),
+    db
+      .select({ id: cases.id, status: cases.status, channel: cases.channel })
+      .from(cases)
+      .where(eq(cases.id, caseId))
+      .limit(1),
     /*
      * Las dos direcciones juntas. El mail que sale de verdad escribe en
      * `claim_messages` y en `outbound_messages`, y en la segunda guarda el
@@ -137,9 +151,24 @@ export async function conversacionDelCaso(
       )
       .orderBy(desc(outboundMessages.created_at))
       .limit(POR_FUENTE),
+    // Para la ventana de 24 h de WhatsApp: el último entrante de ese canal,
+    // exacto y no recortado por `POR_FUENTE` como el hilo de arriba.
+    db
+      .select({ received_at: claimMessages.received_at })
+      .from(claimMessages)
+      .where(
+        and(
+          eq(claimMessages.case_id, caseId),
+          eq(claimMessages.direction, "inbound"),
+          eq(claimMessages.provider, "whatsapp")
+        )
+      )
+      .orderBy(desc(claimMessages.received_at))
+      .limit(1),
   ]);
 
-  if (caso.length === 0) return null;
+  const elCaso = caso[0];
+  if (!elCaso) return null;
 
   const mensajes: MensajeDeLaConversacion[] = [
     ...hilo.map(({ status, ...m }) => ({
@@ -178,5 +207,8 @@ export async function conversacionDelCaso(
   return {
     messages: mensajes.slice(-TOPE_MENSAJES),
     recortada: mensajes.length > TOPE_MENSAJES,
+    status: elCaso.status,
+    channel: elCaso.channel,
+    ultimoEntranteWhatsApp: ultimoEntrante[0]?.received_at ?? null,
   };
 }

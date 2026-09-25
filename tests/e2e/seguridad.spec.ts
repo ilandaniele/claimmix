@@ -158,6 +158,14 @@ test.describe("lo público es sólo lo público", () => {
     expect([301, 302, 307, 308]).toContain(res.status());
     expect(res.headers()["location"] ?? "").toContain("/login");
   });
+
+  test("el asistente (Plan Pro) también manda al login sin sesión", async ({ request }) => {
+    // Antes de mirar el plan, la ruta pide sesión. Ver el bloqueo de Plan Pro
+    // en vez del login ya sería una fuga: diría que la cuenta existe.
+    const res = await request.get("/asistente", { maxRedirects: 0, failOnStatusCode: false });
+    expect([301, 302, 307, 308]).toContain(res.status());
+    expect(res.headers()["location"] ?? "").toContain("/login");
+  });
 });
 
 test.describe("lo que un error cuenta de más", () => {

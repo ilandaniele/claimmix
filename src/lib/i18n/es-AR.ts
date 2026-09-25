@@ -31,6 +31,7 @@ export const esAR = {
   "nav.agenteBloqueado": "Solo administradores pueden abrir la consola del agente.",
   "nav.facturacion": "Facturación",
   "nav.cartera": "Cartera",
+  "nav.asistente": "Asistente",
 
   /*
    * La antigüedad de un siniestro. El `{n}` es el número, y es el único lugar
@@ -1034,6 +1035,16 @@ export const esAR = {
   "bandeja.quitarSeleccion": "Quitar selección",
   "bandeja.seleccionar": "Seleccionar",
   "bandeja.seleccionarPagina": "Seleccionar los {n} de esta página",
+
+  // ── Asistente — preguntas en lenguaje natural sobre los casos ──────────
+  "asistente.titulo": "Asistente",
+  "asistente.subtitulo": "Preguntá por los casos del inquilino, en lenguaje natural.",
+  "asistente.preguntaLabel": "Tu pregunta",
+  "asistente.placeholder": "¿Cuántos casos hubo este mes? ¿Qué pasó con el caso de Roberto Paz?",
+  "asistente.enviar": "Preguntar",
+  "asistente.enviando": "Consultando…",
+  "asistente.demasiadas": "Demasiadas preguntas seguidas. Esperá un momento y volvé a intentar.",
+  "asistente.error": "No se pudo responder la pregunta. Probá de nuevo.",
 
 } as const;
 

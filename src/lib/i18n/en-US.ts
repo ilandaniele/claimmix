@@ -26,6 +26,7 @@ export const enUS: Record<TranslationKey, string> = {
   "nav.demo": "Demo",
   "nav.principal": "Main navigation",
   "nav.saltarAlContenido": "Skip to content",
+  "nav.asistente": "Assistant",
   "nav.agente": "Agent",
   "nav.agenteBloqueado": "Only administrators can open the agent console.",
   "nav.facturacion": "Billing",
@@ -1007,5 +1008,15 @@ export const enUS: Record<TranslationKey, string> = {
   "bandeja.quitarSeleccion": "Clear selection",
   "bandeja.seleccionar": "Select",
   "bandeja.seleccionarPagina": "Select all {n} on this page",
+
+  // ── Asistente — natural-language questions about the tenant's cases ────
+  "asistente.titulo": "Assistant",
+  "asistente.subtitulo": "Ask about the tenant's cases, in natural language.",
+  "asistente.preguntaLabel": "Your question",
+  "asistente.placeholder": "How many cases were there this month? What happened with Roberto Paz's case?",
+  "asistente.enviar": "Ask",
+  "asistente.enviando": "Asking…",
+  "asistente.demasiadas": "Too many questions in a row. Wait a moment and try again.",
+  "asistente.error": "Could not answer the question. Try again.",
 
 } as const;

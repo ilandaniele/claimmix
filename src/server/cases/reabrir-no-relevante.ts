@@ -28,9 +28,9 @@
  *
  * ── Sólo el correo, y no por olvido ──────────────────────────────────────────
  *
- * WhatsApp no lo necesita: `findExistingWhatsAppCase` reutiliza un caso SÓLO si
- * está en `recibido`, `info_faltante` o `confirmacion_pendiente`, así que un
- * mensaje nuevo sobre un caso no-relevante ya abre un caso nuevo. Se descubrió
+ * WhatsApp no lo necesita: `findExistingWhatsAppCase` no reutiliza un caso
+ * `no_relevante` (lista y razones en `@/core/case/para-responder`), así que un
+ * mensaje nuevo sobre él ya abre un caso nuevo. Se descubrió
  * al revés de lo esperado — puse la llamada en los dos canales y un test de
  * WhatsApp que ya existía se puso rojo porque la consulta de más le corrió el
  * mock: era código muerto.
@@ -59,12 +59,13 @@ import { logger } from "@/lib/observability/logger";
  * existía. No tira nunca: que la reapertura falle no puede tumbar el ingreso de
  * un mensaje, que es lo único que no se puede perder.
  *
- * @returns true si lo reabrió.
+ * @returns el estado en que queda el caso, o `null` si no se pudo leer. Lo usa
+ * el ingreso para decidir si marca «Para responder» sin volver a leer la fila.
  */
 export async function reabrirSiEraNoRelevante(
   caseId: string,
   tenantId: string
-): Promise<boolean> {
+): Promise<string | null> {
   const tenantCtx: TenantContext = { tenantId };
 
   try {
@@ -73,7 +74,7 @@ export async function reabrirSiEraNoRelevante(
         db.select({ status: cases.status }).from(cases).where(eq(cases.id, caseId)).limit(1)
       )
     );
-    if (!fila || fila.status !== "no_relevante") return false;
+    if (!fila || fila.status !== "no_relevante") return fila?.status ?? null;
 
     /*
      * La máquina de estados sigue mandando.
@@ -82,7 +83,7 @@ export async function reabrirSiEraNoRelevante(
      * arista `no_relevante → recibido`, esto deja de reabrir en lugar de
      * escribir un estado que la máquina no reconoce.
      */
-    if (!isValidTransition("no_relevante", "recibido")) return false;
+    if (!isValidTransition("no_relevante", "recibido")) return fila.status;
 
     await enTenant(tenantCtx, (db) =>
       db
@@ -104,7 +105,7 @@ export async function reabrirSiEraNoRelevante(
         case_id: caseId,
       }, "case.reabierto_por_mensaje");
 
-    return true;
+    return "recibido";
   } catch (err) {
     /*
      * El mensaje ya está guardado; lo que se pierde acá es la reapertura.
@@ -112,6 +113,6 @@ export async function reabrirSiEraNoRelevante(
      * tirar dejaría el mensaje sin entrar, que es peor.
      */
     logger.error({ detalle: err instanceof Error ? err.name : "UnknownError", case_id: caseId }, "reabrir_no_relevante.no_se_pudo_reabrir");
-    return false;
+    return null;
   }
 }

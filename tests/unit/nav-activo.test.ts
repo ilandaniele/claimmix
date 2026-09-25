@@ -14,6 +14,7 @@ import { hrefActivo } from "@/app/(app)/_components/nav-activo";
 
 const BARRA = [
   "/bandeja",
+  "/bandeja?para_responder=true",
   "/bandeja?status=escalado",
   "/bandeja?is_claim=false",
   "/clientes",
@@ -53,6 +54,16 @@ describe("hrefActivo", () => {
   it("sumar «No relevantes» no le roba el resaltado a «Bandeja» ni a «Escalados»", () => {
     expect(hrefActivo(BARRA, "/bandeja", q("is_claim=true"))).toBe("/bandeja");
     expect(hrefActivo(BARRA, "/bandeja", q("status=escalado"))).toBe("/bandeja?status=escalado");
+  });
+
+  it("«Para responder» se resalta sólo con su query, y entonces «Bandeja» no", () => {
+    expect(hrefActivo(BARRA, "/bandeja", q("para_responder=true"))).toBe(
+      "/bandeja?para_responder=true"
+    );
+    expect(hrefActivo(BARRA, "/bandeja", q("para_responder=true&page=2"))).toBe(
+      "/bandeja?para_responder=true"
+    );
+    expect(hrefActivo(BARRA, "/bandeja", q(""))).toBe("/bandeja");
   });
 
   it("una subruta resalta a su padre por prefijo, pero solo por `/`", () => {

@@ -97,6 +97,11 @@ pedimos» ni el ofrecimiento de responder con más información— y `no-mencion
 con «internad», «quemadur», «recuper», «mejoría» y «esté bien»: la frase no
 repite ni pronostica lo que contó de la salud.
 
+Toda conversación con `finally` que termina en `listo_para_core` o
+`requiere_especialista` corre `traspaso`: el último mensaje avisa que la carga
+de datos se cierra por ese medio y que una persona escribe desde otro número o
+correo, con `mencionaElTraspaso` de `src/core/mensajes/traspaso.ts`.
+
 También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
 hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún
 turno de la persona habló de heridos. Si no dijo nada, se le pregunta abierto.
@@ -637,7 +642,7 @@ chequeos: el smoke primero, y colgando de él los otros seis.
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
-2. `pnpm rehearse`: las catorce conversaciones enteras contra el agente real.
+2. `pnpm rehearse`: las quince conversaciones enteras contra el agente real.
    Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
 3. `pnpm load --reporte carga.json`: las consultas del tablero con la mesa

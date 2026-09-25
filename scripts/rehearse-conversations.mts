@@ -40,6 +40,7 @@ import * as dotenv from "dotenv";
 import { readable } from "@/core/email/texto-legible";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { diceCuidado } from "@/core/mensajes/derivacion";
+import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
 import { pideAlgo } from "./lib/pide-algo.mjs";
 import { confirmaLoDicho, formaDePedirLaHora } from "./lib/ensayo-confirmaciones.mjs";
@@ -160,6 +161,12 @@ interface Turn {
      */
     prefiltered?: boolean;
     status?: string;
+    /**
+     * Que el caso haya quedado (o no) en «Para responder»: llegó un mensaje
+     * después de que el agente terminó y lo contesta una persona. Con
+     * `replies: 0` solo no se distingue de un mensaje que se perdió.
+     */
+    paraResponder?: boolean;
     /**
      * Claves que el mensaje NO tiene que haber pedido.
      *
@@ -291,6 +298,22 @@ const SCENARIOS: Scenario[] = [
           cuidado: true,
           sinPedido: true,
         },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
+  {
+    id: "escribe-despues-del-cierre",
+    what: "Vuelve a escribir después de la derivación: se suma al caso, el agente calla y queda «Para responder»",
+    turns: [
+      {
+        say: "Se incendió la camioneta en la ruta 33, mi hijo está internado con quemaduras. Soy Marta Ruiz, póliza POL-7731-D.",
+        expect: { replies: 1, status: "requiere_especialista" },
+      },
+      {
+        say: "¿Me pueden llamar?",
+        expect: { replies: 0, status: "requiere_especialista", paraResponder: true },
       },
     ],
     finally: { status: "requiere_especialista" },
@@ -954,6 +977,9 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
   // marcador de 1×1: el CI no tiene los fixtures y el caso queda esperando lo
   // que nunca va a reconocer.
   let fotosSinEnsayar = false;
+  // Lo último que leyó la persona: en un caso terminado tiene que decirle que
+  // por acá ya no sigue nadie.
+  let ultimo: string | null = null;
   // Un «No» suelto a «¿Hubo personas lastimadas?» también es hablar de heridos.
   let pedidoAnterior: string[] = [];
   let contestoHeridos = false;
@@ -1005,6 +1031,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         said = await repliesSince(active, seen);
       }
       seen += said.length;
+      if (said.length > 0) ultimo = readable(said[said.length - 1].body);
 
       if (said.length === 0) console.log("       🤖 (silencio)");
       for (const reply of said) {
@@ -1134,17 +1161,28 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           );
         }
       }
-      if (want.status) {
+      if (want.status || want.paraResponder !== undefined) {
         const row = await db
-          .select({ status: cases.status })
+          .select({ status: cases.status, paraResponderDesde: cases.para_responder_desde })
           .from(cases)
           .where(eq(cases.id, active));
-        if (row[0]?.status !== want.status) {
+        if (want.status && row[0]?.status !== want.status) {
           note(
             scenario.id,
             i + 1,
             `estado ${row[0]?.status}, esperaba ${want.status}`,
             "estado"
+          );
+        }
+        if (
+          want.paraResponder !== undefined &&
+          (row[0]?.paraResponderDesde != null) !== want.paraResponder
+        ) {
+          note(
+            scenario.id,
+            i + 1,
+            want.paraResponder ? "no quedó «Para responder»" : "quedó «Para responder» y no debía",
+            "para-responder"
           );
         }
       }
@@ -1224,6 +1262,15 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           0,
           `estado final ${row?.status}, esperaba ${want.status}`,
           "estado-final"
+        );
+      }
+      const terminado = row?.status === "listo_para_core" || row?.status === "requiere_especialista";
+      if (terminado && ultimo !== null && !mencionaElTraspaso(ultimo)) {
+        note(
+          scenario.id,
+          0,
+          "el último mensaje no avisa que la carga termina y que escribe una persona",
+          "traspaso"
         );
       }
 
@@ -1517,10 +1564,10 @@ async function refuseIfBudgetSpent(): Promise<void> {
  * treat this as a policy that does not exist" while the table is empty, and
  * "there is no policy with that number" as soon as it holds a single row. The
  * second answer is the one that makes the agent escalate the case to a
- * specialist on the very first turn, and from then on every message opens a
- * NEW case, because an escalated case is deliberately outside the threading
- * window — a human owns it. Nine behavioural differences, not one of them
- * about the agent, and a day to read them.
+ * specialist on the very first turn, and from then on every message joins that
+ * case and lands in «Para responder» instead of reaching the agent — a human
+ * owns it. Nine behavioural differences, not one of them about the agent, and a
+ * day to read them.
  *
  * Production has an empty book today and will not on the day it has customers,
  * so this is not a QA quirk to paper over. The rehearsal says what it found and
@@ -1544,8 +1591,8 @@ async function refuseIfPadronCargado(): Promise<void> {
       "ahí `verificar_poliza` contesta que la aseguradora todavía no cargó el",
       "padrón, y el agente pide la documentación. Con una sola fila cargada",
       "contesta que esa póliza no existe, el caso se deriva a un especialista en",
-      "el primer turno, y los mensajes siguientes abren casos nuevos: el informe",
-      "sale lleno de diferencias que no son del agente.",
+      "el primer turno, y los mensajes siguientes van a «Para responder» sin que",
+      "el agente conteste: el informe sale lleno de diferencias que no son del agente.",
       "",
       "Vaciá el padrón de este inquilino antes de ensayar, o dale a cada",
       "escenario su propio bloque `policy` para que el ensayo siembre el titular",

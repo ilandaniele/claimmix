@@ -193,6 +193,12 @@ export const cases = pgTable("cases", {
   fraud_indicators: jsonb("fraud_indicators").default(sql`'[]'::jsonb`),
   // Granular injury severity (migration 0009)
   injury_severity: text("injury_severity"),
+  // Llegó un mensaje después de que el agente terminó; lo contesta una persona
+  // (migración 0031).
+  para_responder_desde: timestamp("para_responder_desde", {
+    withTimezone: true,
+    mode: "string",
+  }),
 });
 
 export const rawMessages = pgTable("raw_messages", {

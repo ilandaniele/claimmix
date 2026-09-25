@@ -5,12 +5,13 @@
  * guarda rechaza nunca sale, así que el ensayo con el mismo predicado sólo
  * marcaría un piso que pide. Esto marca los pedidos que la guarda deja pasar
  * —«contanos», «te pedimos», «¿podés mandarnos…?»— en lo que el redactor
- * escribió de verdad. «Podés responder a este correo» es el ofrecimiento del
- * piso del mail, no un pedido.
+ * escribió de verdad. «Si respondés este correo, lo lee una persona del
+ * equipo» (`SI_RESPONDES_EL_CORREO`) es el pie de los mails que cierran, no un
+ * pedido.
  */
 
-// «Si tenés más información, podés enviarla respondiendo este correo» es el
-// ofrecimiento del piso dicho de otra forma: depende de que haya algo más.
+// «Si tenés más información, podés enviarla respondiendo este correo» es ese
+// pie dicho por el redactor: depende de que haya algo más.
 const OFRECE = String.raw`\bsi (?:ten[eé]s|quer[eé]s (?:agregar|sumar)) (?:m[aá]s |alguna |otra )?(?:informaci[oó]n|novedad|algo|dato)[^.?!\n]*`;
 
 const PEDIDOS = [

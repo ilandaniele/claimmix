@@ -11,7 +11,7 @@
  * AC12: Pagination per_page is capped at 100.
  */
 
-import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
 import { estadosAConsultar } from "@/core/case/filtro-de-estado";
 import { db } from "@/lib/db";
 import { countRows, ilikeAny } from "@/lib/db/helpers";
@@ -81,8 +81,17 @@ const SORT_COLUMNS = {
 export function buildCaseFilters(
   query: Omit<CaseQuery, "page" | "per_page" | "sort" | "order">
 ): SQL | undefined {
-  const { status, type, q, severity, customer_id, policy_id, channel, is_claim } =
-    query;
+  const {
+    status,
+    type,
+    q,
+    severity,
+    customer_id,
+    policy_id,
+    channel,
+    is_claim,
+    para_responder,
+  } = query;
   const conditions: (SQL | undefined)[] = [];
 
   /*
@@ -118,6 +127,7 @@ export function buildCaseFilters(
   if (policy_id) conditions.push(eq(cases.policy_id, policy_id));
   if (channel?.length) conditions.push(inArray(cases.channel, channel));
   if (is_claim !== undefined) conditions.push(eq(cases.is_claim, is_claim));
+  if (para_responder) conditions.push(isNotNull(cases.para_responder_desde));
 
   // `and()` sin condiciones devuelve undefined, que para drizzle es «sin WHERE».
   return conditions.length > 0 ? and(...conditions) : undefined;
@@ -139,6 +149,13 @@ export function buildCaseFilters(
 export function consultaListado(datos: ClienteDatos, query: CaseQuery) {
   const { page, per_page, sort, order } = query;
   const sortColumn = SORT_COLUMNS[sort];
+  // En «Para responder» va primero el que espera hace más tiempo. El índice
+  // parcial de la 0031 sirve este orden recorrido al revés.
+  const orden = query.para_responder
+    ? asc(cases.para_responder_desde)
+    : order === "asc"
+      ? asc(sortColumn)
+      : desc(sortColumn);
   return datos
     .select({
       id: cases.id,
@@ -180,6 +197,7 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery) {
       policy_id: cases.policy_id,
       is_claim: cases.is_claim,
       requires_specialist: cases.requires_specialist,
+      para_responder_desde: cases.para_responder_desde,
       /*
        * Seis columnas que este listado devolvía y nadie leía.
        *
@@ -212,7 +230,7 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery) {
     })
     .from(cases)
     .where(buildCaseFilters(query))
-    .orderBy(order === "asc" ? asc(sortColumn) : desc(sortColumn))
+    .orderBy(orden)
     // Pagination — max 100 per page (enforced in CaseQuerySchema)
     .limit(per_page)
     .offset((page - 1) * per_page);

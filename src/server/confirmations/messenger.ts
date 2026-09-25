@@ -41,6 +41,11 @@ import {
 } from "@/core/mensajes/titular-que-no-coincide";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { CUIDADO } from "@/core/mensajes/derivacion";
+import {
+  AVISO_DE_TRASPASO,
+  NO_HACE_FALTA_CONTESTAR,
+  SI_VOLVES_A_ESCRIBIR,
+} from "@/core/mensajes/traspaso";
 
 export interface AgentMessage {
   caseId: string;
@@ -120,7 +125,8 @@ const MAX_WHATSAPP_ITEMS = 5;
 const ESCALATION_TEXT =
   "Recibimos tu denuncia y ya quedó registrada. Por las características de lo que nos contás, " +
   "la derivamos a un especialista que se va a comunicar con vos a la brevedad. " +
-  "Si necesitás asistencia urgente, llamá a la línea de emergencias de tu póliza.";
+  "Si necesitás asistencia urgente, llamá a la línea de emergencias de tu póliza. " +
+  AVISO_DE_TRASPASO;
 
 /**
  * El escalado por WhatsApp, con los dos valores cuando el titular no coincide.
@@ -213,7 +219,10 @@ function renderAsk(data: Record<string, unknown>): string {
 function renderConflict(data: Record<string, unknown>): string {
   const campos = camposDeConflicto(data);
 
+  const ajeno = data.titularAjeno === true;
   const conValor = campos.filter((c) => c.proposed && c.stored);
+  // Derivado en esta vuelta: sin valores que nombrar, igual no se pide nada.
+  if (conValor.length === 0 && ajeno) return `Recibimos tu denuncia. ${LO_REVISA_UN_ESPECIALISTA}`;
   if (conValor.length === 0) {
     const etiquetas = campos.map((c) => labelForField(c.fieldKey).label);
     return etiquetas.length > 0
@@ -229,8 +238,6 @@ function renderConflict(data: Record<string, unknown>): string {
     const guardado = enmascarar(c.fieldKey, c.stored, "padron");
     return `${label}: vos nos decís "${propuesto}" y en nuestro sistema figura "${guardado}".`;
   });
-
-  const ajeno = data.titularAjeno === true;
 
   const encabezado = ajeno
     ? `Recibimos tu denuncia. ${NO_COINCIDE_CON_EL_TITULAR}`
@@ -278,11 +285,11 @@ function renderClosing(data: Record<string, unknown>): string {
   );
   const phrase = claimLabel ? ` de ${claimLabel}` : "";
 
-  return data.isFollowUp === true
-    ? `Listo, ya tenemos todo lo que necesitábamos. Tu denuncia${phrase} quedó completa y pasa a análisis. ` +
-        `Un analista la va a revisar y te contactamos si hiciera falta algo más.`
-    : `Recibimos tu denuncia${phrase} y ya quedó registrada con todos los datos necesarios. ` +
-        `Un analista la va a revisar y te contactamos si hace falta algo más.`;
+  const apertura =
+    data.isFollowUp === true
+      ? `Listo, ya tenemos todo lo que necesitábamos. Tu denuncia${phrase} quedó completa y pasa a análisis.`
+      : `Recibimos tu denuncia${phrase} y ya quedó registrada con todos los datos necesarios.`;
+  return `${apertura} ${AVISO_DE_TRASPASO}`;
 }
 
 /**
@@ -466,6 +473,22 @@ async function writeReply(
   });
 }
 
+/**
+ * Lo que va después de la prosa, fuera del redactor: no depende de que el
+ * modelo se acuerde de decirlo.
+ */
+function conPie(message: AgentMessage, texto: string): string {
+  const traspaso =
+    message.template === "confirmation_received" ||
+    message.template === "specialist_escalation" ||
+    (message.template === "data_confirmation_request" && message.data.titularAjeno === true);
+  const pie = [
+    ...(message.data.yaPreguntamos === true ? [NO_HACE_FALTA_CONTESTAR] : []),
+    ...(traspaso ? [SI_VOLVES_A_ESCRIBIR] : []),
+  ];
+  return pie.length > 0 ? `${texto}\n\n${pie.join(" ")}` : texto;
+}
+
 export const whatsappMessenger: AgentMessenger = {
   async send(message) {
     try {
@@ -491,7 +514,7 @@ export const whatsappMessenger: AgentMessenger = {
         return;
       }
 
-      const finalBody = await writeReply(message, body, "whatsapp");
+      const finalBody = conPie(message, await writeReply(message, body, "whatsapp"));
 
       const res = await sendWhatsAppText(message.to, finalBody);
       await recordOutbound(message, finalBody, res.ok ? "sent" : "failed");
@@ -583,7 +606,7 @@ export const simulatedWhatsappMessenger: AgentMessenger = {
     // Compose, then do not send. A rehearsal that skipped the writer would be
     // rehearsing a different script: the template is the floor, and what a
     // claimant actually reads is whatever the model made of it.
-    const finalBody = await writeReply(message, body, "whatsapp");
+    const finalBody = conPie(message, await writeReply(message, body, "whatsapp"));
     await recordOutbound(message, finalBody, "skipped_simulated");
     logger.info({
         case_id: message.caseId,

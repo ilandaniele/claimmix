@@ -86,7 +86,7 @@ describe("reabrirSiEraNoRelevante", () => {
   it("un caso no-relevante vuelve a `recibido`", async () => {
     elCasoEsta("no_relevante");
 
-    expect(await reabrirSiEraNoRelevante(CASE, TENANT)).toBe(true);
+    expect(await reabrirSiEraNoRelevante(CASE, TENANT)).toBe("recibido");
     expect(loEscrito()[0]?.status).toBe("recibido");
   });
 
@@ -121,7 +121,8 @@ describe("reabrirSiEraNoRelevante", () => {
       vi.clearAllMocks();
       elCasoEsta(estado);
 
-      expect(await reabrirSiEraNoRelevante(CASE, TENANT)).toBe(false);
+      // Devuelve el que leyó: el ingreso decide con eso sin volver a leer.
+      expect(await reabrirSiEraNoRelevante(CASE, TENANT)).toBe(estado);
       expect(loEscrito()).toEqual([]);
       expect(mockAudit).not.toHaveBeenCalled();
     }
@@ -132,18 +133,18 @@ describe("reabrirSiEraNoRelevante", () => {
       from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }),
     }));
 
-    expect(await reabrirSiEraNoRelevante(CASE, TENANT)).toBe(false);
+    expect(await reabrirSiEraNoRelevante(CASE, TENANT)).toBeNull();
     expect(loEscrito()).toEqual([]);
   });
 
-  it("si la base falla, devuelve false y NO tira", async () => {
+  it("si la base falla, devuelve null y NO tira", async () => {
     // El mensaje ya está guardado cuando esto corre. Tirar acá dejaría el
     // mensaje sin entrar, que es peor que no reabrir.
     mockSelect.mockImplementation(() => {
       throw new Error("la base se cayó");
     });
 
-    await expect(reabrirSiEraNoRelevante(CASE, TENANT)).resolves.toBe(false);
+    await expect(reabrirSiEraNoRelevante(CASE, TENANT)).resolves.toBeNull();
   });
 });
 

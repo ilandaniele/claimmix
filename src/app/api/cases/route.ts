@@ -77,6 +77,7 @@ export async function GET(request: NextRequest) {
     policy_id: searchParams.get("policy_id") ?? undefined,
     channel: searchParams.getAll("channel"),
     is_claim: searchParams.get("is_claim") ?? undefined,
+    para_responder: searchParams.get("para_responder") ?? undefined,
   };
 
   const parsed = CaseQuerySchema.safeParse(rawQuery);

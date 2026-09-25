@@ -211,6 +211,18 @@ describe("PanelDeFiltros", () => {
     }
   });
 
+  // «Para responder» es una sección de la barra, no un filtro del panel.
+  it("«Limpiar» no saca de la sección «Para responder»", () => {
+    montar("para_responder=true&type=granizo&severity=critical");
+
+    fireEvent.click(screen.getByRole("button", { name: "Limpiar" }));
+
+    const url = ultimaUrl();
+    expect(url.get("para_responder")).toBe("true");
+    expect(url.get("type")).toBeNull();
+    expect(url.get("severity")).toBeNull();
+  });
+
   it("con un solo filtro puesto no aparece «Limpiar»: la marca ya lo saca", () => {
     montar("type=granizo");
     expect(screen.queryByRole("button", { name: "Limpiar" })).toBeNull();

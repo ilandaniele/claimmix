@@ -237,6 +237,7 @@ export function renderTemplate(
         claimantName: data.claimantName != null ? String(data.claimantName) : null,
         cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
         heridos: data.heridos === true,
+        yaPreguntamos: data.yaPreguntamos === true,
       });
 
     default: {

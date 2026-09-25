@@ -9,6 +9,7 @@
 import { describe, it, expect } from "vitest";
 
 import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
+import { AVISO_DE_TRASPASO, SI_RESPONDES_EL_CORREO } from "@/core/mensajes/traspaso";
 
 describe("diceCuidado", () => {
   it.each([
@@ -47,13 +48,12 @@ describe("pideDatos", () => {
     expect(pideDatos(texto)).toBe(true);
   });
 
-  it("no: el piso del mail, que ofrece responder sin pedir nada", () => {
-    expect(
-      pideDatos(
-        "Si tenés información adicional relevante, podés responder a este correo y será incorporada a tu caso."
-      )
-    ).toBe(false);
-  });
+  it.each([AVISO_DE_TRASPASO, SI_RESPONDES_EL_CORREO])(
+    "no: el aviso y el pie de los pisos, que no piden nada: %s",
+    (texto) => {
+      expect(pideDatos(texto)).toBe(false);
+    }
+  );
 });
 
 /*

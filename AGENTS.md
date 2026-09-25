@@ -10,7 +10,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # Probar cambios
 
-`pnpm check` — tipos, lint, tests, catorce conversaciones enteras contra el
+`pnpm check` — tipos, lint, tests, quince conversaciones enteras contra el
 agente real por WhatsApp y por mail, y el estado del deploy. No manda mensajes a nadie.
 `pnpm check --local` mientras trabajás; `pnpm check` completo después de cada
 deploy. Ver `docs/TESTING.md`.

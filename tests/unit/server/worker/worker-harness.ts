@@ -91,7 +91,12 @@ export function dbSimulado(
     if (entrantes && conversacion) {
       orderBy.mockReturnValue(
         Promise.resolve(
-          conversacion.mensajes.map(([body_text, received_at]) => ({ body_text, received_at, subject: "Siniestro" }))
+          conversacion.mensajes.map(([body_text, received_at], i) => ({
+            id: `entrante-${i + 1}`,
+            body_text,
+            received_at,
+            subject: "Siniestro",
+          }))
         )
       );
     }

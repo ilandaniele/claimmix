@@ -4,7 +4,12 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
+import {
+  ESTADOS_DEL_AGENTE_TERMINADO,
+  ESTADOS_WHATSAPP_QUE_SUMAN_MENSAJES,
+} from "@/core/case/para-responder";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { marcarParaResponder } from "@/server/cases/para-responder";
 import { downloadWhatsAppMedia, type WhatsAppMediaRef } from "@/server/whatsapp/cloud-api";
 import { rehostAndRecordAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
@@ -215,7 +220,7 @@ export async function createWhatsAppIntake(
   const providerMessageId = input.providerMessageId?.trim() || null;
 
   const channel = input.simulated ? "whatsapp_sim" : "whatsapp";
-  const existingCaseId = await findExistingWhatsAppCase(input.tenantId, threadId, channel);
+  const existente = await findExistingWhatsAppCase(input.tenantId, threadId, channel);
   /*
    * `creado` no es lo mismo que «no lo encontré antes».
    *
@@ -223,8 +228,8 @@ export async function createWhatsAppIntake(
    * que ganó: no encontró nada al buscar y aun así no creó nada. Decir
    * `new_case` en la auditoría de ése sería anotar un caso que no abrió.
    */
-  const abierto = existingCaseId
-    ? { id: existingCaseId, creado: false }
+  const abierto = existente
+    ? { id: existente.id, creado: false }
     : await createWhatsAppCase(input.tenantId, threadId, channel);
   const caseId = abierto.id;
 
@@ -240,6 +245,18 @@ export async function createWhatsAppIntake(
 
   if (guardado.claimMessageId && input.media?.length) {
     await storeWhatsAppMedia(input.tenantId, caseId, guardado.claimMessageId, input.media);
+  }
+
+  // Sólo si el agente ya terminó: un seguimiento de la conversación en curso no
+  // paga otro UPDATE. Con `duplicado` también, por si la primera entrega se cortó
+  // antes de marcar, pero sólo si queda un mensaje sin contestar: la reentrega
+  // del mensaje que cerró el caso no es nada nuevo.
+  if (existente && (ESTADOS_DEL_AGENTE_TERMINADO as readonly string[]).includes(existente.status)) {
+    await marcarParaResponder(
+      caseId,
+      input.tenantId,
+      guardado.duplicado ? "sinContestar" : undefined
+    );
   }
 
   await writeAuditLog({
@@ -380,7 +397,7 @@ async function findExistingWhatsAppCase(
   tenantId: string,
   threadId: string,
   channel: "whatsapp" | "whatsapp_sim" = "whatsapp"
-): Promise<string | null> {
+): Promise<{ id: string; status: string } | null> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
@@ -388,24 +405,15 @@ async function findExistingWhatsAppCase(
     const data = firstRow(
       await enTenant(tenantCtx, (db) =>
         db
-          .select({ id: c.id })
+          .select({ id: c.id, status: c.status })
           .from(c)
           .where(
             and(
               eq(c.channel, channel),
               eq(c.email_thread_id, threadId),
               sql`coalesce(${c.updated_at}, ${c.created_at}) > now() - interval '${sql.raw(String(WHATSAPP_THREAD_WINDOW_DAYS))} days'`,
-              // Only statuses where the conversation is genuinely still open.
-              //
-              // `listo_para_core` and `listo` used to be here, and they are the
-              // reason a finished claim swallowed the next message from that
-              // number: the case is complete and waiting on the insurer, not on
-              // the person. Their next message is new information at best and a
-              // new accident at worst — either way it deserves its own case.
-              //
-              // `requiere_especialista` stays out for the same reason: a human
-              // owns it, and the agent has already said it will not write again.
-              inArray(c.status, ["recibido", "info_faltante", "confirmacion_pendiente"])
+              // Lista y razones en `@/core/case/para-responder`.
+              inArray(c.status, [...ESTADOS_WHATSAPP_QUE_SUMAN_MENSAJES])
             )
           )
           .orderBy(desc(c.created_at))
@@ -413,7 +421,7 @@ async function findExistingWhatsAppCase(
       )
     );
 
-    return data?.id ?? null;
+    return data ?? null;
   } catch (err) {
     /*
      * «No encontré» y «no pude buscar» NO son lo mismo.

@@ -156,7 +156,7 @@ function hasClaimSignal(subject: string, body: string): boolean {
   return includesAny(combined, CLAIM_SIGNAL_TERMS);
 }
 
-function isBulkHeader(headers: Array<{ name?: string | null; value?: string | null }>): boolean {
+export function isBulkHeader(headers: Array<{ name?: string | null; value?: string | null }>): boolean {
   const listUnsubscribe = headerValue(headers, "List-Unsubscribe");
   const precedence = headerValue(headers, "Precedence");
   const autoSubmitted = headerValue(headers, "Auto-Submitted");

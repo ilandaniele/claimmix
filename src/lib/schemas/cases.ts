@@ -136,6 +136,13 @@ export const CaseQuerySchema = z.object({
   policy_id: z.string().uuid().optional(),
   channel: listaDe(z.enum(["email_sim", "email", "whatsapp_sim", "whatsapp"])),
   is_claim: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
+  // Sólo `true` filtra: «los que no están para responder» no es una sección.
+  // Cualquier otro valor se ignora, como en `bandeja/page.tsx`: un 400 acá
+  // rompía el sondeo y el CSV de una página que sí se veía.
+  para_responder: z
+    .string()
+    .optional()
+    .transform((v) => (v === "true" ? true : undefined)),
 });
 
 export type CaseQuery = z.infer<typeof CaseQuerySchema>;

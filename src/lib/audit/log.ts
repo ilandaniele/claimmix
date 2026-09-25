@@ -98,6 +98,8 @@ export const AuditEvent = {
    * rastro quedaba disponible y nunca se usaba.
    */
   CASE_DELETED: "case.deleted",
+  /** Una persona contestó lo que llegó después de que el agente terminó. */
+  CASE_MARKED_ANSWERED: "case.marked_answered",
 
   // ── AI extraction ──────────────────────────────────────────────────────────
   AI_EXTRACTED: "ai.extracted",

@@ -16,6 +16,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
+import { CASE_EDITOR_ROLES } from "@/lib/auth/roles";
 import type { TenantContext } from "@/data/scope";
 import { users } from "@/lib/db/schema";
 import {
@@ -50,6 +51,7 @@ import Link from "next/link";
 
 interface CaseDetailPageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ desde?: string | string[] }>;
 }
 
 /**
@@ -80,8 +82,11 @@ function toPayloadRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
-export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
+export default async function CaseDetailPage({ params, searchParams }: CaseDetailPageProps) {
   const { id } = await params;
+  // Abierto desde «Para responder», «Volver» sigue con la cola.
+  const volverA =
+    (await searchParams).desde === "para_responder" ? "/bandeja?para_responder=true" : "/bandeja";
   const locale = await getServerLocale();
   const t = getT(locale);
 
@@ -111,6 +116,9 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   // Este contexto es lo único que le dice de quién son los datos.
   const tenantCtx: TenantContext = { tenantId: tenantId };
+
+  // Antes de leer: lo que entre de acá en adelante no lo vio quien contesta.
+  const vistoEn = new Date().toISOString();
 
   /*
    * Todo en dos esperas, no en cinco.
@@ -201,7 +209,7 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
       {/* Back button */}
       <div className="mb-4">
         <Link
-          href="/bandeja"
+          href={volverA}
           className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
           aria-label={t("case.detail.back")}
         >
@@ -287,6 +295,9 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
             caseId={caseRow.id}
             status={caseRow.status as CaseStatus}
             caseNumber={caseNumber}
+            paraResponder={caseRow.para_responder_desde !== null}
+            vistoEn={vistoEn}
+            puedeMarcar={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
           />
         </div>
       </Card>

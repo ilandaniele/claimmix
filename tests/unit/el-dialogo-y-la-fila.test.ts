@@ -70,7 +70,7 @@ describe("23 — una fila se puede abrir en otra pestaña", () => {
     // caso en la MISMA pestaña, el botón del medio no hacía nada, y no había
     // «copiar dirección del enlace» porque no había dirección.
     expect(TABLA).toContain("<Link");
-    expect(TABLA).toContain("href={`/casos/${id}`}");
+    expect(TABLA).toContain("href={hrefDelCaso(id)}");
   });
 
   it("no se prefetchean cien casos al abrir la lista", () => {

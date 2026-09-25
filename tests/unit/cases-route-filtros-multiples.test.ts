@@ -89,4 +89,24 @@ describe("GET /api/cases — filtros multi-select", () => {
     expect(body.error.code).toBe("VALIDATION_FAILED");
     expect(mockListCases).not.toHaveBeenCalled();
   });
+
+  it("«Para responder» llega a la consulta", async () => {
+    const res = await GET(makeRequest("?para_responder=true"));
+
+    expect(res.status).toBe(200);
+    expect(mockListCases).toHaveBeenCalledWith(
+      { tenantId: TENANT_ID },
+      expect.objectContaining({ para_responder: true })
+    );
+  });
+
+  it.each(["false", ""])("para_responder=%s no da 400: no filtra", async (valor) => {
+    const res = await GET(makeRequest(`?para_responder=${valor}`));
+
+    expect(res.status).toBe(200);
+    expect(mockListCases).toHaveBeenCalledWith(
+      { tenantId: TENANT_ID },
+      expect.objectContaining({ para_responder: undefined })
+    );
+  });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PER_PAGE_OPTIONS } from "./per-page";
 import { ID_PANEL_DE_LA_LISTA } from "./components/ids";
 import { contarPorOpcion } from "@/core/case/filtro-de-estado";
@@ -303,6 +303,10 @@ function DashboardClientInterno({
   const activeSeverity = paramsVisibles.getAll("severity") as Severity[];
   const activeIsClaimRaw = paramsVisibles.get("is_claim") as "true" | "false" | null;
   const activeIsClaim = activeIsClaimRaw ?? undefined;
+  const paraResponder = paramsVisibles.get("para_responder") === "true";
+  // Lo que pide el sondeo: la URL, no el destino de una navegación en vuelo.
+  const sondeaLaCola = searchParams.get("para_responder") === "true";
+  const router = useRouter();
 
   const [seleccionando, setSeleccionando] = useState(false);
   const onDeleteManyDisponible = true;
@@ -431,6 +435,16 @@ function DashboardClientInterno({
   // ── Realtime handlers ──────────────────────────────────────────────────────
   const handleInsert = useCallback(
     (newCase: CaseRow) => {
+      /*
+       * En «Para responder» una fila nueva es un caso que ya existía y recién se
+       * marcó: ni es un siniestro nuevo ni suma a los contadores, que cuentan
+       * toda la bandeja. Dónde va y cuántos quedan lo sabe el servidor, que
+       * ordena por la marca.
+       */
+      if (sondeaLaCola) {
+        router.refresh();
+        return;
+      }
       setCases((prev) => mergeCaseUpdate(prev, newCase, "insert"));
       setTotal((prev) => prev + 1);
       setStatusCountsBase((prev) =>
@@ -442,7 +456,7 @@ function DashboardClientInterno({
       );
       addToast(`${t("bandeja.toastNew")} ${formatCaseNumber(newCase.id)}`, "info");
     },
-    [addToast, t]
+    [addToast, t, sondeaLaCola, router]
   );
 
   const handleUpdate = useCallback(
@@ -467,7 +481,18 @@ function DashboardClientInterno({
     [addToast, t]
   );
 
-  useCasesRealtime({ onInsert: handleInsert, onUpdate: handleUpdate });
+  /*
+   * Lo que se desmarca sale de la cola. El sondeo no trae bajas, y el Atrás del
+   * navegador restaura la lista de antes de marcar, con el caso todavía adentro.
+   */
+  const handleCompleta = useCallback(
+    (ids: ReadonlySet<string>) => {
+      if (sondeaLaCola && cases.some((c) => !ids.has(c.id))) router.refresh();
+    },
+    [sondeaLaCola, cases, router]
+  );
+
+  useCasesRealtime({ onInsert: handleInsert, onUpdate: handleUpdate, onCompleta: handleCompleta });
 
   // ── Filtering & pagination ─────────────────────────────────────────────────
   const PER_PAGE = parseInt(paramsVisibles.get("per_page") ?? "", 10) || initialData.meta.per_page;
@@ -497,6 +522,7 @@ function DashboardClientInterno({
       return false;
     if (activeIsClaim === "true" && c.is_claim !== true) return false;
     if (activeIsClaim === "false" && c.is_claim !== false) return false;
+    if (paraResponder && !c.para_responder_desde) return false;
     return true;
   });
   const visibleTotal = total;
@@ -645,6 +671,7 @@ function DashboardClientInterno({
               cases={visibleCases}
               onDeleteMany={handleDeleteMany}
               seleccionando={seleccionando}
+              desde={paraResponder ? "para_responder" : undefined}
             />
           </div>
         </div>

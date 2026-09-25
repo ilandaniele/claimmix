@@ -26,6 +26,7 @@ import {
   LO_REVISA_UN_ESPECIALISTA,
   NO_COINCIDE_CON_EL_TITULAR,
 } from "@/core/mensajes/titular-que-no-coincide";
+import { SI_RESPONDES_EL_CORREO } from "@/core/mensajes/traspaso";
 
 /** Un dato sobre el que se pregunta. */
 export interface CampoAConfirmar {
@@ -140,7 +141,9 @@ export function renderDataConfirmationRequest(
           },
         ];
 
-  const bloques = campos.map(armarBloque);
+  const ajeno = data.titularAjeno === true;
+  // Derivado en esta vuelta: un bloque abierto pide el dato, y nadie lee la respuesta.
+  const bloques = campos.map(armarBloque).filter((b) => !(ajeno && b.abierto));
 
   /*
    * Con que UNO traiga valor, hay algo que confirmar.
@@ -151,7 +154,6 @@ export function renderDataConfirmationRequest(
    */
   const isOpenQuestion = bloques.every((b) => b.abierto);
   const varios = bloques.length > 1;
-  const ajeno = data.titularAjeno === true && !isOpenQuestion;
 
   const subject = ajeno
     ? `Tu reclamo pasa a un especialista - Caso #${data.caseId}`
@@ -178,7 +180,11 @@ export function renderDataConfirmationRequest(
       ? "necesitamos que confirmes los siguientes datos:"
       : "necesitamos que confirmes el siguiente dato:";
 
-  const tras = ajeno ? `. ${NO_COINCIDE_CON_EL_TITULAR}` : `, y ${queSigue}`;
+  const tras = !ajeno
+    ? `, y ${queSigue}`
+    : bloques.length > 0
+      ? `. ${NO_COINCIDE_CON_EL_TITULAR}`
+      : ".";
   const introHtml = `<p>Gracias por tu reclamo. Lo registramos como <strong>caso #${escapeHtml(data.caseId)}</strong>${escapeHtml(tras)}</p>`;
   const introText = `Gracias por tu reclamo. Lo registramos como caso #${data.caseId}${tras}`;
 
@@ -202,14 +208,11 @@ export function renderDataConfirmationRequest(
           `- O bien, escribí ${varios ? "los valores correctos" : "el valor correcto"} directamente en tu respuesta.`,
         ].join("\n");
 
-  const cuerpo = [
-    introText,
-    "",
-    bloques.map((b) => b.text).join("\n\n"),
-    "",
-    actionText,
-  ].join("\n");
+  const cuerpo = [introText, ...bloques.map((b) => b.text), actionText].join("\n\n");
   const redactado = data.cuerpo?.trim();
+  // Derivado, como los otros dos mails que cierran: el pie va fuera de la prosa,
+  // que un cuerpo redactado reemplaza entera.
+  const pie = ajeno ? SI_RESPONDES_EL_CORREO : null;
 
   const prosaHtml = redactado
     ? textoAHtml(redactado)
@@ -223,6 +226,7 @@ export function renderDataConfirmationRequest(
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
   <h1 style="font-size: 20px; color: #1a56db;">${escapeHtml(heading)}</h1>
   ${prosaHtml}
+  ${pie ? `<p>${escapeHtml(pie)}</p>` : ""}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
   <p style="font-size: 12px; color: #6b7280;">Caso de referencia: #${escapeHtml(data.caseId)}. Este mensaje fue generado automáticamente.</p>
 </body>
@@ -232,6 +236,7 @@ export function renderDataConfirmationRequest(
     heading,
     "",
     redactado ?? cuerpo,
+    ...(pie ? ["", pie] : []),
     "",
     "---",
     `Caso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente.`,

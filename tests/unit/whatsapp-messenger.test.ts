@@ -57,6 +57,12 @@ import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { CUIDADO, diceCuidado, hablaDeLaSalud } from "@/core/mensajes/derivacion";
+import {
+  AVISO_DE_TRASPASO,
+  NO_HACE_FALTA_CONTESTAR,
+  SI_VOLVES_A_ESCRIBIR,
+  mencionaElTraspaso,
+} from "@/core/mensajes/traspaso";
 import { pideAlgo } from "../../scripts/lib/pide-algo.mjs";
 import type { EmailTemplate } from "@/server/email/render";
 
@@ -129,6 +135,20 @@ describe("whatsappMessenger — what it says", () => {
     });
 
     expect(sentBody()).not.toContain("Roberto Paz");
+  });
+
+  it("la diferencia va detrás del aviso y no invita a contestar", async () => {
+    await send("specialist_escalation", {
+      caseId: CASE,
+      titularIniciales: "R*** P***",
+      claimantName: "Lucía Paz",
+    });
+
+    const body = sentBody();
+    const tras = body.slice(body.indexOf(AVISO_DE_TRASPASO) + AVISO_DE_TRASPASO.length);
+    expect(tras).toContain("R*** P***");
+    expect(tras).not.toMatch(/contanos/i);
+    expect(pideAlgo(tras.toLowerCase())).toBe(false);
   });
 
   it("un escalado por severidad no menciona ningún padrón", async () => {
@@ -243,6 +263,15 @@ describe("whatsappMessenger — what it says", () => {
     const body = sentBody();
     expect(body).toContain("ya tenemos todo lo que necesitábamos");
     expect(body).not.toContain("Recibimos tu denuncia de");
+  });
+
+  it.each([false, true])("el cierre avisa el traspaso (isFollowUp: %s)", async (isFollowUp) => {
+    await send("confirmation_received", { caseId: CASE, claimType: "choque", isFollowUp });
+
+    const body = sentBody();
+    expect(body).toContain(AVISO_DE_TRASPASO);
+    expect(mencionaElTraspaso(body)).toBe(true);
+    expect(body).not.toContain("Un analista");
   });
 
   it("shows both values when ours disagrees with theirs", async () => {
@@ -380,6 +409,8 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).not.toContain("Roberto Paz");
     expect(body).toContain("****0140");
     expect(body).not.toContain("14937663");
+    expect(body).toContain(AVISO_DE_TRASPASO);
+    expect(mencionaElTraspaso(body)).toBe(true);
   });
 
   it("sin valores que mostrar, pide los datos por su nombre", async () => {
@@ -395,6 +426,19 @@ describe("whatsappMessenger — what it says", () => {
     // No puede quedar un mensaje que muestre comillas vacías.
     expect(body).not.toContain('""');
     expect(body).toMatch(/confirmes estos datos/i);
+  });
+
+  it("derivado sin valores que mostrar, avisa el traspaso y no pide nada", async () => {
+    await send("data_confirmation_request", {
+      caseId: CASE,
+      titularAjeno: true,
+      fields: [{ fieldKey: "full_name", proposedValue: "" }],
+    });
+
+    const body = sentBody();
+    expect(body).toContain(AVISO_DE_TRASPASO);
+    expect(body).not.toMatch(/respondé/i);
+    expect(pideAlgo(body.toLowerCase())).toBe(false);
   });
 });
 
@@ -552,6 +596,31 @@ describe("whatsappMessenger — la pregunta tiene respuesta sin redactor", () =>
     expect(veces(sentBody())).toBe(1);
   });
 
+  it("el cierre con pregunta no promete contestar por el medio que cierra", async () => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+    await send("confirmation_received", { caseId: CASE, isFollowUp: true, question: PREGUNTA });
+
+    const body = sentBody();
+    const tras = body.slice(body.indexOf(AVISO_DE_TRASPASO) + AVISO_DE_TRASPASO.length);
+    expect(tras).toContain(RESPUESTA_PENDIENTE);
+    expect(tras).not.toMatch(/por ac[aá]/i);
+    expect(pideAlgo(tras.toLowerCase())).toBe(false);
+  });
+
+  // La frase también va en los pedidos, a mitad de la carga: ahí nadie
+  // presentó a «la persona del equipo».
+  it("el pedido con pregunta no nombra a una persona que nadie presentó", async () => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: FALTAN,
+      question: PREGUNTA,
+    });
+
+    expect(sentBody()).toContain(RESPUESTA_PENDIENTE);
+    expect(sentBody()).not.toMatch(/\bla persona\b/i);
+  });
+
   it.each(["missing_information_request", "confirmation_received"] as const)(
     "%s sin pregunta no la dice",
     async (template) => {
@@ -640,6 +709,16 @@ describe("whatsappMessenger — la derivación con heridos", () => {
     // ponerlo en rojo.
     expect(pideAlgo(body.toLowerCase())).toBe(false);
     expect(hablaDeLaSalud(body)).toBe(false);
+    // La consigna abre; el traspaso cierra.
+    expect(body.indexOf(CUIDADO)).toBeLessThan(body.indexOf(AVISO_DE_TRASPASO));
+    expect(mencionaElTraspaso(body)).toBe(true);
+  });
+
+  it("sin heridos, la derivación también avisa el traspaso", async () => {
+    await send("specialist_escalation", { caseId: CASE, severity: "critical" });
+
+    expect(sentBody()).toContain(AVISO_DE_TRASPASO);
+    expect(mencionaElTraspaso(sentBody())).toBe(true);
   });
 
   it.each([
@@ -668,7 +747,7 @@ describe("whatsappMessenger — la derivación con heridos", () => {
     const body = sentBody();
     expect(veces(body, CUIDADO)).toBe(1);
     expect(veces(body, RESPUESTA_PENDIENTE)).toBe(1);
-    expect(body.endsWith(RESPUESTA_PENDIENTE)).toBe(true);
+    expect(body.endsWith(`${RESPUESTA_PENDIENTE}\n\n${SI_VOLVES_A_ESCRIBIR}`)).toBe(true);
   });
 
   describe("con el redactor", () => {
@@ -681,19 +760,19 @@ describe("whatsappMessenger — la derivación con heridos", () => {
     const prompt = () => String((callGemini as ReturnType<typeof vi.fn>).mock.calls[0][0]);
 
     it("con heridos, la consigna llega al redactor", async () => {
-      const redactado = `${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.`;
+      const redactado = `${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
       redacta(redactado);
 
       await send("specialist_escalation", { caseId: CASE, severity: "critical", heridos: true });
 
       expect(prompt()).toContain(BRIEF);
-      expect(sentBody()).toBe(redactado);
+      expect(sentBody()).toBe(`${redactado}\n\n${SI_VOLVES_A_ESCRIBIR}`);
     });
 
     // El nombre que escribió la persona viaja en el piso del titular ajeno: un
     // «Lamentamos» ahí no es alguien que se lastimó.
     it("un nombre con «Lamentamos» no la prende en la del titular ajeno", async () => {
-      const redactado = "Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.";
+      const redactado = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
       redacta(redactado);
 
       await send("specialist_escalation", {
@@ -703,7 +782,85 @@ describe("whatsappMessenger — la derivación con heridos", () => {
       });
 
       expect(prompt()).not.toContain(BRIEF);
-      expect(sentBody()).toBe(redactado);
+      expect(sentBody()).toBe(`${redactado}\n\n${SI_VOLVES_A_ESCRIBIR}`);
     });
+  });
+});
+
+/*
+ * Un mensaje después del traspaso se suma al caso y queda en «Para responder».
+ * El pie lo dice, y va fuera del redactor para que no dependa de que el modelo
+ * se acuerde.
+ */
+describe("whatsappMessenger — después del traspaso", () => {
+  const redacta = (message: string) =>
+    (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({ message }),
+      usage: { promptTokens: 0, completionTokens: 0 },
+    });
+  const TITULAR_AJENO = {
+    titularAjeno: true,
+    fields: [{ fieldKey: "full_name", proposedValue: "Lucía Paz", conflictWithValue: "Roberto Paz" }],
+  };
+
+  beforeEach(() => {
+    (callGemini as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("sin modelo en tests"));
+  });
+
+  it.each([
+    ["confirmation_received", {}],
+    ["specialist_escalation", { severity: "high" }],
+    ["data_confirmation_request", TITULAR_AJENO],
+  ] as const)("%s dice qué pasa si vuelve a escribir, y no pide nada", async (template, extra) => {
+    await send(template, { caseId: CASE, ...extra });
+
+    const body = sentBody();
+    expect(body.endsWith(SI_VOLVES_A_ESCRIBIR)).toBe(true);
+    expect(mencionaElTraspaso(body)).toBe(true);
+    expect(pideAlgo(SI_VOLVES_A_ESCRIBIR.toLowerCase())).toBe(false);
+  });
+
+  it("también con la prosa del redactor, y en el simulado", async () => {
+    const redactado = `Listo, tu denuncia quedó completa. ${AVISO_DE_TRASPASO}`;
+    redacta(redactado);
+    await send("confirmation_received", { caseId: CASE, isFollowUp: true });
+    expect(sentBody()).toBe(`${redactado}\n\n${SI_VOLVES_A_ESCRIBIR}`);
+
+    await simulatedWhatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO,
+      template: "confirmation_received",
+      data: { caseId: CASE, isFollowUp: true },
+    });
+    expect(inserted[1]?.rendered_body).toBe(`${redactado}\n\n${SI_VOLVES_A_ESCRIBIR}`);
+  });
+
+  it.each([
+    ["missing_information_request", { missingFields: ["parte_amistoso"] }],
+    ["information_received", {}],
+    [
+      "data_confirmation_request",
+      { fields: [{ fieldKey: "full_name", proposedValue: "Pedro García", conflictWithValue: "Juan Pérez" }] },
+    ],
+  ] as const)("%s sigue la carga por acá: sin pie", async (template, extra) => {
+    await send(template, { caseId: CASE, ...extra });
+    expect(sentBody()).not.toContain(SI_VOLVES_A_ESCRIBIR);
+  });
+
+  it("la derivación tras un pedido de confirmación dice que no hace falta contestarlo", async () => {
+    const redactado = `Ya derivamos tu denuncia a un especialista. ${AVISO_DE_TRASPASO}`;
+    redacta(redactado);
+    await send("specialist_escalation", { caseId: CASE, severity: "high", yaPreguntamos: true });
+
+    const body = sentBody();
+    expect(body).toContain(NO_HACE_FALTA_CONTESTAR);
+    expect(body.indexOf(AVISO_DE_TRASPASO)).toBeLessThan(body.indexOf(NO_HACE_FALTA_CONTESTAR));
+    expect(pideAlgo(body.toLowerCase())).toBe(false);
+
+    resetSend();
+    redacta(redactado);
+    await send("specialist_escalation", { caseId: CASE, severity: "high" });
+    expect(sentBody()).not.toContain(NO_HACE_FALTA_CONTESTAR);
   });
 });

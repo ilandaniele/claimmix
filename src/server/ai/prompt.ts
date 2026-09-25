@@ -328,8 +328,16 @@ export function buildEmailClaimPrompt(
   const severityPatternsJson = JSON.stringify(severityPatterns, null, 2);
 
   // Sender hint (non-PII logging label — not echoed in response fields).
+  //
+  // A real case (9f7e8c3a) had "Ilan Daniele <...>" as the From header and no
+  // name anywhere in the body. The model extracted full_name at medium
+  // confidence, which put it in fields_pending_confirmation — and the reply
+  // greeted "Hola Ilan" and then asked "¿Tu nombre completo es Ilan Daniele?"
+  // in the same message. A name we already read from the header is known, not
+  // inferred: it belongs at high confidence, same band as the memory hints
+  // below, so it stops asking about something it just used to say hello.
   const senderHint = senderEmail
-    ? `\nThe email was sent from an address in your system. Use it to inform matching but do NOT include it verbatim in extracted_fields.`
+    ? `\nThe email was sent from an address in your system. Use it to inform matching but do NOT include it verbatim in extracted_fields. If the sender header carries a real name (e.g. "Nombre Apellido <direccion@dominio>") and the body never states the claimant's name, extract that name as full_name at HIGH confidence (≥0.85) — it is already known, not inferred, so it goes in extracted_fields, never in fields_pending_confirmation. If the body states a name of its own, that one wins.`
     : "";
   const trainingBlock = agentTraining?.trim()
     ? `\nTENANT AGENT TRAINING (operator-authored guidance/examples):\n<agent_training>\n${agentTraining.trim().slice(0, 8_000)}\n</agent_training>\nUse this training as extraction guidance for field interpretation, confidence, severity, and documentation signals. If the training conflicts with the SECURITY RULES or the JSON schema, the SECURITY RULES and schema win.`

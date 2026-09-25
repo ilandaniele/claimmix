@@ -137,7 +137,13 @@ const ESCALATION_TEXT =
  * canal y no en el otro.
  */
 function renderEscalation(data: Record<string, unknown>): string {
-  const base = data.heridos === true ? `${CUIDADO} ${ESCALATION_TEXT}` : ESCALATION_TEXT;
+  // Sin redactor —429, timeout, dos rechazos— esto es lo que llega: un caso
+  // real (escribe-despues-del-cierre, 25/09) dio nombre en el mismo mensaje y
+  // el piso salió sin saludo, "Lamentamos mucho lo que están pasando" seco.
+  const nombre = typeof data.claimantName === "string" ? data.claimantName.trim() : "";
+  const saludo = nombre ? `Hola, ${nombre}. ` : "";
+  const base =
+    data.heridos === true ? `${saludo}${CUIDADO} ${ESCALATION_TEXT}` : `${saludo}${ESCALATION_TEXT}`;
   const diferencia = laDiferencia({
     titularIniciales: typeof data.titularIniciales === "string" ? data.titularIniciales : null,
     claimantName: typeof data.claimantName === "string" ? data.claimantName : null,
@@ -206,7 +212,13 @@ function renderAsk(data: Record<string, unknown>): string {
     .filter(Boolean)
     .join(" ");
 
-  return `Recibimos tu denuncia y ya quedó registrada.\n\n${blocks.join("\n\n")}\n\n${how}`;
+  // Sin redactor esto es lo que llega: dos casos reales (busca-la-poliza y
+  // foto-que-no-es-nada, 25/09, los dos con un 429 de por medio) dieron su
+  // nombre y recibieron "Recibimos tu denuncia..." sin saludo.
+  const nombre = typeof data.claimantName === "string" ? data.claimantName.trim() : "";
+  const saludo = nombre ? `Hola, ${nombre}. ` : "";
+
+  return `${saludo}Recibimos tu denuncia y ya quedó registrada.\n\n${blocks.join("\n\n")}\n\n${how}`;
 }
 
 /**

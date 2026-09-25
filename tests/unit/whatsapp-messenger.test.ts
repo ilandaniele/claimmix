@@ -125,6 +125,22 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).toContain("especialista");
   });
 
+  /*
+   * escribe-despues-del-cierre, 25/09: un 429 tiró el redactor y el piso
+   * mandó "Lamentamos mucho lo que están pasando" sin saludo, aunque quien
+   * escribió ya había dado su nombre en el mismo mensaje.
+   */
+  it("saluda por el nombre cuando el redactor está apagado", async () => {
+    await send("specialist_escalation", {
+      caseId: CASE,
+      severity: "critical",
+      heridos: true,
+      claimantName: "Marta Ruiz",
+    });
+
+    expect(sentBody()).toContain("Hola, Marta Ruiz.");
+  });
+
   it("y el nombre del padrón nunca entero", async () => {
     // El tipo sólo acepta iniciales, pero si alguien le pasa el nombre entero
     // por este camino tiene que notarse acá y no en la casilla de una persona.
@@ -155,6 +171,30 @@ describe("whatsappMessenger — what it says", () => {
     await send("specialist_escalation", { caseId: CASE, severity: "critical" });
 
     expect(sentBody()).not.toContain("figura a nombre de");
+  });
+
+  /*
+   * busca-la-poliza y foto-que-no-es-nada, 25/09: los dos dieron su nombre y,
+   * cuando el 429 tiró el redactor, el piso contestó "Recibimos tu denuncia
+   * y ya quedó registrada" sin saludo — frío para alguien que recién chocó.
+   */
+  it("saluda por el nombre cuando el redactor está apagado", async () => {
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: ["policy_number"],
+      claimantName: "Cecilia Ferrari",
+    });
+
+    expect(sentBody()).toContain("Hola, Cecilia Ferrari.");
+  });
+
+  it("sin nombre no saluda", async () => {
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: ["policy_number"],
+    });
+
+    expect(sentBody()).not.toContain("Hola,");
   });
 
   it("names every field in Spanish, never the database key", async () => {

@@ -324,6 +324,19 @@ function violation(text: string, input: ComposeReplyInput): string | null {
       if (!nombrado && !citado) return `dropped_field:${key}`;
     }
 
+    // Al revés de `dropped_field`: no importa qué dice el renglón de más, con
+    // que sobre uno alcanza. El choque-completo del 25/09 pidió 2 cosas —el
+    // gap-analysis lo dice, `missing_fields_count:1` en el log de esa vuelta— y
+    // la lista salió con 11, inventando datos de terceros que la denuncia
+    // nunca mencionó. `input.fields` es la única lista real: contar renglones
+    // no necesita saber qué inventó cada uno.
+    if ((input.fields ?? []).length > 0) {
+      const bullets = trimmed
+        .split("\n")
+        .filter((l) => /^[ \t]*(?:[•*\-]|\d+[.)])[ \t]+/.test(l));
+      if (bullets.length > (input.fields ?? []).length) return "invented_field";
+    }
+
     // «• ¿Hubo personas lastimadas?: no» le propone a la persona un valor que
     // quizá nunca dijo, y un «ok» lo confirma. El valor va adentro de la pregunta.
     // Después del «?» sólo cuenta un sí, un no o un valor que ya tenemos: «¿Dónde
@@ -465,6 +478,9 @@ function explain(problem: string): string {
   }
   if (problem.startsWith("forbidden:")) {
     return "prometiste algo sobre cobertura, pagos o plazos. Nadie evaluó el siniestro todavía.";
+  }
+  if (problem === "invented_field") {
+    return "la lista tiene más ítems que los que te pasé. Pedí sólo lo que está en DATOS A PEDIR, ni uno más.";
   }
   if (problem === "pregunta_con_valor") {
     return "pusiste un valor pegado a una pregunta («¿…?: no»). Si tenés un valor, metelo adentro de la pregunta; si no, preguntá abierto sin proponer nada.";

@@ -11,6 +11,8 @@ import {
   isValidTransition,
   getAllowedTransitions,
   validateTransition,
+  ESTADOS_QUE_NO_SE_REABREN_A_MANO,
+  REAPERTURA_POR_ABANDONO,
 } from "@/core/case/fsm";
 import type { CaseStatus } from "@/lib/schemas/cases";
 
@@ -163,4 +165,21 @@ describe("LLM08: AI-reachable statuses from procesando", () => {
       expect(isValidTransition("procesando", status)).toBe(false);
     });
   }
+});
+
+// ── P8: cerrado sigue sin arista de vuelta ────────────────────────────────────
+
+describe("P8: REAPERTURA_POR_ABANDONO no es una transición nueva", () => {
+  it("cerrado sigue terminal, sin arista hacia info_faltante", () => {
+    expect(FSM_TRANSITIONS.cerrado).toHaveLength(0);
+    expect(isValidTransition("cerrado", "info_faltante")).toBe(false);
+  });
+
+  it("cerrado sigue en ESTADOS_QUE_NO_SE_REABREN_A_MANO", () => {
+    expect(ESTADOS_QUE_NO_SE_REABREN_A_MANO.has("cerrado")).toBe(true);
+  });
+
+  it("REAPERTURA_POR_ABANDONO sólo documenta la excepción, no la habilita acá", () => {
+    expect(REAPERTURA_POR_ABANDONO).toEqual({ desde: "cerrado", hacia: "info_faltante" });
+  });
 });

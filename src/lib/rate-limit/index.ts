@@ -137,6 +137,12 @@ export const RATE_LIMIT_CONFIGS = {
    * Cada envío toca la API de Meta; frena un doble click o un loop, no un uso normal.
    */
   RESPUESTA_HUMANA: { limit: 10, windowMs: 60_000 },
+
+  /**
+   * REENVIAR_PEDIDO: 1 por 30 segundos por usuario.
+   * Un reenvío manda un WhatsApp o un mail de verdad; frena el doble click.
+   */
+  REENVIAR_PEDIDO: { limit: 1, windowMs: 30_000 },
 } as const;
 
 /**

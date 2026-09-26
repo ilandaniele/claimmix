@@ -271,6 +271,20 @@ export const esAR = {
   "escalate.success": "Siniestro escalado correctamente.",
   "escalate.error": "Error al escalar el siniestro. Intentá de nuevo.",
 
+  // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
+  "reenvio.boton": "Reenviar pedido",
+  "reenvio.reabrir": "Reabrir y reenviar",
+  "reenvio.ok": "Se le volvió a pedir lo que falta",
+  "reenvio.noSePuede": "No se puede reenviar el pedido ahora",
+  "reenvio.reciente": "Ya se le pidió hace un momento",
+  "reenvio.motivo.estado": "El caso no está esperando una respuesta",
+  "reenvio.motivo.sin_destinatario": "No sabemos a quién escribirle",
+  "reenvio.motivo.ventana_cerrada": "Pasaron más de 24 h desde su último mensaje de WhatsApp",
+  "reenvio.motivo.nada_pendiente": "No queda nada por pedir",
+  "reenvio.motivo.reciente": "Se le pidió hace menos de 10 minutos",
+  "reenvio.motivo.cierre_no_es_abandono": "Lo cerró una persona: no se reabre desde acá",
+  "audit.claim.request_resent": "Se le volvió a pedir lo que falta",
+
   // ── Missing docs ───────────────────────────────────────────────────────────
   "docs.parte_amistoso": "Parte amistoso de accidente",
   "docs.fotos_danos": "Fotos de los daños",

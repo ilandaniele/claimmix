@@ -60,6 +60,7 @@ export function CaseDetailClient({
   const [transitioning, setTransitioning] = useState(false);
   const [reAnalyzing, setReAnalyzing] = useState(false);
   const [marcando, setMarcando] = useState(false);
+  const [reenviando, setReenviando] = useState(false);
 
   const dialogOpen = showClose || showEscalate || transitioning;
 
@@ -135,6 +136,20 @@ export function CaseDetailClient({
           : ["case.paraResponder.cambio", "info"]
     );
 
+  // P8: mismo botón para reenviar el pedido y para reabrir-y-reenviar.
+  const handleReenviar = (reabrir: boolean) =>
+    accion(
+      setReenviando,
+      `/api/cases/${caseId}/reenviar-pedido`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reabrir ? { reabrir: true } : {}),
+      },
+      () => ["reenvio.ok", "success"],
+      { 409: "reenvio.noSePuede", 429: "reenvio.reciente" }
+    );
+
   // ── Close success — show toast, redirect to /bandeja ──────────────────────
   function handleCloseSuccess() {
     setShowClose(false);
@@ -192,6 +207,8 @@ export function CaseDetailClient({
           puedeCambiarEstado={puedeCambiarEstado}
           onConfirmarListo={handleConfirmarListo}
           onRevisadoListo={handleRevisadoListo}
+          onReenviar={puedeMarcar ? handleReenviar : undefined}
+          reenviando={reenviando}
         />
       </div>
 

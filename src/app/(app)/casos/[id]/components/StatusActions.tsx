@@ -111,9 +111,9 @@ export function StatusActions({
   reenviando,
 }: StatusActionsProps) {
   const t = useT();
-  // ── cerrado — read-only banner ──────────────────────────────────────────────
+  // ── cerrado — read-only banner, o «Reabrir y reenviar» (P8) ────────────────
   if (status === "cerrado") {
-    return (
+    const banner = (
       <div
         className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-600"
         role="status"
@@ -133,6 +133,31 @@ export function StatusActions({
           />
         </svg>
         {t("case.detail.closedBanner")}
+      </div>
+    );
+
+    if (!(acciones.reabrible && puedeCambiarEstado && onReenviar)) {
+      return banner;
+    }
+
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {banner}
+        <button
+          type="button"
+          onClick={() => onReenviar(true)}
+          disabled={!acciones.puedeReenviar || reenviando}
+          data-testid="action-reabrir-reenviar"
+          aria-describedby={acciones.motivoSinReenvio ? "motivo-reenvio" : undefined}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {t("reenvio.reabrir")}
+        </button>
+        {acciones.motivoSinReenvio && (
+          <p id="motivo-reenvio" className="text-xs text-slate-500">
+            {t(`reenvio.motivo.${acciones.motivoSinReenvio}`)}
+          </p>
+        )}
       </div>
     );
   }
@@ -241,6 +266,34 @@ export function StatusActions({
     );
   }
 
+  // ── info_faltante / confirmacion_pendiente — reenviar pedido (P8) ──────────
+  if (status === "info_faltante" || status === "confirmacion_pendiente") {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {onReenviar && (
+          <>
+            <button
+              type="button"
+              onClick={() => onReenviar(false)}
+              disabled={!acciones.puedeReenviar || reenviando}
+              data-testid="action-reenviar-pedido"
+              aria-describedby={acciones.motivoSinReenvio ? "motivo-reenvio" : undefined}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {t("reenvio.boton")}
+            </button>
+            {acciones.motivoSinReenvio && (
+              <p id="motivo-reenvio" className="text-xs text-slate-500">
+                {t(`reenvio.motivo.${acciones.motivoSinReenvio}`)}
+              </p>
+            )}
+          </>
+        )}
+        <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
+      </div>
+    );
+  }
+
   // ── escalado — resolver + cerrar + re-analizar ─────────────────────────────
   if (status === "escalado") {
     return (
@@ -331,7 +384,7 @@ export function StatusActions({
     );
   }
 
-  // ── fallback (recibido, info_faltante, etc.) — re-analizar only ────────────
+  // ── fallback (recibido, etc.) — re-analizar only ────────────────────────────
   return (
     <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
   );

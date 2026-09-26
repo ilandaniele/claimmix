@@ -16,7 +16,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { CASE_EDITOR_ROLES } from "@/lib/auth/roles";
+import { CASE_EDITOR_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
 import type { TenantContext } from "@/data/scope";
 import {
   cargarDetalleDeCaso,
@@ -24,6 +24,7 @@ import {
 } from "@/server/cases/detail-view";
 import type { MensajeEntrante } from "@/server/cases/inbound-messages";
 import { CaseDetailClient } from "./CaseDetailClient";
+import { leerEstadoDeAcciones } from "@/server/cases/acciones";
 import { ExtractedFieldsTable } from "./components/ExtractedFieldsTable";
 import { MissingDocsList } from "./components/MissingDocsList";
 import { AuditTimeline } from "./components/AuditTimeline";
@@ -137,7 +138,10 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
    * consulta por cosa, cada una con su propio `.catch`, así que un fallo del
    * historial de auditoría no se lleva puestos los campos extraídos.
    */
-  const detail = await cargarDetalleDeCaso(tenantCtx, id);
+  const [detail, acciones] = await Promise.all([
+    cargarDetalleDeCaso(tenantCtx, id),
+    leerEstadoDeAcciones(tenantCtx, id),
+  ]);
 
   if (!detail) {
     notFound();
@@ -311,6 +315,8 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             paraResponder={caseRow.para_responder_desde !== null}
             vistoEn={vistoEn}
             puedeMarcar={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
+            acciones={acciones}
+            puedeCambiarEstado={puedeCambiarEstado(me, caseRow.assigned_to)}
           />
         </div>
       </Card>

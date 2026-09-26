@@ -105,6 +105,8 @@ export const AuditEvent = {
    * pasar por el agente. Payload: { outbound_id, estado } — nunca el texto.
    */
   CASE_HUMAN_REPLY: "case.human_reply",
+  /** CASE_READY_CONFIRMED: una persona confirmó que el caso queda listo para Core. */
+  CASE_READY_CONFIRMED: "case.ready_confirmed",
 
   // ── AI extraction ──────────────────────────────────────────────────────────
   AI_EXTRACTED: "ai.extracted",

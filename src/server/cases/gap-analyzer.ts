@@ -12,6 +12,7 @@
  *
  * Required fields for a complete email claim:
  *   full_name, email OR phone, accident_date, accident_description, claim_type
+ *   + por ramo: ver core/case/required-fields.ts
  *
  * This is a pure-function-like module (DB reads only, no DB writes).
  * The orchestrator (confirmations/orchestrate.ts) calls this to decide
@@ -33,6 +34,7 @@ import {
 } from "@/lib/db/schema";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
+import { camposRequeridosDelRamo, clavesQueSatisfacen } from "@/core/case/required-fields";
 import { logger } from "@/lib/observability/logger";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -58,7 +60,7 @@ export const REQUIRED_CLAIM_FIELDS = [
 export const REQUIRED_CONTACT_FIELDS = ["email", "phone"] as const;
 
 /** Confidence threshold for 'medium' confidence (IC9). */
-const MEDIUM_CONFIDENCE_LOW = 0.60;
+export const MEDIUM_CONFIDENCE_LOW = 0.60;
 /**
  * At or above this, a field is certain enough to act on without asking.
  *
@@ -159,12 +161,21 @@ export async function analyzeEmailClaimGaps(
     }
   }
 
+  // Lo que pide el ramo de este caso, además de los campos base. Sólo cuando
+  // `claim_type` está lo bastante firme: con poca confianza no sabemos qué
+  // ramo es, y pedir de más sería peor que no pedir todavía.
+  const tipo = fieldMap.get("claim_type");
+  const delRamo =
+    tipo && tipo.confidence >= MEDIUM_CONFIDENCE_LOW
+      ? camposRequeridosDelRamo(tipo.field_value)
+      : [];
+
   // ── 3. Determine missing required fields ──────────────────────────────────
   const missingRequiredFields: string[] = [];
 
-  // Check mandatory fields
-  for (const reqField of REQUIRED_CLAIM_FIELDS) {
-    const extracted = fieldMap.get(reqField);
+  // Check mandatory fields, más lo que pida el ramo de este caso.
+  for (const reqField of [...REQUIRED_CLAIM_FIELDS, ...delRamo]) {
+    const extracted = mejorEntreClaves(fieldMap, clavesQueSatisfacen(reqField));
     const isMissingInDB = missingDocKeys.includes(reqField);
 
     if (isMissingInDB && !extracted) {
@@ -344,6 +355,25 @@ async function leerElCaso(
     ]);
     return { storedFields, missingDocKeys, confirmaciones };
   }
+}
+
+/**
+ * La entrada de mayor confianza entre las claves que satisfacen un campo
+ * requerido. Para los campos base, `clavesQueSatisfacen` sólo devuelve la
+ * clave pedida, así que esto es `fieldMap.get(reqField)` como antes.
+ */
+function mejorEntreClaves(
+  fieldMap: Map<string, ExtractedField>,
+  claves: readonly string[]
+): ExtractedField | undefined {
+  let mejor: ExtractedField | undefined;
+  for (const clave of claves) {
+    const campo = fieldMap.get(canonicalFieldKey(clave));
+    if (campo && (!mejor || campo.confidence > mejor.confidence)) {
+      mejor = campo;
+    }
+  }
+  return mejor;
 }
 
 function codigoDeError(err: unknown): string {

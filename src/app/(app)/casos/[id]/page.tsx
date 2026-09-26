@@ -336,7 +336,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               <ul className="space-y-1">
                 {pendientes.map((d) => (
                   <li key={d.id}>
-                    <a href="#missing-docs" className="text-sm text-slate-700 hover:underline">
+                    <a href="#missing-docs-heading" className="text-sm text-slate-700 hover:underline">
                       {etiquetaDeCampo(d.doc_key, t)}
                     </a>
                   </li>

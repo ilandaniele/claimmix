@@ -45,7 +45,7 @@ const SIN_USO = { calls: 0, prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 
  * que hay entre las filas y la pantalla, que es lo que no tenía nada.
  */
 function baseCon(over: Partial<{
-  resumen: { total: number; listo: number; cerrados: number; minutos: number };
+  resumen: { total: number; listo: number; respondidos: number; minutos: number };
   porEstado: Array<{ status: string; n: number }>;
   porTipo: Array<{ claim_type: string | null; n: number }>;
   escalados: number;
@@ -57,7 +57,7 @@ function baseCon(over: Partial<{
   serie: PuntoSerie[];
 }> = {}) {
   mockVarias.mockImplementation(async () => [
-    [over.resumen ?? { total: 0, listo: 0, cerrados: 0, minutos: 0 }],
+    [over.resumen ?? { total: 0, listo: 0, respondidos: 0, minutos: 0 }],
     over.porEstado ?? [],
     over.porTipo ?? [],
     [{ n: over.escalados ?? 0 }],
@@ -75,7 +75,7 @@ beforeEach(() => mockVarias.mockReset());
 
 describe("getTenantKpis — la tasa de completitud", () => {
   it("es el porcentaje redondeado de los completados del mes", async () => {
-    baseCon({ resumen: { total: 455, listo: 28, cerrados: 0, minutos: 0 } });
+    baseCon({ resumen: { total: 455, listo: 28, respondidos: 0, minutos: 0 } });
 
     const { summary } = await getTenantKpis(CTX);
 
@@ -85,7 +85,7 @@ describe("getTenantKpis — la tasa de completitud", () => {
 
   it("sin casos en el mes es 0 y no NaN", async () => {
     // `0 / 0` es NaN, y un NaN en esta pantalla se renderiza como «NaN%».
-    baseCon({ resumen: { total: 0, listo: 0, cerrados: 0, minutos: 0 } });
+    baseCon({ resumen: { total: 0, listo: 0, respondidos: 0, minutos: 0 } });
 
     const { summary } = await getTenantKpis(CTX);
 
@@ -93,23 +93,23 @@ describe("getTenantKpis — la tasa de completitud", () => {
   });
 });
 
-describe("getTenantKpis — el tiempo de apertura", () => {
-  it("promedia sólo los casos que de verdad se cerraron", async () => {
-    baseCon({ resumen: { total: 10, listo: 2, cerrados: 4, minutos: 1000 } });
+describe("getTenantKpis — el tiempo hasta la primera respuesta", () => {
+  it("promedia sólo los casos que de verdad se respondieron", async () => {
+    baseCon({ resumen: { total: 10, listo: 2, respondidos: 4, minutos: 1000 } });
 
     const { summary } = await getTenantKpis(CTX);
 
-    expect(summary.avg_opening_time_minutes).toBe(250);
+    expect(summary.avg_first_response_minutes).toBe(250);
   });
 
-  it("sin cierres es null, no cero", async () => {
-    // Cero minutos es una afirmación —«se cierran al instante»— y no hubo
-    // ningún cierre que la respalde. La pantalla muestra un guión con null.
-    baseCon({ resumen: { total: 10, listo: 2, cerrados: 0, minutos: 0 } });
+  it("sin respuestas es null, no cero", async () => {
+    // Cero minutos es una afirmación —«se responde al instante»— y no hubo
+    // ninguna respuesta que la respalde. La pantalla muestra un guión con null.
+    baseCon({ resumen: { total: 10, listo: 2, respondidos: 0, minutos: 0 } });
 
     const { summary } = await getTenantKpis(CTX);
 
-    expect(summary.avg_opening_time_minutes).toBeNull();
+    expect(summary.avg_first_response_minutes).toBeNull();
   });
 });
 

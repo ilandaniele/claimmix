@@ -660,7 +660,7 @@ export const esAR = {
   "metricas.actividad.nota": "Sólo WhatsApp y mail reales, sin simulaciones. Un reclamo abierto es un caso confirmado como siniestro, así que pueden ser menos que el total del mes.",
   "metricas.card.completitudAuto": "Tasa de completitud automática",
   "metricas.card.escalados": "Siniestros escalados",
-  "metricas.card.tiempoApertura": "Tiempo medio de apertura",
+  "metricas.card.primeraRespuesta": "Tiempo medio hasta la primera respuesta",
   "metricas.card.totalMes": "Total siniestros (mes)",
   "metricas.col.casosCerrados": "Casos cerrados",
   "metricas.col.costo": "Costo",

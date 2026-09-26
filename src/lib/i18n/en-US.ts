@@ -633,7 +633,7 @@ export const enUS: Record<TranslationKey, string> = {
   "metricas.actividad.nota": "Real WhatsApp and email only, no simulations. A claim opened is a case confirmed as a claim, so there can be fewer than the month's total.",
   "metricas.card.completitudAuto": "Auto-completion rate",
   "metricas.card.escalados": "Escalated claims",
-  "metricas.card.tiempoApertura": "Average time to open",
+  "metricas.card.primeraRespuesta": "Average time to first response",
   "metricas.card.totalMes": "Total claims (month)",
   "metricas.col.casosCerrados": "Cases closed",
   "metricas.col.costo": "Cost",

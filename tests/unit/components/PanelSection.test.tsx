@@ -31,6 +31,20 @@ describe("PanelSection", () => {
     expect(seccion).toContainElement(screen.getByText("contenido"));
   });
 
+  it("el id que expone en el DOM es `${id}-heading`, nunca `${id}` a secas", () => {
+    // El bug real: un enlace en otra parte de la pantalla apuntaba a
+    // "#missing-docs" en vez de "#missing-docs-heading" y no scrolleaba a
+    // ningún lado, porque el `<section>` nunca lleva el `id` pelado.
+    render(
+      <PanelSection id="missing-docs" titulo="Documentación pendiente">
+        <p>contenido</p>
+      </PanelSection>
+    );
+
+    expect(document.querySelector("#missing-docs-heading")).toBeTruthy();
+    expect(document.querySelector("#missing-docs")).toBeNull();
+  });
+
   it("dos paneles en la misma pantalla no se pisan los identificadores", () => {
     render(
       <>

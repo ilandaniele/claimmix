@@ -73,3 +73,28 @@ export function getRequiredDocs(claimType: ClaimType): readonly RequiredDoc[] {
 export function getAllDocKeys(claimType: ClaimType): readonly string[] {
   return (REQUIRED_DOCS_CONFIG[claimType] ?? []).map((d) => d.doc_key);
 }
+
+/** Un ramo sin ninguna regla propia: el agente no sabe qué pedir. */
+export function esRamoSinCalibrar(claimType: ClaimType): boolean {
+  return getRequiredDocs(claimType).length === 0;
+}
+
+export type EstadoDelDocumento = "received" | "declined" | "pending";
+
+/**
+ * El estado de una fila de `missing_docs`, tal como lo lee un analista.
+ *
+ * Vive acá y no en `MissingDocsList.tsx` porque ese archivo es `"use client"`:
+ * un componente de servidor no puede llamar a una función exportada por un
+ * módulo de cliente.
+ */
+export function estadoDelDocumento(d: {
+  satisfied_at?: unknown;
+  declined_at?: unknown;
+}): EstadoDelDocumento {
+  if (d.satisfied_at) return "received";
+  // Antes de "pending": el asegurado avisó que no tiene este documento, y un
+  // analista que lee "pendiente" sale a buscar un papel que nadie tiene.
+  if (d.declined_at) return "declined";
+  return "pending";
+}

@@ -35,7 +35,8 @@ import "server-only";
 import { asc, eq } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
-import { claimAttachments, claimFieldConfirmations } from "@/lib/db/schema";
+import { claimAttachments, claimFieldConfirmations, users } from "@/lib/db/schema";
+import { firstRow } from "@/lib/db/helpers";
 import type { CaseRow, ExtractedFieldRow, MissingDocRow } from "@/lib/db/types";
 import { logger } from "@/lib/observability/logger";
 import {
@@ -78,6 +79,15 @@ export interface AdjuntoEnPantalla {
    * mandaron algo y no entró— llegaba a la pantalla idéntica a una guardada.
    */
   rejected_reason: string | null;
+  /**
+   * Si tiene bytes guardados y se puede abrir desde el caso.
+   *
+   * `storage_path` nunca sale de acá: la pantalla no necesita la ruta del
+   * bucket, sólo si hay algo detrás para pedirle a la ruta que lo sirve.
+   */
+  disponible: boolean;
+  /** Qué documento pedido cerró este adjunto, o `null` si no cerró ninguno. */
+  matched_doc_key: string | null;
 }
 
 export interface DetalleDeCaso {
@@ -91,6 +101,8 @@ export interface DetalleDeCaso {
   messages: MensajeEntrante[];
   /** `true` si `messages` puede no incluir el más nuevo — ver `ultimoParaReleer`. */
   hayMasMensajes: boolean;
+  /** El nombre de quien tiene asignado el caso, o `null` si nadie o no se pudo leer. */
+  asignado_nombre: string | null;
 }
 
 /**
@@ -164,13 +176,19 @@ async function fetchAdjuntos(
           external_url: claimAttachments.external_url,
           uploaded_at: claimAttachments.created_at,
           rejected_reason: claimAttachments.rejected_reason,
+          storage_path: claimAttachments.storage_path,
+          matched_doc_key: claimAttachments.matched_doc_key,
         })
         .from(claimAttachments)
         .where(eq(claimAttachments.case_id, caseId))
         .orderBy(asc(claimAttachments.created_at))
     );
 
-    return filas.map((f) => ({ ...f, external_url: f.external_url ?? "" }));
+    return filas.map(({ storage_path, ...f }) => ({
+      ...f,
+      external_url: f.external_url ?? "",
+      disponible: storage_path != null && f.rejected_reason == null,
+    }));
   } catch (err) {
     // Degrada a propósito —la pantalla no se cae porque falle una consulta—
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
@@ -183,6 +201,18 @@ async function fetchAdjuntos(
       }, "cases.detail_view.query_failed");
     return [];
   }
+}
+
+/** El nombre de quien tiene asignado el caso, o `null` si no hay o falla la consulta. */
+async function fetchNombreAsignado(
+  ctx: TenantContext,
+  userId: string
+): Promise<string | null> {
+  return enTenant(ctx, (db) =>
+    db.select({ n: users.full_name }).from(users).where(eq(users.id, userId)).limit(1)
+  )
+    .then((filas) => firstRow(filas)?.n ?? null)
+    .catch(() => null);
 }
 
 /**
@@ -218,7 +248,7 @@ export async function cargarDetalleDeCaso(
    */
   const esDeCorreo = caseRow.channel === "email" || caseRow.channel === "email_sim";
 
-  const [extracted_fields, missing_docs, audit_log, confirmations, attachments, messages] =
+  const [extracted_fields, missing_docs, audit_log, confirmations, attachments, messages, asignado_nombre] =
     await Promise.all([
       fetchExtractedFields(ctx, caseId),
       fetchMissingDocs(ctx, caseId),
@@ -226,6 +256,7 @@ export async function cargarDetalleDeCaso(
       esDeCorreo ? fetchConfirmaciones(ctx, caseId) : Promise.resolve([]),
       fetchAdjuntos(ctx, caseId),
       mensajesEntrantes(ctx, caseId, { orden: "viejos", tope: MENSAJES_A_MOSTRAR }),
+      caseRow.assigned_to ? fetchNombreAsignado(ctx, caseRow.assigned_to) : Promise.resolve(null),
     ]);
 
   return {
@@ -237,6 +268,7 @@ export async function cargarDetalleDeCaso(
     attachments,
     messages,
     hayMasMensajes: messages.length >= MENSAJES_A_MOSTRAR,
+    asignado_nombre,
   };
 }
 

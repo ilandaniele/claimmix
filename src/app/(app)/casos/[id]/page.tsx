@@ -18,7 +18,6 @@ import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { CASE_EDITOR_ROLES } from "@/lib/auth/roles";
 import type { TenantContext } from "@/data/scope";
-import { users } from "@/lib/db/schema";
 import {
   cargarDetalleDeCaso,
   ultimoParaReleer,
@@ -46,6 +45,11 @@ import { formatAge, formatDate } from "@/lib/utils";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { parseEmailClaimFields } from "@/lib/email/claim-parser";
+import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
+import { estadoDelDocumento, esRamoSinCalibrar } from "@/core/case/required-docs";
+import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
+import { resumenDeCaso } from "@/lib/labels/resumen-de-caso";
+import { diaArgentino } from "@/core/fecha/dia-argentino";
 import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
 import Link from "next/link";
 
@@ -89,6 +93,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     (await searchParams).desde === "para_responder" ? "/bandeja?para_responder=true" : "/bandeja";
   const locale = await getServerLocale();
   const t = getT(locale);
+  const hoy = diaArgentino();
 
   const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
     choque: t("type.choque"),
@@ -149,6 +154,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     confirmations,
     attachments,
     messages,
+    asignado_nombre,
   } = detail;
 
   const isEmailCase =
@@ -180,21 +186,18 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     })) satisfies ExtractedFieldRow[];
   }
 
+  // Por clave canónica: filas viejas con alias en castellano igual alimentan
+  // nombre, póliza, fecha y lugar.
   const fieldValues = new Map(
-    displayedExtractedFields.map((field) => [field.field_key, field.field_value])
+    displayedExtractedFields.map((field) => [
+      canonicalFieldKey(field.field_key),
+      field.field_value,
+    ])
   );
-  const fieldConfidences = displayedExtractedFields
-    .map((field) => field.confidence)
-    .filter((confidence): confidence is number => typeof confidence === "number");
   const displayedPolicyholderName =
     caseRow.policyholder_name ?? fieldValues.get("full_name") ?? null;
   const displayedPolicyNumber =
     caseRow.policy_number ?? fieldValues.get("policy_number") ?? null;
-  const caseConfidenceMin =
-    caseRow.confidence_min != null ? Number(caseRow.confidence_min) : null;
-  const displayedConfidence =
-    caseConfidenceMin ??
-    (fieldConfidences.length > 0 ? Math.min(...fieldConfidences) : null);
   const caseNumber = formatCaseNumber(caseRow.id);
   const CHANNEL_LABELS: Record<string, string> = {
     email: t("channel.email"),
@@ -260,13 +263,23 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                     caseRow.claim_type)
                   : "—"}
               </Pill>
+              {caseRow.claim_type &&
+                esRamoSinCalibrar(caseRow.claim_type as ClaimType) && (
+                  <Pill tone="espera">{t("case.detail.ramoSinCalibrar")}</Pill>
+                )}
               <StatusBadge status={caseRow.status as CaseStatus} />
             </div>
+            {caseRow.claim_type &&
+              esRamoSinCalibrar(caseRow.claim_type as ClaimType) && (
+                <p className="mb-3 text-[12.5px] text-slate-500">
+                  {t("case.detail.ramoSinCalibrarAyuda")}
+                </p>
+              )}
 
             <FieldGrid className="sm:grid-cols-3">
               <Field label={t("case.detail.assignedTo")}>
                 {caseRow.assigned_to
-                  ? t("case.detail.assigned")
+                  ? (asignado_nombre ?? t("case.detail.assigned"))
                   : t("case.detail.unassigned")}
               </Field>
               <Field label={t("case.detail.created")}>
@@ -302,10 +315,62 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
         </div>
       </Card>
 
+      {/*
+        * Lo que falta para completar el caso (B4).
+        *
+        * Repite lo mismo que la lista de documentación, a la derecha, pero
+        * arriba de todo: es lo primero que alguien que abre el caso necesita
+        * saber, no algo que hay que bajar a buscar.
+        */}
+      {(() => {
+        const pendientes = missing_docs.filter(
+          (d) => estadoDelDocumento(d) === "pending"
+        );
+        return pendientes.length > 0 ? (
+          <div className="mb-6">
+            <PanelSection
+              id="pendientes"
+              tono="atencion"
+              titulo={t("case.detail.pendientesTitulo")}
+            >
+              <ul className="space-y-1">
+                {pendientes.map((d) => (
+                  <li key={d.id}>
+                    <a href="#missing-docs-heading" className="text-sm text-slate-700 hover:underline">
+                      {etiquetaDeCampo(d.doc_key, t)}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </PanelSection>
+          </div>
+        ) : null;
+      })()}
+
       {/* Two-column layout: left = main content, right = docs + audit */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left column — 2/3 width */}
         <div className="lg:col-span-2 flex flex-col gap-6">
+          {/* Resumen del caso, en una línea */}
+          {(() => {
+            const resumen = resumenDeCaso(
+              {
+                nombre: displayedPolicyholderName,
+                tipo: caseRow.claim_type,
+                fecha: fieldValues.get("accident_date") ?? null,
+                lugar: fieldValues.get("accident_location") ?? null,
+                lesiones: caseRow.injury_severity ?? null,
+                hoy,
+              },
+              t
+            );
+            return resumen ? (
+              <Card className="px-5 py-4">
+                <p className="text-[15px] text-slate-800">{resumen}</p>
+              </Card>
+            ) : null;
+          })()}
+
           {/* Datos del asegurado */}
           <PanelSection id="insured-data" titulo={t("case.detail.insuredData")}>
             {/*
@@ -322,28 +387,31 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                   <span className="font-mono">{displayedPolicyNumber}</span>
                 ) : null}
               </Field>
-              <Field label={t("case.detail.confidence.col")}>
-                {displayedConfidence != null ? (
-                  <span className="cifra">
-                    {Math.round(displayedConfidence * 100)}%
-                  </span>
-                ) : null}
-              </Field>
             </FieldGrid>
           </PanelSection>
 
           {/* Campos extraídos */}
           <PanelSection id="extracted-fields" titulo={t("case.detail.extractedFields")}>
-            <ExtractedFieldsTable fields={displayedExtractedFields} />
-          </PanelSection>
-
-          {/* Análisis del agente — live preview (extracted JSON, trainability, download) */}
-          <PanelSection id="agent-run" titulo={t("case.detail.agentAnalysis")}>
-            <AgentRunPanel
-              caseId={caseRow.id}
-              canConfirmTraining={canConfirmTraining}
+            <ExtractedFieldsTable
+              fields={displayedExtractedFields.filter((f) => !isDocument(f.field_key))}
+              hoy={hoy}
             />
           </PanelSection>
+
+          {/* Análisis del agente — plegado: es el panel técnico, no lo primero que hace falta ver. */}
+          <details className="rounded-xl border border-slate-200">
+            <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-slate-700">
+              {t("case.detail.verDetalleTecnico")}
+            </summary>
+            <div className="p-3">
+              <PanelSection id="agent-run" titulo={t("case.detail.agentAnalysis")}>
+                <AgentRunPanel
+                  caseId={caseRow.id}
+                  canConfirmTraining={canConfirmTraining}
+                />
+              </PanelSection>
+            </div>
+          </details>
 
           {/* Texto original — collapsible accordion */}
           <PanelSection id="raw-email" titulo={t("case.detail.rawEmail")}>
@@ -354,19 +422,6 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               El marco y el titulo los pone el componente: solo el sabe si hay
               mensajes, y sin ellos la tarjeta no tiene que existir. */}
           <MessagesThread caseId={caseRow.id} />
-
-          {/*
-            * Los adjuntos (AC23) — para todos los canales, no sólo correo.
-            *
-            * Esta sección vivía adentro del bloque de correo, así que un caso
-            * de WhatsApp no mostraba NINGÚN adjunto: ni los que sí se
-            * guardaron, ni la fila que queda cuando un archivo pasa el tope de
-            * 10 MB, que se escribe justamente para avisar que mandaron algo y
-            * no entró.
-            */}
-          <PanelSection id="attachments" titulo={t("case.detail.attachments")}>
-            <AttachmentsPanel attachments={attachments} />
-          </PanelSection>
 
           {/* Email-specific sections — only shown for email channel cases */}
           {isEmailCase && (
@@ -404,7 +459,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                     </Field>
                   )}
                   {caseRow.injury_severity && caseRow.injury_severity !== "none" && (
-                    <Field label="Severidad lesiones">
+                    <Field label={t("case.detail.injuries")}>
                       <InjurySeverityBadge severity={caseRow.injury_severity} />
                     </Field>
                   )}
@@ -483,6 +538,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 <FieldConfirmationsPanel
                   caseId={caseRow.id}
                   initialConfirmations={confirmations}
+                  hoy={hoy}
                 />
               </PanelSection>
 
@@ -528,9 +584,26 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             <MissingDocsList docs={missing_docs} />
           </PanelSection>
 
+          {/*
+            * Los adjuntos (AC23) — para todos los canales, no sólo correo.
+            *
+            * Esta sección vivía adentro del bloque de correo, así que un caso
+            * de WhatsApp no mostraba NINGÚN adjunto: ni los que sí se
+            * guardaron, ni la fila que queda cuando un archivo pasa el tope de
+            * 10 MB, que se escribe justamente para avisar que mandaron algo y
+            * no entró.
+            */}
+          <PanelSection id="attachments" titulo={t("case.detail.attachments")}>
+            <AttachmentsPanel
+              attachments={attachments}
+              caseId={caseRow.id}
+              puedeAbrir={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
+            />
+          </PanelSection>
+
           {/* Historial */}
           <PanelSection id="audit-log" titulo={t("case.detail.auditLog")}>
-            <AuditTimeline events={audit_log} />
+            <AuditTimeline events={audit_log} channel={caseRow.channel} />
           </PanelSection>
         </div>
       </div>

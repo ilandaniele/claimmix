@@ -92,6 +92,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const severityParam = params["severity"];
   const isClaimParam = params["is_claim"];
   const para_responder = params["para_responder"] === "true" ? true : undefined;
+  const cola = params["cola"] === "mia" ? "mia" : undefined;
 
   const status = valores(statusParam, VALID_STATUSES);
 
@@ -163,7 +164,8 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
       severity,
       is_claim,
       para_responder,
-    }),
+      cola,
+    }, userRow.id),
     contarPorEstado({ tenantId }),
   ]);
 
@@ -203,7 +205,11 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
          * `DashboardClient` repetía este mismo título adentro de la tarjeta.
          */}
         <h1 className="text-balance text-[26px] font-semibold tracking-tight text-slate-900">
-          {para_responder ? t("bandeja.paraResponder") : t("bandeja.title")}
+          {para_responder
+            ? t("bandeja.paraResponder")
+            : cola
+              ? t("nav.miCola")
+              : t("bandeja.title")}
         </h1>
         <p className="mt-1 text-[13px] text-slate-500">{t("bandeja.subtitle")}</p>
 

@@ -24,12 +24,21 @@ interface AuditLogEntry {
 
 interface AuditTimelineProps {
   events: AuditLogEntry[];
+  channel?: string;
 }
 
 function eventLabel(
   eventType: string,
+  channel: string | undefined,
   t: (key: TranslationKey) => string
 ): string {
+  // El correo por WhatsApp lo llevan las mismas tablas que el correo real, así
+  // que el evento es igual — «email.received» — pero para quien lee la
+  // pantalla es un mensaje de WhatsApp, no un mail.
+  if (eventType === "email.received" && channel?.startsWith("whatsapp")) {
+    return t("audit.whatsapp.received");
+  }
+
   const i18nKey = `audit.${eventType}` as TranslationKey;
   if (i18nKey in esAR) {
     return t(i18nKey);
@@ -40,12 +49,30 @@ function eventLabel(
     .join(" → ");
 }
 
+/** Motivos propios que esta pantalla sabe nombrar, además de los de adjuntos. */
+const MOTIVOS_DEL_CASO: Record<string, TranslationKey> = {
+  processing_timeout: "case.detail.motivo.processingTimeout",
+  conflict: "case.detail.motivo.conflict",
+  lesiones: "case.detail.motivo.lesiones",
+};
+
+const SEVERIDAD = /^severidad (high|critical)$/;
+
 function motivoLegible(
   reason: string,
   t: (key: TranslationKey) => string
 ): string {
   const clave = claveDeMotivoDeRechazo(reason);
-  return clave ? t(clave) : reason;
+  if (clave) return t(clave);
+
+  const propio = MOTIVOS_DEL_CASO[reason];
+  if (propio) return t(propio);
+
+  // No se toca `orchestrate.ts:294`: ese texto también va a `alertSpecialists`.
+  const m = SEVERIDAD.exec(reason);
+  if (m) return t("case.detail.motivo.severidad").replace("{nivel}", t(`severity.${m[1]}` as TranslationKey));
+
+  return reason;
 }
 
 function dotColor(eventType: string): string {
@@ -56,7 +83,7 @@ function dotColor(eventType: string): string {
   return "bg-slate-300";
 }
 
-export function AuditTimeline({ events }: AuditTimelineProps) {
+export function AuditTimeline({ events, channel }: AuditTimelineProps) {
   const t = useT();
   const { locale } = useLocale();
 
@@ -81,7 +108,7 @@ export function AuditTimeline({ events }: AuditTimelineProps) {
           />
           <div className="flex flex-col gap-0.5">
             <p className="text-xs font-medium text-slate-700 leading-tight">
-              {eventLabel(event.event_type, t)}
+              {eventLabel(event.event_type, channel, t)}
             </p>
             <time
               dateTime={event.created_at}

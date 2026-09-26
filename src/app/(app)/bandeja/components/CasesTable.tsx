@@ -367,9 +367,10 @@ export function CasesTable({
       {
         accessorKey: "assigned_to",
         header: t("table.col.assignedTo"),
-        cell: ({ getValue }) => (
+        cell: ({ row }) => (
           <span className="whitespace-nowrap text-[13px] text-slate-500">
-            {getValue<string | null>() ? t("case.detail.assigned") : <Vacio />}
+            {row.original.assigned_name ??
+              (row.original.assigned_to ? t("case.detail.assigned") : t("case.detail.unassigned"))}
           </span>
         ),
       },

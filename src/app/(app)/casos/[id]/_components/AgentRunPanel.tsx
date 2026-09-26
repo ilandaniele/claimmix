@@ -17,10 +17,11 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 import type { TranslationKey } from "@/lib/i18n";
 import { useT, useLocale } from "@/lib/i18n/LocaleContext";
 import { formatDate } from "@/lib/utils";
+import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
+import { ConfidenceBar } from "@/app/(app)/_components/ui";
 
 // ── Types (mirror /api/cases/:id/agent-run response) ──────────────────────────
 
@@ -86,22 +87,6 @@ const BLOCKING_LABEL_KEYS: Record<string, TranslationKey> = {
   prompt_injection_suspected: "agente.bloqueo.prompt_injection_suspected",
   unresolved_conflicts: "agente.bloqueo.unresolved_conflicts",
 };
-
-// ── Small confidence bar ──────────────────────────────────────────────────────
-
-function ConfidenceMiniBar({ value }: { value: number }) {
-  const pct = Math.round(value * 100);
-  const color =
-    value >= 0.7 ? "bg-green-500" : value >= 0.5 ? "bg-yellow-500" : "bg-red-500";
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-200">
-        <div className={`h-full ${color} ${anchoDeBarra(pct)}`} />
-      </div>
-      <span className="text-xs tabular-nums text-slate-500">{pct}%</span>
-    </div>
-  );
-}
 
 // ── Main panel ────────────────────────────────────────────────────────────────
 
@@ -243,10 +228,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
     data.pending_confirmations.length > 0
       ? data.pending_confirmations.map((c) => c.field_key)
       : (run.output_payload.fields_pending_confirmation ?? []);
-  const missingKeys =
-    data.missing_docs.length > 0
-      ? data.missing_docs.map((d) => d.doc_key)
-      : run.missing_fields;
+  const missingKeys = data.missing_docs.map((d) => d.doc_key);
   const scorePct = Math.round(run.trainability_score * 100);
 
   return (
@@ -350,13 +332,13 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
               >
                 <div className="min-w-0">
                   <span className="block text-xs font-medium text-slate-500">
-                    {field.field_key}
+                    {etiquetaDeCampo(field.field_key, t)}
                   </span>
                   <span className="block truncate text-sm text-slate-800">
                     {field.field_value}
                   </span>
                 </div>
-                <ConfidenceMiniBar value={field.confidence} />
+                <ConfidenceBar value={field.confidence} />
               </li>
             ))}
           </ul>
@@ -380,7 +362,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
                   key={key}
                   className="inline-flex mr-1.5 items-center rounded-full bg-yellow-50 px-2 py-0.5 text-xs text-yellow-800"
                 >
-                  {key}
+                  {etiquetaDeCampo(key, t)}
                 </li>
               ))}
             </ul>
@@ -399,7 +381,7 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
                   key={key}
                   className="inline-flex mr-1.5 items-center rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700"
                 >
-                  {key}
+                  {etiquetaDeCampo(key, t)}
                 </li>
               ))}
             </ul>

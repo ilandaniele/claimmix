@@ -11,8 +11,21 @@
  * AC12: Pagination per_page is capped at 100.
  */
 
-import { and, asc, desc, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { estadosAConsultar } from "@/core/case/filtro-de-estado";
+import { ESTADOS_ESCALADO, ESTADOS_ESPERANDO_AL_DENUNCIANTE } from "@/core/case/fsm";
 import { db } from "@/lib/db";
 import { countRows, ilikeAny } from "@/lib/db/helpers";
 import {
@@ -35,6 +48,7 @@ import type { CaseQuery, SortColumn } from "@/lib/schemas/cases";
  */
 export type CaseRow = CasesTableRow & {
   fecha_siniestro: string | null;
+  assigned_name: string | null;
 };
 
 export interface CaseListResult {
@@ -79,7 +93,8 @@ const SORT_COLUMNS = {
  * menos, cuando lo que pasaría es que no devolvería nada.
  */
 export function buildCaseFilters(
-  query: Omit<CaseQuery, "page" | "per_page" | "sort" | "order">
+  query: Omit<CaseQuery, "page" | "per_page" | "sort" | "order">,
+  yo?: string
 ): SQL | undefined {
   const {
     status,
@@ -91,6 +106,7 @@ export function buildCaseFilters(
     channel,
     is_claim,
     para_responder,
+    cola,
   } = query;
   const conditions: (SQL | undefined)[] = [];
 
@@ -128,6 +144,27 @@ export function buildCaseFilters(
   if (channel?.length) conditions.push(inArray(cases.channel, channel));
   if (is_claim !== undefined) conditions.push(eq(cases.is_claim, is_claim));
   if (para_responder) conditions.push(isNotNull(cases.para_responder_desde));
+  /*
+   * «Mi cola»: lo escalado sin asignar o asignado a mí, más lo que espera al
+   * denunciante hace más de 48 horas — ahí ya no importa quién lo tenga, nadie
+   * lo está mirando. Sin `yo` (sesión sin id resuelto) cierra en falso: mejor
+   * una cola vacía que una que muestre casos de cualquiera.
+   */
+  if (cola === "mia")
+    conditions.push(
+      yo
+        ? or(
+            and(
+              inArray(cases.status, [...ESTADOS_ESCALADO]),
+              or(isNull(cases.assigned_to), eq(cases.assigned_to, yo))
+            ),
+            and(
+              inArray(cases.status, [...ESTADOS_ESPERANDO_AL_DENUNCIANTE, "confirmacion_pendiente"]),
+              lt(cases.updated_at, sql`now() - interval '48 hours'`)
+            )
+          )!
+        : sql`false`
+    );
 
   // `and()` sin condiciones devuelve undefined, que para drizzle es «sin WHERE».
   return conditions.length > 0 ? and(...conditions) : undefined;
@@ -146,16 +183,20 @@ export function buildCaseFilters(
  * Un armador compartido es la única forma de que el plan que se explica sea el
  * plan que corre.
  */
-export function consultaListado(datos: ClienteDatos, query: CaseQuery) {
+export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: string) {
   const { page, per_page, sort, order } = query;
   const sortColumn = SORT_COLUMNS[sort];
   // En «Para responder» va primero el que espera hace más tiempo. El índice
-  // parcial de la 0031 sirve este orden recorrido al revés.
+  // parcial de la 0031 sirve este orden recorrido al revés. En «Mi cola» el
+  // más viejo también va primero: es el que lleva más tiempo sin que nadie lo
+  // mire.
   const orden = query.para_responder
     ? asc(cases.para_responder_desde)
-    : order === "asc"
-      ? asc(sortColumn)
-      : desc(sortColumn);
+    : query.cola === "mia"
+      ? asc(cases.updated_at)
+      : order === "asc"
+        ? asc(sortColumn)
+        : desc(sortColumn);
   return datos
     .select({
       id: cases.id,
@@ -198,6 +239,7 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery) {
       is_claim: cases.is_claim,
       requires_specialist: cases.requires_specialist,
       para_responder_desde: cases.para_responder_desde,
+      assigned_name: sql<string | null>`(select u.full_name from users u where u.id = ${cases.assigned_to})`,
       /*
        * Seis columnas que este listado devolvía y nadie leía.
        *
@@ -229,7 +271,7 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery) {
         )`,
     })
     .from(cases)
-    .where(buildCaseFilters(query))
+    .where(buildCaseFilters(query, yo))
     .orderBy(orden)
     // Pagination — max 100 per page (enforced in CaseQuerySchema)
     .limit(per_page)
@@ -237,11 +279,11 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery) {
 }
 
 /** El `count(*)` que viaja con el listado. Sin LIMIT: es el que crece. */
-export function consultaConteo(datos: ClienteDatos, query: CaseQuery) {
+export function consultaConteo(datos: ClienteDatos, query: CaseQuery, yo?: string) {
   return datos
     .select({ n: sql<number>`count(*)::int` })
     .from(cases)
-    .where(buildCaseFilters(query));
+    .where(buildCaseFilters(query, yo));
 }
 
 /** Los contadores por estado de la bandeja. Tampoco lleva LIMIT. */
@@ -288,7 +330,8 @@ export async function contarPorEstado(
  */
 export async function listCases(
   ctx: TenantContext,
-  query: CaseQuery
+  query: CaseQuery,
+  yo?: string
 ): Promise<CaseListResult> {
   const { page, per_page } = query;
 
@@ -298,7 +341,7 @@ export async function listCases(
   try {
     const [conteo, filas] = await enTenantVarias<
       [Array<{ n: number }>, Record<string, unknown>[]]
-    >(ctx, (db) => [consultaConteo(db, query), consultaListado(db, query)]);
+    >(ctx, (db) => [consultaConteo(db, query, yo), consultaListado(db, query, yo)]);
     total = conteo[0]?.n ?? 0;
     data = filas;
   } catch (err) {
@@ -329,12 +372,13 @@ export async function listCases(
  */
 export async function listCasesForExport(
   tenantId: string,
-  query: Omit<CaseQuery, "page" | "per_page" | "sort" | "order">
+  query: Omit<CaseQuery, "page" | "per_page" | "sort" | "order">,
+  yo?: string
 ): Promise<CaseRow[]> {
   // El mismo WHERE que el listado, que es lo que su contrato dice desde
   // siempre. El `eq(cases.tenant_id, …)` que estaba acá era el último que
   // quedaba escrito a mano en este archivo: lo pone la base.
-  const where = buildCaseFilters(query);
+  const where = buildCaseFilters(query, yo);
 
   try {
     // Max 1000 rows per export.

@@ -13,7 +13,7 @@
 import "server-only";
 
 import { createHash } from "crypto";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
 import { tables } from "@/lib/db";
@@ -61,14 +61,7 @@ export interface TrainingExample {
   created_at: string;
 }
 
-/**
- * Los ejemplos aprobados de una aseguradora, los más nuevos primero y sin
- * repetidos.
- *
- * El tope de 500 es el conjunto con el que se entrena, no una página: entrenar
- * con todo el histórico de un cliente grande costaría plata sin mejorar nada,
- * porque los ejemplos viejos describen un agente que ya cambió.
- */
+/** Sólo casos simulados: con datos de personas reales no se entrena un modelo. */
 export async function approvedExamplesForTenant(
   tenantId: string
 ): Promise<TrainingExample[]> {
@@ -85,7 +78,13 @@ export async function approvedExamplesForTenant(
         created_at: t.created_at,
       })
       .from(t)
-      .where(eq(t.status, "approved"))
+      .innerJoin(tables.cases, eq(tables.cases.id, t.case_id))
+      .where(
+        and(
+          eq(t.status, "approved"),
+          inArray(tables.cases.channel, ["email_sim", "whatsapp_sim"])
+        )
+      )
       .orderBy(desc(t.created_at))
       .limit(500)
   );

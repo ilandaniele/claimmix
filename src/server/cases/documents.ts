@@ -524,7 +524,8 @@ export async function resolveDeclinedDocs(
    * for anything yet. The claim went straight to "ya tenemos todo".
    *
    * A request that was never made cannot be refused. Passing what we asked for
-   * makes that a fact rather than a hope about the model's judgement.
+   * makes that a fact rather than a hope about the model's judgement. Once a
+   * request is out, a pending document the person names by its word counts too.
    */
   alreadyAsked: string[],
   /**
@@ -545,11 +546,20 @@ export async function resolveDeclinedDocs(
 
   try {
     const asked = new Set(alreadyAsked);
-    const pending = (await pendingDocKeys(caseId, tenantId)).filter((k) => asked.has(k));
+    const outstanding = await pendingDocKeys(caseId, tenantId);
+    // Un documento que la persona nombra también cuenta, aunque esta vez no
+    // estuviera en la lista: el agente elige qué pedir en cada vuelta, y un QA
+    // mostró «No completamos ningún parte amistoso» ignorado porque el primer
+    // pedido traía otros cuatro. Callarlo es volver a pedírselo después.
+    const dicho = normalize(said);
+    const nombrados = outstanding.filter(
+      (k) => !asked.has(k) && dicho.includes(palabraDelDocumento(k))
+    );
+    const pending = [...outstanding.filter((k) => asked.has(k)), ...nombrados];
     if (pending.length === 0) return [];
     if (!MIGHT_BE_DECLINING.test(said)) return [];
 
-    const declined = await identifyDeclined(caseId, tenantId, said, pending);
+    const declined = await identifyDeclined(caseId, tenantId, said, pending, nombrados);
     if (declined.length === 0) return [];
 
     await enTenant(tenantCtx, (db) =>
@@ -596,6 +606,14 @@ export async function resolveDeclinedDocs(
   }
 }
 
+/**
+ * La palabra con que una persona nombra el documento: «parte», «foto»,
+ * «licencia». Sin la «s» final, así «no tengo fotos» y «no hay foto» cuentan igual.
+ */
+function palabraDelDocumento(key: string): string {
+  return normalize(labelForField(key).label).split(" ")[0].replace(/s$/, "");
+}
+
 /** For comparing a quote with the message: accents and spacing vary, the words do not. */
 function normalize(text: string): string {
   return text
@@ -616,7 +634,9 @@ async function identifyDeclined(
   caseId: string,
   tenantId: string,
   said: string,
-  pending: string[]
+  pending: string[],
+  /** Los que no pedimos: la cita tiene que nombrarlos, no alcanza con que niegue algo. */
+  sinPedir: string[] = []
 ): Promise<string[]> {
   const options = pending
     .map((key) => `- ${key}: ${labelForField(key).label}`)
@@ -678,7 +698,9 @@ Lista vacía si no niega ninguno.`;
       // nobody will make again.
       .filter((d) => {
         const quote = normalize(d.cita);
-        return quote.length >= 4 && normalized.includes(quote);
+        if (quote.length < 4 || !normalized.includes(quote)) return false;
+        const clave = d.clave.trim();
+        return !sinPedir.includes(clave) || quote.includes(palabraDelDocumento(clave));
       })
       .map((d) => d.clave.trim())
       .filter((k) => pending.includes(k));

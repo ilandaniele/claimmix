@@ -59,6 +59,10 @@ const FULL_HIGH_CONFIDENCE_FIELDS: ExtractedField[] = [
   { field_key: "claim_type",           field_value: "choque",           confidence: 0.90, source: "ai" },
   { field_key: "policy_number",        field_value: "POL-4471-A",       confidence: 0.90, source: "ai" },
   { field_key: "dni",                  field_value: "30145882",         confidence: 0.90, source: "ai" },
+  // choque pide, además, patente/provincia/hora (P6).
+  { field_key: "patente_vehiculo",     field_value: "AB123CD",          confidence: 0.90, source: "ai" },
+  { field_key: "provincia_siniestro",  field_value: "Buenos Aires",     confidence: 0.90, source: "ai" },
+  { field_key: "hora_siniestro",       field_value: "19:00",            confidence: 0.90, source: "ai" },
 ];
 
 /**
@@ -134,6 +138,9 @@ describe("analyzeEmailClaimGaps — complete claim", () => {
       { field_key: "claim_type",           field_value: "robo",        confidence: 0.89, source: "ai" },
       { field_key: "numero_poliza",        field_value: "POL-8890-C",  confidence: 0.90, source: "ai" },
       { field_key: "dni_asegurado",        field_value: "28777111",    confidence: 0.90, source: "ai" },
+      // robo pide patente/provincia, sin hora (P6).
+      { field_key: "patente_vehiculo",     field_value: "AB123CD",     confidence: 0.90, source: "ai" },
+      { field_key: "provincia_siniestro",  field_value: "Buenos Aires", confidence: 0.90, source: "ai" },
     ];
     setupDbMocks([], []);
     const result = await analyzeEmailClaimGaps(CASE_ID, fieldsWithPhone, TENANT_ID);
@@ -274,6 +281,9 @@ describe("analyzeEmailClaimGaps — pending confirmation", () => {
       { field_key: "claim_type",           field_value: "choque",           confidence: 0.90, source: "ai" },
       { field_key: "policy_number",        field_value: "POL-4471-A",       confidence: 0.90, source: "ai" },
       { field_key: "dni",                  field_value: "30145882",         confidence: 0.90, source: "ai" },
+      { field_key: "patente_vehiculo",     field_value: "AB123CD",          confidence: 0.90, source: "ai" },
+      { field_key: "provincia_siniestro",  field_value: "Buenos Aires",     confidence: 0.90, source: "ai" },
+      { field_key: "hora_siniestro",       field_value: "19:00",            confidence: 0.90, source: "ai" },
     ];
     setupDbMocks([], []);
     const result = await analyzeEmailClaimGaps(CASE_ID, fieldsWithMediumConfidence, TENANT_ID);
@@ -547,6 +557,10 @@ describe("analyzeEmailClaimGaps — what the case already holds", () => {
     { field_key: "numero_poliza", field_value: "POL-4471-A", confidence: 0.95, source: "ai" as const },
     { field_key: "dni_asegurado", field_value: "30145882", confidence: 0.95, source: "ai" as const },
     { field_key: "telefono_contacto", field_value: "2914567788", confidence: 0.85, source: "ai" as const },
+    // Lo que pide el ramo (choque, en ambos tests de acá abajo), ya en el caso.
+    { field_key: "patente_vehiculo", field_value: "AB123CD", confidence: 0.9, source: "ai" as const },
+    { field_key: "provincia_siniestro", field_value: "Buenos Aires", confidence: 0.9, source: "ai" as const },
+    { field_key: "hora_siniestro", field_value: "19:00", confidence: 0.9, source: "ai" as const },
   ];
 
   it("does not re-ask for data an earlier message already supplied", async () => {
@@ -592,5 +606,75 @@ describe("analyzeEmailClaimGaps — what the case already holds", () => {
     );
 
     expect(result.missingRequiredFields).toEqual([]);
+  });
+});
+
+// ── Test suite: campos por ramo (P6) ──────────────────────────────────────────
+
+describe("analyzeEmailClaimGaps — campos por ramo (P6)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("un choque sin la hora pide hora_siniestro y queda info_faltante", async () => {
+    const sinHora = FULL_HIGH_CONFIDENCE_FIELDS.filter((f) => f.field_key !== "hora_siniestro");
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, sinHora, TENANT_ID);
+
+    expect(result.missingRequiredFields).toContain("hora_siniestro");
+    expect(result.status).toBe("info_faltante");
+  });
+
+  it("party_a_plate a 0.9 satisface patente_vehiculo, party_b_plate no", async () => {
+    const base = FULL_HIGH_CONFIDENCE_FIELDS.filter((f) => f.field_key !== "patente_vehiculo");
+
+    setupDbMocks([], []);
+    const conPartyA = await analyzeEmailClaimGaps(
+      CASE_ID,
+      [...base, { field_key: "party_a_plate", field_value: "AB123CD", confidence: 0.9, source: "ai" }],
+      TENANT_ID
+    );
+    expect(conPartyA.missingRequiredFields).not.toContain("patente_vehiculo");
+
+    setupDbMocks([], []);
+    const conPartyB = await analyzeEmailClaimGaps(
+      CASE_ID,
+      [...base, { field_key: "party_b_plate", field_value: "XY987ZW", confidence: 0.9, source: "ai" }],
+      TENANT_ID
+    );
+    expect(conPartyB.missingRequiredFields).toContain("patente_vehiculo");
+  });
+
+  it("claim_type a 0.5 no agrega ningún campo por ramo", async () => {
+    const bajaConfianza: ExtractedField[] = [
+      ...FULL_HIGH_CONFIDENCE_FIELDS.filter(
+        (f) => !["claim_type", "patente_vehiculo", "provincia_siniestro", "hora_siniestro"].includes(f.field_key)
+      ),
+      { field_key: "claim_type", field_value: "choque", confidence: 0.5, source: "ai" },
+    ];
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, bajaConfianza, TENANT_ID);
+
+    expect(result.missingRequiredFields).not.toContain("patente_vehiculo");
+    expect(result.missingRequiredFields).not.toContain("provincia_siniestro");
+    expect(result.missingRequiredFields).not.toContain("hora_siniestro");
+  });
+
+  it("accident_location solo no satisface provincia_siniestro", async () => {
+    const conUbicacion = [
+      ...FULL_HIGH_CONFIDENCE_FIELDS.filter((f) => f.field_key !== "provincia_siniestro"),
+      { field_key: "accident_location", field_value: "Av. Alem 2300", confidence: 0.9, source: "ai" as const },
+    ];
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, conUbicacion, TENANT_ID);
+
+    expect(result.missingRequiredFields).toContain("provincia_siniestro");
+  });
+
+  it("provincia_siniestro a 0.9 sí la satisface", async () => {
+    setupDbMocks([], []);
+    const result = await analyzeEmailClaimGaps(CASE_ID, FULL_HIGH_CONFIDENCE_FIELDS, TENANT_ID);
+
+    expect(result.missingRequiredFields).not.toContain("provincia_siniestro");
   });
 });

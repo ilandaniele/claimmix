@@ -268,6 +268,69 @@ export function StatusActions({
     );
   }
 
+  // ── listo_para_core — confirmar (persona) + re-analizar ────────────────────
+  // Sin «Cerrar»: la FSM no tiene el borde listo_para_core -> cerrado.
+  if (status === "listo_para_core") {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {puedeCambiarEstado &&
+          (!acciones.confirmado ? (
+            <button
+              type="button"
+              onClick={onConfirmarListo}
+              disabled={dialogOpen}
+              data-testid="action-confirmar-listo"
+              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {t("case.detail.confirmarListo")}
+            </button>
+          ) : (
+            <span
+              role="status"
+              data-testid="listo-confirmado"
+              className="text-sm text-slate-600"
+            >
+              {acciones.confirmadoPor
+                ? t("case.detail.confirmadoPor").replace("{quien}", acciones.confirmadoPor)
+                : t("case.detail.confirmadoAnonimo")}
+            </span>
+          ))}
+        <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
+      </div>
+    );
+  }
+
+  // ── requiere_especialista — revisado + cerrar + re-analizar ─────────────────
+  if (status === "requiere_especialista") {
+    return (
+      <div className="flex flex-wrap gap-2">
+        {puedeCambiarEstado && (
+          <>
+            <button
+              type="button"
+              onClick={onRevisadoListo}
+              disabled={dialogOpen}
+              data-testid="action-revisado-listo"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {t("case.detail.revisadoListo")}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={dialogOpen}
+              data-testid="action-cerrar"
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {t("case.detail.close")}
+            </button>
+          </>
+        )}
+        <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
+      </div>
+    );
+  }
+
   // ── fallback (recibido, info_faltante, etc.) — re-analizar only ────────────
   return (
     <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />

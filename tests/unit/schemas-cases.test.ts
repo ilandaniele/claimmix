@@ -188,4 +188,17 @@ describe("CasePatchSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("rejects confirmar_listo junto con assigned_to (van por separado, P6)", () => {
+    const result = CasePatchSchema.safeParse({
+      confirmar_listo: true,
+      assigned_to: "20000000-0000-0000-0000-000000000001",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("acepta confirmar_listo solo", () => {
+    const result = CasePatchSchema.safeParse({ confirmar_listo: true });
+    expect(result.success).toBe(true);
+  });
 });

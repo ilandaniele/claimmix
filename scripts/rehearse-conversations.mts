@@ -253,7 +253,7 @@ const SCENARIOS: Scenario[] = [
     what: "Un choque que llega entero, en varios mensajes, y termina listo",
     turns: [
       {
-        say: "Hola, choqué ayer en Bahía Blanca, Av. Alem al 2300. Soy Martín Sosa, póliza POL-4471-A, DNI 30.145.882. No hubo heridos.",
+        say: "Hola, choqué ayer a las 19 en Bahía Blanca, Av. Alem al 2300, con mi Gol patente AB 123 CD. Soy Martín Sosa, póliza POL-4471-A, DNI 30.145.882. No hubo heridos.",
         expect: { replies: 1, mentions: ["parte", "licencia"], avoids: ["cubierto", "aprobado"] },
       },
       {
@@ -578,7 +578,7 @@ const SCENARIOS: Scenario[] = [
     turns: [
       {
         say: [
-          "Buenas, ayer choqué en Alem al 2300, en Bahía Blanca.",
+          "Buenas, ayer a las 19 choqué con mi Gol patente AB 123 CD en Alem al 2300, en Bahía Blanca.",
           "No hubo heridos. La póliza es POL-4471-A.",
         ].join("\n"),
         // Sobre `asked_keys` y no sobre la prosa: lo que escribe el modelo

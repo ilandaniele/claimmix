@@ -309,10 +309,10 @@ describe("buildCaseFilters — «Para responder»", () => {
 
 describe("consultaListado — orden de «Para responder»", () => {
   // Un cliente de drizzle que no se conecta: sólo arma el SQL.
-  async function ordenDe(query: Partial<typeof baseQuery> & { para_responder?: true }) {
+  async function ordenDe(query: Partial<typeof baseQuery> & { para_responder?: true; cola?: "mia" }) {
     const { drizzle } = await import("drizzle-orm/pg-proxy");
     const datos = drizzle(async () => ({ rows: [] }));
-    return consultaListado(datos as never, { ...baseQuery, ...query })
+    return consultaListado(datos as never, { ...baseQuery, ...query }, "yo-1")
       .toSQL()
       .sql.split(" order by ")[1];
   }
@@ -323,5 +323,38 @@ describe("consultaListado — orden de «Para responder»", () => {
 
   it("sin la sección ordena por la columna pedida", async () => {
     expect(await ordenDe({})).toMatch(/^"cases"\."created_at" desc /);
+  });
+
+  it("«Mi cola» ordena por lo más viejo primero", async () => {
+    expect(await ordenDe({ cola: "mia" })).toMatch(/^"cases"\."updated_at" asc /);
+  });
+
+  it("selecciona el nombre del analista asignado", async () => {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const datos = drizzle(async () => ({ rows: [] }));
+    const sql = consultaListado(datos as never, baseQuery).toSQL().sql;
+    expect(sql).toContain("select u.full_name from users u");
+  });
+});
+
+describe("buildCaseFilters — «Mi cola»", () => {
+  it("con yo: referencia assigned_to y la ventana de 48 horas", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const where = buildCaseFilters({ cola: "mia" }, "yo-1");
+
+    expect(where).toBeDefined();
+    const compilado = new PgDialect().sqlToQuery(where!).sql;
+    expect(compilado).toContain("assigned_to");
+    expect(compilado).toContain("48 hours");
+    expect(compilado).not.toContain("tenant_id");
+  });
+
+  it("sin yo cierra en falso", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const where = buildCaseFilters({ cola: "mia" });
+
+    expect(where).toBeDefined();
+    const compilado = new PgDialect().sqlToQuery(where!).sql;
+    expect(compilado).toContain("false");
   });
 });

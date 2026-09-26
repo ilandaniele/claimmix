@@ -16,6 +16,7 @@ export const enUS: Record<TranslationKey, string> = {
   "nav.bandeja": "Inbox",
   "nav.escalados": "Escalated",
   "nav.noRelevantes": "Not relevant",
+  "nav.miCola": "My queue",
   "nav.clientes": "Clients",
   "nav.analisis": "Analysis",
   "nav.metricas": "Metrics",

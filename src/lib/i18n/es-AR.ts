@@ -17,6 +17,7 @@ export const esAR = {
   "nav.bandeja": "Bandeja",
   "nav.escalados": "Escalados",
   "nav.noRelevantes": "No relevantes",
+  "nav.miCola": "Mi cola",
   "nav.clientes": "Clientes",
   "nav.analisis": "Análisis",
   "nav.metricas": "Métricas",

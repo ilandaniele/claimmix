@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
     channel: searchParams.getAll("channel"),
     is_claim: searchParams.get("is_claim") ?? undefined,
     para_responder: searchParams.get("para_responder") ?? undefined,
+    cola: searchParams.get("cola") ?? undefined,
   };
 
   const parsed = CaseQuerySchema.safeParse(rawQuery);
@@ -93,7 +94,7 @@ export async function GET(request: NextRequest) {
 
   // ── 4. Fetch data (explicit tenant_id filter — RLS is gone) ───────────────
   try {
-    const result = await listCases({ tenantId: userRow.tenant_id }, parsed.data);
+    const result = await listCases({ tenantId: userRow.tenant_id }, parsed.data, userRow.id);
     // Drizzle numeric columns surface as strings — convert at the boundary so
     // the JSON shape matches the previous PostgREST response (numbers).
     return ok({

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { DemoPublic } from "./DemoPublic";
 
 export const metadata = {
@@ -40,10 +41,22 @@ export default function DemoPage() {
             </div>
             <span className="font-semibold text-slate-800 text-lg">ClaimMix</span>
           </div>
-          {/* Violeta, el acento del producto: el índigo daba 3,83:1 en oscuro. */}
-          <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700">
-            Demo en vivo
-          </span>
+          <div className="flex items-center gap-3">
+            {/*
+              Sin sesión: `proxy.ts` ya manda a quien entra acá sin loguearse
+              a `/login?redirect=/bandeja`, así que no hace falta mirarla acá.
+            */}
+            <Link
+              href="/bandeja"
+              className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+            >
+              ← Ir a la bandeja
+            </Link>
+            {/* Violeta, el acento del producto: el índigo daba 3,83:1 en oscuro. */}
+            <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700">
+              Demo en vivo
+            </span>
+          </div>
         </div>
       </header>
 

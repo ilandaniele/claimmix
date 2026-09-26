@@ -476,10 +476,6 @@ jobs:
     name: Tests E2E
     runs-on: ubuntu-latest
     env:
-      # Sin el tope de 4 GB del workflow: acá corren `pnpm dev`, Playwright y
-      # Chromium en el mismo runner de 7 GB, y con ese tope el runner se apagó
-      # sin memoria dos veces seguidas. Node vuelve a calcular el suyo.
-      NODE_OPTIONS: ""
       # Mismo motivo que en `integration-tests`.
       HAY_E2E: ${{ secrets.E2E_DATABASE_URL }}
       ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
@@ -579,10 +575,20 @@ jobs:
         env:
           ENSAYO_URL: ${{ secrets.E2E_DATABASE_URL }}
 
+      # Playwright levanta `pnpm start` en CI, no `pnpm dev`: el porqué está en
+      # `playwright.config.ts`. Sin base los tests no corren y el build sobra.
+      - name: Build
+        if: env.HAY_E2E != ''
+        run: pnpm build
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
+          BETTER_AUTH_SECRET: placeholder-secret-for-build-only
+          MOCK_AI: "true"
+
       - name: Run E2E tests
         run: |
           if [ -n "$HAY_E2E" ]; then
-            ( while sleep 15; do echo "[recursos] $(free -m | awk '/Mem:/{print "mem " $3 "/" $2 " MB, disponible " $7}; /Swap:/{print "swap " $3 "/" $2}' | paste -sd' ') disco $(df -h / | awk 'NR==2{print $4}') libres"; done ) &
             pnpm test:e2e --project=chromium
           elif [ "$ES_FORK" = "true" ]; then
             echo "::warning title=E2E sin correr::Falta E2E_DATABASE_URL — normal en un fork. Los e2e NO se probaron en este PR."
@@ -590,8 +596,8 @@ jobs:
             {
               echo "### Los e2e no corrieron"
               echo ""
-              echo "Falta el secreto `E2E_DATABASE_URL`. Playwright levanta el servidor"
-              echo "con `pnpm dev`, y sin base el servidor no arranca."
+              echo 'Falta el secreto `E2E_DATABASE_URL`. Playwright levanta el servidor'
+              echo 'con `pnpm start`, y sin base el servidor no arranca.'
               echo ""
               echo "**Trece de estos tests no necesitan datos**: cabeceras, nonce de la"
               echo "CSP por pedido, iframe, límite de tráfico, y que las rutas del motor"

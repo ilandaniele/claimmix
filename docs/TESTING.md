@@ -518,7 +518,9 @@ que aprueba porque el sistema estaba apagado es peor que no correrlo.
 
 ### 8. `pnpm test:e2e` — la pantalla, con un navegador de verdad
 
-Playwright levanta el servidor y maneja Chromium. 68 tests: que las rutas
+Playwright levanta el servidor y maneja Chromium: en local con `pnpm dev`, en CI
+con el build de producción (`pnpm start`), porque `next dev` llenaba la memoria
+del runner. 68 tests: que las rutas
 privadas manden al login, que las cabeceras y el nonce de la CSP estén, que el
 límite de tráfico corte, que un analista entre y salga, que la conversación de
 un caso se vea y que simular un mail cree un caso que aparece solo en la tabla.

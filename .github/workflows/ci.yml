@@ -575,6 +575,17 @@ jobs:
         env:
           ENSAYO_URL: ${{ secrets.E2E_DATABASE_URL }}
 
+      # Playwright levanta `pnpm start` en CI, no `pnpm dev`: el porqué está en
+      # `playwright.config.ts`. Sin base los tests no corren y el build sobra.
+      - name: Build
+        if: env.HAY_E2E != ''
+        run: pnpm build
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
+          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
+          BETTER_AUTH_SECRET: placeholder-secret-for-build-only
+          MOCK_AI: "true"
+
       - name: Run E2E tests
         run: |
           if [ -n "$HAY_E2E" ]; then
@@ -585,8 +596,8 @@ jobs:
             {
               echo "### Los e2e no corrieron"
               echo ""
-              echo "Falta el secreto `E2E_DATABASE_URL`. Playwright levanta el servidor"
-              echo "con `pnpm dev`, y sin base el servidor no arranca."
+              echo 'Falta el secreto `E2E_DATABASE_URL`. Playwright levanta el servidor'
+              echo 'con `pnpm start`, y sin base el servidor no arranca.'
               echo ""
               echo "**Trece de estos tests no necesitan datos**: cabeceras, nonce de la"
               echo "CSP por pedido, iframe, límite de tráfico, y que las rutas del motor"

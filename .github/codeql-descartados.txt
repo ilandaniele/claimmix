@@ -1,0 +1,8 @@
+# Hallazgos de CodeQL revisados y descartados.
+#
+# Con el repo privado no hay pestaña de seguridad donde descartarlos, así que
+# el paso «Hallazgos graves» de codeql.yml salta los que figuran acá. Una
+# línea por hallazgo: la regla, la ruta, y después de `#` por qué no es real.
+# Sin número de línea, para que editar el archivo no lo reabra.
+
+js/incomplete-multi-character-sanitization src/core/email/texto-legible.ts  # no sanea HTML: la salida va a consola y a un nodo de texto de React, y `sinEtiquetas` repite la pasada hasta punto fijo

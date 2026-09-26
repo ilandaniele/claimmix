@@ -11,7 +11,7 @@
  * Shows: extracted values with confidence bars, missing fields, fields
  * pending confirmation, original email text, raw extracted JSON, the
  * trainability suggestion, plus:
- *   - "Confirmar como ejemplo de entrenamiento seguro" (role-gated; the ONLY
+ *   - "Usar como ejemplo de referencia" (role-gated; the ONLY
  *     way the agent learns from an email)
  *   - "Descargar JSON extraído" (claim-extraction-{caseId}-{messageId}.json)
  */

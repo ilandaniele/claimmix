@@ -3714,8 +3714,23 @@ entró en dos lotes.
   «No completamos ningún parte amistoso» se descartaba. Ahora cuenta la
   negativa de un documento pendiente que la persona nombra, aunque no
   estuviera en el último pedido, y la cita tiene que nombrarlo.
+- #318: el export del agente (JSON de memoria y JSONL de aprobados) tacha
+  nombres y DNI en cada ejemplo con `ejemploSinDatosDeLaPersona`, en todos los
+  modos, también `full_admin_only`. Tacha a todas las personas del caso
+  (asegurado, tercero, conductor), también en el few-shot. No alcanza a un
+  nombre que nadie extrajo ni a un DNI escrito con espacios. El texto dice «ejemplo de referencia, no
+  se entrena ningún modelo». El repo pasó a privado: CodeQL analiza sin subir
+  el SARIF y falla con hallazgos de gravedad alta o crítica; los revisados
+  y descartados van en `.github/codeql-descartados.txt`. Sin GitHub Pro
+  no hay protección de ramas ni rulesets (la API da 403), así que la regla
+  de rama + PR + promoción se sostiene a mano, y los minutos de Actions
+  cuentan contra el cupo del plan gratuito.
 
 **Para decidir.**
+- El export en `full_admin_only` sigue sacando en claro la memoria de
+  remitentes (`sender_profile`, con nombre y DNI) y, en modo `full`, los
+  argumentos de las herramientas en la auditoría. Es el modo en claro para
+  un administrador; tacharlo es aplicar el mismo helper a esas filas.
 - Un analista confirma o marca «Revisado» sólo en casos asignados, y la
   entrada real no asigna. Cambiarlo es una línea en `puedeCambiarEstado`.
 - «Reabrir y reenviar» queda deshabilitado para WhatsApp hasta que haya una
@@ -3723,8 +3738,6 @@ entró en dos lotes.
   ventana. Los casos de mail funcionan.
 - El modelo afinado del 30/06 se entrenó con ejemplos reales. No está activo:
   el inquilino usa el modelo base.
-- `export.ts` exporta `training_examples` sin tachar, y «ejemplo de
-  entrenamiento» sigue en cuatro archivos de la interfaz.
 - Gmail «Limited Use» puede alcanzar a los ejemplos tachados de casos reales
   llegados por Gmail. Lo confirma el dueño.
 - Falta verificar en un preview la apertura de un PDF de 8 MB por streaming.

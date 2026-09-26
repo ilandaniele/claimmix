@@ -156,9 +156,13 @@ export const CasePatchSchema = z
     status: CaseStatusSchema.optional(),
     assigned_to: z.string().uuid("ID de analista inválido.").optional().nullable(),
     reason: z.string().max(500).optional(),
+    confirmar_listo: z.literal(true).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "Se requiere al menos un campo para actualizar.",
+  })
+  .refine((d) => !(d.confirmar_listo && d.assigned_to !== undefined), {
+    message: "Confirmar y asignar van por separado.",
   });
 
 export type CasePatch = z.infer<typeof CasePatchSchema>;

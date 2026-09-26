@@ -251,6 +251,14 @@ export const esAR = {
   "close.error": "Error al cerrar el siniestro. Intentá de nuevo.",
   "close.errorFsm": "Ese cambio de situación no es válido.",
 
+  // ── Listo para Core: confirmación de una persona (P6) ───────────────────────
+  "case.detail.confirmarListo": "Confirmar y dejar listo",
+  "case.detail.confirmado": "Quedó confirmado como listo para Core",
+  "case.detail.confirmadoPor": "Confirmado por {quien}",
+  "case.detail.confirmadoAnonimo": "Confirmado por el equipo",
+  "case.detail.revisadoListo": "Revisado: pasar a Listo para Core",
+  "audit.case.ready_confirmed": "Una persona lo confirmó como listo para Core",
+
   // ── Escalate dialog ────────────────────────────────────────────────────────
   "escalate.title": "Escalar siniestro",
   "escalate.description": "¿Escalar este siniestro para revisión manual?",

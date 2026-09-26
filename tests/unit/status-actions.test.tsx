@@ -13,6 +13,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { StatusActions } from "../../src/app/(app)/casos/[id]/components/StatusActions";
 import type { CaseStatus } from "../../src/lib/schemas/cases";
+import { SIN_ACCIONES } from "../../src/server/cases/acciones";
 
 // Stub ExportToCorePanel to avoid network calls
 vi.mock(
@@ -36,6 +37,10 @@ const defaultProps = {
   onReAnalyze: vi.fn(),
   reAnalyzing: false,
   dialogOpen: false,
+  acciones: SIN_ACCIONES,
+  puedeCambiarEstado: true,
+  onConfirmarListo: vi.fn(),
+  onRevisadoListo: vi.fn(),
 };
 
 function renderStatus(status: CaseStatus, overrides: Record<string, unknown> = {}) {

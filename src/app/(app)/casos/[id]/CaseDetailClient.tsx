@@ -24,6 +24,7 @@ import { ToastContainer, useToast } from "@/app/(app)/bandeja/components/Toast";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
 import type { CaseStatus } from "@/lib/schemas/cases";
+import type { EstadoDeAcciones } from "@/server/cases/acciones";
 
 interface CaseDetailClientProps {
   caseId: string;
@@ -34,6 +35,8 @@ interface CaseDetailClientProps {
   vistoEn: string;
   /** Sin esto un viewer vería un botón que le contesta 403. */
   puedeMarcar: boolean;
+  acciones: EstadoDeAcciones;
+  puedeCambiarEstado: boolean;
 }
 
 type Aviso = [TranslationKey, "success" | "info"];
@@ -45,6 +48,8 @@ export function CaseDetailClient({
   paraResponder,
   vistoEn,
   puedeMarcar,
+  acciones,
+  puedeCambiarEstado,
 }: CaseDetailClientProps) {
   const t = useT();
   const router = useRouter();
@@ -96,6 +101,13 @@ export function CaseDetailClient({
       () => ["case.detail.statusUpdated", "success"],
       { 409: "close.errorFsm" }
     );
+
+  const confirmarListo = (cuerpo: Record<string, unknown>) =>
+    accion(setTransitioning, `/api/cases/${caseId}`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) },
+      () => ["case.detail.confirmado", "success"], { 409: "close.errorFsm" });
+  const handleConfirmarListo = () => confirmarListo({ confirmar_listo: true });
+  const handleRevisadoListo = () => confirmarListo({ status: "listo_para_core", confirmar_listo: true });
 
   const handleReAnalyze = () =>
     accion(
@@ -176,6 +188,10 @@ export function CaseDetailClient({
           reAnalyzing={reAnalyzing}
           onError={(msg) => addToast(msg, "error")}
           dialogOpen={dialogOpen}
+          acciones={acciones}
+          puedeCambiarEstado={puedeCambiarEstado}
+          onConfirmarListo={handleConfirmarListo}
+          onRevisadoListo={handleRevisadoListo}
         />
       </div>
 

@@ -1,12 +1,18 @@
 /**
- * StatusActions — renders FSM-aware action buttons for a case.
+ * StatusActions — botones de acción según el estado del caso.
  *
- * AC15 button matrix:
- *   listo:      "Cerrar siniestro" (green) + "Escalar" (orange) + "Exportar al Core"
- *   esperando:  "Marcar completo" (green) + "Escalar" (orange) + "Cerrar" (gray)
- *   escalado:   "Resolver escalado → Listo" (blue) + "Cerrar" (gray)
- *   procesando: No action buttons — "Procesando..." spinner
- *   cerrado:    Read-only banner "Siniestro cerrado"
+ * Conviven dos FSM: la del simulador viejo y la del intake por mail/WhatsApp.
+ *
+ *   listo (legado):            «Cerrar siniestro» + «Escalar» + «Exportar al Core»
+ *   esperando (legado):        «Marcar completo» + «Escalar» + «Cerrar»
+ *   escalado (legado):         «Resolver escalado → Listo» + «Cerrar»
+ *   procesando:                sin botones — spinner
+ *   listo_para_core:           «Confirmar y dejar listo» (sin confirmar, con permiso),
+ *                              o «Confirmado por …» ya confirmado
+ *   requiere_especialista:     «Revisado: pasar a Listo para Core» + «Cerrar»
+ *   info_faltante /
+ *   confirmacion_pendiente:    reenviar el pedido (P8)
+ *   cerrado:                   banner de sólo lectura, o «Reabrir y reenviar» (P8)
  */
 
 "use client";
@@ -15,6 +21,7 @@ import type { CaseStatus } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
 import { ExportToCorePanel } from "./ExportToCorePanel";
+import type { EstadoDeAcciones } from "@/server/cases/acciones";
 
 interface StatusActionsProps {
   caseId: string;
@@ -28,6 +35,13 @@ interface StatusActionsProps {
   onError: (msg: string) => void;
   /** Whether any dialog is currently open (prevent double-clicks) */
   dialogOpen: boolean;
+  acciones: EstadoDeAcciones;
+  puedeCambiarEstado: boolean;
+  onConfirmarListo: () => void;
+  onRevisadoListo: () => void;
+  /** P8. Sin esto no se muestra nada de reenviar ni reabrir. */
+  onReenviar?: (reabrir: boolean) => void;
+  reenviando?: boolean;
 }
 
 function ReAnalyzeButton({
@@ -89,6 +103,12 @@ export function StatusActions({
   reAnalyzing,
   onError,
   dialogOpen,
+  acciones,
+  puedeCambiarEstado,
+  onConfirmarListo,
+  onRevisadoListo,
+  onReenviar,
+  reenviando,
 }: StatusActionsProps) {
   const t = useT();
   // ── cerrado — read-only banner ──────────────────────────────────────────────

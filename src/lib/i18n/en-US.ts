@@ -242,6 +242,14 @@ export const enUS: Record<TranslationKey, string> = {
   "close.error": "Error closing the claim. Please try again.",
   "close.errorFsm": "Invalid state transition.",
 
+  // ── Ready for Core: confirmed by a person (P6) ──────────────────────────────
+  "case.detail.confirmarListo": "Confirm and mark ready",
+  "case.detail.confirmado": "Confirmed as ready for Core",
+  "case.detail.confirmadoPor": "Confirmed by {quien}",
+  "case.detail.confirmadoAnonimo": "Confirmed by the team",
+  "case.detail.revisadoListo": "Reviewed: move to Ready for Core",
+  "audit.case.ready_confirmed": "A team member confirmed it as ready for Core",
+
   // ── Escalate dialog ────────────────────────────────────────────────────────
   "escalate.title": "Escalate claim",
   "escalate.description": "Escalate this claim for manual review?",

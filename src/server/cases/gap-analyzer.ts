@@ -58,7 +58,7 @@ export const REQUIRED_CLAIM_FIELDS = [
 export const REQUIRED_CONTACT_FIELDS = ["email", "phone"] as const;
 
 /** Confidence threshold for 'medium' confidence (IC9). */
-const MEDIUM_CONFIDENCE_LOW = 0.60;
+export const MEDIUM_CONFIDENCE_LOW = 0.60;
 /**
  * At or above this, a field is certain enough to act on without asking.
  *

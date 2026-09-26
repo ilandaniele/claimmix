@@ -496,6 +496,13 @@ describe("createWhatsAppIntake — simulated numbers never reach WhatsApp", () =
     });
 
     expect(insertedCase()?.channel).toBe("whatsapp_sim");
+    // El historial tenía "whatsapp" fijo acá, así que un caso simulado quedaba
+    // anotado como si hubiera llegado por el canal real.
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ channel: "whatsapp_sim" }),
+      })
+    );
   });
 
   it("leaves a real intake on the whatsapp channel", async () => {

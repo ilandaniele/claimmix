@@ -420,6 +420,33 @@ describe("createWhatsAppIntake — el archivo que no entró queda anotado", () =
     expect(attachments[0].rechazoPrevio).toBeUndefined();
   });
 
+  it("el que no se pudo bajar de Graph también queda anotado, no perdido", async () => {
+    // `downloadWhatsAppMedia` devuelve `null` cuando falla la descarga —no
+    // «demasiado grande»—, y antes eso caía en un `continue` sin dejar fila.
+    espiaDeDescarga.mockResolvedValueOnce(null);
+
+    await createWhatsAppIntake({
+      tenantId: TENANT,
+      from: TELEFONO,
+      body: "la foto que no llegó",
+      media: [{ id: "media-4", mimeType: "image/jpeg", filename: "danios.jpg" }],
+    });
+
+    expect(espiaDeRehost).toHaveBeenCalledTimes(1);
+    const { attachments } = espiaDeRehost.mock.calls[0][0] as {
+      attachments: Array<Record<string, unknown>>;
+    };
+
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({
+      Name: "danios.jpg",
+      Content: "",
+      ContentType: "image/jpeg",
+      ContentLength: 0,
+      rechazoPrevio: "download_failed",
+    });
+  });
+
   it("y el comentario de cloud-api ya no dice que el rastro se pierde", async () => {
     /*
      * Afirmación sobre la fuente. El párrafo decía «Acá devolvemos null (...)

@@ -118,7 +118,8 @@ describe("la situación del caso", () => {
   });
 
   it("la guía de /demo y el análisis no nombran un filtro «estado» que ya no existe", () => {
-    expect(leer("src/app/demo/DemoPublic.tsx")).toContain("Se filtra por situación,");
+    expect(esAR["ayuda.paso2.texto"]).toContain("situación");
+    expect(esAR["ayuda.paso2.texto"]).not.toContain("estado");
     expect(leer("src/app/(app)/analisis/page.tsx")).toContain("Distribución por situación");
   });
 });

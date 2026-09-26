@@ -365,7 +365,11 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             * no entró.
             */}
           <PanelSection id="attachments" titulo={t("case.detail.attachments")}>
-            <AttachmentsPanel attachments={attachments} />
+            <AttachmentsPanel
+              attachments={attachments}
+              caseId={caseRow.id}
+              puedeAbrir={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
+            />
           </PanelSection>
 
           {/* Email-specific sections — only shown for email channel cases */}

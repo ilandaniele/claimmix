@@ -41,14 +41,14 @@ const RECHAZADO = {
 
 describe("AttachmentsPanel", () => {
   it("el rechazado explica por qué no entró y qué pedirle al asegurado", () => {
-    render(<AttachmentsPanel attachments={[GUARDADO, RECHAZADO]} />);
+    render(<AttachmentsPanel attachments={[GUARDADO, RECHAZADO]} caseId="c-1" puedeAbrir={false} />);
 
     expect(screen.getByText(/pesa más de 10 MB/i)).toBeInTheDocument();
     expect(screen.getByText(/mande más chico/i)).toBeInTheDocument();
   });
 
   it("no pinta el tamaño del rechazado: ese número es un centinela", () => {
-    render(<AttachmentsPanel attachments={[GUARDADO, RECHAZADO]} />);
+    render(<AttachmentsPanel attachments={[GUARDADO, RECHAZADO]} caseId="c-1" puedeAbrir={false} />);
 
     // «10.0 MB» es lo que daba `formatBytes` sobre el centinela, y es lo que
     // hacía que el analista pidiera recortar un poquito un archivo de 80 MB.
@@ -56,7 +56,7 @@ describe("AttachmentsPanel", () => {
   });
 
   it("el guardado sigue mostrando su tamaño", () => {
-    render(<AttachmentsPanel attachments={[GUARDADO, RECHAZADO]} />);
+    render(<AttachmentsPanel attachments={[GUARDADO, RECHAZADO]} caseId="c-1" puedeAbrir={false} />);
 
     expect(screen.getByText("200.0 KB")).toBeInTheDocument();
     expect(screen.getByText("frente.jpg")).toBeInTheDocument();
@@ -66,6 +66,8 @@ describe("AttachmentsPanel", () => {
     render(
       <AttachmentsPanel
         attachments={[{ ...RECHAZADO, rejected_reason: "vaya_a_saber" }]}
+        caseId="c-1"
+        puedeAbrir={false}
       />
     );
 

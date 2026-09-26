@@ -499,6 +499,42 @@ describe("resolveDeclinedDocs — what stops a claim being waived by accident", 
     expect(audit?.payload).toMatchObject({ doc_keys: ["parte_amistoso"] });
   });
 
+  it("oye la negativa de un documento que no estaba en la lista si lo nombra", async () => {
+    // QA del 26/09: el primer pedido traía otros cuatro puntos y «No completamos
+    // ningún parte amistoso» se ignoró, así que el parte se iba a pedir después.
+    queueSelects([{ doc_key: "parte_amistoso" }, { doc_key: "fotos_danos" }]);
+    declares([{ clave: "parte_amistoso", cita: "No completamos ningún parte amistoso" }]);
+
+    await resolveDeclinedDocs(
+      CASE,
+      TENANT,
+      "No completamos ningún parte amistoso, el otro conductor no quiso.",
+      ["fotos_danos", "licencia_conducir"]
+    );
+
+    const audit = vi.mocked(writeAuditLog).mock.calls[0]?.[0];
+    expect(audit?.payload).toMatchObject({ doc_keys: ["parte_amistoso"] });
+  });
+
+  it("no cierra un documento sin pedir si la cita no lo nombra", async () => {
+    // Nombrado en el mensaje, pero la negativa es de otro.
+    queueSelects([{ doc_key: "parte_amistoso" }, { doc_key: "fotos_danos" }]);
+    declares([
+      { clave: "parte_amistoso", cita: "no completamos el parte" },
+      { clave: "fotos_danos", cita: "no completamos el parte" },
+    ]);
+
+    await resolveDeclinedDocs(
+      CASE,
+      TENANT,
+      "no completamos el parte. Las fotos las mando mañana",
+      ["parte_amistoso"]
+    );
+
+    const audit = vi.mocked(writeAuditLog).mock.calls[0]?.[0];
+    expect(audit?.payload).toMatchObject({ doc_keys: ["parte_amistoso"] });
+  });
+
   it("ignores a refusal it cannot quote", async () => {
     // The model naming a document without pointing at the words was inferring,
     // and inference here removes a request nobody will make again.

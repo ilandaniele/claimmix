@@ -60,6 +60,7 @@ const { ingestInboundEmail } = await import("@/server/email/inbound-email");
 const { runIntakeAgent } = await import("@/server/agents/intake-agent");
 const { hablaDeHeridos, respuestaAHeridos } = await import("@/core/case/heridos-supuestos");
 const { db } = await import("@/lib/db");
+const { CONTACT_DOC_KEYS } = await import("@/server/cases/documents");
 const {
   cases,
   claimAttachments,
@@ -1220,7 +1221,10 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
        */
       if (want.recognisesNothing || want.recognises?.length) {
         const ahora = await closedDocKeys(active);
-        const cerroAhora = [...ahora].filter((k) => !cerradosAntes.has(k));
+        // El contacto lo cierra el canal, no el archivo: igual que en el pen test.
+        const cerroAhora = [...ahora].filter(
+          (k) => !cerradosAntes.has(k) && !(CONTACT_DOC_KEYS as readonly string[]).includes(k)
+        );
 
         if (want.recognisesNothing && cerroAhora.length > 0) {
           note(

@@ -43,10 +43,15 @@ vi.mock("@/lib/db", () => ({
     trainingExamples: {
       id: "id",
       tenant_id: "tenant_id",
+      case_id: "case_id",
       input_payload: "input_payload",
       expected_output: "expected_output",
       created_at: "created_at",
       status: "status",
+    },
+    cases: {
+      id: "id",
+      channel: "channel",
     },
   },
 }));
@@ -57,9 +62,11 @@ import { buildVertexAiJsonl } from "@/server/training/vertex-ai-fine-tuning";
 function mockApprovedRows(rows: Array<Record<string, unknown>>) {
   mockSelect.mockReturnValue({
     from: () => ({
-      where: () => ({
-        orderBy: () => ({
-          limit: () => Promise.resolve(rows),
+      innerJoin: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: () => Promise.resolve(rows),
+          }),
         }),
       }),
     }),

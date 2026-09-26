@@ -22,6 +22,9 @@ permissions:
 # ── Reusable setup steps (defined as env defaults) ────────────────────────────
 env:
   NODE_VERSION: "22"
+  # El runner de un repo privado tiene 7 GB, y Node toma de ahí un tope de
+  # unos 2 GB que `tsc` pasa. Con 4 GB entra y queda margen para el sistema.
+  NODE_OPTIONS: --max-old-space-size=4096
   # Acá vivía `npm_config_minimum_release_age: "0"`, con un comentario que decía
   # «pnpm 11.5 supply-chain policy». Dos cosas no cerraban:
   #
@@ -40,12 +43,6 @@ jobs:
   typecheck:
     name: Tipos
     runs-on: ubuntu-latest
-    # El runner de un repo privado tiene 7 GB, y Node toma de ahí un tope de
-    # unos 2 GB que `tsc` pasa. Va por job y no para todo el workflow: con
-    # el tope alto en los e2e, donde corren `pnpm dev` y Chromium juntos, el
-    # runner se apagó sin memoria dos veces seguidas.
-    env:
-      NODE_OPTIONS: --max-old-space-size=4096
     permissions:
       contents: read
     steps:
@@ -479,6 +476,10 @@ jobs:
     name: Tests E2E
     runs-on: ubuntu-latest
     env:
+      # Sin el tope de 4 GB del workflow: acá corren `pnpm dev`, Playwright y
+      # Chromium en el mismo runner de 7 GB, y con ese tope el runner se apagó
+      # sin memoria dos veces seguidas. Node vuelve a calcular el suyo.
+      NODE_OPTIONS: ""
       # Mismo motivo que en `integration-tests`.
       HAY_E2E: ${{ secrets.E2E_DATABASE_URL }}
       ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
@@ -967,9 +968,6 @@ jobs:
   pen-test-local:
     name: Pen test local
     runs-on: ubuntu-latest
-    # El mismo tope que `typecheck`: `pnpm build` también corre `tsc`.
-    env:
-      NODE_OPTIONS: --max-old-space-size=4096
     permissions:
       contents: read
     steps:

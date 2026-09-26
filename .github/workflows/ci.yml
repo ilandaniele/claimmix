@@ -582,6 +582,7 @@ jobs:
       - name: Run E2E tests
         run: |
           if [ -n "$HAY_E2E" ]; then
+            ( while sleep 15; do echo "[recursos] $(free -m | awk '/Mem:/{print "mem " $3 "/" $2 " MB, disponible " $7}; /Swap:/{print "swap " $3 "/" $2}' | paste -sd' ') disco $(df -h / | awk 'NR==2{print $4}') libres"; done ) &
             pnpm test:e2e --project=chromium
           elif [ "$ES_FORK" = "true" ]; then
             echo "::warning title=E2E sin correr::Falta E2E_DATABASE_URL — normal en un fork. Los e2e NO se probaron en este PR."

@@ -714,18 +714,44 @@ async function attackTenantWall(): Promise<void> {
   // así que esto es sólo un SELECT — con el rol dueño, que ignora RLS a
   // propósito para poder elegir de cualquier tenant, igual que hace
   // `prove-tenancy.mts` para lo mismo.
-  const [victim] = await db
-    .select({
-      id: cases.id,
-      policyholder_name: cases.policyholder_name,
-      policy_number: cases.policy_number,
-    })
-    .from(cases)
-    .where(eq(cases.tenant_id, TENANT_A))
-    .orderBy(desc(cases.created_at))
-    .limit(1);
+  const elegir = async () => {
+    const [victim] = await db
+      .select({
+        id: cases.id,
+        policyholder_name: cases.policyholder_name,
+        policy_number: cases.policy_number,
+      })
+      .from(cases)
+      .where(eq(cases.tenant_id, TENANT_A))
+      .orderBy(desc(cases.created_at))
+      .limit(1);
+    if (!victim) return null;
+    return {
+      victim,
+      ownDetail: await getCaseDetail(TENANT_A, victim.id),
+      ownList: await listCases({ tenantId: TENANT_A }, { ...query } as never),
+    };
+  };
 
-  if (!victim) {
+  /*
+   * El más nuevo puede estar de paso. En el Post-deploy, `pnpm knock` y el
+   * ensayo corren a la vez que esto, crean casos en este mismo tenant y los
+   * borran al terminar. Si el elegido se borra entre el detalle y el listado,
+   * el control de abajo da rojo sin que la pared tenga nada que ver (26/09,
+   * sobre a1154f3). Un caso que ya no existe no prueba nada: se elige otro.
+   */
+  let elegido = await elegir();
+  for (let intento = 1; elegido && intento < 3; intento++) {
+    const [sigue] = await db
+      .select({ id: cases.id })
+      .from(cases)
+      .where(eq(cases.id, elegido.victim.id));
+    if (sigue) break;
+    console.log(`  (el caso ${elegido.victim.id} se borró mientras se probaba: elijo otro)`);
+    elegido = await elegir();
+  }
+
+  if (!elegido) {
     console.log("\n(TENANT_A no tiene ningún caso: no hay nada con qué probar la pared.)");
     findings.push({
       what: "la pared entre inquilinos NO se probó (TENANT_A no tiene casos)",
@@ -733,9 +759,9 @@ async function attackTenantWall(): Promise<void> {
     });
     return;
   }
+  const { victim, ownDetail, ownList } = elegido;
 
   // ── Primero: que exista de verdad ──────────────────────────────────────
-  const ownDetail = await getCaseDetail(TENANT_A, victim.id);
   probe(
     "el caso elegido existe y su dueño lo ve",
     ownDetail !== null,
@@ -750,7 +776,6 @@ async function attackTenantWall(): Promise<void> {
    * las de abajo darían verde sin haber mirado nada. Esto se asegura de que,
    * cuando el caso SÍ es tuyo, se ve.
    */
-  const ownList = await listCases({ tenantId: TENANT_A }, { ...query } as never);
   probe(
     "y lo ve en su propio listado",
     JSON.stringify(ownList).includes(victim.id),

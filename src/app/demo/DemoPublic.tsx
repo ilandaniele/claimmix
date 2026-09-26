@@ -3,10 +3,12 @@
 import { useState, useEffect } from "react";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
+import { useT } from "@/lib/i18n/LocaleContext";
+import type { TranslationKey } from "@/lib/i18n";
 
 // ── Example emails ────────────────────────────────────────────────────────────
 
-const EXAMPLES = {
+export const EXAMPLES = {
   choque: {
     label: "Choque",
     subject: "Reporte de siniestro - Choque - Póliza 4821-A",
@@ -55,20 +57,16 @@ Teléfono: 011-15-4499-3321.
 Gracias,
 Carlos Rodríguez`,
   },
-  accidente: {
-    label: "Accidente personal",
-    subject: "Accidente personal - Caída en escalera - Póliza 9812-D",
+  cristales: {
+    label: "Cristales",
+    subject: "Rotura de parabrisas - Póliza 9812-D",
     body: `Buenas tardes,
 
-Me dirijo a ustedes para reportar un accidente personal que sufrí el 24/06/2026 a las 11:15hs.
+Les escribo para reportar la rotura del parabrisas de mi auto. El 24/06/2026 a las 16:30 hs, circulando por Ruta 2 a la altura del km 45, un camión levantó una piedra que golpeó el parabrisas y lo astilló de lado a lado.
 
-Mi nombre es Ana Morales, DNI 31.200.300, titular de la póliza N° 9812-D. El accidente ocurrió en las escaleras del edificio de mi trabajo ubicado en Florida 560, piso 3, CABA.
+Soy Ana Morales, DNI 31.200.300, titular de la póliza N° 9812-D. El vehículo es un Volkswagen Gol Trend, patente AB123CD.
 
-Me resbalé en un escalón mojado (habían limpiado y no había señal de advertencia) y caí. Resultado: fractura de radio distal en la muñeca derecha y esguince de tobillo izquierdo. Fui atendida de urgencia en el Hospital Italiano de Buenos Aires (turno de guardia, nro. de atención 2026-HI-44812).
-
-El traumatólogo indicó yeso durante 6 semanas y no puedo trabajar en ese período. Soy diseñadora gráfica independiente.
-
-Adjunto: alta de guardia, radiografías, informe del traumatólogo.
+No hubo heridos. Adjunto fotos del parabrisas.
 
 Teléfono: 011-15-5544-9921.
 
@@ -248,6 +246,7 @@ function FNOLFlow() {
 // ── Result panel ──────────────────────────────────────────────────────────────
 
 function ResultPanel({ result, elapsed }: { result: ExtractedClaim; elapsed: number }) {
+  const t = useT();
   const isClaim = result.is_claim;
   const fields = result.extracted_fields ?? {};
   const fieldEntries = Object.entries(fields).filter(([, v]) => Boolean(v));
@@ -272,10 +271,14 @@ function ResultPanel({ result, elapsed }: { result: ExtractedClaim; elapsed: num
         )}
         {/* Ámbar y no naranja: `bg-orange-100` no tiene par oscuro y quedaba
             como una isla clara en la página. Ámbar sí: 7,28:1. */}
+        {result.severity && (
+          <span className="rounded-lg bg-amber-100 px-3 py-1 text-sm font-bold text-amber-700">
+            Severidad: {t(`severity.${result.severity}` as TranslationKey)}
+          </span>
+        )}
         {result.injury_severity && result.injury_severity !== "none" && (
           <span className="rounded-lg bg-amber-100 px-3 py-1 text-sm font-bold text-amber-700">
-            Severidad:{" "}
-            {{ fatal: "FATAL", severe: "GRAVE", minor: "LEVE" }[result.injury_severity] ?? result.injury_severity.toUpperCase()}
+            Lesiones: {t(`riesgo.lesiones.${result.injury_severity}` as TranslationKey)}
           </span>
         )}
         {!isClaim && (
@@ -297,23 +300,36 @@ function ResultPanel({ result, elapsed }: { result: ExtractedClaim; elapsed: num
 
       <div className="h-px bg-slate-100" />
 
-      {/* Animated fields grid */}
-      {fieldEntries.length > 0 && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {fieldEntries.map(([key, val], i) => (
-            <FieldCard
-              key={key}
-              label={FIELD_LABELS[key] ?? key}
-              value={String(val)}
-              confidence={result.field_confidences?.[key] ?? null}
-              index={i}
-            />
-          ))}
+      {result.requires_specialist ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="text-sm font-semibold text-amber-800">Requiere especialista</div>
+          <p className="mt-1 text-sm text-amber-700">
+            En el sistema real este reclamo pasa solo a «Requiere especialista» y lo revisa una
+            persona antes de seguir. Por eso la demo no muestra sus datos: pueden incluir
+            lesiones, datos de salud u otra información sensible.
+          </p>
         </div>
-      )}
+      ) : (
+        <>
+          {/* Animated fields grid */}
+          {fieldEntries.length > 0 && (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {fieldEntries.map(([key, val], i) => (
+                <FieldCard
+                  key={key}
+                  label={FIELD_LABELS[key] ?? key}
+                  value={String(val)}
+                  confidence={result.field_confidences?.[key] ?? null}
+                  index={i}
+                />
+              ))}
+            </div>
+          )}
 
-      {/* Missing fields */}
-      <MissingFields fields={result.missing_fields ?? []} />
+          {/* Missing fields */}
+          <MissingFields fields={result.missing_fields ?? []} />
+        </>
+      )}
 
       {/* Fraud indicators */}
       {result.fraud_risk_level && result.fraud_risk_level !== "none" && (
@@ -443,6 +459,10 @@ function anuncioDeEtapa(
     return "Analizando el email con IA. Puede demorar unos segundos.";
   }
   if (stage !== "done" || !result) return "";
+
+  if (result.requires_specialist) {
+    return `Análisis listo. Requiere especialista. En ${(elapsed / 1000).toFixed(1)} segundos.`;
+  }
 
   const tipo = result.extracted_fields?.claim_type
     ? (CLAIM_TYPE_LABELS[result.extracted_fields.claim_type] ??

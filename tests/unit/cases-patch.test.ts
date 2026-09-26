@@ -281,6 +281,19 @@ describe("patchCase — ownership check", () => {
     );
     expect(result.case.status).toBe("cerrado");
   });
+
+  it("audits a close that also reassigns as case.closed, not case.assigned", async () => {
+    setupPatchMocks([listoCase], [{ ...listoCase, status: "cerrado", assigned_to: null }]);
+
+    await patchCase("case-1", { status: "cerrado", assigned_to: null }, adminActor, null, null);
+
+    expect(vi.mocked(writeAuditLog)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "case.closed",
+        payload: expect.objectContaining({ assigned_to: null }),
+      })
+    );
+  });
 });
 
 // ── patchCase — update failure ────────────────────────────────────────────────

@@ -191,7 +191,8 @@ export async function patchCase(
   }
 
   if (patch.assigned_to !== undefined) {
-    eventType = AuditEvent.CASE_ASSIGNED;
+    // Un cierre queda como cierre aunque reasigne: el reenvío lee `case.closed`.
+    if (patch.status !== "cerrado") eventType = AuditEvent.CASE_ASSIGNED;
     auditPayload.assigned_to = patch.assigned_to;
   }
 

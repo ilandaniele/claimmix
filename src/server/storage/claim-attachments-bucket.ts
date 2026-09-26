@@ -154,6 +154,32 @@ export async function readAttachment(storagePath: string): Promise<Buffer | null
 }
 
 /**
+ * Abre un adjunto para servirlo tal cual, en streaming.
+ *
+ * `readAttachment` junta todo en un Buffer, y eso es lo que no sirve acá: una
+ * función de Vercel corta la respuesta en 4.5 MB y un adjunto llega a pesar
+ * 10 MB. Devuelve `null` en error, mismo criterio que `readAttachment`: la
+ * ruta que llama a esto lo convierte en un 404 y no filtra la causa.
+ */
+export async function abrirAdjunto(
+  storagePath: string
+): Promise<{ cuerpo: ReadableStream<Uint8Array>; largo: number | undefined } | null> {
+  try {
+    const s3 = createStorageClient();
+    const res = await s3.send(
+      new GetObjectCommand({ Bucket: bucketName(), Key: storagePath })
+    );
+    const cuerpo = res.Body?.transformToWebStream();
+    if (!cuerpo) return null;
+    return { cuerpo, largo: res.ContentLength };
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "UnknownError";
+    logger.error({ error_name: name }, "attachments.open_failed");
+    return null;
+  }
+}
+
+/**
  * Remove an object from the bucket.
  *
  * Deliberately not reachable from anything that handles a claim: an attachment

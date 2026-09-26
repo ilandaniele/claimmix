@@ -78,6 +78,15 @@ export interface AdjuntoEnPantalla {
    * mandaron algo y no entró— llegaba a la pantalla idéntica a una guardada.
    */
   rejected_reason: string | null;
+  /**
+   * Si tiene bytes guardados y se puede abrir desde el caso.
+   *
+   * `storage_path` nunca sale de acá: la pantalla no necesita la ruta del
+   * bucket, sólo si hay algo detrás para pedirle a la ruta que lo sirve.
+   */
+  disponible: boolean;
+  /** Qué documento pedido cerró este adjunto, o `null` si no cerró ninguno. */
+  matched_doc_key: string | null;
 }
 
 export interface DetalleDeCaso {
@@ -164,13 +173,19 @@ async function fetchAdjuntos(
           external_url: claimAttachments.external_url,
           uploaded_at: claimAttachments.created_at,
           rejected_reason: claimAttachments.rejected_reason,
+          storage_path: claimAttachments.storage_path,
+          matched_doc_key: claimAttachments.matched_doc_key,
         })
         .from(claimAttachments)
         .where(eq(claimAttachments.case_id, caseId))
         .orderBy(asc(claimAttachments.created_at))
     );
 
-    return filas.map((f) => ({ ...f, external_url: f.external_url ?? "" }));
+    return filas.map(({ storage_path, ...f }) => ({
+      ...f,
+      external_url: f.external_url ?? "",
+      disponible: storage_path != null && f.rejected_reason == null,
+    }));
   } catch (err) {
     // Degrada a propósito —la pantalla no se cae porque falle una consulta—
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve

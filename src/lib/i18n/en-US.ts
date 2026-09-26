@@ -401,6 +401,11 @@ export const enUS: Record<TranslationKey, string> = {
   "attachment.rejected.aggregate_size_exceeded": "The files in that message were over the limit together. Ask for them one at a time.",
   "attachment.rejected.decode_failed": "It arrived damaged and could not be read. Ask the policyholder to send it again.",
   "attachment.rejected.unknown": "Could not be stored. Ask the policyholder to send it again.",
+  "attachment.rejected.download_failed": "We could not download the WhatsApp file; ask them to send it again.",
+
+  // Which requested document this attachment closed — shown only once the
+  // agent has identified it (`matched_doc_key`).
+  "case.detail.reconocidoComo": "Recognised as: {doc}",
 
   // ── Gmail status panel ─────────────────────────────────────────────────────
   "gmail.accounts.title": "Gmail intake accounts",

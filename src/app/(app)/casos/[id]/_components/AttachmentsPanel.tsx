@@ -15,6 +15,7 @@
 
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
+import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
 
 interface Attachment {
   id: string;
@@ -25,6 +26,10 @@ interface Attachment {
   uploaded_at: string | null;
   /** Por qué no quedó guardado, o `null` si quedó. */
   rejected_reason: string | null;
+  /** Si tiene bytes guardados y se puede pedir a `/api/cases/:id/attachments/:attachmentId`. */
+  disponible: boolean;
+  /** Qué documento pedido cerró este adjunto, o `null` si no cerró ninguno. */
+  matched_doc_key: string | null;
 }
 
 interface AttachmentsPanelProps {
@@ -66,6 +71,7 @@ const MOTIVOS_CONOCIDOS = new Set([
   "rehost_timeout",
   "aggregate_size_exceeded",
   "decode_failed",
+  "download_failed",
 ]);
 
 /**
@@ -103,7 +109,7 @@ function contentTypeBadge(contentType: string): {
   return { label: "FILE", classes: "bg-slate-100 text-slate-600" };
 }
 
-export function AttachmentsPanel({ attachments }: AttachmentsPanelProps) {
+export function AttachmentsPanel({ attachments, caseId, puedeAbrir }: AttachmentsPanelProps) {
   const t = useT();
   if (attachments.length === 0) {
     return (
@@ -122,6 +128,11 @@ export function AttachmentsPanel({ attachments }: AttachmentsPanelProps) {
         {attachments.map((attachment) => {
           const badge = contentTypeBadge(attachment.content_type);
           const rechazado = attachment.rejected_reason;
+          // `puedeAbrir` es el rol; `disponible` es si hay bytes detrás. Sin
+          // las dos, el link o la miniatura pedirían un archivo que no está
+          // o que este rol no puede ver.
+          const seAbre = attachment.disponible && puedeAbrir;
+          const href = `/api/cases/${caseId}/attachments/${attachment.id}`;
           return (
             <div
               key={attachment.id}
@@ -132,18 +143,38 @@ export function AttachmentsPanel({ attachments }: AttachmentsPanelProps) {
               }`}
             >
               <div className="flex items-center gap-3 flex-1 min-w-0">
+                {seAbre && attachment.content_type.toLowerCase().startsWith("image/") && (
+                  // eslint-disable-next-line @next/next/no-img-element -- el src pasa por auth, `next/image` no aplica a un endpoint propio.
+                  <img
+                    src={href}
+                    loading="lazy"
+                    alt={attachment.filename}
+                    className="h-16 w-16 rounded object-cover flex-shrink-0"
+                  />
+                )}
                 {/* Content type badge */}
                 <span
                   className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-semibold ${badge.classes} flex-shrink-0`}
                 >
                   {badge.label}
                 </span>
-                {/* Filename */}
-                <span
-                  className="text-sm text-slate-800 truncate font-medium"
-                  title={attachment.filename}
-                >
-                  {attachment.filename}
+                <span className="min-w-0">
+                  {/* Filename */}
+                  <span
+                    className="block text-sm text-slate-800 truncate font-medium"
+                    title={attachment.filename}
+                  >
+                    {attachment.filename}
+                  </span>
+                  {/* Qué documento pedido cerró este adjunto, si cerró alguno. */}
+                  {attachment.matched_doc_key && (
+                    <span className="block text-xs text-slate-500 truncate">
+                      {t("case.detail.reconocidoComo").replace(
+                        "{doc}",
+                        etiquetaDeCampo(attachment.matched_doc_key, t)
+                      )}
+                    </span>
+                  )}
                 </span>
                 {/*
                   * Dónde va el tamaño va el motivo, cuando lo hay.
@@ -191,6 +222,19 @@ export function AttachmentsPanel({ attachments }: AttachmentsPanelProps) {
               {esEnlaceSeguro(attachment.external_url) && (
                 <a
                   href={attachment.external_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-shrink-0 rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                  aria-label={`Abrir ${attachment.filename} en nueva pestaña`}
+                >
+                  {t("case.detail.openAttachment")}
+                </a>
+              )}
+
+              {/* El guardado propio, servido por la ruta: sólo si hay bytes y el rol puede verlos. */}
+              {seAbre && (
+                <a
+                  href={href}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-shrink-0 rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"

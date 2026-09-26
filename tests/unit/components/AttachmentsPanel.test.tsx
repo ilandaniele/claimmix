@@ -26,6 +26,8 @@ const GUARDADO = {
   external_url: "https://ejemplo.test/frente.jpg",
   uploaded_at: "2026-09-01T10:00:00Z",
   rejected_reason: null,
+  disponible: true,
+  matched_doc_key: null,
 };
 
 const RECHAZADO = {
@@ -37,7 +39,13 @@ const RECHAZADO = {
   external_url: "",
   uploaded_at: "2026-09-01T10:01:00Z",
   rejected_reason: "size_exceeded",
+  disponible: false,
+  matched_doc_key: null,
 };
+
+// Sin `external_url` a propósito: ese branch ya pone su propio «Abrir», y lo
+// que prueban estos casos es el link nuevo, el que sirve el archivo propio.
+const PROPIO = { ...GUARDADO, external_url: "" };
 
 describe("AttachmentsPanel", () => {
   it("el rechazado explica por qué no entró y qué pedirle al asegurado", () => {
@@ -73,5 +81,64 @@ describe("AttachmentsPanel", () => {
 
     expect(screen.queryByText(/vaya_a_saber/)).not.toBeInTheDocument();
     expect(screen.getByText(/No se pudo guardar/i)).toBeInTheDocument();
+  });
+
+  it("un archivo de WhatsApp que no se pudo bajar avisa que lo reenvíen", () => {
+    render(
+      <AttachmentsPanel
+        attachments={[{ ...RECHAZADO, rejected_reason: "download_failed" }]}
+        caseId="c-1"
+        puedeAbrir={false}
+      />
+    );
+
+    expect(screen.getByText(/pedile que lo reenvíe/i)).toBeInTheDocument();
+  });
+
+  it("«Abrir» sólo aparece con bytes guardados y un rol que puede verlos", () => {
+    const { rerender } = render(
+      <AttachmentsPanel attachments={[PROPIO]} caseId="c-1" puedeAbrir={false} />
+    );
+    expect(screen.queryByText("Abrir")).not.toBeInTheDocument();
+
+    rerender(
+      <AttachmentsPanel
+        attachments={[{ ...PROPIO, disponible: false }]}
+        caseId="c-1"
+        puedeAbrir={true}
+      />
+    );
+    expect(screen.queryByText("Abrir")).not.toBeInTheDocument();
+
+    rerender(<AttachmentsPanel attachments={[PROPIO]} caseId="c-1" puedeAbrir={true} />);
+    expect(screen.getByText("Abrir")).toBeInTheDocument();
+  });
+
+  it("la miniatura sólo aparece para una imagen que se puede abrir", () => {
+    const { rerender } = render(
+      <AttachmentsPanel attachments={[PROPIO]} caseId="c-1" puedeAbrir={true} />
+    );
+    expect(screen.getByAltText(PROPIO.filename)).toBeInTheDocument();
+
+    rerender(
+      <AttachmentsPanel
+        attachments={[{ ...PROPIO, content_type: "application/pdf" }]}
+        caseId="c-1"
+        puedeAbrir={true}
+      />
+    );
+    expect(screen.queryByAltText(PROPIO.filename)).not.toBeInTheDocument();
+  });
+
+  it("muestra qué documento pedido cerró el adjunto", () => {
+    render(
+      <AttachmentsPanel
+        attachments={[{ ...GUARDADO, matched_doc_key: "fotos_danos" }]}
+        caseId="c-1"
+        puedeAbrir={true}
+      />
+    );
+
+    expect(screen.getByText("Reconocido como: Fotos de los daños")).toBeInTheDocument();
   });
 });

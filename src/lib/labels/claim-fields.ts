@@ -356,6 +356,11 @@ const FIELD_ALIASES: Record<string, string> = {
   // hay_heridos, asked in another language.
   injury_severity: "hay_heridos",
   heridos: "hay_heridos",
+  aseguradora_tercero: "party_b_insurer",
+  compania_tercero: "party_b_insurer",
+  tercero_aseguradora: "party_b_insurer",
+  nombre_tercero: "party_b_name",
+  patente_tercero: "party_b_plate",
 };
 
 /** The one key that stands for this field, whichever alias arrived. */

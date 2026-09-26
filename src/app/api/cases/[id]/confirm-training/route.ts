@@ -1,6 +1,6 @@
 /**
- * POST /api/cases/:id/confirm-training — "Confirmar como ejemplo de
- * entrenamiento seguro" (Confirm as safe training example).
+ * POST /api/cases/:id/confirm-training — "Usar como ejemplo de referencia".
+ * No se entrena ningún modelo: el ejemplo entra al prompt few-shot.
  *
  * THE ONLY WAY the agent learns from an email. Until this endpoint is called
  * by a human, every incoming email is untrusted and never used for training.
@@ -122,7 +122,7 @@ export async function POST(
           return err(
             new AppError(
               "VALIDATION_FAILED",
-              "Este email ya fue confirmado como ejemplo de entrenamiento."
+              "Este caso ya es un ejemplo de referencia. No se entrena ningún modelo con él."
             )
           );
         case "unsafe_run":

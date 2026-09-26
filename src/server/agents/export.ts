@@ -5,6 +5,7 @@ import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
 import * as tables from "@/lib/db/schema";
 import type { UserRole } from "@/lib/auth/require-role";
+import { ejemploSinDatosDeLaPersona } from "@/server/training/sin-datos-de-la-persona";
 
 export const AGENT_EXPORT_TYPES = ["config_only", "memory_only", "full"] as const;
 export const AGENT_EXPORT_PII_MODES = ["masked", "excluded", "full_admin_only"] as const;
@@ -420,7 +421,9 @@ async function loadApprovedExampleRows(tenantId: string) {
   const t = tables.trainingExamples;
   const c = tables.cases;
   const r = tables.agentRuns;
-  return (await enTenant(tenantCtx, (db) =>
+  // Nombre y DNI se tachan acá, antes de enmascarar: ni el modo en claro los
+  // saca. Un ejemplo de referencia no necesita saber quién es la persona.
+  const rows = (await enTenant(tenantCtx, (db) =>
     db
       .select({
         id: t.id,
@@ -445,13 +448,14 @@ async function loadApprovedExampleRows(tenantId: string) {
       .where(eq(t.status, "approved"))
       .orderBy(desc(t.approved_at))) as ApprovedExampleExportRow[]
   );
+  return rows.map(ejemploSinDatosDeLaPersona);
 }
 
 async function loadTrainingExamples(tenantId: string, status: "approved" | "rejected") {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const t = tables.trainingExamples;
-  return enTenant(tenantCtx, (db) =>
+  const rows = await enTenant(tenantCtx, (db) =>
     db
       .select({
         id: t.id,
@@ -470,6 +474,7 @@ async function loadTrainingExamples(tenantId: string, status: "approved" | "reje
       .where(eq(t.status, status))
       .orderBy(desc(t.approved_at))
   );
+  return rows.map(ejemploSinDatosDeLaPersona);
 }
 
 async function loadMemorySection(tenantId: string) {

@@ -112,8 +112,8 @@ export function tacharNombreYDni(
     if (opts?.porPalabra) {
       for (const token of nombre.split(/\s+/).filter((p) => p.length >= 3)) {
         const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        // nosemgrep
         out = out.replace(
+          // nosemgrep
           new RegExp(`(?<![\\p{L}\\d])${escapedToken}(?![\\p{L}\\d])`, "giu"),
           en.nombre
         );

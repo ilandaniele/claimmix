@@ -22,6 +22,9 @@ permissions:
 # ── Reusable setup steps (defined as env defaults) ────────────────────────────
 env:
   NODE_VERSION: "22"
+  # El runner de un repo privado tiene 7 GB, y Node toma de ahí un tope de
+  # unos 2 GB que `tsc` pasa. Con 4 GB entra y queda margen para el sistema.
+  NODE_OPTIONS: --max-old-space-size=4096
   # Acá vivía `npm_config_minimum_release_age: "0"`, con un comentario que decía
   # «pnpm 11.5 supply-chain policy». Dos cosas no cerraban:
   #

@@ -75,7 +75,7 @@ import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { polizaParaCompletar } from "@/core/case/poliza-encontrada";
 import { mirarPolizas } from "@/core/case/poliza-vigente";
 import { esTitularAjeno } from "@/core/case/titular-ajeno";
-import { respuestaAHeridos, sinHeridosSupuestos } from "@/core/case/heridos-supuestos";
+import { hayHeridos, respuestaAHeridos, sinHeridosSupuestos } from "@/core/case/heridos-supuestos";
 import { ultimoPedido } from "@/server/confirmations/ultimo-pedido";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
 import { puedeArrancar } from "@/core/case/estados-de-arranque";
@@ -123,7 +123,7 @@ import { loadMemoryHints as loadClaimMemoryHints } from "@/server/memory/load";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle";
-import { mergeExtractedFields, parseEmailClaimFields } from "@/lib/email/claim-parser";
+import { mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
@@ -1112,6 +1112,7 @@ export async function runEmailExtractionWorker(
       senderEmail,
       agentTraining,
       learning,
+      channel: caseRow.channel,
     };
     extractedClaim = await runEmailClaimAgent({
       payload: emailPayload,
@@ -1134,7 +1135,7 @@ export async function runEmailExtractionWorker(
     const aiClaimType =
       extractedClaim.extracted_fields?.claim_type ??
       hydratedFields.find((f) => f.field_key === "claim_type")?.field_value;
-    const mergedFields = mergeExtractedFields(hydratedFields, fallbackFields);
+    const mergedFields = sanearContacto(mergeExtractedFields(hydratedFields, fallbackFields));
     const mergedFieldKeys = new Set(mergedFields.map((field) => field.field_key));
     const agentRecognizedClaim =
       extractedClaim.is_claim !== false ||
@@ -1166,7 +1167,7 @@ export async function runEmailExtractionWorker(
       extractedClaim.severity,
       knownPatterns
     );
-    const needsSpecialist = requiresSpecialist(finalSeverity);
+    const needsSpecialist = requiresSpecialist(finalSeverity) || hayHeridos(extractedClaim);
 
     // ── f2) Agent run logging + trainability suggestion ───────────────────────
     // EVERY processed email creates an agent_runs row (claim or not). The
@@ -1535,18 +1536,6 @@ export async function runEmailExtractionWorker(
       logger.error({ code: dbErrCode(err) }, "email_worker.case_update_error");
     }
 
-    // ── m) Specialist audit log — AC11 ────────────────────────────────────────
-    if (needsSpecialist) {
-      await writeAuditLog({
-        tenant_id: tenantId,
-        actor_id: userId,
-        event_type: AuditEvent.SPECIALIST_REQUIRED,
-        target_type: "case",
-        target_id: caseId,
-        payload: { severity: finalSeverity },
-      });
-    }
-
     // ── n) Memory applied audit log — AC13 groundwork ────────────────────────
     if (memoryApplied) {
       await writeAuditLog({
@@ -1580,7 +1569,7 @@ export async function runEmailExtractionWorker(
         caseId,
         tenantId,
         {
-          extractedClaim,
+          extractedClaim: { ...extractedClaim, severity: finalSeverity, requires_specialist: needsSpecialist },
           senderEmail,
           // Left undefined on purpose: dispatch reads the RFC Message-ID off
           // the inbound claim_messages row itself. This comment used to say
@@ -1917,10 +1906,37 @@ async function upsertExtractedFields(
   tenantCtx: TenantContext,
   fields: Array<{ field_key: string; field_value: string; confidence: number }>
 ): Promise<void> {
+  /*
+   * Un mismo hecho llega con dos claves — el modelo dijo `numero_poliza` y el
+   * parser de respaldo dijo `policy_number` — y `ON CONFLICT (case_id,
+   * field_key)` no las ve iguales hasta que las dos se canonizan. Sin este
+   * paso, el upsert intentaba insertar la misma clave canónica dos veces en
+   * la misma sentencia y Postgres lo rechazaba entero.
+   *
+   * Se queda con la de mayor confianza; en un empate, con la que ya venía
+   * canónica — el parser de respaldo no inventa nombres nuevos.
+   */
+  const porClave = new Map<
+    string,
+    { field_key: string; field_value: string; confidence: number; crudoCanonico: boolean }
+  >();
+  for (const f of fields) {
+    const clave = canonicalFieldKey(f.field_key);
+    const crudoCanonico = f.field_key === clave;
+    const actual = porClave.get(clave);
+    const gana =
+      !actual ||
+      f.confidence > actual.confidence ||
+      (f.confidence === actual.confidence && crudoCanonico && !actual.crudoCanonico);
+    if (gana) {
+      porClave.set(clave, { field_key: clave, field_value: f.field_value, confidence: f.confidence, crudoCanonico });
+    }
+  }
+
   // El tenant_id sigue yendo en los valores: ahí no es un filtro, es el dueño
   // de la fila. Y ahora la base comprueba que coincida con el contexto —
   // escribir en la cuenta de otro pasó de ser posible a ser rechazado.
-  const fieldInserts = fields.map((f) => ({
+  const fieldInserts = [...porClave.values()].map((f) => ({
     case_id: caseId,
     tenant_id: tenantCtx.tenantId,
     field_key: f.field_key,

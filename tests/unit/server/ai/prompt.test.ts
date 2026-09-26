@@ -139,6 +139,57 @@ describe("buildEmailClaimPrompt — fields to extract section", () => {
   });
 });
 
+describe("buildEmailClaimPrompt — canonical keys (F1)", () => {
+  it("forbids emitting Spanish synonyms for the built-in field keys", () => {
+    expect(PROMPT).toContain(
+      "never emit Spanish synonyms (nombre_asegurado, dni_asegurado, numero_poliza, fecha_siniestro, lugar_siniestro, descripcion_hecho, tipo_siniestro, telefono_contacto)"
+    );
+  });
+});
+
+describe("buildEmailClaimPrompt — sender hint by channel (F3)", () => {
+  it("uses the WhatsApp wording when channel is whatsapp, not the email one", () => {
+    const prompt = buildEmailClaimPrompt(SUBJECT, BODY, [], [], "5492916426930", "", undefined, "whatsapp");
+
+    expect(prompt).toContain("The sender is a WhatsApp phone number");
+    expect(prompt).not.toContain("The email was sent from an address in your system");
+  });
+
+  it("uses the email wording when channel is email", () => {
+    const prompt = buildEmailClaimPrompt(
+      SUBJECT,
+      BODY,
+      [],
+      [],
+      "n10jasper@gmail.com",
+      "",
+      undefined,
+      "email"
+    );
+
+    expect(prompt).toContain("The email was sent from an address in your system");
+    expect(prompt).not.toContain("The sender is a WhatsApp phone number");
+  });
+});
+
+describe("buildEmailClaimPrompt — parties and injuries (F4)", () => {
+  it("contains the PARTIES AND INJURIES section", () => {
+    expect(PROMPT).toContain("PARTIES AND INJURIES (fields[] only, never extracted_fields)");
+  });
+
+  it("tells apart the insured (party_a) from the third party (party_b)", () => {
+    expect(PROMPT).toContain("party_a_* = the insured (asegurado); party_b_* = the third party (tercero)");
+  });
+
+  it("lists party_b_insurer among the third-party fields", () => {
+    expect(PROMPT).toContain("party_b_insurer");
+  });
+
+  it("mentions heridos_cantidad for the number of injured people", () => {
+    expect(PROMPT).toContain("heridos_cantidad");
+  });
+});
+
 describe("buildEmailClaimPrompt - Gemini training-memory context", () => {
   const learningPrompt = buildEmailClaimPrompt(
     SUBJECT,

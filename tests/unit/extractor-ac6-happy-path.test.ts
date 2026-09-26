@@ -192,6 +192,7 @@ vi.mock("@/server/ai/hydrate-fields", () => ({
 vi.mock("@/lib/email/claim-parser", () => ({
   mergeExtractedFields: vi.fn().mockImplementation((hydrated: any[], _fallback: any[]) => hydrated),
   parseEmailClaimFields: vi.fn().mockReturnValue([]),
+  sanearContacto: vi.fn().mockImplementation((fields: any[]) => fields),
 }));
 
 // ── Import mocked modules for assertion ──────────────────────────────────────

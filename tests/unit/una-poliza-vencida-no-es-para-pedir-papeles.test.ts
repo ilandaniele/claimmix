@@ -248,16 +248,16 @@ describe("una póliza vencida no es para pedir papeles", () => {
   });
 
   /*
-   * La frase de cuidado es de la derivación por gravedad. Por la póliza vencida
-   * sola no se deriva por las heridas, y el mensaje no las nombra; con un caso
-   * grave, sí, venza o no la póliza.
+   * La frase de cuidado es de la derivación por gravedad o por heridas. Por
+   * la póliza vencida sola, sin ninguna de las dos, no se nombran; con
+   * heridas declaradas, deriva por eso y lo dice, venza o no la póliza.
    */
-  async function derivacionVencida(severity: "low" | "high") {
+  async function derivacionVencida(severity: "low" | "high", injury_severity?: "severe") {
     await orchestratePostExtraction(
       CASE_ID,
       TENANT_ID,
       {
-        extractedClaim: extractEmailClaimMock({ severity, injury_severity: "severe" }),
+        extractedClaim: extractEmailClaimMock({ severity, injury_severity }),
         senderEmail: SENDER_EMAIL,
         polizas: POLIZA_VENCIDA,
       },
@@ -268,15 +268,21 @@ describe("una póliza vencida no es para pedir papeles", () => {
     return salidas[0][0].data as Record<string, unknown>;
   }
 
-  it("con heridos y sin gravedad, la derivación de siempre", async () => {
+  it("sin heridos y sin gravedad, la derivación de siempre", async () => {
     const data = await derivacionVencida("low");
 
     expect(data).not.toHaveProperty("heridos");
     expect(JSON.stringify(vi.mocked(alertSpecialists).mock.calls)).not.toContain("heridos");
   });
 
+  it("con heridos, deriva por eso aunque no sea grave", async () => {
+    const data = await derivacionVencida("low", "severe");
+
+    expect(data).toMatchObject({ heridos: true });
+  });
+
   it("con heridos y gravedad alta, abre con el cuidado", async () => {
-    const data = await derivacionVencida("high");
+    const data = await derivacionVencida("high", "severe");
 
     expect(data).toMatchObject({ heridos: true });
   });

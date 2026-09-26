@@ -532,6 +532,9 @@ export function confirmationRank(fieldKey: string): number {
   return CONFIRMATION_RANK[canonicalFieldKey(fieldKey)] ?? DEFAULT_CONFIRMATION_RANK;
 }
 
+/** Los campos que de verdad importan — los únicos que muestran barra de confianza. */
+export const CAMPOS_CLAVE: readonly string[] = Object.keys(CONFIRMATION_RANK);
+
 // ── Claim types ───────────────────────────────────────────────────────────────
 
 /**

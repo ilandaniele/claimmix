@@ -213,10 +213,15 @@ export async function fetchAuditLog(
        * técnico de un escalado. Nada de eso se muestra, y parte es dato de la
        * persona que hizo la denuncia.
        */
-      reason:
-        f.payload && typeof f.payload === "object" && "reason" in f.payload
-          ? String((f.payload as Record<string, unknown>).reason)
-          : null,
+      reason: (() => {
+        const r =
+          f.payload && typeof f.payload === "object" && "reason" in f.payload
+            ? (f.payload as Record<string, unknown>).reason
+            : null;
+        // Sólo texto no vacío: un `reason: null` en el payload no es «Motivo:
+        // null» en la pantalla, es que no hay motivo.
+        return typeof r === "string" && r.trim() !== "" ? r : null;
+      })(),
     }));
   } catch (err) {
     // Degrada a propósito —la pantalla no se cae porque falle una consulta—

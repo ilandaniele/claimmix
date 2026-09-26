@@ -29,6 +29,8 @@ interface Attachment {
 
 interface AttachmentsPanelProps {
   attachments: Attachment[];
+  caseId: string;
+  puedeAbrir: boolean;
 }
 
 /** Format bytes as human-readable size string (e.g. "1.2 MB") */

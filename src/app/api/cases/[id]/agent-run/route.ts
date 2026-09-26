@@ -120,7 +120,8 @@ export async function GET(
           .where(
             and(
               eq(missingDocs.case_id, caseId),
-              isNull(missingDocs.satisfied_at)
+              isNull(missingDocs.satisfied_at),
+              isNull(missingDocs.declined_at)
             )
           )
       ).catch(() => []),

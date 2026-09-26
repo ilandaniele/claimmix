@@ -54,6 +54,7 @@ describe("FieldConfirmationsPanel", () => {
     render(
       <FieldConfirmationsPanel
         caseId="caso-1"
+        hoy="2026-01-01"
         initialConfirmations={[{ ...BASE, proposed_value: "Juan Pérez" }]}
       />
     );
@@ -77,6 +78,7 @@ describe("FieldConfirmationsPanel", () => {
     render(
       <FieldConfirmationsPanel
         caseId="caso-1"
+        hoy="2026-01-01"
         initialConfirmations={[{ ...BASE, proposed_value: propuesto }]}
       />
     );
@@ -92,6 +94,7 @@ describe("FieldConfirmationsPanel", () => {
     render(
       <FieldConfirmationsPanel
         caseId="caso-1"
+        hoy="2026-01-01"
         initialConfirmations={[{ ...BASE, proposed_value: null }]}
       />
     );
@@ -112,6 +115,7 @@ describe("FieldConfirmationsPanel", () => {
     render(
       <FieldConfirmationsPanel
         caseId="caso-1"
+        hoy="2026-01-01"
         initialConfirmations={[
           { ...BASE, proposed_value: "Juan Pérez", status: "confirmed" },
         ]}
@@ -130,6 +134,7 @@ describe("FieldConfirmationsPanel", () => {
     render(
       <FieldConfirmationsPanel
         caseId="caso-1"
+        hoy="2026-01-01"
         initialConfirmations={[{ ...BASE, proposed_value: "Juan Pérez" }]}
       />
     );
@@ -141,5 +146,32 @@ describe("FieldConfirmationsPanel", () => {
     );
     // No se hace la actualización optimista: el botón sigue ahí.
     expect(botonConfirmar()).toBeTruthy();
+  });
+
+  it("la etiqueta reemplaza la clave cruda del campo", () => {
+    render(
+      <FieldConfirmationsPanel
+        caseId="caso-1"
+        hoy="2026-01-01"
+        initialConfirmations={[{ ...BASE, proposed_value: "Juan Pérez" }]}
+      />
+    );
+
+    expect(screen.getByText("Nombre completo")).toBeInTheDocument();
+    expect(screen.queryByText("full_name")).toBeNull();
+  });
+
+  it("un valor booleano true se lee «Sí»", () => {
+    render(
+      <FieldConfirmationsPanel
+        caseId="caso-1"
+        hoy="2026-01-01"
+        initialConfirmations={[
+          { ...BASE, field_key: "hay_heridos", proposed_value: "true" },
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Sí")).toBeInTheDocument();
   });
 });

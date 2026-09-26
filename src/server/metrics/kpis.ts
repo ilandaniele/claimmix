@@ -40,7 +40,7 @@ import { ClaimTypeSchema } from "@/lib/schemas/cases";
 
 export interface MetricasSummary {
   total_cases_month: number;
-  avg_opening_time_minutes: number | null;
+  avg_first_response_minutes: number | null;
   auto_completion_rate: number;
   escalated_count: number;
 }
@@ -183,7 +183,7 @@ export async function getTenantKpis(
    */
   ] = await enTenantVarias<
     [
-      [{ total: number; listo: number; cerrados: number; minutos: number }],
+      [{ total: number; listo: number; respondidos: number; minutos: number }],
       Array<{ status: string; n: number }>,
       Array<{ claim_type: string | null; n: number }>,
       [{ n: number }],
@@ -194,7 +194,16 @@ export async function getTenantKpis(
       Array<Usos & { model: string }>,
       PuntoSerie[]?,
     ]
-  >(tenantCtx, (db) => [
+  >(tenantCtx, (db) => {
+    /*
+     * La primera respuesta de VERDAD: el envío más viejo en el canal de
+     * salida, no la apertura del caso. `avg_opening_time_minutes` medía
+     * cuánto tardaba el agente en abrir el caso, que es instantáneo — el
+     * número que importa es cuánto tarda alguien en contestarle al
+     * denunciante.
+     */
+    const primera = sql`(select min(om.created_at) from outbound_messages om where om.case_id = ${cases.id} and om.tenant_id = ${cases.tenant_id} and om.status = 'sent')`;
+    return [
       /*
        * Los tres números del mes en una fila, en vez de traer los casos.
        *
@@ -214,8 +223,8 @@ export async function getTenantKpis(
             listo: sql<number>`count(*) filter (where ${inArray(cases.status, [
               ...ESTADOS_COMPLETADO_SIN_PERSONA,
             ])})::int`,
-            cerrados: sql<number>`count(*) filter (where ${cases.status} = 'cerrado' and ${cases.closed_at} is not null)::int`,
-            minutos: sql<number>`coalesce(sum(extract(epoch from (${cases.closed_at} - ${cases.created_at})) / 60) filter (where ${cases.status} = 'cerrado' and ${cases.closed_at} is not null), 0)::float8`,
+            respondidos: sql<number>`count(${primera})::int`,
+            minutos: sql<number>`coalesce(sum(extract(epoch from (${primera} - ${cases.created_at})) / 60), 0)::float8`,
           })
           .from(cases)
           .where(and(
@@ -323,14 +332,15 @@ export async function getTenantKpis(
       ...(opts?.serie
         ? [consultaDeActividad(db, opts.serie, desdeDe(opts.serie, ahora))]
         : []),
-    ]);
+    ];
+  });
 
   const totalCasesMonth = resumenMes?.total ?? 0;
 
   // El mismo Math.round(total / n) de antes, con la suma hecha por la base.
-  const avgOpeningMinutes: number | null =
-    resumenMes && resumenMes.cerrados > 0
-      ? Math.round(resumenMes.minutos / resumenMes.cerrados)
+  const avgFirstResponseMinutes: number | null =
+    resumenMes && resumenMes.respondidos > 0
+      ? Math.round(resumenMes.minutos / resumenMes.respondidos)
       : null;
 
   const listoCount = resumenMes?.listo ?? 0;
@@ -377,7 +387,7 @@ export async function getTenantKpis(
   return {
     summary: {
       total_cases_month: totalCasesMonth,
-      avg_opening_time_minutes: avgOpeningMinutes,
+      avg_first_response_minutes: avgFirstResponseMinutes,
       auto_completion_rate: autoCompletionRate,
       escalated_count: escalatedRow?.n ?? 0,
     },

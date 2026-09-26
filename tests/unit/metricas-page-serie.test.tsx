@@ -33,7 +33,7 @@ function datos(casos: number): MetricasData {
   return {
     summary: {
       total_cases_month: casos,
-      avg_opening_time_minutes: null,
+      avg_first_response_minutes: null,
       auto_completion_rate: 0,
       escalated_count: 0,
     },

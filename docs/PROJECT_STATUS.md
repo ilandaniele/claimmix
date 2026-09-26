@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-25. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-26. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -3657,7 +3657,7 @@ no le faltaba respaldo en el servidor, la nota anterior estaba equivocada.
 inquilinos sólo leyendo. `scripts/migrate.mjs --forget` no se marca a sí mismo
 como deriva.
 
-**Lo que queda.**
+**Decidido, sin cambios.** No queda nada abierto en esta sección.
 - La pregunta por heridos puede repetirse en un mismo caso. Se deja así porque
   es una guarda de seguridad.
 - La región de Vertex sigue en `us-central1`: el dueño rechazó `global` el
@@ -3665,13 +3665,11 @@ como deriva.
 
 ### 🙋 Waiting on you (not code)
 
-- **Qué hacer con la respuesta a un caso ya derivado.** Desde que el titular
-  ajeno se deriva solo, el pedido de confirmación sale y el caso queda en
-  `requiere_especialista` en la misma vuelta. Si la persona contesta, por mail
-  el mensaje queda sin leer (`MESSAGE_NOT_READ`) y por WhatsApp abre un caso
-  nuevo. Falta decidir si `findExistingWhatsAppCase` incluye
-  `requiere_especialista`. El pedido ya no invita a contestar, así que pasa
-  menos, pero sigue pudiendo pasar.
+- ~~**Qué hacer con la respuesta a un caso ya derivado.**~~ ✅ **RESUELTO
+  25/09 en #293 (P6).** `findExistingWhatsAppCase` suma el mensaje al caso en
+  `requiere_especialista` (`ESTADOS_WHATSAPP_QUE_SUMAN_MENSAJES`), y por mail
+  el hilo ya caía en el caso. En los dos canales el agente calla y el caso
+  queda en «Para responder». Lo cubre el ensayo `escribe-despues-del-cierre`.
 
 - **Escaneo de seguridad: las tres tandas están cerradas.** Tanda 1 (auth,
   seguridad, rate-limit, `src/app/api`; 15/09, `cc89d00`): 74/74 archivos, 0

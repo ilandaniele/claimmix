@@ -105,7 +105,9 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
       .update(cases)
       .set({
         status: "cerrado",
-        closed_at: new Date().toISOString(),
+        // Con el reloj de la base: el reenvío sólo reabre si la auditoría del
+        // abandono no es más vieja que este `closed_at`.
+        closed_at: sql`now()`,
         updated_at: new Date().toISOString(),
         para_responder_desde: null,
       })

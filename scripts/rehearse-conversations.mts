@@ -60,6 +60,7 @@ const { ingestInboundEmail } = await import("@/server/email/inbound-email");
 const { runIntakeAgent } = await import("@/server/agents/intake-agent");
 const { hablaDeHeridos, respuestaAHeridos } = await import("@/core/case/heridos-supuestos");
 const { db } = await import("@/lib/db");
+const { CONTACT_DOC_KEYS } = await import("@/server/cases/documents");
 const {
   cases,
   claimAttachments,
@@ -253,7 +254,7 @@ const SCENARIOS: Scenario[] = [
     what: "Un choque que llega entero, en varios mensajes, y termina listo",
     turns: [
       {
-        say: "Hola, choqué ayer en Bahía Blanca, Av. Alem al 2300. Soy Martín Sosa, póliza POL-4471-A, DNI 30.145.882. No hubo heridos.",
+        say: "Hola, choqué ayer a las 19 en Bahía Blanca, Av. Alem al 2300, con mi Gol patente AB 123 CD. Soy Martín Sosa, póliza POL-4471-A, DNI 30.145.882. No hubo heridos.",
         expect: { replies: 1, mentions: ["parte", "licencia"], avoids: ["cubierto", "aprobado"] },
       },
       {
@@ -578,7 +579,7 @@ const SCENARIOS: Scenario[] = [
     turns: [
       {
         say: [
-          "Buenas, ayer choqué en Alem al 2300, en Bahía Blanca.",
+          "Buenas, ayer a las 19 choqué con mi Gol patente AB 123 CD en Alem al 2300, en Bahía Blanca.",
           "No hubo heridos. La póliza es POL-4471-A.",
         ].join("\n"),
         // Sobre `asked_keys` y no sobre la prosa: lo que escribe el modelo
@@ -1220,7 +1221,10 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
        */
       if (want.recognisesNothing || want.recognises?.length) {
         const ahora = await closedDocKeys(active);
-        const cerroAhora = [...ahora].filter((k) => !cerradosAntes.has(k));
+        // El contacto lo cierra el canal, no el archivo: igual que en el pen test.
+        const cerroAhora = [...ahora].filter(
+          (k) => !cerradosAntes.has(k) && !(CONTACT_DOC_KEYS as readonly string[]).includes(k)
+        );
 
         if (want.recognisesNothing && cerroAhora.length > 0) {
           note(

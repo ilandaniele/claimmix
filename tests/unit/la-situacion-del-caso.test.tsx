@@ -16,6 +16,7 @@ import { EscalateDialog } from "../../src/app/(app)/casos/[id]/components/Escala
 import { LocaleProvider } from "../../src/lib/i18n/LocaleContext";
 import { esAR } from "../../src/lib/i18n/es-AR";
 import type { CaseRow } from "../../src/server/cases/list";
+import { SIN_ACCIONES } from "../../src/server/cases/acciones";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
@@ -77,6 +78,8 @@ describe("la situación del caso", () => {
           paraResponder={false}
           vistoEn="2026-09-25T12:00:00.000Z"
           puedeMarcar={false}
+          acciones={SIN_ACCIONES}
+          puedeCambiarEstado={true}
         />
       </LocaleProvider>
     );

@@ -16,14 +16,20 @@
 // Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
 // eso se verifica en tests/unit/data-scope-sin-rol.test.ts y, contra bases de
 // verdad, en `pnpm capa-datos` y `pnpm tenancy`.
+const { enTenantMock, enTenantVariasMock } = vi.hoisted(() => ({
+  enTenantMock: vi.fn(),
+  enTenantVariasMock: vi.fn(),
+}));
+
 vi.mock("@/data/scope", async () => {
   const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
+  enTenantMock.mockImplementation((_ctx: unknown, armar: (d: unknown) => unknown) =>
+    Promise.resolve(armar(mod.db))
+  );
+  enTenantVariasMock.mockImplementation((_ctx: unknown, armar: (d: unknown) => unknown[]) =>
+    Promise.all(armar(mod.db))
+  );
+  return { enTenant: enTenantMock, enTenantVarias: enTenantVariasMock };
 });
 
 vi.mock("@/lib/db", () => ({
@@ -44,13 +50,17 @@ vi.mock("@/lib/audit/log", () => ({
     CASE_STATUS_CHANGED: "case.status_changed",
     CASE_CLOSED: "case.closed",
     CASE_ASSIGNED: "case.assigned",
+    CASE_READY_CONFIRMED: "case.ready_confirmed",
   },
 }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { patchCase } from "@/server/cases/patch";
 import { AppError } from "@/lib/errors";
 import { db } from "@/lib/db";
+import { enTenantVarias } from "@/data/scope";
+import { writeAuditLog } from "@/lib/audit/log";
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -109,6 +119,17 @@ function setupPatchMocks(fetchRows: unknown[], updatedRows: unknown[]) {
     set: vi.fn().mockReturnValue({ where: whereAfterSet }),
   };
   vi.mocked(db.update).mockReturnValue(setChain as any);
+}
+
+/**
+ * Igual que setupPatchMocks, más la cadena de `db.insert(auditLog).select(...)`
+ * que usa `auditoriaSiQuedo` en el camino de confirmar_listo. El valor
+ * resuelto no importa: patch.ts sólo usa la primera sentencia del batch.
+ */
+function setupConfirmMocks(fetchRows: unknown[], updatedRows: unknown[]) {
+  setupPatchMocks(fetchRows, updatedRows);
+  const insertSelectFn = vi.fn().mockResolvedValue(undefined);
+  vi.mocked(db.insert).mockReturnValue({ select: insertSelectFn } as any);
 }
 
 // ── patchCase — FSM validation ────────────────────────────────────────────────
@@ -260,6 +281,19 @@ describe("patchCase — ownership check", () => {
     );
     expect(result.case.status).toBe("cerrado");
   });
+
+  it("audits a close that also reassigns as case.closed, not case.assigned", async () => {
+    setupPatchMocks([listoCase], [{ ...listoCase, status: "cerrado", assigned_to: null }]);
+
+    await patchCase("case-1", { status: "cerrado", assigned_to: null }, adminActor, null, null);
+
+    expect(vi.mocked(writeAuditLog)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "case.closed",
+        payload: expect.objectContaining({ assigned_to: null }),
+      })
+    );
+  });
 });
 
 // ── patchCase — update failure ────────────────────────────────────────────────
@@ -276,5 +310,82 @@ describe("patchCase — update failure", () => {
     await expect(
       patchCase("case-1", { status: "escalado" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
+  });
+});
+
+// ── patchCase — confirmar_listo (P6) ─────────────────────────────────────────
+
+describe("patchCase — confirmar_listo (P6)", () => {
+  const listoParaCoreCase = { ...listoCase, status: "listo_para_core" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("en listo_para_core manda un solo enTenantVarias con dos sentencias y no escribe con writeAuditLog", async () => {
+    setupConfirmMocks([listoParaCoreCase], [listoParaCoreCase]);
+
+    const result = await patchCase("case-1", { confirmar_listo: true }, adminActor, null, null);
+
+    expect(result.case.status).toBe("listo_para_core");
+    expect(enTenantVarias).toHaveBeenCalledTimes(1);
+    const armar = vi.mocked(enTenantVarias).mock.calls[0]![1] as (d: unknown) => unknown[];
+    const sentencias = armar(db);
+    expect(sentencias).toHaveLength(2);
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("si el update no devuelve filas, 409 FSM_INVALID_TRANSITION (el caso cambió mientras tanto)", async () => {
+    setupConfirmMocks([listoParaCoreCase], []);
+
+    await expect(
+      patchCase("case-1", { confirmar_listo: true }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+  });
+
+  it("en info_faltante, 409 (sólo se confirma un caso que queda listo para Core)", async () => {
+    const infoFaltanteCase = { ...listoCase, status: "info_faltante" };
+    setupConfirmMocks([infoFaltanteCase], []);
+
+    await expect(
+      patchCase("case-1", { confirmar_listo: true }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+  });
+
+  it("desde requiere_especialista, { status: listo_para_core, confirmar_listo: true } pasa", async () => {
+    const requiereEspecialistaCase = { ...listoCase, status: "requiere_especialista" };
+    setupConfirmMocks([requiereEspecialistaCase], [listoParaCoreCase]);
+
+    const result = await patchCase(
+      "case-1",
+      { status: "listo_para_core", confirmar_listo: true },
+      adminActor,
+      null,
+      null
+    );
+    expect(result.case.status).toBe("listo_para_core");
+  });
+
+  it("un analyst sin el caso asignado recibe 404", async () => {
+    const ajeno = { ...listoParaCoreCase, assigned_to: "other-analyst-id" };
+    setupConfirmMocks([ajeno], []);
+
+    await expect(
+      patchCase("case-1", { confirmar_listo: true }, analystActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
+  });
+
+  it('con ip "anonymous", el insert de auditoría guarda ip null', async () => {
+    setupConfirmMocks([listoParaCoreCase], [listoParaCoreCase]);
+
+    await patchCase("case-1", { confirmar_listo: true }, adminActor, "anonymous", null);
+
+    const columnas = vi.mocked(db.select).mock.calls.find((c) => c.length > 0)?.[0] as Record<
+      string,
+      { sql: unknown }
+    >;
+    const dialecto = new PgDialect();
+    const { params } = dialecto.sqlToQuery(columnas.ip.sql as never);
+    expect(params).toEqual([null]);
   });
 });

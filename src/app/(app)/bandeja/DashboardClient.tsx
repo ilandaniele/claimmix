@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PER_PAGE_OPTIONS } from "./per-page";
 import { ID_PANEL_DE_LA_LISTA } from "./components/ids";
@@ -290,6 +290,21 @@ function DashboardClientInterno({
   // Multi-select: cada uno puede traer varios valores (`?type=choque&type=robo`).
   const activeStatus = paramsVisibles.getAll("status") as CaseStatus[];
   const activeType = paramsVisibles.getAll("type") as ClaimType[];
+  /*
+   * El estado activo no se compara contra la CLAVE del grupo: se compara
+   * contra el conjunto de estados que esa clave cubre. Comparar contra la
+   * clave —`c.status !== activeStatus`— descartaba una fila con
+   * `?status=escalado` puesto apenas el sondeo la traía con su estado CRUDO
+   * `requiere_especialista`, que es justo lo que el canal real escribe. La
+   * fila desaparecía de la lista con el filtro puesto, y volvía sola al
+   * sacarlo. `estadosAConsultar` es la misma expansión que ya usa el servidor.
+   */
+  const activeStatusKey = activeStatus.join(",");
+  const estadosActivos = useMemo(
+    () => (activeStatus.length > 0 ? new Set(activeStatus.flatMap(estadosAConsultar)) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `activeStatusKey` es la clave estable de `activeStatus`
+    [activeStatusKey]
+  );
 
   // Lo que va al CSV: todo lo que filtra la pantalla, sin la paginación.
   const exportQuery = (() => {
@@ -305,7 +320,8 @@ function DashboardClientInterno({
   const activeIsClaim = activeIsClaimRaw ?? undefined;
   const paraResponder = paramsVisibles.get("para_responder") === "true";
   // Lo que pide el sondeo: la URL, no el destino de una navegación en vuelo.
-  const sondeaLaCola = searchParams.get("para_responder") === "true";
+  const sondeaLaCola =
+    searchParams.get("para_responder") === "true" || searchParams.get("cola") === "mia";
   const router = useRouter();
 
   const [seleccionando, setSeleccionando] = useState(false);
@@ -472,13 +488,24 @@ function DashboardClientInterno({
             return item;
           })
         );
+        /*
+         * El total del header cuenta lo que el filtro de estado deja ver. Si
+         * la fila sale del conjunto activo, el total baja; si entra, sube. Sin
+         * filtro de estado (`estadosActivos` null) el total no se toca acá.
+         */
+        if (estadosActivos) {
+          const estabaAdentro = estadosActivos.has(prevStatus);
+          const quedaAdentro = estadosActivos.has(updatedCase.status);
+          if (estabaAdentro && !quedaAdentro) setTotal((n) => Math.max(0, n - 1));
+          else if (!estabaAdentro && quedaAdentro) setTotal((n) => n + 1);
+        }
         addToast(
           `${formatCaseNumber(updatedCase.id)} ${t("bandeja.toastUpdated")} ${prevStatus} → ${updatedCase.status}`,
           "info"
         );
       }
     },
-    [addToast, t]
+    [addToast, t, estadosActivos]
   );
 
   /*
@@ -496,17 +523,6 @@ function DashboardClientInterno({
 
   // ── Filtering & pagination ─────────────────────────────────────────────────
   const PER_PAGE = parseInt(paramsVisibles.get("per_page") ?? "", 10) || initialData.meta.per_page;
-  /*
-   * El estado activo no se compara contra la CLAVE del grupo: se compara
-   * contra el conjunto de estados que esa clave cubre. Comparar contra la
-   * clave —`c.status !== activeStatus`— descartaba una fila con
-   * `?status=escalado` puesto apenas el sondeo la traía con su estado CRUDO
-   * `requiere_especialista`, que es justo lo que el canal real escribe. La
-   * fila desaparecía de la lista con el filtro puesto, y volvía sola al
-   * sacarlo. `estadosAConsultar` es la misma expansión que ya usa el servidor.
-   */
-  const estadosActivos =
-    activeStatus.length > 0 ? new Set(activeStatus.flatMap(estadosAConsultar)) : null;
   const visibleCases = cases.filter((c) => {
     if (estadosActivos && !estadosActivos.has(c.status)) return false;
     if (

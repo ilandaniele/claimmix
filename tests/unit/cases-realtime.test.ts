@@ -51,8 +51,9 @@ function makeCase(overrides: Partial<CaseRow> = {}): CaseRow {
     fraud_risk_level: null,
     fraud_indicators: null,
     para_responder_desde: null,
-    // No es columna de `cases`: la suma `consultaListado` por subconsulta.
+    // No son columnas de `cases`: las suma `consultaListado` por subconsulta.
     fecha_siniestro: null,
+    assigned_name: null,
     ...overrides,
   };
 }

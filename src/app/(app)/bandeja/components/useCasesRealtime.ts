@@ -68,10 +68,11 @@ const POLL_MAX_MS = 30000;
  * `status` ya viene incluido: es el primero de `PARAMS_DE_FILTRO`, aunque no
  * viva en el panel sino en las pestañas.
  *
- * `para_responder` va aparte: es una sección de la barra lateral y no un filtro
- * del panel, así que «Limpiar» no lo borra, pero el sondeo lo tiene que reenviar.
+ * `para_responder` y `cola` van aparte: son secciones de la barra lateral y no
+ * un filtro del panel, así que «Limpiar» no los borra, pero el sondeo los
+ * tiene que reenviar.
  */
-export const FILTER_PARAMS = [...PARAMS_DE_FILTRO, "para_responder"];
+export const FILTER_PARAMS = [...PARAMS_DE_FILTRO, "para_responder", "cola"];
 
 /** Build the /api/cases query string from the current location filters. */
 function buildQuery(current: URLSearchParams): string {

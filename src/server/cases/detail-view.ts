@@ -35,7 +35,8 @@ import "server-only";
 import { asc, eq } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
-import { claimAttachments, claimFieldConfirmations } from "@/lib/db/schema";
+import { claimAttachments, claimFieldConfirmations, users } from "@/lib/db/schema";
+import { firstRow } from "@/lib/db/helpers";
 import type { CaseRow, ExtractedFieldRow, MissingDocRow } from "@/lib/db/types";
 import { logger } from "@/lib/observability/logger";
 import {
@@ -100,6 +101,8 @@ export interface DetalleDeCaso {
   messages: MensajeEntrante[];
   /** `true` si `messages` puede no incluir el más nuevo — ver `ultimoParaReleer`. */
   hayMasMensajes: boolean;
+  /** El nombre de quien tiene asignado el caso, o `null` si nadie o no se pudo leer. */
+  asignado_nombre: string | null;
 }
 
 /**
@@ -200,6 +203,18 @@ async function fetchAdjuntos(
   }
 }
 
+/** El nombre de quien tiene asignado el caso, o `null` si no hay o falla la consulta. */
+async function fetchNombreAsignado(
+  ctx: TenantContext,
+  userId: string
+): Promise<string | null> {
+  return enTenant(ctx, (db) =>
+    db.select({ n: users.full_name }).from(users).where(eq(users.id, userId)).limit(1)
+  )
+    .then((filas) => firstRow(filas)?.n ?? null)
+    .catch(() => null);
+}
+
 /**
  * Trae el caso y, si existe, todo lo demás en una sola tanda.
  *
@@ -233,7 +248,7 @@ export async function cargarDetalleDeCaso(
    */
   const esDeCorreo = caseRow.channel === "email" || caseRow.channel === "email_sim";
 
-  const [extracted_fields, missing_docs, audit_log, confirmations, attachments, messages] =
+  const [extracted_fields, missing_docs, audit_log, confirmations, attachments, messages, asignado_nombre] =
     await Promise.all([
       fetchExtractedFields(ctx, caseId),
       fetchMissingDocs(ctx, caseId),
@@ -241,6 +256,7 @@ export async function cargarDetalleDeCaso(
       esDeCorreo ? fetchConfirmaciones(ctx, caseId) : Promise.resolve([]),
       fetchAdjuntos(ctx, caseId),
       mensajesEntrantes(ctx, caseId, { orden: "viejos", tope: MENSAJES_A_MOSTRAR }),
+      caseRow.assigned_to ? fetchNombreAsignado(ctx, caseRow.assigned_to) : Promise.resolve(null),
     ]);
 
   return {
@@ -252,6 +268,7 @@ export async function cargarDetalleDeCaso(
     attachments,
     messages,
     hayMasMensajes: messages.length >= MENSAJES_A_MOSTRAR,
+    asignado_nombre,
   };
 }
 

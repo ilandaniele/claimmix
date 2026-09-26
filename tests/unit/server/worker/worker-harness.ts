@@ -176,6 +176,7 @@ export interface OpcionesDelExtractor {
   fields_pending_confirmation?: string[];
   severity?: string;
   requires_specialist?: boolean;
+  injury_severity?: string;
 }
 
 /**
@@ -269,8 +270,16 @@ export function registrarMocks(opciones: {
   }));
 
   vi.doMock("@/server/ai/severity-classifier", () => ({
-    classifySeverity: vi.fn().mockReturnValue(necesitaEspecialista ? "high" : "medium"),
-    requiresSpecialist: vi.fn().mockReturnValue(necesitaEspecialista),
+    classifySeverity: vi
+      .fn()
+      .mockImplementation((_texto: string, severidadIA?: string | null) =>
+        necesitaEspecialista ? "high" : (severidadIA ?? "medium")
+      ),
+    requiresSpecialist: vi
+      .fn()
+      .mockImplementation(
+        (severidad: string) => necesitaEspecialista || severidad === "high" || severidad === "critical"
+      ),
   }));
 
   vi.doMock("@/core/case/fsm", () => ({
@@ -302,6 +311,7 @@ export function registrarMocks(opciones: {
       possible_policy_matches: [],
       severity: extractor.severity ?? "medium",
       requires_specialist: extractor.requires_specialist ?? false,
+      injury_severity: extractor.injury_severity ?? null,
       not_relevant_reason: undefined,
       summary: "",
       suggested_reply: "",

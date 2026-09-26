@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseEmailClaimFields } from "@/lib/email/claim-parser";
+import { parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
 import {
   EXAMPLE_CHOQUE_EMAIL_BODY,
   EXAMPLE_CHOQUE_EMAIL_SUBJECT,
 } from "../../../fixtures/email-choque-reenvio";
+import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 
 function fieldMap(fields: ReturnType<typeof parseEmailClaimFields>) {
   return new Map(fields.map((field) => [field.field_key, field.field_value]));
@@ -24,9 +25,20 @@ describe("parseEmailClaimFields", () => {
     expect(fields.get("policy_number")).toBe("91500000-2");
     expect(fields.get("accident_date")).toBe("27/07/2025");
     expect(fields.get("claim_type")).toBe("choque");
-    expect(fields.get("party_a_plate")).toBe("ABC123");
-    expect(fields.get("party_b_plate")).toBe("XY456ZW");
     expect(fields.get("cbu")).toBe("0070068930004000000016");
+  });
+
+  it("does not attribute a plate to either party without a «mi vehículo/auto»", () => {
+    const fields = fieldMap(
+      parseEmailClaimFields({
+        subject: EXAMPLE_CHOQUE_EMAIL_SUBJECT,
+        body: EXAMPLE_CHOQUE_EMAIL_BODY,
+        senderEmail: "fallback@example.com",
+      })
+    );
+
+    expect(fields.has("party_a_plate")).toBe(false);
+    expect(fields.has("party_b_plate")).toBe(false);
   });
 
   it("uses the sender address when no address appears in the email text", () => {
@@ -89,10 +101,61 @@ describe("parseEmailClaimFields", () => {
     expect(fields.get("accident_date")).toBe("15/03/2024");
     expect(fields.get("claim_type")).toBe("choque");
     expect(fields.get("party_a_plate")).toBe("AB123CD");
-    expect(fields.get("party_b_plate")).toBe("EF456GH");
+    expect(fields.has("party_b_plate")).toBe(false);
     expect(fields.get("fotos_danos")).toBe("si");
     expect(fields.get("licencia_conducir")).toBe("si");
     expect(fields.get("denuncia_policial")).toBe("si");
     expect(fields.get("police_report_number")).toBe("0045/2024");
+  });
+
+  it("extracts the insured's plate from «mi auto patente X», with no parentheses", () => {
+    const fields = fieldMap(
+      parseEmailClaimFields({
+        body: "Choqué ayer con mi auto patente AB123CD en Alem y Rivadavia.",
+      })
+    );
+
+    expect(fields.get("party_a_plate")).toBe("AB123CD");
+  });
+});
+
+describe("sanearContacto", () => {
+  const email = (field_value: string): ExtractedField => ({
+    field_key: "email",
+    field_value,
+    confidence: 0.9,
+    source: "ai",
+  });
+
+  it("moves a phone number that landed in email to phone", () => {
+    const fields = sanearContacto([email("+54 9 291 555-1234")]);
+
+    expect(fields.find((f) => f.field_key === "email")).toBeUndefined();
+    expect(fields.find((f) => f.field_key === "phone")?.field_value).toBe("+54 9 291 555-1234");
+  });
+
+  it("drops an email field that is neither an address nor a phone number", () => {
+    const fields = sanearContacto([email("no tengo mail")]);
+
+    expect(fields).toHaveLength(0);
+  });
+
+  it("leaves a valid email address untouched", () => {
+    const fields = sanearContacto([email("asegurado@ejemplo.com")]);
+
+    expect(fields).toEqual([email("asegurado@ejemplo.com")]);
+  });
+
+  it("does not overwrite a phone already present", () => {
+    const phone: ExtractedField = {
+      field_key: "phone",
+      field_value: "2915551111",
+      confidence: 0.9,
+      source: "ai",
+    };
+    const fields = sanearContacto([email("291 555-9999"), phone]);
+
+    expect(fields.filter((f) => f.field_key === "phone")).toEqual([phone]);
+    expect(fields.find((f) => f.field_key === "email")).toBeUndefined();
   });
 });

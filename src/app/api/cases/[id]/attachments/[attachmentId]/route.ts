@@ -49,7 +49,7 @@ const INLINE = new Set([
  * porque un visor viejo que sólo lee `filename` no decodifica nada.
  */
 function nombreParaDisposition(fileName: string): string {
-  const ascii = fileName.replace(/[\r\n"\\]|[^\x00-\x7F]/g, "_");
+  const ascii = fileName.replace(/[\x00-\x1F\x7F"\\]|[^\x20-\x7E]/g, "_");
   return `filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 

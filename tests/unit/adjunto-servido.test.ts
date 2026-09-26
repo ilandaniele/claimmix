@@ -128,6 +128,16 @@ describe("GET /api/cases/:id/attachments/:attachmentId", () => {
     expect(disposition).toContain(`filename*=UTF-8''${encodeURIComponent(nombre)}`);
   });
 
+  it("un nombre con un carácter de control no imprimible no rompe el header", async () => {
+    const nombre = "foto\x01.jpg";
+    mockEnTenant.mockResolvedValue([{ ...FILA, file_name: nombre }]);
+
+    const res = await llamar();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Disposition")).toContain('filename="foto_.jpg"');
+  });
+
   it("un id que no es uuid da 404", async () => {
     const res = await llamar("no-es-un-uuid");
 

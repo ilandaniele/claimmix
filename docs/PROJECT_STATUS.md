@@ -3715,8 +3715,10 @@ entró en dos lotes.
   negativa de un documento pendiente que la persona nombra, aunque no
   estuviera en el último pedido, y la cita tiene que nombrarlo.
 - #318: el export del agente (JSON de memoria y JSONL de aprobados) tacha
-  nombre y DNI en cada ejemplo con `ejemploSinDatosDeLaPersona`, en todos los
-  modos, también `full_admin_only`. El texto dice «ejemplo de referencia, no
+  nombres y DNI en cada ejemplo con `ejemploSinDatosDeLaPersona`, en todos los
+  modos, también `full_admin_only`. Tacha a todas las personas del caso
+  (asegurado, tercero, conductor), también en el few-shot. No alcanza a un
+  nombre que nadie extrajo ni a un DNI escrito con espacios. El texto dice «ejemplo de referencia, no
   se entrena ningún modelo». El repo pasó a privado: CodeQL analiza sin subir
   el SARIF y falla con hallazgos de gravedad alta o crítica. Sin GitHub Pro
   no hay protección de ramas ni rulesets (la API da 403), así que la regla
@@ -3724,6 +3726,10 @@ entró en dos lotes.
   cuentan contra el cupo del plan gratuito.
 
 **Para decidir.**
+- El export en `full_admin_only` sigue sacando en claro la memoria de
+  remitentes (`sender_profile`, con nombre y DNI) y, en modo `full`, los
+  argumentos de las herramientas en la auditoría. Es el modo en claro para
+  un administrador; tacharlo es aplicar el mismo helper a esas filas.
 - Un analista confirma o marca «Revisado» sólo en casos asignados, y la
   entrada real no asigna. Cambiarlo es una línea en `puedeCambiarEstado`.
 - «Reabrir y reenviar» queda deshabilitado para WhatsApp hasta que haya una

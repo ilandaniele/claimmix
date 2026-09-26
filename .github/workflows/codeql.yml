@@ -31,6 +31,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # El evento `schedule` no documenta `repository` en su payload; la API
+      # dice si el repo es privado para cualquier evento.
+      - name: Visibilidad del repo
+        id: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" >> "$GITHUB_OUTPUT"
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
@@ -47,14 +55,14 @@ jobs:
           category: "/language:javascript-typescript"
           # Un repo privado sin Advanced Security rechaza el SARIF. El análisis
           # corre igual y el paso siguiente lo lee acá.
-          upload: ${{ github.event.repository.private && 'never' || 'always' }}
+          upload: ${{ steps.repo.outputs.private == 'true' && 'never' || 'always' }}
           output: sarif
 
       # Sin la pestaña de seguridad nadie ve los hallazgos, así que el job
       # falla con los de gravedad alta o crítica (security-severity >= 7), el
       # mismo umbral con el que GitHub marca rojo un PR cuando sí hay subida.
       - name: Hallazgos graves
-        if: github.event.repository.private
+        if: steps.repo.outputs.private == 'true'
         run: |
           jq -r '
             .runs[] as $r

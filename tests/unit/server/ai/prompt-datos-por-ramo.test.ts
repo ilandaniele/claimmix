@@ -26,4 +26,9 @@ describe("buildEmailClaimPrompt — datos requeridos por ramo (P6)", () => {
   it("no deriva la provincia de una calle sola", () => {
     expect(PROMPT).toContain("Never derive it from a street alone");
   });
+
+  it("una hora dicha no se vuelve a preguntar, y el tipo de vehículo no se agrega", () => {
+    expect(PROMPT).toContain('"a las 19"');
+    expect(PROMPT).toContain("Never add a vehicle-type field");
+  });
 });

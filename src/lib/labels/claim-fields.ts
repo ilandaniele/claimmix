@@ -356,6 +356,11 @@ const FIELD_ALIASES: Record<string, string> = {
   // hay_heridos, asked in another language.
   injury_severity: "hay_heridos",
   heridos: "hay_heridos",
+  aseguradora_tercero: "party_b_insurer",
+  compania_tercero: "party_b_insurer",
+  tercero_aseguradora: "party_b_insurer",
+  nombre_tercero: "party_b_name",
+  patente_tercero: "party_b_plate",
 };
 
 /** The one key that stands for this field, whichever alias arrived. */
@@ -376,6 +381,12 @@ const NARRATIVE_HINTS = [
   "resumen",
   "summary",
 ];
+
+/**
+ * Lo que la patente ya dice. «Mi Gol» volvía como «¿el vehículo es un auto?» y
+ * el caso no llegaba a «Listo para Core» (ensayo del 26/09).
+ */
+const DESCRIPTIVE_KEYS = new Set(["tipo_vehiculo"]);
 
 /**
  * Whether a confirmation request about this field is worth sending.
@@ -410,6 +421,7 @@ export function isNameable(fieldKey: string): boolean {
 
 export function isWorthConfirming(fieldKey: string): boolean {
   const key = canonicalFieldKey(fieldKey).toLowerCase();
+  if (DESCRIPTIVE_KEYS.has(key)) return false;
   return !NARRATIVE_HINTS.some((h) => key.includes(h));
 }
 

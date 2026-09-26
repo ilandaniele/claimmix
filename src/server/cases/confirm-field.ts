@@ -41,6 +41,7 @@ import {
   missingDocs,
 } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
+import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import type { UserRow } from "@/lib/db/types";
 import type { CaseStatus, ConfirmField } from "@/lib/schemas/cases";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
@@ -274,7 +275,7 @@ async function confirmar(
         .values({
           case_id: caseId,
           tenant_id: tenantId,
-          field_key: fieldKey,
+          field_key: canonicalFieldKey(fieldKey),
           field_value: confirmedValue,
           confidence: "1.00", // Lo confirmó una persona: no hay incertidumbre.
         })

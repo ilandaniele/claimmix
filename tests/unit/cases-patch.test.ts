@@ -316,7 +316,8 @@ describe("patchCase — confirmar_listo (P6)", () => {
 
     expect(result.case.status).toBe("listo_para_core");
     expect(enTenantVarias).toHaveBeenCalledTimes(1);
-    const sentencias = vi.mocked(enTenantVarias).mock.calls[0]![1](db) as unknown[];
+    const armar = vi.mocked(enTenantVarias).mock.calls[0]![1] as (d: unknown) => unknown[];
+    const sentencias = armar(db);
     expect(sentencias).toHaveLength(2);
     expect(writeAuditLog).not.toHaveBeenCalled();
   });

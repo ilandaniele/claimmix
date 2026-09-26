@@ -13,6 +13,7 @@ import { CaseDetailClient } from "../../src/app/(app)/casos/[id]/CaseDetailClien
 import { LocaleProvider } from "../../src/lib/i18n/LocaleContext";
 import type { Locale } from "../../src/lib/i18n";
 import type { CaseRow } from "../../src/server/cases/list";
+import { SIN_ACCIONES } from "../../src/server/cases/acciones";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
@@ -34,6 +35,8 @@ function detalle(locale: Locale, paraResponder: boolean, puedeMarcar: boolean) {
         paraResponder={paraResponder}
         vistoEn={VISTO}
         puedeMarcar={puedeMarcar}
+        acciones={SIN_ACCIONES}
+        puedeCambiarEstado={true}
       />
     </LocaleProvider>
   );

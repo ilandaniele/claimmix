@@ -14,10 +14,7 @@
 import "server-only";
 
 import { and, count, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
-import {
-  ESTADOS_COMPLETADO_SIN_PERSONA,
-  ESTADOS_ESCALADO,
-} from "@/core/case/fsm";
+import { ESTADOS_ESCALADO } from "@/core/case/fsm";
 
 import { mesArgentino, ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import {
@@ -35,6 +32,7 @@ import {
 } from "@/data/scope";
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
+import { completadoConfirmado } from "@/server/cases/listo-confirmado";
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
@@ -218,11 +216,9 @@ export async function getTenantKpis(
       db
           .select({
             total: sql<number>`count(*)::int`,
-            // Los DOS vocabularios: el canal real termina en `listo_para_core`,
-            // no en `listo`. Ver `ESTADOS_COMPLETADO_SIN_PERSONA`.
-            listo: sql<number>`count(*) filter (where ${inArray(cases.status, [
-              ...ESTADOS_COMPLETADO_SIN_PERSONA,
-            ])})::int`,
+            // Completado por una persona, o ya enviado al Core — nunca el
+            // `listo` legado, que no dice que alguien lo haya mirado.
+            listo: sql<number>`count(*) filter (where ${completadoConfirmado})::int`,
             respondidos: sql<number>`count(${primera})::int`,
             minutos: sql<number>`coalesce(sum(extract(epoch from (${primera} - ${cases.created_at})) / 60), 0)::float8`,
           })

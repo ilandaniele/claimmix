@@ -47,3 +47,8 @@ export const ADMIN_ROLES: UserRole[] = ["owner", "admin"];
  * proyección por rol en toda la pantalla del caso, no un parche en una ruta.
  */
 export const CASE_EDITOR_ROLES: UserRole[] = ["owner", "admin", "specialist", "analyst"];
+
+/** Quién cambia el estado de un caso: un editor, y si es analista, sólo el suyo. */
+export function puedeCambiarEstado(actor: { role: string; id: string }, assignedTo: string | null): boolean {
+  return (CASE_EDITOR_ROLES as readonly string[]).includes(actor.role) && (actor.role !== "analyst" || assignedTo === actor.id);
+}

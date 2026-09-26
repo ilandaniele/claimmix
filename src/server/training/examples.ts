@@ -32,6 +32,7 @@ import { UNSAFE_BLOCKING_REASONS } from "./trainability";
 import { logger } from "@/lib/observability/logger";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { ejemploSinDatosDeLaPersona } from "./sin-datos-de-la-persona";
+import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 
 // ── Few-shot retrieval (immediate learning layer) ─────────────────────────────
 
@@ -164,9 +165,41 @@ export function formatApprovedExamples(examples: ApprovedExample[]): string {
   return examples
     .map(
       (example, i) =>
-        `EXAMPLE ${i + 1} (human-approved):\nINPUT subject: ${sinCentinelas(example.input.subject)}\nINPUT body (excerpt): ${sinCentinelas(example.input.body)}\nEXPECTED OUTPUT: ${sinCentinelas(JSON.stringify(example.expectedOutput))}`
+        `EXAMPLE ${i + 1} (human-approved):\nINPUT subject: ${sinCentinelas(example.input.subject)}\nINPUT body (excerpt): ${sinCentinelas(example.input.body)}\nEXPECTED OUTPUT: ${sinCentinelas(JSON.stringify(canonizarEjemplo(example.expectedOutput)))}`
     )
     .join("\n\n");
+}
+
+/**
+ * Canoniza las claves de `agent_output.fields[]` y `agent_output.extracted_fields`
+ * antes de mostrarlas al modelo — un ejemplo aprobado con `numero_poliza` no
+ * puede enseñar la clave que ya no se guarda. `confirmed_fields` queda como
+ * está: son las que confirmó una persona, no las que canoniza esta función.
+ */
+function canonizarEjemplo(expectedOutput: Record<string, unknown>): Record<string, unknown> {
+  const agentOutput = expectedOutput.agent_output;
+  if (!agentOutput || typeof agentOutput !== "object") return expectedOutput;
+  const ao = agentOutput as Record<string, unknown>;
+
+  const fields = Array.isArray(ao.fields)
+    ? ao.fields.map((f) =>
+        f && typeof f === "object" && "field_key" in f
+          ? { ...f, field_key: canonicalFieldKey(String((f as { field_key: unknown }).field_key)) }
+          : f
+      )
+    : ao.fields;
+
+  const extractedFields =
+    ao.extracted_fields && typeof ao.extracted_fields === "object"
+      ? Object.fromEntries(
+          Object.entries(ao.extracted_fields as Record<string, unknown>).map(([k, v]) => [
+            canonicalFieldKey(k),
+            v,
+          ])
+        )
+      : ao.extracted_fields;
+
+  return { ...expectedOutput, agent_output: { ...ao, fields, extracted_fields: extractedFields } };
 }
 
 // ── Human approval (the ONLY way an example is created) ───────────────────────

@@ -9,6 +9,8 @@ import "server-only";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 import { extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
+import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
+import { hayHeridos } from "@/core/case/heridos-supuestos";
 import { checkDemoBudget, getDemoTenantId } from "@/server/ai/budget";
 import { rateLimit, getClientIp } from "@/lib/rate-limit/index";
 import { ok, err } from "@/lib/api/respond";
@@ -107,6 +109,29 @@ export async function POST(request: NextRequest): Promise<Response> {
         error_name: e instanceof Error ? e.name : "UnknownError",
       }, "demo.public_analyze.provider_error");
     return err(new AppError("INTERNAL_ERROR", "No pudimos analizar el reclamo en este momento. Probá de nuevo en unos minutos."));
+  }
+
+  /*
+   * Espeja la regla real de derivación (P2): severidad alta o crítica, o
+   * heridos. Acá no hay caso ni especialista que lo revise, así que en vez de
+   * mostrar el resultado se lo redacta: puede traer lesiones u otro dato de
+   * salud, y esta pantalla la ve cualquiera sin loguearse.
+   */
+  const sev = classifySeverity(`${parsed.data.subject}\n\n${parsed.data.body}`, result.severity, []);
+  if (requiresSpecialist(sev) || hayHeridos(result)) {
+    return ok({
+      ...result,
+      severity: sev,
+      requires_specialist: true,
+      fields: [],
+      extracted_fields: { claim_type: result.extracted_fields?.claim_type },
+      field_confidences: {},
+      missing_fields: [],
+      fields_pending_confirmation: [],
+      summary: "",
+      suggested_reply: "",
+      injury_severity: null,
+    });
   }
 
   return ok(result);

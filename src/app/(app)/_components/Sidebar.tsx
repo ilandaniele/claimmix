@@ -22,6 +22,7 @@ import {
   MailX,
   MessageSquareReply,
   Sparkles,
+  ListTodo,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -154,6 +155,7 @@ export function Sidebar({
   const puedeVerClientes = (CUSTOMER_PII_ROLES as string[]).includes(role);
 
   const operacionItems: NavItemDef[] = conCandadoPro([
+    { label: t("nav.miCola"), href: "/bandeja?cola=mia", icon: ListTodo },
     { label: t("nav.bandeja") || "Bandeja", href: "/bandeja", icon: Inbox },
     { label: t("bandeja.paraResponder"), href: "/bandeja?para_responder=true", icon: MessageSquareReply },
     /*

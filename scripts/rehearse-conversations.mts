@@ -652,6 +652,23 @@ const SCENARIOS: Scenario[] = [
   },
 
   {
+    id: "accidente-personal-fractura",
+    what: "Una fractura contada sin palabras de gravedad también deriva",
+    turns: [
+      {
+        say: "Me caí de la moto en Av. Colón al 1200 y me fracturé la muñeca, fui a la guardia y me enyesaron. Soy Pablo Díaz, póliza POL-5521-M.",
+        expect: {
+          replies: 1,
+          status: "requiere_especialista",
+          avoids: [...LO_MEDICO, "DNI"],
+          sinPedido: true,
+        },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
+  {
     id: "pregunta",
     what: "Una persona que pregunta algo tiene que recibir una respuesta",
     turns: [

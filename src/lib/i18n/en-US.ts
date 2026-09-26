@@ -16,6 +16,7 @@ export const enUS: Record<TranslationKey, string> = {
   "nav.bandeja": "Inbox",
   "nav.escalados": "Escalated",
   "nav.noRelevantes": "Not relevant",
+  "nav.miCola": "My queue",
   "nav.clientes": "Clients",
   "nav.analisis": "Analysis",
   "nav.metricas": "Metrics",
@@ -203,10 +204,12 @@ export const enUS: Record<TranslationKey, string> = {
   "field.accident_description": "Accident description",
   "field.date": "Incident date",
   "field.location": "Incident location",
-  "field.party_a_name": "Driver A — Name",
-  "field.party_a_plate": "Driver A — Plate",
-  "field.party_b_name": "Driver B — Name",
-  "field.party_b_plate": "Driver B — Plate",
+  "field.party_a_name": "Insured — Name",
+  "field.party_a_plate": "Insured — Plate",
+  "field.party_b_name": "Third party — Name",
+  "field.party_b_plate": "Third party — Plate",
+  "field.party_b_insurer": "Third party — Insurer",
+  "field.heridos_cantidad": "Number of injured people",
   "field.declared_damage": "Declared damage",
   "field.stolen_items": "Stolen items",
   "field.hail_date": "Hail date",
@@ -450,6 +453,11 @@ export const enUS: Record<TranslationKey, string> = {
   "attachment.rejected.aggregate_size_exceeded": "The files in that message were over the limit together. Ask for them one at a time.",
   "attachment.rejected.decode_failed": "It arrived damaged and could not be read. Ask the policyholder to send it again.",
   "attachment.rejected.unknown": "Could not be stored. Ask the policyholder to send it again.",
+  "attachment.rejected.download_failed": "We could not download the WhatsApp file; ask them to send it again.",
+
+  // Which requested document this attachment closed — shown only once the
+  // agent has identified it (`matched_doc_key`).
+  "case.detail.reconocidoComo": "Recognised as: {doc}",
 
   // ── Gmail status panel ─────────────────────────────────────────────────────
   "gmail.accounts.title": "Gmail intake accounts",
@@ -681,7 +689,7 @@ export const enUS: Record<TranslationKey, string> = {
   "metricas.actividad.nota": "Real WhatsApp and email only, no simulations. A claim opened is a case confirmed as a claim, so there can be fewer than the month's total.",
   "metricas.card.completitudAuto": "Auto-completion rate",
   "metricas.card.escalados": "Escalated claims",
-  "metricas.card.tiempoApertura": "Average time to open",
+  "metricas.card.primeraRespuesta": "Average time to first response",
   "metricas.card.totalMes": "Total claims (month)",
   "metricas.col.casosCerrados": "Cases closed",
   "metricas.col.costo": "Cost",
@@ -1067,5 +1075,20 @@ export const enUS: Record<TranslationKey, string> = {
   "asistente.enviando": "Asking…",
   "asistente.demasiadas": "Too many questions in a row. Wait a moment and try again.",
   "asistente.error": "Could not answer the question. Try again.",
+
+  // ── Help — how the interface works, same text in the demo and the app ──
+  "ayuda.abrir": "Help: how it works",
+  "ayuda.titulo": "How it works",
+  "ayuda.cerrar": "Close",
+  "ayuda.paso1.titulo": "1. The claim arrives on its own",
+  "ayuda.paso1.texto": "Claims arrive by email or WhatsApp and the agent fills in the data.",
+  "ayuda.paso2.titulo": "2. The inbox",
+  "ayuda.paso2.texto": "In the inbox you filter by status, type, severity and channel. «Escalated», «Needs reply» and «Not relevant» in the sidebar are shortcuts to those filters.",
+  "ayuda.paso3.titulo": "3. Confirming a value",
+  "ayuda.paso3.texto": "If a value has medium confidence or does not match what we already had, the case asks you to confirm it: confirm, correct or reject it from the case detail.",
+  "ayuda.paso4.titulo": "4. Sending to a specialist",
+  "ayuda.paso4.texto": "With high or critical severity, or when the claim mentions injuries, the case moves to «Requires specialist» on its own and a person reviews it before it continues.",
+  "ayuda.paso5.titulo": "5. Export",
+  "ayuda.paso5.texto": "«Export» downloads a CSV with the filters you are looking at.",
 
 } as const;

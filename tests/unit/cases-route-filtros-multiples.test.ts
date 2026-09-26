@@ -67,7 +67,8 @@ describe("GET /api/cases — filtros multi-select", () => {
     expect(res.status).toBe(200);
     expect(mockListCases).toHaveBeenCalledWith(
       { tenantId: TENANT_ID },
-      expect.objectContaining({ type: ["choque", "robo"] })
+      expect.objectContaining({ type: ["choque", "robo"] }),
+      USER_ID
     );
   });
 
@@ -77,7 +78,8 @@ describe("GET /api/cases — filtros multi-select", () => {
     expect(res.status).toBe(200);
     expect(mockListCases).toHaveBeenCalledWith(
       { tenantId: TENANT_ID },
-      expect.objectContaining({ type: ["choque"] })
+      expect.objectContaining({ type: ["choque"] }),
+      USER_ID
     );
   });
 
@@ -96,7 +98,8 @@ describe("GET /api/cases — filtros multi-select", () => {
     expect(res.status).toBe(200);
     expect(mockListCases).toHaveBeenCalledWith(
       { tenantId: TENANT_ID },
-      expect.objectContaining({ para_responder: true })
+      expect.objectContaining({ para_responder: true }),
+      USER_ID
     );
   });
 
@@ -106,7 +109,8 @@ describe("GET /api/cases — filtros multi-select", () => {
     expect(res.status).toBe(200);
     expect(mockListCases).toHaveBeenCalledWith(
       { tenantId: TENANT_ID },
-      expect.objectContaining({ para_responder: undefined })
+      expect.objectContaining({ para_responder: undefined }),
+      USER_ID
     );
   });
 });

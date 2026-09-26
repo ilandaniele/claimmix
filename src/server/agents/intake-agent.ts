@@ -266,7 +266,7 @@ export async function createWhatsAppIntake(
     target_type: "case",
     target_id: caseId,
     payload: {
-      channel: "whatsapp",
+      channel,
       action: abierto.creado ? "new_case" : "thread_update",
       provider: "whatsapp",
     },
@@ -310,7 +310,18 @@ async function storeWhatsAppMedia(
       const file = ref.data
         ? { data: ref.data, mimeType: ref.mimeType }
         : await downloadWhatsAppMedia(ref.id);
-      if (!file) continue;
+      if (!file) {
+        // No es lo mismo que «pasaba el tope»: acá no hay ni siquiera un
+        // peso. Igual se anota, para que el analista vea que algo se mandó.
+        downloaded.push({
+          Name: ref.filename,
+          Content: "",
+          ContentType: ref.mimeType,
+          ContentLength: 0,
+          rechazoPrevio: "download_failed",
+        });
+        continue;
+      }
 
       /*
        * Demasiado grande NO es lo mismo que no se pudo bajar.

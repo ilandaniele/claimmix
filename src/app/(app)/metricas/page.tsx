@@ -196,8 +196,8 @@ export default async function MetricasPage({
               accent="blue"
             />
             <SummaryCard
-              label={t("metricas.card.tiempoApertura")}
-              value={formatMinutes(data!.summary.avg_opening_time_minutes)}
+              label={t("metricas.card.primeraRespuesta")}
+              value={formatMinutes(data!.summary.avg_first_response_minutes)}
               accent="slate"
             />
             <SummaryCard
@@ -501,7 +501,7 @@ type Accent = "blue" | "green" | "red" | "slate";
 
 const ACCENT_CLASSES: Record<Accent, string> = {
   blue: "border-blue-200 bg-blue-50",
-  green: "border-green-200 bg-green-50",
+  green: "border-emerald-200 bg-emerald-50",
   red: "border-red-200 bg-red-50",
   slate: "border-slate-200 bg-slate-50",
 };

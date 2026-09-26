@@ -143,6 +143,9 @@ export const CaseQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => (v === "true" ? true : undefined)),
+  // «Mi cola»: nunca acepta un id de usuario por la query, sólo esta marca.
+  // Quién es «mi» lo resuelve el servidor con la sesión.
+  cola: z.literal("mia").optional(),
 });
 
 export type CaseQuery = z.infer<typeof CaseQuerySchema>;

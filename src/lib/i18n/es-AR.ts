@@ -17,6 +17,7 @@ export const esAR = {
   "nav.bandeja": "Bandeja",
   "nav.escalados": "Escalados",
   "nav.noRelevantes": "No relevantes",
+  "nav.miCola": "Mi cola",
   "nav.clientes": "Clientes",
   "nav.analisis": "Análisis",
   "nav.metricas": "Métricas",
@@ -212,10 +213,12 @@ export const esAR = {
   "field.accident_description": "Descripción del siniestro",
   "field.date": "Fecha del siniestro",
   "field.location": "Lugar del siniestro",
-  "field.party_a_name": "Conductor A — Nombre",
-  "field.party_a_plate": "Conductor A — Patente",
-  "field.party_b_name": "Conductor B — Nombre",
-  "field.party_b_plate": "Conductor B — Patente",
+  "field.party_a_name": "Asegurado — Nombre",
+  "field.party_a_plate": "Asegurado — Patente",
+  "field.party_b_name": "Tercero — Nombre",
+  "field.party_b_plate": "Tercero — Patente",
+  "field.party_b_insurer": "Tercero — Aseguradora",
+  "field.heridos_cantidad": "Cantidad de heridos",
   "field.declared_damage": "Daños declarados",
   "field.stolen_items": "Bienes sustraídos",
   "field.hail_date": "Fecha de granizo",
@@ -468,6 +471,11 @@ export const esAR = {
   "attachment.rejected.aggregate_size_exceeded": "Entre todos los archivos de ese mensaje se pasaron del tope. Pedile que los mande de a uno.",
   "attachment.rejected.decode_failed": "Llegó dañado y no se pudo leer. Pedile al asegurado que lo mande de nuevo.",
   "attachment.rejected.unknown": "No se pudo guardar. Pedile al asegurado que lo mande de nuevo.",
+  "attachment.rejected.download_failed": "No pudimos bajar el archivo de WhatsApp; pedile que lo reenvíe.",
+
+  // «Qué documento pedido cerró este adjunto» — sólo se muestra cuando el
+  // agente ya lo identificó (`matched_doc_key`).
+  "case.detail.reconocidoComo": "Reconocido como: {doc}",
 
   "gmail.accounts.title": "Cuentas Gmail de ingreso",
   "gmail.accounts.helper": "Conectá una o más casillas Gmail para crear siniestros automáticamente desde cada inbox.",
@@ -708,7 +716,7 @@ export const esAR = {
   "metricas.actividad.nota": "Sólo WhatsApp y mail reales, sin simulaciones. Un reclamo abierto es un caso confirmado como siniestro, así que pueden ser menos que el total del mes.",
   "metricas.card.completitudAuto": "Tasa de completitud automática",
   "metricas.card.escalados": "Siniestros escalados",
-  "metricas.card.tiempoApertura": "Tiempo medio de apertura",
+  "metricas.card.primeraRespuesta": "Tiempo medio hasta la primera respuesta",
   "metricas.card.totalMes": "Total siniestros (mes)",
   "metricas.col.casosCerrados": "Casos cerrados",
   "metricas.col.costo": "Costo",
@@ -1094,6 +1102,21 @@ export const esAR = {
   "asistente.enviando": "Consultando…",
   "asistente.demasiadas": "Demasiadas preguntas seguidas. Esperá un momento y volvé a intentar.",
   "asistente.error": "No se pudo responder la pregunta. Probá de nuevo.",
+
+  // ── Ayuda — cómo se usa la interfaz, mismo texto en la demo y en la app ─
+  "ayuda.abrir": "Ayuda: cómo se usa",
+  "ayuda.titulo": "Cómo se usa",
+  "ayuda.cerrar": "Cerrar",
+  "ayuda.paso1.titulo": "1. El siniestro llega solo",
+  "ayuda.paso1.texto": "Los siniestros llegan solos por mail o WhatsApp y el agente completa los datos.",
+  "ayuda.paso2.titulo": "2. La bandeja",
+  "ayuda.paso2.texto": "En la bandeja filtrás por situación, tipo, severidad y canal. «Escalados», «Para responder» y «No relevantes» de la barra son atajos a esos filtros.",
+  "ayuda.paso3.titulo": "3. Confirmar un dato",
+  "ayuda.paso3.texto": "Si un dato tiene confianza media o no coincide con lo que ya teníamos, el caso te pide confirmarlo: lo confirmás, corregís o rechazás desde el detalle.",
+  "ayuda.paso4.titulo": "4. Derivar a un especialista",
+  "ayuda.paso4.texto": "Con severidad alta o crítica, o si el reclamo menciona lesiones, el caso pasa solo a «Requiere especialista» y una persona lo revisa antes de seguir.",
+  "ayuda.paso5.titulo": "5. Exportar",
+  "ayuda.paso5.texto": "«Exportar» baja un CSV con los mismos filtros que estás mirando.",
 
 } as const;
 

@@ -70,6 +70,22 @@ describe("ejemploSinDatosDeLaPersona", () => {
     expect(body).toContain("[NOMBRE]");
   });
 
+  it("reconoce el nombre y el DNI guardados con las claves en castellano", () => {
+    const ejemplo = {
+      input_payload: { subject: "", body: "Soy Martín Sosa, DNI 30145882. Otro dato: Sosa." },
+      expected_output: {
+        confirmed_fields: [
+          { field_key: "nombre_asegurado", field_value: "Martín Sosa", confidence: 0.9 },
+        ],
+        agent_output: { extracted_fields: { dni_asegurado: "30145882" } },
+      },
+    };
+
+    const body = (ejemploSinDatosDeLaPersona(ejemplo).input_payload as { body: string }).body;
+
+    expect(body).toBe("Soy [NOMBRE], DNI [DNI]. Otro dato: [NOMBRE].");
+  });
+
   it("saca sender_email de donde aparezca", () => {
     const ejemplo = {
       input_payload: { subject: "x", body: "y", sender_email: "persona@mail.com" },

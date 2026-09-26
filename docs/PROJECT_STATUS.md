@@ -3663,6 +3663,72 @@ como deriva.
 - La región de Vertex sigue en `us-central1`: el dueño rechazó `global` el
   25/09.
 
+### 📋 El documento de mejoras a la interfaz, punto por punto (2026-09-26)
+
+El documento «Mejoras a la interfaz y funcionalidad del agente» (Google Docs,
+modificado por última vez el 17/09) lista 33 puntos, de A1 a H3. Una
+auditoría contra el código marcó A3 como hecho (#192) y C6 como no aplicable:
+«choque» es el ramo correcto para quien reclama por su propio auto. El resto
+entró en dos lotes.
+
+**Lote 1 (en `main` con #309).**
+- #304: la pantalla del caso se lee (B1-B5, C2, C3, C7, C8, D1, D2, D4, E1,
+  E3, E4). Estados reales de los documentos, un rótulo por dato, un panel «Qué
+  falta» y una línea de tiempo sin «Motivo: null».
+- #305: una clave canónica por dato, el teléfono de WhatsApp nunca como email,
+  la parte A siempre es el asegurado, la derivación por severidad escrita una
+  sola vez y toda lesión declarada deriva (C1, C3-C5, C7, D3, F2).
+- #306: filtros sin carreras, «Mi cola» (`/bandeja?cola=mia`), el analista
+  asignado en la bandeja y el tiempo hasta la primera respuesta medido con el
+  primer mensaje saliente (A2, A5, E1, H1, H2).
+- #307: la demo pública no muestra datos de salud, lleva a la bandeja y la app
+  tiene un botón de ayuda (A1, A4, D4, F1).
+- #308: los adjuntos se abren desde el caso por
+  `GET /api/cases/[id]/attachments/[attachmentId]`, en streaming y con
+  `CASE_EDITOR_ROLES` (E2, B5, D2). Viewer no abre archivos.
+- El tope del bundle pasó de 300 a 310 kB en #304: `qa` ya pesaba 297 kB por
+  crecimiento orgánico, con los dos diccionarios en un solo chunk y sin
+  duplicados. Está dicho en el commit y en `docs/PROMOCION.md`.
+
+**Lote 2 (decisiones del dueño del 26/09).**
+- #310 (B3, H3): datos obligatorios por ramo en
+  `src/core/case/required-fields.ts`: patente en los ramos de auto, provincia
+  en todos, hora en `choque` y `rc`. «Listo para Core» pide que una persona
+  confirme («Confirmar y dejar listo», auditado como `case.ready_confirmed`), y
+  una corrida posterior del agente invalida la confirmación. La «Tasa de
+  completitud automática» cuenta sólo los casos confirmados más los
+  `enviado_a_core`, así que va a bajar: antes contaba casos que nadie había
+  mirado.
+- #311 (E5): los ejemplos de referencia del prompt tachan nombre y DNI
+  (`[NOMBRE]`, `[DNI]`), también por clave canónica. El fine-tuning usa sólo
+  casos `email_sim` y `whatsapp_sim`. Los eventos dicen «ejemplo de
+  referencia, no se entrena ningún modelo».
+- #312 (B6): «Reenviar pedido»
+  (`POST /api/cases/[id]/reenviar-pedido`) y «Reabrir y reenviar» para un
+  caso cerrado por abandono. Por WhatsApp sólo dentro de la ventana de 24 h.
+  No se reenvía un pedido de menos de 10 minutos. La revisión de seguridad en
+  Fable confirmó un hallazgo medio (P8-01: reabrir un caso que después cerró
+  una persona) y quedó corregido con `ultimoCierreVigente`.
+- #313: el Post-deploy de QA sobre #310 salió rojo en `mail-completo`. El
+  agente eligió no pedir el parte amistoso en el primer turno y la negativa
+  «No completamos ningún parte amistoso» se descartaba. Ahora cuenta la
+  negativa de un documento pendiente que la persona nombra, aunque no
+  estuviera en el último pedido, y la cita tiene que nombrarlo.
+
+**Para decidir.**
+- Un analista confirma o marca «Revisado» sólo en casos asignados, y la
+  entrada real no asigna. Cambiarlo es una línea en `puedeCambiarEstado`.
+- «Reabrir y reenviar» queda deshabilitado para WhatsApp hasta que haya una
+  plantilla aprobada por Meta: el barrido cierra a los 14 días, fuera de la
+  ventana. Los casos de mail funcionan.
+- El modelo afinado del 30/06 se entrenó con ejemplos reales. No está activo:
+  el inquilino usa el modelo base.
+- `export.ts` exporta `training_examples` sin tachar, y «ejemplo de
+  entrenamiento» sigue en cuatro archivos de la interfaz.
+- Gmail «Limited Use» puede alcanzar a los ejemplos tachados de casos reales
+  llegados por Gmail. Lo confirma el dueño.
+- Falta verificar en un preview la apertura de un PDF de 8 MB por streaming.
+
 ### 🙋 Waiting on you (not code)
 
 - ~~**Qué hacer con la respuesta a un caso ya derivado.**~~ ✅ **RESUELTO

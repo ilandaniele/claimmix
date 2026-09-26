@@ -66,16 +66,34 @@ const CTX = {
 };
 
 /** Las 8 filas de `consultasDelReenvio`, en orden, para un info_faltante con algo pendiente. */
-function filasBase(o: Partial<{ status: string; channel: string; assignedTo: string | null; ultimoCierre: string }> = {}) {
+function filasBase(
+  o: Partial<{
+    status: string;
+    channel: string;
+    assignedTo: string | null;
+    ultimoCierre: string;
+    closedAt: string | null;
+    cierreEn: string;
+  }> = {}
+) {
   return [
-    [{ id: CASE_ID, status: o.status ?? "info_faltante", channel: o.channel ?? "email", assigned_to: o.assignedTo ?? null, updated_at: LEIDO }],
+    [{
+      id: CASE_ID,
+      status: o.status ?? "info_faltante",
+      channel: o.channel ?? "email",
+      assigned_to: o.assignedTo ?? null,
+      updated_at: LEIDO,
+      closed_at: o.closedAt ?? (o.ultimoCierre ? "2026-09-20T00:00:00.000Z" : null),
+    }],
     [{ from_addr: "juan@x.com", received_at: "2026-09-25T00:00:00.000Z" }],
     [],
     [{ asked_keys: ["full_name"], created_at: "2026-09-01T00:00:00.000Z" }],
     [],
     [],
     [],
-    o.ultimoCierre ? [{ event_type: o.ultimoCierre }] : [],
+    o.ultimoCierre
+      ? [{ event_type: o.ultimoCierre, created_at: o.cierreEn ?? "2026-09-20T00:00:00.000Z" }]
+      : [],
   ];
 }
 
@@ -205,5 +223,26 @@ describe("reenviarPedido", () => {
     expect(mockWriteAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ event_type: "claim.request_resent", payload: { claves: ["full_name"], reabierto: true } })
     );
+  });
+
+  it("P8-01: un abandono viejo no reabre un caso que después cerró una persona", async () => {
+    // El caso se reabrió por abandono, y luego lo cerró una persona: `closed_at`
+    // quedó más nuevo que la única fila `claim.closed_abandoned` de la auditoría.
+    configurarLecturas(
+      filasBase({
+        status: "cerrado",
+        assignedTo: USER_ID,
+        ultimoCierre: "claim.closed_abandoned",
+        closedAt: "2026-09-24T00:00:00.000Z",
+        cierreEn: "2026-09-10T00:00:00.000Z",
+      })
+    );
+
+    const r = await reenviarPedido(CTX as never, CASE_ID, true);
+
+    expect(r).toEqual({ ok: false, motivo: "cierre_no_es_abandono" });
+    expect(db.update).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockWriteAuditLog).not.toHaveBeenCalled();
   });
 });

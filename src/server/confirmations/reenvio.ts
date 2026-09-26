@@ -53,6 +53,7 @@ export function consultasDelReenvio(db: ClienteDatos, caseId: string): readonly 
         channel: cases.channel,
         assigned_to: cases.assigned_to,
         updated_at: cases.updated_at,
+        closed_at: cases.closed_at,
       })
       .from(cases)
       .where(eq(cases.id, caseId))
@@ -105,7 +106,7 @@ export function consultasDelReenvio(db: ClienteDatos, caseId: string): readonly 
       .where(eq(claimFieldConfirmations.case_id, caseId)),
 
     db
-      .select({ event_type: auditLog.event_type })
+      .select({ event_type: auditLog.event_type, created_at: auditLog.created_at })
       .from(auditLog)
       .where(
         and(
@@ -126,6 +127,7 @@ export interface DatosDelReenvio {
     channel: string;
     assigned_to: string | null;
     updated_at: string | null;
+    closed_at: string | null;
   } | null;
   destinatario: string | null;
   ultimoEntrante: string | null;
@@ -136,11 +138,32 @@ export interface DatosDelReenvio {
   ultimoCierre: string | null;
 }
 
-type FilaDeCaso = { id: string; status: string; channel: string; assigned_to: string | null; updated_at: string | null };
+type FilaDeCaso = {
+  id: string;
+  status: string;
+  channel: string;
+  assigned_to: string | null;
+  updated_at: string | null;
+  closed_at: string | null;
+};
 type FilaDeContacto = { from_addr: string | null; received_at: string };
 type FilaDelPedido = { asked_keys: string[] | null; created_at: string };
 type FilaDeCampoCruda = { field_key: string; field_value: string | null; confidence: string | number };
 type FilaDeConfirmacionCruda = { field_name: string; status: string; suggested_value: string | null };
+type FilaDeCierre = { event_type: string; created_at: string };
+
+/**
+ * El cierre sólo cuenta si es tan nuevo como el `closed_at` vigente del caso.
+ * Sin esto, un `claim.closed_abandoned` de un cierre viejo (reabierto y
+ * cerrado de nuevo, esta vez por una persona) sigue siendo la última fila con
+ * ese `event_type` y hace pasar un cierre humano por un abandono.
+ */
+function ultimoCierreVigente(caso: FilaDeCaso | undefined, cierre: FilaDeCierre | undefined): string | null {
+  if (!cierre || !caso?.closed_at) return null;
+  return new Date(cierre.created_at).getTime() >= new Date(caso.closed_at).getTime()
+    ? cierre.event_type
+    : null;
+}
 
 /** Arma `DatosDelReenvio` a partir de las 8 filas de `consultasDelReenvio`, en el mismo orden. */
 export function deFilasDelReenvio(filas: readonly unknown[]): DatosDelReenvio {
@@ -161,7 +184,7 @@ export function deFilasDelReenvio(filas: readonly unknown[]): DatosDelReenvio {
     FilaDeCampoCruda[],
     Array<{ doc_key: string }>,
     FilaDeConfirmacionCruda[],
-    Array<{ event_type: string }>,
+    FilaDeCierre[],
   ];
 
   // El de claim_messages manda; raw_messages es sólo el respaldo del flujo simulado.
@@ -186,7 +209,7 @@ export function deFilasDelReenvio(filas: readonly unknown[]): DatosDelReenvio {
       status: c.status,
       suggested_value: c.suggested_value,
     })),
-    ultimoCierre: cierreFilas[0]?.event_type ?? null,
+    ultimoCierre: ultimoCierreVigente(casoFilas[0], cierreFilas[0]),
   };
 }
 

@@ -19,6 +19,7 @@ function datos(overrides: Partial<DatosDelReenvio> = {}): DatosDelReenvio {
       channel: "email",
       assigned_to: null,
       updated_at: "2026-09-01T00:00:00.000Z",
+      closed_at: null,
     },
     destinatario: "juan@x.com",
     ultimoEntrante: "2026-09-25T00:00:00.000Z",

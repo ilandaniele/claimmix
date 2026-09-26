@@ -272,7 +272,9 @@ export async function orchestratePostExtraction(
 
   // ── B. Severity escalation — AC11 ────────────────────────────────────────
   const severity = extractedClaim.severity;
-  const isHighSeverity = severity === "high" || severity === "critical";
+  const heridos = hayHeridos(extractedClaim);
+  const grave = severity === "high" || severity === "critical";
+  const isHighSeverity = grave || heridos;
   const derivaSola = isHighSeverity || extractedOutput.polizas?.derivar === true;
 
   if (derivaSola) {
@@ -290,9 +292,11 @@ export async function orchestratePostExtraction(
       )?.field_value ?? null,
       summary: extractedClaim.summary ?? null,
       heridos: isHighSeverity && hayHeridos(extractedClaim),
-      reason: isHighSeverity
+      reason: grave
         ? `severidad ${severity}`
-        : `póliza sin vigencia${extractedOutput.polizas?.vencioEl ? ` desde ${extractedOutput.polizas.vencioEl}` : ""}`,
+        : heridos
+          ? "lesiones"
+          : `póliza sin vigencia${extractedOutput.polizas?.vencioEl ? ` desde ${extractedOutput.polizas.vencioEl}` : ""}`,
     });
   }
 
@@ -1560,10 +1564,11 @@ async function escalate(opts: {
   summary?: string | null;
   reason: string;
   /**
-   * Alguien se lastimó: la derivación abre con una frase de cuidado. Sólo la
-   * pasa la derivación por gravedad, nunca la del titular ni la de póliza sin
-   * gravedad. Es sólo el booleano: ni el mensaje, ni el redactor, ni la
-   * auditoría necesitan el detalle médico.
+   * Alguien se lastimó: la derivación abre con una frase de cuidado. La pasa
+   * la derivación por gravedad y la que sale porque hay heridos aunque la
+   * gravedad no lo pida; nunca la del titular ni la de póliza sin gravedad.
+   * Es sólo el booleano: ni el mensaje, ni el redactor, ni la auditoría
+   * necesitan el detalle médico.
    */
   heridos?: boolean;
   /**

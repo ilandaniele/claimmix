@@ -93,6 +93,7 @@ describe("MissingDocsList — a document nobody has", () => {
     expect(screen.getByText("No lo tienen")).toBeInTheDocument();
     expect(screen.queryByText("Recibido")).not.toBeInTheDocument();
     expect(screen.queryByText("Pendiente")).not.toBeInTheDocument();
+    expect(screen.queryByText("Falta")).not.toBeInTheDocument();
   });
 
   it("quotes what they said, so someone can judge whether to insist", () => {
@@ -111,5 +112,12 @@ describe("MissingDocsList — a document nobody has", () => {
     show([doc({ doc_key: "fotos_danos", satisfied_at: "2026-08-20T19:18:08Z" })]);
 
     expect(screen.getByText("Recibido")).toBeInTheDocument();
+  });
+
+  it("no dates reads as 'Falta', never as 'Excusado'", () => {
+    show([doc({ doc_key: "fotos_danos", requested_at: null })]);
+
+    expect(screen.getByText("Falta")).toBeInTheDocument();
+    expect(screen.queryByText("Excusado")).not.toBeInTheDocument();
   });
 });

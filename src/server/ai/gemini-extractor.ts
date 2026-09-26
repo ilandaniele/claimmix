@@ -561,7 +561,8 @@ export async function extractEmailClaimGemini(
       payload.knownPatterns,
       payload.senderEmail,
       payload.agentTraining,
-      payload.learning
+      payload.learning,
+      payload.channel
     ) + schemaSuffix();
 
   const userMessage =

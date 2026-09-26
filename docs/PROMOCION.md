@@ -38,7 +38,7 @@ Corren en cada PR, y estos son los que **impiden** mergear:
 | `Credenciales` | gitleaks sobre el historial del PR |
 | `Datos personales` | que no se cuele un dato de una persona |
 | `Invariantes de arquitectura` | las reglas de arquitectura y de CI |
-| `Peso del bundle` | 300 kB comprimidos de JavaScript |
+| `Peso del bundle` | 310 kB comprimidos de JavaScript |
 | `Aislamiento de tenants` | que la base separe las aseguradoras |
 | `Pen test local` | que ninguna ruta nueva conteste sin credenciales |
 

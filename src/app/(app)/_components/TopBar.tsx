@@ -4,6 +4,7 @@ import { useFormStatus } from "react-dom";
 import { LogOut } from "lucide-react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Ayuda } from "./Ayuda";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { signOut } from "@/app/login/actions";
 
@@ -75,6 +76,7 @@ export function TopBar({ fullName, role }: TopBarProps) {
   return (
     <header className="flex h-16 flex-shrink-0 items-center justify-end px-6">
       <div className="flex items-center gap-2">
+        <Ayuda />
         <ThemeToggle />
         <LanguageSwitcher />
 

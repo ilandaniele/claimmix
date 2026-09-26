@@ -26,6 +26,7 @@
  */
 
 import type { ReactNode } from "react";
+import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 
 /**
  * La tarjeta de sección: el bloque que se repite en todo el tablero.
@@ -234,4 +235,51 @@ export function FieldGrid({
   className?: string;
 }) {
   return <dl className={`grid grid-cols-1 gap-x-6 gap-y-4 ${className}`}>{children}</dl>;
+}
+
+/**
+ * La barra de confianza chica, compartida por las tres pantallas que la
+ * dibujaban cada una por su cuenta (`ExtractedFieldsTable`, `AgentRunPanel`,
+ * `FieldConfirmationsPanel`). Sin hooks: se puede usar desde un server
+ * component.
+ */
+export function ConfidenceBar({ value }: { value: number }) {
+  const pct = Math.round(value * 100);
+
+  let trackColor: string;
+  let fillColor: string;
+  let textColor: string;
+
+  if (value >= 0.7) {
+    trackColor = "bg-green-100";
+    fillColor = "bg-green-500";
+    textColor = "text-green-700";
+  } else if (value >= 0.5) {
+    trackColor = "bg-yellow-100";
+    fillColor = "bg-yellow-500";
+    textColor = "text-yellow-700";
+  } else {
+    trackColor = "bg-red-100";
+    fillColor = "bg-red-500";
+    textColor = "text-red-700";
+  }
+
+  return (
+    <div
+      className="flex items-center gap-2"
+      aria-label={`Confianza: ${pct}%`}
+      role="meter"
+      aria-valuenow={pct}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      <div
+        className={`h-1.5 w-16 rounded-full ${trackColor} overflow-hidden`}
+        aria-hidden="true"
+      >
+        <div className={`h-full rounded-full ${fillColor} transition-all ${anchoDeBarra(pct)}`} />
+      </div>
+      <span className={`text-xs tabular-nums font-medium ${textColor}`}>{pct}%</span>
+    </div>
+  );
 }

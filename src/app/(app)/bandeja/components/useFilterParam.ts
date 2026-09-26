@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useNavegacion } from "./navegacion-pendiente";
 
 /**
@@ -18,13 +18,12 @@ import { useNavegacion } from "./navegacion-pendiente";
  * la URL queda `?type=choque&type=robo` y no un valor pisando al otro.
  */
 export function useFilterParam(): (clave: string, valores: readonly string[]) => void {
-  const { empujar } = useNavegacion();
+  const { empujar, paramsVisibles } = useNavegacion();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
 
   return useCallback(
     (clave: string, valores: readonly string[]) => {
-      const params = new URLSearchParams(searchParams.toString());
+      const params = new URLSearchParams(paramsVisibles.toString());
       params.delete(clave);
       for (const valor of valores) params.append(clave, valor);
 
@@ -33,7 +32,7 @@ export function useFilterParam(): (clave: string, valores: readonly string[]) =>
 
       empujar(`${pathname}?${params.toString()}`);
     },
-    [empujar, pathname, searchParams]
+    [empujar, pathname, paramsVisibles]
   );
 }
 
@@ -49,13 +48,12 @@ export function useFilterParam(): (clave: string, valores: readonly string[]) =>
  * Acá se borra todo sobre una sola copia y se empuja una sola vez.
  */
 export function useLimpiarFiltros(): (params: string[]) => void {
-  const { empujar } = useNavegacion();
+  const { empujar, paramsVisibles } = useNavegacion();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
 
   return useCallback(
     (params: string[]) => {
-      const siguientes = new URLSearchParams(searchParams.toString());
+      const siguientes = new URLSearchParams(paramsVisibles.toString());
       for (const clave of params) siguientes.delete(clave);
 
       // Lo mismo que al filtrar: el conjunto es otro, la página vuelve a la 1.
@@ -64,7 +62,7 @@ export function useLimpiarFiltros(): (params: string[]) => void {
       const query = siguientes.toString();
       empujar(query ? `${pathname}?${query}` : pathname);
     },
-    [empujar, pathname, searchParams]
+    [empujar, pathname, paramsVisibles]
   );
 }
 
@@ -83,22 +81,21 @@ export function usePaginacion(): {
   irAPagina: (pagina: number) => void;
   cambiarTamanoDePagina: (porPagina: number) => void;
 } {
-  const { empujar } = useNavegacion();
+  const { empujar, paramsVisibles } = useNavegacion();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
 
   const irAPagina = useCallback(
     (pagina: number) => {
-      const params = new URLSearchParams(searchParams.toString());
+      const params = new URLSearchParams(paramsVisibles.toString());
       params.set("page", String(pagina));
       empujar(`${pathname}?${params.toString()}`);
     },
-    [empujar, pathname, searchParams]
+    [empujar, pathname, paramsVisibles]
   );
 
   const cambiarTamanoDePagina = useCallback(
     (porPagina: number) => {
-      const params = new URLSearchParams(searchParams.toString());
+      const params = new URLSearchParams(paramsVisibles.toString());
       params.set("per_page", String(porPagina));
       // La fila 1 del tamaño nuevo está siempre en la página 1: quedarse en el
       // número de página viejo puede caer más allá del final de una lista más
@@ -106,7 +103,7 @@ export function usePaginacion(): {
       params.set("page", "1");
       empujar(`${pathname}?${params.toString()}`);
     },
-    [empujar, pathname, searchParams]
+    [empujar, pathname, paramsVisibles]
   );
 
   return { irAPagina, cambiarTamanoDePagina };

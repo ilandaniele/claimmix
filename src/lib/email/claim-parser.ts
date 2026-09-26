@@ -30,8 +30,15 @@ const FULL_NAME_RE = /\bNombre\s+completo\s*:\s*(.+?)(?=\s+-\s*(?:DNI|Tel[eé]fo
 const PHONE_RE = /\bTel[eé]fono\s*:\s*([+()0-9][+()0-9\s.-]{6,40})/i;
 const LOCATION_RE = /\ben\s+la\s+intersecci[oó]n\s+de\s+(.+?)(?:\.|El\s+otro|Hubo\s+da[ñn]os|Tipo\s+de\s+siniestro|Documentaci[oó]n|$)/i;
 const PLATE_PATTERN_SOURCE = "[A-Z]{2}\\s?\\d{3}\\s?[A-Z]{2}|[A-Z]{3}\\s?\\d{3}";
-const PLATE_RE = new RegExp(`\\b(?:dominio|patente)\\s+(${PLATE_PATTERN_SOURCE})(?=\\W|$)`, "gi");
-const VEHICLE_RE = new RegExp(`\\b(?:mi\\s+veh[ií]culo|un)\\s+\\(([^()]*?)\\s*,?\\s*patente\\s+${PLATE_PATTERN_SOURCE}\\)`, "gi");
+/**
+ * La patente del asegurado, y sólo la del asegurado: «mi vehículo» / «mi
+ * auto», con o sin la descripción entre paréntesis. La del tercero nunca sale
+ * de acá — la dice el modelo, en `fields[]`, cuando el texto la nombra.
+ */
+const VEHICLE_RE = new RegExp(
+  `\\bmi\\s+(?:veh[ií]culo|auto)\\b(?:\\s*\\([^()]*?patente\\s+(${PLATE_PATTERN_SOURCE})\\)|\\s+patente\\s+(${PLATE_PATTERN_SOURCE}))`,
+  "i"
+);
 const PERSON_DNI_RE =
   /\bpersona\s+([A-Z][A-Z\s.'-]{3,120}?)\s+con\s+(?:DU|DNI)\s*(?:Nro\.?|N[ro]*\.?|No\.?)?\s*:?\s*[0-9.]{7,12}(?=\D|$)/i;
 const GREETING_NAME_RE =
@@ -91,15 +98,29 @@ export function parseEmailClaimFields(input: ParseInput): ExtractedField[] {
   addField(fields, "accident_description", extractAccidentDescription(subject) ?? extractBodyDescription(text));
   addDocumentationFields(fields, text);
 
-  const plates = [...text.matchAll(PLATE_RE)].map((m) => normalizePlate(m[1] ?? ""));
-  if (plates[0]) addField(fields, "party_a_plate", plates[0]);
-  if (plates[1]) addField(fields, "party_b_plate", plates[1]);
-
-  const vehicles = extractVehicles(text);
-  if (vehicles[0]) addField(fields, "party_a_vehicle", vehicles[0]);
-  if (vehicles[1]) addField(fields, "party_b_vehicle", vehicles[1]);
+  const vehicleMatch = VEHICLE_RE.exec(text);
+  const partyAPlate = vehicleMatch?.[1] ?? vehicleMatch?.[2];
+  if (partyAPlate) addField(fields, "party_a_plate", normalizePlate(partyAPlate));
 
   return fields;
+}
+
+/**
+ * Limpia el contacto: un `email` que no es una dirección se descarta, y si
+ * son 8 a 15 dígitos se recupera como `phone` — el WhatsApp que llegaba en el
+ * único par de contacto que el parser conocía. No reordena los demás campos.
+ */
+export function sanearContacto(fields: ExtractedField[]): ExtractedField[] {
+  const emailField = fields.find((f) => f.field_key === "email");
+  if (!emailField || EMAIL_RE.test(emailField.field_value)) return fields;
+
+  const soloDigitos = emailField.field_value.replace(/\D/g, "");
+  const hayTelefono = fields.some((f) => f.field_key === "phone");
+  const esTelefono = !hayTelefono && soloDigitos.length >= 8 && soloDigitos.length <= 15;
+
+  return fields
+    .filter((f) => f !== emailField)
+    .concat(esTelefono ? [{ ...emailField, field_key: "phone" }] : []);
 }
 
 export function mergeExtractedFields(
@@ -286,16 +307,6 @@ function extractBodyDescription(text: string): string | null {
 function extractAccidentLocation(text: string): string | null {
   const value = matchValue(LOCATION_RE, text);
   return value?.replace(/\s+/g, " ").trim() ?? null;
-}
-
-function extractVehicles(subject: string): string[] {
-  const platePattern = new RegExp(PLATE_PATTERN_SOURCE, "i");
-  const fromSubjectFirst = new RegExp(`entre\\s+(.+?)\\s+dominio\\s+${platePattern.source}`, "i").exec(subject)?.[1];
-  const fromSubjectSecond = new RegExp(`\\sy\\s+(.+?)\\s+dominio\\s+${platePattern.source}`, "i").exec(subject)?.[1];
-  const fromBody = [...subject.matchAll(VEHICLE_RE)].map((match) => match[1]);
-  return [fromSubjectFirst, fromSubjectSecond, ...fromBody]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .map((value) => value.trim());
 }
 
 function addDocumentationFields(fields: ExtractedField[], text: string): void {

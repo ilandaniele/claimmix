@@ -158,6 +158,7 @@ export async function GET(request: NextRequest) {
     para_responder: searchParams.get("para_responder") ?? undefined,
     customer_id: searchParams.get("customer_id") ?? undefined,
     policy_id: searchParams.get("policy_id") ?? undefined,
+    cola: searchParams.get("cola") ?? undefined,
     // page/per_page/sort/order are ignored for export (always max 1000, date desc)
     page: "1",
     per_page: "100",
@@ -189,7 +190,8 @@ export async function GET(request: NextRequest) {
       para_responder: parsed.data.para_responder,
       customer_id: parsed.data.customer_id,
       policy_id: parsed.data.policy_id,
-    });
+      cola: parsed.data.cola,
+    }, userRow.id);
   } catch (error) {
     const errName = error instanceof Error ? error.name : "UnknownError";
     logger.error({ error_name: errName, ip }, "get_api_cases_export_csv.query_error");

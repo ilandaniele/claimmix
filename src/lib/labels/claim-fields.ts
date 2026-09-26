@@ -356,6 +356,11 @@ const FIELD_ALIASES: Record<string, string> = {
   // hay_heridos, asked in another language.
   injury_severity: "hay_heridos",
   heridos: "hay_heridos",
+  aseguradora_tercero: "party_b_insurer",
+  compania_tercero: "party_b_insurer",
+  tercero_aseguradora: "party_b_insurer",
+  nombre_tercero: "party_b_name",
+  patente_tercero: "party_b_plate",
 };
 
 /** The one key that stands for this field, whichever alias arrived. */
@@ -531,6 +536,9 @@ const DEFAULT_CONFIRMATION_RANK = 6;
 export function confirmationRank(fieldKey: string): number {
   return CONFIRMATION_RANK[canonicalFieldKey(fieldKey)] ?? DEFAULT_CONFIRMATION_RANK;
 }
+
+/** Los campos que de verdad importan — los únicos que muestran barra de confianza. */
+export const CAMPOS_CLAVE: readonly string[] = Object.keys(CONFIRMATION_RANK);
 
 // ── Claim types ───────────────────────────────────────────────────────────────
 

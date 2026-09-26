@@ -260,6 +260,20 @@ export const enUS: Record<TranslationKey, string> = {
   "escalate.success": "Claim escalated successfully.",
   "escalate.error": "Error escalating the claim. Please try again.",
 
+  // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
+  "reenvio.boton": "Resend request",
+  "reenvio.reabrir": "Reopen and resend",
+  "reenvio.ok": "The request was sent again",
+  "reenvio.noSePuede": "The request cannot be sent right now",
+  "reenvio.reciente": "It was just requested",
+  "reenvio.motivo.estado": "The case is not waiting for an answer",
+  "reenvio.motivo.sin_destinatario": "No recipient on file",
+  "reenvio.motivo.ventana_cerrada": "More than 24 h since their last WhatsApp message",
+  "reenvio.motivo.nada_pendiente": "Nothing left to ask for",
+  "reenvio.motivo.reciente": "Asked less than 10 minutes ago",
+  "reenvio.motivo.cierre_no_es_abandono": "Closed by a team member: it cannot be reopened here",
+  "audit.claim.request_resent": "Request sent again",
+
   // ── Missing docs ───────────────────────────────────────────────────────────
   "docs.parte_amistoso": "Friendly accident report",
   "docs.fotos_danos": "Damage photos",

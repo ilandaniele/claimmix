@@ -383,6 +383,12 @@ const NARRATIVE_HINTS = [
 ];
 
 /**
+ * Lo que la patente ya dice. «Mi Gol» volvía como «¿el vehículo es un auto?» y
+ * el caso no llegaba a «Listo para Core» (ensayo del 26/09).
+ */
+const DESCRIPTIVE_KEYS = new Set(["tipo_vehiculo"]);
+
+/**
  * Whether a confirmation request about this field is worth sending.
  *
  * False for free text. A real email asked someone to confirm the field "Qué
@@ -415,6 +421,7 @@ export function isNameable(fieldKey: string): boolean {
 
 export function isWorthConfirming(fieldKey: string): boolean {
   const key = canonicalFieldKey(fieldKey).toLowerCase();
+  if (DESCRIPTIVE_KEYS.has(key)) return false;
   return !NARRATIVE_HINTS.some((h) => key.includes(h));
 }
 

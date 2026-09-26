@@ -383,48 +383,30 @@ function VideoSection() {
 
 // ── Cómo usar section ─────────────────────────────────────────────────────────
 
-const COMO_USAR_PASOS = [
-  {
-    titulo: "1. El siniestro llega solo",
-    texto:
-      "Entra por mail o por WhatsApp y el agente extrae los campos automáticamente, sin que nadie los tipee.",
-  },
-  {
-    titulo: "2. La bandeja",
-    texto:
-      "Cada caso aparece en la bandeja. Se filtra por situación, tipo de siniestro, severidad y canal desde el panel de filtros.",
-  },
-  {
-    titulo: "3. Confirmar un campo",
-    texto:
-      "Si un campo tiene confianza media o no coincide con un dato ya guardado del asegurado, el caso pide confirmación. El ajustador lo confirma, corrige o rechaza desde el detalle del caso.",
-  },
-  {
-    titulo: "4. Derivar a un especialista",
-    texto:
-      "Cuando la severidad es alta o crítica, el caso pasa solo a \"Requiere especialista\": una persona lo revisa antes de seguir.",
-  },
-  {
-    titulo: "5. Exportar",
-    texto:
-      "El botón \"Exportar\" de la bandeja descarga un CSV con los mismos filtros que se están mirando en pantalla.",
-  },
-] as const;
+// Mismas claves que `Ayuda.tsx`: un solo texto para la demo y para la app.
+const PASOS_AYUDA: ReadonlyArray<{ titulo: TranslationKey; texto: TranslationKey }> = [
+  { titulo: "ayuda.paso1.titulo", texto: "ayuda.paso1.texto" },
+  { titulo: "ayuda.paso2.titulo", texto: "ayuda.paso2.texto" },
+  { titulo: "ayuda.paso3.titulo", texto: "ayuda.paso3.texto" },
+  { titulo: "ayuda.paso4.titulo", texto: "ayuda.paso4.texto" },
+  { titulo: "ayuda.paso5.titulo", texto: "ayuda.paso5.texto" },
+];
 
 function ComoUsar() {
+  const t = useT();
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 mt-8">
       <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">
         Cómo usar la interfaz real
       </h2>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {COMO_USAR_PASOS.map((paso) => (
+        {PASOS_AYUDA.map((paso) => (
           <div
             key={paso.titulo}
             className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
           >
-            <div className="text-sm font-semibold text-slate-800 mb-1">{paso.titulo}</div>
-            <p className="text-sm text-slate-500 leading-relaxed">{paso.texto}</p>
+            <div className="text-sm font-semibold text-slate-800 mb-1">{t(paso.titulo)}</div>
+            <p className="text-sm text-slate-500 leading-relaxed">{t(paso.texto)}</p>
           </div>
         ))}
       </div>

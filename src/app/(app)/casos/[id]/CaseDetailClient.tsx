@@ -24,6 +24,7 @@ import { ToastContainer, useToast } from "@/app/(app)/bandeja/components/Toast";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
 import type { CaseStatus } from "@/lib/schemas/cases";
+import type { EstadoDeAcciones } from "@/server/cases/acciones";
 
 interface CaseDetailClientProps {
   caseId: string;
@@ -34,6 +35,8 @@ interface CaseDetailClientProps {
   vistoEn: string;
   /** Sin esto un viewer vería un botón que le contesta 403. */
   puedeMarcar: boolean;
+  acciones: EstadoDeAcciones;
+  puedeCambiarEstado: boolean;
 }
 
 type Aviso = [TranslationKey, "success" | "info"];
@@ -45,6 +48,8 @@ export function CaseDetailClient({
   paraResponder,
   vistoEn,
   puedeMarcar,
+  acciones,
+  puedeCambiarEstado,
 }: CaseDetailClientProps) {
   const t = useT();
   const router = useRouter();
@@ -55,6 +60,7 @@ export function CaseDetailClient({
   const [transitioning, setTransitioning] = useState(false);
   const [reAnalyzing, setReAnalyzing] = useState(false);
   const [marcando, setMarcando] = useState(false);
+  const [reenviando, setReenviando] = useState(false);
 
   const dialogOpen = showClose || showEscalate || transitioning;
 
@@ -97,6 +103,13 @@ export function CaseDetailClient({
       { 409: "close.errorFsm" }
     );
 
+  const confirmarListo = (cuerpo: Record<string, unknown>) =>
+    accion(setTransitioning, `/api/cases/${caseId}`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) },
+      () => ["case.detail.confirmado", "success"], { 409: "close.errorFsm" });
+  const handleConfirmarListo = () => confirmarListo({ confirmar_listo: true });
+  const handleRevisadoListo = () => confirmarListo({ status: "listo_para_core", confirmar_listo: true });
+
   const handleReAnalyze = () =>
     accion(
       setReAnalyzing,
@@ -121,6 +134,20 @@ export function CaseDetailClient({
         (await res.json()).actualizado
           ? ["case.paraResponder.hecho", "success"]
           : ["case.paraResponder.cambio", "info"]
+    );
+
+  // P8: mismo botón para reenviar el pedido y para reabrir-y-reenviar.
+  const handleReenviar = (reabrir: boolean) =>
+    accion(
+      setReenviando,
+      `/api/cases/${caseId}/reenviar-pedido`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reabrir ? { reabrir: true } : {}),
+      },
+      () => ["reenvio.ok", "success"],
+      { 409: "reenvio.noSePuede", 429: "reenvio.reciente" }
     );
 
   // ── Close success — show toast, redirect to /bandeja ──────────────────────
@@ -176,6 +203,12 @@ export function CaseDetailClient({
           reAnalyzing={reAnalyzing}
           onError={(msg) => addToast(msg, "error")}
           dialogOpen={dialogOpen}
+          acciones={acciones}
+          puedeCambiarEstado={puedeCambiarEstado}
+          onConfirmarListo={handleConfirmarListo}
+          onRevisadoListo={handleRevisadoListo}
+          onReenviar={puedeMarcar ? handleReenviar : undefined}
+          reenviando={reenviando}
         />
       </div>
 

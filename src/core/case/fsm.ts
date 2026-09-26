@@ -224,6 +224,22 @@ export const ESTADOS_QUE_NO_SE_REABREN_A_MANO: ReadonlySet<CaseStatus> =
   ]);
 
 /**
+ * `cerrado` sigue sin arista de vuelta: esto NO es una transición nueva.
+ *
+ * P8 reabre un caso cerrado por abandono para reenviarle el mismo pedido, pero
+ * a mano, desde una ruta puntual con su propia guarda — no agregando
+ * `cerrado → info_faltante` a `FSM_TRANSITIONS`, que abriría esa puerta a
+ * cualquier otra ruta que mire la FSM (PATCH, re-analyze). `cerrado` sigue
+ * terminal y sigue en `ESTADOS_QUE_NO_SE_REABREN_A_MANO`: la reapertura sólo
+ * corre cuando el último cierre fue por abandono, chequeo que vive en
+ * `src/server/confirmations/reenvio.ts`, no acá.
+ */
+export const REAPERTURA_POR_ABANDONO = {
+  desde: "cerrado",
+  hacia: "info_faltante",
+} as const;
+
+/**
  * Email-intake specific: returns the initial status for a new email case.
  * This is 'recibido' — the email has been received and persisted.
  */

@@ -164,6 +164,11 @@ describe("isWorthConfirming", () => {
     expect(isWorthConfirming("accident_date")).toBe(true);
     expect(isWorthConfirming("policy_number")).toBe(true);
   });
+
+  it("no pregunta el tipo de vehículo: la patente ya lo identifica", () => {
+    expect(isWorthConfirming("tipo_vehiculo")).toBe(false);
+    expect(isWorthConfirming("patente_vehiculo")).toBe(true);
+  });
 });
 
 describe("confirmationRank", () => {

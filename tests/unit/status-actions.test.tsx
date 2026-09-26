@@ -13,6 +13,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { StatusActions } from "../../src/app/(app)/casos/[id]/components/StatusActions";
 import type { CaseStatus } from "../../src/lib/schemas/cases";
+import { SIN_ACCIONES } from "../../src/server/cases/acciones";
 
 // Stub ExportToCorePanel to avoid network calls
 vi.mock(
@@ -36,6 +37,10 @@ const defaultProps = {
   onReAnalyze: vi.fn(),
   reAnalyzing: false,
   dialogOpen: false,
+  acciones: SIN_ACCIONES,
+  puedeCambiarEstado: true,
+  onConfirmarListo: vi.fn(),
+  onRevisadoListo: vi.fn(),
 };
 
 function renderStatus(status: CaseStatus, overrides: Record<string, unknown> = {}) {
@@ -186,5 +191,54 @@ describe("StatusActions — cerrado", () => {
     renderStatus("cerrado");
     expect(screen.queryByTestId("action-cerrar")).not.toBeInTheDocument();
     expect(screen.queryByTestId("action-escalar")).not.toBeInTheDocument();
+  });
+});
+
+// ── listo_para_core / requiere_especialista — confirmación de una persona (P6) ──
+
+describe("StatusActions — listo_para_core", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("sin confirmar y con permiso, el botón confirma", () => {
+    renderStatus("listo_para_core");
+    fireEvent.click(screen.getByTestId("action-confirmar-listo"));
+    expect(defaultProps.onConfirmarListo).toHaveBeenCalledOnce();
+  });
+
+  it("confirmado, muestra «Confirmado por Ana» y no el botón", () => {
+    renderStatus("listo_para_core", {
+      acciones: { ...SIN_ACCIONES, confirmado: true, confirmadoPor: "Ana" },
+    });
+    expect(screen.getByText("Confirmado por Ana")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-confirmar-listo")).not.toBeInTheDocument();
+  });
+
+  it("sin permiso, no muestra el botón de confirmar", () => {
+    renderStatus("listo_para_core", { puedeCambiarEstado: false });
+    expect(screen.queryByTestId("action-confirmar-listo")).not.toBeInTheDocument();
+    expect(screen.getByTestId("action-re-analizar")).toBeInTheDocument();
+  });
+});
+
+describe("StatusActions — requiere_especialista", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("con permiso, muestra los dos botones y cada uno llama a su handler", () => {
+    renderStatus("requiere_especialista");
+    fireEvent.click(screen.getByTestId("action-revisado-listo"));
+    expect(defaultProps.onRevisadoListo).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId("action-cerrar"));
+    expect(defaultProps.onClose).toHaveBeenCalledOnce();
+  });
+
+  it("sin permiso, sólo queda re-analizar", () => {
+    renderStatus("requiere_especialista", { puedeCambiarEstado: false });
+    expect(screen.queryByTestId("action-revisado-listo")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("action-cerrar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("action-re-analizar")).toBeInTheDocument();
   });
 });

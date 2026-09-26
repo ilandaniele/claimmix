@@ -31,6 +31,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { UNSAFE_BLOCKING_REASONS } from "./trainability";
 import { logger } from "@/lib/observability/logger";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
+import { ejemploSinDatosDeLaPersona } from "./sin-datos-de-la-persona";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 
 // ── Few-shot retrieval (immediate learning layer) ─────────────────────────────
@@ -97,9 +98,13 @@ export function deEjemplos(
   delTipo: FilaDeEjemplo[],
   relleno: FilaDeEjemplo[]
 ): ApprovedExample[] {
-  const collected: FilaDeEjemplo[] = [...delTipo.slice(0, MAX_EXAMPLES)];
+  // Se tacha acá, al leer, para cubrir también las filas ya guardadas.
+  const sinDatosDelTipo = delTipo.map(ejemploSinDatosDeLaPersona);
+  const sinDatosDeRelleno = relleno.map(ejemploSinDatosDeLaPersona);
 
-  for (const row of relleno) {
+  const collected: FilaDeEjemplo[] = [...sinDatosDelTipo.slice(0, MAX_EXAMPLES)];
+
+  for (const row of sinDatosDeRelleno) {
     if (collected.length >= MAX_EXAMPLES) break;
     if (!collected.some((c) => c.id === row.id)) collected.push(row);
   }
@@ -287,6 +292,7 @@ export async function approveTrainingExample(
   // approved example teaches the CORRECTED values, not raw model output.
   let confirmedFields: Array<{ field_key: string; field_value: string; confidence: number }> = [];
   let claimType: string | null = null;
+  let channel: string | null = null;
 
   if (run.case_id) {
     // Se captura antes de las consultas a propósito.
@@ -313,7 +319,7 @@ export async function approveTrainingExample(
         ),
         enTenant(tenantCtx, (db) =>
           db
-            .select({ claim_type: c.claim_type })
+            .select({ claim_type: c.claim_type, channel: c.channel })
             .from(c)
             .where(eq(c.id, caseId))
             .limit(1)
@@ -325,10 +331,13 @@ export async function approveTrainingExample(
         field_value: f.field_value,
         confidence: Number(f.confidence),
       }));
-      claimType = firstRow(caseRows)?.claim_type ?? null;
+      const caseRow = firstRow(caseRows);
+      claimType = caseRow?.claim_type ?? null;
+      channel = caseRow?.channel ?? null;
     } catch {
       confirmedFields = [];
       claimType = null;
+      channel = null;
     }
   }
 
@@ -336,6 +345,16 @@ export async function approveTrainingExample(
     agent_output: run.output_payload ?? {},
     confirmed_fields: confirmedFields,
   };
+
+  // Simulado: se guarda tal cual, para que el conjunto de fine-tuning siga
+  // siendo realista (A-22). Real: se tacha nombre y DNI antes de guardar.
+  const esSimulado = channel === "email_sim" || channel === "whatsapp_sim";
+  const paraGuardar = esSimulado
+    ? { input_payload: run.input_payload ?? {}, expected_output: expectedOutput }
+    : ejemploSinDatosDeLaPersona({
+        input_payload: run.input_payload ?? {},
+        expected_output: expectedOutput,
+      });
 
   // ── 4. Insert (unique indexes enforce dedupe) ───────────────────────────────
   const nowIso = new Date().toISOString();
@@ -351,8 +370,8 @@ export async function approveTrainingExample(
             case_id: run.case_id,
             claim_message_id: run.claim_message_id,
             claim_type: claimType,
-            input_payload: run.input_payload ?? {},
-            expected_output: expectedOutput,
+            input_payload: paraGuardar.input_payload,
+            expected_output: paraGuardar.expected_output,
             status: "approved",
             approved_by: approvedBy,
             approved_at: nowIso,

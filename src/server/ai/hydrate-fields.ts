@@ -70,8 +70,11 @@ export function hydrateFieldsFromExtracted(extracted: ExtractedClaim): Extracted
 /**
  * Argentine DNI: 7–8 contiguous digits, optionally dotted (e.g. 12.345.678).
  * Matches: 92310691, 9231069, 12.345.678
+ *
+ * Es global (`/g`): usarla sólo con `.replace`, nunca con `.test` (un `.test`
+ * con `/g` arrastra `lastIndex` de la llamada anterior y da falsos negativos).
  */
-const DNI_RE = /\b\d{1,2}\.?\d{3}\.?\d{3}\b/g;
+export const DNI_RE = /\b\d{1,2}\.?\d{3}\.?\d{3}\b/g;
 
 /**
  * Generic claim/policy reference: 4+ uppercase-or-digit chars with optional dash + digits.
@@ -80,6 +83,57 @@ const DNI_RE = /\b\d{1,2}\.?\d{3}\.?\d{3}\b/g;
  * common abbreviations like "AC6", "T01", etc.).
  */
 const POLICY_RE = /\b[A-Z0-9]{4,}-?\d{1,4}\b/g;
+
+/**
+ * Tacha el nombre y el DNI de una persona en un texto libre.
+ *
+ * Son los pasos 1-2 de `scrubPiiFromSummary`, generalizados: acá el
+ * reemplazo no es fijo («el asegurado» / «[DNI omitido]») sino el que pida
+ * quien llama.
+ */
+export function tacharNombreYDni(
+  texto: string,
+  datos: { nombre?: string | null; dni?: string | null },
+  en: { nombre: string; dni: string },
+  opts?: { porPalabra?: boolean }
+): string {
+  if (!texto) return texto;
+  let out = texto;
+
+  const nombre = datos.nombre?.trim();
+  if (nombre && nombre.length >= 3) {
+    const escaped = nombre.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Regla detect-non-literal-regexp. `escaped` sale de la línea de
+    // arriba, que escapa todos los metacaracteres. La regla es sintáctica y
+    // no ve el escape; el valor entra como texto literal, no como patrón.
+    // nosemgrep
+    out = out.replace(new RegExp(escaped, "gi"), en.nombre);
+
+    if (opts?.porPalabra) {
+      for (const token of nombre.split(/\s+/).filter((p) => p.length >= 3)) {
+        const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        out = out.replace(
+          // nosemgrep
+          new RegExp(`(?<![\\p{L}\\d])${escapedToken}(?![\\p{L}\\d])`, "giu"),
+          en.nombre
+        );
+      }
+    }
+  }
+
+  const dni = datos.dni?.trim();
+  if (dni && /^\d[\d.]*$/.test(dni)) {
+    out = out.replace(
+      // Regla detect-non-literal-regexp. escapado en la misma expresión,
+      // y además `dni` ya pasó por una validación de sólo dígitos y puntos.
+      // nosemgrep
+      new RegExp(dni.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+      en.dni
+    );
+  }
+
+  return out;
+}
 
 /**
  * Scrub known PII values from the free-text fields summary, suggested_reply, and
@@ -109,26 +163,12 @@ export function scrubPiiFromSummary(extracted: ExtractedClaim): ExtractedClaim {
     if (!s) return s;
     let out = s;
 
-    // 1. Replace full name if we know it (case-insensitive, whole-token match).
-    if (fullName && fullName.length >= 3) {
-      const escaped = fullName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // Regla detect-non-literal-regexp. `escaped` sale de la línea de
-      // arriba, que escapa todos los metacaracteres. La regla es sintáctica y
-      // no ve el escape; el valor entra como texto literal, no como patrón.
-      // nosemgrep
-      out = out.replace(new RegExp(escaped, "gi"), "el asegurado");
-    }
-
-    // 2. Replace extracted DNI value by its literal string.
-    if (dniValue && /^\d[\d.]*$/.test(dniValue)) {
-      out = out.replace(
-        // Regla detect-non-literal-regexp. escapado en la misma expresión,
-        // y además `dniValue` ya pasó por una validación de sólo dígitos y puntos.
-        // nosemgrep
-        new RegExp(dniValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
-        "[DNI omitido]"
-      );
-    }
+    // 1-2. Replace full name and DNI if we know them.
+    out = tacharNombreYDni(
+      out,
+      { nombre: fullName, dni: dniValue },
+      { nombre: "el asegurado", dni: "[DNI omitido]" }
+    );
 
     // 3. Replace extracted policy_number by its literal string.
     if (policyValue) {

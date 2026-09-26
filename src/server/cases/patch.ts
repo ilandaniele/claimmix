@@ -4,9 +4,8 @@
  * Validates FSM transitions, enforces ownership rules, writes audit log,
  * and updates the case row.
  *
- * Ownership rules:
- * - An analyst can PATCH cases assigned to them (`assigned_to = user.id`).
- * - A supervisor or admin can PATCH any case in their tenant.
+ * Ownership rules: ver `puedeCambiarEstado` (owner/admin/specialist siempre,
+ * analyst sólo si el caso es suyo, viewer nunca).
  * - A wrong-tenant request is caught by the explicit tenant_id filter
  *   (returns 404, not 403).
  *
@@ -14,9 +13,9 @@
  * AC15: Wrong-tenant PATCH returns 404 (tenant filter hides the row → no rows updated).
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
 import type { CaseInsert, CaseRow, UserRow } from "@/lib/db/types";
@@ -24,6 +23,8 @@ import type { CasePatch } from "@/lib/schemas/cases";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import { validateTransition } from "@/core/case/fsm";
 import { writeAuditLog, AuditEvent, type AuditEventType } from "@/lib/audit/log";
+import { puedeCambiarEstado } from "@/lib/auth/roles";
+import { auditoriaSiQuedo } from "@/server/cases/auditoria-si-quedo";
 import { AppError } from "@/lib/errors";
 
 /** The actor fields patchCase actually needs (matches requireRole's userRow). */
@@ -77,9 +78,7 @@ export async function patchCase(
   }
 
   // ── 2. Ownership check ─────────────────────────────────────────────────────
-  // An analyst can only PATCH their own assigned cases.
-  // Supervisors and admins can patch any case in the tenant.
-  if (actor.role === "analyst" && current.assigned_to !== actor.id) {
+  if (!puedeCambiarEstado(actor, current.assigned_to)) {
     // Return 404 rather than 403 — consistent with IDOR prevention policy.
     // An analyst probing for cases they don't own gets the same 404 response.
     throw new AppError("NOT_FOUND", "El caso no existe o no tenés acceso.");
@@ -94,6 +93,11 @@ export async function patchCase(
     if (validationError) {
       throw new AppError("FSM_INVALID_TRANSITION", validationError);
     }
+  }
+
+  const destino = patch.status ?? current.status;
+  if (patch.confirmar_listo && destino !== "listo_para_core") {
+    throw new AppError("FSM_INVALID_TRANSITION", "Sólo se confirma un caso que queda listo para Core.");
   }
 
   // ── 4. Build update payload ────────────────────────────────────────────────
@@ -115,6 +119,42 @@ export async function patchCase(
   }
 
   // ── 5. Apply update (tenant filter ensures only tenant-matching rows) ──────
+  if (patch.confirmar_listo) {
+    const ahora = updateData.updated_at!;
+    let filas: CaseRow[];
+    try {
+      [filas] = await enTenantVarias<[CaseRow[], unknown]>(tenantCtx, (db) => [
+        db
+          .update(cases)
+          .set(updateData)
+          .where(and(eq(cases.id, caseId), eq(cases.status, current.status)))
+          .returning(),
+        auditoriaSiQuedo(
+          db,
+          {
+            caseId,
+            actorId: actor.id,
+            eventType: AuditEvent.CASE_READY_CONFIRMED,
+            payload: { old_status: current.status, new_status: "listo_para_core", reason: patch.reason ?? null },
+            ip,
+            ua,
+          },
+          sql`${cases.updated_at} = ${ahora}::timestamptz and ${cases.status} = 'listo_para_core'`
+        ),
+      ]);
+    } catch {
+      filas = [];
+    }
+
+    const updated = firstRow(filas);
+    if (!updated) {
+      // El caso cambió (otro PATCH, o el estado ya no es el que vimos) mientras confirmábamos.
+      throw new AppError("FSM_INVALID_TRANSITION", "El caso cambió mientras lo mirabas.");
+    }
+
+    return { case: updated };
+  }
+
   let updated: CaseRow | null;
   try {
     updated = firstRow(
@@ -151,7 +191,8 @@ export async function patchCase(
   }
 
   if (patch.assigned_to !== undefined) {
-    eventType = AuditEvent.CASE_ASSIGNED;
+    // Un cierre queda como cierre aunque reasigne: el reenvío lee `case.closed`.
+    if (patch.status !== "cerrado") eventType = AuditEvent.CASE_ASSIGNED;
     auditPayload.assigned_to = patch.assigned_to;
   }
 

@@ -105,6 +105,8 @@ export const AuditEvent = {
    * pasar por el agente. Payload: { outbound_id, estado } — nunca el texto.
    */
   CASE_HUMAN_REPLY: "case.human_reply",
+  /** CASE_READY_CONFIRMED: una persona confirmó que el caso queda listo para Core. */
+  CASE_READY_CONFIRMED: "case.ready_confirmed",
 
   // ── AI extraction ──────────────────────────────────────────────────────────
   AI_EXTRACTED: "ai.extracted",
@@ -235,6 +237,9 @@ export const AuditEvent = {
    * anything, time simply ran out.
    */
   CASE_CLOSED_ABANDONED: "claim.closed_abandoned",
+
+  /** CLAIM_REQUEST_RESENT: una persona volvió a pedirle al asegurado lo que falta. */
+  CLAIM_REQUEST_RESENT: "claim.request_resent",
 
   /**
    * DOCUMENTS_RECEIVED: a file the claimant sent was recognised as one of the

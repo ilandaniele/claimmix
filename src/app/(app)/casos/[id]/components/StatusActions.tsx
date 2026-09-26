@@ -1,12 +1,18 @@
 /**
- * StatusActions — renders FSM-aware action buttons for a case.
+ * StatusActions — botones de acción según el estado del caso.
  *
- * AC15 button matrix:
- *   listo:      "Cerrar siniestro" (green) + "Escalar" (orange) + "Exportar al Core"
- *   esperando:  "Marcar completo" (green) + "Escalar" (orange) + "Cerrar" (gray)
- *   escalado:   "Resolver escalado → Listo" (blue) + "Cerrar" (gray)
- *   procesando: No action buttons — "Procesando..." spinner
- *   cerrado:    Read-only banner "Siniestro cerrado"
+ * Conviven dos FSM: la del simulador viejo y la del intake por mail/WhatsApp.
+ *
+ *   listo (legado):            «Cerrar siniestro» + «Escalar» + «Exportar al Core»
+ *   esperando (legado):        «Marcar completo» + «Escalar» + «Cerrar»
+ *   escalado (legado):         «Resolver escalado → Listo» + «Cerrar»
+ *   procesando:                sin botones — spinner
+ *   listo_para_core:           «Confirmar y dejar listo» (sin confirmar, con permiso),
+ *                              o «Confirmado por …» ya confirmado
+ *   requiere_especialista:     «Revisado: pasar a Listo para Core» + «Cerrar»
+ *   info_faltante /
+ *   confirmacion_pendiente:    reenviar el pedido (P8)
+ *   cerrado:                   banner de sólo lectura, o «Reabrir y reenviar» (P8)
  */
 
 "use client";
@@ -15,6 +21,7 @@ import type { CaseStatus } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
 import { ExportToCorePanel } from "./ExportToCorePanel";
+import type { EstadoDeAcciones } from "@/server/cases/acciones";
 
 interface StatusActionsProps {
   caseId: string;
@@ -28,6 +35,13 @@ interface StatusActionsProps {
   onError: (msg: string) => void;
   /** Whether any dialog is currently open (prevent double-clicks) */
   dialogOpen: boolean;
+  acciones: EstadoDeAcciones;
+  puedeCambiarEstado: boolean;
+  onConfirmarListo: () => void;
+  onRevisadoListo: () => void;
+  /** P8. Sin esto no se muestra nada de reenviar ni reabrir. */
+  onReenviar?: (reabrir: boolean) => void;
+  reenviando?: boolean;
 }
 
 function ReAnalyzeButton({
@@ -89,11 +103,17 @@ export function StatusActions({
   reAnalyzing,
   onError,
   dialogOpen,
+  acciones,
+  puedeCambiarEstado,
+  onConfirmarListo,
+  onRevisadoListo,
+  onReenviar,
+  reenviando,
 }: StatusActionsProps) {
   const t = useT();
-  // ── cerrado — read-only banner ──────────────────────────────────────────────
+  // ── cerrado — read-only banner, o «Reabrir y reenviar» (P8) ────────────────
   if (status === "cerrado") {
-    return (
+    const banner = (
       <div
         className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-600"
         role="status"
@@ -113,6 +133,31 @@ export function StatusActions({
           />
         </svg>
         {t("case.detail.closedBanner")}
+      </div>
+    );
+
+    if (!(acciones.reabrible && puedeCambiarEstado && onReenviar)) {
+      return banner;
+    }
+
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {banner}
+        <button
+          type="button"
+          onClick={() => onReenviar(true)}
+          disabled={!acciones.puedeReenviar || reenviando}
+          data-testid="action-reabrir-reenviar"
+          aria-describedby={acciones.motivoSinReenvio ? "motivo-reenvio" : undefined}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {t("reenvio.reabrir")}
+        </button>
+        {acciones.motivoSinReenvio && (
+          <p id="motivo-reenvio" className="text-xs text-slate-500">
+            {t(`reenvio.motivo.${acciones.motivoSinReenvio}`)}
+          </p>
+        )}
       </div>
     );
   }
@@ -221,6 +266,34 @@ export function StatusActions({
     );
   }
 
+  // ── info_faltante / confirmacion_pendiente — reenviar pedido (P8) ──────────
+  if (status === "info_faltante" || status === "confirmacion_pendiente") {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {onReenviar && (
+          <>
+            <button
+              type="button"
+              onClick={() => onReenviar(false)}
+              disabled={!acciones.puedeReenviar || reenviando}
+              data-testid="action-reenviar-pedido"
+              aria-describedby={acciones.motivoSinReenvio ? "motivo-reenvio" : undefined}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {t("reenvio.boton")}
+            </button>
+            {acciones.motivoSinReenvio && (
+              <p id="motivo-reenvio" className="text-xs text-slate-500">
+                {t(`reenvio.motivo.${acciones.motivoSinReenvio}`)}
+              </p>
+            )}
+          </>
+        )}
+        <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
+      </div>
+    );
+  }
+
   // ── escalado — resolver + cerrar + re-analizar ─────────────────────────────
   if (status === "escalado") {
     return (
@@ -248,7 +321,70 @@ export function StatusActions({
     );
   }
 
-  // ── fallback (recibido, info_faltante, etc.) — re-analizar only ────────────
+  // ── listo_para_core — confirmar (persona) + re-analizar ────────────────────
+  // Sin «Cerrar»: la FSM no tiene el borde listo_para_core -> cerrado.
+  if (status === "listo_para_core") {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {puedeCambiarEstado &&
+          (!acciones.confirmado ? (
+            <button
+              type="button"
+              onClick={onConfirmarListo}
+              disabled={dialogOpen}
+              data-testid="action-confirmar-listo"
+              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {t("case.detail.confirmarListo")}
+            </button>
+          ) : (
+            <span
+              role="status"
+              data-testid="listo-confirmado"
+              className="text-sm text-slate-600"
+            >
+              {acciones.confirmadoPor
+                ? t("case.detail.confirmadoPor").replace("{quien}", acciones.confirmadoPor)
+                : t("case.detail.confirmadoAnonimo")}
+            </span>
+          ))}
+        <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
+      </div>
+    );
+  }
+
+  // ── requiere_especialista — revisado + cerrar + re-analizar ─────────────────
+  if (status === "requiere_especialista") {
+    return (
+      <div className="flex flex-wrap gap-2">
+        {puedeCambiarEstado && (
+          <>
+            <button
+              type="button"
+              onClick={onRevisadoListo}
+              disabled={dialogOpen}
+              data-testid="action-revisado-listo"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {t("case.detail.revisadoListo")}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={dialogOpen}
+              data-testid="action-cerrar"
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {t("case.detail.close")}
+            </button>
+          </>
+        )}
+        <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
+      </div>
+    );
+  }
+
+  // ── fallback (recibido, etc.) — re-analizar only ────────────────────────────
   return (
     <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
   );

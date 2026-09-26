@@ -1096,6 +1096,21 @@ export const esAR = {
   "asistente.demasiadas": "Demasiadas preguntas seguidas. Esperá un momento y volvé a intentar.",
   "asistente.error": "No se pudo responder la pregunta. Probá de nuevo.",
 
+  // ── Ayuda — cómo se usa la interfaz, mismo texto en la demo y en la app ─
+  "ayuda.abrir": "Ayuda: cómo se usa",
+  "ayuda.titulo": "Cómo se usa",
+  "ayuda.cerrar": "Cerrar",
+  "ayuda.paso1.titulo": "1. El siniestro llega solo",
+  "ayuda.paso1.texto": "Los siniestros llegan solos por mail o WhatsApp y el agente completa los datos.",
+  "ayuda.paso2.titulo": "2. La bandeja",
+  "ayuda.paso2.texto": "En la bandeja filtrás por situación, tipo, severidad y canal. «Escalados», «Para responder» y «No relevantes» de la barra son atajos a esos filtros.",
+  "ayuda.paso3.titulo": "3. Confirmar un dato",
+  "ayuda.paso3.texto": "Si un dato tiene confianza media o no coincide con lo que ya teníamos, el caso te pide confirmarlo: lo confirmás, corregís o rechazás desde el detalle.",
+  "ayuda.paso4.titulo": "4. Derivar a un especialista",
+  "ayuda.paso4.texto": "Con severidad alta o crítica, o si el reclamo menciona lesiones, el caso pasa solo a «Requiere especialista» y una persona lo revisa antes de seguir.",
+  "ayuda.paso5.titulo": "5. Exportar",
+  "ayuda.paso5.texto": "«Exportar» baja un CSV con los mismos filtros que estás mirando.",
+
 } as const;
 
 export type TranslationKey = keyof typeof esAR;

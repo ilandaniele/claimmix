@@ -1069,4 +1069,19 @@ export const enUS: Record<TranslationKey, string> = {
   "asistente.demasiadas": "Too many questions in a row. Wait a moment and try again.",
   "asistente.error": "Could not answer the question. Try again.",
 
+  // ── Help — how the interface works, same text in the demo and the app ──
+  "ayuda.abrir": "Help: how it works",
+  "ayuda.titulo": "How it works",
+  "ayuda.cerrar": "Close",
+  "ayuda.paso1.titulo": "1. The claim arrives on its own",
+  "ayuda.paso1.texto": "Claims arrive by email or WhatsApp and the agent fills in the data.",
+  "ayuda.paso2.titulo": "2. The inbox",
+  "ayuda.paso2.texto": "In the inbox you filter by status, type, severity and channel. «Escalated», «Needs reply» and «Not relevant» in the sidebar are shortcuts to those filters.",
+  "ayuda.paso3.titulo": "3. Confirming a value",
+  "ayuda.paso3.texto": "If a value has medium confidence or does not match what we already had, the case asks you to confirm it: confirm, correct or reject it from the case detail.",
+  "ayuda.paso4.titulo": "4. Sending to a specialist",
+  "ayuda.paso4.texto": "With high or critical severity, or when the claim mentions injuries, the case moves to «Requires specialist» on its own and a person reviews it before it continues.",
+  "ayuda.paso5.titulo": "5. Export",
+  "ayuda.paso5.texto": "«Export» downloads a CSV with the filters you are looking at.",
+
 } as const;

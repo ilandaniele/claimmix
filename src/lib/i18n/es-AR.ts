@@ -271,6 +271,20 @@ export const esAR = {
   "escalate.success": "Siniestro escalado correctamente.",
   "escalate.error": "Error al escalar el siniestro. Intentá de nuevo.",
 
+  // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
+  "reenvio.boton": "Reenviar pedido",
+  "reenvio.reabrir": "Reabrir y reenviar",
+  "reenvio.ok": "Se le volvió a pedir lo que falta",
+  "reenvio.noSePuede": "No se puede reenviar el pedido ahora",
+  "reenvio.reciente": "Ya se le pidió hace un momento",
+  "reenvio.motivo.estado": "El caso no está esperando una respuesta",
+  "reenvio.motivo.sin_destinatario": "No sabemos a quién escribirle",
+  "reenvio.motivo.ventana_cerrada": "Pasaron más de 24 h desde su último mensaje de WhatsApp",
+  "reenvio.motivo.nada_pendiente": "No queda nada por pedir",
+  "reenvio.motivo.reciente": "Se le pidió hace menos de 10 minutos",
+  "reenvio.motivo.cierre_no_es_abandono": "Lo cerró una persona: no se reabre desde acá",
+  "audit.claim.request_resent": "Se le volvió a pedir lo que falta",
+
   // ── Missing docs ───────────────────────────────────────────────────────────
   "docs.parte_amistoso": "Parte amistoso de accidente",
   "docs.fotos_danos": "Fotos de los daños",
@@ -322,8 +336,8 @@ export const esAR = {
   "audit.core.sync_success": "Se mandó al sistema central",
   "audit.core.sync_failed": "Falló el envío al sistema central",
   "audit.ai.budget_exceeded": "No se analizó: se terminó el cupo de IA",
-  "audit.training.example_approved": "Se aprobó como ejemplo de entrenamiento",
-  "audit.training.example_rejected": "Se descartó como ejemplo de entrenamiento",
+  "audit.training.example_approved": "Se aprobó como ejemplo de referencia",
+  "audit.training.example_rejected": "Se descartó como ejemplo de referencia",
   "audit.doc.received": "Llegó un documento",
   "audit.ai.extraction_started": "Empezó el análisis",
   "audit.whatsapp.received": "Llegó un mensaje por WhatsApp",
@@ -611,7 +625,7 @@ export const esAR = {
    */
 
   // ── La consola del agente, adentro del detalle de un caso ─────────
-  "agente.avisoAprendizaje": "El agente nunca aprende de un email automáticamente: solo después de esta confirmación humana se usa como ejemplo aprobado.",
+  "agente.avisoAprendizaje": "Nada de este caso se usa solo. Si lo confirmás, el agente lo toma como ejemplo de referencia para los próximos casos de tu compañía. No se usa para entrenar ningún modelo.",
   "agente.bloqueo.invalid_json": "JSON inválido",
   "agente.bloqueo.no_linked_case": "Sin caso vinculado",
   "agente.bloqueo.not_a_claim": "No es un reclamo",
@@ -619,7 +633,7 @@ export const esAR = {
   "agente.bloqueo.unresolved_conflicts": "Conflictos sin resolver",
   "agente.cargando": "Cargando análisis del agente",
   "agente.confirmando": "Confirmando…",
-  "agente.confirmar": "Confirmar como ejemplo de entrenamiento seguro",
+  "agente.confirmar": "Usar como ejemplo de referencia",
   "agente.confirmarError": "No se pudo confirmar el ejemplo.",
   "agente.confirmarOk": "Ejemplo confirmado. El agente lo usará como contexto aprobado en próximos análisis.",
   "agente.descargarJson": "Descargar JSON extraído",
@@ -627,7 +641,7 @@ export const esAR = {
   "agente.errorCarga": "No se pudo cargar el análisis del agente. Recargá la página para reintentar.",
   "agente.faltantes": "Campos faltantes",
   "agente.jsonCrudo": "JSON extraído (crudo)",
-  "agente.noSugerido": "No sugerido para entrenamiento",
+  "agente.noSugerido": "No sugerido como ejemplo",
   "agente.pendientes": "Pendientes de confirmación",
   "agente.procesando": "El agente está procesando este email… los valores extraídos aparecerán acá automáticamente.",
   "agente.puntaje": "Puntaje",
@@ -636,7 +650,7 @@ export const esAR = {
   "agente.sinFaltantes": "Sin campos faltantes.",
   "agente.sinPendientes": "Sin campos pendientes.",
   "agente.sinValores": "El agente no extrajo valores en el último análisis.",
-  "agente.sugerido": "Sugerido para entrenamiento",
+  "agente.sugerido": "Sugerido como ejemplo",
   "agente.valoresExtraidos": "Valores extraídos (último análisis)",
   "agente.yaConfirmado": "Ejemplo ya confirmado",
 

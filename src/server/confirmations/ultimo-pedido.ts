@@ -17,7 +17,7 @@ import { logger } from "@/lib/observability/logger";
 
 type FilaDelPedido = { asked_keys: string[] | null; created_at: string };
 
-function consultaDelPedido(db: ClienteDatos, caseId: string) {
+export function consultaDelPedido(db: ClienteDatos, caseId: string) {
   return db
     .select({ asked_keys: outboundMessages.asked_keys, created_at: outboundMessages.created_at })
     .from(outboundMessages)

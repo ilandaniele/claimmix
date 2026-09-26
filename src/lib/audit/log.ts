@@ -238,6 +238,9 @@ export const AuditEvent = {
    */
   CASE_CLOSED_ABANDONED: "claim.closed_abandoned",
 
+  /** CLAIM_REQUEST_RESENT: una persona volvió a pedirle al asegurado lo que falta. */
+  CLAIM_REQUEST_RESENT: "claim.request_resent",
+
   /**
    * DOCUMENTS_RECEIVED: a file the claimant sent was recognised as one of the
    * documents we had asked for, and the request was closed.

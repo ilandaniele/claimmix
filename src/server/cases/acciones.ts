@@ -17,6 +17,7 @@ import { auditLog, users } from "@/lib/db/schema";
 import { AuditEvent } from "@/lib/audit/log";
 import { ultimaCorrida } from "@/server/cases/listo-confirmado";
 import { logger } from "@/lib/observability/logger";
+import { consultasDelReenvio, deFilasDelReenvio, decidirReenvio } from "@/server/confirmations/reenvio";
 
 export type MotivoSinReenvio =
   | "estado"
@@ -47,31 +48,37 @@ export async function leerEstadoDeAcciones(
   caseId: string
 ): Promise<EstadoDeAcciones> {
   try {
-    const [confirmaciones] = await enTenantVarias<[Array<{ quien: string | null }>]>(
-      ctx,
-      (db) => [
-        db
-          .select({ quien: users.full_name })
-          .from(auditLog)
-          .leftJoin(users, eq(users.id, auditLog.actor_id))
-          .where(
-            and(
-              eq(auditLog.target_type, "case"),
-              eq(auditLog.target_id, caseId),
-              eq(auditLog.event_type, AuditEvent.CASE_READY_CONFIRMED),
-              gt(auditLog.created_at, ultimaCorrida(caseId))
-            )
+    const filas = await enTenantVarias<readonly unknown[]>(ctx, (db) => [
+      db
+        .select({ quien: users.full_name })
+        .from(auditLog)
+        .leftJoin(users, eq(users.id, auditLog.actor_id))
+        .where(
+          and(
+            eq(auditLog.target_type, "case"),
+            eq(auditLog.target_id, caseId),
+            eq(auditLog.event_type, AuditEvent.CASE_READY_CONFIRMED),
+            gt(auditLog.created_at, ultimaCorrida(caseId))
           )
-          .orderBy(desc(auditLog.created_at))
-          .limit(1),
-      ]
-    );
+        )
+        .orderBy(desc(auditLog.created_at))
+        .limit(1),
+      ...consultasDelReenvio(db, caseId),
+    ]);
 
+    const confirmaciones = filas[0] as Array<{ quien: string | null }>;
     const fila = confirmaciones[0];
+
+    const d = deFilasDelReenvio(filas.slice(1));
+    const reabrible = d.caso?.status === "cerrado" && d.ultimoCierre === AuditEvent.CASE_CLOSED_ABANDONED;
+    const dec = decidirReenvio(d, new Date(), reabrible);
+
     return {
-      ...SIN_ACCIONES,
       confirmado: fila !== undefined,
       confirmadoPor: fila?.quien ?? null,
+      reabrible,
+      puedeReenviar: dec.ok,
+      motivoSinReenvio: dec.ok ? null : dec.motivo,
     };
   } catch (err) {
     const code =

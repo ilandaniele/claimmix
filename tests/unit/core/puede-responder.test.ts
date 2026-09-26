@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 
-import { estadoDeRespuesta, VENTANA_WHATSAPP_MS } from "@/core/whatsapp/puede-responder";
+import {
+  estadoDeRespuesta,
+  vencimientoDeLaVentana,
+  VENTANA_WHATSAPP_MS,
+} from "@/core/whatsapp/puede-responder";
 
 const AHORA = new Date("2026-09-25T12:00:00.000Z");
 
@@ -90,5 +94,27 @@ describe("estadoDeRespuesta", () => {
       ultimoEntrante: "2026-09-24T12:01:00.000Z",
     });
     expect(r.habilitada).toBe(true);
+  });
+});
+
+describe("vencimientoDeLaVentana", () => {
+  it("sin entrante todavía, null", () => {
+    expect(vencimientoDeLaVentana(null, AHORA)).toBeNull();
+  });
+
+  it("dentro de la ventana, la fecha en la que vence", () => {
+    const ultimoEntrante = "2026-09-24T12:01:00.000Z";
+    const vence = vencimientoDeLaVentana(ultimoEntrante, AHORA);
+    expect(vence?.toISOString()).toBe("2026-09-25T12:01:00.000Z");
+  });
+
+  it("justo a las 24 h, ya venció (borde estricto)", () => {
+    const ultimoEntrante = new Date(AHORA.getTime() - VENTANA_WHATSAPP_MS).toISOString();
+    expect(vencimientoDeLaVentana(ultimoEntrante, AHORA)).toBeNull();
+  });
+
+  it("un segundo antes de las 24 h, todavía no venció", () => {
+    const ultimoEntrante = new Date(AHORA.getTime() - VENTANA_WHATSAPP_MS + 1000).toISOString();
+    expect(vencimientoDeLaVentana(ultimoEntrante, AHORA)).not.toBeNull();
   });
 });

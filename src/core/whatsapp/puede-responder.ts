@@ -21,6 +21,22 @@ export interface EstadoDeRespuesta {
   vence_en: string | null;
 }
 
+/**
+ * Cuándo se cierra la ventana de 24 h de WhatsApp, o null si no hay ventana
+ * (nunca entró un mensaje, o ya venció).
+ *
+ * Extraída de `estadoDeRespuesta`: P8 la necesita sola, para decidir si el
+ * REENVÍO por WhatsApp todavía puede salir, sin repetir las otras cuatro
+ * condiciones (plan, rol, agente activo) que no aplican a un reenvío del lado
+ * del servidor.
+ */
+export function vencimientoDeLaVentana(ultimoEntrante: string | null, ahora: Date): Date | null {
+  if (!ultimoEntrante) return null;
+  const vence = new Date(new Date(ultimoEntrante).getTime() + VENTANA_WHATSAPP_MS);
+  if (vence.getTime() <= ahora.getTime()) return null;
+  return vence;
+}
+
 export function estadoDeRespuesta(i: {
   plan: string | null;
   role: string;
@@ -38,10 +54,7 @@ export function estadoDeRespuesta(i: {
   }
   if (puedeArrancar(i.status)) return { habilitada: false, motivo: "agente_activo", vence_en: null };
 
-  if (!i.ultimoEntrante) return { habilitada: false, motivo: "ventana", vence_en: null };
-  const vence = new Date(new Date(i.ultimoEntrante).getTime() + VENTANA_WHATSAPP_MS);
-  if (vence.getTime() <= i.ahora.getTime()) {
-    return { habilitada: false, motivo: "ventana", vence_en: null };
-  }
+  const vence = vencimientoDeLaVentana(i.ultimoEntrante, i.ahora);
+  if (!vence) return { habilitada: false, motivo: "ventana", vence_en: null };
   return { habilitada: true, motivo: null, vence_en: vence.toISOString() };
 }

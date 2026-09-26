@@ -262,6 +262,20 @@ export const enUS: Record<TranslationKey, string> = {
   "escalate.success": "Claim escalated successfully.",
   "escalate.error": "Error escalating the claim. Please try again.",
 
+  // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
+  "reenvio.boton": "Resend request",
+  "reenvio.reabrir": "Reopen and resend",
+  "reenvio.ok": "The request was sent again",
+  "reenvio.noSePuede": "The request cannot be sent right now",
+  "reenvio.reciente": "It was just requested",
+  "reenvio.motivo.estado": "The case is not waiting for an answer",
+  "reenvio.motivo.sin_destinatario": "No recipient on file",
+  "reenvio.motivo.ventana_cerrada": "More than 24 h since their last WhatsApp message",
+  "reenvio.motivo.nada_pendiente": "Nothing left to ask for",
+  "reenvio.motivo.reciente": "Asked less than 10 minutes ago",
+  "reenvio.motivo.cierre_no_es_abandono": "Closed by a team member: it cannot be reopened here",
+  "audit.claim.request_resent": "Request sent again",
+
   // ── Missing docs ───────────────────────────────────────────────────────────
   "docs.parte_amistoso": "Friendly accident report",
   "docs.fotos_danos": "Damage photos",
@@ -313,8 +327,8 @@ export const enUS: Record<TranslationKey, string> = {
   "audit.core.sync_success": "Sent to the core system",
   "audit.core.sync_failed": "Sending to the core system failed",
   "audit.ai.budget_exceeded": "Not analysed: AI budget exhausted",
-  "audit.training.example_approved": "Approved as a training example",
-  "audit.training.example_rejected": "Rejected as a training example",
+  "audit.training.example_approved": "Approved as a reference example",
+  "audit.training.example_rejected": "Rejected as a reference example",
   "audit.doc.received": "Document received",
   "audit.ai.extraction_started": "Analysis started",
   "audit.whatsapp.received": "WhatsApp message received",
@@ -584,7 +598,7 @@ export const enUS: Record<TranslationKey, string> = {
    */
 
   // ── La consola del agente, adentro del detalle de un caso ─────────
-  "agente.avisoAprendizaje": "The agent never learns from an email on its own: only after this human confirmation is it used as an approved example.",
+  "agente.avisoAprendizaje": "Nothing from this case is used on its own. If you confirm it, the agent takes it as a reference example for your company's next cases. It is not used to train any model.",
   "agente.bloqueo.invalid_json": "Invalid JSON",
   "agente.bloqueo.no_linked_case": "No linked case",
   "agente.bloqueo.not_a_claim": "Not a claim",
@@ -592,7 +606,7 @@ export const enUS: Record<TranslationKey, string> = {
   "agente.bloqueo.unresolved_conflicts": "Unresolved conflicts",
   "agente.cargando": "Loading agent analysis",
   "agente.confirmando": "Confirming…",
-  "agente.confirmar": "Confirm as a safe training example",
+  "agente.confirmar": "Use as a reference example",
   "agente.confirmarError": "Couldn't confirm the example.",
   "agente.confirmarOk": "Example confirmed. The agent will use it as approved context in future analyses.",
   "agente.descargarJson": "Download extracted JSON",
@@ -600,7 +614,7 @@ export const enUS: Record<TranslationKey, string> = {
   "agente.errorCarga": "Couldn't load the agent analysis. Reload the page to try again.",
   "agente.faltantes": "Missing fields",
   "agente.jsonCrudo": "Extracted JSON (raw)",
-  "agente.noSugerido": "Not suggested for training",
+  "agente.noSugerido": "Not suggested as an example",
   "agente.pendientes": "Pending confirmation",
   "agente.procesando": "The agent is processing this email… the extracted values will show up here automatically.",
   "agente.puntaje": "Score",
@@ -609,7 +623,7 @@ export const enUS: Record<TranslationKey, string> = {
   "agente.sinFaltantes": "No missing fields.",
   "agente.sinPendientes": "No pending fields.",
   "agente.sinValores": "The agent didn't extract any values in the latest analysis.",
-  "agente.sugerido": "Suggested for training",
+  "agente.sugerido": "Suggested as an example",
   "agente.valoresExtraidos": "Extracted values (latest analysis)",
   "agente.yaConfirmado": "Example already confirmed",
 

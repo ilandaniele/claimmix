@@ -15,6 +15,7 @@
 import { useState, useCallback } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
+import { etiquetaDeCampo, valorParaMostrar } from "@/lib/labels/etiqueta-de-campo";
 
 interface Confirmation {
   id: string;
@@ -29,6 +30,7 @@ interface Confirmation {
 interface FieldConfirmationsPanelProps {
   caseId: string;
   initialConfirmations: Confirmation[];
+  hoy: string;
 }
 
 const STATUS_CLASSES: Record<Confirmation["status"], string> = {
@@ -65,6 +67,7 @@ function ConfidenceIndicator({ value }: { value: number }) {
 export function FieldConfirmationsPanel({
   caseId,
   initialConfirmations,
+  hoy,
 }: FieldConfirmationsPanelProps) {
   const t = useT();
   const STATUS_LABELS: Record<Confirmation["status"], string> = {
@@ -180,8 +183,8 @@ export function FieldConfirmationsPanel({
                   <div className="flex-1 min-w-0 space-y-1.5">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
                       {t("case.detail.fieldKey")}:{" "}
-                      <span className="font-mono text-slate-700 normal-case">
-                        {conf.field_key}
+                      <span className="text-slate-700 normal-case">
+                        {etiquetaDeCampo(conf.field_key, t)}
                       </span>
                     </p>
                     <p className="text-sm text-slate-800">
@@ -189,14 +192,16 @@ export function FieldConfirmationsPanel({
                         {t("case.detail.proposedValue")}:{" "}
                       </span>
                       <span className="font-medium">
-                        {conf.proposed_value ?? "—"}
+                        {conf.proposed_value
+                          ? valorParaMostrar(conf.field_key, conf.proposed_value, t, hoy)
+                          : "—"}
                       </span>
                     </p>
                     {conf.conflict_with_value && (
                       <p className="text-sm text-orange-700">
                         <span>{t("case.detail.conflictValue")}: </span>
                         <span className="font-medium line-through">
-                          {conf.conflict_with_value}
+                          {valorParaMostrar(conf.field_key, conf.conflict_with_value, t, hoy)}
                         </span>
                       </p>
                     )}
@@ -245,11 +250,13 @@ export function FieldConfirmationsPanel({
                 key={conf.id}
                 className="flex items-center justify-between rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
               >
-                <span className="font-mono text-xs text-slate-600">
-                  {conf.field_key}
+                <span className="text-xs text-slate-600">
+                  {etiquetaDeCampo(conf.field_key, t)}
                 </span>
                 <span className="text-slate-700 truncate mx-2 flex-1">
-                  {conf.proposed_value ?? "—"}
+                  {conf.proposed_value
+                    ? valorParaMostrar(conf.field_key, conf.proposed_value, t, hoy)
+                    : "—"}
                 </span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[conf.status]}`}

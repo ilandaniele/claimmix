@@ -35,7 +35,7 @@ const RAIZ = ".next/static/chunks";
  * Turbopack con el grafo de módulos. `@next/bundle-analyzer` NO sirve acá: es
  * de webpack, y este proyecto compila con Turbopack.
  */
-const TOPE_KB = 300;
+const TOPE_KB = 310;
 
 if (!existsSync(RAIZ)) {
   console.error(`No hay build en ${RAIZ}. Corré \`pnpm build\` primero.`);

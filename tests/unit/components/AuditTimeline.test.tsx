@@ -18,6 +18,27 @@ import { render, screen } from "@testing-library/react";
 // Sin mock de i18n a propósito: lo que se afirma es el texto que lee una
 // persona. Si mañana alguien cambia la frase del rechazo, este test se entera.
 import { AuditTimeline } from "@/app/(app)/casos/[id]/components/AuditTimeline";
+import { AuditEvent } from "@/lib/audit/log";
+import { esAR } from "@/lib/i18n";
+
+// Prefijos y valores exactos que no necesitan traducción propia: son técnicos
+// (`auth.`, `health.`, `assistant.`) o entrenamiento/IA que no pasa por acá.
+const PREFIJOS_EXCLUIDOS = [
+  "auth.",
+  "health.",
+  "assistant.",
+  "training.prompt_rule_",
+  "training.custom_field_",
+  "training.finetune_",
+];
+const VALORES_EXCLUIDOS = new Set([
+  "agent.memory_config_exported",
+  "ai.provider_changed",
+  "email.filtered",
+  "email.webhook_rejected",
+  "email.deduplicated",
+  "case.deleted",
+]);
 
 const ADJUNTO_RECHAZADO = {
   id: 1,
@@ -66,5 +87,55 @@ describe("AuditTimeline", () => {
     expect(
       screen.getByText("sin respuesta del denunciante")
     ).toBeInTheDocument();
+  });
+
+  it("todo evento del historial tiene una traducción", () => {
+    const valores = [...Object.values(AuditEvent), "case.re_analyze_triggered"];
+    for (const v of valores) {
+      if (PREFIJOS_EXCLUIDOS.some((p) => v.startsWith(p))) continue;
+      if (VALORES_EXCLUIDOS.has(v)) continue;
+      expect(esAR).toHaveProperty(`audit.${v}`);
+    }
+  });
+
+  it("un mensaje de WhatsApp se lee como tal, no como email", () => {
+    render(
+      <AuditTimeline
+        events={[
+          { id: 5, event_type: "email.received", created_at: "2026-09-01T10:04:00Z", reason: null },
+        ]}
+        channel="whatsapp_sim"
+      />
+    );
+
+    expect(screen.getByText("Llegó un mensaje por WhatsApp")).toBeInTheDocument();
+  });
+
+  it("la severidad alta se lee «Severidad: Alto»", () => {
+    render(
+      <AuditTimeline
+        events={[
+          { id: 6, event_type: "case.status_changed", created_at: "2026-09-01T10:05:00Z", reason: "severidad high" },
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Severidad: Alto")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["processing_timeout", "El análisis tardó demasiado"],
+    ["conflict", "Un dato no coincide con lo que teníamos"],
+    ["lesiones", "Mencionó lesiones o datos de salud"],
+  ])("el motivo %s se traduce", (reason, esperado) => {
+    render(
+      <AuditTimeline
+        events={[
+          { id: 7, event_type: "case.status_changed", created_at: "2026-09-01T10:06:00Z", reason },
+        ]}
+      />
+    );
+
+    expect(screen.getByText(esperado)).toBeInTheDocument();
   });
 });

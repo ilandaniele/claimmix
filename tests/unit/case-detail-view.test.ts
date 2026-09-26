@@ -37,6 +37,7 @@ import {
   extractedFields,
   missingDocs,
   rawMessages,
+  users,
 } from "@/lib/db/schema";
 
 const CTX = { tenantId: "tenant-1" };
@@ -385,5 +386,39 @@ describe("ultimoParaReleer", () => {
 
     // El parser recibe esto directo.
     expect(res).toEqual({ subject: "", body: "", senderEmail: "" });
+  });
+});
+
+describe("cargarDetalleDeCaso — el nombre de quien tiene el caso", () => {
+  it("sin asignado, no pide el nombre", async () => {
+    const reg = espiar(TODO);
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(reg.tablas).not.toContain(users);
+    expect(res!.asignado_nombre).toBeNull();
+  });
+
+  it("con asignado, la tanda pide una consulta más y trae el nombre", async () => {
+    const porTabla = new Map(TODO);
+    porTabla.set(cases, [{ ...CASO_DE_CORREO, assigned_to: "user-1" }]);
+    porTabla.set(users, [{ n: "Ana Analista" }]);
+    const reg = espiar(porTabla);
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(reg.tablas).toContain(users);
+    expect(res!.asignado_nombre).toBe("Ana Analista");
+  });
+
+  it("si falla la consulta del nombre, da null y no tumba la pantalla", async () => {
+    const porTabla = new Map(TODO);
+    porTabla.set(cases, [{ ...CASO_DE_CORREO, assigned_to: "user-1" }]);
+    espiar(porTabla, new Set([users]));
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(res).not.toBeNull();
+    expect(res!.asignado_nombre).toBeNull();
   });
 });

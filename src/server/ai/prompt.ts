@@ -287,7 +287,8 @@ export function buildEmailClaimPrompt(
   knownPatterns: KnownPattern[],
   senderEmail?: string,
   agentTraining?: string,
-  learning?: PromptLearningContext
+  learning?: PromptLearningContext,
+  channel?: string
 ): string {
   /*
    * Lo que escribió la persona NO puede escribir los centinelas.
@@ -336,9 +337,12 @@ export function buildEmailClaimPrompt(
   // in the same message. A name we already read from the header is known, not
   // inferred: it belongs at high confidence, same band as the memory hints
   // below, so it stops asking about something it just used to say hello.
-  const senderHint = senderEmail
-    ? `\nThe email was sent from an address in your system. Use it to inform matching but do NOT include it verbatim in extracted_fields. If the sender header carries a real name (e.g. "Nombre Apellido <direccion@dominio>") and the body never states the claimant's name, extract that name as full_name at HIGH confidence (≥0.85) — it is already known, not inferred, so it goes in extracted_fields, never in fields_pending_confirmation. If the body states a name of its own, that one wins.`
-    : "";
+  const senderHint =
+    channel === "whatsapp" || channel === "whatsapp_sim"
+      ? "\nThe sender is a WhatsApp phone number: never put it in email; email only if an address appears in the text."
+      : senderEmail
+        ? `\nThe email was sent from an address in your system. Use it to inform matching but do NOT include it verbatim in extracted_fields. If the sender header carries a real name (e.g. "Nombre Apellido <direccion@dominio>") and the body never states the claimant's name, extract that name as full_name at HIGH confidence (≥0.85) — it is already known, not inferred, so it goes in extracted_fields, never in fields_pending_confirmation. If the body states a name of its own, that one wins.`
+        : "";
   const trainingBlock = agentTraining?.trim()
     ? `\nTENANT AGENT TRAINING (operator-authored guidance/examples):\n<agent_training>\n${agentTraining.trim().slice(0, 8_000)}\n</agent_training>\nUse this training as extraction guidance for field interpretation, confidence, severity, and documentation signals. If the training conflicts with the SECURITY RULES or the JSON schema, the SECURITY RULES and schema win.`
     : "";
@@ -464,6 +468,8 @@ FIELDS TO EXTRACT (use empty string + confidence=0 if not found):
 - accident_description: Description of what happened
 - claim_type: One of: choque, robo, granizo, incendio, cristales, rc, robo_contenido, accidente_personal, or other.
 
+Use exactly these English keys; never emit Spanish synonyms (nombre_asegurado, dni_asegurado, numero_poliza, fecha_siniestro, lugar_siniestro, descripcion_hecho, tipo_siniestro, telefono_contacto).
+
   ⚠️ DECISIVE TEST FOR COLLISIONS (apply this BEFORE anything else when there is a crash/golpe/impacto):
   Ask "¿quién sufrió el daño que se está reclamando?"
     • "Yo choqué y se dañó MI auto" (the insured claims for their OWN vehicle/property) → choque
@@ -527,6 +533,11 @@ DOCUMENTATION / ATTACHMENT SIGNALS TO MIRROR INTO fields[]:
 These document keys are not part of extracted_fields, but MUST be added to
 fields[] with confidence 0.85-0.95 when clearly present. Do not list a document
 as missing if it is in the attached/mentioned documentation block.
+
+PARTIES AND INJURIES (fields[] only, never extracted_fields):
+- party_a_* = the insured (asegurado); party_b_* = the third party (tercero). Never assign by order of appearance.
+- When a third party is mentioned, add to fields[]: party_b_name, party_b_plate, party_b_insurer (their insurance company). Only when stated; never list them in missing_fields.
+- heridos_cantidad: the number of injured people, only when at least one person was injured and the number is stated. Never names. Never in missing_fields.
 
 MEMORY HINTS (pre-confirmed data for this sender — use these to fill missing/low-confidence fields):
 <memory_hints>

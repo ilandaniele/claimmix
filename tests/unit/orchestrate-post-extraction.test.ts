@@ -559,6 +559,7 @@ describe("orchestratePostExtraction — la derivación con heridos", () => {
     ["high", "severe"],
     ["critical", "minor"],
     ["critical", "fatal"],
+    ["medium", "minor"],
   ] as const)("%s con heridos %s: un solo mensaje, con heridos", async (severity, injury_severity) => {
     const { salidas, data } = await derivacion({ severity, requires_specialist: true, injury_severity });
 
@@ -588,20 +589,48 @@ describe("orchestratePostExtraction — la derivación con heridos", () => {
     expect(data).not.toHaveProperty("heridos");
   });
 
-  it("con heridos leves y gravedad media no hay derivación", async () => {
+  it("con heridos leves y gravedad media, deriva por los heridos y no por la gravedad", async () => {
     const { salidas } = await derivacion({ severity: "medium", injury_severity: "minor" });
+
+    expect(salidas).toHaveLength(1);
+  });
+
+  it("sin heridos y con gravedad media, no hay derivación", async () => {
+    const { salidas } = await derivacion({ severity: "medium" });
 
     expect(salidas).toHaveLength(0);
   });
 
-  it("la del titular ajeno no la lleva, aunque haya heridos", async () => {
-    const { data } = await derivacion({ injury_severity: "severe" }, { titularAjeno: true });
+  it("la del titular ajeno no la lleva, sin heridos", async () => {
+    const { data } = await derivacion({}, { titularAjeno: true });
 
     expect(data).toBeDefined();
     expect(data).not.toHaveProperty("heridos");
   });
 
-  it("la que decide el agente tampoco", async () => {
+  it("con heridos, deriva por eso y no por ser un titular ajeno", async () => {
+    const { data } = await derivacion({ injury_severity: "severe" }, { titularAjeno: true });
+
+    expect(data).toMatchObject({ heridos: true });
+  });
+
+  it("la que decide el agente tampoco la lleva, sin heridos", async () => {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "escalate",
+      askFor: [],
+      question: null,
+      reasoning: "la póliza venció en 2020",
+      noteForAnalyst: null,
+      resolved: [],
+    } as never);
+
+    const { data } = await derivacion({});
+
+    expect(data).toBeDefined();
+    expect(data).not.toHaveProperty("heridos");
+  });
+
+  it("con heridos, deriva por eso y no por lo que decida el agente", async () => {
     vi.mocked(deliberate).mockResolvedValue({
       intent: "escalate",
       askFor: [],
@@ -613,8 +642,7 @@ describe("orchestratePostExtraction — la derivación con heridos", () => {
 
     const { data } = await derivacion({ injury_severity: "severe" });
 
-    expect(data).toBeDefined();
-    expect(data).not.toHaveProperty("heridos");
+    expect(data).toMatchObject({ heridos: true });
   });
 
   it("el registro de auditoría no se entera: sólo gravedad y motivo", async () => {
@@ -624,6 +652,19 @@ describe("orchestratePostExtraction — la derivación con heridos", () => {
       .mocked(writeAuditLog)
       .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
     expect(registro?.[0].payload).toEqual({ severity: "critical", reason: "severidad critical" });
+  });
+
+  it("con gravedad media, el motivo de la derivación es «lesiones» y no manda otro mensaje", async () => {
+    const { salidas } = await derivacion({ severity: "medium", injury_severity: "minor" });
+
+    const registro = vi
+      .mocked(writeAuditLog)
+      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
+    expect(registro?.[0].payload).toEqual({ severity: "medium", reason: "lesiones" });
+
+    const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+    expect(templates).toEqual(["specialist_escalation"]);
+    expect(salidas).toHaveLength(1);
   });
 });
 

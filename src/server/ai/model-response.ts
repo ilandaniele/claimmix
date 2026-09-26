@@ -167,6 +167,8 @@ export interface EmailClaimPayload {
   agentTraining?: string;
   /** Operator learning context: rules, approved examples, versioned prompt. */
   learning?: PromptLearningContext;
+  /** email | email_sim | whatsapp | whatsapp_sim — cambia el consejo sobre el remitente. */
+  channel?: string;
 }
 
 

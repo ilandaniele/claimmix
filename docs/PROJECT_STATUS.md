@@ -3720,7 +3720,8 @@ entró en dos lotes.
   (asegurado, tercero, conductor), también en el few-shot. No alcanza a un
   nombre que nadie extrajo ni a un DNI escrito con espacios. El texto dice «ejemplo de referencia, no
   se entrena ningún modelo». El repo pasó a privado: CodeQL analiza sin subir
-  el SARIF y falla con hallazgos de gravedad alta o crítica. Sin GitHub Pro
+  el SARIF y falla con hallazgos de gravedad alta o crítica; los revisados
+  y descartados van en `.github/codeql-descartados.txt`. Sin GitHub Pro
   no hay protección de ramas ni rulesets (la API da 403), así que la regla
   de rama + PR + promoción se sostiene a mano, y los minutos de Actions
   cuentan contra el cupo del plan gratuito.

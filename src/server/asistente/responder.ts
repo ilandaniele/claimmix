@@ -94,9 +94,26 @@ function recortarAPalabra(texto: string, tope: number): string {
   return ultimoEspacio > 0 ? cortado.slice(0, ultimoEspacio) : "";
 }
 
-/** Corridas de 8 o más dígitos: DNI, teléfono, un monto. */
+/** Corridas de 6 o más dígitos: DNI, teléfono, un monto. */
 function digitosLargos(texto: string): string[] {
-  return texto.match(/\d{8,}/g) ?? [];
+  return texto.match(/\d{6,}/g) ?? [];
+}
+
+/**
+ * Deshace el punto o el espacio de miles ("5.000.000", "5 000 000") para que
+ * un número agrupado no se cuele partido en corridas cortas y esquive
+ * `digitosLargos`. No toca nada que no tenga esa forma de a-tres-en-tres.
+ */
+function normalizarNumeros(t: string): string {
+  return t.replace(/\d{1,3}(?:[.\s]\d{3})+/g, (m) => m.replace(/[.\s]/g, ""));
+}
+
+/** Los números largos (normalizados) de la póliza y de los campos extraídos: lo único que un resumen puede repetir. */
+function digitosConocidos(d: DetalleDelCaso): Set<string> {
+  return new Set([
+    ...(d.poliza ? digitosLargos(normalizarNumeros(d.poliza)) : []),
+    ...d.campos.flatMap((c) => digitosLargos(normalizarNumeros(c.valor))),
+  ]);
 }
 
 /**
@@ -104,14 +121,29 @@ function digitosLargos(texto: string): string[] {
  * aparecer ya en algún campo estructurado (póliza o extraído). Es la defensa
  * contra el denunciante que escribe "ya me depositaron $50000000" en un
  * mensaje: ese monto vive en el texto libre, nunca en un campo, así que si el
- * modelo lo repite como dato del caso, el resumen entero se descarta.
+ * modelo lo repite como dato del caso, el resumen entero se descarta. Los dos
+ * lados se normalizan antes de comparar, para que "5.000.000" valga lo mismo
+ * que "5000000".
  */
 function tieneNumeroInventado(resumen: string, d: DetalleDelCaso): boolean {
-  const conocidos = new Set([
-    ...(d.poliza ? digitosLargos(d.poliza) : []),
-    ...d.campos.flatMap((c) => digitosLargos(c.valor)),
-  ]);
-  return digitosLargos(resumen).some((n) => !conocidos.has(n));
+  const conocidos = digitosConocidos(d);
+  return digitosLargos(normalizarNumeros(resumen)).some((n) => !conocidos.has(n));
+}
+
+/**
+ * Un monto con signo de moneda ($, ARS, USD, u$s) que el resumen afirma sin
+ * que esos mismos dígitos estén en la póliza o en un campo extraído. Es una
+ * segunda guarda, aparte de `tieneNumeroInventado`: acá alcanza con un monto
+ * corto (por ejemplo "$500") para descartar el resumen, porque un monto nunca
+ * es un dato del caso — es una afirmación que el prompt le prohíbe hacer.
+ */
+function tieneMontoInventado(resumen: string, d: DetalleDelCaso): boolean {
+  const conocidos = digitosConocidos(d);
+  const montos = normalizarNumeros(resumen).match(/(?:\$|u\$s|\b(?:ars|usd)\b)\s?\d[\d.\s]*/gi) ?? [];
+  return montos.some((m) => {
+    const digitos = m.replace(/\D/g, "");
+    return digitos.length > 0 && !conocidos.has(digitos);
+  });
 }
 
 /**
@@ -163,7 +195,8 @@ async function resumenDelCaso(tenantId: string, detalle: DetalleDelCaso): Promis
         resumen.length <= 1200 &&
         !RE_CENTINELA.test(resumen) &&
         !/https?:\/\//i.test(resumen) &&
-        !tieneNumeroInventado(resumen, detalle);
+        !tieneNumeroInventado(resumen, detalle) &&
+        !tieneMontoInventado(resumen, detalle);
       if (valido) {
         // El prefijo nunca se recorta acá: es lo único que no puede mentir
         // (ver comentario de `resumenDeterministico`). Lo que cede es el

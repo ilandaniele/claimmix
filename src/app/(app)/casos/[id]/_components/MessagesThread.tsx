@@ -18,9 +18,10 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
-import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { useT, useLocale } from "@/lib/i18n/LocaleContext";
+import type { Locale, TranslationKey } from "@/lib/i18n";
 import type { MensajeDeLaConversacion as Message } from "@/server/cases/conversacion";
 import type { EstadoDeRespuesta } from "@/core/whatsapp/puede-responder";
 import { BloqueoPlanPro } from "@/app/(app)/_components/BloqueoPlanPro";
@@ -40,7 +41,9 @@ type LoadState = "loading" | "ready" | "error";
 
 const PREVIEW_MAX_CHARS = 300;
 const SUBJECT_MAX_CHARS = 60;
-const LOCALE = "es-AR";
+// Meta cierra la ventana de servicio a las 24 h en hora de Meta, pero se lo
+// mostramos a quien contesta en su huso: el equipo trabaja desde Argentina.
+const TIMEZONE = "America/Argentina/Buenos_Aires";
 
 /*
  * Lo saliente que no llegó, o no se sabe si llegó, lo dice. 'queued' es un
@@ -55,9 +58,8 @@ const ESTADOS: Record<string, { clave: TranslationKey; clase: string }> = {
 
 // ── Relative time formatter ────────────────────────────────────────────────────
 
-const rtf = new Intl.RelativeTimeFormat(LOCALE, { numeric: "auto" });
-
-function formatRelative(isoTimestamp: string): string {
+function formatRelative(isoTimestamp: string, locale: Locale): string {
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   const date = new Date(isoTimestamp);
   const diffMs = date.getTime() - Date.now();
   const diffSec = Math.round(diffMs / 1000);
@@ -69,6 +71,18 @@ function formatRelative(isoTimestamp: string): string {
   if (Math.abs(diffMin) < 60) return rtf.format(diffMin, "minute");
   if (Math.abs(diffHours) < 24) return rtf.format(diffHours, "hour");
   return rtf.format(diffDays, "day");
+}
+
+/** Día y hora (HH:mm, 24 h) del vencimiento de la ventana, en hora argentina. */
+function formatVenceEn(isoTimestamp: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: TIMEZONE,
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(isoTimestamp));
 }
 
 // ── Avatar helper ─────────────────────────────────────────────────────────────
@@ -125,14 +139,27 @@ function MessageSkeleton() {
 
 interface MessageCardProps {
   message: Message;
+  locale: Locale;
 }
 
-function MessageCard({ message }: MessageCardProps) {
+/** Por quién firma cada tarjeta saliente: el agente o una persona del equipo (P8). */
+const AUTOR_CLAVE: Record<Message["autor"], TranslationKey> = {
+  denunciante: "messages.thread.denunciante",
+  agente: "messages.thread.agente",
+  equipo: "messages.thread.equipo",
+};
+
+function MessageCard({ message, locale }: MessageCardProps) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
 
   const saliente = message.direction === "outbound";
-  const autor = t(saliente ? "messages.thread.agente" : "messages.thread.denunciante");
+  // El servidor siempre manda `autor`; este fallback sólo cubre que falte el
+  // campo (algún fixture de test), no mensajes viejos.
+  const autor = t(
+    AUTOR_CLAVE[message.autor] ?? (saliente ? "messages.thread.agente" : "messages.thread.denunciante")
+  );
+  const canal = t(message.provider === "whatsapp" ? "messages.thread.canalWhatsapp" : "messages.thread.canalMail");
   // Lo saliente lleva la inicial del agente: el remitente es el buzón de la
   // aseguradora o no hay ninguno.
   const avatarLetter = saliente ? autor.charAt(0) : getAvatarLetter(message.from_addr);
@@ -192,6 +219,9 @@ function MessageCard({ message }: MessageCardProps) {
                 >
                   {autor}
                 </span>
+                <span className="flex-shrink-0 rounded-full bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-500">
+                  {canal}
+                </span>
                 {message.from_addr && (
                   <span className="text-sm font-medium text-slate-800 truncate">
                     {message.from_addr}
@@ -217,9 +247,9 @@ function MessageCard({ message }: MessageCardProps) {
               <time
                 dateTime={message.received_at}
                 className="text-xs text-slate-500 flex-shrink-0"
-                title={new Date(message.received_at).toLocaleString(LOCALE)}
+                title={new Date(message.received_at).toLocaleString(locale)}
               >
-                {formatRelative(message.received_at)}
+                {formatRelative(message.received_at, locale)}
               </time>
             </div>
 
@@ -302,7 +332,8 @@ function Marco({ children }: { children: React.ReactNode }) {
 }
 
 export function MessagesThread({ caseId }: MessagesThreadProps) {
-  const t = useT();
+  const { t, locale } = useLocale();
+  const router = useRouter();
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [messages, setMessages] = useState<Message[]>([]);
   const [recortada, setRecortada] = useState(false);
@@ -311,37 +342,52 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
   const [enviando, setEnviando] = useState(false);
   const [envioEstado, setEnvioEstado] = useState<"enviado" | "fallo" | null>(null);
 
+  // No usar el estado después de desmontar: sigue vivo entre la carga inicial
+  // y el refetch que sigue a un envío, así que no alcanza con la limpieza de
+  // un solo useEffect.
+  const cancelledRef = useRef(false);
   useEffect(() => {
-    let cancelled = false;
-
-    async function fetchMessages() {
-      try {
-        const res = await fetch(`/api/cases/${caseId}/messages`);
-
-        if (!res.ok) {
-          if (!cancelled) setLoadState("error");
-          return;
-        }
-
-        const data: RespuestaDeMensajes = await res.json();
-        if (!cancelled) {
-          setMessages(data.messages);
-          setRecortada(data.recortada);
-          setRespuesta(data.respuesta);
-          setLoadState("ready");
-        }
-      } catch {
-        // Network failure — show error state.
-        if (!cancelled) setLoadState("error");
-      }
-    }
-
-    fetchMessages();
-
+    // StrictMode corre montaje -> limpieza -> montaje sobre la misma ref: sin
+    // este reinicio, la limpieza deja la bandera en true y el segundo montaje
+    // la hereda, así que el fetch que sigue nunca llega a pisar el estado.
+    cancelledRef.current = false;
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
+  }, []);
+
+  // Aparte del efecto de montaje para poder llamarla de nuevo después de un
+  // envío (F): así el estado "Para responder" del encabezado no queda viejo.
+  //
+  // `silencioso` es el refetch que sigue a un POST que ya salió (o quedó
+  // anotado): si ese GET falla no hay que tapar el hilo ni el "Enviado." con
+  // la pantalla de error genérica, sólo se pierde la actualización.
+  const fetchMessages = useCallback(async (opciones: { silencioso?: boolean } = {}) => {
+    try {
+      const res = await fetch(`/api/cases/${caseId}/messages`);
+
+      if (!res.ok) {
+        if (!cancelledRef.current && !opciones.silencioso) setLoadState("error");
+        return;
+      }
+
+      const data: RespuestaDeMensajes = await res.json();
+      if (!cancelledRef.current) {
+        setMessages(data.messages);
+        setRecortada(data.recortada);
+        setRespuesta(data.respuesta);
+        setLoadState("ready");
+      }
+    } catch {
+      // Network failure — show error state, salvo que sea un refetch silencioso.
+      if (!cancelledRef.current && !opciones.silencioso) setLoadState("error");
+    }
   }, [caseId]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchMessages();
+  }, [fetchMessages]);
 
   async function enviarRespuesta() {
     if (!texto.trim() || enviando) return;
@@ -356,8 +402,25 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
       if (res.ok) {
         setTexto("");
         setEnvioEstado("enviado");
+        // El envío puede haber cerrado la ventana o terminado el turno de
+        // responder: se vuelve a pedir el estado, no se lo supone. Silencioso:
+        // si este GET falla, el envío ya salió y no hay que tapar el "Enviado.".
+        await fetchMessages({ silencioso: true });
+        router.refresh();
       } else {
-        setEnvioEstado("fallo");
+        const cuerpo = await res.json().catch(() => null);
+        const motivo = cuerpo?.error?.details?.motivo;
+        if (res.status === 403) {
+          setRespuesta({ habilitada: false, motivo: "plan", vence_en: null });
+        } else if (res.status === 409 && motivo) {
+          setRespuesta({ habilitada: false, motivo, vence_en: null });
+        } else {
+          // 5xx u otro error sin motivo reconocido: puede haber quedado una
+          // fila "queued" o "failed" escrita antes de que Meta contestara — se
+          // la trae también acá para que se vea antes de reintentar.
+          setEnvioEstado("fallo");
+          await fetchMessages({ silencioso: true });
+        }
       }
     } catch {
       setEnvioEstado("fallo");
@@ -416,13 +479,13 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
         )}
         <div className="space-y-3">
           {messages.map((message) => (
-            <MessageCard key={message.id} message={message} />
+            <MessageCard key={message.id} message={message} locale={locale} />
           ))}
         </div>
         {respuesta && respuesta.motivo !== "rol" && (
           <div className="mt-4 border-t border-slate-200 pt-4">
             {respuesta.motivo === "plan" ? (
-              <BloqueoPlanPro t={t} />
+              <BloqueoPlanPro t={t} funcion={t("planPro.responder")} />
             ) : respuesta.habilitada ? (
               <div className="space-y-2">
                 <textarea
@@ -434,6 +497,11 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
                   disabled={enviando}
                   className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-60"
                 />
+                {respuesta.vence_en && (
+                  <p className="text-xs text-slate-500">
+                    {t("messages.reply.venceEn").replace("{fecha}", formatVenceEn(respuesta.vence_en, locale))}
+                  </p>
+                )}
                 <div className="flex items-center gap-3">
                   <button
                     type="button"

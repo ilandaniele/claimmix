@@ -11,19 +11,20 @@ import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { esPlanPro } from "@/core/billing/plan-pro";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { BloqueoPlanPro } from "../_components/BloqueoPlanPro";
 import { CajaDelAsistente } from "./_components/CajaDelAsistente";
 
 export default async function AsistentePage() {
-  const locale = await getServerLocale();
-  const t = getT(locale);
-
   const session = await getSessionContext();
   if (!session?.user) redirect("/login");
   // Deduplicada con la del layout: ver lib/auth/user-row.ts.
   const userRow = await getUserRow(session.user.id);
   if (!userRow) redirect("/login");
+
+  // Misma preferencia que el layout: la cuenta le gana a la cookie.
+  const locale = await resolveAccountLocale(userRow.locale);
+  const t = getT(locale);
 
   return (
     <div className="px-6 py-8 max-w-3xl">
@@ -32,7 +33,7 @@ export default async function AsistentePage() {
         <p className="mt-1 text-sm text-slate-500">{t("asistente.subtitulo")}</p>
       </div>
 
-      {esPlanPro(userRow.plan) ? <CajaDelAsistente /> : <BloqueoPlanPro t={t} />}
+      {esPlanPro(userRow.plan) ? <CajaDelAsistente /> : <BloqueoPlanPro t={t} funcion={t("planPro.asistente")} />}
     </div>
   );
 }

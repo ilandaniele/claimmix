@@ -534,10 +534,13 @@ export const enUS: Record<TranslationKey, string> = {
   "messages.thread.collapse": "Show less",
   "messages.thread.denunciante": "Claimant",
   "messages.thread.agente": "Agent",
+  "messages.thread.equipo": "Team",
   "messages.thread.no_enviado": "Not sent",
   "messages.thread.simulado": "Simulated",
   "messages.thread.sin_confirmar": "Unconfirmed",
   "messages.thread.recortada": "Showing only the most recent messages.",
+  "messages.thread.canalWhatsapp": "WhatsApp",
+  "messages.thread.canalMail": "Mail",
 
   // ── Reply by WhatsApp (P8) ───────────────────────────────────────────────────
   "messages.reply.enviar": "Send",
@@ -547,6 +550,7 @@ export const enUS: Record<TranslationKey, string> = {
   "messages.reply.canal": "This case did not arrive by WhatsApp.",
   "messages.reply.enviado": "Sent.",
   "messages.reply.fallo": "Could not send. Try again.",
+  "messages.reply.venceEn": "You can reply until {fecha}.",
 
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clients",
@@ -639,7 +643,9 @@ export const enUS: Record<TranslationKey, string> = {
 
   // ── Plan Pro — las funciones que el plan abre, no un plan del catálogo ─
   "planPro.nombre": "Pro plan",
-  "planPro.bloqueado": "Available on the Pro plan",
+  "planPro.bloqueado": "Available with the Pro plan",
+  "planPro.asistente": "AI assistant",
+  "planPro.responder": "Reply on WhatsApp from the app",
 
   // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
   "cartera.aFacturar": "To bill",

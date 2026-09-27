@@ -19,6 +19,8 @@ import { authUsers, users } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { logger } from "@/lib/observability/logger";
+import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
+import { getClientIp } from "@/lib/rate-limit/index";
 
 // ── GET /api/admin/users ──────────────────────────────────────────────────────
 
@@ -161,6 +163,17 @@ export async function POST(request: NextRequest) {
         )
       );
     }
+
+    await writeAuditLog({
+      tenant_id: adminRow.tenant_id,
+      actor_id: adminRow.id,
+      event_type: AuditEvent.USER_CREATED,
+      target_type: "user",
+      target_id: newUserId,
+      payload: { role },
+      ip: getClientIp(request),
+      ua: request.headers.get("user-agent") ?? undefined,
+    });
 
     return ok(
       {

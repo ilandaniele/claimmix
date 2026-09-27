@@ -5,11 +5,13 @@
  * the GET verification handshake, and inbound payload parsing.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { createHmac } from "crypto";
 import {
+  downloadWhatsAppMedia,
   parseCloudApiMessages,
   resolveWebhookChallenge,
+  sendWhatsAppText,
   verifyMetaSignature,
 } from "@/server/whatsapp/cloud-api";
 
@@ -116,5 +118,86 @@ describe("parseCloudApiMessages", () => {
     expect(parseCloudApiMessages({ object: "page", entry: [] })).toEqual([]);
     expect(parseCloudApiMessages(null)).toEqual([]);
     expect(parseCloudApiMessages({})).toEqual([]);
+  });
+});
+
+/*
+ * Sin plazo, un Meta colgado deja la función esperando hasta el `maxDuration`
+ * de la ruta en vez de fallar rápido y dejar que el que llama siga.
+ */
+describe("sendWhatsAppText — plazo del envío", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
+    process.env.WHATSAPP_PHONE_NUMBER_ID = "123";
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete process.env.WHATSAPP_ACCESS_TOKEN;
+    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+  });
+
+  it("un fetch que rechaza con TimeoutError da ok:false y no tira", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    }) as unknown as typeof fetch;
+
+    await expect(sendWhatsAppText("5491100000000", "hola")).resolves.toMatchObject({ ok: false });
+  });
+
+  it("el fetch del envío recibe un signal", async () => {
+    let signalRecibido: unknown;
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      signalRecibido = (init as RequestInit | undefined)?.signal;
+      return new Response(JSON.stringify({ messages: [{ id: "wamid.out" }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await sendWhatsAppText("5491100000000", "hola");
+
+    expect(signalRecibido).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("downloadWhatsAppMedia — plazo de la descarga", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete process.env.WHATSAPP_ACCESS_TOKEN;
+  });
+
+  it("un fetch que rechaza con TimeoutError da null", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    }) as unknown as typeof fetch;
+
+    await expect(downloadWhatsAppMedia("media-1")).resolves.toBeNull();
+  });
+
+  it("la metadata y la descarga de bytes reciben cada una un signal", async () => {
+    const signals: unknown[] = [];
+    globalThis.fetch = vi.fn(async (url, init) => {
+      signals.push((init as RequestInit | undefined)?.signal);
+      const u = String(url);
+      if (u.includes("/media-1")) {
+        return new Response(
+          JSON.stringify({ url: "https://cdn.example/file", mime_type: "image/jpeg" }),
+          { status: 200 }
+        );
+      }
+      return new Response(Buffer.from("bytes"), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await downloadWhatsAppMedia("media-1");
+
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[1]).toBeInstanceOf(AbortSignal);
   });
 });

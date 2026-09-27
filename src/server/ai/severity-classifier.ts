@@ -41,7 +41,7 @@ function matchesPattern(text: string, pattern: string): boolean {
     return text.includes(lower);
   }
 
-  const escaped = lower.replace(/[.*+?^${}()|[\\\\]]/g, "\\$&");
+  const escaped = lower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   /*
    * El plural cuenta igual que el singular.

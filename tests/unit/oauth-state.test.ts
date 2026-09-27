@@ -78,6 +78,14 @@ describe("estadoEsValido", () => {
     expect(estadoEsValido(estado, SESION, nuevoNonce())).toBe(false);
   });
 
+  it("una firma alterada de distinto largo no pasa, y no tira error", () => {
+    // La comparación es de largo constante: un nonce más corto o más largo
+    // que el esperado tiene que dar false sin romper la ruta.
+    expect(() => estadoEsValido(estado, SESION, nonce.slice(0, -5))).not.toThrow();
+    expect(estadoEsValido(estado, SESION, nonce.slice(0, -5))).toBe(false);
+    expect(estadoEsValido(estado, SESION, nonce + "extra")).toBe(false);
+  });
+
   it("un state sin nonce no pasa", () => {
     // El formato viejo, sin nonce, tiene que quedar afuera: si pasara, el
     // arreglo no serviría de nada.

@@ -31,6 +31,7 @@
 import "server-only";
 
 import { randomBytes } from "crypto";
+import { timingSafeStringEqual } from "@/lib/security/compare";
 
 export const COOKIE_ESTADO_OAUTH = "gmail_oauth_state";
 
@@ -78,22 +79,5 @@ export function estadoEsValido(
   if (!esperado || !estado.nonce) return false;
   if (estado.tenantId !== sesion.tenantId) return false;
   if (estado.userId !== sesion.userId) return false;
-  return comparacionConstante(estado.nonce, esperado);
-}
-
-/**
- * Comparar sin filtrar por tiempo.
- *
- * Acá el nonce lo eligió el servidor y no hay un oráculo evidente que
- * aprovechar, pero comparar secretos con `===` es la clase de detalle que se
- * copia de un lado a otro. Que el patrón del repo sea siempre el mismo vale más
- * que el ahorro.
- */
-function comparacionConstante(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let distinto = 0;
-  for (let i = 0; i < a.length; i++) {
-    distinto |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return distinto === 0;
+  return timingSafeStringEqual(estado.nonce, esperado);
 }

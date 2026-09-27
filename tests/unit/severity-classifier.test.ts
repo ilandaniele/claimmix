@@ -229,6 +229,30 @@ describe("classifySeverity — pattern escalates AI", () => {
   });
 });
 
+// ── DB patterns with regex metacharacters ──────────────────────────────────────
+
+describe("classifySeverity — patrones con metacaracteres de regex", () => {
+  it("'golpe (fuerte)' coincide literal y no tira error", () => {
+    const dbPatterns: KnownPattern[] = [mkPattern("golpe (fuerte)", "high")];
+    const result = () => classifySeverity("hubo un golpe (fuerte) en la puerta", null, dbPatterns);
+    expect(result).not.toThrow();
+    expect(result()).toBe("high");
+  });
+
+  it("'a.b' no coincide con 'axb' — el punto es literal", () => {
+    const dbPatterns: KnownPattern[] = [mkPattern("a.b", "high")];
+    const result = classifySeverity("hubo axb en el lugar", null, dbPatterns);
+    expect(result).toBe("medium");
+  });
+
+  it("'c++' compila y coincide literal", () => {
+    const dbPatterns: KnownPattern[] = [mkPattern("c++", "critical")];
+    const result = () => classifySeverity("el sistema usa c++ en el motor", null, dbPatterns);
+    expect(result).not.toThrow();
+    expect(result()).toBe("critical");
+  });
+});
+
 // ── AC25: Prompt injection in email body does not affect classifier ────────────
 
 describe("classifySeverity — AC25 prompt injection resistance", () => {

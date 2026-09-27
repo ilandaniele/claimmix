@@ -1666,7 +1666,8 @@ reconocen por `email_thread_id LIKE '5490000%'` y clientes
 `ensayo.*@example.com`; los hijos de `cases` son `ON DELETE CASCADE`. Un
 ensayo matado a mitad deja huérfanos — hoy cinco, dos veces, borrados por ese
 mismo criterio en una transacción con conteo antes y después.
-`cleanup:cases` NO sirve para esto: borra todos los casos del inquilino.
+`cleanup:cases` se borró (G9): borraba todos los casos del inquilino de la
+base viva, y no servía para esto.
 
 **El e2e que estaba en verde y no contaba filas.** «Pongo 100 y la tabla
 sigue en 20» llegó DESPUÉS de que el e2e de cien por página pasara en CI.

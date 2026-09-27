@@ -13,6 +13,11 @@
  */
 
 import { nombreDelMesArgentino } from "@/core/fecha/dia-argentino";
+import {
+  CLAVES_DE_ESTADO,
+  contarPorOpcion,
+  type ClaveDeEstado,
+} from "@/core/case/filtro-de-estado";
 import { unidadDe, type Unidad } from "@/core/metricas/serie";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
@@ -25,9 +30,6 @@ import {
   type AiUsageByUser,
   type AiUsageByModel,
 } from "@/server/metrics/kpis";
-import { enTenant, type TenantContext } from "@/data/scope";
-import { and, gte, lt, count, sql, isNotNull } from "drizzle-orm";
-import { aiUsage, authUsers, cases } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
@@ -96,11 +98,18 @@ const formatUsd = (value: number) => formatUsdShared(value, 4);
 
 // ── Status bar chart ──────────────────────────────────────────────────────────
 
-const STATUS_COLORS: Record<string, string> = {
-  listo: "bg-green-500",
-  esperando: "bg-yellow-400",
-  escalado: "bg-red-400",
+/*
+ * Los mismos seis grupos de `filtro-de-estado.ts`, no los estados crudos: el
+ * canal real escribe `requiere_especialista`, `listo_para_core`, `recibido`,
+ * que este gráfico dibujaba sin barra por no tener una clave que los cubra. El
+ * orden es el de `CLAVES_DE_ESTADO`, el mismo recorrido que ya usa la bandeja.
+ */
+const STATUS_COLORS: Record<ClaveDeEstado, string> = {
   procesando: "bg-blue-400",
+  esperando: "bg-yellow-400",
+  confirmacion_pendiente: "bg-amber-500",
+  escalado: "bg-red-400",
+  listo: "bg-green-500",
   cerrado: "bg-slate-400",
 };
 
@@ -110,11 +119,12 @@ const STATUS_COLORS: Record<string, string> = {
  * sabe en qué idioma está mirando quien pidió la página. El orden de las
  * entradas sigue siendo el orden en que se dibujan las barras.
  */
-const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
-  listo: "tabs.listo",
-  esperando: "tabs.esperando",
-  escalado: "tabs.escalado",
+const STATUS_LABEL_KEYS: Record<ClaveDeEstado, TranslationKey> = {
   procesando: "tabs.procesando",
+  esperando: "tabs.esperando",
+  confirmacion_pendiente: "status.confirmacion_pendiente",
+  escalado: "tabs.escalado",
+  listo: "tabs.listo",
   cerrado: "tabs.cerrado",
 };
 
@@ -159,8 +169,13 @@ export default async function MetricasPage({
       Object.values(data.by_status).some((v) => v > 0) ||
       data.ai_usage.all_time.total_tokens > 0);
 
-  const totalByStatus = Object.values(data?.by_status ?? {}).reduce(
-    (a, b) => a + b,
+  // Sólo los seis grupos de la bandeja: `no_relevante` y `error_core` quedan
+  // afuera de la partición, y sumarlos acá volvía a romper el 100% del gráfico.
+  const porGrupoDeEstado = contarPorOpcion(
+    Object.entries(data?.by_status ?? {}).map(([status, n]) => ({ status, count: n }))
+  );
+  const totalByStatus = CLAVES_DE_ESTADO.reduce(
+    (a, clave) => a + porGrupoDeEstado[clave],
     0
   );
   const totalByType = Object.values(data?.by_type ?? {}).reduce(
@@ -180,38 +195,49 @@ export default async function MetricasPage({
         </p>
       </div>
 
-      {!hasData ? (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-6 py-12 text-center">
+      {!hasData && (
+        <div className="mb-8 rounded-lg border border-slate-200 bg-slate-50 px-6 py-12 text-center">
           <p className="text-sm text-slate-500">
             {t("metricas.emptyPeriod")}
           </p>
         </div>
-      ) : (
-        <>
-          {/* ── Summary cards ────────────────────────────────────────────────── */}
-          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <SummaryCard
-              label={t("metricas.card.totalMes")}
-              value={`${data!.summary.total_cases_month} ${t("bandeja.claims")}`}
-              accent="blue"
-            />
-            <SummaryCard
-              label={t("metricas.card.primeraRespuesta")}
-              value={formatMinutes(data!.summary.avg_first_response_minutes)}
-              accent="slate"
-            />
-            <SummaryCard
-              label={t("metricas.card.completitudAuto")}
-              value={`${data!.summary.auto_completion_rate}%`}
-              accent="green"
-            />
-            <SummaryCard
-              label={t("metricas.card.escalados")}
-              value={`${data!.summary.escalated_count} ${t("bandeja.claims")}`}
-              accent="red"
-            />
-          </div>
+      )}
 
+      {hasData && (
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <SummaryCard
+            label={t("metricas.card.totalMes")}
+            value={`${data!.summary.total_cases_month} ${t("bandeja.claims")}`}
+            accent="blue"
+          />
+          <SummaryCard
+            label={t("metricas.card.primeraRespuesta")}
+            value={formatMinutes(data!.summary.avg_first_response_minutes)}
+            accent="slate"
+          />
+          <SummaryCard
+            label={t("metricas.card.completitudAuto")}
+            value={`${data!.summary.auto_completion_rate}%`}
+            accent="green"
+          />
+          <SummaryCard
+            label={t("metricas.card.escalados")}
+            value={`${data!.summary.escalated_count} ${t("bandeja.claims")}`}
+            accent="red"
+          />
+        </div>
+      )}
+
+      {/* La actividad va arriba, antes del uso de IA: es lo primero que alguien
+          quiere ver, y sale aunque el tenant no tenga historial todavía. */}
+      {data?.serie && (
+        <div className="mb-8">
+          <SerieDeActividad serie={data.serie} unidad={unidad} locale={locale} />
+        </div>
+      )}
+
+      {hasData && (
+        <>
           {/* ── Charts row ───────────────────────────────────────────────────── */}
           <section className="mb-8">
             <div className="mb-4">
@@ -366,15 +392,15 @@ export default async function MetricasPage({
                 <p className="text-sm text-slate-500">{t("metricas.sinDatos")}</p>
               ) : (
                 <div className="space-y-3">
-                  {Object.entries(STATUS_LABEL_KEYS).map(([key, labelKey]) => {
-                    const label = t(labelKey);
-                    const count = data!.by_status[key] ?? 0;
+                  {CLAVES_DE_ESTADO.map((clave) => {
+                    const label = t(STATUS_LABEL_KEYS[clave]);
+                    const count = porGrupoDeEstado[clave];
                     const pct =
                       totalByStatus > 0
                         ? Math.round((count / totalByStatus) * 100)
                         : 0;
                     return (
-                      <div key={key}>
+                      <div key={clave}>
                         <div className="mb-1 flex justify-between text-xs text-slate-600">
                           <span>{label}</span>
                           <span>
@@ -383,7 +409,7 @@ export default async function MetricasPage({
                         </div>
                         <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
                           <div
-                            className={`h-full rounded-full transition-all ${STATUS_COLORS[key] ?? "bg-slate-400"} ${anchoDeBarra(pct)}`}
+                            className={`h-full rounded-full transition-all ${STATUS_COLORS[clave]} ${anchoDeBarra(pct)}`}
                                                         aria-valuenow={pct}
                             aria-valuemin={0}
                             aria-valuemax={100}
@@ -483,12 +509,6 @@ export default async function MetricasPage({
               </table>
             )}
           </div>
-
-          {data!.serie && (
-            <div className="mt-8">
-              <SerieDeActividad serie={data!.serie} unidad={unidad} locale={locale} />
-            </div>
-          )}
         </>
       )}
     </div>

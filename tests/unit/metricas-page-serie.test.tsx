@@ -2,8 +2,8 @@
  * /metricas con la serie de actividad, dibujada entera.
  *
  * El componente y `getTenantKpis` se prueban cada uno por su lado; esto prueba
- * la unión: que `?serie=` llegue a la consulta, y que la sección salga adentro
- * del tablero y no en ceros debajo de «no hay datos».
+ * la unión: que `?serie=` llegue a la consulta, y que la sección salga arriba
+ * del todo, tenga o no el tenant otro historial que mostrar.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -42,7 +42,16 @@ function datos(casos: number): MetricasData {
     top_analysts: [],
     ai_usage: { month: SIN_USO, all_time: SIN_USO, by_user: [], by_model: [] },
     period: { start: "", end: "" },
-    serie: [{ clave: "2026-09-15", reclamos: casos, whatsapps: 0, mails: 0 }],
+    serie: [
+      {
+        clave: "2026-09-15",
+        reclamos: casos,
+        whatsapps: 0,
+        mails: 0,
+        reclamos_whatsapp: 0,
+        reclamos_mail: 0,
+      },
+    ],
   };
 }
 
@@ -63,20 +72,20 @@ describe("/metricas — la serie de actividad", () => {
     expect(screen.getByRole("link", { current: "page" })).toHaveTextContent("Por día");
   });
 
-  it("sin `?serie=` pide la mensual", async () => {
+  it("sin `?serie=` pide la diaria", async () => {
     mockKpis.mockResolvedValue(datos(3));
 
     await dibujar();
 
-    expect(mockKpis).toHaveBeenCalledWith({ tenantId: "t1" }, { serie: "mes" });
+    expect(mockKpis).toHaveBeenCalledWith({ tenantId: "t1" }, { serie: "dia" });
   });
 
-  it("sin ningún caso queda sólo el aviso, no una serie en ceros debajo", async () => {
+  it("sin ningún caso, la actividad reciente se muestra igual bajo el aviso", async () => {
     mockKpis.mockResolvedValue(datos(0));
 
     await dibujar("dia");
 
     expect(screen.getByText(/No hay datos disponibles/)).toBeInTheDocument();
-    expect(screen.queryByTestId("serie-actividad")).not.toBeInTheDocument();
+    expect(screen.getByTestId("serie-actividad")).toBeInTheDocument();
   });
 });

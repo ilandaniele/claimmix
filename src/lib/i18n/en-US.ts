@@ -137,6 +137,12 @@ export const enUS: Record<TranslationKey, string> = {
   "bandeja.tableLabel": "Claims table",
   "bandeja.toastNew": "New claim received:",
   "bandeja.toastUpdated": "updated:",
+  "bandeja.vista.lista": "List",
+  "bandeja.vista.tablero": "Board",
+
+  // ── Inbox board (G36) — read-only, no drag-and-drop ─────────────────────────
+  "tablero.verTodos": "See all",
+  "tablero.vacio": "No claims in this column.",
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simulate new claim",
@@ -393,6 +399,7 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Bandeja filter labels ───────────────────────────────────────────────────
   "filter.channel": "Channel",
   "filter.severity": "Severity",
+  "filter.fraude": "Fraud",
   // Was "Type", colliding with the claim-type chips above. See the es-AR note.
   "filter.isClaim": "Relevance",
   "filter.todos": "All",
@@ -644,6 +651,11 @@ export const enUS: Record<TranslationKey, string> = {
   "agente.valoresExtraidos": "Extracted values (latest analysis)",
   "agente.yaConfirmado": "Example already confirmed",
 
+  // ── El indicador de estado del agente, al pie del sidebar (G37) ─────
+  "agente.estado.activo": "Agent active",
+  "agente.estado.modo_prueba": "Test mode",
+  "agente.estado.sin_presupuesto": "Out of budget",
+  "agente.estado.procesando": "{n} in progress",
 
   // ── Los nombres comerciales de los planes ──────────────────────────
   // El precio y la aritmética siguen en `lib/billing/plans.ts`, que no conoce

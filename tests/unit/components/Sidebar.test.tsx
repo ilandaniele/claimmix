@@ -59,3 +59,19 @@ describe("Sidebar — aria-current", () => {
     expect(activos[0]).toHaveTextContent("Métricas");
   });
 });
+
+describe("Sidebar — estado del agente (G37)", () => {
+  it("dibuja el slot que le pasa el layout, al pie", () => {
+    render(
+      <LocaleProvider locale="es-AR">
+        <Sidebar role="owner" estadoDelAgente={<span>Agente activo</span>} />
+      </LocaleProvider>
+    );
+    expect(screen.getByText("Agente activo")).toBeInTheDocument();
+  });
+
+  it("sin la prop, no dibuja nada al pie", () => {
+    montar("es-AR");
+    expect(screen.queryByText("Agente activo")).not.toBeInTheDocument();
+  });
+});

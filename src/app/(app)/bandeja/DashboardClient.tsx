@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PER_PAGE_OPTIONS } from "./per-page";
 import { ID_PANEL_DE_LA_LISTA } from "./components/ids";
 import { contarPorOpcion } from "@/core/case/filtro-de-estado";
@@ -11,6 +11,8 @@ import { BotonDeFiltros, MarcasDeFiltros } from "./components/PanelDeFiltros";
 import { CampoDeBusqueda } from "./components/CampoDeBusqueda";
 import { SelectorDePeriodo } from "./components/SelectorDePeriodo";
 import { CasesTable } from "./components/CasesTable";
+import { Tablero } from "./components/Tablero";
+import { claseChip } from "./components/chip";
 import { SimulateModal } from "./components/SimulateModal";
 import { ToastContainer, useToast } from "./components/Toast";
 import { useCasesRealtime, mergeCaseUpdate } from "./components/useCasesRealtime";
@@ -269,15 +271,22 @@ interface DashboardClientProps {
   initialData: CaseListResult;
   scenarios: readonly OpcionDeEscenario[];
   allStatusCounts: { status: CaseStatus | "todos"; count: number }[];
+  /**
+   * "lista" o "tablero". `vista` no es un filtro: page.tsx ya lo validó, y
+   * ausente es "lista" — la pantalla de siempre, sin cambios.
+   */
+  vista?: "lista" | "tablero";
 }
 
 function DashboardClientInterno({
   initialData,
   scenarios,
   allStatusCounts,
+  vista = "lista",
 }: DashboardClientProps) {
   const t = useT();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   /*
    * Lo activo se lee de `paramsVisibles`: el destino mientras la navegacion
    * esta en vuelo, la URL cuando no. Asi la pestaña, el chip y la pagina se
@@ -285,7 +294,22 @@ function DashboardClientInterno({
    * `exportQuery`, mas abajo, sigue leyendo la URL real: el CSV es de lo que
    * ya se esta mirando, no de lo que esta por llegar.
    */
-  const { pending, paramsVisibles } = useNavegacion();
+  const { pending, paramsVisibles, empujar } = useNavegacion();
+  /*
+   * El switch lista/tablero cambia sólo el parámetro `vista`, sin tocar page
+   * ni el resto de los filtros: no es un filtro, es otra forma de mirar lo
+   * mismo.
+   */
+  const irAVista = useCallback(
+    (v: "lista" | "tablero") => {
+      const params = new URLSearchParams(paramsVisibles.toString());
+      if (v === "lista") params.delete("vista");
+      else params.set("vista", v);
+      const query = params.toString();
+      empujar(query ? `${pathname}?${query}` : pathname);
+    },
+    [pathname, paramsVisibles, empujar]
+  );
   // Multi-select: cada uno puede traer varios valores (`?type=choque&type=robo`).
   const activeStatus = paramsVisibles.getAll("status") as CaseStatus[];
   const activeType = paramsVisibles.getAll("type") as ClaimType[];
@@ -587,6 +611,28 @@ function DashboardClientInterno({
            */
           alLadoDelTitulo={
             <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+              {/*
+                * "vista" no es un filtro más: cambia cómo se mira la MISMA
+                * lista, así que va aparte y no adentro del panel de filtros.
+                */}
+              <div className="flex items-center gap-0.5 rounded-full bg-slate-100 p-0.5">
+                <button
+                  type="button"
+                  aria-pressed={vista === "lista"}
+                  onClick={() => irAVista("lista")}
+                  className={claseChip(vista === "lista")}
+                >
+                  {t("bandeja.vista.lista")}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={vista === "tablero"}
+                  onClick={() => irAVista("tablero")}
+                  className={claseChip(vista === "tablero")}
+                >
+                  {t("bandeja.vista.tablero")}
+                </button>
+              </div>
               <CampoDeBusqueda />
               <SelectorDePeriodo />
               <BotonDeFiltros cuentas={cuentasDeEstado} />
@@ -676,33 +722,43 @@ function DashboardClientInterno({
             </div>
           )}
           {/*
-            * `role="tabpanel"` y el id: son la otra mitad del `role="tablist"`
-            * de las pestañas. Sin esto, un lector anuncia «pestaña 2 de 6» y no
-            * hay ningún panel al que esa pestaña lleve.
+            * El tablero es otra forma de mirar la MISMA lista, no una
+            * pantalla aparte: mismas filas, mismo `pending`. Con "lista" (el
+            * valor por omisión) esto es exactamente lo que había antes de
+            * G36 — `role="tabpanel"` y el id son la otra mitad del
+            * `role="tablist"` de las pestañas, y sin ellos un lector anuncia
+            * «pestaña 2 de 6» sin ningún panel al que esa pestaña lleve.
             */}
-          <div
-            id={ID_PANEL_DE_LA_LISTA}
-            role="tabpanel"
-            aria-label={t("bandeja.tableLabel")}
-            className={`scroll-fino h-full overflow-auto transition-opacity ${pending ? "pointer-events-none opacity-60" : ""}`}
-            data-scroll="lista"
-            aria-busy={pending}
-          >
-            <CasesTable
-              cases={visibleCases}
-              onDeleteMany={handleDeleteMany}
-              seleccionando={seleccionando}
-              desde={paraResponder ? "para_responder" : undefined}
-            />
-          </div>
+          {vista === "tablero" ? (
+            <Tablero casos={visibleCases} totales={cuentasDeEstado} />
+          ) : (
+            <div
+              id={ID_PANEL_DE_LA_LISTA}
+              role="tabpanel"
+              aria-label={t("bandeja.tableLabel")}
+              className={`scroll-fino h-full overflow-auto transition-opacity ${pending ? "pointer-events-none opacity-60" : ""}`}
+              data-scroll="lista"
+              aria-busy={pending}
+            >
+              <CasesTable
+                cases={visibleCases}
+                onDeleteMany={handleDeleteMany}
+                seleccionando={seleccionando}
+                desde={paraResponder ? "para_responder" : undefined}
+              />
+            </div>
+          )}
         </div>
 
         {/*
           * El paginador queda FUERA del área que scrollea: antes iba al final de
           * la tabla, así que con cien filas había que bajar hasta el fondo para
           * cambiar de página. Ahora la lista se mueve y el control se queda.
+          *
+          * En el tablero no hay paginador: cada columna ya muestra "N de M" y
+          * el link "ver todos" lleva al resto en la lista.
           */}
-        {visibleTotal > 0 && (
+        {vista === "lista" && visibleTotal > 0 && (
           <Pagination
             page={activePage}
             perPage={PER_PAGE}

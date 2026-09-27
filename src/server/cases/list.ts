@@ -96,6 +96,7 @@ export function buildCaseFilters(
     q,
     desde,
     severity,
+    fraude,
     customer_id,
     policy_id,
     channel,
@@ -161,6 +162,8 @@ export function buildCaseFilters(
   if (desde) conditions.push(gte(cases.created_at, desde));
   // AC18: Email-intake filters
   if (severity?.length) conditions.push(inArray(cases.severity, severity));
+  // G35: filtro de fraude de la bandeja.
+  if (fraude?.length) conditions.push(inArray(cases.fraud_risk_level, fraude));
   if (customer_id) conditions.push(eq(cases.customer_id, customer_id));
   if (policy_id) conditions.push(eq(cases.policy_id, policy_id));
   if (channel?.length) conditions.push(inArray(cases.channel, channel));

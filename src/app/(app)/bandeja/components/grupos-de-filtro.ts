@@ -125,6 +125,15 @@ export const GRUPOS_DE_FILTRO: GrupoDeFiltro[] = [
     ],
   },
   {
+    param: "fraude",
+    rotulo: "filter.fraude",
+    opciones: [
+      { clave: "low", etiqueta: "riesgo.fraude.low", color: "bg-yellow-500" },
+      { clave: "medium", etiqueta: "riesgo.fraude.medium", color: "bg-amber-500" },
+      { clave: "high", etiqueta: "riesgo.fraude.high", color: "bg-red-600" },
+    ],
+  },
+  {
     param: "channel",
     rotulo: "filter.channel",
     opciones: [

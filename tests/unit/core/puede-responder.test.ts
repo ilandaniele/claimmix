@@ -47,6 +47,22 @@ describe("estadoDeRespuesta", () => {
     });
   });
 
+  it("sin Plan Pro y canal mail, motivo canal (rol y canal van antes que plan)", () => {
+    expect(estadoDeRespuesta({ ...BASE, plan: "piloto", channel: "email" })).toEqual({
+      habilitada: false,
+      motivo: "canal",
+      vence_en: null,
+    });
+  });
+
+  it("visor sin Plan Pro, motivo rol (rol va antes que plan)", () => {
+    expect(estadoDeRespuesta({ ...BASE, plan: "piloto", role: "viewer" })).toEqual({
+      habilitada: false,
+      motivo: "rol",
+      vence_en: null,
+    });
+  });
+
   it.each(["recibido", "procesando", "info_faltante", "confirmacion_pendiente"])(
     "con el agente todavía en %s, motivo agente_activo",
     (status) => {

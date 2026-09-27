@@ -66,7 +66,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   INVALID_CREDENTIALS: "Credenciales inválidas.",
   NOT_FOUND: "El recurso solicitado no existe.",
   FORBIDDEN_ROLE: "No tenés permisos para realizar esta acción.",
-  PLAN_REQUERIDO: "Esta función es del Plan Pro.",
+  PLAN_REQUERIDO: "Disponible con el Plan Pro.",
   VALIDATION_FAILED: "Los datos enviados no son válidos.",
   RATE_LIMITED: "Demasiadas solicitudes. Esperá un momento.",
   AI_BUDGET_EXCEEDED: "Presupuesto de IA agotado para hoy.",

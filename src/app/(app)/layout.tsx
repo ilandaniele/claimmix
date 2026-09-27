@@ -20,7 +20,7 @@ import { TopBar } from "./_components/TopBar";
 import { AsistenteFlotante } from "./_components/AsistenteFlotante";
 import { getT } from "@/lib/i18n";
 import { LocaleProvider } from "@/lib/i18n/LocaleContext";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { ThemeProvider } from "@/lib/theme/ThemeContext";
 
 export default async function AppLayout({
@@ -47,12 +47,7 @@ export default async function AppLayout({
   const isOperator = isOperatorEmail(user?.email);
   // Account preference wins over the device cookie (so the saved language
   // follows the user to any device); cookie/default covers the rest.
-  const cookieLocale = await getServerLocale();
-  const accountLocale = userRow?.locale;
-  const locale =
-    accountLocale === "es-AR" || accountLocale === "en-US"
-      ? accountLocale
-      : cookieLocale;
+  const locale = await resolveAccountLocale(userRow?.locale);
   const t = getT(locale);
   const fullName: string = userRow?.full_name ?? user?.email ?? t("layout.nombreFallback");
   const esPro = esPlanPro(userRow?.plan);

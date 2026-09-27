@@ -13,11 +13,13 @@ import { cases, claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import type { RoleContext } from "@/lib/auth/require-role";
 import { estadoDeRespuesta, type MotivoSinRespuesta } from "@/core/whatsapp/puede-responder";
+import { PLANTILLA_RESPUESTA_HUMANA } from "@/core/whatsapp/plantillas";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
 import { isReservedTestNumber } from "@/core/phone/reserved";
 import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
 
-export const PLANTILLA_RESPUESTA_HUMANA = "wa_respuesta_humana";
+// Re-exportada para no romper a quien ya la importa desde acá.
+export { PLANTILLA_RESPUESTA_HUMANA };
 
 export type ResultadoRespuesta =
   | { ok: true; id: string; estado: "sent" | "skipped_simulated" }
@@ -26,7 +28,8 @@ export type ResultadoRespuesta =
 export async function responderPorWhatsApp(
   ctx: RoleContext,
   caseId: string,
-  texto: string
+  texto: string,
+  meta?: { ip?: string | null; ua?: string | null }
 ): Promise<ResultadoRespuesta> {
   const tenantCtx: TenantContext = { tenantId: ctx.userRow.tenant_id };
 
@@ -76,6 +79,29 @@ export async function responderPorWhatsApp(
   const to = caso.email_thread_id;
   const simulado = caso.channel === "whatsapp_sim" || isReservedTestNumber(to);
 
+  /*
+   * Primero la fila, "queued", después Meta (J): si el envío se corta la
+   * entrega queda anotada igual, y si el proceso se cae entre las dos nadie
+   * la reintenta creyendo que nunca salió — antes era al revés, y un fallo de
+   * base justo después de mandar dejaba una respuesta real sin ningún rastro.
+   */
+  const filaInsert = firstRow(
+    await enTenant(tenantCtx, (db) =>
+      db
+        .insert(outboundMessages)
+        .values({
+          case_id: caseId,
+          tenant_id: tenantCtx.tenantId,
+          channel: "whatsapp",
+          template: PLANTILLA_RESPUESTA_HUMANA,
+          rendered_body: texto,
+          status: "queued",
+        })
+        .returning({ id: outboundMessages.id })
+    )
+  );
+  const outboundId = filaInsert!.id;
+
   let status: "sent" | "failed" | "skipped_simulated";
   if (simulado) {
     status = "skipped_simulated";
@@ -86,43 +112,15 @@ export async function responderPorWhatsApp(
     status = res.ok ? "sent" : "failed";
   }
 
-  let outboundId: string;
   if (status === "failed") {
-    const fila = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .insert(outboundMessages)
-          .values({
-            case_id: caseId,
-            tenant_id: tenantCtx.tenantId,
-            channel: "whatsapp",
-            template: PLANTILLA_RESPUESTA_HUMANA,
-            rendered_body: texto,
-            status,
-          })
-          .returning({ id: outboundMessages.id })
-      )
+    await enTenant(tenantCtx, (db) =>
+      db.update(outboundMessages).set({ status }).where(eq(outboundMessages.id, outboundId))
     );
-    outboundId = fila!.id;
   } else {
-    const [filaInsert] = await enTenantVarias<[Array<{ id: string }>, unknown]>(
-      tenantCtx,
-      (db) => [
-        db
-          .insert(outboundMessages)
-          .values({
-            case_id: caseId,
-            tenant_id: tenantCtx.tenantId,
-            channel: "whatsapp",
-            template: PLANTILLA_RESPUESTA_HUMANA,
-            rendered_body: texto,
-            status,
-          })
-          .returning({ id: outboundMessages.id }),
-        db.update(cases).set({ para_responder_desde: null }).where(eq(cases.id, caseId)),
-      ]
-    );
-    outboundId = firstRow(filaInsert)!.id;
+    await enTenantVarias<[unknown, unknown]>(tenantCtx, (db) => [
+      db.update(outboundMessages).set({ status }).where(eq(outboundMessages.id, outboundId)),
+      db.update(cases).set({ para_responder_desde: null }).where(eq(cases.id, caseId)),
+    ]);
   }
 
   await writeAuditLog({
@@ -132,6 +130,8 @@ export async function responderPorWhatsApp(
     target_type: "case",
     target_id: caseId,
     payload: { outbound_id: outboundId, estado: status },
+    ip: meta?.ip,
+    ua: meta?.ua,
   });
 
   if (status === "failed") return { ok: false, motivo: "envio_fallido" };

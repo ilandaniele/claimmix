@@ -27,7 +27,11 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 vi.mock("@/lib/auth/user-row", () => ({ getUserRow: mockGetUserRow }));
 vi.mock("@/lib/auth/require-operator", () => ({ isOperatorEmail: () => false }));
-vi.mock("@/lib/i18n/locale", () => ({ getServerLocale: async () => "es-AR" }));
+vi.mock("@/lib/i18n/locale", () => ({
+  getServerLocale: async () => "es-AR",
+  resolveAccountLocale: async (accountLocale?: string | null) =>
+    accountLocale === "es-AR" || accountLocale === "en-US" ? accountLocale : "es-AR",
+}));
 vi.mock("@/app/(app)/_components/TopBar", () => ({ TopBar: () => null }));
 
 import AppLayout from "../../src/app/(app)/layout";
@@ -42,7 +46,7 @@ describe("conCandadoPro", () => {
     expect(pro).toMatchObject({
       disabled: true,
       insignia: "Plan Pro",
-      disabledReason: "Disponible en el Plan Pro",
+      disabledReason: "Disponible con el Plan Pro",
     });
     expect(comun).toBe(COMUN);
   });
@@ -59,7 +63,7 @@ describe("NavLink con candado Pro", () => {
     expect(screen.getByText("Plan Pro")).toBeInTheDocument();
     expect(container.querySelector('[aria-disabled="true"]')).toHaveAttribute(
       "title",
-      "Disponible en el Plan Pro"
+      "Disponible con el Plan Pro"
     );
     expect(screen.queryByRole("link")).toBeNull();
   });

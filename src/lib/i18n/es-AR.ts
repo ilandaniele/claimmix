@@ -564,10 +564,13 @@ export const esAR = {
   "messages.thread.collapse": "Ver menos",
   "messages.thread.denunciante": "Denunciante",
   "messages.thread.agente": "Agente",
+  "messages.thread.equipo": "Equipo",
   "messages.thread.no_enviado": "No se envió",
   "messages.thread.simulado": "Simulado",
   "messages.thread.sin_confirmar": "Sin confirmar",
   "messages.thread.recortada": "Se muestran sólo los mensajes más recientes.",
+  "messages.thread.canalWhatsapp": "WhatsApp",
+  "messages.thread.canalMail": "Mail",
 
   // ── Reply by WhatsApp (P8) ───────────────────────────────────────────────────
   "messages.reply.enviar": "Enviar",
@@ -577,6 +580,7 @@ export const esAR = {
   "messages.reply.canal": "Este caso no llegó por WhatsApp.",
   "messages.reply.enviado": "Enviado.",
   "messages.reply.fallo": "No se pudo enviar. Probá de nuevo.",
+  "messages.reply.venceEn": "Podés responder hasta el {fecha}.",
 
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clientes",
@@ -679,7 +683,9 @@ export const esAR = {
 
   // ── Plan Pro — las funciones que el plan abre, no un plan del catálogo ─
   "planPro.nombre": "Plan Pro",
-  "planPro.bloqueado": "Disponible en el Plan Pro",
+  "planPro.bloqueado": "Disponible con el Plan Pro",
+  "planPro.asistente": "Asistente con IA",
+  "planPro.responder": "Responder por WhatsApp desde la app",
 
   // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
   "cartera.aFacturar": "A facturar",

@@ -93,6 +93,10 @@ export type Severity = z.infer<typeof SeveritySchema>;
 export const SortColumnSchema = z.enum(["created_at", "confidence_min", "status"]);
 export type SortColumn = z.infer<typeof SortColumnSchema>;
 
+/** Ventanas del selector de período de la bandeja. Sin valor es «todo el tiempo». */
+export const PeriodoSchema = z.enum(["hoy", "7d", "30d", "90d"]);
+export type Periodo = z.infer<typeof PeriodoSchema>;
+
 /**
  * Convierte un campo en lista, aceptando un valor suelto o varios.
  *
@@ -123,10 +127,16 @@ export const CaseQuerySchema = z.object({
    * buscar, el planificador descarta el índice y recorre la tabla entera del
    * inquilino. `?q=a` es una petición barata que cuesta una lectura completa.
    *
-   * Nadie lo manda desde la interfaz: `q` sólo existe en la API y en el CSV.
-   * Un 400 acá no le cambia nada a nadie que hoy esté buscando.
+   * La caja de búsqueda de la bandeja manda `q`, pero a `page.tsx` — que no
+   * pasa por este esquema — y no a esta API. Este mínimo sigue rigiendo la
+   * API y el CSV: ahí un `?q=a` sin este piso barre la tabla entera.
    */
   q: z.string().min(3).max(200).optional(),
+  periodo: PeriodoSchema.optional(),
+  // Medianoche argentina desde la que arranca `periodo`. Nunca llega de la
+  // URL: la calcula el servidor con `desdeDePeriodo` y de ahí va directo al
+  // WHERE de `buildCaseFilters`.
+  desde: z.string().optional(),
   ...camposDePagina,
   sort: SortColumnSchema.default("created_at"),
   order: z.enum(["asc", "desc"]).default("desc"),

@@ -5,8 +5,10 @@
  *       Passes to DashboardClient which handles realtime, filters, and interactivity.
  *
  * URL search params supported:
- *   status: CaseStatus (filter tab)
- *   type:   ClaimType  (filter chip)
+ *   status:  CaseStatus (filter tab)
+ *   type:    ClaimType  (filter chip)
+ *   q:       string     (búsqueda libre — nombre, póliza o número de caso)
+ *   periodo: Periodo    (selector de período — hoy | 7d | 30d | 90d)
  *   page:     number   (pagination)
  *   per_page: number   (page size — must be one of PER_PAGE_OPTIONS)
  *
@@ -16,12 +18,12 @@
 import { redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { contarPorEstado, listCases } from "@/server/cases/list";
+import { buildCaseFilters, contarPorEstado, desdeDePeriodo, listCases } from "@/server/cases/list";
 import { OPCIONES_DE_ESCENARIO } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
 import { PER_PAGE_OPTIONS } from "./per-page";
-import { ClaimTypeSchema } from "@/lib/schemas/cases";
-import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
+import { ClaimTypeSchema, PeriodoSchema } from "@/lib/schemas/cases";
+import type { CaseStatus, ClaimType, Periodo, Severity } from "@/lib/schemas/cases";
 import { Card } from "../_components/ui";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
@@ -55,6 +57,7 @@ const VALID_STATUSES: CaseStatus[] = [
 const VALID_TYPES: ClaimType[] = ClaimTypeSchema.options;
 const VALID_SEVERITIES: Severity[] = ["low", "medium", "high", "critical"];
 const VALID_CHANNELS = ["email_sim", "email", "whatsapp_sim", "whatsapp"] as const;
+const VALID_PERIODOS: Periodo[] = PeriodoSchema.options;
 
 /**
  * Normaliza un parámetro multi-valor (`status`, `type`, `severity`,
@@ -75,6 +78,28 @@ function valores<T extends string>(
     (lista as readonly string[]).includes(v)
   );
   return filtrados.length > 0 ? (filtrados as [T, ...T[]]) : undefined;
+}
+
+/**
+ * El texto de la caja de búsqueda, recortado.
+ *
+ * Ochenta caracteres alcanza y sobra para un nombre, una póliza o un número
+ * de caso; más que eso es un enlace armado a mano, no algo que alguien tipeó
+ * en el campo. Vacío, sólo espacios o menos de tres caracteres da
+ * `undefined`, igual que `valores()` con el resto de los filtros.
+ *
+ * El piso de tres espeja el `q.min(3)` de `CaseQuerySchema` (ver
+ * src/lib/schemas/cases.ts): con uno o dos caracteres pg_trgm no tiene un
+ * grupo de tres para buscar y el planificador descarta el índice, así que
+ * `listCases`/`contarPorEstado` recorrerían la tabla entera del inquilino en
+ * cada pausa de tipeo. `CampoDeBusqueda` debounca por TIEMPO, no por
+ * longitud, así que esos estados intermedios de uno o dos caracteres pasan
+ * de verdad.
+ */
+export function normalizarBusqueda(raw: string | string[] | undefined): string | undefined {
+  const valor = Array.isArray(raw) ? raw[0] : raw;
+  const recortado = valor?.trim().slice(0, 80);
+  return recortado && recortado.length >= 3 ? recortado : undefined;
 }
 
 interface BandejaPageProps {
@@ -117,6 +142,10 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const is_claim =
     isClaimParam === "true" ? true : isClaimParam === "false" ? false : undefined;
 
+  const q = normalizarBusqueda(params["q"]);
+  const periodo = valores(params["periodo"], VALID_PERIODOS)?.[0];
+  const desde = desdeDePeriodo(periodo);
+
   // Resolve the tenant boundary (RLS is gone — explicit tenant_id filter only).
   const session = await getSessionContext();
   if (!session?.user) redirect("/login");
@@ -155,6 +184,8 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     listCases({ tenantId }, {
       status,
       type,
+      q,
+      desde,
       page,
       per_page,
       sort: "created_at",
@@ -166,7 +197,9 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
       para_responder,
       cola,
     }, userRow.id),
-    contarPorEstado({ tenantId }),
+    // Contadores de las pestañas: sólo búsqueda y período los mueven, nunca
+    // los chips de estado/tipo/severidad — ver `consultaPorEstado`.
+    contarPorEstado({ tenantId }, buildCaseFilters({ q, desde })),
   ]);
 
   /*

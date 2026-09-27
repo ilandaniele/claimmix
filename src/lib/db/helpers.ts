@@ -6,8 +6,14 @@ import { enTenant, type TenantContext } from "@/data/scope";
 /** Returns the first row of a result set, or null when empty. */
 export const firstRow = <T>(rows: T[]): T | null => rows[0] ?? null;
 
-/** Escapes LIKE/ILIKE wildcard characters in user-supplied search input. */
-const escapeLike = (q: string): string => q.replace(/[\\%_]/g, "\\$&");
+/**
+ * Escapes LIKE/ILIKE wildcard characters in user-supplied search input.
+ *
+ * Exportada porque `buildCaseFilters` la necesita suelta: además del
+ * `ilikeAny` de acá abajo, arma a mano un patrón para un EXISTS correlacionado
+ * (nombre extraído) y tiene que escapar igual, no reinventar el escape.
+ */
+export const escapeLike = (q: string): string => q.replace(/[\\%_]/g, "\\$&");
 
 /**
  * Case-insensitive substring match across any of the given columns:

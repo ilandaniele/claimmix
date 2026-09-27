@@ -118,7 +118,10 @@ export const esAR = {
   // ── Bandeja actions ────────────────────────────────────────────────────────
   "bandeja.simulate": "Simular nuevo email",
   "bandeja.export": "Exportar CSV",
-  "bandeja.search": "Buscar casos...",
+  // Placeholder y aria-label de la caja de búsqueda del encabezado: nombre,
+  // póliza o número de caso («SIN-XXXX-XXXX»).
+  "bandeja.buscarPlaceholder": "Buscá por nombre, póliza o número de caso",
+  "bandeja.buscarLimpiar": "Limpiar búsqueda",
   "bandeja.empty": "No hay siniestros que coincidan con los filtros.",
   "bandeja.loading": "Cargando casos...",
   "bandeja.delete": "Eliminar caso",
@@ -418,6 +421,16 @@ export const esAR = {
   "filter.limpiar": "Limpiar",
   "filter.limpiarTodo": "Limpiar todo",
   "filter.quitar": "Quitar filtro",
+  // Rótulo de la marca removible de la búsqueda libre, en MarcasDeFiltros.
+  "filter.busqueda": "Búsqueda",
+
+  // ── Selector de período (bandeja) ──────────────────────────────────────────
+  "periodo.titulo": "Período",
+  "periodo.todo": "Todo",
+  "periodo.hoy": "Hoy",
+  "periodo.7d": "7 días",
+  "periodo.30d": "30 días",
+  "periodo.90d": "90 días",
 
   // ── Case detail email sections ──────────────────────────────────────────────
   "case.detail.parsedEmail": "Datos del email",
@@ -745,7 +758,7 @@ export const esAR = {
   "metricas.card.completitudAuto": "Tasa de completitud automática",
   "metricas.card.escalados": "Siniestros escalados",
   "metricas.card.primeraRespuesta": "Tiempo medio hasta la primera respuesta",
-  "metricas.card.totalMes": "Total siniestros (mes)",
+  "metricas.card.totalMes": "Casos del mes",
   "metricas.col.casosCerrados": "Casos cerrados",
   "metricas.col.costo": "Costo",
   "metricas.col.modelo": "Modelo",
@@ -765,8 +778,15 @@ export const esAR = {
   "metricas.ia.tokensMes": "Tokens este mes",
   "metricas.ia.tokensTotal": "Tokens históricos",
   "metricas.ia.vacio": "Sin consumo de IA este mes.",
-  "metricas.porEstado": "Siniestros por situación",
-  "metricas.porTipo": "Siniestros por tipo",
+  "metricas.porEstado": "Siniestros por situación (histórico)",
+  "metricas.porTipo": "Siniestros por tipo (histórico)",
+  "metricas.resumen.esteAnio": "Este año",
+  "metricas.resumen.esteMes": "Este mes",
+  "metricas.resumen.hoy": "Hoy",
+  "metricas.resumen.porCanal": "{whatsapp} por WhatsApp · {mail} por mail",
+  "metricas.resumen.ultimos12meses": "Últimos 12 meses",
+  "metricas.resumen.ultimos30dias": "Últimos 30 días",
+  "metricas.resumen.ultimos5anios": "Últimos 5 años",
   "metricas.sinCasosCerrados": "Ningún caso cerrado este mes.",
   "metricas.sinDatos": "Sin datos.",
   "metricas.topAnalistas": "Top 5 analistas — casos cerrados este mes",

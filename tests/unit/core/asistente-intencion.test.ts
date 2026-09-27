@@ -51,6 +51,7 @@ describe("IntencionSchema", () => {
       herramienta: "buscar_caso",
       nombre: "Roberto'; DROP TABLE cases; --",
       numero: null,
+      codigo: null,
     });
     expect(r.success).toBe(true);
     if (r.success && r.data.herramienta === "buscar_caso") {
@@ -68,6 +69,37 @@ describe("IntencionSchema", () => {
       herramienta: "buscar_caso",
       nombre: null,
       numero: "POL-2024-01",
+      codigo: null,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("acepta un código de 8 hex, sin importar mayúsculas", () => {
+    const r = IntencionSchema.safeParse({
+      herramienta: "buscar_caso",
+      nombre: null,
+      numero: null,
+      codigo: "3F2A9B1C",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rechaza un código que no tiene 8 caracteres hex", () => {
+    const r = IntencionSchema.safeParse({
+      herramienta: "buscar_caso",
+      nombre: null,
+      numero: null,
+      codigo: "3f2a9b1",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rechaza un código con caracteres fuera de hex", () => {
+    const r = IntencionSchema.safeParse({
+      herramienta: "buscar_caso",
+      nombre: null,
+      numero: null,
+      codigo: "3f2a9b1z",
     });
     expect(r.success).toBe(false);
   });

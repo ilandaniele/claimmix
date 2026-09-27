@@ -51,6 +51,7 @@ import { estadoDelDocumento, esRamoSinCalibrar } from "@/core/case/required-docs
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
 import { resumenDeCaso } from "@/lib/labels/resumen-de-caso";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
+import { formatCaseNumber } from "@/core/case/numero";
 import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
 import Link from "next/link";
 
@@ -71,12 +72,6 @@ interface ExtractedFieldRow {
   field_value: string;
   confidence: number;
   extracted_at: string;
-}
-
-/** Format case UUID to display SIN-XXXX-XXXX string */
-function formatCaseNumber(id: string): string {
-  const suffix = id.replace(/-/g, "").slice(-8).toUpperCase();
-  return `SIN-${suffix.slice(0, 4)}-${suffix.slice(4)}`;
 }
 
 /** Safe jsonb → Record normalization (audit payloads are objects in practice). */

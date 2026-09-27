@@ -1120,6 +1120,17 @@ export const enUS: Record<TranslationKey, string> = {
   "asistente.enviando": "Asking…",
   "asistente.demasiadas": "Too many questions in a row. Wait a moment and try again.",
   "asistente.error": "Could not answer the question. Try again.",
+  "asistente.avisoResumenIA": "Summary generated with AI from the case. Verify it in the case before acting.",
+  "asistente.chip.conteoMes": "How many cases were there this month?",
+  "asistente.chip.whatsappsHoy": "How many WhatsApps came in today?",
+  "asistente.chip.reclamos30dias": "How many claims were there in the last 30 days?",
+  "asistente.chip.buscarCasoLabel": "Search for the case of…",
+  "asistente.chip.buscarCasoPrefill": "Search for the case of ",
+  "asistente.chip.resumirCaso": "Summarize this case",
+  "asistente.chip.resumirCasoPregunta": "What happened with case {numero}?",
+  // ── Floating assistant — the same assistant, in a panel over any page ───
+  "asistente.flotante.abrir": "Ask the assistant",
+  "asistente.flotante.cerrar": "Close assistant",
 
   // ── Help — how the interface works, same text in the demo and the app ──
   "ayuda.abrir": "Help: how it works",

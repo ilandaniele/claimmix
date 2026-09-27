@@ -3726,7 +3726,32 @@ entró en dos lotes.
   de rama + PR + promoción se sostiene a mano, y los minutos de Actions
   cuentan contra el cupo del plan gratuito.
 
+**Lote 3 (ideas de un video de Instagram, 26/09).** Las cuatro funciones
+pedidas ya existían: el asistente (#296), la respuesta por WhatsApp desde el
+caso (#295), las series de `/metricas` (23/09) y el candado del Plan Pro. Este
+lote las pule.
+- #321: `/metricas` muestra la actividad del día, del mes y del año apenas
+  debajo de las tarjetas, con reclamos por WhatsApp y por mail separados. El
+  gráfico por estado usa los seis grupos de la bandeja.
+- #322: la bandeja busca por nombre, nombre extraído, póliza o número
+  `SIN-XXXX-XXXX` y filtra por período (hoy, 7, 30 y 90 días). Los
+  contadores y el CSV siguen a los dos filtros.
+- #323: la conversación del caso rotula quién escribió, muestra el
+  vencimiento de la ventana de WhatsApp y el motivo concreto cuando no se
+  puede responder. La respuesta humana graba la fila antes de mandar. El
+  candado dice «Disponible con el Plan Pro».
+- #324: el asistente se abre desde un botón flotante en cualquier pantalla
+  (Plan Pro). Busca por número de caso y por nombre sin acentos. Si Gemini no
+  responde, devuelve `IA_NO_DISPONIBLE` en vez de inventar.
+- Quedan como ideas, sin construir: «Tomar el control» de una conversación
+  (choca con responder sólo cuando el agente terminó), un tablero kanban, una
+  agenda, un resumen diario por mail y el estado del agente en la barra.
+
 **Para decidir.**
+- `src/server/confirmations/messenger.ts` todavía manda el WhatsApp antes de
+  grabar la fila saliente. Si el proceso se cae entre las dos cosas, el
+  mensaje sale y no queda registro. #323 ya lo corrigió en la respuesta
+  humana.
 - El export en `full_admin_only` sigue sacando en claro la memoria de
   remitentes (`sender_profile`, con nombre y DNI) y, en modo `full`, los
   argumentos de las herramientas en la auditoría. Es el modo en claro para

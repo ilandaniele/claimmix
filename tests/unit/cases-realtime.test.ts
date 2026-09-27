@@ -8,7 +8,8 @@
  *   - computeStatusCounts: counts all statuses correctly
  */
 
-import { formatCaseNumber, mergeCaseUpdate, computeStatusCounts } from "@/app/(app)/bandeja/components/casesRealtimeUtils";
+import { mergeCaseUpdate, computeStatusCounts } from "@/app/(app)/bandeja/components/casesRealtimeUtils";
+import { formatCaseNumber } from "@/core/case/numero";
 import type { CaseRow } from "@/server/cases/list";
 
 function makeCase(overrides: Partial<CaseRow> = {}): CaseRow {

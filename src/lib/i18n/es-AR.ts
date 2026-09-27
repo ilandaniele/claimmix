@@ -1150,6 +1150,17 @@ export const esAR = {
   "asistente.enviando": "Consultando…",
   "asistente.demasiadas": "Demasiadas preguntas seguidas. Esperá un momento y volvé a intentar.",
   "asistente.error": "No se pudo responder la pregunta. Probá de nuevo.",
+  "asistente.avisoResumenIA": "Resumen generado con IA a partir del caso. Verificalo en el caso antes de actuar.",
+  "asistente.chip.conteoMes": "¿Cuántos casos hubo este mes?",
+  "asistente.chip.whatsappsHoy": "¿Cuántos WhatsApps entraron hoy?",
+  "asistente.chip.reclamos30dias": "¿Cuántos reclamos hubo en los últimos 30 días?",
+  "asistente.chip.buscarCasoLabel": "Buscá el caso de…",
+  "asistente.chip.buscarCasoPrefill": "Buscá el caso de ",
+  "asistente.chip.resumirCaso": "Resumí este caso",
+  "asistente.chip.resumirCasoPregunta": "¿Qué pasó con el caso {numero}?",
+  // ── Asistente flotante — el mismo asistente, en un panel sobre cualquier página ─
+  "asistente.flotante.abrir": "Preguntale al asistente",
+  "asistente.flotante.cerrar": "Cerrar asistente",
 
   // ── Ayuda — cómo se usa la interfaz, mismo texto en la demo y en la app ─
   "ayuda.abrir": "Ayuda: cómo se usa",

@@ -38,9 +38,12 @@ vi.mock("drizzle-orm", async (importOriginal) => {
   return { ...real, eq: vi.fn((col: unknown, val: unknown) => ({ col, val })) };
 });
 
-const { mockLogError } = vi.hoisted(() => ({ mockLogError: vi.fn() }));
+const { mockLogError, mockLogInfo } = vi.hoisted(() => ({
+  mockLogError: vi.fn(),
+  mockLogInfo: vi.fn(),
+}));
 vi.mock("@/lib/observability/logger", () => ({
-  logger: { error: mockLogError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+  logger: { error: mockLogError, warn: vi.fn(), info: mockLogInfo, debug: vi.fn() },
 }));
 
 vi.mock("@/server/whatsapp/cloud-api", () => ({
@@ -834,6 +837,49 @@ describe("whatsappMessenger — la fila antes del envío (G13)", () => {
     expect(inserted).toHaveLength(1);
     expect(inserted[0]).toMatchObject({ status: "skipped_simulated" });
     expect(updated).toHaveLength(0);
+  });
+});
+
+/*
+ * G29: el resultado del envío pasa por `logger`, no por `console`, con las
+ * mismas claves de `msg` y los mismos campos que tenía antes.
+ */
+describe("whatsappMessenger — el resultado del envío pasa por logger (G29)", () => {
+  it("un envío ok anota 'whatsapp.messenger.sent' por logger.info", async () => {
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(mockLogInfo).toHaveBeenCalledWith(
+      { case_id: CASE, template: "confirmation_received" },
+      "whatsapp.messenger.sent"
+    );
+  });
+
+  it("un envío fallido anota 'whatsapp.messenger.send_failed' por logger.error, con el motivo recortado a 200", async () => {
+    (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      error: "Cloud API 400: " + "x".repeat(300),
+    });
+
+    await send("confirmation_received", { caseId: CASE });
+
+    const [campos] = mockLogError.mock.calls.find(
+      ([, msg]) => msg === "whatsapp.messenger.send_failed"
+    )!;
+    expect(campos.case_id).toBe(CASE);
+    expect(campos.template).toBe("confirmation_received");
+    expect(campos.detalle).toHaveLength(200);
+    expect(campos.detalle).toBe(("Cloud API 400: " + "x".repeat(300)).slice(0, 200));
+  });
+
+  it("un envío fallido sin motivo no agrega 'detalle'", async () => {
+    (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false });
+
+    await send("confirmation_received", { caseId: CASE });
+
+    const [campos] = mockLogError.mock.calls.find(
+      ([, msg]) => msg === "whatsapp.messenger.send_failed"
+    )!;
+    expect(campos).not.toHaveProperty("detalle");
   });
 });
 

@@ -10,7 +10,7 @@
  * Security / PII:
  *   - Sender email is the lookup key and never written to stdout.
  *   - All audit payloads go through redactObject() before logging.
- *   - Writes go through the shared Drizzle db client (tenant filter always applied).
+ *   - Writes go through enTenant (tenant filter always applied).
  */
 
 import "server-only";

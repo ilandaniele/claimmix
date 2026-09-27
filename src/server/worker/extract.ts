@@ -110,6 +110,7 @@ import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle"
 import { mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 
@@ -326,7 +327,7 @@ async function acquireExtractionLease(
      */
     logger.error({
         case_id: caseId,
-        code: dbErrCode(err),
+        code: errorCode(err),
       }, "email_worker.lease_indeterminado");
     return "no_se_pudo";
   }
@@ -371,7 +372,7 @@ async function releaseExtractionLease(
 
     return filas[0]?.pending === true;
   } catch (err) {
-    logger.error({ code: dbErrCode(err) }, "email_worker.lease_release_error");
+    logger.error({ code: errorCode(err) }, "email_worker.lease_release_error");
     return false;
   }
 }
@@ -399,7 +400,7 @@ async function devolverReservaHeredada(
         .where(eq(cases.id, caseId))
     );
   } catch (err) {
-    logger.error({ code: dbErrCode(err) }, "email_worker.devolver_heredada_fallo");
+    logger.error({ code: errorCode(err) }, "email_worker.devolver_heredada_fallo");
   }
 }
 
@@ -486,7 +487,7 @@ async function redispatchExtraction(
     );
   } catch (err) {
     // Si ni esto se puede escribir, queda el log de arriba y nada más.
-    logger.error({ code: dbErrCode(err) }, "email_worker.no_se_pudo_remarcar_pendiente");
+    logger.error({ code: errorCode(err) }, "email_worker.no_se_pudo_remarcar_pendiente");
   }
 }
 
@@ -537,7 +538,7 @@ async function reintentarPorTimeout(
   } catch (err) {
     logger.error({
         case_id: caseId,
-        code: dbErrCode(err),
+        code: errorCode(err),
       }, "email_worker.reintento_por_timeout_fallo");
     return false;
   }
@@ -1009,7 +1010,7 @@ export async function runEmailExtractionWorker(
       try {
         await upsertExtractedFields(caseId, tenantCtx, fieldsToWrite);
       } catch (err) {
-        logger.error({ code: dbErrCode(err) }, "email_worker.extracted_fields_upsert_error");
+        logger.error({ code: errorCode(err) }, "email_worker.extracted_fields_upsert_error");
       }
     }
 
@@ -1026,7 +1027,7 @@ export async function runEmailExtractionWorker(
       try {
         await insertMissingDocsIfAbsent(caseId, tenantCtx, missingFieldKeys);
       } catch (err) {
-        logger.error({ code: dbErrCode(err) }, "email_worker.missing_docs_upsert_error");
+        logger.error({ code: errorCode(err) }, "email_worker.missing_docs_upsert_error");
       }
     }
 
@@ -1264,7 +1265,7 @@ export async function runEmailExtractionWorker(
         db.update(cases).set(caseUpdate).where(eq(cases.id, caseId))
       );
     } catch (err) {
-      logger.error({ code: dbErrCode(err) }, "email_worker.case_update_error");
+      logger.error({ code: errorCode(err) }, "email_worker.case_update_error");
     }
 
     // ── n) Memory applied audit log — AC13 groundwork ────────────────────────
@@ -1549,7 +1550,7 @@ async function cargarLoDelPrompt(
     };
   } catch (err) {
     logger.error({
-        code: dbErrCode(err),
+        code: errorCode(err),
         nota: "Se vuelve al camino de a uno, donde cada carga degrada sola.",
       }, "email_worker.lote_del_prompt_fallo");
 
@@ -1613,20 +1614,11 @@ async function loadKnownPatterns(tenantCtx: TenantContext): Promise<KnownPattern
   try {
     return deKnownPatterns(await enTenant(tenantCtx, consultaKnownPatterns));
   } catch (err) {
-    logger.error({ code: dbErrCode(err) }, "email_worker.known_claim_patterns_load_error");
+    logger.error({ code: errorCode(err) }, "email_worker.known_claim_patterns_load_error");
     return [];
   }
 }
 
-// ── Helpers (shared with legacy worker) ───────────────────────────────────────
-
-/** Extract a loggable error code from a thrown DB error (PII-safe). */
-function dbErrCode(err: unknown): string {
-  return (
-    (err as { code?: string })?.code ??
-    (err instanceof Error ? err.name : "UnknownError")
-  );
-}
 
 /**
  * Upsert extracted_fields rows on the (case_id, field_key) unique constraint
@@ -1824,7 +1816,7 @@ async function anotarPolizaEncontrada(
      * `policy_id` y el agente vuelve a pedir el número. Molesto, no roto — y no
      * es motivo para tirar abajo la extracción entera.
      */
-    logger.error({ code: dbErrCode(err) }, "email_worker.no_se_pudo_anotar_la_poliza");
+    logger.error({ code: errorCode(err) }, "email_worker.no_se_pudo_anotar_la_poliza");
   }
 }
 
@@ -1847,7 +1839,7 @@ async function updateCaseStatus(
       db.update(cases).set(updatePayload).where(eq(cases.id, caseId))
     );
   } catch (err) {
-    logger.error({ code: dbErrCode(err), case_id: caseId }, "worker.failed_to_update_case_status");
+    logger.error({ code: errorCode(err), case_id: caseId }, "worker.failed_to_update_case_status");
   }
 }
 

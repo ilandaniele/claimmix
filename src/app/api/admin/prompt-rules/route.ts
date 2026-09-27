@@ -4,8 +4,8 @@
  * GET  — list all rules for the tenant (active + inactive).
  * POST — create a rule. Body: { title, rule_text, rule_type, active? }.
  *
- * Rules are tenant-scoped (explicit tenant_id filter — the only isolation
- * boundary now that RLS is gone), versioned via updated_at + audit events,
+ * Rules are tenant-scoped (explicit tenant_id filter via enTenant, backed by
+ * RLS), versioned via updated_at + audit events,
  * and NEVER touch source code — active rules are injected into the
  * extraction prompt at runtime (see prompt-rules.ts).
  *

@@ -1,20 +1,20 @@
 /**
  * AI budget guard — enforces monthly cost ceiling and daily per-user/tenant caps.
  *
- * LLM10: Monthly $200 project cap enforced in code. Fail closed when exceeded.
+ * LLM10: Monthly $200 project cap enforced in code. Blocks once exceeded;
+ * fails open (does not block) if the usage counter itself can't be read.
  * Spec:
- *   - Per-user: 100k tokens/day (AI_USER_DAILY_TOKEN_CAP env)
+ *   - Per-user: 2M tokens/day (AI_USER_DAILY_TOKEN_CAP env)
  *   - Per-tenant: 5M tokens/day (AI_TENANT_DAILY_TOKEN_CAP env)
  *   - Monthly project cap: $200 (MONTHLY_BUDGET_USD env, default 200)
  *
  * AC10 (budget guard): Returns { exceeded: true, reason } when any cap is hit.
  *
- * Uses service-role client to query ai_usage table (no RLS bypass concern
- * here — this is a server-only, privileged cost check).
+ * Queries ai_usage through enTenant/enTenantVarias (no service-role client).
  *
- * Token cost model (as of 2024):
- *   gpt-4o-mini — Input: $0.150/1M, Output: $0.600/1M
- *   gpt-4o      — Input: $2.500/1M, Output: $10.00/1M
+ * Token cost model: Gemini/Vertex pricing (see MODEL_COSTS below). The
+ * gpt-4o(-mini) entries are legacy — kept only to price ai_usage rows
+ * written before the OpenAI-to-Gemini migration.
  */
 
 import "server-only";

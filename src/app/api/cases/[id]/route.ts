@@ -6,7 +6,7 @@
  * AC14: Detail returns extracted_fields[], missing_docs[], audit_log[] (last 20, desc).
  * AC15: PATCH writes audit_log entry; wrong-tenant PATCH returns 404.
  *
- * RLS is gone — every query filters explicitly by the caller's tenant_id.
+ * Every query filters explicitly by the caller's tenant_id (enTenant, backed by RLS).
  */
 
 import { type NextRequest } from "next/server";

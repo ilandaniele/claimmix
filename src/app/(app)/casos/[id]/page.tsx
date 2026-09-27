@@ -9,8 +9,8 @@
  * AC15: Passes case to CaseDetailClient which renders FSM-aware action buttons.
  *
  * Protected by proxy.ts — unauthenticated access redirects to /login.
- * IDOR: getCaseDetail filters explicitly by tenant_id (RLS is gone) — wrong
- * tenant returns null → 404.
+ * IDOR: getCaseDetail filters explicitly by tenant_id (enTenant, backed by RLS)
+ * — wrong tenant returns null → 404.
  */
 
 import { notFound, redirect } from "next/navigation";
@@ -484,11 +484,11 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                         ? "precaucion"
                         : "atencion"
                   }
-                  titulo="Alertas de fraude"
+                  titulo={t("case.detail.fraudAnalysis")}
                   accesorio={<FraudRiskBadge level={caseRow.fraud_risk_level} />}
                 >
                   <p className="mb-3 text-[12px] text-slate-500 dark:text-slate-400">
-                    Análisis automático — solo orientativo. La decisión final la toma el ajustador.
+                    {t("case.detail.fraudDisclaimer")}
                   </p>
                   {Array.isArray(caseRow.fraud_indicators) && caseRow.fraud_indicators.length > 0 ? (
                     <ul className="space-y-2">
@@ -508,7 +508,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                       )}
                     </ul>
                   ) : (
-                    <p className="text-sm text-slate-500">Sin detalles adicionales.</p>
+                    <p className="text-sm text-slate-500">{t("case.detail.fraudNoDetails")}</p>
                   )}
                 </PanelSection>
               )}

@@ -1,7 +1,7 @@
 /**
  * Extractor mock — extracción local determinista, sin llamar a ningún modelo.
  *
- * AC9:  Lo elige `resolverAiMode` (src/server/ai/ai-mode.ts): MOCK_AI=true,
+ * AC9:  Lo elige `resolveExtractionEngine` (src/server/ai/provider.ts): MOCK_AI=true,
  *       AI_MOCK=true, o Gemini sin configurar. NO existe ningun interruptor
  *       por OPENAI_API_KEY: OpenAI se saco del producto y esa variable no se
  *       lee en ningun lado, asi que quien la pusiera para forzar el mock se
@@ -363,7 +363,7 @@ export function runMockExtractor(
 /**
  * Mock extractor for the email claim extraction pipeline (W3).
  *
- * Lo elige `resolverAiMode`: MOCK_AI=true, AI_MOCK=true, o Gemini sin
+ * Lo elige `resolveExtractionEngine`: MOCK_AI=true, AI_MOCK=true, o Gemini sin
  * configurar. OPENAI_API_KEY no se lee en ningun lado.
  * Accepts overrides to simulate specific test scenarios without real LLM calls.
  *

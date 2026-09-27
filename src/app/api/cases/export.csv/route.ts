@@ -4,7 +4,7 @@
  * AC13: Returns text/csv with Content-Disposition attachment.
  *       Formula-injection-safe values (=, +, -, @ prefixed with single quote).
  *       Max 1000 rows per export.
- *       Same explicit tenant_id isolation as GET /api/cases (RLS is gone).
+ *       Same explicit tenant_id isolation as GET /api/cases (enTenant, backed by RLS).
  *
  * Columns: Nro. Siniestro, Asegurado, Póliza, Tipo, Situación, Confianza, Fecha, Analista.
  * Filters: same query params as GET /api/cases (status, type, q, periodo).

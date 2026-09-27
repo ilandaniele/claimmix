@@ -31,7 +31,7 @@
  * AC4:  headers, raw_payload persisted as jsonb; body_text/body_html decoded.
  * AC7:  La marca avanza hasta el último historyId leído en la corrida.
  * AC8:  La marca avanza IGUAL si los mensajes fallan — el porqué está en
- *       `shouldAdvance`, más abajo en este archivo. El rastro del que se
+ *       "Advance watermark", más abajo en este archivo. El rastro del que se
  *       perdió queda en gmail_poll_state.last_error, que ya no se borra al
  *       avanzar.
  * AC10: No PII (from_addr, body, subject) in logs — only message IDs and error codes.
@@ -409,7 +409,7 @@ async function processMessage(
     return { outcome: "skipped" };
   }
 
-  const { caseId, claimMessageId, isNewCase } = ingested;
+  const { caseId, claimMessageId } = ingested;
 
   // ── g) Rehost attachments ──────────────────────────────────────────────────
   if (payload?.parts && payload.parts.length > 0) {
@@ -423,21 +423,10 @@ async function processMessage(
   }
 
   // ── h) Mark as read (best-effort — IC9) ───────────────────────────────────
-  try {
-    await gmail.users.messages.modify({
-      userId: "me",
-      id: gmailMessageId,
-      requestBody: { removeLabelIds: ["UNREAD"] },
-    });
-  } catch (err) {
-    // IC9: non-fatal — log code only, never throw.
-    const code = err instanceof Error ? err.name : "UnknownError";
-    logger.error({ code, message_id: gmailMessageId }, "gmail_poller.mark_as_read_error");
-  }
+  await markMessageRead(gmail, gmailMessageId);
 
-  // The EMAIL_RECEIVED audit entry is written by ingestInboundEmail, which is
-  // the only place that knows whether this opened a case or joined one.
-  void isNewCase;
+  // La auditoría EMAIL_RECEIVED la escribe ingestInboundEmail, que es el único
+  // que sabe si esto abrió un caso o se sumó a uno.
 
   await dispatchExtractionWorker(caseId, tenantId);
 
@@ -661,7 +650,7 @@ export async function pollGmail(
   /*
    * Los que fallaron antes van PRIMERO, y con su cuenta de intentos.
    *
-   * La marca de agua avanza siempre (ver `shouldAdvance` más abajo), así que
+   * La marca de agua avanza siempre (ver "Advance watermark" más abajo), así que
    * sin esto un mensaje que falla una vez no se vuelve a mirar nunca: el cron
    * arranca desde la marca ya avanzada. Ésta es la tercera salida, la que no
    * estaba: la marca sigue avanzando —no hay bucle de veneno— y el mensaje
@@ -763,9 +752,7 @@ export async function pollGmail(
   // comentario daba por irresoluble.
   //
   // Su id también queda en `last_error`, y por eso advancePollState no lo borra.
-  const shouldAdvance = true;
-
-  if (shouldAdvance && latestHistoryId !== pollState.historyId) {
+  if (latestHistoryId !== pollState.historyId) {
     try {
       await advancePollState(pollState.id, latestHistoryId);
     } catch (advanceErr) {

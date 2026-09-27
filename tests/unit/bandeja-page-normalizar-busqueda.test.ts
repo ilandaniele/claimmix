@@ -21,7 +21,7 @@ vi.mock("@/server/cases/list", () => ({
 }));
 vi.mock("@/server/intake/scenarios", () => ({ OPCIONES_DE_ESCENARIO: [] }));
 
-import { normalizarBusqueda } from "@/app/(app)/bandeja/page";
+import { normalizarBusqueda, VALID_CHANNELS, VALID_SEVERITIES, VALID_STATUSES } from "@/app/(app)/bandeja/page";
 
 describe("normalizarBusqueda", () => {
   it("recorta los espacios de los extremos", () => {
@@ -51,5 +51,40 @@ describe("normalizarBusqueda", () => {
 
   it("tres caracteres ya pasa", () => {
     expect(normalizarBusqueda("abc")).toBe("abc");
+  });
+});
+
+// G26: VALID_STATUSES/VALID_SEVERITIES/VALID_CHANNELS pasan a salir de sus
+// schemas — el conjunto de valores válidos tiene que quedar igual al de la
+// lista escrita a mano que reemplazan.
+describe("conjuntos válidos de la bandeja", () => {
+  it("VALID_STATUSES es el mismo conjunto de antes", () => {
+    expect(new Set(VALID_STATUSES)).toEqual(
+      new Set([
+        "procesando",
+        "listo",
+        "esperando",
+        "escalado",
+        "cerrado",
+        "recibido",
+        "info_faltante",
+        "confirmacion_pendiente",
+        "requiere_especialista",
+        "listo_para_core",
+        "enviado_a_core",
+        "error_core",
+        "no_relevante",
+      ])
+    );
+  });
+
+  it("VALID_SEVERITIES es el mismo conjunto de antes", () => {
+    expect(new Set(VALID_SEVERITIES)).toEqual(new Set(["low", "medium", "high", "critical"]));
+  });
+
+  it("VALID_CHANNELS es el mismo conjunto de antes", () => {
+    expect(new Set(VALID_CHANNELS)).toEqual(
+      new Set(["email_sim", "email", "whatsapp_sim", "whatsapp"])
+    );
   });
 });

@@ -555,13 +555,10 @@ export const whatsappMessenger: AgentMessenger = {
         await recordOutbound(message, finalBody, status);
       }
 
-      // Un envío fallido sale por stderr, no por stdout.
-      //
-      // La línea decía `level: "error"` y se iba igual por `console.log`. Quien
-      // filtre por stream —que es lo que hace cualquier alerta— no lo veía: un
+      // Un envío fallido anota por `logger.error`, no por `logger.info`. Quien
+      // filtre por nivel —que es lo que hace cualquier alerta— no lo veía: un
       // mensaje que no le llegó al asegurado quedaba con la misma prioridad que
       // uno que sí.
-      const registrar = res.ok ? console.log : console.error;
       /*
        * Y el motivo, que `sendWhatsAppText` ya se tomó el trabajo de armar.
        *
@@ -576,16 +573,21 @@ export const whatsappMessenger: AgentMessenger = {
        * Recortado, porque el cuerpo de error de Meta puede traer el payload que
        * mandamos y ahí adentro va el texto del mensaje.
        */
-      registrar(
-        JSON.stringify({
-          level: res.ok ? "info" : "error",
-          service: "claimmix",
-          msg: res.ok ? "whatsapp.messenger.sent" : "whatsapp.messenger.send_failed",
-          case_id: message.caseId,
-          template: message.template,
-          ...(res.ok || !res.error ? {} : { detalle: res.error.slice(0, 200) }),
-        })
-      );
+      if (res.ok) {
+        logger.info(
+          { case_id: message.caseId, template: message.template },
+          "whatsapp.messenger.sent"
+        );
+      } else {
+        logger.error(
+          {
+            case_id: message.caseId,
+            template: message.template,
+            ...(res.ok || !res.error ? {} : { detalle: res.error.slice(0, 200) }),
+          },
+          "whatsapp.messenger.send_failed"
+        );
+      }
     } catch (err) {
       // Intake already succeeded; a messaging failure must not undo it.
       logger.error({

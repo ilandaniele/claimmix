@@ -8,7 +8,7 @@
  *      Re-analysis temporarily sets status to "procesando" then the worker transitions it.
  *
  * LLM10: Budget check before running extractor.
- * RLS is gone — every query filters explicitly by the caller's tenant_id.
+ * Every query filters explicitly by the caller's tenant_id (enTenant, backed by RLS).
  */
 
 import { type NextRequest, after } from "next/server";
@@ -27,6 +27,7 @@ import { ESTADOS_QUE_NO_SE_REABREN_A_MANO } from "@/core/case/fsm";
 import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import {
   getClientIp,
@@ -167,8 +168,7 @@ export async function POST(
       );
     }
   } catch (e) {
-    const code = (e as { code?: string })?.code ?? (e instanceof Error ? e.name : "UnknownError");
-    logger.error({ code, case_id: caseId }, "re_analyze.failed_to_reset_case");
+    logger.error({ code: errorCode(e), case_id: caseId }, "re_analyze.failed_to_reset_case");
     return err(new AppError("INTERNAL_ERROR"));
   }
 

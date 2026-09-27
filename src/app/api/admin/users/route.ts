@@ -11,6 +11,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { ALL_ROLES } from "@/lib/auth/roles";
 import { auth } from "@/lib/auth";
 import { enAltaDeAdmin } from "@/lib/auth/registro-permitido";
 import { db } from "@/lib/db";
@@ -64,7 +65,7 @@ export async function GET() {
 const CreateUserSchema = z.object({
   full_name: z.string().min(2).max(100),
   email: z.string().email(),
-  role: z.enum(["owner", "admin", "specialist", "analyst", "viewer"]),
+  role: z.enum(ALL_ROLES),
   password: z.string().min(8).optional(),
 });
 

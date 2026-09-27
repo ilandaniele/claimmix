@@ -47,6 +47,7 @@ import type { CaseStatus, ConfirmField } from "@/lib/schemas/cases";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { updateMemoryFromConfirmation } from "@/server/memory/update";
 import { mensajesEntrantes } from "@/server/cases/inbound-messages";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 /** Quién resuelve: el id para la auditoría, el rol para saber qué le toca. */
@@ -57,14 +58,6 @@ export interface FieldConfirmationResult {
   field_key: string;
   new_status: string;
   claim_memory_updated: boolean;
-}
-
-/** El código de un error de base, sin arrastrar datos de nadie al log. */
-function dbErrCode(e: unknown): string {
-  return (
-    (e as { code?: string })?.code ??
-    (e instanceof Error ? e.name : "UnknownError")
-  );
 }
 
 /**
@@ -189,7 +182,7 @@ export async function resolveFieldConfirmation(
       )
     );
   } catch (e) {
-    logger.error({ code: dbErrCode(e) }, "confirm_field.claim_field_confirmations_fetch_error");
+    logger.error({ code: errorCode(e) }, "confirm_field.claim_field_confirmations_fetch_error");
     throw new AppError("INTERNAL_ERROR");
   }
 
@@ -264,7 +257,7 @@ async function confirmar(
           .where(eq(claimFieldConfirmations.id, confirmationRow.id))
       );
     } catch (e) {
-      logger.error({ code: dbErrCode(e) }, "confirm_field.confirmation_update_error");
+      logger.error({ code: errorCode(e) }, "confirm_field.confirmation_update_error");
     }
   }
 
@@ -288,7 +281,7 @@ async function confirmar(
         })
     );
   } catch (e) {
-    logger.error({ code: dbErrCode(e) }, "confirm_field.extracted_fields_upsert_error");
+    logger.error({ code: errorCode(e) }, "confirm_field.extracted_fields_upsert_error");
   }
 
   try {
@@ -305,7 +298,7 @@ async function confirmar(
         )
     );
   } catch (e) {
-    logger.error({ code: dbErrCode(e) }, "confirm_field.missing_docs_update_error");
+    logger.error({ code: errorCode(e) }, "confirm_field.missing_docs_update_error");
   }
 
   /*
@@ -376,7 +369,7 @@ async function rechazar(a: ContextoAccion): Promise<FieldConfirmationResult> {
           .where(eq(claimFieldConfirmations.id, confirmationRow.id))
       );
     } catch (e) {
-      logger.error({ code: dbErrCode(e) }, "confirm_field.reject_update_error");
+      logger.error({ code: errorCode(e) }, "confirm_field.reject_update_error");
     }
   }
 
@@ -488,7 +481,7 @@ async function reEvaluateStatus(
           .where(eq(cases.id, caseId))
       );
     } catch (e) {
-      logger.error({ code: dbErrCode(e) }, "confirm_field.status_update_error");
+      logger.error({ code: errorCode(e) }, "confirm_field.status_update_error");
       return currentStatus;
     }
 

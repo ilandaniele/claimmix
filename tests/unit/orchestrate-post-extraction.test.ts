@@ -52,11 +52,17 @@ vi.mock("@/lib/db", () => {
 });
 
 // Mock @/lib/db/helpers — firstRow just returns rows[0] ?? null, safe to mock.
-vi.mock("@/lib/db/helpers", () => ({
-  firstRow: (rows: unknown[]) => rows[0] ?? null,
-  ilikeAny: vi.fn(),
-  countRows: vi.fn(),
-}));
+// policyNumberEquals/digitsOnlyEquals quedan reales: el test de la búsqueda
+// del titular inspecciona el SQL que arman.
+vi.mock("@/lib/db/helpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/helpers")>();
+  return {
+    ...actual,
+    firstRow: (rows: unknown[]) => rows[0] ?? null,
+    ilikeAny: vi.fn(),
+    countRows: vi.fn(),
+  };
+});
 
 // Mock dispatchOutboundEmail so no real emails are sent.
 vi.mock("@/server/email/dispatch", () => ({

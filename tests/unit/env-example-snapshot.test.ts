@@ -102,3 +102,18 @@ describe("W1 — .env.example Gmail migration snapshot", () => {
     expect(content.trim().length).toBeGreaterThan(100);
   });
 });
+
+describe(".env.example lists the vars the code throws without", () => {
+  it("DOES contain GMAIL_TOKEN_ENCRYPTION_KEY", () => {
+    const content = readEnvExample();
+    expect(content).toMatch(/GMAIL_TOKEN_ENCRYPTION_KEY/);
+  });
+
+  it("DOES contain the four WIF (GCP_*) vars", () => {
+    const content = readEnvExample();
+    expect(content).toMatch(/GCP_PROJECT_NUMBER/);
+    expect(content).toMatch(/GCP_WORKLOAD_IDENTITY_POOL_ID/);
+    expect(content).toMatch(/GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID/);
+    expect(content).toMatch(/GCP_SERVICE_ACCOUNT_EMAIL/);
+  });
+});

@@ -19,6 +19,7 @@
  */
 
 import type { Severity } from "@/lib/schemas/cases";
+import { escaparRegex } from "@/core/text/escapar-regex";
 import type { KnownPattern } from "./prompt";
 
 /**
@@ -41,7 +42,7 @@ function matchesPattern(text: string, pattern: string): boolean {
     return text.includes(lower);
   }
 
-  const escaped = lower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = escaparRegex(lower);
 
   /*
    * El plural cuenta igual que el singular.

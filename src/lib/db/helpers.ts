@@ -51,6 +51,30 @@ export function ilikeAny(cols: AnyPgColumn[], q: string): SQL | undefined {
  * abre la bandeja con sesión se salteaba por falta de credenciales de
  * Playwright. Se descubrió al crearlas.
  */
+/**
+ * Compara sólo los dígitos de una columna contra un valor ya normalizado a
+ * dígitos: tolera puntos, guiones y prefijos de letras en lo guardado.
+ *
+ * No es sólo para DNI: también compara teléfonos y, en la búsqueda de casos
+ * por número de póliza, tolera un prefijo de letras. El valor de la derecha
+ * ya tiene que venir normalizado — este helper no llama a `normalizarDni`.
+ */
+export function digitsOnlyEquals(col: AnyPgColumn, digits: string): SQL {
+  return sql`regexp_replace(coalesce(${col}, ''), '[^0-9]', '', 'g') = ${digits}`;
+}
+
+/**
+ * Compara un número de póliza contra una columna, igual que
+ * `normalizarNumeroPoliza`: sin espacios y en mayúsculas.
+ *
+ * El guion NO se saca — ver el comentario de esa función en
+ * `@/core/matching/normalizar`. El valor de la derecha ya tiene que venir
+ * normalizado por esa misma función.
+ */
+export function policyNumberEquals(col: AnyPgColumn, normalized: string): SQL {
+  return sql`upper(replace(${col}, ' ', '')) = ${normalized}`;
+}
+
 export async function countRows(
   ctx: TenantContext,
   table: PgTable | SQLWrapper,

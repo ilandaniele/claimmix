@@ -224,7 +224,8 @@ export interface AgentRunRow {
 
 /**
  * Fetch the most recent agent run for a case. Tenant scoping is enforced
- * explicitly (RLS is gone): pass the tenant id from the authenticated context.
+ * explicitly via enTenant, backed by RLS: pass the tenant id from the
+ * authenticated context.
  */
 export async function getLatestAgentRun(
   tenantId: string,

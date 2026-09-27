@@ -35,11 +35,15 @@ vi.mock("@/lib/db", () => {
   return { db: mockDb, tables: {} };
 });
 
-vi.mock("@/lib/db/helpers", () => ({
-  firstRow: (rows: unknown[]) => rows[0] ?? null,
-  ilikeAny: vi.fn(),
-  countRows: vi.fn(),
-}));
+vi.mock("@/lib/db/helpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/helpers")>();
+  return {
+    ...actual,
+    firstRow: (rows: unknown[]) => rows[0] ?? null,
+    ilikeAny: vi.fn(),
+    countRows: vi.fn(),
+  };
+});
 
 vi.mock("@/server/email/dispatch", () => ({
   dispatchOutboundEmail: vi.fn().mockResolvedValue(undefined),

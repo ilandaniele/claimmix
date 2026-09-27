@@ -62,6 +62,10 @@ export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 export const SeveritySchema = z.enum(["low", "medium", "high", "critical"]);
 export type Severity = z.infer<typeof SeveritySchema>;
 
+/** Canales de ingreso de un caso. */
+export const ChannelSchema = z.enum(["email_sim", "email", "whatsapp_sim", "whatsapp"]);
+export type Channel = z.infer<typeof ChannelSchema>;
+
 /** Allowed sort columns — whitelist prevents SQL injection via sort param */
 export const SortColumnSchema = z.enum(["created_at", "confidence_min", "status"]);
 export type SortColumn = z.infer<typeof SortColumnSchema>;
@@ -117,7 +121,7 @@ export const CaseQuerySchema = z.object({
   severity: listaDe(SeveritySchema),
   customer_id: z.string().uuid().optional(),
   policy_id: z.string().uuid().optional(),
-  channel: listaDe(z.enum(["email_sim", "email", "whatsapp_sim", "whatsapp"])),
+  channel: listaDe(ChannelSchema),
   is_claim: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
   // Sólo `true` filtra: «los que no están para responder» no es una sección.
   // Cualquier otro valor se ignora, como en `bandeja/page.tsx`: un 400 acá

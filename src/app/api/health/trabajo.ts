@@ -24,6 +24,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { errorCode } from "@/lib/observability/error-code";
 
 export type EstadoDeTrabajo = "ok" | "degraded" | "down";
 
@@ -65,10 +66,7 @@ function caido(name: string, detail: string): ChequeoDeTrabajo {
  * convence.
  */
 function noSePudo(name: string, err: unknown): ChequeoDeTrabajo {
-  const code =
-    (err as { code?: string })?.code ??
-    (err instanceof Error ? err.name : "UnknownError");
-  return flojo(name, `no se pudo medir (${code})`);
+  return flojo(name, `no se pudo medir (${errorCode(err)})`);
 }
 
 /** Casos que entraron y que nadie levantó. Cada uno es una denuncia sin leer. */

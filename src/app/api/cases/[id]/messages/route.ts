@@ -34,6 +34,7 @@ import {
   type RateLimitResult,
 } from "@/lib/rate-limit/index";
 import { z } from "zod";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 // ── Params schema ─────────────────────────────────────────────────────────────
@@ -45,14 +46,6 @@ const ParamsSchema = z.object({
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BODY_TEXT_MAX_CHARS = 2000;
-
-/** Extract a loggable error code from a thrown DB error (PII-safe). */
-function dbErrCode(e: unknown): string {
-  return (
-    (e as { code?: string })?.code ??
-    (e instanceof Error ? e.name : "UnknownError")
-  );
-}
 
 // ── GET /api/cases/:id/messages ───────────────────────────────────────────────
 
@@ -119,7 +112,7 @@ export async function GET(
 
     return ok({ messages, recortada: conversacion.recortada, respuesta });
   } catch (e) {
-    logger.error({ code: dbErrCode(e) }, "get_api_cases_id_messages.messages_query_error");
+    logger.error({ code: errorCode(e) }, "get_api_cases_id_messages.messages_query_error");
     return err(new AppError("INTERNAL_ERROR"));
   }
 }

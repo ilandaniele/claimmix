@@ -30,6 +30,7 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { bareAddress } from "@/lib/email/reserved";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 /** The channels whose `cases.email_thread_id` is an email thread. */
@@ -100,8 +101,7 @@ export async function threadLookup(
       if (caseId) return { existingCaseId: caseId };
     }
   } catch (err) {
-    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
-    logger.error({ code }, "thread_lookup.claim_messages_error");
+    logger.error({ code: errorCode(err) }, "thread_lookup.claim_messages_error");
     // Non-fatal — fall through to legacy check.
   }
 
@@ -132,8 +132,7 @@ export async function threadLookup(
       if (caseId) return { existingCaseId: caseId };
     }
   } catch (err) {
-    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
-    logger.error({ code }, "thread_lookup.cases_error");
+    logger.error({ code: errorCode(err) }, "thread_lookup.cases_error");
     return { existingCaseId: undefined };
   }
 

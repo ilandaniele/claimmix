@@ -8,8 +8,8 @@
  * can poll while the case is still 'procesando' (extraction in flight).
  *
  * Auth: any authenticated role (viewers may inspect). Explicit tenant_id
- * filters scope the tenant (RLS is gone); wrong-tenant case → 404 (never 403 —
- * no tenant enumeration).
+ * filters scope the tenant (enTenant, backed by RLS); wrong-tenant case → 404
+ * (never 403 — no tenant enumeration).
  *
  * Response:
  *   {

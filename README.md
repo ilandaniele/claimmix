@@ -12,7 +12,7 @@ ClaimMix is an AI-powered FNOL claims management system for insurance teams. It 
 - Neon Postgres with Drizzle
 - Gmail API and Google Pub/Sub
 - WhatsApp Business Cloud API (official Meta — see [`docs/whatsapp-setup.md`](docs/whatsapp-setup.md))
-- OpenAI and Google Gemini agent providers (+ Vertex AI fine-tuning)
+- Google Gemini agent provider (+ Vertex AI fine-tuning)
 - S3-compatible attachment storage
 - Vitest and Playwright
 
@@ -34,18 +34,20 @@ MOCK_AI=true
 
 ## Database
 
-Migrations live in `neon/migrations/` (`0001`–`0009` as of 2026-06-29).
+Migrations live in `neon/migrations/`.
 
-> ⚠️ **Migrations are applied BY HAND and are NOT tracked.** Deploys do **not**
-> run them. After adding a migration you must apply it to Neon yourself, and when
+> ⚠️ **Deploys do not apply migrations.** After adding a migration you must run
+> `node scripts/migrate.mjs --apply` yourself; it tracks applied migrations in a
+> checksummed `schema_migrations` ledger, so re-running is a safe no-op. When
 > something DB-shaped breaks after a deploy, **diff the live Neon schema against
 > `src/lib/db/schema/*`** rather than trusting these files. (Migrations 0006/0008/0009
-> were once shipped in code but never applied, which broke all `cases` INSERTs.)
+> were once shipped in code but never applied, which broke all `cases` INSERTs —
+> exactly what the ledger now prevents.)
 
-Apply them in order with your Postgres tool of choice, e.g.:
+Apply them with:
 
 ```bash
-for f in neon/migrations/0*.sql; do psql "$DATABASE_URL" -1 -f "$f"; done
+node scripts/migrate.mjs --apply
 ```
 
 Optional seed data lives in `neon/seed.sql`.
@@ -57,9 +59,7 @@ Optional seed data lives in `neon/seed.sql`.
 | `DATABASE_URL` | yes | Neon Postgres connection string |
 | `BETTER_AUTH_SECRET` | yes | Better Auth secret |
 | `BETTER_AUTH_URL` | yes | Public app URL for Better Auth |
-| `AI_PROVIDER` | no | `gemini` or `openai`; defaults to `gemini` |
-| `OPENAI_API_KEY` | no | Optional OpenAI provider key |
-| `OPENAI_MODEL` | no | Default OpenAI model, defaults to `gpt-4o-mini` |
+| `AI_PROVIDER` | no | Defaults to `gemini` (only supported provider — OpenAI was removed) |
 | `GEMINI_API_KEY` | no | Global Gemini provider key used by the default provider |
 | `GEMINI_MODEL` | no | Default Gemini model, defaults to `gemini-2.5-flash` |
 | `MOCK_AI` | no | Set `true` to use deterministic mock agent output |
@@ -75,24 +75,24 @@ Optional seed data lives in `neon/seed.sql`.
 | `PUBSUB_SERVICE_ACCOUNT` | push | Service account of our push subscription; the token's `email` must match it. Required wherever `PUBSUB_AUDIENCE` is set |
 | `S3_ENDPOINT` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_BUCKET` | attachments | S3-compatible storage |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | no | Observability |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | no | Durable rate limiting |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | no | Rate limiting backend when `RATE_LIMIT_PROVIDER=upstash`; default backend is Postgres |
 
 ## Agent Console
 
 Admins use `/agente` to manage:
 
-- Provider and model settings for OpenAI and Gemini
+- Provider and model settings for Gemini
 - Tenant custom fields
 - Prompt rules
 - Approved training examples
-- Optional OpenAI fine-tuning jobs and manual model activation
+- Optional Vertex AI fine-tuning jobs and manual model activation
 
-Gemini and OpenAI are treated as agent providers behind the same validated claim-output contract. The workflow still validates all model output before any database write.
+Gemini is the agent provider, behind a validated claim-output contract. The workflow still validates all model output before any database write.
 
 ## Security
 
-- Every tenant-owned query must filter by `tenant_id`.
-- Neon/Postgres RLS scaffolding is in `0004_agent_console_security.sql` for non-owner roles that set `claimmix.tenant_id`.
+- Every tenant-owned query must filter by `tenant_id`, via `enTenant`/`enTenantVarias` (`src/data/scope.ts`).
+- Neon/Postgres enforces `FORCE ROW LEVEL SECURITY` as of `0018_tenant_isolation_force_rls.sql`, as a DB-level backstop to the app-level filter.
 - Route handlers validate input with Zod.
 - Mutations re-check role authorization server-side.
 - Audit events are written for training, provider, field, and model deployment changes.

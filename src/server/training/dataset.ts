@@ -54,6 +54,27 @@ export function buildExpectedOutput(
   return agentOutput;
 }
 
+/** Job abierto: sigue existiendo entre `draft` y `approved`, antes de desplegarse. */
+export const OPEN_JOB_STATUSES = ["draft", "queued", "running", "eval_pending", "approved"];
+
+/**
+ * Corta las líneas ya armadas en entrenamiento y validación, 80/20 con un
+ * mínimo de 10 ejemplos para que haya validación. Estaba repetido, idéntico,
+ * en cada formato de línea (`toJsonlLine` de `fine-tuning.ts` y
+ * `toGeminiJsonlLine` de `vertex-ai-fine-tuning.ts`).
+ */
+export function splitJsonl(lines: string[]) {
+  const validationCount = lines.length >= 10 ? Math.max(1, Math.floor(lines.length * 0.2)) : 0;
+  const validation = validationCount > 0 ? lines.slice(0, validationCount) : [];
+  const training = validationCount > 0 ? lines.slice(validationCount) : lines;
+  return {
+    trainingJsonl: training.join("\n") + "\n",
+    validationJsonl: validation.length > 0 ? validation.join("\n") + "\n" : "",
+    trainingCount: training.length,
+    validationCount: validation.length,
+  };
+}
+
 export interface TrainingExample {
   id: string;
   input_payload: Record<string, unknown>;

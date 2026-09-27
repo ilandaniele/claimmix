@@ -17,6 +17,7 @@ import { eq } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 /**
@@ -61,8 +62,7 @@ export async function checkDuplicate(
     return row !== null;
   } catch (err) {
     // Log code only — never raw DB error body (may contain PII).
-    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
-    logger.error({ code }, "dedupe.claim_messages_check_error");
+    logger.error({ code: errorCode(err) }, "dedupe.claim_messages_check_error");
     // Fail open — let the request proceed; idempotency is best-effort.
     return false;
   }

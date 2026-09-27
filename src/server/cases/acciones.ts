@@ -16,6 +16,7 @@ import { enTenantVarias, type TenantContext } from "@/data/scope";
 import { auditLog, users } from "@/lib/db/schema";
 import { AuditEvent } from "@/lib/audit/log";
 import { ultimaCorrida } from "@/server/cases/listo-confirmado";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { consultasDelReenvio, deFilasDelReenvio, decidirReenvio } from "@/server/confirmations/reenvio";
 
@@ -81,10 +82,7 @@ export async function leerEstadoDeAcciones(
       motivoSinReenvio: dec.ok ? null : dec.motivo,
     };
   } catch (err) {
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
-    logger.error({ code }, "acciones.no_se_leyeron");
+    logger.error({ code: errorCode(err) }, "acciones.no_se_leyeron");
     return SIN_ACCIONES;
   }
 }

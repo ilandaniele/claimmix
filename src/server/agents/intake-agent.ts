@@ -14,6 +14,7 @@ import { downloadWhatsAppMedia, type WhatsAppMediaRef } from "@/server/whatsapp/
 import { rehostAndRecordAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 type IntakeChannel = "email" | "email_sim" | "whatsapp" | "whatsapp_sim";
@@ -141,9 +142,7 @@ export async function runIntakeAgent(input: IntakeAgentInput): Promise<IntakeAge
      */
     logger.error({
         case_id: input.caseId,
-        error_code:
-          (err as { code?: string })?.code ??
-          (err instanceof Error ? err.name : "UnknownError"),
+        error_code: errorCode(err),
       }, "intake_agent.case_lookup_error");
     caseRow = null;
   }
@@ -449,16 +448,13 @@ async function findExistingWhatsAppCase(
      * Tirar es lo correcto acá: el webhook contesta 500, Meta reentrega, y el
      * guard de `duplicado` hace que reentregar sea seguro. Ese camino ya existe.
      */
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
     logger.error({
-        code,
+        code: errorCode(err),
         nota:
           "No se pudo mirar si ya había un caso abierto. Se corta para no abrir " +
           "uno duplicado; Meta reentrega.",
       }, "whatsapp.busqueda_de_caso_fallo");
-    throw new Error(`whatsapp_case_lookup_failed:${code}`);
+    throw new Error(`whatsapp_case_lookup_failed:${errorCode(err)}`);
   }
 }
 
@@ -628,9 +624,7 @@ async function insertWhatsAppMessage(
     logger.error({
         case_id: input.caseId,
         canal: "whatsapp",
-        error_code:
-          (err as { code?: string })?.code ??
-          (err instanceof Error ? err.name : "UnknownError"),
+        error_code: errorCode(err),
       }, "intake.raw_message_no_guardado");
   }
 

@@ -7,6 +7,8 @@
 
 import { z } from "zod";
 
+import { ALL_ROLES } from "@/lib/auth/roles";
+
 /** POST /api/auth/sign-in request body */
 export const SignInSchema = z.object({
   email: z
@@ -49,7 +51,7 @@ export const MeResponseSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
   full_name: z.string(),
-  role: z.enum(["owner", "admin", "specialist", "analyst", "viewer"]),
+  role: z.enum(ALL_ROLES),
   tenant_id: z.string().uuid(),
 });
 

@@ -15,6 +15,7 @@
  */
 
 import "server-only";
+import { escaparRegex } from "@/core/text/escapar-regex";
 import { CLAIM_FIELD_KEYS } from "@/lib/schemas/extracted-claim";
 import type { ExtractedClaim, ExtractedField, ClaimFields } from "@/lib/schemas/extracted-claim";
 
@@ -102,7 +103,7 @@ export function tacharNombreYDni(
 
   const nombre = datos.nombre?.trim();
   if (nombre && nombre.length >= 3) {
-    const escaped = nombre.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const escaped = escaparRegex(nombre);
     // Regla detect-non-literal-regexp. `escaped` sale de la línea de
     // arriba, que escapa todos los metacaracteres. La regla es sintáctica y
     // no ve el escape; el valor entra como texto literal, no como patrón.
@@ -111,7 +112,7 @@ export function tacharNombreYDni(
 
     if (opts?.porPalabra) {
       for (const token of nombre.split(/\s+/).filter((p) => p.length >= 3)) {
-        const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const escapedToken = escaparRegex(token);
         out = out.replace(
           // nosemgrep
           new RegExp(`(?<![\\p{L}\\d])${escapedToken}(?![\\p{L}\\d])`, "giu"),
@@ -127,7 +128,7 @@ export function tacharNombreYDni(
       // Regla detect-non-literal-regexp. escapado en la misma expresión,
       // y además `dni` ya pasó por una validación de sólo dígitos y puntos.
       // nosemgrep
-      new RegExp(dni.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+      new RegExp(escaparRegex(dni), "g"),
       en.dni
     );
   }
@@ -175,7 +176,7 @@ export function scrubPiiFromSummary(extracted: ExtractedClaim): ExtractedClaim {
       out = out.replace(
         // Regla detect-non-literal-regexp. escapado en la misma expresión.
         // nosemgrep
-        new RegExp(policyValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+        new RegExp(escaparRegex(policyValue), "g"),
         "[póliza omitida]"
       );
     }

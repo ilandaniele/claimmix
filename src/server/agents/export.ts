@@ -3,8 +3,10 @@ import "server-only";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
+import { firstRow } from "@/lib/db/helpers";
 import * as tables from "@/lib/db/schema";
 import type { UserRole } from "@/lib/auth/require-role";
+import { getDefaultGeminiModel } from "@/server/ai/provider";
 import { ejemploSinDatosDeLaPersona } from "@/server/training/sin-datos-de-la-persona";
 
 export const AGENT_EXPORT_TYPES = ["config_only", "memory_only", "full"] as const;
@@ -23,10 +25,6 @@ export interface AgentExportRequest {
 
 type JsonRecord = Record<string, unknown>;
 
-function firstRow<T>(rows: T[]): T | null {
-  return rows[0] ?? null;
-}
-
 /*
  * Un valor guardado que ya no exista —"openai", de antes— devuelve null y cae
  * al default. El export es un archivo que alguien se lleva: mejor que diga el
@@ -34,10 +32,6 @@ function firstRow<T>(rows: T[]): T | null {
  */
 function toProvider(value: unknown): "gemini" | null {
   return value === "gemini" ? value : null;
-}
-
-function getExportDefaultGeminiModel(): string {
-  return process.env.GEMINI_MODEL ?? "gemini-flash-latest";
 }
 
 export function normalizeAgentExportFormat(raw: string | null): AgentExportFormat | null {
@@ -329,7 +323,7 @@ async function loadProviderSettings(tenantId: string) {
   const defaultProvider = toProvider(row?.provider) ?? "gemini";
   const activeModelProvider = toProvider(row?.active_model_provider) ?? defaultProvider;
   const activeModel =
-    row?.active_model ?? row?.gemini_model ?? getExportDefaultGeminiModel();
+    row?.active_model ?? row?.gemini_model ?? getDefaultGeminiModel();
 
   return {
     provider: {
@@ -341,7 +335,7 @@ async function loadProviderSettings(tenantId: string) {
     },
     model_settings: {
       provider: defaultProvider,
-      gemini_model: row?.gemini_model ?? getExportDefaultGeminiModel(),
+      gemini_model: row?.gemini_model ?? getDefaultGeminiModel(),
       active_model_provider: activeModelProvider,
       active_model: activeModel,
       previous_model: row?.previous_model ?? null,

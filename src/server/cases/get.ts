@@ -5,8 +5,8 @@
  * and the last 20 audit_log entries (sorted descending by created_at).
  *
  * IDOR protection:
- * - Every query filters explicitly by tenant_id (RLS is gone — the
- *   explicit filter is the ONLY tenant boundary).
+ * - Every query filters explicitly by tenant_id via enTenant, backed by RLS
+ *   (FORCE ROW LEVEL SECURITY) as the DB-level backstop.
  * - A case belonging to another tenant returns zero rows.
  * - The route handler converts a missing row to 404 (not 403) to
  *   prevent tenant enumeration (AC10).
@@ -19,6 +19,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { auditLog, cases, extractedFields, missingDocs } from "@/lib/db/schema";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import type {
   CaseRow,
@@ -91,11 +92,7 @@ export async function fetchCaseRow(
      *
      * No cambia lo que devuelve. Sólo deja de ser mudo.
      */
-    logger.error({
-        error_code:
-          (err as { code?: string })?.code ??
-          (err instanceof Error ? err.name : "UnknownError"),
-      }, "cases.fetchCaseRow.query_failed");
+    logger.error({ error_code: errorCode(err) }, "cases.fetchCaseRow.query_failed");
     return null;
   }
 }
@@ -131,11 +128,7 @@ export async function fetchExtractedFields(
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
     // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
     // persona no mandó nada.
-    logger.error({
-        error_code:
-          (err as { code?: string })?.code ??
-          (err instanceof Error ? err.name : "UnknownError"),
-      }, "cases.fetchExtractedFields.query_failed");
+    logger.error({ error_code: errorCode(err) }, "cases.fetchExtractedFields.query_failed");
     return [];
   }
 }
@@ -158,11 +151,7 @@ export async function fetchMissingDocs(
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
     // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
     // persona no mandó nada.
-    logger.error({
-        error_code:
-          (err as { code?: string })?.code ??
-          (err instanceof Error ? err.name : "UnknownError"),
-      }, "cases.fetchMissingDocs.query_failed");
+    logger.error({ error_code: errorCode(err) }, "cases.fetchMissingDocs.query_failed");
     return [];
   }
 }
@@ -226,11 +215,7 @@ export async function fetchAuditLog(
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
     // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
     // persona no mandó nada.
-    logger.error({
-        error_code:
-          (err as { code?: string })?.code ??
-          (err instanceof Error ? err.name : "UnknownError"),
-      }, "cases.fetchAuditLog.query_failed");
+    logger.error({ error_code: errorCode(err) }, "cases.fetchAuditLog.query_failed");
     return [];
   }
 }

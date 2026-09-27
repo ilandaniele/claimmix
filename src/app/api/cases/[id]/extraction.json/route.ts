@@ -8,7 +8,7 @@
  * are UUIDs/sanitized, no user-controlled text).
  *
  * Auth: any authenticated role (viewers can inspect extracted JSON).
- * Explicit tenant_id filters scope the tenant (RLS is gone);
+ * Explicit tenant_id filters scope the tenant (enTenant, backed by RLS);
  * wrong-tenant case → 404.
  */
 

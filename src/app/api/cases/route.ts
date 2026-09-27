@@ -1,7 +1,7 @@
 /**
  * GET /api/cases — list cases with filtering, pagination, and sorting.
  *
- * AC9:  Tenant-isolated by explicit tenant_id filter (RLS is gone).
+ * AC9:  Tenant-isolated by explicit tenant_id filter (enTenant, backed by RLS).
  * AC11: Filter by claim type returns only matching cases.
  * AC12: Pagination per_page capped at 100.
  *
@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── 4. Fetch data (explicit tenant_id filter — RLS is gone) ───────────────
+  // ── 4. Fetch data (explicit tenant_id filter, backed by RLS) ───────────────
   try {
     const result = await listCases({ tenantId: userRow.tenant_id }, parsed.data, userRow.id);
     // Drizzle numeric columns surface as strings — convert at the boundary so

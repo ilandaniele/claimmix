@@ -28,6 +28,7 @@ import { enTenant, enTenantVarias } from "@/data/scope";
 import { reabrirSiEraNoRelevante } from "@/server/cases/reabrir-no-relevante";
 import { marcarParaResponder } from "@/server/cases/para-responder";
 import { ESTADOS_DEL_AGENTE_TERMINADO } from "@/core/case/para-responder";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 export interface InboundEmail {
@@ -259,10 +260,7 @@ async function insertInboundMessage(
     return inserted?.id ?? null;
   } catch (err) {
     // Code only: the body and headers carry personal data.
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
-    logger.error({ code }, "inbound_email.claim_messages_insert_failed");
+    logger.error({ code: errorCode(err) }, "inbound_email.claim_messages_insert_failed");
     return null;
   }
 }

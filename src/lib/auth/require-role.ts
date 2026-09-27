@@ -14,8 +14,9 @@
  * Throws AppError('MISSING_SESSION') if no valid session.
  * Throws AppError('FORBIDDEN_ROLE')  if the user's role is not in the list.
  *
- * NOTE: with RLS gone, ctx.userRow.tenant_id is the ONLY tenant boundary.
- * Every query on tenant-owned tables MUST filter by it explicitly.
+ * NOTE: ctx.userRow.tenant_id is the app-level tenant boundary (enTenant);
+ * RLS (FORCE ROW LEVEL SECURITY) is the DB-level backstop. Every query on
+ * tenant-owned tables MUST filter by it explicitly.
  */
 
 import { getSessionContext } from "@/lib/auth/session";

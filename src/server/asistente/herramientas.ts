@@ -24,7 +24,7 @@ import "server-only";
 
 import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { escapeLike } from "@/lib/db/helpers";
+import { digitsOnlyEquals, escapeLike } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
 import { estadosAConsultar } from "@/core/case/filtro-de-estado";
 import type { ConteoDeCasos, Intencion } from "@/core/asistente/intencion";
@@ -167,7 +167,7 @@ export async function buscarCaso(
   const condicion = i.codigo
     ? sql`right(replace(${cases.id}::text, '-', ''), 8) = lower(${i.codigo})`
     : i.numero
-      ? sql`regexp_replace(coalesce(${cases.policy_number}, ''), '[^0-9]', '', 'g') = ${i.numero}`
+      ? digitsOnlyEquals(cases.policy_number, i.numero)
       : i.nombre
         ? condicionPorNombre(i.nombre)
         : undefined;

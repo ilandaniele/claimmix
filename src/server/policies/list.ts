@@ -7,12 +7,13 @@
 
 import "server-only";
 
-import { and, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { normalizarNumeroPoliza } from "@/core/matching/normalizar";
 import type { TenantContext } from "@/data/scope";
 import { paginarEnTenant, type Pagina } from "@/lib/db/paginacion";
+import { policyNumberEquals } from "@/lib/db/helpers";
 import { customers, policies } from "@/lib/db/schema";
 import { camposDePagina } from "@/lib/schemas/paginacion";
 
@@ -55,16 +56,15 @@ export function armarFiltroDePolizas(query: PolicyQuery): SQL | undefined {
    * así que `?policy_number=pol-4471-a` no encontraba nada mientras el agente sí
    * lo encuentra — y los números de póliza los tipea una persona.
    *
-   * El SQL es idéntico al de `policy-matcher.ts:125`, `customer-matcher.ts:213`
-   * y `agent-tools.ts:136`, que es lo que pide el encabezado de `normalizar.ts`:
-   * el guion viaja de los dos lados o de ninguno. Sacar el espacio y subir a
-   * mayúsculas, nada más — `POL-8812-R` y `POL8812R` pueden ser dos contratos
-   * distintos del mismo inquilino, y `(tenant_id, policy_number)` es único sobre
-   * el texto crudo.
+   * `policyNumberEquals` es el mismo SQL que usan los otros buscadores, que es
+   * lo que pide el encabezado de `normalizar.ts`: el guion viaja de los dos
+   * lados o de ninguno. Sacar el espacio y subir a mayúsculas, nada más —
+   * `POL-8812-R` y `POL8812R` pueden ser dos contratos distintos del mismo
+   * inquilino, y `(tenant_id, policy_number)` es único sobre el texto crudo.
    */
   if (query.policy_number)
     condiciones.push(
-      sql`upper(replace(${policies.policy_number}, ' ', '')) = ${normalizarNumeroPoliza(query.policy_number)}`
+      policyNumberEquals(policies.policy_number, normalizarNumeroPoliza(query.policy_number))
     );
   if (query.status) condiciones.push(eq(policies.status, query.status));
 

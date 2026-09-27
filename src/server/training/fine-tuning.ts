@@ -30,6 +30,8 @@ import { tables } from "@/lib/db";
 import {
   approvedExamplesForTenant,
   buildExpectedOutput,
+  OPEN_JOB_STATUSES,
+  splitJsonl,
 } from "@/server/training/dataset";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -39,8 +41,6 @@ import {
   getTenantGeminiModel,
   setTenantModelDefaults,
 } from "@/server/ai/provider";
-
-const OPEN_JOB_STATUSES = ["draft", "queued", "running", "eval_pending", "approved"];
 
 function toJsonlLine(example: {
   input_payload: Record<string, unknown>;
@@ -213,16 +213,7 @@ export async function createDraftFineTuneJob(tenantId: string, userId: string) {
 
 export async function buildFineTuneJsonl(tenantId: string) {
   const examples = await approvedExamplesForTenant(tenantId);
-  const lines = examples.map(toJsonlLine);
-  const validationCount = lines.length >= 10 ? Math.max(1, Math.floor(lines.length * 0.2)) : 0;
-  const validation = validationCount > 0 ? lines.slice(0, validationCount) : [];
-  const training = validationCount > 0 ? lines.slice(validationCount) : lines;
-  return {
-    trainingJsonl: training.join("\n") + "\n",
-    validationJsonl: validation.length > 0 ? validation.join("\n") + "\n" : "",
-    trainingCount: training.length,
-    validationCount: validation.length,
-  };
+  return splitJsonl(examples.map(toJsonlLine));
 }
 
 /**

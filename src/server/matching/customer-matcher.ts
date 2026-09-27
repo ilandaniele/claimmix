@@ -21,6 +21,7 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
+import { digitsOnlyEquals, policyNumberEquals } from "@/lib/db/helpers";
 import {
   normalizarDni,
   normalizarEmail,
@@ -214,16 +215,9 @@ async function matchByPolicyNumber(
         .leftJoin(c, eq(p.customer_id, c.id))
         // Sin espacios y en mayúsculas de los DOS lados: los números de póliza
         // los tipea una persona, y `pol-8812-r` es el mismo contrato que
-        // `POL-8812-R`.
-        //
-        // El guion no se saca, ni acá ni en `normalizarNumeroPoliza`, y tiene
-        // que seguir así en los dos o en ninguno: ver el motivo escrito en esa
-        // función. El ejemplo que estaba acá era `pol 8812-r`, que normaliza a
-        // `POL8812-R` y NO coincide con `POL-8812-R` — un comentario que se
-        // desmentía a sí mismo contra la consulta que documentaba.
-        .where(
-          sql`upper(replace(${p.policy_number}, ' ', '')) = ${normalizarNumeroPoliza(policyNumber)}`
-        )
+        // `POL-8812-R`. `policyNumberEquals` es el mismo SQL de los otros
+        // buscadores — el guion no se saca, ver el motivo en `normalizarNumeroPoliza`.
+        .where(policyNumberEquals(p.policy_number, normalizarNumeroPoliza(policyNumber)))
         .limit(5)
     );
   } catch (e) {
@@ -277,7 +271,7 @@ async function matchByDni(
       db
         .select({ id: c.id, full_name: c.full_name, email: c.email, dni: c.dni })
         .from(c)
-        .where(sql`regexp_replace(coalesce(${c.dni}, ''), '[^0-9]', '', 'g') = ${buscado}`)
+        .where(digitsOnlyEquals(c.dni, buscado))
         .limit(5)
     );
   } catch (e) {
@@ -379,7 +373,7 @@ async function matchByPhone(
         .where(
           and(
             eq(cc.contact_type, "phone"),
-            sql`regexp_replace(coalesce(${cc.value}, ''), '[^0-9]', '', 'g') = ${buscado}`
+            digitsOnlyEquals(cc.value, buscado)
           )
         )
         .limit(5)

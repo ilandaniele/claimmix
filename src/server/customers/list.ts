@@ -20,7 +20,7 @@ import {
   sirveParaBuscar,
 } from "@/core/matching/normalizar";
 import type { TenantContext } from "@/data/scope";
-import { ilikeAny } from "@/lib/db/helpers";
+import { digitsOnlyEquals, ilikeAny } from "@/lib/db/helpers";
 import { camposDePagina } from "@/lib/schemas/paginacion";
 import { paginarEnTenant, type Pagina } from "@/lib/db/paginacion";
 import { customers } from "@/lib/db/schema";
@@ -90,9 +90,7 @@ export function armarFiltroDeBusqueda(
       // El padrón guarda `27654321` y la persona escribe `27.654.321`: se
       // comparan los dígitos pelados de los dos lados.
       if (termino.dni) {
-        alternativas.push(
-          sql`regexp_replace(coalesce(${customers.dni}, ''), '[^0-9]', '', 'g') = ${termino.dni}`
-        );
+        alternativas.push(digitsOnlyEquals(customers.dni, termino.dni));
       }
       // Para cuando pegan la dirección entera. El `ilike` de arriba ya cubre
       // las parciales.
@@ -123,9 +121,7 @@ export function armarFiltroDeBusqueda(
     // a la cadena vacía y devuelve a toda persona con el documento vacío. Buscar
     // a alguien y recibir a cualquiera es peor que no encontrarlo.
     if (sirveParaBuscar(dni, MINIMO_DNI)) {
-      condiciones.push(
-        sql`regexp_replace(coalesce(${customers.dni}, ''), '[^0-9]', '', 'g') = ${dni}`
-      );
+      condiciones.push(digitsOnlyEquals(customers.dni, dni));
     } else {
       // Pidieron filtrar por un documento que no puede serlo: no hay resultado,
       // y eso es distinto de no filtrar.

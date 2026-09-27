@@ -16,7 +16,7 @@ import { eq, desc, count } from "drizzle-orm";
 import { cases, customers, policies } from "@/lib/db/schema";
 import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
 import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
 import { formatDate, formatDateOnly, formatAge } from "@/lib/utils";
@@ -78,7 +78,7 @@ export default async function CustomerDetailPage({
   params,
 }: CustomerDetailPageProps) {
   const { id } = await params;
-  const locale = await getServerLocale();
+  const locale = await getAccountLocale();
   const t = getT(locale);
 
   /*

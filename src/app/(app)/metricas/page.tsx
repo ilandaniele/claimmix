@@ -22,12 +22,13 @@ import { unidadDe, type Unidad } from "@/core/metricas/serie";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { formatUsd as formatUsdShared } from "@/lib/utils";
 import {
   getTenantKpis,
   type MetricasData,
 } from "@/server/metrics/kpis";
+import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
@@ -126,13 +127,6 @@ const STATUS_LABEL_KEYS: Record<ClaveDeEstado, TranslationKey> = {
   cerrado: "tabs.cerrado",
 };
 
-const TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
-  choque: "type.choque",
-  robo: "type.robo",
-  granizo: "type.granizo",
-  incendio: "type.incendio",
-};
-
 const TYPE_COLORS: Record<string, string> = {
   choque: "bg-blue-500",
   robo: "bg-purple-500",
@@ -147,7 +141,7 @@ export default async function MetricasPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const locale = await getServerLocale();
+  const locale = await getAccountLocale();
   const t = getT(locale);
   const unidad = unidadDe((await searchParams).serie);
   let data: MetricasData | null;
@@ -431,8 +425,8 @@ export default async function MetricasPage({
                 <p className="text-sm text-slate-500">{t("metricas.sinDatos")}</p>
               ) : (
                 <div className="space-y-3">
-                  {Object.entries(TYPE_LABEL_KEYS).map(([key, labelKey]) => {
-                    const label = t(labelKey);
+                  {ClaimTypeSchema.options.map((key) => {
+                    const label = t(`type.${key}`);
                     const count = data!.by_type[key] ?? 0;
                     const pct =
                       totalByType > 0

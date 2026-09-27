@@ -26,7 +26,7 @@ import { CaseStatusSchema, ChannelSchema, ClaimTypeSchema, PeriodoSchema, Severi
 import type { CaseStatus, ClaimType, Periodo, Severity } from "@/lib/schemas/cases";
 import { Card } from "../_components/ui";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 
 export const VALID_STATUSES: CaseStatus[] = CaseStatusSchema.options;
 /*
@@ -94,7 +94,7 @@ interface BandejaPageProps {
 
 async function BandejaContent({ searchParams }: BandejaPageProps) {
   const params = await searchParams;
-  const t = getT(await getServerLocale());
+  const t = getT(await getAccountLocale());
 
   const statusParam = params["status"];
   const typeParam = params["type"];

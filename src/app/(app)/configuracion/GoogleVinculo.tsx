@@ -15,7 +15,7 @@ import { Link2, ShieldCheck } from "lucide-react";
 
 import { auth } from "@/lib/auth";
 import { getT, type TranslationKey } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 
 import { vincularGoogle } from "./vincular-google";
 
@@ -26,7 +26,7 @@ const AVISOS: Record<string, { clave: TranslationKey; tono: "ok" | "error" }> = 
 };
 
 export async function GoogleVinculo({ aviso }: { aviso?: string }) {
-  const t = getT(await getServerLocale());
+  const t = getT(await getAccountLocale());
 
   let yaVinculada = false;
   try {

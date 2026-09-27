@@ -14,7 +14,7 @@ import { authUsers, users } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { AdminUsersClient } from "./AdminUsersClient";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 
 interface UserRow {
   id: string;
@@ -27,7 +27,7 @@ interface UserRow {
 type UserRole = "owner" | "admin" | "specialist" | "analyst" | "viewer";
 
 export default async function AdminUsersPage() {
-  const t = getT(await getServerLocale());
+  const t = getT(await getAccountLocale());
   let ctx: Awaited<ReturnType<typeof requireAdmin>>;
   try {
     ctx = await requireAdmin();

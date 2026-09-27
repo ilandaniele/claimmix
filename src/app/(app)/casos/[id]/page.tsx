@@ -44,7 +44,7 @@ import { modoDeCoreSync } from "@/server/core-sync/client";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
 import { formatAge, formatDate } from "@/lib/utils";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { parseEmailClaimFields } from "@/lib/email/claim-parser";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
 import { estadoDelDocumento, esRamoSinCalibrar } from "@/core/case/required-docs";
@@ -87,7 +87,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   // Abierto desde «Para responder», «Volver» sigue con la cola.
   const volverA =
     (await searchParams).desde === "para_responder" ? "/bandeja?para_responder=true" : "/bandeja";
-  const locale = await getServerLocale();
+  const locale = await getAccountLocale();
   const t = getT(locale);
   const hoy = diaArgentino();
 

@@ -9,6 +9,8 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { ClaimTypeSchema } from "@/lib/schemas/cases";
+import { getT, type TranslationKey } from "@/lib/i18n";
 
 // ── Pure helpers extracted from the page (inline re-implementation for testing) ─
 
@@ -50,10 +52,25 @@ function buildByType(
   for (const c of cases) {
     byType[c.claim_type] = (byType[c.claim_type] ?? 0) + 1;
   }
-  for (const t of ["choque", "robo", "granizo", "incendio"]) {
+  for (const t of ClaimTypeSchema.options) {
     if (!(t in byType)) byType[t] = 0;
   }
   return byType;
+}
+
+// G33: la página itera `ClaimTypeSchema.options` (los 9 tipos) y resuelve la
+// etiqueta con `t(\`type.${k}\`)`, en vez de un mapa a mano con sólo 4. Acá se
+// reimplementa el mismo armado de barras con el diccionario real, porque la
+// página es un Server Component y no se puede importar directo.
+function buildTypeBars(
+  byType: Record<string, number>,
+  t: (key: TranslationKey) => string
+): Array<{ key: string; label: string; count: number }> {
+  return ClaimTypeSchema.options.map((key) => ({
+    key,
+    label: t(`type.${key}`),
+    count: byType[key] ?? 0,
+  }));
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -130,11 +147,16 @@ describe("buildByType", () => {
     expect(result.robo).toBe(1);
   });
 
-  it("ensures all 4 types are present even with 0 counts", () => {
+  it("ensures all 9 types are present even with 0 counts", () => {
     const result = buildByType([{ claim_type: "choque" }]);
     expect(result.granizo).toBe(0);
     expect(result.incendio).toBe(0);
     expect(result.robo).toBe(0);
+    expect(result.cristales).toBe(0);
+    expect(result.rc).toBe(0);
+    expect(result.robo_contenido).toBe(0);
+    expect(result.accidente_personal).toBe(0);
+    expect(result.other).toBe(0);
   });
 
   it("handles empty cases array", () => {
@@ -143,5 +165,31 @@ describe("buildByType", () => {
     expect(result.robo).toBe(0);
     expect(result.granizo).toBe(0);
     expect(result.incendio).toBe(0);
+  });
+});
+
+describe("byType bars (G33 — métricas muestra los 9 tipos)", () => {
+  const t = getT("es-AR");
+
+  it('by_type {cristales:3} renders "Cristales"', () => {
+    const bars = buildTypeBars({ cristales: 3 }, t);
+    const cristales = bars.find((b) => b.key === "cristales");
+    expect(cristales?.label).toBe("Cristales");
+    expect(cristales?.count).toBe(3);
+  });
+
+  it("la suma de las barras es igual a totalByType", () => {
+    const byType = { choque: 2, cristales: 3, other: 1 };
+    const totalByType = Object.values(byType).reduce((a, b) => a + b, 0);
+    const bars = buildTypeBars(byType, t);
+    const sum = bars.reduce((a, b) => a + b.count, 0);
+    expect(sum).toBe(totalByType);
+  });
+
+  it("cubre los 9 tipos, no sólo los 4 de antes", () => {
+    const bars = buildTypeBars({}, t);
+    expect(bars).toHaveLength(9);
+    expect(bars.map((b) => b.key)).toContain("cristales");
+    expect(bars.map((b) => b.key)).toContain("robo_contenido");
   });
 });

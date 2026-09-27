@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { AppError } from "@/lib/errors";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { AgentConsoleClient } from "./AgentConsoleClient";
 
 export default async function AgentConsolePage() {
@@ -16,7 +16,7 @@ export default async function AgentConsolePage() {
     redirect("/bandeja");
   }
 
-  const t = getT(await getServerLocale());
+  const t = getT(await getAccountLocale());
 
   return (
     <div className="max-w-6xl px-6 py-8">

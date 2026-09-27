@@ -135,6 +135,18 @@ describe("getTenantKpis — la distribución por tipo", () => {
     expect(by_type.robo).toBe(3);
     expect(Object.values(by_type)).not.toContain(7);
   });
+
+  it("cuenta sólo reclamos: el where trae is_claim is true", async () => {
+    // Un `no_relevante` puede arrastrar un `claim_type` del intento previo, y
+    // sin este filtro sumaba como si fuera un reclamo de verdad.
+    baseCon();
+    await getTenantKpis(CTX);
+
+    const armador = mockVarias.mock.calls[0]![1] as (db: unknown) => { toSQL(): { sql: string } }[];
+    const { sql } = armador(new QueryBuilder() as never)[2]!.toSQL();
+
+    expect(sql).toMatch(/"cases"\."is_claim" is true/);
+  });
 });
 
 describe("getTenantKpis — el consumo de IA", () => {

@@ -59,7 +59,7 @@ describe("la situación del caso", () => {
 
   it("los filtros y las métricas también dicen «situación»", () => {
     expect(esAR["filter.estado"]).toBe("Situación");
-    expect(esAR["metricas.porEstado"]).toBe("Siniestros por situación");
+    expect(esAR["metricas.porEstado"]).toBe("Siniestros por situación (histórico)");
   });
 
   it.each([

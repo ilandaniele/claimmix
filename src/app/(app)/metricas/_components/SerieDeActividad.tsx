@@ -20,6 +20,44 @@ const ROTULO_UNIDAD: Record<Unidad, TranslationKey> = {
   anio: "metricas.actividad.anio",
 };
 
+/** El período de hoy, según la unidad elegida. */
+const ROTULO_ACTUAL: Record<Unidad, TranslationKey> = {
+  dia: "metricas.resumen.hoy",
+  mes: "metricas.resumen.esteMes",
+  anio: "metricas.resumen.esteAnio",
+};
+
+/** La ventana entera, la misma que ya dibuja la lista de abajo. */
+const ROTULO_VENTANA: Record<Unidad, TranslationKey> = {
+  dia: "metricas.resumen.ultimos30dias",
+  mes: "metricas.resumen.ultimos12meses",
+  anio: "metricas.resumen.ultimos5anios",
+};
+
+const SIN_ACTIVIDAD: PuntoSerie = {
+  clave: "",
+  reclamos: 0,
+  whatsapps: 0,
+  mails: 0,
+  reclamos_whatsapp: 0,
+  reclamos_mail: 0,
+};
+
+/** La ventana entera sumada en un solo punto. */
+function sumarVentana(serie: PuntoSerie[]): PuntoSerie {
+  return serie.reduce(
+    (acc, p) => ({
+      clave: "",
+      reclamos: acc.reclamos + p.reclamos,
+      whatsapps: acc.whatsapps + p.whatsapps,
+      mails: acc.mails + p.mails,
+      reclamos_whatsapp: acc.reclamos_whatsapp + p.reclamos_whatsapp,
+      reclamos_mail: acc.reclamos_mail + p.reclamos_mail,
+    }),
+    SIN_ACTIVIDAD
+  );
+}
+
 const SERIES: Array<{
   campo: "reclamos" | "whatsapps" | "mails";
   rotulo: TranslationKey;
@@ -36,6 +74,64 @@ function rotuloDe(clave: string, unidad: Unidad, locale: Locale): string {
   return formatDateOnly(clave, locale);
 }
 
+/**
+ * Una columna del resumen: el período (hoy, o la ventana entera) y sus tres
+ * números. El mismo estilo de tile que ya usa la pantalla para el uso de IA.
+ */
+function ColumnaResumen({
+  titulo,
+  punto,
+  t,
+  testId,
+}: {
+  titulo: string;
+  punto: PuntoSerie;
+  t: (key: TranslationKey) => string;
+  testId: string;
+}) {
+  const porCanal = t("metricas.resumen.porCanal")
+    .replace("{whatsapp}", String(punto.reclamos_whatsapp))
+    .replace("{mail}", String(punto.reclamos_mail));
+
+  return (
+    <div
+      data-testid={testId}
+      className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/70"
+    >
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {titulo}
+      </h3>
+      <dl className="space-y-3">
+        <div>
+          <dt className="text-xs text-slate-600 dark:text-slate-300">
+            {t("metricas.actividad.reclamos")}
+          </dt>
+          <dd className="text-xl font-bold tabular-nums text-slate-900 dark:text-slate-100">
+            {punto.reclamos}
+          </dd>
+          <p className="text-xs text-slate-500 dark:text-slate-400">{porCanal}</p>
+        </div>
+        <div>
+          <dt className="text-xs text-slate-600 dark:text-slate-300">
+            {t("metricas.actividad.whatsapps")}
+          </dt>
+          <dd className="text-xl font-bold tabular-nums text-slate-900 dark:text-slate-100">
+            {punto.whatsapps}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-slate-600 dark:text-slate-300">
+            {t("metricas.actividad.mails")}
+          </dt>
+          <dd className="text-xl font-bold tabular-nums text-slate-900 dark:text-slate-100">
+            {punto.mails}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
 export function SerieDeActividad({
   serie,
   unidad,
@@ -49,6 +145,11 @@ export function SerieDeActividad({
   // Una escala para las tres series: así una barra de WhatsApp y una de mail
   // del mismo largo son la misma cantidad.
   const max = Math.max(0, ...serie.flatMap((p) => SERIES.map((s) => p[s.campo])));
+  // El resumen de arriba: el último período de la ventana, y la ventana entera
+  // sumada. `serie` siempre trae 30, 12 o 5 puntos —la rellena `completarSerie`—
+  // pero el `?? SIN_ACTIVIDAD` cubre igual un array vacío.
+  const actual = serie.at(-1) ?? SIN_ACTIVIDAD;
+  const ventana = sumarVentana(serie);
 
   return (
     <section
@@ -93,6 +194,24 @@ export function SerieDeActividad({
             {t(s.rotulo)}
           </span>
         ))}
+      </div>
+
+      <div
+        className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2"
+        data-testid="resumen-actividad"
+      >
+        <ColumnaResumen
+          titulo={t(ROTULO_ACTUAL[unidad])}
+          punto={actual}
+          t={t}
+          testId="resumen-actual"
+        />
+        <ColumnaResumen
+          titulo={t(ROTULO_VENTANA[unidad])}
+          punto={ventana}
+          t={t}
+          testId="resumen-ventana"
+        />
       </div>
 
       <ul className="space-y-2">

@@ -98,7 +98,7 @@ function normalizeUsage(row?: {
  * Reclamos abiertos, WhatsApps y mails atendidos por período, desde `desde`.
  *
  * El período se corta en hora argentina, igual que la ventana del mes: en UTC
- * los casos de las 21 a las 24 caerían en el día siguiente. Las tres series
+ * los casos de las 21 a las 24 caerían en el día siguiente. Las cinco series
  * miran sólo WhatsApp y mail reales: batch-simulate crea cientos de `email_sim`
  * que después quedan como reclamo, y un día de escenarios se leía como un día
  * de 108 reclamos sin ningún mensaje atendido.
@@ -115,6 +115,8 @@ export function consultaDeActividad(db: ClienteDatos, unidad: Unidad, desde: str
       reclamos: sql<number>`count(*) filter (where ${cases.is_claim} is true)::int`,
       whatsapps: sql<number>`count(*) filter (where ${cases.channel} = 'whatsapp')::int`,
       mails: sql<number>`count(*) filter (where ${cases.channel} = 'email')::int`,
+      reclamos_whatsapp: sql<number>`count(*) filter (where ${cases.is_claim} is true and ${cases.channel} = 'whatsapp')::int`,
+      reclamos_mail: sql<number>`count(*) filter (where ${cases.is_claim} is true and ${cases.channel} = 'email')::int`,
     })
     .from(cases)
     .where(and(gte(cases.created_at, desde), inArray(cases.channel, ["whatsapp", "email"])))

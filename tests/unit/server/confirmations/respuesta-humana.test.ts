@@ -117,7 +117,8 @@ describe("responderPorWhatsApp", () => {
   it("a un número reservado para pruebas, no llama a Meta y queda simulado", async () => {
     mockEnTenantVarias
       .mockResolvedValueOnce(caso({ email_thread_id: "5490000123456" }))
-      .mockResolvedValueOnce([[{ id: "outbound-1" }], undefined]);
+      .mockResolvedValueOnce([undefined, undefined]);
+    mockEnTenant.mockResolvedValueOnce([{ id: "outbound-1" }]);
 
     const r = await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO);
 
@@ -128,7 +129,8 @@ describe("responderPorWhatsApp", () => {
   it("canal whatsapp_sim, no llama a Meta y queda simulado aunque el número parezca real", async () => {
     mockEnTenantVarias
       .mockResolvedValueOnce(caso({ channel: "whatsapp_sim" }))
-      .mockResolvedValueOnce([[{ id: "outbound-1" }], undefined]);
+      .mockResolvedValueOnce([undefined, undefined]);
+    mockEnTenant.mockResolvedValueOnce([{ id: "outbound-1" }]);
 
     const r = await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO);
 
@@ -136,22 +138,50 @@ describe("responderPorWhatsApp", () => {
     expect(r).toEqual({ ok: true, id: "outbound-1", estado: "skipped_simulated" });
   });
 
-  it("dentro de la ventana, manda por Meta, inserta el saliente, saca «para responder» y audita", async () => {
+  it("J: inserta la fila 'queued' antes de mandar por Meta, no después", async () => {
     mockEnTenantVarias
       .mockResolvedValueOnce(caso())
-      .mockResolvedValueOnce([[{ id: "outbound-1" }], undefined]);
+      .mockResolvedValueOnce([undefined, undefined]);
+    mockEnTenant.mockResolvedValueOnce([{ id: "outbound-1" }]);
 
-    const r = await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO);
+    await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO);
+
+    const ordenInsert = mockEnTenant.mock.invocationCallOrder[0]!;
+    const ordenEnvio = mockSend.mock.invocationCallOrder[0]!;
+    expect(ordenInsert).toBeLessThan(ordenEnvio);
+
+    // El insert es "queued", no un estado final: el envío todavía no pasó.
+    const armarInsert = mockEnTenant.mock.calls[0]![1] as (db: unknown) => unknown;
+    let statusInsertado: unknown;
+    armarInsert({
+      insert: () => ({
+        values: (v: { status: unknown }) => {
+          statusInsertado = v.status;
+          return { returning: () => "insert" };
+        },
+      }),
+    });
+    expect(statusInsertado).toBe("queued");
+  });
+
+  it("dentro de la ventana, manda por Meta, inserta el saliente, saca «para responder» y audita con ip/ua", async () => {
+    mockEnTenantVarias
+      .mockResolvedValueOnce(caso())
+      .mockResolvedValueOnce([undefined, undefined]);
+    mockEnTenant.mockResolvedValueOnce([{ id: "outbound-1" }]);
+
+    const r = await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO, { ip: "1.2.3.4", ua: "curl/8" });
 
     expect(mockSend).toHaveBeenCalledWith("5491100000001", TEXTO);
     expect(r).toEqual({ ok: true, id: "outbound-1", estado: "sent" });
+    // Un insert propio (queued) y, después de mandar, un lote con el update y
+    // la marca de «para responder» — nunca junto al insert.
+    expect(mockEnTenant).toHaveBeenCalledTimes(1);
     expect(mockEnTenantVarias).toHaveBeenCalledTimes(2);
-    expect(mockEnTenant).not.toHaveBeenCalled();
 
-    // El segundo viaje inserta y saca la marca en el mismo lote.
+    // El segundo viaje actualiza el estado y saca la marca en el mismo lote.
     const armar = mockEnTenantVarias.mock.calls[1]![1] as (db: unknown) => unknown[];
     const consultas = armar({
-      insert: () => ({ values: () => ({ returning: () => "insert" }) }),
       update: () => ({ set: () => ({ where: () => "update" }) }),
     });
     expect(consultas).toHaveLength(2);
@@ -164,6 +194,8 @@ describe("responderPorWhatsApp", () => {
         target_type: "case",
         target_id: CASE_ID,
         payload: { outbound_id: "outbound-1", estado: "sent" },
+        ip: "1.2.3.4",
+        ua: "curl/8",
       })
     );
     // Nunca el texto de la respuesta en el registro.
@@ -174,13 +206,15 @@ describe("responderPorWhatsApp", () => {
   it("si Meta rechaza el envío, guarda la fila como failed, no saca la marca y avisa envio_fallido", async () => {
     mockSend.mockResolvedValueOnce({ ok: false, error: "meta_down" });
     mockEnTenantVarias.mockResolvedValueOnce(caso());
-    mockEnTenant.mockResolvedValueOnce([{ id: "outbound-2" }]);
+    mockEnTenant
+      .mockResolvedValueOnce([{ id: "outbound-2" }])
+      .mockResolvedValueOnce(undefined);
 
     const r = await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO);
 
     expect(r).toEqual({ ok: false, motivo: "envio_fallido" });
-    // Un solo insert, sin lote junto a un update: la marca sigue puesta.
-    expect(mockEnTenant).toHaveBeenCalledTimes(1);
+    // Insert y update por separado, nunca en lote con la marca de «para responder».
+    expect(mockEnTenant).toHaveBeenCalledTimes(2);
     expect(mockEnTenantVarias).toHaveBeenCalledTimes(1);
     expect(mockWriteAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ payload: { outbound_id: "outbound-2", estado: "failed" } })

@@ -109,6 +109,7 @@ function makeMessage(overrides: Partial<{
   received_at: string;
   status: string;
   attachment_count: number;
+  template: string | null;
 }> = {}) {
   return {
     id: "msg-uuid-001",
@@ -120,6 +121,7 @@ function makeMessage(overrides: Partial<{
     received_at: "2026-06-01T10:00:00Z",
     status: "received",
     attachment_count: 0,
+    template: null,
     ...overrides,
   };
 }
@@ -222,6 +224,7 @@ describe("GET /api/cases/[id]/messages", () => {
     // AC8: each entry has exactly the contract's fields
     expect(Object.keys(body.messages[0]).sort()).toEqual([
       "attachment_count",
+      "autor",
       "body_text",
       "direction",
       "estado_envio",
@@ -259,7 +262,8 @@ describe("GET /api/cases/[id]/messages", () => {
     expect(body).toEqual({
       messages: [],
       recortada: false,
-      respuesta: { habilitada: false, motivo: "plan", vence_en: null },
+      // Canal ("email") falla antes que plan en el nuevo orden: rol, canal, plan, agente_activo, ventana.
+      respuesta: { habilitada: false, motivo: "canal", vence_en: null },
     });
   });
 

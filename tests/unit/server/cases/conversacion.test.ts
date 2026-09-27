@@ -140,7 +140,31 @@ describe("conversacionDelCaso", () => {
       received_at: "2026-06-01 10:05:00+00",
       estado_envio: "skipped_simulated",
       attachment_count: 0,
+      autor: "agente",
     });
+  });
+
+  it("WhatsApp: la plantilla de respuesta humana marca autor 'equipo'", async () => {
+    responder([
+      [{ id: CASO }],
+      [entrante({ provider: "whatsapp", subject: "WhatsApp", from_addr: "5491100000000" })],
+      [],
+      [
+        {
+          id: "wa-2",
+          channel: "whatsapp",
+          rendered_body: "Ya está resuelto, gracias por avisar.",
+          status: "sent",
+          created_at: "2026-06-01 10:05:00+00",
+          template: "wa_respuesta_humana",
+        },
+      ],
+      [],
+    ]);
+
+    const [, saliente] = (await conversacionDelCaso(CTX, CASO))!.messages;
+
+    expect(saliente).toMatchObject({ id: "wa-2", autor: "equipo" });
   });
 
   it("el mail simulado aparece: su vista previa sólo existe en outbound_messages, en HTML", async () => {
@@ -174,6 +198,7 @@ describe("conversacionDelCaso", () => {
       received_at: "2026-06-01 10:05:00+00",
       estado_envio: "skipped_simulated",
       attachment_count: 0,
+      autor: "agente",
     });
   });
 
@@ -217,6 +242,7 @@ describe("conversacionDelCaso", () => {
       received_at: "2026-06-01 10:00:00+00",
       estado_envio: null,
       attachment_count: 0,
+      autor: "denunciante",
     });
     expect(respuesta).toMatchObject({ id: "sim-1", direction: "outbound" });
   });

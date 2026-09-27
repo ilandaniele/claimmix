@@ -23,3 +23,17 @@ export async function getServerLocale(): Promise<Locale> {
   }
   return DEFAULT_LOCALE;
 }
+
+/**
+ * El idioma que usa una pantalla del shell: la preferencia de la cuenta le
+ * gana a la cookie del dispositivo, así que sigue a la persona a cualquier
+ * dispositivo; sin cuenta o sin preferencia guardada, la cookie (o el default).
+ *
+ * Antes cada pantalla resolvía esto por su cuenta, y `/asistente` se había
+ * quedado sólo con la cookie: alguien con la cuenta en inglés veía el layout
+ * en inglés y esa pantalla en castellano.
+ */
+export async function resolveAccountLocale(accountLocale?: string | null): Promise<Locale> {
+  const cookieLocale = await getServerLocale();
+  return accountLocale === "es-AR" || accountLocale === "en-US" ? accountLocale : cookieLocale;
+}

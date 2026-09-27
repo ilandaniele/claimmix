@@ -52,7 +52,7 @@ describe("ERROR_STATUS", () => {
 
   it("maps PLAN_REQUERIDO to 403, con su mensaje", () => {
     expect(ERROR_STATUS.PLAN_REQUERIDO).toBe(403);
-    expect(new AppError("PLAN_REQUERIDO").message).toBe("Esta función es del Plan Pro.");
+    expect(new AppError("PLAN_REQUERIDO").message).toBe("Disponible con el Plan Pro.");
   });
 
   it("maps NOT_FOUND to 404", () => {

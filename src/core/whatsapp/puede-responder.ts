@@ -2,9 +2,11 @@
  * Si una persona puede responder un caso por WhatsApp, y por qué no si no.
  *
  * Pura: la usan tanto el GET de mensajes (para mostrar el estado) como el
- * POST que responde (para exigirlo de nuevo del lado del servidor). Cuatro
- * condiciones, en este orden de motivo si falla más de una: plan, rol, canal,
- * agente activo, ventana.
+ * POST que responde (para exigirlo de nuevo del lado del servidor). Cinco
+ * condiciones, en este orden de motivo si falla más de una: rol, canal, plan,
+ * agente activo, ventana. El plan va después de rol y canal para que un
+ * caso por mail o un visor vean por qué no pueden responder sin que el
+ * candado del Plan Pro tape el motivo real.
  */
 import { esPlanPro } from "@/core/billing/plan-pro";
 import { CASE_EDITOR_ROLES } from "@/lib/auth/roles";
@@ -45,13 +47,13 @@ export function estadoDeRespuesta(i: {
   ultimoEntrante: string | null;
   ahora: Date;
 }): EstadoDeRespuesta {
-  if (!esPlanPro(i.plan)) return { habilitada: false, motivo: "plan", vence_en: null };
   if (!(CASE_EDITOR_ROLES as readonly string[]).includes(i.role)) {
     return { habilitada: false, motivo: "rol", vence_en: null };
   }
   if (i.channel !== "whatsapp" && i.channel !== "whatsapp_sim") {
     return { habilitada: false, motivo: "canal", vence_en: null };
   }
+  if (!esPlanPro(i.plan)) return { habilitada: false, motivo: "plan", vence_en: null };
   if (puedeArrancar(i.status)) return { habilitada: false, motivo: "agente_activo", vence_en: null };
 
   const vence = vencimientoDeLaVentana(i.ultimoEntrante, i.ahora);

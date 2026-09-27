@@ -3,8 +3,9 @@
  * saliente, por mail o por WhatsApp.
  *
  * AC8: Returns 200 + messages array (id, direction, provider, subject,
- *      from_addr, body_text, received_at, estado_envio, attachment_count),
- *      oldest first: the last 50, with `recortada` true when there were more.
+ *      from_addr, body_text, received_at, estado_envio, attachment_count,
+ *      autor), oldest first: the last 50, with `recortada` true when there
+ *      were more.
  * AC9: Returns 404 NOT_FOUND when case belongs to a different tenant (IDOR safe).
  * AC10: Returns 200 + { messages: [], recortada: false } when the case has no messages.
  * AC13: body_text is truncated to 2000 chars server-side, after masking.

@@ -183,13 +183,6 @@ export async function setTenantGeminiKey(tenantId: string, apiKey: string): Prom
   );
 }
 
-// ── Provider key checks ───────────────────────────────────────────────────────
-
-/** True when the provider's API key is configured in env (non-empty). */
-export function hasProviderKey(_provider: AiProvider): boolean {
-  return Boolean(process.env.GEMINI_API_KEY?.trim());
-}
-
 export function getDefaultGeminiModel(): string {
   // gemini-flash-latest (not a pinned 2.5/2.0 name): pinned older models get
   // "no longer available to new users" 404s on freshly-created keys. -latest

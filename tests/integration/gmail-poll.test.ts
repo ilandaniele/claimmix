@@ -315,10 +315,6 @@ vi.mock("@/lib/audit/log", () => ({
   },
 }));
 
-vi.mock("@/server/worker/extract", () => ({
-  runExtractionWorker: vi.fn().mockResolvedValue(undefined),
-}));
-
 // Mock fetch so dispatchExtractionWorker doesn't hit the network.
 vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
 

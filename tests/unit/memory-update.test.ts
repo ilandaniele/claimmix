@@ -1,5 +1,5 @@
 /**
- * Unit tests for updateMemoryFromConfirmation and seedMemoryFromExtraction.
+ * Unit tests for updateMemoryFromConfirmation.
  *
  * AC14: Memory only updated via confirm-field endpoint (updateMemoryFromConfirmation).
  * AC21: Audit log FIELD_CONFIRMED with redacted values.
@@ -85,11 +85,7 @@ vi.mock("@/lib/audit/redact", () => ({
 }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  updateMemoryFromConfirmation,
-  seedMemoryFromExtraction,
-} from "@/server/memory/update";
-import type { ExtractedField } from "@/lib/schemas/extracted-claim";
+import { updateMemoryFromConfirmation } from "@/server/memory/update";
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 
@@ -254,139 +250,5 @@ describe("updateMemoryFromConfirmation", () => {
         "case-1"
       )
     ).resolves.toBeUndefined();
-  });
-});
-
-// ── Tests: seedMemoryFromExtraction ──────────────────────────────────────────
-
-describe("seedMemoryFromExtraction", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    makeSelectChain([]);
-    makeInsertChain();
-  });
-
-  const highConfidenceFields: ExtractedField[] = [
-    {
-      field_key: "full_name",
-      field_value: "Juan Pérez",
-      confidence: 0.92,
-      source: "ai",
-    },
-    {
-      field_key: "dni",
-      field_value: "35123456",
-      confidence: 0.88,
-      source: "ai",
-    },
-    {
-      field_key: "policy_number",
-      field_value: "POL-2024-001",
-      confidence: 0.86,
-      source: "ai",
-    },
-    // phone — should NOT be seeded (it's a lookup key)
-    {
-      field_key: "phone",
-      field_value: "+541112345678",
-      confidence: 0.95,
-      source: "ai",
-    },
-    // email — should NOT be seeded
-    {
-      field_key: "email",
-      field_value: "user@example.com",
-      confidence: 0.99,
-      source: "ai",
-    },
-  ];
-
-  it("seeds only full_name, dni, policy_number — never phone or email", async () => {
-    const { valuesMock } = makeInsertChain();
-
-    await seedMemoryFromExtraction(
-      "tenant-1",
-      "sender@example.com",
-      highConfidenceFields,
-      "case-1"
-    );
-
-    expect(valuesMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        value: expect.not.objectContaining({ phone: expect.anything() }),
-      })
-    );
-    expect(valuesMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        value: expect.not.objectContaining({ email: expect.anything() }),
-      })
-    );
-    // full_name, dni, policy_number should be seeded
-    expect(valuesMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        value: expect.objectContaining({
-          full_name: "Juan Pérez",
-          dni: "35123456",
-          policy_number: "POL-2024-001",
-        }),
-      })
-    );
-  });
-
-  it("discounts confidence by 0.8 factor for auto-seeded memory", async () => {
-    const { valuesMock } = makeInsertChain();
-
-    const fields: ExtractedField[] = [
-      { field_key: "full_name", field_value: "Ana García", confidence: 0.90, source: "ai" },
-    ];
-
-    await seedMemoryFromExtraction("tenant-1", "s@example.com", fields, "c1");
-
-    // min confidence is 0.90; discounted = 0.90 * 0.8 = 0.72
-    expect(valuesMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        confidence: 0.72,
-        source: "auto_extracted",
-      })
-    );
-  });
-
-  it("does NOT seed fields below 0.85 confidence threshold", async () => {
-    const { valuesMock } = makeInsertChain();
-
-    const lowConfFields: ExtractedField[] = [
-      { field_key: "full_name", field_value: "Juan", confidence: 0.75, source: "ai" },
-      { field_key: "dni", field_value: "12345", confidence: 0.60, source: "ai" },
-    ];
-
-    await seedMemoryFromExtraction("tenant-1", "s@example.com", lowConfFields, "c1");
-
-    // No insert should be called since no fields meet the threshold
-    expect(db.insert).not.toHaveBeenCalled();
-  });
-
-  it("uses onConflictDoNothing to not overwrite existing confirmed memory", async () => {
-    const { onConflictDoNothing } = makeInsertChain();
-
-    const fields: ExtractedField[] = [
-      { field_key: "full_name", field_value: "New Name", confidence: 0.95, source: "ai" },
-    ];
-
-    await seedMemoryFromExtraction("tenant-1", "s@example.com", fields, "c1");
-
-    // onConflictDoNothing ensures existing confirmed rows are not overwritten
-    expect(onConflictDoNothing).toHaveBeenCalled();
-  });
-
-  it("returns early without calling DB when senderEmail is empty", async () => {
-    const { valuesMock } = makeInsertChain();
-
-    const fields: ExtractedField[] = [
-      { field_key: "full_name", field_value: "Juan", confidence: 0.92, source: "ai" },
-    ];
-
-    await seedMemoryFromExtraction("tenant-1", "", fields, "c1");
-
-    expect(db.insert).not.toHaveBeenCalled();
   });
 });

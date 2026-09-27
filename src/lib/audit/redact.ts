@@ -3,7 +3,7 @@
  *
  * AC18: Logs must never contain DNI numbers or policy numbers.
  * These functions sanitize strings before they enter the audit_log or
- * any structured log output via pino.
+ * any structured log output.
  *
  * Patterns:
  *   - DNI: 1–3 digits, optional dot, 3 digits, optional dot, 3 digits

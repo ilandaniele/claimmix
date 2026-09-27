@@ -20,26 +20,12 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { redactObject } from "@/lib/audit/redact";
-import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 import { logger } from "@/lib/observability/logger";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/** Minimum confidence for extraction to be seeded into memory (IC9). */
-const SEED_MIN_CONFIDENCE = 0.85;
-
-/** Discount factor applied to auto-seeded memory confidence values. */
-const SEED_CONFIDENCE_DISCOUNT = 0.8;
-
 /** Confirmed confidence for human-confirmed memory entries. */
 const CONFIRMATION_CONFIDENCE = 0.90;
-
-/**
- * Fields that MAY be seeded into sender_profile memory.
- * Phone and email are lookup keys — never seeded as values.
- */
-const SEEDABLE_FIELDS = ["full_name", "dni", "policy_number"] as const;
-type SeedableField = (typeof SEEDABLE_FIELDS)[number];
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -165,93 +151,5 @@ export async function updateMemoryFromConfirmation(
     const errName = err instanceof Error ? err.name : "UnknownError";
     logger.error({ error_name: errName }, "memory_update.updatememoryfromconfirmation_exception");
     // Do not rethrow — memory update failures must not break the primary flow.
-  }
-}
-
-/**
- * Seed claim_memory from high-confidence extracted fields after a successful
- * first-pass extraction.
- *
- * Seeds sender_profile memory for fields meeting the high-confidence threshold.
- * Applies a confidence discount (× 0.8) because the values are unconfirmed by a human.
- *
- * Only seeds: full_name, dni, policy_number.
- * Never seeds: phone, email (these are lookup keys, not values to seed).
- *
- * AC14: Seeded entries are inserted with low confidence and no confirmed_at.
- *       They are only upgraded to CONFIRMATION_CONFIDENCE after human confirmation.
- *
- * @param tenantId        - UUID of the tenant.
- * @param senderEmail     - Sender's email address (lookup key — PII).
- * @param extractedFields - Array of extracted fields from the AI extractor.
- * @param caseId          - UUID of the case (for audit log).
- */
-export async function seedMemoryFromExtraction(
-  tenantId: string,
-  senderEmail: string,
-  extractedFields: ExtractedField[],
-  caseId: string
-): Promise<void> {
-  if (!senderEmail) return;
-
-  try {
-    // Filter to only seedable, high-confidence fields.
-    const fieldsToSeed = extractedFields.filter(
-      (f) =>
-        (SEEDABLE_FIELDS as readonly string[]).includes(f.field_key) &&
-        f.confidence >= SEED_MIN_CONFIDENCE
-    );
-
-    if (fieldsToSeed.length === 0) return;
-
-    const now = new Date().toISOString();
-
-    // Build the sender_profile value object from seedable fields.
-    const profileValue: Record<string, unknown> = {};
-    for (const f of fieldsToSeed) {
-      profileValue[f.field_key] = f.field_value;
-    }
-
-    // Compute discounted confidence (lowest field confidence × discount factor).
-    const minFieldConfidence = Math.min(...fieldsToSeed.map((f) => f.confidence));
-    const seedConfidence = parseFloat(
-      (minFieldConfidence * SEED_CONFIDENCE_DISCOUNT).toFixed(2)
-    );
-
-    // ── Upsert sender_profile row ─────────────────────────────────────────────
-    // Only inserts if no existing row — existing confirmed memory is NOT overwritten.
-    // Unique key: idx_claim_memory_tenant_type_key (tenant_id, memory_type, key).
-    try {
-      const t = tables.claimMemory;
-      await enTenant({ tenantId }, (db) =>
-        db
-          .insert(t)
-          .values({
-            tenant_id: tenantId,
-            memory_type: "sender_profile",
-            key: senderEmail,
-            value: profileValue,
-            confidence: seedConfidence,
-            source: "auto_extracted",
-            last_used_at: now,
-          })
-          // ON CONFLICT DO NOTHING: do NOT overwrite an existing confirmed row.
-          .onConflictDoNothing({
-            target: [t.tenant_id, t.memory_type, t.key],
-          })
-      );
-    } catch (e) {
-      logger.error({ detalle: (e as { code?: string })?.code }, "memory_update.seedmemoryfromextraction_upsert_error");
-    }
-
-    logger.info({
-        case_id: caseId,
-        fields_seeded: fieldsToSeed.map((f) => f.field_key),
-        seed_confidence: seedConfidence,
-        // PII: senderEmail is NOT logged here,
-      }, "memory.seeded_from_extraction");
-  } catch (err) {
-    const errName = err instanceof Error ? err.name : "UnknownError";
-    logger.error({ error_name: errName }, "memory_update.seedmemoryfromextraction_exception");
   }
 }

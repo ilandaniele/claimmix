@@ -1,9 +1,9 @@
 /**
  * El vocabulario visual del tablero.
  *
- * Cinco piezas, y con eso se arma todo: la tarjeta de sección, su encabezado con
- * acciones a la derecha, la baldosa de indicador, la píldora de estado y el
- * campo con la etiqueta arriba del valor.
+ * Cuatro piezas, y con eso se arma todo: la tarjeta de sección, su encabezado
+ * con acciones a la derecha, la píldora de estado y el campo con la etiqueta
+ * arriba del valor.
  *
  * ── Dos reglas que no son de estilo ─────────────────────────────────────────
  *
@@ -99,45 +99,6 @@ export function CardHeader({
       {children ? (
         <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>
       ) : null}
-    </div>
-  );
-}
-
-/**
- * Una baldosa de indicador: rótulo chico, número grande, y una línea de abajo
- * opcional para el contexto.
- *
- * El número va con `cifra`, que fija ancho tabular: en un tablero de siniestros
- * los números están para compararse entre sí, y con cifras de ancho variable las
- * columnas bailan.
- */
-export function KpiTile({
-  label,
-  value,
-  hint,
-  tone = "neutro",
-}: {
-  label: string;
-  value: ReactNode;
-  hint?: ReactNode;
-  /** El color dice qué tan urgente es, no qué tan lindo queda. */
-  tone?: "neutro" | "critico" | "espera" | "listo";
-}) {
-  // Escritas enteras: Tailwind no compila una clase armada con plantilla.
-  const tonos = {
-    neutro: "text-slate-900",
-    critico: "text-red-700",
-    espera: "text-amber-700",
-    listo: "text-emerald-700",
-  } as const;
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
-      <p className="rotulo text-slate-500">{label}</p>
-      <p className={`cifra mt-2 text-[28px] font-semibold leading-none ${tonos[tone]}`}>
-        {value}
-      </p>
-      {hint ? <p className="mt-2 text-[12px] text-slate-500">{hint}</p> : null}
     </div>
   );
 }

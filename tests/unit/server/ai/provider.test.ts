@@ -47,7 +47,6 @@ import {
   getDefaultProvider,
   getTenantAiProvider,
   resolveExtractionEngine,
-  hasProviderKey,
 } from "@/server/ai/provider";
 
 // ---------- env helpers ----------
@@ -101,21 +100,6 @@ describe("getDefaultProvider", () => {
   it("falls back to gemini for invalid values", () => {
     process.env.AI_PROVIDER = "claude";
     expect(getDefaultProvider()).toBe("gemini");
-  });
-});
-
-describe("hasProviderKey", () => {
-  it("dice si hay clave de Gemini y no mira ninguna otra", () => {
-    // Una OPENAI_API_KEY vieja en el entorno no habilita nada: el proveedor
-    // salio del producto y la variable puede seguir cargada en Vercel.
-    process.env.OPENAI_API_KEY = "sk-test";
-    delete process.env.GEMINI_API_KEY;
-    expect(hasProviderKey("gemini")).toBe(false);
-  });
-
-  it("treats whitespace-only keys as missing", () => {
-    process.env.GEMINI_API_KEY = "   ";
-    expect(hasProviderKey("gemini")).toBe(false);
   });
 });
 

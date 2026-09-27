@@ -226,6 +226,10 @@ async function think(
   const ctx: ToolContext = { caseId: input.caseId, tenantId: input.tenantId };
   const toolCalls: AgentPlan["toolCalls"] = [];
   const transcript: string[] = [];
+  // Sólo lo que DEVOLVIÓ cada consulta, para `lookupResults` — `transcript`
+  // también lleva los argumentos que ESCRIBIÓ el modelo, y un valor inventado
+  // en `args` no puede quedar "respaldado" por su propia llamada.
+  const resultados: string[] = [];
 
   for (let step = 0; step <= MAX_TOOL_CALLS; step++) {
     // On the last pass the tool menu is withdrawn, so the model has to decide
@@ -248,7 +252,7 @@ async function think(
     // cuatro.
     await registrarConsumoDelModelo(input.tenantId, model, usage);
 
-    if (!text) return { plan: null, toolCalls, lookupResults: transcript };
+    if (!text) return { plan: null, toolCalls, lookupResults: resultados };
 
     const parsed = JSON.parse(text) as Record<string, unknown>;
 
@@ -272,13 +276,14 @@ async function think(
       transcript.push(
         `${call.tool}(${JSON.stringify(call.args)}) → ${JSON.stringify(result)}`
       );
+      resultados.push(JSON.stringify(result));
       continue;
     }
 
-    return { plan: coerce(parsed), toolCalls, lookupResults: transcript };
+    return { plan: coerce(parsed), toolCalls, lookupResults: resultados };
   }
 
-  return { plan: null, toolCalls, lookupResults: transcript };
+  return { plan: null, toolCalls, lookupResults: resultados };
 }
 
 /** A tool call, if that is what came back rather than a plan. */
@@ -301,7 +306,7 @@ function buildPrompt(input: DeliberationInput, lastChance = false): string {
     const { label, kind } = labelForField(key);
     const known = input.knownValues[key];
     return known
-      ? `- ${key} — ${label}. Ya entendimos "${known}", sólo habría que confirmarlo.`
+      ? `- ${key} — ${label}. Ya entendimos "${sinCentinelas(known)}", sólo habría que confirmarlo.`
       : `- ${key} — ${label} (${kind === "documento" ? "archivo o foto" : "dato"})`;
   });
 

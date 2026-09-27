@@ -292,6 +292,41 @@ describe("responderPregunta — buscar_caso, un solo resultado", () => {
     expect(r.texto).toContain("30111222");
   });
 
+  it("cae al resumen determinístico si el modelo afirma un monto en pesos que no está en los campos", async () => {
+    respuestaDelModelo({ resumen: "$5.000.000 aprobados por la aseguradora." });
+
+    const r = await responderPregunta(ctx(), "qué pasó con el caso de Roberto Paz");
+    expect(r.texto).not.toContain("5.000.000");
+    expect(r.texto).toContain("Cedula verde");
+  });
+
+  it("no toma por moneda un «ars» dentro de otra palabra", async () => {
+    respuestaDelModelo({ resumen: "Chocaron dos cars 3 veces en la misma esquina." });
+
+    const r = await responderPregunta(ctx(), "qué pasó con el caso de Roberto Paz");
+    expect(r.texto).toContain("cars 3 veces");
+  });
+
+  it("cae al resumen determinístico si el modelo repite un número de 7 dígitos que no está en los campos", async () => {
+    respuestaDelModelo({ resumen: "El siniestro quedó bajo el número 9999999." });
+
+    const r = await responderPregunta(ctx(), "qué pasó con el caso de Roberto Paz");
+    expect(r.texto).not.toContain("9999999");
+    expect(r.texto).toContain("Cedula verde");
+  });
+
+  it("acepta un número agrupado con puntos si coincide, sin separadores, con un campo conocido", async () => {
+    respuestaDelModelo({ resumen: "El DNI es 5.000.000." });
+    mockBuscarCaso.mockResolvedValue({
+      coincidencias: [{ id: "caso-1", etiqueta: "Roberto Paz — choque" }],
+      detalle: { ...detalle, campos: [{ clave: "dni", valor: "5000000" }] },
+      hayMas: false,
+    });
+
+    const r = await responderPregunta(ctx(), "qué pasó con el caso de Roberto Paz");
+    expect(r.texto).toContain("5.000.000");
+  });
+
   it("el prefijo determinístico muestra la etiqueta legible del tipo, no la clave cruda", async () => {
     respuestaDelModelo({ resumen: "resumen normal" });
 

@@ -207,13 +207,13 @@ function buildPrompt(input: ComposeReplyInput): string {
     const { label, instruction, kind } = labelForField(key);
     const known = input.knownValues?.[key];
     return known
-      ? `- ${label}: ya entendimos: ${known}. Preguntá si es correcto con ese mismo valor adentro de la pregunta, sin comillas ni paréntesis, nunca «¿pregunta?: valor» ni «¿pregunta? valor»; no pidas más precisión ni digas que la persona lo escribió así`
+      ? `- ${label}: ya entendimos: ${sinCentinelas(known)}. Preguntá si es correcto con ese mismo valor adentro de la pregunta, sin comillas ni paréntesis, nunca «¿pregunta?: valor» ni «¿pregunta? valor»; no pidas más precisión ni digas que la persona lo escribió así`
       : `- ${label} — ${instruction} (${kind === "documento" ? "archivo o foto" : "dato"})`;
   });
 
   const conflictos = (input.conflicts ?? []).map((c) => {
     const { label } = labelForField(c.fieldKey);
-    return `- ${label}: la persona dice "${c.proposed}" y nosotros tenemos "${c.stored}"`;
+    return `- ${label}: la persona dice "${sinCentinelas(c.proposed)}" y nosotros tenemos "${sinCentinelas(c.stored)}"`;
   });
 
   const intentBrief: Record<ReplyIntent, string> = {

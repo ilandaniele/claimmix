@@ -23,6 +23,7 @@ import {
   MessageSquareReply,
   Sparkles,
   ListTodo,
+  CalendarClock,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -170,6 +171,8 @@ export function Sidebar({
      */
     { label: t("nav.escalados"), href: "/bandeja?status=escalado", icon: AlertTriangle },
     { label: t("nav.noRelevantes"), href: "/bandeja?is_claim=false", icon: MailX },
+    // D-D1: la abre cualquier rol; `leerAgenda` tapa el titular por su cuenta.
+    { label: t("nav.agenda"), href: "/agenda", icon: CalendarClock },
     /*
      * «Clientes» sólo para quien puede ver datos personales.
      *

@@ -18,6 +18,7 @@ export const esAR = {
   "nav.escalados": "Escalados",
   "nav.noRelevantes": "No relevantes",
   "nav.miCola": "Mi cola",
+  "nav.agenda": "Agenda",
   "nav.clientes": "Clientes",
   "nav.analisis": "Análisis",
   "nav.metricas": "Métricas",
@@ -155,6 +156,15 @@ export const esAR = {
   "tablero.verTodos": "Ver todos",
   "tablero.vacio": "Sin casos en esta columna.",
 
+  // ── Agenda (G39) ───────────────────────────────────────────────────────────
+  "agenda.title": "Agenda",
+  "agenda.subtitle": "Lo que vence: ventanas de WhatsApp y conversaciones por cerrar.",
+  "agenda.empty": "No hay vencimientos por ahora.",
+  "agenda.hoy": "Hoy",
+  "agenda.manana": "Mañana",
+  "agenda.tipo.ventanaWhatsapp": "Ventana de WhatsApp",
+  "agenda.tipo.cierreAbandono": "Cierre por abandono",
+
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simular nuevo siniestro",
   "simulate.scenario": "Tipo de siniestro",
@@ -279,6 +289,13 @@ export const esAR = {
   "escalate.cancel": "Cancelar",
   "escalate.success": "Siniestro escalado correctamente.",
   "escalate.error": "Error al escalar el siniestro. Intentá de nuevo.",
+
+  // ── Tomar el control (D-F2) ──────────────────────────────────────────────────
+  "case.detail.tomarElControl": "Tomar el control",
+  "tomarElControl.title": "Tomar el control del caso",
+  "tomarElControl.description": "El agente deja de responder este caso, que pasa a requerir especialista. Es un paso de un solo sentido: no se puede deshacer.",
+  "tomarElControl.confirm": "Tomar el control",
+  "tomarElControl.cancel": "Cancelar",
 
   // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
   "reenvio.boton": "Reenviar pedido",

@@ -54,6 +54,7 @@ const MOTIVOS_DEL_CASO: Record<string, TranslationKey> = {
   processing_timeout: "case.detail.motivo.processingTimeout",
   conflict: "case.detail.motivo.conflict",
   lesiones: "case.detail.motivo.lesiones",
+  tomar_el_control: "case.detail.tomarElControl",
 };
 
 const SEVERIDAD = /^severidad (high|critical)$/;

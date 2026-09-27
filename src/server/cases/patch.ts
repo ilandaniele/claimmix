@@ -21,6 +21,7 @@ import type { CaseInsert, CaseRow, UserRow } from "@/lib/db/types";
 import type { CasePatch } from "@/lib/schemas/cases";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import { validateTransition } from "@/core/case/fsm";
+import { reservaViva } from "@/core/case/reserva-de-extraccion";
 import { writeAuditLog, AuditEvent, type AuditEventType } from "@/lib/audit/log";
 import { puedeCambiarEstado } from "@/lib/auth/roles";
 import { auditoriaSiQuedo } from "@/server/cases/auditoria-si-quedo";
@@ -88,6 +89,12 @@ export async function patchCase(
   // comentario de `fsm.ts:26`), nunca este PATCH.
   if (patch.status === "enviado_a_core" || patch.status === "error_core") {
     throw new AppError("FSM_INVALID_TRANSITION", "Ese estado lo pone sólo el envío a Core.");
+  }
+
+  // D-F2: «tomar el control» sólo con el agente terminado del todo. La UI ya
+  // esconde el botón, pero la guarda de verdad es ésta.
+  if (patch.status === "requiere_especialista" && reservaViva(current.extraction_lease_at, new Date())) {
+    throw new AppError("FSM_INVALID_TRANSITION", "El agente está trabajando en este caso.");
   }
 
   if (patch.status !== undefined && patch.status !== current.status) {

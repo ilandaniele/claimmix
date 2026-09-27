@@ -17,6 +17,7 @@ export const enUS: Record<TranslationKey, string> = {
   "nav.escalados": "Escalated",
   "nav.noRelevantes": "Not relevant",
   "nav.miCola": "My queue",
+  "nav.agenda": "Agenda",
   "nav.clientes": "Clients",
   "nav.analisis": "Analysis",
   "nav.metricas": "Metrics",
@@ -144,6 +145,15 @@ export const enUS: Record<TranslationKey, string> = {
   "tablero.verTodos": "See all",
   "tablero.vacio": "No claims in this column.",
 
+  // ── Agenda (G39) ───────────────────────────────────────────────────────────
+  "agenda.title": "Agenda",
+  "agenda.subtitle": "What's due: WhatsApp windows and conversations to close.",
+  "agenda.empty": "Nothing due right now.",
+  "agenda.hoy": "Today",
+  "agenda.manana": "Tomorrow",
+  "agenda.tipo.ventanaWhatsapp": "WhatsApp window",
+  "agenda.tipo.cierreAbandono": "Abandonment closure",
+
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simulate new claim",
   "simulate.scenario": "Claim type",
@@ -268,6 +278,13 @@ export const enUS: Record<TranslationKey, string> = {
   "escalate.cancel": "Cancel",
   "escalate.success": "Claim escalated successfully.",
   "escalate.error": "Error escalating the claim. Please try again.",
+
+  // ── Tomar el control (D-F2) ──────────────────────────────────────────────────
+  "case.detail.tomarElControl": "Take over",
+  "tomarElControl.title": "Take over the case",
+  "tomarElControl.description": "The agent stops answering this case, which moves to requires specialist. This is a one-way step: it cannot be undone.",
+  "tomarElControl.confirm": "Take over",
+  "tomarElControl.cancel": "Cancel",
 
   // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
   "reenvio.boton": "Resend request",

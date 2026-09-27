@@ -240,6 +240,62 @@ describe("patchCase — FSM validation", () => {
   });
 });
 
+// ── patchCase — tomar el control (D-F2, G38) ─────────────────────────────────
+
+describe("patchCase — tomar el control (D-F2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("con la reserva de extracción viva, pasar a requiere_especialista da FSM_INVALID_TRANSITION", async () => {
+    const infoFaltanteCase = {
+      ...listoCase,
+      status: "info_faltante",
+      extraction_lease_at: new Date().toISOString(),
+    };
+    setupPatchMocks([infoFaltanteCase], []);
+
+    await expect(
+      patchCase("case-1", { status: "requiere_especialista", reason: "tomar_el_control" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("con la reserva vencida, pasar a requiere_especialista da ok", async () => {
+    const infoFaltanteCase = {
+      ...listoCase,
+      status: "info_faltante",
+      extraction_lease_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+    };
+    const updatedCase = { ...infoFaltanteCase, status: "requiere_especialista" };
+    setupPatchMocks([infoFaltanteCase], [updatedCase]);
+
+    const result = await patchCase(
+      "case-1",
+      { status: "requiere_especialista", reason: "tomar_el_control" },
+      adminActor,
+      null,
+      null
+    );
+    expect(result.case.status).toBe("requiere_especialista");
+  });
+
+  it("sin reserva (extraction_lease_at null), pasar a requiere_especialista da ok", async () => {
+    const infoFaltanteCase = { ...listoCase, status: "info_faltante", extraction_lease_at: null };
+    const updatedCase = { ...infoFaltanteCase, status: "requiere_especialista" };
+    setupPatchMocks([infoFaltanteCase], [updatedCase]);
+
+    const result = await patchCase(
+      "case-1",
+      { status: "requiere_especialista", reason: "tomar_el_control" },
+      adminActor,
+      null,
+      null
+    );
+    expect(result.case.status).toBe("requiere_especialista");
+  });
+});
+
 // ── patchCase — not found / IDOR ─────────────────────────────────────────────
 
 describe("patchCase — IDOR and not found", () => {

@@ -17,6 +17,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { CASE_EDITOR_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
+import { puedeTomarElControl } from "@/core/case/tomar-el-control";
 import type { TenantContext } from "@/data/scope";
 import {
   cargarDetalleDeCaso,
@@ -206,6 +207,17 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   };
   const channelLabel = CHANNEL_LABELS[caseRow.channel] ?? caseRow.channel;
 
+  const puedeCambiarEstadoCaso = puedeCambiarEstado(me, caseRow.assigned_to);
+  const puedeTomarElControlCaso = puedeTomarElControl({
+    puedeCambiarEstado: puedeCambiarEstadoCaso,
+    plan: me.plan,
+    channel: caseRow.channel,
+    status: caseRow.status,
+    extractionPending: caseRow.extraction_pending,
+    extractionLeaseAt: caseRow.extraction_lease_at,
+    ahora: new Date(),
+  });
+
   return (
     <div className="mx-auto max-w-5xl px-6 pb-8 pt-1">
       {/* Back button */}
@@ -311,7 +323,8 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             vistoEn={vistoEn}
             puedeMarcar={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
             acciones={acciones}
-            puedeCambiarEstado={puedeCambiarEstado(me, caseRow.assigned_to)}
+            puedeCambiarEstado={puedeCambiarEstadoCaso}
+            puedeTomarElControl={puedeTomarElControlCaso}
           />
         </div>
       </Card>

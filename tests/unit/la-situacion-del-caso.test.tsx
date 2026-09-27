@@ -80,6 +80,7 @@ describe("la situación del caso", () => {
           puedeMarcar={false}
           acciones={SIN_ACCIONES}
           puedeCambiarEstado={true}
+          puedeTomarElControl={false}
         />
       </LocaleProvider>
     );

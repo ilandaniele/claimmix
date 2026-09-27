@@ -268,6 +268,30 @@ describe("GmailSender", () => {
     expect(decoded).toContain("References: <original-msg-id@mail.gmail.com>");
   });
 
+  // ── Header injection (CRLF stripping) ────────────────────────────────────────
+
+  it("strips CR/LF from headers so a crafted subject can't inject a Bcc line", async () => {
+    mockMessagesSend.mockResolvedValueOnce({ data: { id: "gmail-msg-id-injection" } });
+
+    const { GmailSender } = await import("@/server/email/gmail/gmail-sender");
+    const sender = new GmailSender();
+
+    await sender.send({
+      to: "claimant@example.com",
+      from: "claims@test.com",
+      subject: "Hola\r\nBcc: x@y.z",
+      textBody: "Hello",
+    });
+
+    expect(mockMessagesSend).toHaveBeenCalledOnce();
+    const callArg = mockMessagesSend.mock.calls[0][0] as {
+      requestBody: { raw: string };
+    };
+    const decoded = Buffer.from(callArg.requestBody.raw, "base64url").toString("utf-8");
+    const lines = decoded.split("\r\n");
+    expect(lines.some((l) => l.startsWith("Bcc:"))).toBe(false);
+  });
+
   // ── base64url encoding verification ──────────────────────────────────────────
 
   it("uses base64url encoding (response.data.id from mock, not raw email string)", async () => {

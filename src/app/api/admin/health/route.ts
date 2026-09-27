@@ -46,8 +46,7 @@ export async function GET() {
     const code = (e as { code?: string })?.code;
     if (code !== "42P01") {
       dbStatus = "error";
-      dbError =
-        code ?? (e instanceof Error ? e.message.slice(0, 50) : "UNKNOWN");
+      dbError = code ?? "UNKNOWN";
     }
   }
 

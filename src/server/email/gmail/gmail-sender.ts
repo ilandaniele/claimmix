@@ -63,6 +63,12 @@ function encodeBody(value: string): string {
 }
 
 /**
+ * Saca CR/LF de un valor de encabezado para que no pueda inyectar líneas
+ * propias (por ejemplo un asunto con `\r\nBcc:`).
+ */
+const sinSaltos = (v: string) => v.replace(/[\r\n]+/g, " ");
+
+/**
  * Build an RFC 2822 raw email string from SendEmailOptions.
  *
  * When opts.htmlBody is provided, builds a multipart/alternative message.
@@ -71,13 +77,13 @@ function encodeBody(value: string): string {
  * opts.headers (Name/Value pairs) are appended as additional RFC 2822 headers.
  */
 function buildRawEmail(opts: SendEmailOptions): string {
-  const from = opts.from;
-  const to = opts.to;
-  const subject = opts.subject;
+  const from = sinSaltos(opts.from);
+  const to = sinSaltos(opts.to);
+  const subject = sinSaltos(opts.subject);
 
   // ── Extra headers (In-Reply-To, References, etc.) ──────────────────────────
   const extraHeaderLines: string[] = (opts.headers ?? []).map(
-    (h) => `${h.Name}: ${h.Value}`
+    (h) => `${h.Name}: ${sinSaltos(h.Value)}`
   );
 
   if (opts.htmlBody) {

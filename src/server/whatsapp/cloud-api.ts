@@ -30,6 +30,21 @@ function apiVersion(): string {
   return process.env.WHATSAPP_API_VERSION?.trim() || "v22.0";
 }
 
+/*
+ * Plazos de los pedidos a Graph. Sin esto, una Meta colgada deja la función
+ * esperando hasta el `maxDuration` de la ruta en vez de fallar y dejar que el
+ * que llama siga (ya sabe leer `null` / `ok:false`).
+ */
+
+/** Sólo resuelve una URL corta; no hay motivo para que tarde. */
+const PLAZO_METADATA_MEDIA_MS = 15_000;
+
+/** El archivo puede pesar hasta el tope de guardado; necesita más margen. */
+const PLAZO_DESCARGA_MEDIA_MS = 60_000;
+
+/** Mandar un texto es liviano; si tarda más que esto, ya no vale la pena. */
+const PLAZO_ENVIO_WHATSAPP_MS = 20_000;
+
 // ── Webhook signature validation ─────────────────────────────────────────────
 
 /**
@@ -305,6 +320,7 @@ export async function downloadWhatsAppMedia(
   try {
     const metaRes = await fetch(`${GRAPH_API_BASE}/${apiVersion()}/${mediaId}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(PLAZO_METADATA_MEDIA_MS),
     });
     if (!metaRes.ok) {
       logger.error({ detalle: metaRes.status }, "whatsapp.media_metadata_failed");
@@ -359,6 +375,7 @@ export async function downloadWhatsAppMedia(
 
     const fileRes = await fetch(meta.url, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(PLAZO_DESCARGA_MEDIA_MS),
     });
     if (!fileRes.ok) {
       logger.error({ detalle: fileRes.status }, "whatsapp.media_fetch_failed");
@@ -483,6 +500,7 @@ export async function sendWhatsAppText(
         type: "text",
         text: { preview_url: false, body: body.slice(0, 4096) },
       }),
+      signal: AbortSignal.timeout(PLAZO_ENVIO_WHATSAPP_MS),
     });
 
     if (!res.ok) {

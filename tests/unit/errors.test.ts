@@ -82,6 +82,10 @@ describe("ERROR_STATUS", () => {
   it("maps NOT_IMPLEMENTED to 501", () => {
     expect(ERROR_STATUS.NOT_IMPLEMENTED).toBe(501);
   });
+
+  it("maps IA_NO_DISPONIBLE to 503", () => {
+    expect(ERROR_STATUS.IA_NO_DISPONIBLE).toBe(503);
+  });
 });
 
 describe("ErrorCode enum", () => {
@@ -99,5 +103,6 @@ describe("ErrorCode enum", () => {
     expect(codes).toContain("FSM_INVALID_TRANSITION");
     expect(codes).toContain("INTERNAL_ERROR");
     expect(codes).toContain("NOT_IMPLEMENTED");
+    expect(codes).toContain("IA_NO_DISPONIBLE");
   });
 });

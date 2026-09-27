@@ -1,0 +1,176 @@
+/**
+ * AsistenteFlotante — botón flotante y su panel (spec A). `CajaDelAsistente`
+ * va mockeada: acá se prueba el flotante (visibilidad por ruta, abrir/cerrar,
+ * foco, Escape, panel no modal, persistencia entre cierres), no el contenido
+ * de la caja — eso lo prueba `CajaDelAsistente.test.tsx`.
+ */
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { vi, describe, it, expect, beforeEach } from "vitest";
+import { useEffect, type RefObject } from "react";
+import { AsistenteFlotante } from "../../../src/app/(app)/_components/AsistenteFlotante";
+
+let pathname = "/bandeja";
+vi.mock("next/navigation", () => ({
+  usePathname: () => pathname,
+}));
+
+let montajes = 0;
+vi.mock("@/app/(app)/asistente/_components/CajaDelAsistente", () => ({
+  // Un textarea de verdad que se enfoca sola al montar (un frame después, como
+  // la real `CajaDelAsistente` — ver su propio test): así se prueba el
+  // contrato con el panel flotante, no la caja en sí. `montajes` cuenta
+  // MONTAJES, no renders: si el panel reabre sin desmontar la caja (spec de
+  // persistencia del historial), este contador no se mueve.
+  CajaDelAsistente: ({ textareaRef }: { textareaRef?: RefObject<HTMLTextAreaElement | null> }) => {
+    useEffect(() => {
+      montajes++;
+      const id = requestAnimationFrame(() => textareaRef?.current?.focus());
+      return () => cancelAnimationFrame(id);
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- sólo al montar
+    }, []);
+    return <textarea data-testid="caja-mock" ref={textareaRef} />;
+  },
+}));
+
+describe("AsistenteFlotante", () => {
+  beforeEach(() => {
+    montajes = 0;
+  });
+
+  it("en /asistente no se muestra: la caja entera ya está en pantalla", () => {
+    pathname = "/asistente";
+    render(<AsistenteFlotante />);
+    expect(screen.queryByRole("button", { name: "Preguntale al asistente" })).toBeNull();
+  });
+
+  it("en cualquier otra pantalla, el botón flotante se muestra", () => {
+    pathname = "/bandeja";
+    render(<AsistenteFlotante />);
+    expect(screen.getByRole("button", { name: "Preguntale al asistente" })).toBeInTheDocument();
+  });
+
+  it("el botón abre el panel con la caja adentro, sin aria-modal: no es un diálogo modal", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    await user.click(screen.getByRole("button", { name: "Preguntale al asistente" }));
+
+    const panel = screen.getByRole("dialog");
+    expect(panel).not.toHaveAttribute("aria-modal");
+    await waitFor(() => expect(screen.getByTestId("caja-mock")).toBeInTheDocument());
+  });
+
+  it("el foco llega al textarea aunque la caja tarde en llegar por next/dynamic", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    // Al abrir, el efecto de foco del panel corre antes de que el chunk de la
+    // caja llegue: sin el efecto de montaje de `CajaDelAsistente` el foco no
+    // llega a ningún lado (no hay trampa de Tab que lo empuje al botón de
+    // cerrar, como pasaría en un diálogo modal).
+    await user.click(screen.getByRole("button", { name: "Preguntale al asistente" }));
+
+    const textarea = await screen.findByRole("textbox");
+    // El foco llega un frame después (ver comentario en la caja real): no es
+    // sincrónico con el montaje.
+    await waitFor(() => expect(document.activeElement).toBe(textarea));
+  });
+
+  it("Escape cierra el panel y el foco vuelve al botón", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    const boton = screen.getByRole("button", { name: "Preguntale al asistente" });
+    await user.click(boton);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(boton);
+  });
+
+  it("el botón de cerrar del panel también cierra, y devuelve el foco al lanzador", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    const boton = screen.getByRole("button", { name: "Preguntale al asistente" });
+    await user.click(boton);
+    await user.click(screen.getByRole("button", { name: "Cerrar asistente" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(boton);
+  });
+
+  it("no atrapa Tab: no hay listener que le gane a Tab dentro del panel", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    await user.click(screen.getByRole("button", { name: "Preguntale al asistente" }));
+    await screen.findByTestId("caja-mock");
+
+    // Único enfocable adentro del panel además del botón de cerrar: si hubiera
+    // trampa de Tab, un Tab de más volvería al botón de cerrar en vez de salir
+    // del panel.
+    const textarea = screen.getByTestId("caja-mock");
+    textarea.focus();
+    await user.tab();
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Cerrar asistente" }));
+  });
+
+  it("cerrar y reabrir no desmonta la caja: el historial de sesión sobrevive", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    const boton = screen.getByRole("button", { name: "Preguntale al asistente" });
+    await user.click(boton);
+    await screen.findByTestId("caja-mock");
+    expect(montajes).toBe(1);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Oculto, no desmontado: sigue en el DOM.
+    expect(screen.getByTestId("caja-mock")).toBeInTheDocument();
+
+    await user.click(boton);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(montajes).toBe(1);
+  });
+
+  it("el panel oculto no es alcanzable por teclado ni lectores de pantalla", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    const boton = screen.getByRole("button", { name: "Preguntale al asistente" });
+    await user.click(boton);
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    const panel = document.getElementById("asistente-flotante-panel");
+    expect(panel).toHaveAttribute("hidden");
+    expect(panel).toHaveAttribute("inert");
+  });
+
+  it("reabrir el panel vuelve a enfocar el textarea, no sólo la primera vez", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    const boton = screen.getByRole("button", { name: "Preguntale al asistente" });
+    await user.click(boton);
+    const textarea = await screen.findByRole("textbox");
+    await waitFor(() => expect(document.activeElement).toBe(textarea));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    textarea.blur();
+
+    await user.click(boton);
+    await waitFor(() => expect(document.activeElement).toBe(textarea));
+  });
+});

@@ -236,7 +236,7 @@ if (conDatos.length < 2) {
   } else {
     const porNombre = await buscarCaso(
       ctxDe(a),
-      { herramienta: "buscar_caso", nombre: casoDeOtro.nombre, numero: null },
+      { herramienta: "buscar_caso", nombre: casoDeOtro.nombre, numero: null, codigo: null },
       "admin"
     );
     if (porNombre.coincidencias.length > 0) {
@@ -252,7 +252,7 @@ if (conDatos.length < 2) {
     } else {
       const porNumero = await buscarCaso(
         ctxDe(a),
-        { herramienta: "buscar_caso", nombre: null, numero: digitos },
+        { herramienta: "buscar_caso", nombre: null, numero: digitos, codigo: null },
         "admin"
       );
       if (porNumero.coincidencias.length > 0) {

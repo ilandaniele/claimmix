@@ -52,6 +52,8 @@ export const IntencionSchema = z.discriminatedUnion("herramienta", [
         .string()
         .regex(/^\d{1,12}$/)
         .nullable(),
+      // Los 8 caracteres hex del número de caso ("SIN-XXXX-XXXX"), sin guiones.
+      codigo: z.string().regex(/^[0-9a-f]{8}$/i).nullable(),
     })
     .strict(),
   z.object({ herramienta: z.literal("ninguna") }).strict(),

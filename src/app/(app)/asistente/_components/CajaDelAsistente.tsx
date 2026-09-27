@@ -1,21 +1,36 @@
 "use client";
 
 /**
- * CajaDelAsistente — pregunta y respuesta, una por vez.
+ * CajaDelAsistente — pregunta y respuesta, con las últimas 5 en pantalla.
  *
  * La respuesta se muestra como texto plano (`white-space: pre-wrap`), nunca
  * como HTML ni markdown: es texto de un modelo, y el riesgo de inyección no
  * termina en el servidor. Los enlaces a casos salen únicamente de `casos[]`,
  * nunca del texto libre de la respuesta.
+ *
+ * El historial es sólo de este componente: nunca viaja al servidor, se pierde
+ * al cerrar (recarga de página, o el panel flotante que desmonta al cerrar).
+ *
+ * Vive en `/asistente` (page.tsx, sin `textareaRef`) y adentro del panel
+ * flotante (`AsistenteFlotante.tsx`, que pasa su propio ref para enfocar el
+ * textarea al abrir).
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
-import { useT } from "@/lib/i18n/LocaleContext";
+import { usePathname } from "next/navigation";
+import { useLocale, useT } from "@/lib/i18n/LocaleContext";
+import { formatCaseNumber } from "@/core/case/numero";
+import { formatDate } from "@/lib/utils";
+import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
+import type { CaseStatus } from "@/lib/schemas/cases";
 
 interface CasoEncontrado {
   id: string;
   etiqueta: string;
+  numero: string;
+  creado: string;
+  estado: CaseStatus;
 }
 
 interface RespuestaDelAsistente {
@@ -24,27 +39,73 @@ interface RespuestaDelAsistente {
   casos: CasoEncontrado[];
 }
 
-export function CajaDelAsistente() {
+interface Intercambio {
+  pregunta: string;
+  respuesta: RespuestaDelAsistente;
+}
+
+/** Las últimas 5, ni una más: es un historial de sesión, no un registro. */
+const TOPE_HISTORIAL = 5;
+
+const ESTILO_CHIP =
+  "rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 " +
+  "transition-colors hover:bg-slate-50 motion-reduce:transition-none " +
+  "dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700";
+
+interface CajaDelAsistenteProps {
+  /** Del panel flotante, para enfocar el textarea al abrir. Sin él, la caja usa uno propio. */
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
+}
+
+export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsistenteProps = {}) {
   const t = useT();
+  const { locale } = useLocale();
+  const pathname = usePathname();
   const [pregunta, setPregunta] = useState("");
   const [enviando, setEnviando] = useState(false);
-  const [respuesta, setRespuesta] = useState<RespuestaDelAsistente | null>(null);
+  const [historial, setHistorial] = useState<Intercambio[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const finRef = useRef<HTMLDivElement>(null);
+  const textareaPropio = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = textareaRefExterno ?? textareaPropio;
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (pregunta.trim().length < 3 || enviando) return;
+  // El panel flotante recién monta esta caja UNA vez, en la primera apertura
+  // (`next/dynamic`): si el chunk todavía no había llegado, el efecto de foco
+  // inicial de `PanelDelAsistente` (en `AsistenteFlotante`) ya corrió con el
+  // textarea inexistente y no hizo nada. Este efecto lo enfoca acá, al montar
+  // — pero diferido un frame, mismo motivo que el de `PanelDelAsistente`: si
+  // el chunk YA estaba en caché, esta caja monta en el mismo commit que el
+  // panel, y sin el diferimiento este `focus()` competiría con el del panel.
+  // En `/asistente` (sin `textareaRefExterno`) no corresponde: la página no es
+  // un panel que "se abre", y en aperturas siguientes del flotante ya se
+  // encarga `PanelDelAsistente` solo (esta caja no vuelve a montar).
+  useEffect(() => {
+    if (!textareaRefExterno) return;
+    const id = requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sólo al montar
+  }, []);
+
+  // "Resumí este caso": sólo dentro de /casos/<id>. El número sale del propio
+  // id de la ruta — `formatCaseNumber` es puro, no hace falta pedirlo de nuevo.
+  const casoActual = useMemo(() => {
+    const m = /^\/casos\/([0-9a-fA-F-]+)$/.exec(pathname ?? "");
+    return m ? { numero: formatCaseNumber(m[1]!) } : null;
+  }, [pathname]);
+
+  const enviar = useCallback(
+    async (texto: string) => {
+      const limpia = texto.trim();
+      if (limpia.length < 3 || enviando) return;
 
       setEnviando(true);
       setError(null);
-      setRespuesta(null);
 
       try {
         const res = await fetch("/api/asistente", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pregunta: pregunta.trim() }),
+          body: JSON.stringify({ pregunta: limpia }),
         });
 
         if (res.status === 429) {
@@ -61,36 +122,96 @@ export function CajaDelAsistente() {
         }
 
         const data = (await res.json()) as RespuestaDelAsistente;
-        setRespuesta(data);
+        setHistorial((prev) => [...prev, { pregunta: limpia, respuesta: data }].slice(-TOPE_HISTORIAL));
+        setPregunta("");
+        // Opcional: jsdom (tests) no implementa scrollIntoView.
+        requestAnimationFrame(() => finRef.current?.scrollIntoView?.({ block: "end" }));
       } catch {
         setError(t("asistente.error"));
       } finally {
         setEnviando(false);
       }
     },
-    [pregunta, enviando, t]
+    [enviando, t]
   );
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      void enviar(pregunta);
+    },
+    [pregunta, enviar]
+  );
+
+  // El chip de "buscá el caso de…" llena y enfoca, nunca envía solo.
+  // Sin useCallback: sólo la usa un onClick, no hace falta memoizarla, y el
+  // compilador de React no puede seguir un `.current` leído adentro.
+  function llenarYEnfocar(texto: string) {
+    setPregunta(texto);
+    textareaRef.current?.focus();
+  }
 
   return (
     <div className="space-y-4">
+      {historial.length === 0 && (
+        <div className="flex flex-wrap gap-2" data-testid="asistente-chips">
+          <button type="button" className={ESTILO_CHIP} onClick={() => void enviar(t("asistente.chip.conteoMes"))}>
+            {t("asistente.chip.conteoMes")}
+          </button>
+          <button
+            type="button"
+            className={ESTILO_CHIP}
+            onClick={() => void enviar(t("asistente.chip.whatsappsHoy"))}
+          >
+            {t("asistente.chip.whatsappsHoy")}
+          </button>
+          <button
+            type="button"
+            className={ESTILO_CHIP}
+            onClick={() => void enviar(t("asistente.chip.reclamos30dias"))}
+          >
+            {t("asistente.chip.reclamos30dias")}
+          </button>
+          <button
+            type="button"
+            className={ESTILO_CHIP}
+            onClick={() => llenarYEnfocar(t("asistente.chip.buscarCasoPrefill"))}
+          >
+            {t("asistente.chip.buscarCasoLabel")}
+          </button>
+          {casoActual && (
+            <button
+              type="button"
+              className={ESTILO_CHIP}
+              onClick={() =>
+                void enviar(t("asistente.chip.resumirCasoPregunta").replace("{numero}", casoActual.numero))
+              }
+            >
+              {t("asistente.chip.resumirCaso")}
+            </button>
+          )}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-3">
-        <label htmlFor="pregunta-asistente" className="block text-sm font-medium text-slate-700">
+        <label htmlFor="pregunta-asistente" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
           {t("asistente.preguntaLabel")}
         </label>
         <textarea
           id="pregunta-asistente"
+          ref={textareaRef}
           rows={3}
           value={pregunta}
           onChange={(e) => setPregunta(e.target.value)}
           placeholder={t("asistente.placeholder")}
           maxLength={500}
-          className="w-full rounded-md border border-control px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
+          className="w-full resize-none rounded-md border border-control px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-900 dark:text-slate-100"
         />
         <button
           type="submit"
           disabled={enviando || pregunta.trim().length < 3}
           data-testid="asistente-submit"
-          className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {enviando ? t("asistente.enviando") : t("asistente.enviar")}
         </button>
@@ -102,21 +223,43 @@ export function CajaDelAsistente() {
         </div>
       )}
 
-      {respuesta && (
-        <div className="rounded-md border border-slate-200 bg-white px-4 py-3">
-          <p className="whitespace-pre-wrap text-sm text-slate-800">{respuesta.texto}</p>
-          {respuesta.casos.length > 0 && (
-            <ul className="mt-3 space-y-1 border-t border-slate-100 pt-3">
-              {respuesta.casos.map((caso) => (
-                <li key={caso.id}>
-                  <Link href={`/casos/${caso.id}`} className="text-sm font-medium text-blue-600 hover:underline">
-                    {caso.etiqueta}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+      {historial.length > 0 && (
+        <ul className="space-y-3">
+          {historial.map((intercambio, i) => (
+            <li
+              key={i}
+              className="rounded-md border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-800"
+            >
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{intercambio.pregunta}</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">
+                {intercambio.respuesta.texto}
+              </p>
+              {intercambio.respuesta.herramienta === "buscar_caso" && intercambio.respuesta.casos.length === 1 && (
+                <p className="mt-2 text-xs italic text-slate-500 dark:text-slate-400">
+                  {t("asistente.avisoResumenIA")}
+                </p>
+              )}
+              {intercambio.respuesta.casos.length > 0 && (
+                <ul className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 dark:border-slate-700">
+                  {intercambio.respuesta.casos.map((caso) => (
+                    <li key={caso.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      <Link href={`/casos/${caso.id}`} className="text-sm font-medium text-blue-600 hover:underline">
+                        {caso.etiqueta}
+                      </Link>
+                      <span className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        <span>{caso.numero}</span>
+                        <span>{formatDate(caso.creado, locale, { hour: undefined, minute: undefined })}</span>
+                        <StatusBadge status={caso.estado} />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {/* Ancla de scroll: `<div>` no es hijo válido de `<ul>` (sólo `<li>`), así que va en el último `<li>`. */}
+              {i === historial.length - 1 && <div ref={finRef} />}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

@@ -11,11 +11,8 @@ import { BotonDeFiltros, MarcasDeFiltros } from "./components/PanelDeFiltros";
 import { CasesTable } from "./components/CasesTable";
 import { SimulateModal } from "./components/SimulateModal";
 import { ToastContainer, useToast } from "./components/Toast";
-import {
-  useCasesRealtime,
-  mergeCaseUpdate,
-  formatCaseNumber,
-} from "./components/useCasesRealtime";
+import { useCasesRealtime, mergeCaseUpdate } from "./components/useCasesRealtime";
+import { formatCaseNumber } from "@/core/case/numero";
 import type { CaseRow, CaseListResult } from "@/server/cases/list";
 import type { OpcionDeEscenario } from "@/server/intake/scenarios";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";

@@ -73,6 +73,10 @@ export async function GET(request: NextRequest) {
     order: searchParams.get("order") ?? undefined,
     // Email-intake filters (AC18)
     severity: searchParams.getAll("severity"),
+    // Filtro de fraude de la bandeja (G35): el sondeo de useCasesRealtime lo
+    // reenvía porque ya está en PARAMS_DE_FILTRO — sin esto, el sondeo lo
+    // ignoraba y la lista se contradecía sola a los pocos segundos.
+    fraude: searchParams.getAll("fraude"),
     customer_id: searchParams.get("customer_id") ?? undefined,
     policy_id: searchParams.get("policy_id") ?? undefined,
     channel: searchParams.getAll("channel"),

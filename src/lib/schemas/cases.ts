@@ -62,6 +62,15 @@ export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 export const SeveritySchema = z.enum(["low", "medium", "high", "critical"]);
 export type Severity = z.infer<typeof SeveritySchema>;
 
+/**
+ * Niveles de riesgo de fraude que el filtro de la bandeja puede pedir.
+ *
+ * `cases.fraud_risk_level` también acepta `"none"` (el default), pero ese
+ * valor no es una opción de filtro: no hay chip para «sin riesgo».
+ */
+export const FraudRiskLevelSchema = z.enum(["low", "medium", "high"]);
+export type FraudRiskLevel = z.infer<typeof FraudRiskLevelSchema>;
+
 /** Canales de ingreso de un caso. */
 export const ChannelSchema = z.enum(["email_sim", "email", "whatsapp_sim", "whatsapp"]);
 export type Channel = z.infer<typeof ChannelSchema>;
@@ -119,6 +128,9 @@ export const CaseQuerySchema = z.object({
   order: z.enum(["asc", "desc"]).default("desc"),
   // Email-intake filters (AC18)
   severity: listaDe(SeveritySchema),
+  // Filtro de fraude de la bandeja (G35). Aditivo: sin él, ninguna consulta
+  // ni el CSV cambian.
+  fraude: listaDe(FraudRiskLevelSchema),
   customer_id: z.string().uuid().optional(),
   policy_id: z.string().uuid().optional(),
   channel: listaDe(ChannelSchema),

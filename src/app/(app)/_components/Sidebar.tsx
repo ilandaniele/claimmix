@@ -142,12 +142,15 @@ export function Sidebar({
   role,
   isOperator = false,
   esPro = false,
+  estadoDelAgente,
 }: {
   role: string;
   /** Quien opera ClaimMix, no el asegurador. Ve la cartera de clientes. */
   isOperator?: boolean;
   /** Sin el Plan Pro, lo del Plan Pro va con candado. */
   esPro?: boolean;
+  /** El indicador del agente (`EstadoDelAgente`), servido ya resuelto por el layout. */
+  estadoDelAgente?: React.ReactNode;
 }) {
   const t = useT();
   const pathname = usePathname();
@@ -290,6 +293,9 @@ export function Sidebar({
           />
         </div>
       </div>
+
+      {/* El indicador del agente, al pie y fuera del scroll de arriba. */}
+      {estadoDelAgente}
     </nav>
   );
 }

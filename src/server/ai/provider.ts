@@ -28,6 +28,7 @@ import { db, tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { logger } from "@/lib/observability/logger";
+import { resolverAiMode, type AiMode } from "@/server/ai/ai-mode";
 
 export type AiProvider = "gemini";
 export type ExtractionEngine = AiProvider | "mock";
@@ -280,6 +281,15 @@ export async function hasProviderKeyForTenant(tenantId: string, _provider: AiPro
 export function isVertexConfigured(): boolean {
   if (process.env.GEMINI_TRANSPORT?.trim().toLowerCase() !== "vertex") return false;
   return Boolean(process.env.GOOGLE_CLOUD_PROJECT?.trim());
+}
+
+/** Mock o gemini: lo que informan `/api/admin/health` y el indicador del sidebar. */
+export function modoDeIa(): AiMode {
+  return resolverAiMode({
+    mockAi: process.env.MOCK_AI,
+    aiMock: process.env.AI_MOCK,
+    geminiConfigurado: isVertexConfigured() || Boolean(process.env.GEMINI_API_KEY?.trim()),
+  });
 }
 
 /** Env-level default provider (AI_PROVIDER, default "gemini"). */

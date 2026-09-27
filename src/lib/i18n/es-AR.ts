@@ -148,6 +148,12 @@ export const esAR = {
   "bandeja.tableLabel": "Tabla de siniestros",
   "bandeja.toastNew": "Nuevo siniestro recibido:",
   "bandeja.toastUpdated": "actualizado:",
+  "bandeja.vista.lista": "Lista",
+  "bandeja.vista.tablero": "Tablero",
+
+  // ── Tablero de la bandeja (G36) — de sólo lectura, sin arrastrar ────────────
+  "tablero.verTodos": "Ver todos",
+  "tablero.vacio": "Sin casos en esta columna.",
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simular nuevo siniestro",
@@ -404,6 +410,7 @@ export const esAR = {
   // ── Bandeja filter labels ───────────────────────────────────────────────────
   "filter.channel": "Canal",
   "filter.severity": "Severidad",
+  "filter.fraude": "Fraude",
   /*
    * Era «Tipo», la MISMA palabra que el filtro de tipo de siniestro que esta
    * justo arriba. Con los dos grupos en la misma franja quedaban dos «Tipo:»
@@ -674,6 +681,11 @@ export const esAR = {
   "agente.valoresExtraidos": "Valores extraídos (último análisis)",
   "agente.yaConfirmado": "Ejemplo ya confirmado",
 
+  // ── El indicador de estado del agente, al pie del sidebar (G37) ─────
+  "agente.estado.activo": "Agente activo",
+  "agente.estado.modo_prueba": "Modo de prueba",
+  "agente.estado.sin_presupuesto": "Sin presupuesto",
+  "agente.estado.procesando": "{n} en curso",
 
   // ── Los nombres comerciales de los planes ──────────────────────────
   // El precio y la aritmética siguen en `lib/billing/plans.ts`, que no conoce

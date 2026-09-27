@@ -7,7 +7,7 @@
  *       Same explicit tenant_id isolation as GET /api/cases (RLS is gone).
  *
  * Columns: Nro. Siniestro, Asegurado, Póliza, Tipo, Situación, Confianza, Fecha, Analista.
- * Filters: same query params as GET /api/cases (status, type, q).
+ * Filters: same query params as GET /api/cases (status, type, q, periodo).
  *
  * Rate limit: 100 req/min per user (CASES_API config — export is heavier but same bucket).
  */
@@ -19,7 +19,7 @@ import { CaseQuerySchema, type CaseStatus, type ClaimType } from "@/lib/schemas/
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { formatDate } from "@/lib/utils";
-import { listCasesForExport } from "@/server/cases/list";
+import { desdeDePeriodo, listCasesForExport } from "@/server/cases/list";
 import { buildCsv } from "@/lib/csv/safe-encode";
 import { err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -148,10 +148,18 @@ export async function GET(request: NextRequest) {
   // status/type/severity/channel son multi-select: repetidos en la URL, no
   // separados por comas. `getAll` los junta en un array — vacío si el
   // parámetro no vino, que `CaseQuerySchema` trata como `undefined`.
+  // `q` corto (1-2 caracteres) llega de verdad: la caja de la bandeja
+  // debounca por tiempo, no por longitud, y "Exportar" es un <a href> que
+  // reenvía la URL tal cual. `CaseQuerySchema.q` exige mínimo 3 (ver
+  // src/lib/schemas/cases.ts) y tiraría 400 justo en medio de una búsqueda
+  // que la pantalla sigue mostrando filtrada. Se descarta acá, igual que
+  // `normalizarBusqueda` en la bandeja, en vez de fallar la validación.
+  const qCorto = searchParams.get("q")?.trim();
   const rawQuery = {
     status: searchParams.getAll("status"),
     type: searchParams.getAll("type"),
-    q: searchParams.get("q") ?? undefined,
+    q: qCorto && qCorto.length >= 3 ? qCorto : undefined,
+    periodo: searchParams.get("periodo") ?? undefined,
     severity: searchParams.getAll("severity"),
     channel: searchParams.getAll("channel"),
     is_claim: searchParams.get("is_claim") ?? undefined,
@@ -184,6 +192,7 @@ export async function GET(request: NextRequest) {
       status: parsed.data.status,
       type: parsed.data.type,
       q: parsed.data.q,
+      desde: desdeDePeriodo(parsed.data.periodo),
       severity: parsed.data.severity,
       channel: parsed.data.channel,
       is_claim: parsed.data.is_claim,

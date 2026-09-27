@@ -21,6 +21,8 @@ export interface PuntoSerie {
   reclamos: number;
   whatsapps: number;
   mails: number;
+  reclamos_whatsapp: number;
+  reclamos_mail: number;
 }
 
 const LARGO: Record<Unidad, number> = { dia: 30, mes: 12, anio: 5 };
@@ -38,9 +40,9 @@ export const FORMATO_DE: Record<
   anio: { trunc: "year", fmt: "YYYY" },
 };
 
-/** Lo que llega por `?serie=`; cualquier otra cosa, incluida una lista, es mes. */
+/** Lo que llega por `?serie=`; cualquier otra cosa, incluida una lista, es día. */
 export function unidadDe(valor: string | string[] | undefined): Unidad {
-  return UNIDADES.find((u) => u === valor) ?? "mes";
+  return UNIDADES.find((u) => u === valor) ?? "dia";
 }
 
 /**
@@ -83,6 +85,8 @@ export function completarSerie(
       reclamos: fila?.reclamos ?? 0,
       whatsapps: fila?.whatsapps ?? 0,
       mails: fila?.mails ?? 0,
+      reclamos_whatsapp: fila?.reclamos_whatsapp ?? 0,
+      reclamos_mail: fila?.reclamos_mail ?? 0,
     };
   });
 }

@@ -8,10 +8,12 @@
  */
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 import { CasesTable } from "../../../src/app/(app)/bandeja/components/CasesTable";
 import { LocaleProvider } from "../../../src/lib/i18n/LocaleContext";
 import type { CaseRow } from "../../../src/server/cases/list";
+import { formatAge, formatDate } from "../../../src/lib/utils";
+import { getT } from "../../../src/lib/i18n";
 
 // next/navigation must be mocked — CasesTable calls useRouter()
 const push = vi.hoisted(() => vi.fn());
@@ -89,6 +91,42 @@ describe("CasesTable — AC17 (claim_type = 'other')", () => {
     expect(
       screen.getByText("No hay siniestros que coincidan con los filtros.")
     ).toBeInTheDocument();
+  });
+});
+
+describe("CasesTable — columna «Recibido»", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-26T12:00:00.000Z"));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("muestra la antigüedad relativa y la fecha completa en el title", () => {
+    const iso = "2026-09-26T09:00:00.000Z"; // 3 horas antes
+    const cases = [makeCase({ created_at: iso })];
+    render(
+      <LocaleProvider locale="es-AR">
+        <CasesTable cases={cases} />
+      </LocaleProvider>
+    );
+
+    const t = getT("es-AR");
+    const esperado = formatAge(iso, t);
+    const elemento = screen.getByText(esperado);
+    expect(elemento).toHaveAttribute("title", formatDate(iso, "es-AR"));
+  });
+
+  it("en inglés muestra la antigüedad en inglés", () => {
+    const iso = "2026-09-26T09:00:00.000Z";
+    const cases = [makeCase({ created_at: iso })];
+    render(
+      <LocaleProvider locale="en-US">
+        <CasesTable cases={cases} />
+      </LocaleProvider>
+    );
+
+    const t = getT("en-US");
+    expect(screen.getByText(formatAge(iso, t))).toBeInTheDocument();
   });
 });
 

@@ -17,17 +17,13 @@ vi.mock("next/navigation", () => ({
 
 let montajes = 0;
 vi.mock("@/app/(app)/asistente/_components/CajaDelAsistente", () => ({
-  // Un textarea de verdad que se enfoca sola al montar (un frame después, como
-  // la real `CajaDelAsistente` — ver su propio test): así se prueba el
-  // contrato con el panel flotante, no la caja en sí. `montajes` cuenta
-  // MONTAJES, no renders: si el panel reabre sin desmontar la caja (spec de
-  // persistencia del historial), este contador no se mueve.
+  // Un textarea de verdad que NO se enfoca sola, como la real: el foco es
+  // contrato del panel flotante. `montajes` cuenta MONTAJES, no renders: si el
+  // panel reabre sin desmontar la caja (spec de persistencia del historial),
+  // este contador no se mueve.
   CajaDelAsistente: ({ textareaRef }: { textareaRef?: RefObject<HTMLTextAreaElement | null> }) => {
     useEffect(() => {
       montajes++;
-      const id = requestAnimationFrame(() => textareaRef?.current?.focus());
-      return () => cancelAnimationFrame(id);
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- sólo al montar
     }, []);
     return <textarea data-testid="caja-mock" ref={textareaRef} />;
   },
@@ -62,20 +58,15 @@ describe("AsistenteFlotante", () => {
     await waitFor(() => expect(screen.getByTestId("caja-mock")).toBeInTheDocument());
   });
 
-  it("el foco llega al textarea aunque la caja tarde en llegar por next/dynamic", async () => {
+  it("al abrir, el foco llega al textarea", async () => {
     pathname = "/bandeja";
     const user = userEvent.setup();
     render(<AsistenteFlotante />);
 
-    // Al abrir, el efecto de foco del panel corre antes de que el chunk de la
-    // caja llegue: sin el efecto de montaje de `CajaDelAsistente` el foco no
-    // llega a ningún lado (no hay trampa de Tab que lo empuje al botón de
-    // cerrar, como pasaría en un diálogo modal).
     await user.click(screen.getByRole("button", { name: "Preguntale al asistente" }));
 
-    const textarea = await screen.findByRole("textbox");
-    // El foco llega un frame después (ver comentario en la caja real): no es
-    // sincrónico con el montaje.
+    // Un frame después (ver el efecto del panel): no es sincrónico.
+    const textarea = screen.getByRole("textbox");
     await waitFor(() => expect(document.activeElement).toBe(textarea));
   });
 
@@ -103,6 +94,9 @@ describe("AsistenteFlotante", () => {
     await user.click(screen.getByRole("button", { name: "Cerrar asistente" }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(boton);
+    // Ningún foco diferido de la apertura le gana al cierre un frame después.
+    await new Promise((r) => requestAnimationFrame(r));
     expect(document.activeElement).toBe(boton);
   });
 
@@ -164,7 +158,7 @@ describe("AsistenteFlotante", () => {
 
     const boton = screen.getByRole("button", { name: "Preguntale al asistente" });
     await user.click(boton);
-    const textarea = await screen.findByRole("textbox");
+    const textarea = screen.getByRole("textbox");
     await waitFor(() => expect(document.activeElement).toBe(textarea));
 
     fireEvent.keyDown(document, { key: "Escape" });

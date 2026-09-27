@@ -32,15 +32,9 @@ describe("CajaDelAsistente", () => {
     vi.unstubAllGlobals();
   });
 
-  it("con textareaRef externo, enfoca el textarea al montar (panel flotante)", async () => {
+  it("no se autoenfoca al montar: el foco lo decide el panel flotante, no la caja", async () => {
     const ref = createRef<HTMLTextAreaElement>();
     render(<CajaDelAsistente textareaRef={ref} />);
-    // Diferido un frame (ver comentario en el componente): no es sincrónico.
-    await waitFor(() => expect(document.activeElement).toBe(ref.current));
-  });
-
-  it("sin textareaRef externo (/asistente), no se autoenfoca", async () => {
-    render(<CajaDelAsistente />);
     await new Promise((r) => requestAnimationFrame(r));
     expect(screen.getByLabelText("Tu pregunta")).not.toHaveFocus();
   });

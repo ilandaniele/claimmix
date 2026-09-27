@@ -2,9 +2,14 @@
 
 /**
  * AsistenteFlotante — el mismo asistente de `/asistente`, en una caja sobre
- * cualquier pantalla (Plan Pro). Botón flotante + panel; `CajaDelAsistente` se
- * carga recién al primer click (`next/dynamic`, `ssr: false`) para no sumarle
- * peso al bundle de páginas que nunca lo abren (ver `.size-limit.cjs`).
+ * cualquier pantalla (Plan Pro). Botón flotante + panel.
+ *
+ * `CajaDelAsistente` se importa directo, no con `next/dynamic`: la página
+ * `/asistente` también la importa, y Turbopack arma un grupo de chunks por
+ * cada importación dinámica, así que la caja y sus dependencias (StatusBadge,
+ * Card) quedaban copiadas dos veces en el build. `pnpm peso` suma todo el
+ * JavaScript del build y la copia lo pasaba del tope. El panel igual se monta
+ * recién en la primera apertura.
  *
  * El panel es un panel flotante SIN telón: la pantalla de atrás sigue viva y
  * usable, así que no es un diálogo modal — `aria-modal` y la trampa de Tab de
@@ -16,21 +21,15 @@
  *
  * Una vez abierto, el panel queda montado para siempre (oculto con `hidden` +
  * `inert` al cerrar, en vez de desmontarse) para que `CajaDelAsistente` no
- * pierda su historial de sesión entre cierres. La importación dinámica sigue
- * pasando una única vez, en la primera apertura.
+ * pierda su historial de sesión entre cierres.
  */
 
 import { useEffect, useRef, useState } from "react";
-import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { Sparkles, X } from "lucide-react";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { cn } from "@/lib/utils";
-
-const CajaDelAsistente = dynamic(
-  () => import("../asistente/_components/CajaDelAsistente").then((m) => m.CajaDelAsistente),
-  { ssr: false }
-);
+import { CajaDelAsistente } from "../asistente/_components/CajaDelAsistente";
 
 function PanelDelAsistente({
   abierto,
@@ -44,11 +43,8 @@ function PanelDelAsistente({
   const t = useT();
 
   // Foco inicial al textarea, en CADA apertura (el panel queda montado entre
-  // aperturas, esto no es sólo un efecto de montaje). Diferido un frame: en la
-  // primera apertura `CajaDelAsistente` puede llegar recién por `next/dynamic`
-  // y sin el diferimiento este `focus()` se adelantaría al efecto de montaje
-  // propio de la caja; en aperturas siguientes ya está montada y el frame de
-  // más no se nota.
+  // aperturas, esto no es sólo un efecto de montaje). Diferido un frame: el
+  // panel recién deja de estar `hidden` en este mismo commit.
   useEffect(() => {
     if (!abierto) return;
     const id = requestAnimationFrame(() => textareaRef.current?.focus());

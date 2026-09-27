@@ -8,15 +8,15 @@
  * termina en el servidor. Los enlaces a casos salen únicamente de `casos[]`,
  * nunca del texto libre de la respuesta.
  *
- * El historial es sólo de este componente: nunca viaja al servidor, se pierde
- * al cerrar (recarga de página, o el panel flotante que desmonta al cerrar).
+ * El historial es sólo de este componente: nunca viaja al servidor y se pierde
+ * al recargar la página.
  *
  * Vive en `/asistente` (page.tsx, sin `textareaRef`) y adentro del panel
- * flotante (`AsistenteFlotante.tsx`, que pasa su propio ref para enfocar el
- * textarea al abrir).
+ * flotante (`AsistenteFlotante.tsx`, que pasa su propio ref y enfoca el
+ * textarea en cada apertura).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useLocale, useT } from "@/lib/i18n/LocaleContext";
@@ -53,7 +53,7 @@ const ESTILO_CHIP =
   "dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700";
 
 interface CajaDelAsistenteProps {
-  /** Del panel flotante, para enfocar el textarea al abrir. Sin él, la caja usa uno propio. */
+  /** Del panel flotante, que enfoca el textarea al abrir. Sin él, la caja usa uno propio. */
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -68,23 +68,6 @@ export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsi
   const finRef = useRef<HTMLDivElement>(null);
   const textareaPropio = useRef<HTMLTextAreaElement>(null);
   const textareaRef = textareaRefExterno ?? textareaPropio;
-
-  // El panel flotante recién monta esta caja UNA vez, en la primera apertura
-  // (`next/dynamic`): si el chunk todavía no había llegado, el efecto de foco
-  // inicial de `PanelDelAsistente` (en `AsistenteFlotante`) ya corrió con el
-  // textarea inexistente y no hizo nada. Este efecto lo enfoca acá, al montar
-  // — pero diferido un frame, mismo motivo que el de `PanelDelAsistente`: si
-  // el chunk YA estaba en caché, esta caja monta en el mismo commit que el
-  // panel, y sin el diferimiento este `focus()` competiría con el del panel.
-  // En `/asistente` (sin `textareaRefExterno`) no corresponde: la página no es
-  // un panel que "se abre", y en aperturas siguientes del flotante ya se
-  // encarga `PanelDelAsistente` solo (esta caja no vuelve a montar).
-  useEffect(() => {
-    if (!textareaRefExterno) return;
-    const id = requestAnimationFrame(() => textareaRef.current?.focus());
-    return () => cancelAnimationFrame(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- sólo al montar
-  }, []);
 
   // "Resumí este caso": sólo dentro de /casos/<id>. El número sale del propio
   // id de la ruta — `formatCaseNumber` es puro, no hace falta pedirlo de nuevo.

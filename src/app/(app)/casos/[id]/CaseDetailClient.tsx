@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation";
 import { StatusActions } from "./components/StatusActions";
 import { CloseConfirmDialog } from "./components/CloseConfirmDialog";
 import { EscalateDialog } from "./components/EscalateDialog";
+import { TomarElControlDialog } from "./components/TomarElControlDialog";
 import { ToastContainer, useToast } from "@/app/(app)/bandeja/components/Toast";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
@@ -37,6 +38,8 @@ interface CaseDetailClientProps {
   puedeMarcar: boolean;
   acciones: EstadoDeAcciones;
   puedeCambiarEstado: boolean;
+  /** D-F2. Sin esto no se muestra «Tomar el control». */
+  puedeTomarElControl: boolean;
 }
 
 type Aviso = [TranslationKey, "success" | "info"];
@@ -50,6 +53,7 @@ export function CaseDetailClient({
   puedeMarcar,
   acciones,
   puedeCambiarEstado,
+  puedeTomarElControl,
 }: CaseDetailClientProps) {
   const t = useT();
   const router = useRouter();
@@ -57,12 +61,13 @@ export function CaseDetailClient({
 
   const [showClose, setShowClose] = useState(false);
   const [showEscalate, setShowEscalate] = useState(false);
+  const [showTomarElControl, setShowTomarElControl] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   const [reAnalyzing, setReAnalyzing] = useState(false);
   const [marcando, setMarcando] = useState(false);
   const [reenviando, setReenviando] = useState(false);
 
-  const dialogOpen = showClose || showEscalate || transitioning;
+  const dialogOpen = showClose || showEscalate || showTomarElControl || transitioning;
 
   // Las acciones directas hacen lo mismo: pedir, avisar y refrescar. Cambian
   // la ruta, el aviso y qué error se reconoce.
@@ -98,6 +103,21 @@ export function CaseDetailClient({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: toStatus }),
+      },
+      () => ["case.detail.statusUpdated", "success"],
+      { 409: "close.errorFsm" }
+    );
+
+  // D-F2: el cuerpo es exacto, sin variantes — el mismo que exige la guarda
+  // del servidor en patchCase.
+  const handleTomarElControl = () =>
+    accion(
+      setTransitioning,
+      `/api/cases/${caseId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "requiere_especialista", reason: "tomar_el_control" }),
       },
       () => ["case.detail.statusUpdated", "success"],
       { 409: "close.errorFsm" }
@@ -209,6 +229,8 @@ export function CaseDetailClient({
           onRevisadoListo={handleRevisadoListo}
           onReenviar={puedeMarcar ? handleReenviar : undefined}
           reenviando={reenviando}
+          puedeTomarElControl={puedeTomarElControl}
+          onTomarElControl={() => setShowTomarElControl(true)}
         />
       </div>
 
@@ -236,6 +258,14 @@ export function CaseDetailClient({
             setShowEscalate(false);
             addToast(msg, "error");
           }}
+        />
+      )}
+
+      {/* Tomar el control dialog (D-F2) */}
+      {showTomarElControl && (
+        <TomarElControlDialog
+          onClose={() => setShowTomarElControl(false)}
+          onConfirm={handleTomarElControl}
         />
       )}
 

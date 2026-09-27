@@ -81,7 +81,7 @@ export interface CloseAbandonedResult {
  * el problema que este barrido existe para resolver — diecinueve casos a medias
  * en una tarde de pruebas, cerrados a mano.
  */
-const leLlegoLaPregunta = sql`coalesce((
+export const leLlegoLaPregunta = sql`coalesce((
   select ${outboundMessages.status}
     from ${outboundMessages}
    where ${outboundMessages.case_id} = ${cases.id}

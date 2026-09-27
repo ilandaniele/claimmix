@@ -43,16 +43,21 @@ vi.mock("@/lib/db", () => ({
   tables: {},
 }));
 
-// Mock the audit log to avoid DB calls
-vi.mock("@/lib/audit/log", () => ({
-  writeAuditLog: vi.fn().mockResolvedValue(undefined),
-  AuditEvent: {
-    CASE_STATUS_CHANGED: "case.status_changed",
-    CASE_CLOSED: "case.closed",
-    CASE_ASSIGNED: "case.assigned",
-    CASE_READY_CONFIRMED: "case.ready_confirmed",
-  },
-}));
+// Mock the audit log to avoid DB calls. `ipValida` queda real: la usa
+// `auditoriaSiQuedo`, y el test de ip "anonymous" verifica su comportamiento.
+vi.mock("@/lib/audit/log", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/audit/log")>("@/lib/audit/log");
+  return {
+    writeAuditLog: vi.fn().mockResolvedValue(undefined),
+    ipValida: actual.ipValida,
+    AuditEvent: {
+      CASE_STATUS_CHANGED: "case.status_changed",
+      CASE_CLOSED: "case.closed",
+      CASE_ASSIGNED: "case.assigned",
+      CASE_READY_CONFIRMED: "case.ready_confirmed",
+    },
+  };
+});
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -195,6 +200,44 @@ describe("patchCase — FSM validation", () => {
       patchCase("case-1", { status: "esperando" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
   });
+
+  it("throws FSM_INVALID_TRANSITION cuando el PATCH pide enviado_a_core (lo pone sólo el envío a Core)", async () => {
+    const listoParaCoreCase = { ...listoCase, status: "listo_para_core" };
+    setupPatchMocks([listoParaCoreCase], []);
+
+    await expect(
+      patchCase("case-1", { status: "enviado_a_core" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("throws FSM_INVALID_TRANSITION cuando el PATCH pide error_core (lo pone sólo el envío a Core)", async () => {
+    const listoParaCoreCase = { ...listoCase, status: "listo_para_core" };
+    setupPatchMocks([listoParaCoreCase], []);
+
+    await expect(
+      patchCase("case-1", { status: "error_core" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("sigue permitiendo enviado_a_core → cerrado", async () => {
+    const enviadoACoreCase = { ...listoCase, status: "enviado_a_core" };
+    const updatedCase = { ...enviadoACoreCase, status: "cerrado" };
+    setupPatchMocks([enviadoACoreCase], [updatedCase]);
+
+    const result = await patchCase("case-1", { status: "cerrado" }, adminActor, null, null);
+    expect(result.case.status).toBe("cerrado");
+  });
+
+  it("sigue permitiendo error_core → listo_para_core", async () => {
+    const errorCoreCase = { ...listoCase, status: "error_core" };
+    const updatedCase = { ...errorCoreCase, status: "listo_para_core" };
+    setupPatchMocks([errorCoreCase], [updatedCase]);
+
+    const result = await patchCase("case-1", { status: "listo_para_core" }, adminActor, null, null);
+    expect(result.case.status).toBe("listo_para_core");
+  });
 });
 
 // ── patchCase — not found / IDOR ─────────────────────────────────────────────
@@ -303,13 +346,37 @@ describe("patchCase — update failure", () => {
     vi.clearAllMocks();
   });
 
-  it("throws NOT_FOUND when DB update returns no rows (RLS-equivalent: tenant filter blocked write)", async () => {
-    // Select finds the case, but update returns no rows (wrong tenant on write)
+  it("throws FSM_INVALID_TRANSITION when the status update matches no rows (TOCTOU — el caso cambió mientras lo mirabas)", async () => {
+    // El select encuentra el caso, pero el update con status en el where no
+    // matchea ninguna fila: el status cambió en el medio.
     setupPatchMocks([listoCase], []);
 
     await expect(
       patchCase("case-1", { status: "escalado" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("throws NOT_FOUND when a status-less update (sólo reasignación) matches no rows", async () => {
+    setupPatchMocks([listoCase], []);
+
+    await expect(
+      patchCase("case-1", { assigned_to: "other-analyst-id" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
+  });
+
+  it("una reasignación sin status sigue funcionando", async () => {
+    const updatedCase = { ...listoCase, assigned_to: "other-analyst-id" };
+    setupPatchMocks([listoCase], [updatedCase]);
+
+    const result = await patchCase(
+      "case-1",
+      { assigned_to: "other-analyst-id" },
+      adminActor,
+      null,
+      null
+    );
+    expect(result.case.assigned_to).toBe("other-analyst-id");
   });
 });
 

@@ -27,7 +27,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { writeAuditLog, AuditEvent, ipValida } from "@/lib/audit/log";
 import { db } from "@/lib/db";
 
 describe("writeAuditLog", () => {
@@ -114,6 +114,25 @@ describe("writeAuditLog", () => {
         payload: {},
       })
     );
+  });
+});
+
+describe("ipValida", () => {
+  it("returns null for 'anonymous'", () => {
+    expect(ipValida("anonymous")).toBeNull();
+  });
+
+  it("keeps a valid IPv4 address", () => {
+    expect(ipValida("203.0.113.5")).toBe("203.0.113.5");
+  });
+
+  it("keeps a valid IPv6 address", () => {
+    expect(ipValida("::1")).toBe("::1");
+  });
+
+  it("returns null for null or undefined", () => {
+    expect(ipValida(null)).toBeNull();
+    expect(ipValida(undefined)).toBeNull();
   });
 });
 

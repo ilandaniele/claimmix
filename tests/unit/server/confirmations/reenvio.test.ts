@@ -42,7 +42,8 @@ vi.mock("@/server/confirmations/messenger", () => ({
   messengerFor: mockMessengerFor,
 }));
 
-vi.mock("@/lib/audit/log", () => ({
+vi.mock("@/lib/audit/log", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/audit/log")>()),
   AuditEvent: {
     CASE_CLOSED: "case.closed",
     CASE_CLOSED_ABANDONED: "claim.closed_abandoned",

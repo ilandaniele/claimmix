@@ -253,7 +253,14 @@ describe("getTenantKpis — la serie de actividad", () => {
   it("pone las filas en su mes y rellena los doce con cero", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-15T12:00:00Z"));
-    const septiembre = { clave: "2026-09", reclamos: 5, whatsapps: 3, mails: 2 };
+    const septiembre = {
+      clave: "2026-09",
+      reclamos: 5,
+      whatsapps: 3,
+      mails: 2,
+      reclamos_whatsapp: 3,
+      reclamos_mail: 2,
+    };
     baseCon({ serie: [septiembre] });
 
     const { serie } = await getTenantKpis(CTX, { serie: "mes" });
@@ -285,7 +292,7 @@ describe("consultaDeActividad — el SQL que arma", () => {
     expect(params).toEqual(expect.arrayContaining(["day", "YYYY-MM-DD"]));
   });
 
-  it("las tres series cuentan sólo WhatsApp y mail reales, sin simulaciones", () => {
+  it("las cinco series cuentan sólo WhatsApp y mail reales, sin simulaciones", () => {
     expect(sql).toMatch(/"cases"\."channel" in \(\$\d+, \$\d+\)/);
     expect(params).toEqual(expect.arrayContaining(["whatsapp", "email"]));
     expect(params.filter((p) => String(p).endsWith("_sim"))).toEqual([]);
@@ -303,6 +310,12 @@ describe("consultaDeActividad — el SQL que arma", () => {
     expect(columna("reclamos")).toMatch(/filter \(where "cases"\."is_claim" is true\)/);
     expect(columna("whatsapps")).toMatch(/filter \(where "cases"\."channel" = 'whatsapp'\)/);
     expect(columna("mails")).toMatch(/filter \(where "cases"\."channel" = 'email'\)/);
+    expect(columna("reclamos_whatsapp")).toMatch(
+      /filter \(where "cases"\."is_claim" is true and "cases"\."channel" = 'whatsapp'\)/
+    );
+    expect(columna("reclamos_mail")).toMatch(
+      /filter \(where "cases"\."is_claim" is true and "cases"\."channel" = 'email'\)/
+    );
   });
 
   it("devuelve filas con la forma de PuntoSerie", () => {

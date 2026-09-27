@@ -18,7 +18,7 @@ import { entrar } from "@/lib/api/entrada";
 import { exigirPlanPro } from "@/lib/auth/exigir-plan-pro";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
-import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import { getClientIp, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { RespuestaHumanaSchema } from "@/lib/schemas/respuesta";
 import { responderPorWhatsApp } from "@/server/confirmations/respuesta-humana";
 
@@ -50,7 +50,10 @@ export async function POST(
       return err(new AppError("VALIDATION_FAILED", cuerpo.error.issues[0]?.message));
     }
 
-    const resultado = await responderPorWhatsApp(ctx, parsedParams.data.id, cuerpo.data.texto);
+    const resultado = await responderPorWhatsApp(ctx, parsedParams.data.id, cuerpo.data.texto, {
+      ip: getClientIp(request),
+      ua: request.headers.get("user-agent") ?? undefined,
+    });
 
     if (!resultado.ok) {
       if (resultado.motivo === "no_encontrado") {

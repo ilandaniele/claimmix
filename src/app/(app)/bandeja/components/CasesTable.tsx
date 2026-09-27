@@ -17,6 +17,7 @@ import { SourceBadge } from "./SourceBadge";
 import { ConfidenceBar } from "./ConfidenceBar";
 import { Vacio } from "./Vacio";
 import { useLocale } from "@/lib/i18n/LocaleContext";
+import { formatAge, formatDate } from "@/lib/utils";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 
 function formatCaseId(id: string): string {
@@ -336,25 +337,26 @@ export function CasesTable({
       {
         accessorKey: "created_at",
         header: t("table.col.received"),
-        cell: ({ getValue }) => (
-          <span className="whitespace-nowrap text-[13px] text-slate-500">
-            {new Intl.DateTimeFormat(locale, {
-              day: "2-digit",
-              month: "short",
-              hour: "2-digit",
-              minute: "2-digit",
-              /*
-               * Reloj de 24 horas en castellano. `Intl` con `es-AR` devolvía
-               * «09:55 p. m.» —cinco caracteres de más por fila, y con doce
-               * columnas eso era lo que empujaba «Asignación» fuera de la
-               * pantalla—. Además en Argentina el horario se escribe 21:55.
-               *
-               * En inglés se deja el formato que la persona espera.
-               */
-              hour12: locale.startsWith("es") ? false : undefined,
-            }).format(new Date(getValue<string>()))}
-          </span>
-        ),
+        /*
+         * Relativo en la celda, absoluto en el `title`.
+         *
+         * «09:55 p. m.» ocupaba lo mismo que las cinco columnas de al lado
+         * juntas, y para saber si un caso era de hace un rato o de la semana
+         * pasada había que restar la fecha a mano. `formatAge` ya resuelve
+         * eso —y ya lo usa «Antigüedad» en el detalle del caso—; la fecha y
+         * hora completas siguen ahí, en el `title`, para quien las necesite.
+         */
+        cell: ({ getValue }) => {
+          const iso = getValue<string>();
+          return (
+            <span
+              className="whitespace-nowrap text-[13px] text-slate-500"
+              title={formatDate(iso, locale)}
+            >
+              {formatAge(iso, t)}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "severity",

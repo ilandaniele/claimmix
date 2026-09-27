@@ -23,9 +23,16 @@ vi.mock("@/server/cases/get", () => ({ getCaseDetail: mockGetCaseDetail }));
 vi.mock("@/server/cases/conversacion", () => ({ conversacionDelCaso: mockConversacionDelCaso }));
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { contarCasos, buscarCaso } from "@/server/asistente/herramientas";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { contarCasos, buscarCaso, TOPE_COINCIDENCIAS } from "@/server/asistente/herramientas";
 import type { TenantContext } from "@/data/scope";
 import type { Intencion } from "@/core/asistente/intencion";
+
+/** El fragmento SQL de verdad que recibió `.where(...)`, sin conectar a nada. */
+const dialecto = new PgDialect();
+function sqlDe(fragmento: unknown) {
+  return dialecto.sqlToQuery(fragmento as Parameters<PgDialect["sqlToQuery"]>[0]);
+}
 
 const CTX: TenantContext = { tenantId: "10000000-0000-0000-0000-000000000001" };
 const OTRO_TENANT = "20000000-0000-0000-0000-000000000002";
@@ -86,6 +93,27 @@ describe("contarCasos", () => {
     expect(r.total).toBe(2);
     expect(where).toHaveBeenCalledTimes(1);
   });
+
+  it("sin canal pedido, restringe a whatsapp y email reales (paridad con /metricas)", async () => {
+    const { chain, where } = chainWhereResolves([{ n: 2 }]);
+    mockDb.select.mockReturnValue(chain);
+
+    await contarCasos(CTX, base);
+    const { sql, params } = sqlDe(where.mock.calls[0]?.[0]);
+    expect(sql).toMatch(/"channel" in \(\$\d+, \$\d+\)/);
+    expect(params).toEqual(expect.arrayContaining(["whatsapp", "email"]));
+  });
+
+  it("con canal pedido, compara ese único canal — no la lista de reales", async () => {
+    const { chain, where } = chainWhereResolves([{ n: 1 }]);
+    mockDb.select.mockReturnValue(chain);
+
+    await contarCasos(CTX, { ...base, canal: "email" });
+    const { sql, params } = sqlDe(where.mock.calls[0]?.[0]);
+    expect(sql).toMatch(/"channel" = \$\d+/);
+    expect(params).toEqual(expect.arrayContaining(["email"]));
+    expect(params).not.toContain("whatsapp");
+  });
 });
 
 describe("buscarCaso", () => {
@@ -93,29 +121,41 @@ describe("buscarCaso", () => {
     herramienta: "buscar_caso",
     nombre: "Roberto Paz",
     numero: null,
+    codigo: null,
   };
 
-  it("sin nombre ni número no toca la base", async () => {
+  /** Una fila cruda de la consulta: la misma forma que `select` de `buscarCaso`. */
+  const fila = (o: { id: string; policyholder_name: string | null; claim_type: string | null }) => ({
+    ...o,
+    created_at: "2026-09-01T00:00:00.000Z",
+    status: "escalado" as const,
+  });
+
+  it("sin nombre, número ni código no toca la base", async () => {
     const r = await buscarCaso(
       CTX,
-      { herramienta: "buscar_caso", nombre: null, numero: null },
+      { herramienta: "buscar_caso", nombre: null, numero: null, codigo: null },
       "analyst"
     );
-    expect(r).toEqual({ coincidencias: [], detalle: null });
+    expect(r).toEqual({ coincidencias: [], detalle: null, hayMas: false });
     expect(mockDb.select).not.toHaveBeenCalled();
   });
 
   it("más de un resultado no trae detalle", async () => {
     const { chain } = chainOrderLimitResolves([
-      { id: "caso-1", policyholder_name: "Roberto Paz", claim_type: "choque" },
-      { id: "caso-2", policyholder_name: "Roberto Paz Jr.", claim_type: "robo" },
+      fila({ id: "a0000001", policyholder_name: "Roberto Paz", claim_type: "choque" }),
+      fila({ id: "a0000002", policyholder_name: "Roberto Paz Jr.", claim_type: "robo" }),
     ]);
     mockDb.select.mockReturnValue(chain);
 
     const r = await buscarCaso(CTX, busquedaPorNombre, "analyst");
     expect(r.coincidencias).toHaveLength(2);
     expect(r.detalle).toBeNull();
+    expect(r.hayMas).toBe(false);
     expect(mockGetCaseDetail).not.toHaveBeenCalled();
+    // El número y la fecha van en cada coincidencia, para la lista de la caja del asistente.
+    expect(r.coincidencias[0]?.numero).toMatch(/^SIN-[0-9A-F]{4}-[0-9A-F]{4}$/);
+    expect(r.coincidencias[0]?.estado).toBe("escalado");
   });
 
   it("cero resultados no trae detalle", async () => {
@@ -125,6 +165,50 @@ describe("buscarCaso", () => {
     const r = await buscarCaso(CTX, busquedaPorNombre, "analyst");
     expect(r.coincidencias).toHaveLength(0);
     expect(r.detalle).toBeNull();
+    expect(r.hayMas).toBe(false);
+  });
+
+  it("más de TOPE_COINCIDENCIAS filas avisa hayMas y muestra sólo el tope", async () => {
+    const filas = Array.from({ length: TOPE_COINCIDENCIAS + 1 }, (_, n) =>
+      fila({ id: `caso-${n}`, policyholder_name: "Roberto Paz", claim_type: "choque" })
+    );
+    const { chain, limit } = chainOrderLimitResolves(filas);
+    mockDb.select.mockReturnValue(chain);
+
+    const r = await buscarCaso(CTX, busquedaPorNombre, "analyst");
+    expect(r.coincidencias).toHaveLength(TOPE_COINCIDENCIAS);
+    expect(r.hayMas).toBe(true);
+    expect(limit).toHaveBeenCalledWith(TOPE_COINCIDENCIAS + 1);
+  });
+
+  it("busca por código de caso antes que por nombre o número", async () => {
+    const { chain, where } = chainOrderLimitResolves([]);
+    mockDb.select.mockReturnValue(chain);
+
+    await buscarCaso(
+      CTX,
+      { herramienta: "buscar_caso", nombre: "Roberto Paz", numero: "123", codigo: "3f2a9b1c" },
+      "analyst"
+    );
+    const { sql, params } = sqlDe(where.mock.calls[0]?.[0]);
+    expect(sql).toContain("right(replace(");
+    expect(params).toContain("3f2a9b1c");
+  });
+
+  it("busca por nombre insensible a acentos, en policyholder_name o en el nombre extraído", async () => {
+    const { chain, where } = chainOrderLimitResolves([]);
+    mockDb.select.mockReturnValue(chain);
+
+    await buscarCaso(
+      CTX,
+      { herramienta: "buscar_caso", nombre: "Nuñez", numero: null, codigo: null },
+      "analyst"
+    );
+    const { sql, params } = sqlDe(where.mock.calls[0]?.[0]);
+    expect(sql).toContain("translate(lower(");
+    expect(sql).toContain("extracted_fields");
+    expect(sql).toContain("full_name");
+    expect(params).toContain("%Nuñez%");
   });
 
   describe("con exactamente un resultado", () => {
@@ -132,7 +216,7 @@ describe("buscarCaso", () => {
 
     function mockUnResultado() {
       const { chain } = chainOrderLimitResolves([
-        { id: CASE_ID, policyholder_name: "Roberto Paz", claim_type: "choque" },
+        fila({ id: CASE_ID, policyholder_name: "Roberto Paz", claim_type: "choque" }),
       ]);
       mockDb.select.mockReturnValue(chain);
     }

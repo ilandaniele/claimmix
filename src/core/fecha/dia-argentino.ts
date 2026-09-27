@@ -70,6 +70,19 @@ export function medianocheArgentina(anio: number, mes: number, dia: number): str
 }
 
 /**
+ * La medianoche de hace N días, contando hoy como el primero.
+ *
+ * `dias=1` es la medianoche de HOY; `dias=7` es la de hace seis días — la
+ * ventana de "últimos 7 días" del selector de período de la bandeja, con hoy
+ * adentro. `diaArgentino` ya resuelve el corrimiento de tres horas; acá sólo
+ * se le resta un número de días al día de calendario que devuelve.
+ */
+export function medianocheHaceDias(dias: number, cuando: Date = new Date()): string {
+  const [anio, mes, dia] = diaArgentino(cuando).split("-").map(Number);
+  return medianocheArgentina(anio, mes, dia - (dias - 1));
+}
+
+/**
  * La ventana del mes corriente, en horario argentino.
  *
  * Las métricas la armaban con `new Date(now.getFullYear(), now.getMonth(), 1)`,

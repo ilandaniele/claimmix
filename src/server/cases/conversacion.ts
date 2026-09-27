@@ -10,6 +10,7 @@ import "server-only";
 import { and, count, desc, eq, or } from "drizzle-orm";
 import { enTenantVarias, type TenantContext } from "@/data/scope";
 import { readable } from "@/core/email/texto-legible";
+import { PLANTILLA_RESPUESTA_HUMANA } from "@/core/whatsapp/plantillas";
 import {
   cases,
   claimAttachments,
@@ -28,6 +29,16 @@ export interface MensajeDeLaConversacion {
   received_at: string;
   estado_envio: string | null;
   attachment_count: number;
+  /** Quién lo escribió: el denunciante, el agente, o una persona del equipo. */
+  autor: "denunciante" | "agente" | "equipo";
+}
+
+/**
+ * `equipo` sólo cuando lo saliente es la plantilla de la respuesta humana
+ * (P8): el resto de lo saliente lo compuso el agente.
+ */
+function autorDeLoSaliente(template: string | null): "agente" | "equipo" {
+  return template === PLANTILLA_RESPUESTA_HUMANA ? "equipo" : "agente";
 }
 
 /** Lo que contesta `GET /api/cases/:id/messages`. */
@@ -50,14 +61,21 @@ export const TOPE_MENSAJES = 50;
  */
 const POR_FUENTE = TOPE_MENSAJES + 1;
 
-type DelHilo = Omit<MensajeDeLaConversacion, "estado_envio"> & { status: string };
-type Simulado = Omit<MensajeDeLaConversacion, "direction" | "estado_envio" | "attachment_count">;
+type DelHilo = Omit<MensajeDeLaConversacion, "estado_envio" | "autor"> & {
+  status: string;
+  template: string | null;
+};
+type Simulado = Omit<
+  MensajeDeLaConversacion,
+  "direction" | "estado_envio" | "attachment_count" | "autor"
+>;
 type Saliente = {
   id: string;
   channel: string;
   rendered_body: string;
   status: string;
   created_at: string;
+  template: string | null;
 };
 
 /** `null` si el caso no existe o no es del inquilino: la ruta contesta 404. */
@@ -94,6 +112,7 @@ export async function conversacionDelCaso(
         body_text: claimMessages.body_text,
         received_at: claimMessages.received_at,
         status: claimMessages.status,
+        template: claimMessages.template,
         attachment_count: count(claimAttachments.id),
       })
       .from(claimMessages)
@@ -135,6 +154,7 @@ export async function conversacionDelCaso(
         rendered_body: outboundMessages.rendered_body,
         status: outboundMessages.status,
         created_at: outboundMessages.created_at,
+        template: outboundMessages.template,
       })
       .from(outboundMessages)
       .where(
@@ -171,16 +191,18 @@ export async function conversacionDelCaso(
   if (!elCaso) return null;
 
   const mensajes: MensajeDeLaConversacion[] = [
-    ...hilo.map(({ status, ...m }) => ({
+    ...hilo.map(({ status, template, ...m }) => ({
       ...m,
       // Lo entrante tiene estado de recepción, no de envío.
       estado_envio: m.direction === "outbound" ? status : null,
+      autor: m.direction === "outbound" ? autorDeLoSaliente(template) : ("denunciante" as const),
     })),
     ...simulados.map((m) => ({
       ...m,
       direction: "inbound" as const,
       estado_envio: null,
       attachment_count: 0,
+      autor: "denunciante" as const,
     })),
     ...salientes.map((m) => ({
       id: m.id,
@@ -192,6 +214,7 @@ export async function conversacionDelCaso(
       received_at: m.created_at,
       estado_envio: m.status,
       attachment_count: 0,
+      autor: autorDeLoSaliente(m.template),
     })),
   ];
 

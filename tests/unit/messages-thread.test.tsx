@@ -14,6 +14,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { StrictMode } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi, beforeEach, describe, it, expect } from "vitest";
@@ -24,6 +25,13 @@ import type { EstadoDeRespuesta } from "@/core/whatsapp/puede-responder";
 
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
+
+// ── Mock next/navigation (F: router.refresh tras un envío) ────────────────────
+
+const nav = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn(), refresh: nav.refresh }),
+}));
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +53,7 @@ function makeMessage(overrides: Partial<{
   received_at: string;
   estado_envio: string | null;
   attachment_count: number;
+  autor: string;
 }> = {}) {
   return {
     id: "msg-001",
@@ -247,6 +256,20 @@ describe("MessagesThread", () => {
     });
   });
 
+  it("bajo StrictMode (dev) igual llega a mostrar la tarjeta tras el montaje doble", async () => {
+    mockFetch.mockReturnValue(makeJsonResponse({ messages: [makeMessage()] }));
+
+    render(
+      <StrictMode>
+        <MessagesThread caseId={CASE_ID} />
+      </StrictMode>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("message-card")).toBeInTheDocument();
+    });
+  });
+
   it("shows loading skeleton while fetching", () => {
     // Fetch never resolves during this assertion
     mockFetch.mockReturnValue(new Promise(() => {}));
@@ -431,10 +454,41 @@ describe("MessagesThread", () => {
       render(<MessagesThread caseId={CASE_ID} />);
 
       await waitFor(() => expect(screen.getAllByTestId("message-card")).toHaveLength(2));
-      expect(screen.queryByText("WhatsApp")).not.toBeInTheDocument();
+      // "WhatsApp" sólo por la píldora de canal (I), una por tarjeta: si el
+      // asunto se mostrara habría una tercera aparición.
+      expect(screen.getAllByText("WhatsApp")).toHaveLength(2);
       expect(screen.queryByText("(sin asunto)")).not.toBeInTheDocument();
       const [, saliente] = screen.getAllByTestId("message-card");
       expect(within(saliente!).getByText("A")).toBeInTheDocument();
+    });
+
+    it("I: la píldora de canal distingue WhatsApp de Mail", async () => {
+      mockFetch.mockReturnValue(
+        makeJsonResponse({
+          messages: [
+            makeMessage({ id: "wa-1", provider: "whatsapp" }),
+            makeMessage({ id: "gmail-1", provider: "gmail", received_at: new Date(Date.now() - 1000).toISOString() }),
+          ],
+        })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getAllByTestId("message-card")).toHaveLength(2));
+      const [wa, mail] = screen.getAllByTestId("message-card");
+      expect(within(wa!).getByText("WhatsApp")).toBeInTheDocument();
+      expect(within(mail!).getByText("Mail")).toBeInTheDocument();
+    });
+
+    it("E: la plantilla de respuesta humana muestra 'Equipo' y no 'Agente'", async () => {
+      mockFetch.mockReturnValue(
+        makeJsonResponse({ messages: [respuesta({ autor: "equipo" })] })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => expect(screen.getByText("Equipo")).toBeInTheDocument());
+      expect(screen.queryByText("Agente")).not.toBeInTheDocument();
     });
   });
 
@@ -447,6 +501,9 @@ describe("MessagesThread", () => {
         makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
       );
       mockFetch.mockReturnValueOnce(makeJsonResponse({ id: "outbound-1", estado: "sent" }));
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
+      );
 
       render(<MessagesThread caseId={CASE_ID} />);
 
@@ -455,13 +512,166 @@ describe("MessagesThread", () => {
       await user.click(screen.getByRole("button", { name: "Enviar" }));
 
       await waitFor(() => expect(screen.getByText("Enviado.")).toBeInTheDocument());
-      expect(mockFetch).toHaveBeenLastCalledWith(
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
         `/api/cases/${CASE_ID}/responder`,
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({ texto: "Ya está resuelto." }),
         })
       );
+    });
+
+    it("F: después de un envío exitoso, vuelve a pedir el hilo y refresca la ruta", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
+      );
+      mockFetch.mockReturnValueOnce(makeJsonResponse({ id: "outbound-1", estado: "sent" }));
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({
+          messages: [makeMessage()],
+          recortada: false,
+          respuesta: { habilitada: false, motivo: "agente_activo", vence_en: null },
+        })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
+      await user.type(textarea, "Ya está resuelto.");
+      await user.click(screen.getByRole("button", { name: "Enviar" }));
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      expect(mockFetch).toHaveBeenNthCalledWith(3, `/api/cases/${CASE_ID}/messages`);
+      await waitFor(() => expect(nav.refresh).toHaveBeenCalledTimes(1));
+    });
+
+    it("H: muestra hasta cuándo se puede responder cuando la ventana tiene vencimiento", async () => {
+      mockFetch.mockReturnValue(
+        makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
+      expect(screen.getByText(/Podés responder hasta el/)).toBeInTheDocument();
+    });
+
+    it("G: 403 al enviar bloquea la caja por plan", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
+      );
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({ error: { code: "PLAN_REQUERIDO", message: "Disponible con el Plan Pro." } }, 403)
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
+      await user.type(textarea, "Ya está resuelto.");
+      await user.click(screen.getByRole("button", { name: "Enviar" }));
+
+      await waitFor(() => expect(screen.getByText("Disponible con el Plan Pro")).toBeInTheDocument());
+      expect(screen.queryByPlaceholderText("Escribí la respuesta para el denunciante…")).not.toBeInTheDocument();
+    });
+
+    it("G: 409 con motivo cierra la caja con la explicación real", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
+      );
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse(
+          {
+            error: {
+              code: "RESPUESTA_NO_PERMITIDA",
+              message: "No se puede responder este caso por WhatsApp en este momento.",
+              details: { motivo: "ventana" },
+            },
+          },
+          409
+        )
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
+      await user.type(textarea, "Ya está resuelto.");
+      await user.click(screen.getByRole("button", { name: "Enviar" }));
+
+      await waitFor(() =>
+        expect(screen.getByText(/Pasaron más de 24 h desde el último mensaje/)).toBeInTheDocument()
+      );
+      expect(screen.queryByPlaceholderText("Escribí la respuesta para el denunciante…")).not.toBeInTheDocument();
+    });
+
+    it("G: un error sin motivo reconocido muestra el aviso genérico", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
+      );
+      mockFetch.mockReturnValueOnce(makeJsonResponse({ error: { code: "INTERNAL_ERROR", message: "Error." } }, 500));
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
+      await user.type(textarea, "Ya está resuelto.");
+      await user.click(screen.getByRole("button", { name: "Enviar" }));
+
+      await waitFor(() => expect(screen.getByText("No se pudo enviar. Probá de nuevo.")).toBeInTheDocument());
+    });
+
+    it("un 500 al enviar (ENVIO_FALLIDO) también vuelve a pedir el hilo, para que se vea la fila que quedó anotada", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
+      );
+      mockFetch.mockReturnValueOnce(makeJsonResponse({ error: { code: "ENVIO_FALLIDO", message: "Error." } }, 502));
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({
+          messages: [
+            makeMessage(),
+            makeMessage({ id: "msg-out", direction: "outbound", autor: "agente", estado_envio: "failed" }),
+          ],
+          recortada: false,
+          respuesta: HABILITADA,
+        })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
+      await user.type(textarea, "Ya está resuelto.");
+      await user.click(screen.getByRole("button", { name: "Enviar" }));
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      expect(mockFetch).toHaveBeenNthCalledWith(3, `/api/cases/${CASE_ID}/messages`);
+      await waitFor(() => expect(screen.getByText("No se envió")).toBeInTheDocument());
+    });
+
+    it("si el refetch silencioso tras un envío exitoso falla, el hilo y el 'Enviado.' siguen a la vista", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockReturnValueOnce(
+        makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
+      );
+      mockFetch.mockReturnValueOnce(makeJsonResponse({ id: "outbound-1", estado: "sent" }));
+      mockFetch.mockReturnValueOnce(makeJsonResponse({ error: { code: "INTERNAL_ERROR" } }, 500));
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
+      await user.type(textarea, "Ya está resuelto.");
+      await user.click(screen.getByRole("button", { name: "Enviar" }));
+
+      await waitFor(() => expect(screen.getByText("Enviado.")).toBeInTheDocument());
+      // El refetch falló pero era silencioso: sigue el hilo, no la pantalla de error genérico.
+      expect(screen.getByTestId("messages-thread")).toBeInTheDocument();
+      expect(screen.queryByText("Ocurrió un error inesperado. Intentá de nuevo.")).not.toBeInTheDocument();
     });
 
     it("sin Plan Pro: muestra el bloqueo y no la caja de texto", async () => {
@@ -475,7 +685,8 @@ describe("MessagesThread", () => {
 
       render(<MessagesThread caseId={CASE_ID} />);
 
-      await waitFor(() => expect(screen.getByText("Disponible en el Plan Pro")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("Disponible con el Plan Pro")).toBeInTheDocument());
+      expect(screen.getByText("Responder por WhatsApp desde la app")).toBeInTheDocument();
       expect(screen.queryByPlaceholderText("Escribí la respuesta para el denunciante…")).not.toBeInTheDocument();
     });
 
@@ -511,7 +722,7 @@ describe("MessagesThread", () => {
 
       await waitFor(() => expect(screen.getByTestId("message-card")).toBeInTheDocument());
       expect(screen.queryByPlaceholderText("Escribí la respuesta para el denunciante…")).not.toBeInTheDocument();
-      expect(screen.queryByText("Disponible en el Plan Pro")).not.toBeInTheDocument();
+      expect(screen.queryByText("Disponible con el Plan Pro")).not.toBeInTheDocument();
     });
   });
 });

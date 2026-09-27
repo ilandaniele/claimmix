@@ -9,15 +9,6 @@ import type { CaseRow } from "@/server/cases/list";
 import type { CaseStatus } from "@/lib/schemas/cases";
 
 /**
- * Generate a case display number from a UUID.
- * Uses the last 8 hex chars formatted as SIN-XXXX-XXXX.
- */
-export function formatCaseNumber(id: string): string {
-  const suffix = id.replace(/-/g, "").slice(-8).toUpperCase();
-  return `SIN-${suffix.slice(0, 4)}-${suffix.slice(4)}`;
-}
-
-/**
  * Merge realtime updates into a local cases array.
  * INSERT: prepends to the front (newest first), skips duplicates.
  * UPDATE: replaces the matching row in-place.

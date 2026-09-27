@@ -176,16 +176,32 @@ for (const c of crudos) {
   const cuando = new Date(c.ms);
   const dia = diaArgentino(cuando);
   if (dia !== cuando.toISOString().slice(0, 10)) deNoche++;
-  const n = enJs.get(dia) ?? { reclamos: 0, whatsapps: 0, mails: 0 };
+  const n = enJs.get(dia) ?? {
+    reclamos: 0,
+    whatsapps: 0,
+    mails: 0,
+    reclamos_whatsapp: 0,
+    reclamos_mail: 0,
+  };
   if (c.is_claim === true) n.reclamos++;
   if (c.channel === "whatsapp") n.whatsapps++;
   if (c.channel === "email") n.mails++;
+  if (c.is_claim === true && c.channel === "whatsapp") n.reclamos_whatsapp++;
+  if (c.is_claim === true && c.channel === "email") n.reclamos_mail++;
   enJs.set(dia, n);
 }
 const enSql = new Map(porDia.map((f) => [f.clave, f]));
 const descuadres = [...new Set([...enJs.keys(), ...enSql.keys()])].filter((dia) => {
   const [s, j] = [enSql.get(dia), enJs.get(dia)];
-  return !s || !j || s.reclamos !== j.reclamos || s.whatsapps !== j.whatsapps || s.mails !== j.mails;
+  return (
+    !s ||
+    !j ||
+    s.reclamos !== j.reclamos ||
+    s.whatsapps !== j.whatsapps ||
+    s.mails !== j.mails ||
+    s.reclamos_whatsapp !== j.reclamos_whatsapp ||
+    s.reclamos_mail !== j.reclamos_mail
+  );
 });
 if (descuadres.length) {
   mal(`la serie no cuadra con los casos en ${descuadres.length} día(s): ${descuadres.slice(0, 5).join(", ")}`);
@@ -236,7 +252,7 @@ if (conDatos.length < 2) {
   } else {
     const porNombre = await buscarCaso(
       ctxDe(a),
-      { herramienta: "buscar_caso", nombre: casoDeOtro.nombre, numero: null },
+      { herramienta: "buscar_caso", nombre: casoDeOtro.nombre, numero: null, codigo: null },
       "admin"
     );
     if (porNombre.coincidencias.length > 0) {
@@ -252,7 +268,7 @@ if (conDatos.length < 2) {
     } else {
       const porNumero = await buscarCaso(
         ctxDe(a),
-        { herramienta: "buscar_caso", nombre: null, numero: digitos },
+        { herramienta: "buscar_caso", nombre: null, numero: digitos, codigo: null },
         "admin"
       );
       if (porNumero.coincidencias.length > 0) {

@@ -109,7 +109,8 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Bandeja actions ────────────────────────────────────────────────────────
   "bandeja.simulate": "Simulate new email",
   "bandeja.export": "Export CSV",
-  "bandeja.search": "Search cases...",
+  "bandeja.buscarPlaceholder": "Search by name, policy, or case number",
+  "bandeja.buscarLimpiar": "Clear search",
   "bandeja.empty": "No claims match the filters.",
   "bandeja.loading": "Loading cases...",
   "bandeja.delete": "Delete case",
@@ -403,6 +404,15 @@ export const enUS: Record<TranslationKey, string> = {
   "filter.limpiar": "Clear",
   "filter.limpiarTodo": "Clear all",
   "filter.quitar": "Remove filter",
+  "filter.busqueda": "Search",
+
+  // ── Period selector (inbox) ─────────────────────────────────────────────────
+  "periodo.titulo": "Period",
+  "periodo.todo": "All",
+  "periodo.hoy": "Today",
+  "periodo.7d": "7 days",
+  "periodo.30d": "30 days",
+  "periodo.90d": "90 days",
 
   // ── Case detail email sections ──────────────────────────────────────────────
   "case.detail.parsedEmail": "Email data",
@@ -534,10 +544,13 @@ export const enUS: Record<TranslationKey, string> = {
   "messages.thread.collapse": "Show less",
   "messages.thread.denunciante": "Claimant",
   "messages.thread.agente": "Agent",
+  "messages.thread.equipo": "Team",
   "messages.thread.no_enviado": "Not sent",
   "messages.thread.simulado": "Simulated",
   "messages.thread.sin_confirmar": "Unconfirmed",
   "messages.thread.recortada": "Showing only the most recent messages.",
+  "messages.thread.canalWhatsapp": "WhatsApp",
+  "messages.thread.canalMail": "Mail",
 
   // ── Reply by WhatsApp (P8) ───────────────────────────────────────────────────
   "messages.reply.enviar": "Send",
@@ -547,6 +560,7 @@ export const enUS: Record<TranslationKey, string> = {
   "messages.reply.canal": "This case did not arrive by WhatsApp.",
   "messages.reply.enviado": "Sent.",
   "messages.reply.fallo": "Could not send. Try again.",
+  "messages.reply.venceEn": "You can reply until {fecha}.",
 
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clients",
@@ -639,7 +653,9 @@ export const enUS: Record<TranslationKey, string> = {
 
   // ── Plan Pro — las funciones que el plan abre, no un plan del catálogo ─
   "planPro.nombre": "Pro plan",
-  "planPro.bloqueado": "Available on the Pro plan",
+  "planPro.bloqueado": "Available with the Pro plan",
+  "planPro.asistente": "AI assistant",
+  "planPro.responder": "Reply on WhatsApp from the app",
 
   // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
   "cartera.aFacturar": "To bill",
@@ -712,7 +728,7 @@ export const enUS: Record<TranslationKey, string> = {
   "metricas.card.completitudAuto": "Auto-completion rate",
   "metricas.card.escalados": "Escalated claims",
   "metricas.card.primeraRespuesta": "Average time to first response",
-  "metricas.card.totalMes": "Total claims (month)",
+  "metricas.card.totalMes": "Cases this month",
   "metricas.col.casosCerrados": "Cases closed",
   "metricas.col.costo": "Cost",
   "metricas.col.modelo": "Model",
@@ -732,8 +748,15 @@ export const enUS: Record<TranslationKey, string> = {
   "metricas.ia.tokensMes": "Tokens this month",
   "metricas.ia.tokensTotal": "Tokens all time",
   "metricas.ia.vacio": "No AI usage this month.",
-  "metricas.porEstado": "Claims by status",
-  "metricas.porTipo": "Claims by type",
+  "metricas.porEstado": "Claims by status (all time)",
+  "metricas.porTipo": "Claims by type (all time)",
+  "metricas.resumen.esteAnio": "This year",
+  "metricas.resumen.esteMes": "This month",
+  "metricas.resumen.hoy": "Today",
+  "metricas.resumen.porCanal": "{whatsapp} via WhatsApp · {mail} via email",
+  "metricas.resumen.ultimos12meses": "Last 12 months",
+  "metricas.resumen.ultimos30dias": "Last 30 days",
+  "metricas.resumen.ultimos5anios": "Last 5 years",
   "metricas.sinCasosCerrados": "No cases closed this month.",
   "metricas.sinDatos": "No data.",
   "metricas.topAnalistas": "Top 5 analysts — cases closed this month",
@@ -1097,6 +1120,17 @@ export const enUS: Record<TranslationKey, string> = {
   "asistente.enviando": "Asking…",
   "asistente.demasiadas": "Too many questions in a row. Wait a moment and try again.",
   "asistente.error": "Could not answer the question. Try again.",
+  "asistente.avisoResumenIA": "Summary generated with AI from the case. Verify it in the case before acting.",
+  "asistente.chip.conteoMes": "How many cases were there this month?",
+  "asistente.chip.whatsappsHoy": "How many WhatsApps came in today?",
+  "asistente.chip.reclamos30dias": "How many claims were there in the last 30 days?",
+  "asistente.chip.buscarCasoLabel": "Search for the case of…",
+  "asistente.chip.buscarCasoPrefill": "Search for the case of ",
+  "asistente.chip.resumirCaso": "Summarize this case",
+  "asistente.chip.resumirCasoPregunta": "What happened with case {numero}?",
+  // ── Floating assistant — the same assistant, in a panel over any page ───
+  "asistente.flotante.abrir": "Ask the assistant",
+  "asistente.flotante.cerrar": "Close assistant",
 
   // ── Help — how the interface works, same text in the demo and the app ──
   "ayuda.abrir": "Help: how it works",

@@ -15,6 +15,7 @@
  *   500  INTERNAL_ERROR
  *   501  NOT_IMPLEMENTED
  *   502  ENVIO_FALLIDO
+ *   503  IA_NO_DISPONIBLE
  *
  * NEVER include stack traces or internal error strings in API responses.
  */
@@ -35,6 +36,7 @@ export const ErrorCode = {
   INTERNAL_ERROR: "INTERNAL_ERROR",
   NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
   ENVIO_FALLIDO: "ENVIO_FALLIDO",
+  IA_NO_DISPONIBLE: "IA_NO_DISPONIBLE",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -55,6 +57,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   INTERNAL_ERROR: 500,
   NOT_IMPLEMENTED: 501,
   ENVIO_FALLIDO: 502,
+  IA_NO_DISPONIBLE: 503,
 };
 
 /** Default es-AR messages for each error code. */
@@ -63,7 +66,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   INVALID_CREDENTIALS: "Credenciales inválidas.",
   NOT_FOUND: "El recurso solicitado no existe.",
   FORBIDDEN_ROLE: "No tenés permisos para realizar esta acción.",
-  PLAN_REQUERIDO: "Esta función es del Plan Pro.",
+  PLAN_REQUERIDO: "Disponible con el Plan Pro.",
   VALIDATION_FAILED: "Los datos enviados no son válidos.",
   RATE_LIMITED: "Demasiadas solicitudes. Esperá un momento.",
   AI_BUDGET_EXCEEDED: "Presupuesto de IA agotado para hoy.",
@@ -74,6 +77,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   INTERNAL_ERROR: "Error interno del servidor.",
   NOT_IMPLEMENTED: "Esta función no está disponible en esta versión.",
   ENVIO_FALLIDO: "No se pudo enviar el mensaje por WhatsApp.",
+  IA_NO_DISPONIBLE: "El asistente no está disponible en este momento. Probá de nuevo en unos minutos.",
 };
 
 /** Application error — carries a typed error code and HTTP status. */

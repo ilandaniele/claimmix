@@ -17,9 +17,10 @@ import { getUserRow, type UserRow } from "@/lib/auth/user-row";
 import { users } from "@/lib/db/schema";
 import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
+import { AsistenteFlotante } from "./_components/AsistenteFlotante";
 import { getT } from "@/lib/i18n";
 import { LocaleProvider } from "@/lib/i18n/LocaleContext";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { ThemeProvider } from "@/lib/theme/ThemeContext";
 
 export default async function AppLayout({
@@ -46,14 +47,10 @@ export default async function AppLayout({
   const isOperator = isOperatorEmail(user?.email);
   // Account preference wins over the device cookie (so the saved language
   // follows the user to any device); cookie/default covers the rest.
-  const cookieLocale = await getServerLocale();
-  const accountLocale = userRow?.locale;
-  const locale =
-    accountLocale === "es-AR" || accountLocale === "en-US"
-      ? accountLocale
-      : cookieLocale;
+  const locale = await resolveAccountLocale(userRow?.locale);
   const t = getT(locale);
   const fullName: string = userRow?.full_name ?? user?.email ?? t("layout.nombreFallback");
+  const esPro = esPlanPro(userRow?.plan);
 
   return (
     <LocaleProvider locale={locale}>
@@ -110,7 +107,7 @@ export default async function AppLayout({
            * Sólo el booleano: el nombre del plan es dato de admin, y todo lo
            * que recibe la barra viaja al navegador de cualquier rol.
            */}
-          <Sidebar role={role} isOperator={isOperator} esPro={esPlanPro(userRow?.plan)} />
+          <Sidebar role={role} isOperator={isOperator} esPro={esPro} />
 
           {/* Main content area */}
           <div className="flex flex-1 flex-col overflow-hidden">
@@ -130,6 +127,8 @@ export default async function AppLayout({
               {children}
             </main>
           </div>
+
+          {esPro && <AsistenteFlotante />}
         </div>
       </ThemeProvider>
     </LocaleProvider>

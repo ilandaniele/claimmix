@@ -25,6 +25,7 @@ vi.mock("@/lib/auth/require-role", async () => ({
 vi.mock("@/server/confirmations/respuesta-humana", () => ({ responderPorWhatsApp: mockResponder }));
 vi.mock("@/lib/rate-limit/index", () => ({
   RATE_LIMIT_CONFIGS: { RESPUESTA_HUMANA: { limit: 10, windowMs: 60_000 } },
+  getClientIp: () => "203.0.113.7",
 }));
 
 import { POST } from "@/app/api/cases/[id]/responder/route";
@@ -156,10 +157,12 @@ describe("POST /api/cases/:id/responder", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ id: "outbound-1", estado: "sent" });
     expect(mockResponder).toHaveBeenCalledTimes(1);
-    const [ctxLlamado, caseIdLlamado, textoLlamado] = mockResponder.mock.calls[0]!;
+    const [ctxLlamado, caseIdLlamado, textoLlamado, metaLlamado] = mockResponder.mock.calls[0]!;
     expect(ctxLlamado.userRow.tenant_id).toBe(TENANT_ID);
     expect(caseIdLlamado).toBe(CASE_ID);
     expect(textoLlamado).toBe("Ya está resuelto, gracias.");
+    // J: ip y user agent viajan a la auditoría de la respuesta humana.
+    expect(metaLlamado).toEqual({ ip: "203.0.113.7", ua: "vitest" });
   });
 
   it("usa el cupo de RESPUESTA_HUMANA", async () => {

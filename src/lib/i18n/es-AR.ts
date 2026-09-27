@@ -118,7 +118,10 @@ export const esAR = {
   // ── Bandeja actions ────────────────────────────────────────────────────────
   "bandeja.simulate": "Simular nuevo email",
   "bandeja.export": "Exportar CSV",
-  "bandeja.search": "Buscar casos...",
+  // Placeholder y aria-label de la caja de búsqueda del encabezado: nombre,
+  // póliza o número de caso («SIN-XXXX-XXXX»).
+  "bandeja.buscarPlaceholder": "Buscá por nombre, póliza o número de caso",
+  "bandeja.buscarLimpiar": "Limpiar búsqueda",
   "bandeja.empty": "No hay siniestros que coincidan con los filtros.",
   "bandeja.loading": "Cargando casos...",
   "bandeja.delete": "Eliminar caso",
@@ -418,6 +421,16 @@ export const esAR = {
   "filter.limpiar": "Limpiar",
   "filter.limpiarTodo": "Limpiar todo",
   "filter.quitar": "Quitar filtro",
+  // Rótulo de la marca removible de la búsqueda libre, en MarcasDeFiltros.
+  "filter.busqueda": "Búsqueda",
+
+  // ── Selector de período (bandeja) ──────────────────────────────────────────
+  "periodo.titulo": "Período",
+  "periodo.todo": "Todo",
+  "periodo.hoy": "Hoy",
+  "periodo.7d": "7 días",
+  "periodo.30d": "30 días",
+  "periodo.90d": "90 días",
 
   // ── Case detail email sections ──────────────────────────────────────────────
   "case.detail.parsedEmail": "Datos del email",
@@ -551,10 +564,13 @@ export const esAR = {
   "messages.thread.collapse": "Ver menos",
   "messages.thread.denunciante": "Denunciante",
   "messages.thread.agente": "Agente",
+  "messages.thread.equipo": "Equipo",
   "messages.thread.no_enviado": "No se envió",
   "messages.thread.simulado": "Simulado",
   "messages.thread.sin_confirmar": "Sin confirmar",
   "messages.thread.recortada": "Se muestran sólo los mensajes más recientes.",
+  "messages.thread.canalWhatsapp": "WhatsApp",
+  "messages.thread.canalMail": "Mail",
 
   // ── Reply by WhatsApp (P8) ───────────────────────────────────────────────────
   "messages.reply.enviar": "Enviar",
@@ -564,6 +580,7 @@ export const esAR = {
   "messages.reply.canal": "Este caso no llegó por WhatsApp.",
   "messages.reply.enviado": "Enviado.",
   "messages.reply.fallo": "No se pudo enviar. Probá de nuevo.",
+  "messages.reply.venceEn": "Podés responder hasta el {fecha}.",
 
   // ── Customers page ──────────────────────────────────────────────────────────
   "clientes.title": "Clientes",
@@ -666,7 +683,9 @@ export const esAR = {
 
   // ── Plan Pro — las funciones que el plan abre, no un plan del catálogo ─
   "planPro.nombre": "Plan Pro",
-  "planPro.bloqueado": "Disponible en el Plan Pro",
+  "planPro.bloqueado": "Disponible con el Plan Pro",
+  "planPro.asistente": "Asistente con IA",
+  "planPro.responder": "Responder por WhatsApp desde la app",
 
   // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
   "cartera.aFacturar": "A facturar",
@@ -739,7 +758,7 @@ export const esAR = {
   "metricas.card.completitudAuto": "Tasa de completitud automática",
   "metricas.card.escalados": "Siniestros escalados",
   "metricas.card.primeraRespuesta": "Tiempo medio hasta la primera respuesta",
-  "metricas.card.totalMes": "Total siniestros (mes)",
+  "metricas.card.totalMes": "Casos del mes",
   "metricas.col.casosCerrados": "Casos cerrados",
   "metricas.col.costo": "Costo",
   "metricas.col.modelo": "Modelo",
@@ -759,8 +778,15 @@ export const esAR = {
   "metricas.ia.tokensMes": "Tokens este mes",
   "metricas.ia.tokensTotal": "Tokens históricos",
   "metricas.ia.vacio": "Sin consumo de IA este mes.",
-  "metricas.porEstado": "Siniestros por situación",
-  "metricas.porTipo": "Siniestros por tipo",
+  "metricas.porEstado": "Siniestros por situación (histórico)",
+  "metricas.porTipo": "Siniestros por tipo (histórico)",
+  "metricas.resumen.esteAnio": "Este año",
+  "metricas.resumen.esteMes": "Este mes",
+  "metricas.resumen.hoy": "Hoy",
+  "metricas.resumen.porCanal": "{whatsapp} por WhatsApp · {mail} por mail",
+  "metricas.resumen.ultimos12meses": "Últimos 12 meses",
+  "metricas.resumen.ultimos30dias": "Últimos 30 días",
+  "metricas.resumen.ultimos5anios": "Últimos 5 años",
   "metricas.sinCasosCerrados": "Ningún caso cerrado este mes.",
   "metricas.sinDatos": "Sin datos.",
   "metricas.topAnalistas": "Top 5 analistas — casos cerrados este mes",
@@ -1124,6 +1150,17 @@ export const esAR = {
   "asistente.enviando": "Consultando…",
   "asistente.demasiadas": "Demasiadas preguntas seguidas. Esperá un momento y volvé a intentar.",
   "asistente.error": "No se pudo responder la pregunta. Probá de nuevo.",
+  "asistente.avisoResumenIA": "Resumen generado con IA a partir del caso. Verificalo en el caso antes de actuar.",
+  "asistente.chip.conteoMes": "¿Cuántos casos hubo este mes?",
+  "asistente.chip.whatsappsHoy": "¿Cuántos WhatsApps entraron hoy?",
+  "asistente.chip.reclamos30dias": "¿Cuántos reclamos hubo en los últimos 30 días?",
+  "asistente.chip.buscarCasoLabel": "Buscá el caso de…",
+  "asistente.chip.buscarCasoPrefill": "Buscá el caso de ",
+  "asistente.chip.resumirCaso": "Resumí este caso",
+  "asistente.chip.resumirCasoPregunta": "¿Qué pasó con el caso {numero}?",
+  // ── Asistente flotante — el mismo asistente, en un panel sobre cualquier página ─
+  "asistente.flotante.abrir": "Preguntale al asistente",
+  "asistente.flotante.cerrar": "Cerrar asistente",
 
   // ── Ayuda — cómo se usa la interfaz, mismo texto en la demo y en la app ─
   "ayuda.abrir": "Ayuda: cómo se usa",

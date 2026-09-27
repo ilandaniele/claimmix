@@ -21,6 +21,7 @@ import { getServerLocale } from "@/lib/i18n/locale";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
 import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
 import { formatDate, formatDateOnly, formatAge } from "@/lib/utils";
+import { formatCaseNumber } from "@/core/case/numero";
 import Link from "next/link";
 import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
 
@@ -73,12 +74,6 @@ const POLICY_STATUS_CLASSES: Record<string, string> = {
 
 /** Cuántos siniestros se dibujan. El total se cuenta aparte y se muestra igual. */
 const MAX_CASOS = 50;
-
-/** Format case UUID to short SIN-XXXX-XXXX display string */
-function formatCaseNumber(id: string): string {
-  const suffix = id.replace(/-/g, "").slice(-8).toUpperCase();
-  return `SIN-${suffix.slice(0, 4)}-${suffix.slice(4)}`;
-}
 
 export default async function CustomerDetailPage({
   params,

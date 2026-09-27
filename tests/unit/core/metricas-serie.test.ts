@@ -23,6 +23,8 @@ const fila = (clave: string, n: number): PuntoSerie => ({
   reclamos: n,
   whatsapps: n,
   mails: n,
+  reclamos_whatsapp: n,
+  reclamos_mail: n,
 });
 
 describe("serie de actividad — la frontera argentina", () => {
@@ -106,10 +108,10 @@ describe("unidadDe", () => {
     expect(unidadDe("anio")).toBe("anio");
   });
 
-  it("cualquier otra cosa es mes, incluida una lista", () => {
+  it("cualquier otra cosa es día, incluida una lista", () => {
     // `?serie=dia&serie=anio` llega como lista: no se elige una por la persona.
-    expect(unidadDe(undefined)).toBe("mes");
-    expect(unidadDe("x")).toBe("mes");
-    expect(unidadDe(["dia"])).toBe("mes");
+    expect(unidadDe(undefined)).toBe("dia");
+    expect(unidadDe("x")).toBe("dia");
+    expect(unidadDe(["dia"])).toBe("dia");
   });
 });

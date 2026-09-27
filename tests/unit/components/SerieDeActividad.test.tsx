@@ -24,9 +24,9 @@ vi.mock("next/link", async () => {
 import { SerieDeActividad } from "@/app/(app)/metricas/_components/SerieDeActividad";
 
 const SERIE = [
-  { clave: "2026-07", reclamos: 0, whatsapps: 0, mails: 0 },
-  { clave: "2026-08", reclamos: 2, whatsapps: 10, mails: 5 },
-  { clave: "2026-09", reclamos: 4, whatsapps: 0, mails: 1 },
+  { clave: "2026-07", reclamos: 0, whatsapps: 0, mails: 0, reclamos_whatsapp: 0, reclamos_mail: 0 },
+  { clave: "2026-08", reclamos: 2, whatsapps: 10, mails: 5, reclamos_whatsapp: 1, reclamos_mail: 1 },
+  { clave: "2026-09", reclamos: 4, whatsapps: 0, mails: 1, reclamos_whatsapp: 3, reclamos_mail: 1 },
 ];
 
 function dibujar() {
@@ -83,7 +83,9 @@ describe("SerieDeActividad", () => {
   });
 
   it("rotula los días en el orden de cada idioma, sin correrlos al anterior", () => {
-    const dia = [{ clave: "2026-08-31", reclamos: 1, whatsapps: 0, mails: 0 }];
+    const dia = [
+      { clave: "2026-08-31", reclamos: 1, whatsapps: 0, mails: 0, reclamos_whatsapp: 0, reclamos_mail: 0 },
+    ];
 
     const { unmount } = render(<SerieDeActividad serie={dia} unidad="dia" locale="es-AR" />);
     expect(screen.getByText("31/08/2026")).toBeInTheDocument();
@@ -126,10 +128,44 @@ describe("SerieDeActividad", () => {
     expect(within(serie).getAllByText(/WhatsApps atendidos/).length).toBeGreaterThan(SERIE.length);
   });
 
+  it("el resumen de arriba: el período actual es el último punto de la serie", () => {
+    const resumen = within(dibujar()).getByTestId("resumen-actual");
+    // Orden del `<dl>`: reclamos, whatsapps, mails — el mismo de `ColumnaResumen`.
+    const valores = within(resumen).getAllByRole("definition").map((el) => el.textContent);
+
+    expect(within(resumen).getByText("Este mes")).toBeInTheDocument();
+    expect(valores).toEqual(["4", "0", "1"]);
+    expect(within(resumen).getByText("3 por WhatsApp · 1 por mail")).toBeInTheDocument();
+  });
+
+  it("el resumen de arriba: la ventana entera es la suma de todos los puntos", () => {
+    const resumen = within(dibujar()).getByTestId("resumen-ventana");
+    const valores = within(resumen).getAllByRole("definition").map((el) => el.textContent);
+
+    expect(within(resumen).getByText("Últimos 12 meses")).toBeInTheDocument();
+    expect(valores).toEqual(["6", "10", "6"]);
+    expect(within(resumen).getByText("4 por WhatsApp · 2 por mail")).toBeInTheDocument();
+  });
+
+  it("el resumen cambia de rótulo con la unidad", () => {
+    render(<SerieDeActividad serie={SERIE} unidad="dia" locale="es-AR" />);
+    expect(screen.getByTestId("resumen-actual")).toHaveTextContent("Hoy");
+    expect(screen.getByTestId("resumen-ventana")).toHaveTextContent("Últimos 30 días");
+  });
+
+  it("el resumen también se traduce", () => {
+    render(<SerieDeActividad serie={SERIE} unidad="anio" locale="en-US" />);
+    expect(screen.getByTestId("resumen-actual")).toHaveTextContent("This year");
+    expect(screen.getByTestId("resumen-ventana")).toHaveTextContent("Last 5 years");
+    expect(screen.getByTestId("resumen-actual")).toHaveTextContent("3 via WhatsApp · 1 via email");
+  });
+
   it("sin actividad no divide por cero", () => {
     render(
       <SerieDeActividad
-        serie={[{ clave: "2026", reclamos: 0, whatsapps: 0, mails: 0 }]}
+        serie={[
+          { clave: "2026", reclamos: 0, whatsapps: 0, mails: 0, reclamos_whatsapp: 0, reclamos_mail: 0 },
+        ]}
         unidad="anio"
         locale="en-US"
       />

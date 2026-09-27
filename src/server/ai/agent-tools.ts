@@ -26,7 +26,6 @@ import "server-only";
 
 import { and, eq, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { customers, insuredAssets, policies } from "@/lib/db/schema";
 /*

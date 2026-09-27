@@ -45,9 +45,6 @@
 
 import { after } from "next/server";
 import "server-only";
-import { db } from "@/lib/db";
-import { cases, claimAttachments, claimMessages } from "@/lib/db/schema";
-import { firstRow } from "@/lib/db/helpers";
 import { getGmailClient } from "./gmail-client";
 import { getGmailAccountByEmail, listEnabledGmailAccounts, type GmailAccount } from "./accounts";
 import {
@@ -64,7 +61,6 @@ import { ingestInboundEmail } from "@/server/email/inbound-email";
 import { rehostAndRecordAttachments } from "@/server/email/rehost-attachments";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
-import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { sinLosCuerposYaDecodificados } from "@/server/email/gmail/payload-sin-duplicados";
 import type { gmail_v1 } from "googleapis";
 import { logger } from "@/lib/observability/logger";

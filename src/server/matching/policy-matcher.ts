@@ -9,8 +9,8 @@
  */
 
 import "server-only";
-import { and, asc, eq, sql } from "drizzle-orm";
-import { db, tables } from "@/lib/db";
+import { asc, eq, sql } from "drizzle-orm";
+import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { normalizarNumeroPoliza } from "@/core/matching/normalizar";
 import { logger } from "@/lib/observability/logger";

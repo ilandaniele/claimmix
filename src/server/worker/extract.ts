@@ -24,7 +24,6 @@
 
 import "server-only";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
 import {
   enTenant,
   enTenantVarias,
@@ -109,7 +108,6 @@ import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hyd
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle";
 import { mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
-import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
 import { logger } from "@/lib/observability/logger";

@@ -15,7 +15,6 @@
  */
 
 import { isIP } from "node:net";
-import { db } from "@/lib/db";
 import { auditLog } from "@/lib/db/schema";
 import type { AuditLogInsert } from "@/lib/db/types";
 import type { AuditPayload } from "./redact";

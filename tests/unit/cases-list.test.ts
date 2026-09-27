@@ -45,7 +45,6 @@ import {
   listCasesForExport,
 } from "@/server/cases/list";
 import { db } from "@/lib/db";
-import { countRows } from "@/lib/db/helpers";
 import { enTenant, enTenantVarias } from "@/data/scope";
 
 // ── Base query fixture ────────────────────────────────────────────────────────

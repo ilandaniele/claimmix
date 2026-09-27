@@ -13,8 +13,8 @@
  */
 
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
-import { db, tables } from "@/lib/db";
+import { desc, eq } from "drizzle-orm";
+import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { getDefaultGeminiModel } from "@/server/ai/provider";

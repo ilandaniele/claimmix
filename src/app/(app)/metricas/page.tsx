@@ -27,8 +27,6 @@ import { formatUsd as formatUsdShared } from "@/lib/utils";
 import {
   getTenantKpis,
   type MetricasData,
-  type AiUsageByUser,
-  type AiUsageByModel,
 } from "@/server/metrics/kpis";
 import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";

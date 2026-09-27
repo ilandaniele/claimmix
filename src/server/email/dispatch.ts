@@ -23,7 +23,6 @@
 
 import "server-only";
 import { and, asc, eq } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";

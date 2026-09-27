@@ -13,7 +13,7 @@
  * Las llamadas al modelo están mockeadas — esto prueba la contención, no el modelo.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { analyzeGaps } from "@/core/case/gap-analysis";
 import { runMockExtractor } from "@/server/ai/mock-extractor";
 import { buildSystemPrompt, buildUserMessage } from "@/server/ai/prompt";

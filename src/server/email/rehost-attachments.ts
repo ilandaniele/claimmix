@@ -23,7 +23,6 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";

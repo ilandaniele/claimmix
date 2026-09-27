@@ -9,7 +9,7 @@
 
 import "server-only";
 
-import { and, desc, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { interpretarBusqueda } from "@/core/matching/busqueda-libre";

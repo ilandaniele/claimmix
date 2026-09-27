@@ -14,7 +14,6 @@ import { esPlanPro } from "@/core/billing/plan-pro";
 import { getSessionContext } from "@/lib/auth/session";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
 import { getUserRow, type UserRow } from "@/lib/auth/user-row";
-import { users } from "@/lib/db/schema";
 import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
 import { AsistenteFlotante } from "./_components/AsistenteFlotante";

@@ -19,15 +19,13 @@
  */
 
 import "server-only";
-import { createHash } from "crypto";
 import { tokenDeGcp } from "@/server/gcp/credenciales";
 import { and, desc, eq, inArray } from "drizzle-orm";
 
-import { db, tables } from "@/lib/db";
+import { tables } from "@/lib/db";
 import {
   approvedExamplesForTenant,
   buildExpectedOutput,
-  stableHash,
 } from "@/server/training/dataset";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";

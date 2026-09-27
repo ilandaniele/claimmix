@@ -9,7 +9,7 @@
  */
 
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";

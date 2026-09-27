@@ -21,7 +21,6 @@ import "server-only";
 
 import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments, missingDocs, requiredDocsConfig } from "@/lib/db/schema";
 import { callGemini, errMeta, esPasajero } from "@/server/ai/gemini-extractor";

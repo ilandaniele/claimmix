@@ -9,12 +9,11 @@
  * IDOR: case must belong to authenticated user's tenant.
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/require-role";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, extractedFields, missingDocs } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";

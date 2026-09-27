@@ -20,7 +20,6 @@
 import "server-only";
 
 import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { labelForField, labelForClaimType } from "@/lib/labels/claim-fields";

@@ -342,6 +342,10 @@ export function MarcasDeFiltros() {
 
   const franjaRef = useRef<HTMLDivElement>(null);
   const puestos = filtrosPuestos((p) => paramsVisibles.getAll(p));
+  // La búsqueda libre no pasa por `GRUPOS_DE_FILTRO` —no es un chip que se
+  // combina, es texto— así que se cuenta y se saca aparte.
+  const busqueda = paramsVisibles.get("q") ?? "";
+  const totalMarcas = puestos.length + (busqueda ? 1 : 0);
 
   /*
    * ── El foco cuando se saca una marca ────────────────────────────────────
@@ -369,7 +373,7 @@ export function MarcasDeFiltros() {
       marcas[Math.min(i, marcas.length - 1)] ??
       document.getElementById(ID_BOTON);
     destino?.focus();
-  }, [puestos.length]);
+  }, [totalMarcas]);
 
   const sacar = useCallback(
     (param: string, valor: string, i: number) => {
@@ -379,7 +383,14 @@ export function MarcasDeFiltros() {
     [setFilter, paramsVisibles]
   );
 
-  if (puestos.length === 0) return null;
+  // La marca de búsqueda va última en el DOM (ver el render), así que su
+  // posición es siempre la que sigue a la última de `puestos`.
+  const sacarBusqueda = useCallback(() => {
+    focoPendiente.current = puestos.length;
+    setFilter("q", []);
+  }, [setFilter, puestos.length]);
+
+  if (totalMarcas === 0) return null;
 
   return (
     <div
@@ -431,7 +442,28 @@ export function MarcasDeFiltros() {
         </button>
       ))}
 
-
+      {/*
+        * La marca de la búsqueda libre. Va después de `puestos` y no antes:
+        * `sacarBusqueda` asume esa posición para devolver el foco.
+        */}
+      {busqueda && (
+        <button
+          type="button"
+          data-marca="q"
+          onClick={sacarBusqueda}
+          aria-label={`${t("filter.quitar")} ${t("filter.busqueda")}: ${busqueda}`}
+          className="group inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border border-control bg-white py-1 pl-2.5 pr-2 text-[12.5px] font-medium text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+        >
+          <span aria-hidden="true">
+            {t("filter.busqueda")}: {busqueda}
+          </span>
+          <X
+            size={12}
+            aria-hidden="true"
+            className="text-slate-400 transition-colors group-hover:text-slate-700"
+          />
+        </button>
+      )}
 
       {/*
         * Sacarlas de a una sirve para corregir; «Limpiar» sirve para volver a
@@ -439,11 +471,11 @@ export function MarcasDeFiltros() {
         * tantas consultas. Con una sola marca no aporta nada: la marca ya se
         * saca de un click.
         */}
-      {puestos.length > 1 && (
+      {totalMarcas > 1 && (
         <button
           type="button"
           onClick={() => {
-            limpiar(PARAMS_DE_FILTRO);
+            limpiar([...PARAMS_DE_FILTRO, "q"]);
             // El propio «Limpiar» desaparece al usarse: sin esto el foco se cae
             // al body, igual que al sacar la última marca.
             document.getElementById(ID_BOTON)?.focus();

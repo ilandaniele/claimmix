@@ -8,6 +8,8 @@ import { contarPorOpcion } from "@/core/case/filtro-de-estado";
 import { usePaginacion } from "./components/useFilterParam";
 import { NavegacionPendienteProvider, useNavegacion } from "./components/navegacion-pendiente";
 import { BotonDeFiltros, MarcasDeFiltros } from "./components/PanelDeFiltros";
+import { CampoDeBusqueda } from "./components/CampoDeBusqueda";
+import { SelectorDePeriodo } from "./components/SelectorDePeriodo";
 import { CasesTable } from "./components/CasesTable";
 import { SimulateModal } from "./components/SimulateModal";
 import { ToastContainer, useToast } from "./components/Toast";
@@ -586,7 +588,13 @@ function DashboardClientInterno({
            * «Simular» se leería como una acción más, que es lo contrario de lo
            * que es.
            */
-          alLadoDelTitulo={<BotonDeFiltros cuentas={cuentasDeEstado} />}
+          alLadoDelTitulo={
+            <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+              <CampoDeBusqueda />
+              <SelectorDePeriodo />
+              <BotonDeFiltros cuentas={cuentasDeEstado} />
+            </div>
+          }
         >
           {/*
             * El mismo boton entra y sale del modo. Antes desaparecia al entrar

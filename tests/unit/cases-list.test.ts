@@ -39,6 +39,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   buildCaseFilters,
   consultaListado,
+  consultaPorEstado,
+  desdeDePeriodo,
   listCases,
   listCasesForExport,
 } from "@/server/cases/list";
@@ -334,6 +336,92 @@ describe("consultaListado — orden de «Para responder»", () => {
     const datos = drizzle(async () => ({ rows: [] }));
     const sql = consultaListado(datos as never, baseQuery).toSQL().sql;
     expect(sql).toContain("select u.full_name from users u");
+  });
+});
+
+describe("buildCaseFilters — q", () => {
+  it("busca por nombre/póliza con ilike y por el nombre extraído con EXISTS", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const where = buildCaseFilters({ q: "juan" });
+
+    expect(where).toBeDefined();
+    const { sql: compilado, params } = new PgDialect().sqlToQuery(where!);
+    expect(compilado).toContain("ilike");
+    expect(compilado).toContain("exists");
+    expect(compilado).toContain("field_key");
+    expect(params).toContain("%juan%");
+  });
+
+  it("un texto con forma de número de caso compara por los últimos 8 hex del id", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const where = buildCaseFilters({ q: "SIN-1234-abcd" });
+
+    expect(where).toBeDefined();
+    const { sql: compilado, params } = new PgDialect().sqlToQuery(where!);
+    expect(compilado).toContain("replace(");
+    expect(params).toContain("1234abcd");
+  });
+
+  it("sin forma de número de caso no agrega la comparación por id", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const where = buildCaseFilters({ q: "Juan Pérez" });
+
+    expect(where).toBeDefined();
+    const { sql: compilado } = new PgDialect().sqlToQuery(where!);
+    expect(compilado).not.toContain("replace(");
+  });
+});
+
+describe("buildCaseFilters — período", () => {
+  it("desde agrega un piso de fecha sobre created_at", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const where = buildCaseFilters({ desde: "2026-09-20T03:00:00.000Z" });
+
+    expect(where).toBeDefined();
+    const { sql: compilado, params } = new PgDialect().sqlToQuery(where!);
+    expect(compilado).toContain('"created_at" >=');
+    expect(params).toContain("2026-09-20T03:00:00.000Z");
+  });
+
+  it("sin período no filtra", () => {
+    expect(buildCaseFilters({})).toBeUndefined();
+  });
+});
+
+describe("desdeDePeriodo", () => {
+  const cuando = new Date("2026-09-26T12:00:00.000Z"); // 09:00 en Argentina, mismo día
+
+  it("sin período es todo el tiempo", () => {
+    expect(desdeDePeriodo(undefined, cuando)).toBeUndefined();
+  });
+
+  it.each([
+    ["hoy", 1],
+    ["7d", 7],
+    ["30d", 30],
+    ["90d", 90],
+  ] as const)("%s es la medianoche argentina de hace %d días, hoy incluido", (periodo, dias) => {
+    const esperado = new Date(Date.UTC(2026, 8, 26 - (dias - 1), 3, 0, 0, 0)).toISOString();
+    expect(desdeDePeriodo(periodo, cuando)).toBe(esperado);
+  });
+});
+
+describe("consultaPorEstado", () => {
+  it("sin where cuenta todos los estados, sin condición", async () => {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const datos = drizzle(async () => ({ rows: [] }));
+    const sql = consultaPorEstado(datos as never).toSQL().sql;
+    expect(sql).not.toContain("where");
+    expect(sql).toContain("group by");
+  });
+
+  it("con where limita el conteo a la búsqueda/período de la bandeja", async () => {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const datos = drizzle(async () => ({ rows: [] }));
+    const where = buildCaseFilters({ q: "juan" });
+    const sql = consultaPorEstado(datos as never, where).toSQL().sql;
+    expect(sql).toContain("where");
+    expect(sql).toContain("ilike");
   });
 });
 

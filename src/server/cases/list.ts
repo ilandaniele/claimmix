@@ -16,6 +16,7 @@ import {
   asc,
   desc,
   eq,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -26,8 +27,9 @@ import {
 } from "drizzle-orm";
 import { estadosAConsultar } from "@/core/case/filtro-de-estado";
 import { ESTADOS_ESCALADO, ESTADOS_ESPERANDO_AL_DENUNCIANTE } from "@/core/case/fsm";
+import { medianocheHaceDias } from "@/core/fecha/dia-argentino";
 import { db } from "@/lib/db";
-import { countRows, ilikeAny } from "@/lib/db/helpers";
+import { countRows, escapeLike, ilikeAny } from "@/lib/db/helpers";
 import {
   enTenant,
   enTenantVarias,
@@ -36,7 +38,7 @@ import {
 } from "@/data/scope";
 import { cases } from "@/lib/db/schema";
 import type { CaseRow as CasesTableRow } from "@/lib/db/types";
-import type { CaseQuery, SortColumn } from "@/lib/schemas/cases";
+import type { CaseQuery, Periodo, SortColumn } from "@/lib/schemas/cases";
 
 /**
  * La fila que devuelve este listado: las columnas de `cases` más lo que
@@ -100,6 +102,7 @@ export function buildCaseFilters(
     status,
     type,
     q,
+    desde,
     severity,
     customer_id,
     policy_id,
@@ -133,10 +136,37 @@ export function buildCaseFilters(
     );
   if (type?.length) conditions.push(inArray(cases.claim_type, type));
   if (q) {
-    // Case-insensitive substring search on policyholder_name and policy_number.
-    // Parameterized via Drizzle — no raw SQL string interpolation.
-    conditions.push(ilikeAny([cases.policyholder_name, cases.policy_number], q));
+    const patron = `%${escapeLike(q)}%`;
+    const condicionesTexto: (SQL | undefined)[] = [
+      // Case-insensitive substring search on policyholder_name and policy_number.
+      // Parameterized via Drizzle — no raw SQL string interpolation.
+      ilikeAny([cases.policyholder_name, cases.policy_number], q),
+      /*
+       * El nombre que ve la tabla cuando la fila no tiene `policyholder_name`
+       * propio: sale de `extracted_fields`, coalescido recién en
+       * `consultaListado`. Sin este EXISTS, buscar por ese nombre no
+       * encontraba la fila — aunque fuera lo único que se veía en pantalla.
+       */
+      sql`exists (
+        select 1 from extracted_fields ef
+         where ef.case_id = ${cases.id}
+           and ef.tenant_id = ${cases.tenant_id}
+           and ef.field_key = 'full_name'
+           and ef.field_value ilike ${patron}
+      )`,
+    ];
+    /*
+     * «SIN-1234-abcd», con o sin guiones: el número de caso que muestra la
+     * pantalla (`formatCaseId`, en CasesTable), no una columna de la fila.
+     */
+    const comoNumero = /^(sin-?)?([0-9a-f]{4})-?([0-9a-f]{4})$/i.exec(q.trim());
+    if (comoNumero) {
+      const hex8 = (comoNumero[2] + comoNumero[3]).toLowerCase();
+      condicionesTexto.push(sql`right(replace(${cases.id}::text, '-', ''), 8) = ${hex8}`);
+    }
+    conditions.push(or(...condicionesTexto));
   }
+  if (desde) conditions.push(gte(cases.created_at, desde));
   // AC18: Email-intake filters
   if (severity?.length) conditions.push(inArray(cases.severity, severity));
   if (customer_id) conditions.push(eq(cases.customer_id, customer_id));
@@ -168,6 +198,20 @@ export function buildCaseFilters(
 
   // `and()` sin condiciones devuelve undefined, que para drizzle es «sin WHERE».
   return conditions.length > 0 ? and(...conditions) : undefined;
+}
+
+/** Cuántos días entran en cada opción del selector de período, hoy incluido. */
+const DIAS_POR_PERIODO: Record<Periodo, number> = { hoy: 1, "7d": 7, "30d": 30, "90d": 90 };
+
+/**
+ * La medianoche argentina desde la que arranca un `periodo` de la bandeja.
+ *
+ * `undefined` es «todo el tiempo», la opción que no manda `periodo` por la
+ * URL. `cuando` es parámetro y no `new Date()` fijo adentro, igual que el
+ * resto de `dia-argentino.ts`, para que un test pueda fijar el reloj.
+ */
+export function desdeDePeriodo(periodo: Periodo | undefined, cuando: Date = new Date()): string | undefined {
+  return periodo ? medianocheHaceDias(DIAS_POR_PERIODO[periodo], cuando) : undefined;
 }
 
 /**
@@ -286,11 +330,19 @@ export function consultaConteo(datos: ClienteDatos, query: CaseQuery, yo?: strin
     .where(buildCaseFilters(query, yo));
 }
 
-/** Los contadores por estado de la bandeja. Tampoco lleva LIMIT. */
-export function consultaPorEstado(datos: ClienteDatos) {
+/**
+ * Los contadores por estado de la bandeja. Tampoco lleva LIMIT.
+ *
+ * `where` es opcional y a propósito angosto: sólo lo arma la búsqueda (`q`) y
+ * el período (`desde`) de la bandeja, nunca los chips de estado/tipo/severidad
+ * — esos contadores tienen que seguir sumando TODOS los estados, chip por
+ * chip, o la pestaña que no está apretada mostraría siempre 0.
+ */
+export function consultaPorEstado(datos: ClienteDatos, where?: SQL) {
   return datos
     .select({ status: cases.status, n: sql<number>`count(*)::int` })
     .from(cases)
+    .where(where)
     .groupBy(cases.status);
 }
 
@@ -303,10 +355,11 @@ export function consultaPorEstado(datos: ClienteDatos) {
  * cuando la tabla crece.
  */
 export async function contarPorEstado(
-  ctx: TenantContext
+  ctx: TenantContext,
+  where?: SQL
 ): Promise<Array<{ status: string; n: number }>> {
   return enTenant<Array<{ status: string; n: number }>>(ctx, (db) =>
-    consultaPorEstado(db)
+    consultaPorEstado(db, where)
   );
 }
 

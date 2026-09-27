@@ -12,11 +12,10 @@
  */
 
 import "server-only";
-import { isIP } from "node:net";
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { auditLog, cases } from "@/lib/db/schema";
 import type { ClienteDatos } from "@/data/scope";
-import type { AuditEventType } from "@/lib/audit/log";
+import { ipValida, type AuditEventType } from "@/lib/audit/log";
 
 export function auditoriaSiQuedo(
   db: ClienteDatos,
@@ -32,7 +31,7 @@ export function auditoriaSiQuedo(
 ) {
   // `getClientIp` puede devolver "anonymous", que no es un `inet` válido y
   // tiraría abajo todo el batch.
-  const ip = a.ip && isIP(a.ip) !== 0 ? a.ip : null;
+  const ip = ipValida(a.ip);
 
   return db.insert(auditLog).select(
     db

@@ -85,6 +85,12 @@ export async function patchCase(
   }
 
   // ── 3. FSM transition check ────────────────────────────────────────────────
+  // `enviado_a_core` y `error_core` los pone sólo el envío a Core (LLM08,
+  // comentario de `fsm.ts:26`), nunca este PATCH.
+  if (patch.status === "enviado_a_core" || patch.status === "error_core") {
+    throw new AppError("FSM_INVALID_TRANSITION", "Ese estado lo pone sólo el envío a Core.");
+  }
+
   if (patch.status !== undefined && patch.status !== current.status) {
     const validationError = validateTransition(
       current.status as CaseStatus,
@@ -155,6 +161,13 @@ export async function patchCase(
     return { case: updated };
   }
 
+  // Con status, el where exige además el status que vimos al leer: si cambió
+  // en el medio (TOCTOU), el update no matchea ninguna fila.
+  const whereUpdate =
+    patch.status !== undefined
+      ? and(eq(cases.id, caseId), eq(cases.status, current.status))
+      : eq(cases.id, caseId);
+
   let updated: CaseRow | null;
   try {
     updated = firstRow(
@@ -162,7 +175,7 @@ export async function patchCase(
         db
           .update(cases)
           .set(updateData)
-          .where(eq(cases.id, caseId))
+          .where(whereUpdate)
           .returning()
       )
     );
@@ -171,6 +184,9 @@ export async function patchCase(
   }
 
   if (!updated) {
+    if (patch.status !== undefined) {
+      throw new AppError("FSM_INVALID_TRANSITION", "El caso cambió mientras lo mirabas.");
+    }
     // Wrong-tenant updates match 0 rows → indistinguishable 404.
     throw new AppError("NOT_FOUND", "El caso no existe o no tenés acceso.");
   }

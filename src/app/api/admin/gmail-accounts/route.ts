@@ -60,11 +60,11 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { user, userRow } = await requireRole(...ADMIN_ROLES);
+    const { userRow } = await requireRole(...ADMIN_ROLES);
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
-    const isAdmin = userRow.role === "admin" || userRow.role === "owner";
-    const parsed = UpdateGmailAccountSchema.safeParse(await request.json());
+    const body = await request.json().catch(() => null);
+    const parsed = UpdateGmailAccountSchema.safeParse(body);
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
     }
@@ -89,8 +89,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (!data) {
-      logger.error({ detalle: "no_data" }, "admin_gmail_accounts_patch");
-      return err("INTERNAL_ERROR");
+      throw new AppError("NOT_FOUND");
     }
 
     return ok({ account: data });
@@ -101,22 +100,27 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { user, userRow } = await requireRole(...ADMIN_ROLES);
+    const { userRow } = await requireRole(...ADMIN_ROLES);
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
-    const isAdmin = userRow.role === "admin" || userRow.role === "owner";
-    const id = new URL(request.url).searchParams.get("id");
-    if (!id) throw new AppError("VALIDATION_FAILED");
+    const parsedId = z.string().uuid().safeParse(new URL(request.url).searchParams.get("id"));
+    if (!parsedId.success) throw new AppError("NOT_FOUND");
+    const id = parsedId.data;
 
+    let deleted;
     try {
-      await enTenant(tenantCtx, (db) =>
-        db.delete(t).where(eq(t.id, id))
+      deleted = firstRow(
+        await enTenant(tenantCtx, (db) =>
+          db.delete(t).where(eq(t.id, id)).returning({ id: t.id })
+        )
       );
     } catch (e) {
       logger.error({ detalle: (e as { code?: string })?.code ?? "unknown" }, "admin_gmail_accounts_delete");
       return err("INTERNAL_ERROR");
     }
+
+    if (!deleted) throw new AppError("NOT_FOUND");
 
     return ok({ id });
   } catch (e) {

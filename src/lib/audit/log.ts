@@ -14,12 +14,21 @@
  * AC3: audit log row inserted on auth.rate_limited.
  */
 
+import { isIP } from "node:net";
 import { db } from "@/lib/db";
 import { auditLog } from "@/lib/db/schema";
 import type { AuditLogInsert } from "@/lib/db/types";
 import type { AuditPayload } from "./redact";
 import { enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
+
+/**
+ * `getClientIp` puede devolver "anonymous", que no es un `inet` válido y
+ * tiraría abajo la escritura de auditoría.
+ */
+export function ipValida(ip?: string | null): string | null {
+  return ip && isIP(ip) !== 0 ? ip : null;
+}
 
 export interface AuditLogEntry {
   tenant_id: string;
@@ -50,7 +59,7 @@ export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
       target_type: entry.target_type ?? null,
       target_id: entry.target_id ?? null,
       payload: entry.payload ?? {},
-      ip: entry.ip ?? null,
+      ip: ipValida(entry.ip),
       ua: entry.ua ?? null,
     };
 

@@ -23,6 +23,7 @@ import { requireOperator } from "@/lib/auth/require-operator";
 import { AppError } from "@/lib/errors";
 import { listTenantSummaries } from "@/server/billing/tenant-summary";
 import { mesDeCalendario } from "@/core/fecha/mes-calendario";
+import { mesDeParametro } from "@/core/billing/mes-de-parametro";
 import { nombreDePlan } from "@/lib/billing/plan-label";
 
 export const dynamic = "force-dynamic";
@@ -64,7 +65,8 @@ export default async function CarteraPage({
   const t = getT(locale);
 
   const raw = (await searchParams).month;
-  const { month, tenants } = await listTenantSummaries(typeof raw === "string" ? raw : null);
+  const mes = mesDeParametro(typeof raw === "string" ? raw : undefined, new Date());
+  const { month, tenants } = await listTenantSummaries(mes);
 
   const totals = tenants.reduce(
     (acc, fila) => ({

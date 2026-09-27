@@ -28,8 +28,7 @@ import {
 import { estadosAConsultar } from "@/core/case/filtro-de-estado";
 import { ESTADOS_ESCALADO, ESTADOS_ESPERANDO_AL_DENUNCIANTE } from "@/core/case/fsm";
 import { medianocheHaceDias } from "@/core/fecha/dia-argentino";
-import { db } from "@/lib/db";
-import { countRows, escapeLike, ilikeAny } from "@/lib/db/helpers";
+import { escapeLike, ilikeAny } from "@/lib/db/helpers";
 import {
   enTenant,
   enTenantVarias,

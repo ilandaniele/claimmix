@@ -16,13 +16,11 @@
  */
 
 import { and, asc, desc, eq } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { auditLog, cases, extractedFields, missingDocs } from "@/lib/db/schema";
 import { logger } from "@/lib/observability/logger";
 import type {
-  AuditLogRow,
   CaseRow,
   ExtractedFieldRow,
   MissingDocRow,

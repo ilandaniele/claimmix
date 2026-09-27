@@ -26,7 +26,7 @@
 
 import "server-only";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
-import { db, tables } from "@/lib/db";
+import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
 import type { BillingPeriod } from "@/lib/billing/period";

@@ -18,7 +18,6 @@
 import "server-only";
 
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, cases, claimMessages, users } from "@/lib/db/schema";
 import { isReservedTestAddress } from "@/lib/email/reserved";

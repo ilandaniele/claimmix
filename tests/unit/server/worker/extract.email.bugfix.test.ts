@@ -179,7 +179,6 @@ vi.mock("@/lib/db", () => {
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { db } from "@/lib/db";
 import { instalarDbSimulado } from "./db-simulado";
-import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { extraccion } from "../../../helpers/extraccion";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -26,14 +26,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { and, asc, eq, isNull } from "drizzle-orm";
-import {
-  ALL_ROLES,
-  CUSTOMER_PII_ROLES,
-  type UserRole,
-} from "@/lib/auth/require-role";
+import { ALL_ROLES } from "@/lib/auth/require-role";
 import { sinPiiSiNoCorresponde } from "@/server/cases/pii";
 import { entrar } from "@/lib/api/entrada";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {

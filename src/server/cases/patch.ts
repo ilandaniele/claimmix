@@ -14,7 +14,6 @@
  */
 
 import { and, eq, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";

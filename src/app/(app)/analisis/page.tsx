@@ -8,8 +8,7 @@
 
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { db } from "@/lib/db";
-import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
+import { enTenantVarias, type TenantContext } from "@/data/scope";
 import { and, gte, count, sql } from "drizzle-orm";
 import { cases } from "@/lib/db/schema";
 import { statusOptions, claimTypeOptions } from "@/lib/labels/case-catalog";

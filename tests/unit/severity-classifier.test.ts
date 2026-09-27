@@ -10,7 +10,6 @@
 
 import { describe, it, expect } from "vitest";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
-import type { Severity } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────

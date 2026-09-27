@@ -15,7 +15,7 @@
 
 import "server-only";
 import { and, desc, eq, inArray, or, type SQL } from "drizzle-orm";
-import { db, tables } from "@/lib/db";
+import { tables } from "@/lib/db";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";

@@ -3,7 +3,7 @@
  */
 
 import { NextRequest } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { requireAdmin } from "@/lib/auth/require-admin";

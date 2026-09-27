@@ -2,7 +2,6 @@ import "server-only";
 
 import { and, eq, gte, lt, lte, or, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
 import { enTenant } from "@/data/scope";

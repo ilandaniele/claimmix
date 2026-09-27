@@ -14,7 +14,7 @@
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { desc, eq } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";

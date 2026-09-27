@@ -28,7 +28,6 @@
 
 import "server-only";
 import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { esSoloUnAcuse } from "@/core/mensajes/acuse";

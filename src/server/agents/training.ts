@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";

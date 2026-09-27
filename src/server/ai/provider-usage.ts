@@ -8,7 +8,7 @@
  */
 
 import "server-only";
-import { db, tables } from "@/lib/db";
+import { tables } from "@/lib/db";
 import { enTenant } from "@/data/scope";
 
 export interface UsageEventInput {

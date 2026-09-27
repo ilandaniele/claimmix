@@ -23,7 +23,6 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { TRAINING_APPROVER_ROLES } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, agentRuns } from "@/lib/db/schema";

@@ -8,7 +8,7 @@
  *  - resolveExtractionEngine: mock mode, key-based fallback, no-keys → mock
  */
 
-import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 
 // ---------- db mock (hoisted so it runs before module imports) ----------
 const mockDbChain = vi.hoisted(() => {

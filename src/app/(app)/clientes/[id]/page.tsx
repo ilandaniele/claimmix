@@ -11,9 +11,8 @@
 import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { eq, and, desc, count } from "drizzle-orm";
+import { eq, desc, count } from "drizzle-orm";
 import { cases, customers, policies } from "@/lib/db/schema";
 import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import { getT } from "@/lib/i18n";

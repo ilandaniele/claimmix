@@ -4,7 +4,7 @@
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { tables } from "@/lib/db";

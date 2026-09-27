@@ -6,7 +6,7 @@
  * The user receives a confirmation email from Better Auth (if email is configured).
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 

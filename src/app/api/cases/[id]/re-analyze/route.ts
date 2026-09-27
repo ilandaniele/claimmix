@@ -17,7 +17,6 @@ import { and, eq } from "drizzle-orm";
 import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { ADMIN_ROLES } from "@/lib/auth/roles";
 import { entrar } from "@/lib/api/entrada";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";

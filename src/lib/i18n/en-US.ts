@@ -109,7 +109,8 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Bandeja actions ────────────────────────────────────────────────────────
   "bandeja.simulate": "Simulate new email",
   "bandeja.export": "Export CSV",
-  "bandeja.search": "Search cases...",
+  "bandeja.buscarPlaceholder": "Search by name, policy, or case number",
+  "bandeja.buscarLimpiar": "Clear search",
   "bandeja.empty": "No claims match the filters.",
   "bandeja.loading": "Loading cases...",
   "bandeja.delete": "Delete case",
@@ -403,6 +404,15 @@ export const enUS: Record<TranslationKey, string> = {
   "filter.limpiar": "Clear",
   "filter.limpiarTodo": "Clear all",
   "filter.quitar": "Remove filter",
+  "filter.busqueda": "Search",
+
+  // ── Period selector (inbox) ─────────────────────────────────────────────────
+  "periodo.titulo": "Period",
+  "periodo.todo": "All",
+  "periodo.hoy": "Today",
+  "periodo.7d": "7 days",
+  "periodo.30d": "30 days",
+  "periodo.90d": "90 days",
 
   // ── Case detail email sections ──────────────────────────────────────────────
   "case.detail.parsedEmail": "Email data",

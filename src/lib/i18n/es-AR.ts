@@ -118,7 +118,10 @@ export const esAR = {
   // ── Bandeja actions ────────────────────────────────────────────────────────
   "bandeja.simulate": "Simular nuevo email",
   "bandeja.export": "Exportar CSV",
-  "bandeja.search": "Buscar casos...",
+  // Placeholder y aria-label de la caja de búsqueda del encabezado: nombre,
+  // póliza o número de caso («SIN-XXXX-XXXX»).
+  "bandeja.buscarPlaceholder": "Buscá por nombre, póliza o número de caso",
+  "bandeja.buscarLimpiar": "Limpiar búsqueda",
   "bandeja.empty": "No hay siniestros que coincidan con los filtros.",
   "bandeja.loading": "Cargando casos...",
   "bandeja.delete": "Eliminar caso",
@@ -418,6 +421,16 @@ export const esAR = {
   "filter.limpiar": "Limpiar",
   "filter.limpiarTodo": "Limpiar todo",
   "filter.quitar": "Quitar filtro",
+  // Rótulo de la marca removible de la búsqueda libre, en MarcasDeFiltros.
+  "filter.busqueda": "Búsqueda",
+
+  // ── Selector de período (bandeja) ──────────────────────────────────────────
+  "periodo.titulo": "Período",
+  "periodo.todo": "Todo",
+  "periodo.hoy": "Hoy",
+  "periodo.7d": "7 días",
+  "periodo.30d": "30 días",
+  "periodo.90d": "90 días",
 
   // ── Case detail email sections ──────────────────────────────────────────────
   "case.detail.parsedEmail": "Datos del email",

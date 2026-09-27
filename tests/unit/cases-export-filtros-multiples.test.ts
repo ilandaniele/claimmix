@@ -21,9 +21,15 @@ vi.mock("@/lib/api/entrada", () => ({
   entrar: mockEntrar,
 }));
 
-vi.mock("@/server/cases/list", () => ({
-  listCasesForExport: mockListCasesForExport,
-}));
+// `desdeDePeriodo` queda real: la ruta la llama para armar `desde`, y un tapón
+// que sólo trae `listCasesForExport` la dejaría `undefined` y la ruta rompería.
+vi.mock("@/server/cases/list", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/cases/list")>();
+  return {
+    ...actual,
+    listCasesForExport: mockListCasesForExport,
+  };
+});
 
 // getServerLocale lee la cookie del pedido vía next/headers — fuera de
 // alcance de un pedido real acá. El idioma no es lo que este test cubre.
@@ -87,6 +93,28 @@ describe("GET /api/cases/export.csv — filtros multi-select", () => {
     expect(mockListCasesForExport).not.toHaveBeenCalled();
   });
 
+  it.each(["a", "ab"])("q de %s caracteres no da 400 — se descarta, como en la bandeja", async (q) => {
+    const res = await GET(makeRequest(`?q=${q}`));
+
+    expect(res.status).toBe(200);
+    expect(mockListCasesForExport).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({ q: undefined }),
+      USER_ID
+    );
+  });
+
+  it("q de tres caracteres o más sí llega a la consulta", async () => {
+    const res = await GET(makeRequest("?q=abc"));
+
+    expect(res.status).toBe(200);
+    expect(mockListCasesForExport).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({ q: "abc" }),
+      USER_ID
+    );
+  });
+
   it("«Para responder» también filtra el CSV", async () => {
     const res = await GET(makeRequest("?para_responder=true"));
 
@@ -132,5 +160,55 @@ describe("GET /api/cases/export.csv — filtros multi-select", () => {
       }),
       USER_ID
     );
+  });
+});
+
+describe("GET /api/cases/export.csv — período", () => {
+  beforeEach(() => {
+    mockEntrar.mockResolvedValue({
+      ctx: {
+        user: { id: USER_ID },
+        userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "admin" },
+      },
+      rl: { allowed: true, remaining: 10, retryAfterSeconds: 0 },
+    });
+    mockListCasesForExport.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("periodo=hoy manda desde con la medianoche argentina de hoy", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-26T12:00:00.000Z")); // 09:00 en Argentina, mismo día
+
+    const res = await GET(makeRequest("?periodo=hoy"));
+
+    expect(res.status).toBe(200);
+    expect(mockListCasesForExport).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({ desde: "2026-09-26T03:00:00.000Z" }),
+      USER_ID
+    );
+  });
+
+  it("sin período no manda desde", async () => {
+    const res = await GET(makeRequest(""));
+
+    expect(res.status).toBe(200);
+    expect(mockListCasesForExport).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({ desde: undefined }),
+      USER_ID
+    );
+  });
+
+  it("un período inválido da 400", async () => {
+    const res = await GET(makeRequest("?periodo=ayer"));
+
+    expect(res.status).toBe(400);
+    expect(mockListCasesForExport).not.toHaveBeenCalled();
   });
 });

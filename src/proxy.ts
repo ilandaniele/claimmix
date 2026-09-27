@@ -6,8 +6,9 @@
  * 2. Inject the Content-Security-Policy header on every response.
  * 3. Verify the Better Auth session so Server Components and Route Handlers
  *    can trust the request is authenticated.
- * 4. Protect routes — unauthenticated requests to /bandeja/** and /api/**
- *    (except public endpoints) are redirected or returned 401.
+ * 4. Protect routes — unauthenticated requests to /bandeja/** are redirected
+ *    to /login. /api/** never reaches this file: config.matcher excludes it,
+ *    each route authenticates itself.
  *
  * NOTE: This file is named proxy.ts (not middleware.ts) per the team convention.
  * Next.js discovers the middleware by the export name, not the filename —
@@ -53,29 +54,9 @@ const PUBLIC_PREFIXES = [
   "/demo",
   "/privacy",
   "/terms",
-  "/api/auth/sign-in",
-  "/api/auth/sign-out",
-  // Los dos pasos de la recuperación. Sin esto el proxy los rechaza con 401
-  // antes de que la ruta pueda atenderlos, y el flujo no existe.
-  "/api/auth/request-password-reset",
-  "/api/auth/reset-password",
-  "/api/auth/callback",
-  "/api/admin/health",
-  // Internal-only endpoints authenticated by CRON_SECRET or X-Internal-Worker header
-  // at the route level — no session cookie involved. Passing them through middleware
-  // so Vercel Cron and worker-to-worker calls are not blocked with 401 before the
-  // route handler can verify its own token.
-  "/api/admin/",
-  "/api/worker/",
-  // Google Cloud Pub/Sub push webhooks arrive without a Better Auth session cookie.
-  // The route handles its own OIDC token verification (AC16).
-  "/api/webhooks/",
   "/_next",
   "/favicon.ico",
 ];
-
-/** API paths that require authentication but are not browser-navigable. */
-const PROTECTED_API_PREFIX = "/api/";
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
@@ -105,8 +86,9 @@ export async function proxy(request: NextRequest) {
   response.headers.set("x-csp-nonce", nonce);
 
   // The following headers are also set in next.config.ts headers() for CDN-layer
-  // defense-in-depth. Setting them here too ensures they appear on all responses
-  // including API routes and redirects that bypass the CDN cache.
+  // defense-in-depth. Setting them here too ensures they appear on redirects
+  // that bypass the CDN cache. (/api/** never reaches this file — see the
+  // matcher below.)
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set(
@@ -148,26 +130,6 @@ export async function proxy(request: NextRequest) {
 
   // ── 6. Enforce authentication ─────────────────────────────────────────────
   if (!user) {
-    // API routes get a 401 JSON response.
-    if (pathname.startsWith(PROTECTED_API_PREFIX)) {
-      return new NextResponse(
-        JSON.stringify({
-          error: {
-            code: "MISSING_SESSION",
-            message: "Se requiere autenticación.",
-          },
-        }),
-        {
-          status: 401,
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Security-Policy": csp,
-            "X-Content-Type-Options": "nosniff",
-          },
-        }
-      );
-    }
-
     // Browser routes redirect to /login.
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("redirect", pathname);

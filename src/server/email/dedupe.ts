@@ -13,17 +13,11 @@
  */
 
 import "server-only";
-import { and, eq } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { eq } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { cases, claimMessages } from "@/lib/db/schema";
+import { claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { logger } from "@/lib/observability/logger";
-
-export interface DedupeResult {
-  isDuplicate: boolean;
-  existingCaseId?: string;
-}
 
 /**
  * Normalise a provider Message-ID by stripping leading/trailing angle brackets.
@@ -72,79 +66,4 @@ export async function checkDuplicate(
     // Fail open — let the request proceed; idempotency is best-effort.
     return false;
   }
-}
-
-/**
- * Full dedupe check: queries claim_messages first, then falls back to the
- * legacy cases.email_message_id index for rows written before migration 0009.
- *
- * This is the original exported symbol used by the route handler.  It is kept
- * for backwards compatibility and extended to use checkDuplicate internally.
- *
- * @param messageId - Provider Message-ID (may include angle brackets — normalised internally)
- * @param tenantId  - Tenant UUID for scoping the lookup
- * @returns { isDuplicate: boolean; existingCaseId?: string }
- */
-export async function dedupe(
-  messageId: string,
-  tenantId: string
-): Promise<DedupeResult> {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
-  const normalised = normalizeMessageId(messageId);
-
-  // 1. New path: check claim_messages by provider_message_id (AC2).
-  const isDuplicateInClaimMessages = await checkDuplicate(tenantId, normalised);
-
-  if (isDuplicateInClaimMessages) {
-    // Resolve the case_id by reading the claim_messages row.
-    let msgRow: { case_id: string } | null = null;
-    try {
-      msgRow = firstRow(
-        await enTenant(tenantCtx, (db) =>
-          db
-            .select({ case_id: claimMessages.case_id })
-            .from(claimMessages)
-            .where(
-              eq(claimMessages.provider_message_id, normalised)
-            )
-            .limit(1)
-        )
-      );
-    } catch {
-      // Best-effort — duplicate already established; case id resolution failed.
-      msgRow = null;
-    }
-
-    return {
-      isDuplicate: true,
-      existingCaseId: msgRow?.case_id,
-    };
-  }
-
-  // 2. Legacy fallback: check cases.email_message_id for rows pre-migration.
-  let caseRow: { id: string } | null = null;
-  try {
-    caseRow = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select({ id: cases.id })
-          .from(cases)
-          .where(
-            eq(cases.email_message_id, normalised)
-          )
-          .limit(1)
-      )
-    );
-  } catch (err) {
-    const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
-    logger.error({ code }, "dedupe.cases_check_error");
-    return { isDuplicate: false };
-  }
-
-  if (caseRow) {
-    return { isDuplicate: true, existingCaseId: caseRow.id };
-  }
-
-  return { isDuplicate: false };
 }

@@ -9,10 +9,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-// Del núcleo, y no de `@/server/worker/extract`, aunque desde ahí también se
-// re-exporten. Importarlas desde el worker obliga a este archivo a cargar mil
-// quinientas líneas que hablan con la base, y por eso más abajo hay dos
-// `vi.mock` que nada tienen que ver con partir un texto en dos.
+// Del núcleo, y no de `@/server/worker/extract`, que ya no las re-exporta.
+// Importarlas desde el worker obliga a este archivo a cargar mil quinientas
+// líneas que hablan con la base, y por eso más abajo hay dos `vi.mock` que
+// nada tienen que ver con partir un texto en dos.
 import { stripQuotedReply } from "@/core/email/conversation";
 
 describe("stripQuotedReply", () => {

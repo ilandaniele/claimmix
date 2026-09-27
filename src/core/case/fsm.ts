@@ -345,14 +345,3 @@ export function isAiAllowedStatus(status: CaseStatus): boolean {
 }
 
 export type { CaseStatus };
-export type CaseStatusEmail = Extract<
-  CaseStatus,
-  | "recibido"
-  | "info_faltante"
-  | "confirmacion_pendiente"
-  | "requiere_especialista"
-  | "listo_para_core"
-  | "enviado_a_core"
-  | "error_core"
-  | "no_relevante"
->;

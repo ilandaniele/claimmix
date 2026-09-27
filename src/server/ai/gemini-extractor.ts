@@ -38,7 +38,6 @@ import { logProviderUsage } from "./provider-usage";
 import {
   parseResponse,
   parseEmailResponse,
-  buildSafeDefault,
 } from "./model-response";
 import type { EmailClaimPayload } from "./model-response";
 import { getDefaultGeminiModel, getTenantGeminiKey, getTenantGeminiModel } from "./provider";

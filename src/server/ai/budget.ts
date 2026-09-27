@@ -28,10 +28,6 @@ import {
   type TenantContext,
 } from "@/data/scope";
 
-/** @deprecated Legacy constants for gpt-4o-mini. Use computeCostUsd(tokens, tokens, model). */
-export const COST_PER_PROMPT_TOKEN = 0.00000015;
-export const COST_PER_COMPLETION_TOKEN = 0.00000060;
-
 const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   "gpt-4o-mini": { input: 0.00000015, output: 0.00000060 },
   "gpt-4o":      { input: 0.0000025,  output: 0.00001 },

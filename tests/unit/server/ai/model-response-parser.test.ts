@@ -11,7 +11,6 @@ vi.mock("@/server/ai/provider", () => ({
 }));
 
 import {
-  extractJsonObjectText,
   extractJsonObjectTexts,
   parseEmailResponse,
   parseResponse,
@@ -52,7 +51,7 @@ function validExtraction() {
 describe("model JSON parser", () => {
   it("extracts the first balanced JSON object from prose", () => {
     const content = `Thinking done.\n${JSON.stringify(validExtraction())}\nThanks`;
-    expect(extractJsonObjectText(content)).toBe(JSON.stringify(validExtraction()));
+    expect(extractJsonObjectTexts(content)[0]).toBe(JSON.stringify(validExtraction()));
   });
 
   it("extracts multiple JSON object candidates from a noisy response", () => {

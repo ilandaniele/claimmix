@@ -67,17 +67,6 @@ export function extractJsonObjectTexts(content: string | null): string[] {
   return candidates;
 }
 
-/**
- * Extract the first balanced JSON object from a model response.
- *
- * Kept for callers/tests that only need a single JSON object. Production parse
- * paths use extractJsonObjectTexts() and schema validation to choose the first
- * usable extraction object.
- */
-export function extractJsonObjectText(content: string | null): string | null {
-  return extractJsonObjectTexts(content)[0] ?? null;
-}
-
 function parseModelJsonCandidates(content: string | null): Record<string, unknown>[] {
   return extractJsonObjectTexts(content).flatMap((jsonText) => {
     try {
@@ -197,39 +186,4 @@ export function parseEmailResponse(content: string | null, model?: string): Extr
   } catch {
     return null;
   }
-}
-
-/**
- * Safe default for parse failures — treats email as non-claim to avoid false positives.
- * Exported for reuse by other providers (gemini-extractor).
- *
- * Pass the tenant-resolved model when available; the env-var default is only a
- * last resort (it can differ from the tenant's configured model — e.g. env
- * OPENAI_MODEL=gpt-4o vs tenant gpt-4o-mini — which made failure logs lie).
- */
-export function buildSafeDefault(model?: string): ExtractedClaim {
-  return {
-    extraction_model: model ?? getDefaultGeminiModel(),
-    fields: [],
-    prompt_tokens: 0,
-    completion_tokens: 0,
-    cost_usd: 0,
-    is_claim: false,
-    confidence: 0,
-    extracted_fields: undefined,
-    field_confidences: {},
-    missing_fields: [],
-    fields_pending_confirmation: [],
-    possible_customer_matches: [],
-    possible_policy_matches: [],
-    severity: null,
-    requires_specialist: false,
-    not_relevant_reason: "No se pudo procesar el email — error de extracción AI.",
-    summary: "",
-    suggested_reply: "",
-    fraud_risk_level: "none",
-    fraud_indicators: [],
-    injury_severity: null,
-    parse_failed: true,
-  };
 }

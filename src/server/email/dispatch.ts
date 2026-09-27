@@ -17,7 +17,7 @@
  * AC4:  claim_messages row updated with provider_message_id='out-*' after send.
  * AC5:  Function never throws — resolves with { error } on failure.
  * AC12: Confirmation receipt always sent for valid claims.
- * AC12: No direct provider imports — only getEmailProvider() from gmail/index.ts (W1).
+ * AC12: No direct provider imports at module scope — GmailSender is dynamic-imported below.
  * AC16: In-Reply-To and References headers forwarded when inReplyToMessageId is set.
  */
 

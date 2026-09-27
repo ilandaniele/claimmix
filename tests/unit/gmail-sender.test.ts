@@ -77,10 +77,6 @@ describe("GmailSender", () => {
       "@/server/email/gmail/gmail-client"
     );
     resetGmailAuth();
-
-    // Reset the provider factory singleton.
-    const { resetEmailProvider } = await import("@/server/email/gmail/index");
-    resetEmailProvider();
   });
 
   // ── AC9: name === 'gmail' ────────────────────────────────────────────────────
@@ -89,13 +85,6 @@ describe("GmailSender", () => {
     const { GmailSender } = await import("@/server/email/gmail/gmail-sender");
     const sender = new GmailSender();
     expect(sender.name).toBe("gmail");
-  });
-
-  it("AC9: getEmailProvider().name === 'gmail'", async () => {
-    // getEmailProvider() lazy-inits GmailSender — provider name must be 'gmail'.
-    const { getEmailProvider } = await import("@/server/email/gmail/index");
-    const provider = getEmailProvider();
-    expect(provider.name).toBe("gmail");
   });
 
   // ── AC5: send() success ──────────────────────────────────────────────────────

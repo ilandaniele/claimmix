@@ -161,6 +161,10 @@ export async function GET(request: NextRequest) {
     q: qCorto && qCorto.length >= 3 ? qCorto : undefined,
     periodo: searchParams.get("periodo") ?? undefined,
     severity: searchParams.getAll("severity"),
+    // Filtro de fraude de la bandeja (G35): mismo motivo que en /api/cases —
+    // «Exportar» reenvía la URL tal cual, y sin esto el CSV salía sin filtrar
+    // por fraude aunque la pantalla sí lo estuviera.
+    fraude: searchParams.getAll("fraude"),
     channel: searchParams.getAll("channel"),
     is_claim: searchParams.get("is_claim") ?? undefined,
     para_responder: searchParams.get("para_responder") ?? undefined,
@@ -194,6 +198,7 @@ export async function GET(request: NextRequest) {
       q: parsed.data.q,
       desde: desdeDePeriodo(parsed.data.periodo),
       severity: parsed.data.severity,
+      fraude: parsed.data.fraude,
       channel: parsed.data.channel,
       is_claim: parsed.data.is_claim,
       para_responder: parsed.data.para_responder,

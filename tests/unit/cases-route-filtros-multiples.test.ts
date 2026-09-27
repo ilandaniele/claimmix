@@ -92,6 +92,17 @@ describe("GET /api/cases — filtros multi-select", () => {
     expect(mockListCases).not.toHaveBeenCalled();
   });
 
+  it("fraude llega a la consulta (G35)", async () => {
+    const res = await GET(makeRequest("?fraude=high"));
+
+    expect(res.status).toBe(200);
+    expect(mockListCases).toHaveBeenCalledWith(
+      { tenantId: TENANT_ID },
+      expect.objectContaining({ fraude: ["high"] }),
+      USER_ID
+    );
+  });
+
   it("«Para responder» llega a la consulta", async () => {
     const res = await GET(makeRequest("?para_responder=true"));
 

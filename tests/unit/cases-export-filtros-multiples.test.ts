@@ -115,6 +115,17 @@ describe("GET /api/cases/export.csv — filtros multi-select", () => {
     );
   });
 
+  it("fraude también filtra el CSV (G35)", async () => {
+    const res = await GET(makeRequest("?fraude=high"));
+
+    expect(res.status).toBe(200);
+    expect(mockListCasesForExport).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({ fraude: ["high"] }),
+      USER_ID
+    );
+  });
+
   it("«Para responder» también filtra el CSV", async () => {
     const res = await GET(makeRequest("?para_responder=true"));
 

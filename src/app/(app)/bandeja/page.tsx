@@ -22,8 +22,8 @@ import { buildCaseFilters, contarPorEstado, desdeDePeriodo, listCases } from "@/
 import { OPCIONES_DE_ESCENARIO } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
 import { PER_PAGE_OPTIONS } from "./per-page";
-import { CaseStatusSchema, ChannelSchema, ClaimTypeSchema, PeriodoSchema, SeveritySchema } from "@/lib/schemas/cases";
-import type { CaseStatus, ClaimType, Periodo, Severity } from "@/lib/schemas/cases";
+import { CaseStatusSchema, ChannelSchema, ClaimTypeSchema, FraudRiskLevelSchema, PeriodoSchema, SeveritySchema } from "@/lib/schemas/cases";
+import type { CaseStatus, ClaimType, FraudRiskLevel, Periodo, Severity } from "@/lib/schemas/cases";
 import { Card } from "../_components/ui";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
@@ -42,6 +42,7 @@ export const VALID_STATUSES: CaseStatus[] = CaseStatusSchema.options;
  */
 const VALID_TYPES: ClaimType[] = ClaimTypeSchema.options;
 export const VALID_SEVERITIES: Severity[] = SeveritySchema.options;
+export const VALID_FRAUDE: FraudRiskLevel[] = FraudRiskLevelSchema.options;
 export const VALID_CHANNELS = ChannelSchema.options;
 const VALID_PERIODOS: Periodo[] = PeriodoSchema.options;
 
@@ -101,7 +102,14 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const pageParam = params["page"];
   const channelParam = params["channel"];
   const severityParam = params["severity"];
+  const fraudeParam = params["fraude"];
   const isClaimParam = params["is_claim"];
+  /*
+   * `vista` no es un filtro: no entra en `PARAMS_DE_FILTRO`, no lo mira
+   * `buildCaseFilters` ni `contarPorEstado`, y un valor que no sea "tablero"
+   * cae en "lista" — la misma pantalla de siempre.
+   */
+  const vista: "lista" | "tablero" = params["vista"] === "tablero" ? "tablero" : "lista";
   const para_responder = params["para_responder"] === "true" ? true : undefined;
   const cola = params["cola"] === "mia" ? "mia" : undefined;
 
@@ -124,6 +132,8 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const channel = valores(channelParam, VALID_CHANNELS);
 
   const severity = valores(severityParam, VALID_SEVERITIES);
+
+  const fraude = valores(fraudeParam, VALID_FRAUDE);
 
   const is_claim =
     isClaimParam === "true" ? true : isClaimParam === "false" ? false : undefined;
@@ -179,6 +189,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
       // Email-intake filters (AC18)
       channel,
       severity,
+      fraude,
       is_claim,
       para_responder,
       cola,
@@ -261,6 +272,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
             initialData={initialData}
             scenarios={OPCIONES_DE_ESCENARIO}
             allStatusCounts={allStatusCounts}
+            vista={vista}
           />
         </Card>
       </div>

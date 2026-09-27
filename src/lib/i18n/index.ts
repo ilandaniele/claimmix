@@ -3,8 +3,8 @@
  *
  * Usage in Server Components:
  *   import { getT } from '@/lib/i18n';
- *   import { getServerLocale } from '@/lib/i18n/locale';
- *   const locale = await getServerLocale();
+ *   import { getAccountLocale } from '@/server/i18n/idioma-de-la-cuenta';
+ *   const locale = await getAccountLocale();
  *   const t = getT(locale);
  *   <h1>{t('nav.bandeja')}</h1>
  *

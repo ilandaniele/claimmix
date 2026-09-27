@@ -234,11 +234,13 @@ export async function getTenantKpis(
           .from(cases)
           .groupBy(cases.status),
       // Idem, y el `is not null` reemplaza al `if (row.claim_type)` que
-      // descartaba esas filas después de haberlas traído.
+      // descartaba esas filas después de haberlas traído. `is_claim is true`
+      // saca los `no_relevante`, que traen un `claim_type` del intento previo
+      // y antes se contaban como si fueran reclamos.
       db
           .select({ claim_type: cases.claim_type, n: sql<number>`count(*)::int` })
           .from(cases)
-          .where(isNotNull(cases.claim_type))
+          .where(and(isNotNull(cases.claim_type), sql`${cases.is_claim} is true`))
           .groupBy(cases.claim_type),
       db
           .select({ n: count() })

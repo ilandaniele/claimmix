@@ -21,7 +21,7 @@ import { UserAiKeyPanel } from "./UserAiKeyPanel";
 import { GoogleVinculo } from "./GoogleVinculo";
 import { getUserGeminiKey } from "@/server/ai/provider";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import packageJson from "../../../../package.json";
 import { ADMIN_ROLES } from "@/lib/auth/require-role";
 
@@ -85,7 +85,7 @@ export default async function ConfiguracionPage({
   searchParams: Promise<{ vinculo?: string }>;
 }) {
   const { vinculo } = await searchParams;
-  const locale = await getServerLocale();
+  const locale = await getAccountLocale();
   const t = getT(locale);
 
   const session = await getSessionContext();

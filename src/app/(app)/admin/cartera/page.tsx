@@ -18,7 +18,7 @@ import { redirect } from "next/navigation";
 import { formatDate, formatUsd } from "@/lib/utils";
 
 import { getT, type TranslationKey } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { requireOperator } from "@/lib/auth/require-operator";
 import { AppError } from "@/lib/errors";
 import { listTenantSummaries } from "@/server/billing/tenant-summary";
@@ -61,7 +61,7 @@ export default async function CarteraPage({
     redirect("/bandeja");
   }
 
-  const locale = await getServerLocale();
+  const locale = await getAccountLocale();
   const t = getT(locale);
 
   const raw = (await searchParams).month;

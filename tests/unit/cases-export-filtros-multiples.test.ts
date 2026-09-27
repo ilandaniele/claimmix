@@ -31,10 +31,10 @@ vi.mock("@/server/cases/list", async (importOriginal) => {
   };
 });
 
-// getServerLocale lee la cookie del pedido vía next/headers — fuera de
+// resolveAccountLocale lee la cookie del pedido vía next/headers — fuera de
 // alcance de un pedido real acá. El idioma no es lo que este test cubre.
 vi.mock("@/lib/i18n/locale", () => ({
-  getServerLocale: vi.fn().mockResolvedValue("es-AR"),
+  resolveAccountLocale: vi.fn().mockResolvedValue("es-AR"),
 }));
 
 import { GET } from "@/app/api/cases/export.csv/route";

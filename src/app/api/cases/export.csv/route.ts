@@ -17,7 +17,7 @@ import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
 import { CaseQuerySchema, type CaseStatus, type ClaimType } from "@/lib/schemas/cases";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { formatDate } from "@/lib/utils";
 import { desdeDePeriodo, listCasesForExport } from "@/server/cases/list";
 import { buildCsv } from "@/lib/csv/safe-encode";
@@ -210,8 +210,10 @@ export async function GET(request: NextRequest) {
   // ── 5. Build CSV rows ─────────────────────────────────────────────────────
   // El mismo idioma que la pantalla desde la que se apretó «Exportar CSV»: un
   // archivo en castellano bajado desde la interfaz en inglés se lee como un
-  // error del producto.
-  const locale = await getServerLocale();
+  // error del producto. `ctx.userRow` ya está en la mano —de `entrar()`, más
+  // arriba— así que se usa directo y no un segundo lookup por `cache()`, que
+  // acá no vale: un Route Handler no es un render de React.
+  const locale = await resolveAccountLocale(ctx.userRow.locale);
   const t = getT(locale);
   const TIPOS = etiquetasDeTipo(t);
   const ESTADOS = etiquetasDeEstado(t);

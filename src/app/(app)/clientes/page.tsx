@@ -13,7 +13,7 @@ import { getUserRow } from "@/lib/auth/user-row";
 import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
 import { redirect } from "next/navigation";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { listCustomers } from "@/server/customers/list";
@@ -34,7 +34,7 @@ interface ClientesPageProps {
 }
 
 async function ClientesContent({ searchParams }: ClientesPageProps) {
-  const locale = await getServerLocale();
+  const locale = await getAccountLocale();
   const t = getT(locale);
   const params = await searchParams;
 

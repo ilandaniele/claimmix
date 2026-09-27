@@ -26,7 +26,7 @@ vi.mock("@/lib/auth/session", () => ({
 vi.mock("@/lib/auth/user-row", () => ({
   getUserRow: vi.fn(async () => ({ tenant_id: "t1" })),
 }));
-vi.mock("@/lib/i18n/locale", () => ({ getServerLocale: vi.fn(async () => "es-AR") }));
+vi.mock("@/lib/i18n/locale", () => ({ resolveAccountLocale: vi.fn(async () => "es-AR") }));
 vi.mock("@/data/scope", () => ({ enTenant: vi.fn() }));
 vi.mock("@/server/metrics/kpis", () => ({ getTenantKpis: mockKpis }));
 

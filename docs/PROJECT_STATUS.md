@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-26. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-27. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -3744,15 +3744,63 @@ lote las pule.
 - #324: el asistente se abre desde un botón flotante en cualquier pantalla
   (Plan Pro). Busca por número de caso y por nombre sin acentos. Si Gemini no
   responde, devuelve `IA_NO_DISPONIBLE` en vez de inventar.
-- Quedan como ideas, sin construir: «Tomar el control» de una conversación
-  (choca con responder sólo cuando el agente terminó), un tablero kanban, una
-  agenda, un resumen diario por mail y el estado del agente en la barra.
+- Las ideas que quedaban (el tablero, el estado del agente en la barra,
+  «Tomar el control» y la agenda) se construyeron en #333 y #334, dentro de la
+  auditoría de septiembre (abajo). El resumen diario por mail quedó sólo
+  explicado.
+
+**La auditoría técnica de septiembre y la limpieza (2026-09-27).** El informe
+completo, con los 16 puntos pedidos, está en `docs/AUDITORIA-2026-09.md`.
+Ningún PR renombra campos, estados, endpoints ni variables de entorno, y el
+tope de 310 kB de `pnpm peso` no se tocó.
+- #326: la regex del clasificador de gravedad escapa bien su clase;
+  `/api/admin/health` no devuelve el texto del error de la base;
+  `gmail-sender` saca CR/LF de los encabezados; `oauth-state` compara en
+  tiempo constante; el alta de usuarios queda auditada; `confirm-training` da
+  404 con una corrida de otro caso; los `fetch` a Graph cortan a los 30 s. Se
+  borró `scripts/cleanup-cases.ts`, que vaciaba el inquilino de la base viva
+  sin guarda.
+- #327: la deliberación del agente toma como respaldo sólo lo que devolvió
+  cada consulta, no los argumentos que escribió el modelo. Los valores del
+  denunciante pasan por `sinCentinelas` antes del prompt. El resumen del
+  asistente no afirma cobertura, pago ni monto, y se descarta si repite un
+  número o un monto que no esté en la póliza ni en el caso (G12).
+- #328: el re-análisis y el PATCH de estado son atómicos contra el estado
+  leído (409 si otro lo cambió); `enviado_a_core` y `error_core` no se
+  escriben desde la API; la auditoría guarda la IP sólo si es válida;
+  `/admin/cartera` y `/api/admin/gmail-accounts` no dan 500 ante una entrada
+  inválida; un mail que choca por `messageId` sigue con el caso existente en
+  vez de perderse (G40, era el hallazgo alto). `messenger.ts` graba la fila
+  `queued` antes de mandar el WhatsApp (G13).
+- #329 y #330: se borraron el remitente SMTP, `runExtractionWorker`, 56 tipos
+  y otros exports sin importadores, los scripts de la migración de filtros de
+  tenant, `nodemailer`, `pino`, `@aws-sdk/s3-request-presigner` y 88 imports
+  sin uso.
+- #331: simplificaciones sin cambio de comportamiento. El escape de regex, el
+  `errorCode` de los logs (22 copias), la comparación de DNI, teléfono y
+  póliza en SQL (seis módulos) y el corte del dataset de entrenamiento viven
+  en un solo lugar.
+- #332: las once páginas de la app usan el idioma de la cuenta
+  (`getAccountLocale()`), no sólo la cookie. `/metricas` cuenta sólo
+  reclamos en la distribución por tipo y muestra los nueve tipos.
+- #333: la bandeja filtra por riesgo de fraude (también en el CSV), se puede
+  ver como tablero por estado (sólo lectura) y la barra lateral muestra si el
+  agente está activo, en modo de prueba o sin presupuesto.
+- #334: «Tomar el control» pasa un caso de WhatsApp a
+  `requiere_especialista` para que responda una persona. Es Plan Pro, sólo en
+  `info_faltante` o `confirmacion_pendiente`, y sólo cuando el agente terminó:
+  el PATCH devuelve `FSM_INVALID_TRANSITION` si la reserva del agente está
+  viva. La agenda (`/agenda`) lista dos vencimientos que ya salían de datos
+  existentes: el cierre de la ventana de 24 h de WhatsApp y el cierre por
+  abandono. Todos los roles la ven; quien no puede ver datos del cliente ve
+  el titular tapado.
+- El resumen diario por mail quedó sólo explicado en el informe, sin
+  construir.
 
 **Para decidir.**
-- `src/server/confirmations/messenger.ts` todavía manda el WhatsApp antes de
-  grabar la fila saliente. Si el proceso se cae entre las dos cosas, el
-  mensaje sale y no queda registro. #323 ya lo corrigió en la respuesta
-  humana.
+- ~~`src/server/confirmations/messenger.ts` manda el WhatsApp antes de
+  grabar la fila saliente~~. Resuelto en #328: graba la fila `queued` antes
+  de mandar.
 - El export en `full_admin_only` sigue sacando en claro la memoria de
   remitentes (`sender_profile`, con nombre y DNI) y, en modo `full`, los
   argumentos de las herramientas en la auditoría. Es el modo en claro para

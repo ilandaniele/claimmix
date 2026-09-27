@@ -15,8 +15,8 @@
  *
  * The exported name/interface is unchanged so consumers don't change.
  *
- * Pure utility functions (mergeCaseUpdate, computeStatusCounts) are in
- * casesRealtimeUtils.ts for testability. `formatCaseNumber` vive en
+ * Pure utility functions (mergeCaseUpdate) are in casesRealtimeUtils.ts for
+ * testability. `formatCaseNumber` vive en
  * core/case/numero.ts — importalo de ahí directamente.
  */
 
@@ -208,4 +208,4 @@ export function useCasesRealtime(handlers: RealtimeHandlers) {
 }
 
 // Re-export pure utils from casesRealtimeUtils.ts for backward compatibility.
-export { mergeCaseUpdate, computeStatusCounts } from "./casesRealtimeUtils";
+export { mergeCaseUpdate } from "./casesRealtimeUtils";

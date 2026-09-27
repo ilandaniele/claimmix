@@ -6,11 +6,12 @@
  * The user receives a confirmation email from Better Auth (if email is configured).
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { ALL_ROLES } from "@/lib/auth/roles";
 import { auth } from "@/lib/auth";
 import { enAltaDeAdmin } from "@/lib/auth/registro-permitido";
 import { db } from "@/lib/db";
@@ -19,6 +20,8 @@ import { authUsers, users } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { logger } from "@/lib/observability/logger";
+import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
+import { getClientIp } from "@/lib/rate-limit/index";
 
 // ── GET /api/admin/users ──────────────────────────────────────────────────────
 
@@ -62,7 +65,7 @@ export async function GET() {
 const CreateUserSchema = z.object({
   full_name: z.string().min(2).max(100),
   email: z.string().email(),
-  role: z.enum(["owner", "admin", "specialist", "analyst", "viewer"]),
+  role: z.enum(ALL_ROLES),
   password: z.string().min(8).optional(),
 });
 
@@ -161,6 +164,17 @@ export async function POST(request: NextRequest) {
         )
       );
     }
+
+    await writeAuditLog({
+      tenant_id: adminRow.tenant_id,
+      actor_id: adminRow.id,
+      event_type: AuditEvent.USER_CREATED,
+      target_type: "user",
+      target_id: newUserId,
+      payload: { role },
+      ip: getClientIp(request),
+      ua: request.headers.get("user-agent") ?? undefined,
+    });
 
     return ok(
       {

@@ -35,33 +35,6 @@ export const CaseStatusLegacySchema = z.enum([
 ]);
 export type CaseStatusLegacy = z.infer<typeof CaseStatusLegacySchema>;
 
-/**
- * New email-intake FSM statuses added in 0005_email_intake.sql (IC6).
- * Mapped from spec English names to es-AR Spanish for consistency with
- * existing statuses (procesando, listo, esperando, escalado, cerrado).
- *
- * English → Spanish mapping (documented inline):
- *   received             → recibido
- *   missing_info         → info_faltante
- *   pending_confirmation → confirmacion_pendiente
- *   requires_specialist  → requiere_especialista
- *   ready_for_core       → listo_para_core
- *   sent_to_core         → enviado_a_core
- *   core_error           → error_core
- *   not_relevant         → no_relevante
- */
-export const CaseStatusEmailSchema = z.enum([
-  "recibido",
-  "info_faltante",
-  "confirmacion_pendiente",
-  "requiere_especialista",
-  "listo_para_core",
-  "enviado_a_core",
-  "error_core",
-  "no_relevante",
-]);
-export type CaseStatusEmail = z.infer<typeof CaseStatusEmailSchema>;
-
 /** All allowed case statuses (legacy + email-intake) */
 export const CaseStatusSchema = z.enum([
   // Original statuses
@@ -88,6 +61,19 @@ export type CaseStatus = z.infer<typeof CaseStatusSchema>;
  */
 export const SeveritySchema = z.enum(["low", "medium", "high", "critical"]);
 export type Severity = z.infer<typeof SeveritySchema>;
+
+/**
+ * Niveles de riesgo de fraude que el filtro de la bandeja puede pedir.
+ *
+ * `cases.fraud_risk_level` también acepta `"none"` (el default), pero ese
+ * valor no es una opción de filtro: no hay chip para «sin riesgo».
+ */
+export const FraudRiskLevelSchema = z.enum(["low", "medium", "high"]);
+export type FraudRiskLevel = z.infer<typeof FraudRiskLevelSchema>;
+
+/** Canales de ingreso de un caso. */
+export const ChannelSchema = z.enum(["email_sim", "email", "whatsapp_sim", "whatsapp"]);
+export type Channel = z.infer<typeof ChannelSchema>;
 
 /** Allowed sort columns — whitelist prevents SQL injection via sort param */
 export const SortColumnSchema = z.enum(["created_at", "confidence_min", "status"]);
@@ -142,9 +128,12 @@ export const CaseQuerySchema = z.object({
   order: z.enum(["asc", "desc"]).default("desc"),
   // Email-intake filters (AC18)
   severity: listaDe(SeveritySchema),
+  // Filtro de fraude de la bandeja (G35). Aditivo: sin él, ninguna consulta
+  // ni el CSV cambian.
+  fraude: listaDe(FraudRiskLevelSchema),
   customer_id: z.string().uuid().optional(),
   policy_id: z.string().uuid().optional(),
-  channel: listaDe(z.enum(["email_sim", "email", "whatsapp_sim", "whatsapp"])),
+  channel: listaDe(ChannelSchema),
   is_claim: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
   // Sólo `true` filtra: «los que no están para responder» no es una sección.
   // Cualquier otro valor se ignora, como en `bandeja/page.tsx`: un 400 acá

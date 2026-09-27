@@ -21,13 +21,13 @@ import "server-only";
 
 import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments, missingDocs, requiredDocsConfig } from "@/lib/db/schema";
 import { callGemini, errMeta, esPasajero } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 /**
@@ -92,7 +92,7 @@ export async function seedRequiredDocs(
       )
     );
   } catch (err) {
-    logger.error({ code: errCode(err), case_id: caseId }, "documents.seed_failed");
+    logger.error({ code: errorCode(err), case_id: caseId }, "documents.seed_failed");
   }
 }
 
@@ -128,7 +128,7 @@ export async function pendingDocKeys(
       .map((r) => r.doc_key)
       .filter((key) => labelForField(key).kind === "documento");
   } catch (err) {
-    logger.error({ code: errCode(err) }, "documents.pending_fetch_failed");
+    logger.error({ code: errorCode(err) }, "documents.pending_fetch_failed");
     return [];
   }
 }
@@ -265,7 +265,7 @@ export async function reconcileAttachments(
             .where(eq(claimAttachments.id, attachmentId))
         );
       } catch (err) {
-        logger.error({ code: errCode(err) }, "documents.no_se_pudo_marcar_el_adjunto");
+        logger.error({ code: errorCode(err) }, "documents.no_se_pudo_marcar_el_adjunto");
       }
     }
 
@@ -285,7 +285,7 @@ export async function reconcileAttachments(
   } catch (err) {
     // El pasajero ya lo logueó identifyDocument.
     if (vuelveALaCola && esPasajero(err)) throw err;
-    logger.error({ code: errCode(err), case_id: caseId }, "documents.reconcile_failed");
+    logger.error({ code: errorCode(err), case_id: caseId }, "documents.reconcile_failed");
   }
 }
 
@@ -464,13 +464,6 @@ async function inlineFor(
     // answers null, which is the safe direction.
     return undefined;
   }
-}
-
-function errCode(err: unknown): string {
-  return (
-    (err as { code?: string })?.code ??
-    (err instanceof Error ? err.name : "UnknownError")
-  );
 }
 
 // ── When there is nothing to send ────────────────────────────────────────────
@@ -791,6 +784,6 @@ export async function satisfyContactDocsWeAlreadyHave(
   } catch (err) {
     // Que no se cierre no rompe nada: se vuelve a preguntar, que es la falla
     // barata. Lo caro es lo contrario.
-    logger.error({ code: errCode(err), case_id: caseId }, "documents.contact_close_failed");
+    logger.error({ code: errorCode(err), case_id: caseId }, "documents.contact_close_failed");
   }
 }

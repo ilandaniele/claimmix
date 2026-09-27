@@ -58,12 +58,6 @@ export async function PATCH(
       if (message === "JOB_NOT_STARTABLE") {
         throw new AppError("VALIDATION_FAILED", "Este trabajo ya fue iniciado.");
       }
-      if (message === "JOB_NOT_APPROVABLE") {
-        throw new AppError("VALIDATION_FAILED", "Este trabajo todavÃ­a no estÃ¡ listo para aprobar.");
-      }
-      if (message === "JOB_NOT_APPROVED") {
-        throw new AppError("VALIDATION_FAILED", "AprobÃ¡ la evaluaciÃ³n antes de activar el modelo.");
-      }
       throw e;
     }
   } catch (e) {

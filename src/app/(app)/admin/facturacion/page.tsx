@@ -25,7 +25,7 @@ import { getStatement } from "@/server/billing/statement";
 import { mesDeCalendario } from "@/core/fecha/mes-calendario";
 import { nombreDePlan } from "@/lib/billing/plan-label";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +51,7 @@ export default async function FacturacionPage({
     redirect("/bandeja");
   }
 
-  const locale = await getServerLocale();
+  const locale = await getAccountLocale();
   const t = getT(locale);
 
   const raw = (await searchParams).month;

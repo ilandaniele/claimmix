@@ -9,9 +9,10 @@
  */
 
 import "server-only";
-import { and, asc, eq, sql } from "drizzle-orm";
-import { db, tables } from "@/lib/db";
+import { asc, eq } from "drizzle-orm";
+import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
+import { policyNumberEquals } from "@/lib/db/helpers";
 import { normalizarNumeroPoliza } from "@/core/matching/normalizar";
 import { logger } from "@/lib/observability/logger";
 
@@ -121,9 +122,7 @@ async function matchByPolicyNumber(
          * misma tabla, uno tolerante y el otro no, y el que decide si el caso
          * queda asociado a un contrato era el estricto.
          */
-        .where(
-          sql`upper(replace(${p.policy_number}, ' ', '')) = ${normalizarNumeroPoliza(policyNumber)}`
-        )
+        .where(policyNumberEquals(p.policy_number, normalizarNumeroPoliza(policyNumber)))
         .limit(5)
     );
   } catch (e) {

@@ -13,6 +13,7 @@ import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { enTenant, enTenantVarias, type ClienteDatos } from "@/data/scope";
 import { claimFieldConfirmations, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 type FilaDelPedido = { asked_keys: string[] | null; created_at: string };
@@ -37,8 +38,7 @@ export function consultaDelPedido(db: ClienteDatos, caseId: string) {
 }
 
 function noSeLeyo(err: unknown): void {
-  const code = (err as { code?: string })?.code ?? (err instanceof Error ? err.name : "UnknownError");
-  logger.error({ code }, "orchestrate.failed_to_read_the_last_ask");
+  logger.error({ code: errorCode(err) }, "orchestrate.failed_to_read_the_last_ask");
 }
 
 /**

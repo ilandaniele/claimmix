@@ -3,10 +3,11 @@
  */
 
 import { NextRequest } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { ALL_ROLES } from "@/lib/auth/roles";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -18,7 +19,7 @@ import { olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 export const dynamic = "force-dynamic";
 
 const ParamsSchema = z.object({ id: z.string().uuid() });
-const RoleSchema = z.enum(["owner", "admin", "specialist", "analyst", "viewer"]);
+const RoleSchema = z.enum(ALL_ROLES);
 const PatchUserSchema = z.object({
   role: RoleSchema,
 });

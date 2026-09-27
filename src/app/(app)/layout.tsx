@@ -10,14 +10,16 @@
  * It fetches the current user's profile (Drizzle) to display name/initials.
  */
 
+import { Suspense } from "react";
+
 import { esPlanPro } from "@/core/billing/plan-pro";
 import { getSessionContext } from "@/lib/auth/session";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
 import { getUserRow, type UserRow } from "@/lib/auth/user-row";
-import { users } from "@/lib/db/schema";
 import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
 import { AsistenteFlotante } from "./_components/AsistenteFlotante";
+import { EstadoDelAgente } from "./_components/EstadoDelAgente";
 import { getT } from "@/lib/i18n";
 import { LocaleProvider } from "@/lib/i18n/LocaleContext";
 import { resolveAccountLocale } from "@/lib/i18n/locale";
@@ -107,7 +109,18 @@ export default async function AppLayout({
            * Sólo el booleano: el nombre del plan es dato de admin, y todo lo
            * que recibe la barra viaja al navegador de cualquier rol.
            */}
-          <Sidebar role={role} isOperator={isOperator} esPro={esPro} />
+          <Sidebar
+            role={role}
+            isOperator={isOperator}
+            esPro={esPro}
+            estadoDelAgente={
+              userRow?.tenant_id ? (
+                <Suspense fallback={null}>
+                  <EstadoDelAgente tenantId={userRow.tenant_id} locale={locale} />
+                </Suspense>
+              ) : null
+            }
+          />
 
           {/* Main content area */}
           <div className="flex flex-1 flex-col overflow-hidden">

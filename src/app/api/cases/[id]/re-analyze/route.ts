@@ -8,25 +8,26 @@
  *      Re-analysis temporarily sets status to "procesando" then the worker transitions it.
  *
  * LLM10: Budget check before running extractor.
- * RLS is gone — every query filters explicitly by the caller's tenant_id.
+ * Every query filters explicitly by the caller's tenant_id (enTenant, backed by RLS).
  */
 
 import { type NextRequest, after } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { ADMIN_ROLES } from "@/lib/auth/roles";
 import { entrar } from "@/lib/api/entrada";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
-import { CaseStatusSchema } from "@/lib/schemas/cases";
+import { CaseStatusSchema, type CaseStatus } from "@/lib/schemas/cases";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
 import { ESTADOS_QUE_NO_SE_REABREN_A_MANO } from "@/core/case/fsm";
 import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import {
   getClientIp,
@@ -122,7 +123,7 @@ export async function POST(
   if (statusParsed.success && ESTADOS_QUE_NO_SE_REABREN_A_MANO.has(statusParsed.data)) {
     // Admins can re-analyze cases stuck in no_relevante due to provider errors.
     // Regular analysts cannot re-open terminal cases.
-    const isAdmin = userRow.role === "admin";
+    const isAdmin = (ADMIN_ROLES as readonly string[]).includes(userRow.role);
     const isNoRelevante = statusParsed.data === "no_relevante";
     if (!isAdmin || !isNoRelevante) {
       return err(
@@ -134,6 +135,14 @@ export async function POST(
     }
   }
 
+  // Un caso ya enviado a Core no vuelve a `procesando`: eso lo desengancharía
+  // del envío que ya se hizo. Sólo `sync-to-core` escribe/lee esa transición.
+  if (statusParsed.success && statusParsed.data === "enviado_a_core") {
+    return err(
+      new AppError("FSM_INVALID_TRANSITION", "El caso ya se envió a Core. No se puede re-analizar.")
+    );
+  }
+
   // ── Budget check ──────────────────────────────────────────────────────────────
   const budgetResult = await checkBudget(userRow.tenant_id, userRow.id);
   if (budgetResult.exceeded) {
@@ -141,27 +150,25 @@ export async function POST(
   }
 
   // ── Reset case to procesando ──────────────────────────────────────────────────
+  // El where exige además el status que vimos al leer: si cambió en el medio
+  // (TOCTOU), el update no matchea ninguna fila.
   try {
     const resetCase = firstRow(
       await enTenant(tenantCtx, (db) =>
         db
         .update(cases)
         .set({ status: "procesando", updated_at: new Date().toISOString() })
-          .where(eq(cases.id, caseId))
+          .where(and(eq(cases.id, caseId), eq(cases.status, caseRow.status as CaseStatus)))
           .returning({ id: cases.id, status: cases.status })
       )
     );
-    if (!resetCase || resetCase.status !== "procesando") {
+    if (!resetCase) {
       return err(
-        new AppError(
-          "INTERNAL_ERROR",
-          "No se pudo reiniciar el caso para re-analisis."
-        )
+        new AppError("FSM_INVALID_TRANSITION", "El caso cambió mientras lo mirabas.")
       );
     }
   } catch (e) {
-    const code = (e as { code?: string })?.code ?? (e instanceof Error ? e.name : "UnknownError");
-    logger.error({ code, case_id: caseId }, "re_analyze.failed_to_reset_case");
+    logger.error({ code: errorCode(e), case_id: caseId }, "re_analyze.failed_to_reset_case");
     return err(new AppError("INTERNAL_ERROR"));
   }
 

@@ -92,8 +92,6 @@ vi.mock("@/server/ai/budget", () => ({
   checkBudget: mockCheckBudget,
   recordUsage: vi.fn().mockResolvedValue(undefined),
   computeCostUsd: vi.fn().mockReturnValue(0),
-  COST_PER_PROMPT_TOKEN: 0.00000015,
-  COST_PER_COMPLETION_TOKEN: 0.0000006,
 }));
 
 vi.mock("@/server/agents/intake-agent", () => ({

@@ -11,13 +11,12 @@
  * Precondition: cases.status must be 'listo_para_core' (unless force=true).
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 
 import { type RoleContext } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, extractedFields } from "@/lib/db/schema";
 import { SyncToCoreSchema } from "@/lib/schemas/cases";

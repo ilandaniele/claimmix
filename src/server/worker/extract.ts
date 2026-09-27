@@ -1,20 +1,7 @@
 /**
  * AI extraction worker — orchestrates the full extraction pipeline.
  *
- * Original pipeline (simulate flow — still active):
- *   1. Check budget (LLM10)
- *   2. Elegir extractor: mock o Gemini (según MOCK_AI o si hay credencial)
- *   3. Run extractor → ExtractedClaim
- *   4. Gap analysis → recommended_status + missing_doc_keys
- *   5. Write extracted_fields to DB (service role)
- *   6. Write missing_docs to DB (if any)
- *   7. FSM transition: procesando → listo|esperando|escalado
- *   8. Update case.status + case.confidence_min
- *   9. Write audit_log
- *   10. Record ai_usage
- *   11. Create outbound_messages stub (if esperando)
- *
- * Email intake pipeline extension (W3 — runExtractionWorker with email flow):
+ * Email intake pipeline (W3):
  *   a. Fetch case + raw_messages (most recent)
  *   b. Load memory hints from claim_memory for this sender (AC13 groundwork)
  *   c. Load known_claim_patterns for this tenant
@@ -37,7 +24,6 @@
 
 import "server-only";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
 import {
   enTenant,
   enTenantVarias,
@@ -51,14 +37,12 @@ import {
   extractedFields,
   knownClaimPatterns,
   missingDocs,
-  outboundMessages,
   rawMessages,
 } from "@/lib/db/schema";
 import type { CaseInsert } from "@/lib/db/types";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import { analyzeGaps, UMBRAL_POR_OMISION } from "@/core/case/gap-analysis";
-import { checkBudget, recordUsage } from "@/server/ai/budget";
-import { ClaimAgentError, runClaimTextAgent, runEmailClaimAgent } from "@/server/ai/claim-agent";
+import { checkBudget } from "@/server/ai/budget";
+import { runEmailClaimAgent } from "@/server/ai/claim-agent";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 import { errMeta, esPasajero, GeminiExtractionError } from "@/server/ai/gemini-extractor";
@@ -124,271 +108,19 @@ import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hyd
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle";
 import { mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
-import type { ClaimType } from "@/lib/schemas/cases";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
-
-/**
- * Run the extraction worker for a case in "procesando" status.
- * This is the LEGACY worker for the simulate flow (email_sim cases).
- *
- * Safe to call fire-and-forget (all errors are caught and logged).
- * Status transitions are contained to: procesando → listo|esperando|escalado.
- */
-export async function runExtractionWorker(
-  caseId: string,
-  tenantId: string,
-  userId: string | null
-): Promise<void> {
-  // El contexto se arma una vez, acá, a partir del inquilino que llega en la
-  // firma. Todo lo que consulte o escriba abajo lo recibe: esa es la única
-  // forma de que la base sepa de quién es lo que se está tocando.
-  const tenantCtx: TenantContext = { tenantId };
-  // ──0. Fetch case + raw message ──────────────────────────────────────────────
-
-  let caseRow: {
-    id: string;
-    status: string;
-    claim_type: string | null;
-    tenant_id: string;
-    channel: string;
-  } | null;
-  try {
-    caseRow = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select({
-            id: cases.id,
-            status: cases.status,
-            claim_type: cases.claim_type,
-            tenant_id: cases.tenant_id,
-            channel: cases.channel,
-          })
-          .from(cases)
-          .where(eq(cases.id, caseId))
-          .limit(1)
-      )
-    );
-  } catch (err) {
-    logger.error({ case_id: caseId, code: dbErrCode(err) }, "worker.case_not_found");
-    return;
-  }
-
-  if (!caseRow) {
-    logger.error({ case_id: caseId }, "worker.case_not_found");
-    return;
-  }
-
-  // Route supported intake channels to the modern worker so every run is logged.
-  if (
-    caseRow.channel === "email" ||
-    caseRow.channel === "email_sim" ||
-    caseRow.channel === "whatsapp" ||
-    caseRow.channel === "whatsapp_sim"
-  ) {
-    await runEmailExtractionWorker(caseId, tenantId, userId);
-    return;
-  }
-
-  if (caseRow.status !== "procesando") {
-    logger.info({
-        case_id: caseId,
-        status: caseRow.status,
-      }, "worker.skipped.not_procesando");
-    return;
-  }
-
-  const claimType = caseRow.claim_type as ClaimType;
-
-  // Fetch raw message body.
-
-  let rawMsg: { body: string } | null;
-  try {
-    rawMsg = firstRow(
-      await enTenant(tenantCtx, (db) =>
-        db
-          .select({ body: rawMessages.body })
-          .from(rawMessages)
-          .where(eq(rawMessages.case_id, caseId))
-          .orderBy(desc(rawMessages.received_at))
-          .limit(1)
-      )
-    );
-  } catch {
-    rawMsg = null;
-  }
-
-  if (!rawMsg) {
-    logger.error({ case_id: caseId }, "worker.raw_message_not_found_for_case");
-    await escalateCase(caseId, tenantCtx, userId, "raw_message_missing", "raw_message_missing");
-    return;
-  }
-
-  // ── 1. Budget check ──────────────────────────────────────────────────────────
-  const budgetResult = await checkBudget(tenantId, userId);
-  if (budgetResult.exceeded) {
-    logger.warn({
-        case_id: caseId,
-        reason: budgetResult.reason,
-      }, "worker.budget_exceeded");
-    await writeAuditLog({
-      tenant_id: tenantId,
-      actor_id: userId,
-      event_type: AuditEvent.AI_BUDGET_EXCEEDED,
-      target_type: "case",
-      target_id: caseId,
-      payload: { reason: budgetResult.reason },
-    });
-    // Park case in escalado — human needs to re-trigger.
-    await updateCaseStatus(caseId, tenantCtx, "escalado", null);
-    return;
-  }
-
-  // ── 2. Elegir y correr el extractor (gemini | mock) ──────────────────────────
-  let extractedClaim;
-
-  try {
-    extractedClaim = await runClaimTextAgent({
-      rawText: rawMsg.body,
-      claimType,
-      caseId,
-      tenantId,
-      userId,
-    });
-  } catch (e) {
-    if (e instanceof ClaimAgentError) {
-      logger.error({
-        case_id: caseId,
-        error_name: e.cause instanceof Error ? e.cause.name : e.name,
-      }, "worker.ai_output_invalid");
-      await escalateCase(caseId, tenantCtx, userId, "AI_OUTPUT_INVALID", "ai_output_invalid");
-      return;
-    }
-    const name = e instanceof Error ? e.name : "UnknownError";
-    logger.error({
-        case_id: caseId,
-        error_name: name,
-      }, "worker.extractor_error");
-    await escalateCase(caseId, tenantCtx, userId, "extractor_error", "extractor_error");
-    return;
-  }
-
-  // ── 3. Gap analysis ──────────────────────────────────────────────────────────
-  // El umbral se lee acá, en el borde, y entra al núcleo como un número.
-  const umbral = Number.parseFloat(process.env.CONFIDENCE_THRESHOLD ?? "");
-  const gapResult = analyzeGaps(
-    claimType,
-    extractedClaim.fields,
-    Number.isFinite(umbral) ? umbral : UMBRAL_POR_OMISION
-  );
-
-  // ── 4. Write extracted_fields ────────────────────────────────────────────────
-  if (extractedClaim.fields.length > 0) {
-    try {
-      await upsertExtractedFields(caseId, tenantCtx, extractedClaim.fields);
-    } catch (err) {
-      logger.error({ code: dbErrCode(err), case_id: caseId }, "worker.failed_to_write_extracted_fields");
-    }
-  }
-
-  // ── 5. Write missing_docs ────────────────────────────────────────────────────
-  if (gapResult.missing_doc_keys.length > 0) {
-    try {
-      await insertMissingDocsIfAbsent(caseId, tenantCtx, gapResult.missing_doc_keys);
-    } catch (err) {
-      logger.error({ code: dbErrCode(err), case_id: caseId }, "worker.failed_to_write_missing_docs");
-    }
-
-    // Create outbound_messages stub (AC6).
-    try {
-      await enTenant(tenantCtx, (db) =>
-        db.insert(outboundMessages).values({
-          case_id: caseId,
-          tenant_id: tenantId,
-          channel: "email_sim",
-          template: "request_missing_docs",
-          rendered_body: `Se solicita la documentación faltante para el caso ${caseId}: ${gapResult.missing_doc_keys.join(", ")}`,
-          status: "queued",
-        })
-      );
-    } catch (err) {
-      logger.error({ code: dbErrCode(err) }, "worker.failed_to_create_outbound_messages");
-    }
-  }
-
-  // ── 6. FSM transition: procesando → new_status ───────────────────────────────
-  const newStatus = gapResult.recommended_status;
-
-  // Safety: always validate FSM transition (LLM08 containment).
-  if (!isValidTransition("procesando", newStatus)) {
-    logger.error(
-      { desde: "procesando", hacia: newStatus },
-      "worker.invalid_fsm_transition_attempt"
-    );
-    await escalateCase(caseId, tenantCtx, userId, "fsm_violation", "fsm_violation");
-    return;
-  }
-
-  // ── 7. Update case status + confidence_min ───────────────────────────────────
-  await updateCaseStatus(caseId, tenantCtx, newStatus, gapResult.confidence_min);
-
-  // ── 8. Audit log ─────────────────────────────────────────────────────────────
-  const auditPayload: Record<string, unknown> = {
-    model: extractedClaim.extraction_model,
-    fields_extracted: extractedClaim.fields.length,
-    confidence_min: gapResult.confidence_min,
-    new_status: newStatus,
-    missing_doc_keys: gapResult.missing_doc_keys,
-  };
-
-  if (gapResult.low_confidence_fields.length > 0) {
-    auditPayload.reason = "low_confidence";
-    auditPayload.low_confidence_fields = gapResult.low_confidence_fields;
-  }
-
-  await writeAuditLog({
-    tenant_id: tenantId,
-    actor_id: userId,
-    event_type: AuditEvent.AI_EXTRACTED,
-    target_type: "case",
-    target_id: caseId,
-    payload: auditPayload,
-  });
-
-  // ── 9. Record AI usage (budget tracking) ─────────────────────────────────────
-  if (extractedClaim.prompt_tokens > 0 || extractedClaim.completion_tokens > 0) {
-    await recordUsage(
-      tenantId,
-      userId,
-      extractedClaim.extraction_model,
-      extractedClaim.prompt_tokens,
-      extractedClaim.completion_tokens,
-      extractedClaim.cost_usd
-    );
-  }
-
-  // LLM06: Log only safe metadata — never raw_intake_text.
-  logger.info({
-        case_id: caseId,
-        model: extractedClaim.extraction_model,
-        prompt_tokens: extractedClaim.prompt_tokens,
-        completion_tokens: extractedClaim.completion_tokens,
-        new_status: newStatus,
-        confidence_min: gapResult.confidence_min,
-        missing_docs_count: gapResult.missing_doc_keys.length,
-      }, "worker.extraction_complete");
-}
 
 // ── Email intake extraction worker ─────────────────────────────────────────────
 
 /**
  * Run the extraction worker for a real email case (channel='email').
  *
- * This is the W3 pipeline for email-sourced cases. Called from the webhook handler
- * via runExtractionWorker when channel='email', or directly via the API route
- * POST /api/worker/extract.
+ * This is the W3 pipeline for email-sourced cases. Called directly via the
+ * API route POST /api/worker/extract.
  *
  * Pipeline:
  *   a) Fetch case + raw_messages (most recent)
@@ -595,7 +327,7 @@ async function acquireExtractionLease(
      */
     logger.error({
         case_id: caseId,
-        code: dbErrCode(err),
+        code: errorCode(err),
       }, "email_worker.lease_indeterminado");
     return "no_se_pudo";
   }
@@ -640,7 +372,7 @@ async function releaseExtractionLease(
 
     return filas[0]?.pending === true;
   } catch (err) {
-    logger.error({ code: dbErrCode(err) }, "email_worker.lease_release_error");
+    logger.error({ code: errorCode(err) }, "email_worker.lease_release_error");
     return false;
   }
 }
@@ -668,7 +400,7 @@ async function devolverReservaHeredada(
         .where(eq(cases.id, caseId))
     );
   } catch (err) {
-    logger.error({ code: dbErrCode(err) }, "email_worker.devolver_heredada_fallo");
+    logger.error({ code: errorCode(err) }, "email_worker.devolver_heredada_fallo");
   }
 }
 
@@ -755,7 +487,7 @@ async function redispatchExtraction(
     );
   } catch (err) {
     // Si ni esto se puede escribir, queda el log de arriba y nada más.
-    logger.error({ code: dbErrCode(err) }, "email_worker.no_se_pudo_remarcar_pendiente");
+    logger.error({ code: errorCode(err) }, "email_worker.no_se_pudo_remarcar_pendiente");
   }
 }
 
@@ -806,7 +538,7 @@ async function reintentarPorTimeout(
   } catch (err) {
     logger.error({
         case_id: caseId,
-        code: dbErrCode(err),
+        code: errorCode(err),
       }, "email_worker.reintento_por_timeout_fallo");
     return false;
   }
@@ -1278,7 +1010,7 @@ export async function runEmailExtractionWorker(
       try {
         await upsertExtractedFields(caseId, tenantCtx, fieldsToWrite);
       } catch (err) {
-        logger.error({ code: dbErrCode(err) }, "email_worker.extracted_fields_upsert_error");
+        logger.error({ code: errorCode(err) }, "email_worker.extracted_fields_upsert_error");
       }
     }
 
@@ -1295,7 +1027,7 @@ export async function runEmailExtractionWorker(
       try {
         await insertMissingDocsIfAbsent(caseId, tenantCtx, missingFieldKeys);
       } catch (err) {
-        logger.error({ code: dbErrCode(err) }, "email_worker.missing_docs_upsert_error");
+        logger.error({ code: errorCode(err) }, "email_worker.missing_docs_upsert_error");
       }
     }
 
@@ -1533,7 +1265,7 @@ export async function runEmailExtractionWorker(
         db.update(cases).set(caseUpdate).where(eq(cases.id, caseId))
       );
     } catch (err) {
-      logger.error({ code: dbErrCode(err) }, "email_worker.case_update_error");
+      logger.error({ code: errorCode(err) }, "email_worker.case_update_error");
     }
 
     // ── n) Memory applied audit log — AC13 groundwork ────────────────────────
@@ -1818,7 +1550,7 @@ async function cargarLoDelPrompt(
     };
   } catch (err) {
     logger.error({
-        code: dbErrCode(err),
+        code: errorCode(err),
         nota: "Se vuelve al camino de a uno, donde cada carga degrada sola.",
       }, "email_worker.lote_del_prompt_fallo");
 
@@ -1882,20 +1614,11 @@ async function loadKnownPatterns(tenantCtx: TenantContext): Promise<KnownPattern
   try {
     return deKnownPatterns(await enTenant(tenantCtx, consultaKnownPatterns));
   } catch (err) {
-    logger.error({ code: dbErrCode(err) }, "email_worker.known_claim_patterns_load_error");
+    logger.error({ code: errorCode(err) }, "email_worker.known_claim_patterns_load_error");
     return [];
   }
 }
 
-// ── Helpers (shared with legacy worker) ───────────────────────────────────────
-
-/** Extract a loggable error code from a thrown DB error (PII-safe). */
-function dbErrCode(err: unknown): string {
-  return (
-    (err as { code?: string })?.code ??
-    (err instanceof Error ? err.name : "UnknownError")
-  );
-}
 
 /**
  * Upsert extracted_fields rows on the (case_id, field_key) unique constraint
@@ -2093,7 +1816,7 @@ async function anotarPolizaEncontrada(
      * `policy_id` y el agente vuelve a pedir el número. Molesto, no roto — y no
      * es motivo para tirar abajo la extracción entera.
      */
-    logger.error({ code: dbErrCode(err) }, "email_worker.no_se_pudo_anotar_la_poliza");
+    logger.error({ code: errorCode(err) }, "email_worker.no_se_pudo_anotar_la_poliza");
   }
 }
 
@@ -2116,7 +1839,7 @@ async function updateCaseStatus(
       db.update(cases).set(updatePayload).where(eq(cases.id, caseId))
     );
   } catch (err) {
-    logger.error({ code: dbErrCode(err), case_id: caseId }, "worker.failed_to_update_case_status");
+    logger.error({ code: errorCode(err), case_id: caseId }, "worker.failed_to_update_case_status");
   }
 }
 
@@ -2250,10 +1973,3 @@ function loQueContesto(
   return conversation.entrantes.filter((m) => Date.parse(m.recibido) > desde).map((m) => m.texto);
 }
 
-// ── Lo que se mudó al núcleo ────────────────────────────────────────────────
-//
-// `stripQuotedReply` y `buildConversationBody` viven ahora en
-// `src/core/email/conversation.ts`: son texto entrando y texto saliendo, sin
-// base de datos ni reloj de por medio, y ahí se pueden probar sin montar nada.
-// Se re-exportan desde acá porque es de donde las importa todo el mundo.
-export { stripQuotedReply, buildConversationBody };

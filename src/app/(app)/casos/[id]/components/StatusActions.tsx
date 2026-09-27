@@ -11,7 +11,7 @@
  *                              o «Confirmado por …» ya confirmado
  *   requiere_especialista:     «Revisado: pasar a Listo para Core» + «Cerrar»
  *   info_faltante /
- *   confirmacion_pendiente:    reenviar el pedido (P8)
+ *   confirmacion_pendiente:    reenviar el pedido (P8), «Tomar el control» (D-F2)
  *   cerrado:                   banner de sólo lectura, o «Reabrir y reenviar» (P8)
  */
 
@@ -42,6 +42,9 @@ interface StatusActionsProps {
   /** P8. Sin esto no se muestra nada de reenviar ni reabrir. */
   onReenviar?: (reabrir: boolean) => void;
   reenviando?: boolean;
+  /** D-F2. Sin esto el botón de «Tomar el control» no se muestra. */
+  puedeTomarElControl?: boolean;
+  onTomarElControl?: () => void;
 }
 
 function ReAnalyzeButton({
@@ -109,6 +112,8 @@ export function StatusActions({
   onRevisadoListo,
   onReenviar,
   reenviando,
+  puedeTomarElControl,
+  onTomarElControl,
 }: StatusActionsProps) {
   const t = useT();
   // ── cerrado — read-only banner, o «Reabrir y reenviar» (P8) ────────────────
@@ -288,6 +293,17 @@ export function StatusActions({
               </p>
             )}
           </>
+        )}
+        {puedeTomarElControl && onTomarElControl && (
+          <button
+            type="button"
+            onClick={onTomarElControl}
+            disabled={dialogOpen}
+            data-testid="action-tomar-el-control"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {t("case.detail.tomarElControl")}
+          </button>
         )}
         <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
       </div>

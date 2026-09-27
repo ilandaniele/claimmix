@@ -14,7 +14,6 @@
  */
 
 import { and, eq, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
@@ -22,6 +21,7 @@ import type { CaseInsert, CaseRow, UserRow } from "@/lib/db/types";
 import type { CasePatch } from "@/lib/schemas/cases";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import { validateTransition } from "@/core/case/fsm";
+import { reservaViva } from "@/core/case/reserva-de-extraccion";
 import { writeAuditLog, AuditEvent, type AuditEventType } from "@/lib/audit/log";
 import { puedeCambiarEstado } from "@/lib/auth/roles";
 import { auditoriaSiQuedo } from "@/server/cases/auditoria-si-quedo";
@@ -85,6 +85,18 @@ export async function patchCase(
   }
 
   // ── 3. FSM transition check ────────────────────────────────────────────────
+  // `enviado_a_core` y `error_core` los pone sólo el envío a Core (LLM08,
+  // comentario de `fsm.ts:26`), nunca este PATCH.
+  if (patch.status === "enviado_a_core" || patch.status === "error_core") {
+    throw new AppError("FSM_INVALID_TRANSITION", "Ese estado lo pone sólo el envío a Core.");
+  }
+
+  // D-F2: «tomar el control» sólo con el agente terminado del todo. La UI ya
+  // esconde el botón, pero la guarda de verdad es ésta.
+  if (patch.status === "requiere_especialista" && reservaViva(current.extraction_lease_at, new Date())) {
+    throw new AppError("FSM_INVALID_TRANSITION", "El agente está trabajando en este caso.");
+  }
+
   if (patch.status !== undefined && patch.status !== current.status) {
     const validationError = validateTransition(
       current.status as CaseStatus,
@@ -155,6 +167,13 @@ export async function patchCase(
     return { case: updated };
   }
 
+  // Con status, el where exige además el status que vimos al leer: si cambió
+  // en el medio (TOCTOU), el update no matchea ninguna fila.
+  const whereUpdate =
+    patch.status !== undefined
+      ? and(eq(cases.id, caseId), eq(cases.status, current.status))
+      : eq(cases.id, caseId);
+
   let updated: CaseRow | null;
   try {
     updated = firstRow(
@@ -162,7 +181,7 @@ export async function patchCase(
         db
           .update(cases)
           .set(updateData)
-          .where(eq(cases.id, caseId))
+          .where(whereUpdate)
           .returning()
       )
     );
@@ -171,6 +190,9 @@ export async function patchCase(
   }
 
   if (!updated) {
+    if (patch.status !== undefined) {
+      throw new AppError("FSM_INVALID_TRANSITION", "El caso cambió mientras lo mirabas.");
+    }
     // Wrong-tenant updates match 0 rows → indistinguishable 404.
     throw new AppError("NOT_FOUND", "El caso no existe o no tenés acceso.");
   }

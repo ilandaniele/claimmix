@@ -17,13 +17,12 @@
  * AC4:  claim_messages row updated with provider_message_id='out-*' after send.
  * AC5:  Function never throws — resolves with { error } on failure.
  * AC12: Confirmation receipt always sent for valid claims.
- * AC12: No direct provider imports — only getEmailProvider() from gmail/index.ts (W1).
+ * AC12: No direct provider imports at module scope — GmailSender is dynamic-imported below.
  * AC16: In-Reply-To and References headers forwarded when inReplyToMessageId is set.
  */
 
 import "server-only";
 import { and, asc, eq } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
@@ -175,6 +174,57 @@ function messageIdFromHeaders(headers: unknown): string | undefined {
   );
   const value = row?.value?.trim();
   return value ? value : undefined;
+}
+
+/**
+ * Cierra un envío: actualiza las dos filas del par claim_messages/
+ * outbound_messages (dual-write, si se llegó a insertarlas) y escribe la
+ * auditoría. El éxito y el fallo hacían exactamente esto por separado, con el
+ * mismo try/catch y las mismas claves de log — sólo cambian los campos que se
+ * escriben.
+ */
+async function finalizeOutbound(params: {
+  tenantId: string;
+  caseId: string;
+  claimMessageId: string | undefined;
+  outboundMsgId: string | undefined;
+  outboundStatus: "sent" | "failed";
+  claimMessagePatch: Record<string, unknown>;
+  auditEvent: string;
+  auditPayload: Record<string, unknown>;
+}): Promise<void> {
+  const { tenantId, caseId, claimMessageId, outboundMsgId, outboundStatus, claimMessagePatch, auditEvent, auditPayload } = params;
+
+  if (claimMessageId) {
+    try {
+      await enTenant({ tenantId }, (db) =>
+        db.update(claimMessages).set(claimMessagePatch).where(eq(claimMessages.id, claimMessageId))
+      );
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "DBError";
+      logger.error({ error_name: name }, "dispatch.failed_to_update_claim_messages_status");
+    }
+  }
+
+  if (outboundMsgId) {
+    try {
+      await enTenant({ tenantId }, (db) =>
+        db.update(outboundMessages).set({ status: outboundStatus }).where(eq(outboundMessages.id, outboundMsgId))
+      );
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "DBError";
+      logger.error({ error_name: name }, "dispatch.failed_to_update_outbound_messages_status");
+    }
+  }
+
+  await writeAuditLog({
+    tenant_id: tenantId,
+    actor_id: null,
+    event_type: auditEvent,
+    target_type: "case",
+    target_id: caseId,
+    payload: auditPayload,
+  });
 }
 
 /**
@@ -391,47 +441,20 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
       ? rfcMessageId.replace(/^<+/, "").replace(/>+$/, "").trim()
       : providerMessageId;
 
-    // Update claim_messages — set provider_message_id + status='sent' + sent_at
-    if (claimMessageId) {
-      try {
-        await enTenant({ tenantId }, (db) =>
-          db
-            .update(claimMessages)
-            .set({
-              provider_message_id: storedMessageId,
-              status: "sent",
-              sent_at: new Date().toISOString(),
-            })
-            .where(eq(claimMessages.id, claimMessageId))
-        );
-      } catch (err) {
-        const name = err instanceof Error ? err.name : "DBError";
-        logger.error({ error_name: name }, "dispatch.failed_to_update_claim_messages_status");
-      }
-    }
-
-    // Update outbound_messages (dual-write window)
-    if (outboundMsgId) {
-      try {
-        await enTenant({ tenantId }, (db) =>
-          db
-            .update(outboundMessages)
-            .set({ status: "sent" })
-            .where(eq(outboundMessages.id, outboundMsgId))
-        );
-      } catch (err) {
-        const name = err instanceof Error ? err.name : "DBError";
-        logger.error({ error_name: name }, "dispatch.failed_to_update_outbound_messages_status");
-      }
-    }
-
-    await writeAuditLog({
-      tenant_id: tenantId,
-      actor_id: null,
-      event_type: AuditEvent.OUTBOUND_EMAIL_SENT,
-      target_type: "case",
-      target_id: caseId,
-      payload: {
+    // Update claim_messages + outbound_messages, write audit log
+    await finalizeOutbound({
+      tenantId,
+      caseId,
+      claimMessageId,
+      outboundMsgId,
+      outboundStatus: "sent",
+      claimMessagePatch: {
+        provider_message_id: storedMessageId,
+        status: "sent",
+        sent_at: new Date().toISOString(),
+      },
+      auditEvent: AuditEvent.OUTBOUND_EMAIL_SENT,
+      auditPayload: {
         subject_prefix: rendered.subject.slice(0, 40), // partial subject — no PII
         provider_message_id: providerMessageId,
       },
@@ -443,43 +466,16 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
     const { errorCode } = sendResult;
     logger.error({ error_code: errorCode }, "dispatch.email_send_failed_error_code");
 
-    // Update claim_messages — set status='failed' + error_code
-    if (claimMessageId) {
-      try {
-        await enTenant({ tenantId }, (db) =>
-          db
-            .update(claimMessages)
-            .set({ status: "failed", error_code: errorCode })
-            .where(eq(claimMessages.id, claimMessageId))
-        );
-      } catch (err) {
-        const name = err instanceof Error ? err.name : "DBError";
-        logger.error({ error_name: name }, "dispatch.failed_to_update_claim_messages_status");
-      }
-    }
-
-    // Update outbound_messages (dual-write window)
-    if (outboundMsgId) {
-      try {
-        await enTenant({ tenantId }, (db) =>
-          db
-            .update(outboundMessages)
-            .set({ status: "failed" })
-            .where(eq(outboundMessages.id, outboundMsgId))
-        );
-      } catch (err) {
-        const name = err instanceof Error ? err.name : "DBError";
-        logger.error({ error_name: name }, "dispatch.failed_to_update_outbound_messages_status");
-      }
-    }
-
-    await writeAuditLog({
-      tenant_id: tenantId,
-      actor_id: null,
-      event_type: AuditEvent.OUTBOUND_EMAIL_FAILED,
-      target_type: "case",
-      target_id: caseId,
-      payload: { error: errorCode },
+    // Update claim_messages + outbound_messages, write audit log
+    await finalizeOutbound({
+      tenantId,
+      caseId,
+      claimMessageId,
+      outboundMsgId,
+      outboundStatus: "failed",
+      claimMessagePatch: { status: "failed", error_code: errorCode },
+      auditEvent: AuditEvent.OUTBOUND_EMAIL_FAILED,
+      auditPayload: { error: errorCode },
     });
 
     return { error: errorCode };

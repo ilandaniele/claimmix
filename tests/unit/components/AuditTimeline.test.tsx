@@ -127,6 +127,7 @@ describe("AuditTimeline", () => {
     ["processing_timeout", "El análisis tardó demasiado"],
     ["conflict", "Un dato no coincide con lo que teníamos"],
     ["lesiones", "Mencionó lesiones o datos de salud"],
+    ["tomar_el_control", "Tomar el control"],
   ])("el motivo %s se traduce", (reason, esperado) => {
     render(
       <AuditTimeline

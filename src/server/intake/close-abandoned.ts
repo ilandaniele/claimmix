@@ -24,6 +24,7 @@ import { and, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { cases, outboundMessages } from "@/lib/db/schema";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 /**
@@ -80,7 +81,7 @@ export interface CloseAbandonedResult {
  * el problema que este barrido existe para resolver — diecinueve casos a medias
  * en una tarde de pruebas, cerrados a mano.
  */
-const leLlegoLaPregunta = sql`coalesce((
+export const leLlegoLaPregunta = sql`coalesce((
   select ${outboundMessages.status}
     from ${outboundMessages}
    where ${outboundMessages.case_id} = ${cases.id}
@@ -203,12 +204,7 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
 
     return { closed: closed.length, caseIds: closed.map((r) => r.id) };
   } catch (err) {
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
-    logger.error({
-        code,
-      }, "close_abandoned.failed");
+    logger.error({ code: errorCode(err) }, "close_abandoned.failed");
     return { closed: 0, caseIds: [] };
   }
 }
@@ -253,11 +249,6 @@ async function avisarDeLosQueNoRecibieron(days: number): Promise<void> {
           "No es silencio de la persona, es una pregunta que no llegó.",
       }, "close_abandoned.sin_preguntar");
   } catch (err) {
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
-    logger.error({
-        code,
-      }, "close_abandoned.aviso_fallo");
+    logger.error({ code: errorCode(err) }, "close_abandoned.aviso_fallo");
   }
 }

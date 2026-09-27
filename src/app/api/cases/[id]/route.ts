@@ -6,14 +6,13 @@
  * AC14: Detail returns extracted_fields[], missing_docs[], audit_log[] (last 20, desc).
  * AC15: PATCH writes audit_log entry; wrong-tenant PATCH returns 404.
  *
- * RLS is gone — every query filters explicitly by the caller's tenant_id.
+ * Every query filters explicitly by the caller's tenant_id (enTenant, backed by RLS).
  */
 
 import { type NextRequest } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { ALL_ROLES } from "@/lib/auth/require-role";
 import { entrar, type Entrada } from "@/lib/api/entrada";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";

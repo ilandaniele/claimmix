@@ -19,8 +19,9 @@
 
 import "server-only";
 
-import { db } from "@/lib/db";
+import { eq } from "drizzle-orm";
 import { outboundMessages } from "@/lib/db/schema";
+import { firstRow } from "@/lib/db/helpers";
 import { labelForField, labelForClaimType } from "@/lib/labels/claim-fields";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import {
@@ -538,16 +539,26 @@ export const whatsappMessenger: AgentMessenger = {
 
       const finalBody = conPie(message, await writeReply(message, body, "whatsapp"));
 
+      /*
+       * Primero la fila, "queued", después Meta: si el envío se corta a
+       * mitad, la entrega queda anotada igual. Si la reserva falla, se manda
+       * lo mismo — una denuncia ya guardada no se pierde porque la base no
+       * respondió — y el intento se anota al final, como antes de este
+       * cambio.
+       */
+      const outboundId = await reservarSalida(message, finalBody);
       const res = await sendWhatsAppText(message.to, finalBody);
-      await recordOutbound(message, finalBody, res.ok ? "sent" : "failed");
+      const status = res.ok ? "sent" : "failed";
+      if (outboundId) {
+        await marcarSalida(message, outboundId, status);
+      } else {
+        await recordOutbound(message, finalBody, status);
+      }
 
-      // Un envío fallido sale por stderr, no por stdout.
-      //
-      // La línea decía `level: "error"` y se iba igual por `console.log`. Quien
-      // filtre por stream —que es lo que hace cualquier alerta— no lo veía: un
+      // Un envío fallido anota por `logger.error`, no por `logger.info`. Quien
+      // filtre por nivel —que es lo que hace cualquier alerta— no lo veía: un
       // mensaje que no le llegó al asegurado quedaba con la misma prioridad que
       // uno que sí.
-      const registrar = res.ok ? console.log : console.error;
       /*
        * Y el motivo, que `sendWhatsAppText` ya se tomó el trabajo de armar.
        *
@@ -562,16 +573,21 @@ export const whatsappMessenger: AgentMessenger = {
        * Recortado, porque el cuerpo de error de Meta puede traer el payload que
        * mandamos y ahí adentro va el texto del mensaje.
        */
-      registrar(
-        JSON.stringify({
-          level: res.ok ? "info" : "error",
-          service: "claimmix",
-          msg: res.ok ? "whatsapp.messenger.sent" : "whatsapp.messenger.send_failed",
-          case_id: message.caseId,
-          template: message.template,
-          ...(res.ok || !res.error ? {} : { detalle: res.error.slice(0, 200) }),
-        })
-      );
+      if (res.ok) {
+        logger.info(
+          { case_id: message.caseId, template: message.template },
+          "whatsapp.messenger.sent"
+        );
+      } else {
+        logger.error(
+          {
+            case_id: message.caseId,
+            template: message.template,
+            ...(res.ok || !res.error ? {} : { detalle: res.error.slice(0, 200) }),
+          },
+          "whatsapp.messenger.send_failed"
+        );
+      }
     } catch (err) {
       // Intake already succeeded; a messaging failure must not undo it.
       logger.error({
@@ -581,6 +597,65 @@ export const whatsappMessenger: AgentMessenger = {
     }
   },
 };
+
+/**
+ * Reserva la fila antes de mandar, con los mismos campos que `recordOutbound`
+ * pero en "queued". Si la base no responde, no reintenta ni tira: devuelve
+ * null y el llamador manda igual — la denuncia ya está guardada.
+ */
+async function reservarSalida(message: AgentMessage, body: string): Promise<string | null> {
+  try {
+    const fila = firstRow(
+      await enTenant({ tenantId: message.tenantId }, (db) =>
+        db
+          .insert(outboundMessages)
+          .values({
+            case_id: message.caseId,
+            tenant_id: message.tenantId,
+            channel: "whatsapp",
+            template: WHATSAPP_TEMPLATE_NAMES[message.template] ?? message.template,
+            rendered_body: body,
+            status: "queued",
+            asked_keys: Array.isArray(message.data.missingFields)
+              ? (message.data.missingFields as unknown[]).map(String)
+              : null,
+          })
+          .returning({ id: outboundMessages.id })
+      )
+    );
+    return fila?.id ?? null;
+  } catch (err) {
+    const code =
+      (err as { code?: string })?.code ??
+      (err instanceof Error ? err.name : "DBError");
+    logger.error({
+        case_id: message.caseId,
+        code,
+      }, "whatsapp.messenger.ledger_failed");
+    return null;
+  }
+}
+
+/** Cierra la fila reservada con el resultado del envío. Best-effort: nunca reintenta ni tira. */
+async function marcarSalida(
+  message: AgentMessage,
+  id: string,
+  status: "sent" | "failed"
+): Promise<void> {
+  try {
+    await enTenant({ tenantId: message.tenantId }, (db) =>
+      db.update(outboundMessages).set({ status }).where(eq(outboundMessages.id, id))
+    );
+  } catch (err) {
+    const code =
+      (err as { code?: string })?.code ??
+      (err instanceof Error ? err.name : "DBError");
+    logger.error({
+        case_id: message.caseId,
+        code,
+      }, "whatsapp.messenger.ledger_failed");
+  }
+}
 
 /** Best-effort ledger write, in the same table email writes to. */
 async function recordOutbound(

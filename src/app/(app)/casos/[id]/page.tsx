@@ -9,14 +9,15 @@
  * AC15: Passes case to CaseDetailClient which renders FSM-aware action buttons.
  *
  * Protected by proxy.ts — unauthenticated access redirects to /login.
- * IDOR: getCaseDetail filters explicitly by tenant_id (RLS is gone) — wrong
- * tenant returns null → 404.
+ * IDOR: getCaseDetail filters explicitly by tenant_id (enTenant, backed by RLS)
+ * — wrong tenant returns null → 404.
  */
 
 import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { CASE_EDITOR_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
+import { puedeTomarElControl } from "@/core/case/tomar-el-control";
 import type { TenantContext } from "@/data/scope";
 import {
   cargarDetalleDeCaso,
@@ -44,7 +45,7 @@ import { modoDeCoreSync } from "@/server/core-sync/client";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
 import { formatAge, formatDate } from "@/lib/utils";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { parseEmailClaimFields } from "@/lib/email/claim-parser";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
 import { estadoDelDocumento, esRamoSinCalibrar } from "@/core/case/required-docs";
@@ -87,7 +88,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   // Abierto desde «Para responder», «Volver» sigue con la cola.
   const volverA =
     (await searchParams).desde === "para_responder" ? "/bandeja?para_responder=true" : "/bandeja";
-  const locale = await getServerLocale();
+  const locale = await getAccountLocale();
   const t = getT(locale);
   const hoy = diaArgentino();
 
@@ -206,6 +207,17 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   };
   const channelLabel = CHANNEL_LABELS[caseRow.channel] ?? caseRow.channel;
 
+  const puedeCambiarEstadoCaso = puedeCambiarEstado(me, caseRow.assigned_to);
+  const puedeTomarElControlCaso = puedeTomarElControl({
+    puedeCambiarEstado: puedeCambiarEstadoCaso,
+    plan: me.plan,
+    channel: caseRow.channel,
+    status: caseRow.status,
+    extractionPending: caseRow.extraction_pending,
+    extractionLeaseAt: caseRow.extraction_lease_at,
+    ahora: new Date(),
+  });
+
   return (
     <div className="mx-auto max-w-5xl px-6 pb-8 pt-1">
       {/* Back button */}
@@ -311,7 +323,8 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             vistoEn={vistoEn}
             puedeMarcar={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
             acciones={acciones}
-            puedeCambiarEstado={puedeCambiarEstado(me, caseRow.assigned_to)}
+            puedeCambiarEstado={puedeCambiarEstadoCaso}
+            puedeTomarElControl={puedeTomarElControlCaso}
           />
         </div>
       </Card>
@@ -484,11 +497,11 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                         ? "precaucion"
                         : "atencion"
                   }
-                  titulo="Alertas de fraude"
+                  titulo={t("case.detail.fraudAnalysis")}
                   accesorio={<FraudRiskBadge level={caseRow.fraud_risk_level} />}
                 >
                   <p className="mb-3 text-[12px] text-slate-500 dark:text-slate-400">
-                    Análisis automático — solo orientativo. La decisión final la toma el ajustador.
+                    {t("case.detail.fraudDisclaimer")}
                   </p>
                   {Array.isArray(caseRow.fraud_indicators) && caseRow.fraud_indicators.length > 0 ? (
                     <ul className="space-y-2">
@@ -508,7 +521,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                       )}
                     </ul>
                   ) : (
-                    <p className="text-sm text-slate-500">Sin detalles adicionales.</p>
+                    <p className="text-sm text-slate-500">{t("case.detail.fraudNoDetails")}</p>
                   )}
                 </PanelSection>
               )}

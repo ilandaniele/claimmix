@@ -18,6 +18,7 @@ export const esAR = {
   "nav.escalados": "Escalados",
   "nav.noRelevantes": "No relevantes",
   "nav.miCola": "Mi cola",
+  "nav.agenda": "Agenda",
   "nav.clientes": "Clientes",
   "nav.analisis": "Análisis",
   "nav.metricas": "Métricas",
@@ -148,6 +149,21 @@ export const esAR = {
   "bandeja.tableLabel": "Tabla de siniestros",
   "bandeja.toastNew": "Nuevo siniestro recibido:",
   "bandeja.toastUpdated": "actualizado:",
+  "bandeja.vista.lista": "Lista",
+  "bandeja.vista.tablero": "Tablero",
+
+  // ── Tablero de la bandeja (G36) — de sólo lectura, sin arrastrar ────────────
+  "tablero.verTodos": "Ver todos",
+  "tablero.vacio": "Sin casos en esta columna.",
+
+  // ── Agenda (G39) ───────────────────────────────────────────────────────────
+  "agenda.title": "Agenda",
+  "agenda.subtitle": "Lo que vence: ventanas de WhatsApp y conversaciones por cerrar.",
+  "agenda.empty": "No hay vencimientos por ahora.",
+  "agenda.hoy": "Hoy",
+  "agenda.manana": "Mañana",
+  "agenda.tipo.ventanaWhatsapp": "Ventana de WhatsApp",
+  "agenda.tipo.cierreAbandono": "Cierre por abandono",
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simular nuevo siniestro",
@@ -273,6 +289,13 @@ export const esAR = {
   "escalate.cancel": "Cancelar",
   "escalate.success": "Siniestro escalado correctamente.",
   "escalate.error": "Error al escalar el siniestro. Intentá de nuevo.",
+
+  // ── Tomar el control (D-F2) ──────────────────────────────────────────────────
+  "case.detail.tomarElControl": "Tomar el control",
+  "tomarElControl.title": "Tomar el control del caso",
+  "tomarElControl.description": "El agente deja de responder este caso, que pasa a requerir especialista. Es un paso de un solo sentido: no se puede deshacer.",
+  "tomarElControl.confirm": "Tomar el control",
+  "tomarElControl.cancel": "Cancelar",
 
   // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
   "reenvio.boton": "Reenviar pedido",
@@ -404,6 +427,7 @@ export const esAR = {
   // ── Bandeja filter labels ───────────────────────────────────────────────────
   "filter.channel": "Canal",
   "filter.severity": "Severidad",
+  "filter.fraude": "Fraude",
   /*
    * Era «Tipo», la MISMA palabra que el filtro de tipo de siniestro que esta
    * justo arriba. Con los dos grupos en la misma franja quedaban dos «Tipo:»
@@ -471,6 +495,9 @@ export const esAR = {
   "case.detail.technicalData": "Ver datos técnicos",
   "case.detail.verDetalleTecnico": "Ver detalle técnico",
   "case.detail.injuries": "Lesiones",
+  "case.detail.fraudAnalysis": "Alertas de fraude",
+  "case.detail.fraudDisclaimer": "Análisis automático — solo orientativo. La decisión final la toma el ajustador.",
+  "case.detail.fraudNoDetails": "Sin detalles adicionales.",
   "case.detail.ramoSinCalibrar": "Ramo sin calibrar",
   "case.detail.ramoSinCalibrarAyuda": "Este tipo de siniestro todavía no tiene reglas específicas: el agente no sabe qué datos ni qué documentos pedir. Revisalo con más cuidado.",
   "case.detail.resumen.reportaTipo": "{quien} reporta un siniestro de {tipo}",
@@ -671,6 +698,11 @@ export const esAR = {
   "agente.valoresExtraidos": "Valores extraídos (último análisis)",
   "agente.yaConfirmado": "Ejemplo ya confirmado",
 
+  // ── El indicador de estado del agente, al pie del sidebar (G37) ─────
+  "agente.estado.activo": "Agente activo",
+  "agente.estado.modo_prueba": "Modo de prueba",
+  "agente.estado.sin_presupuesto": "Sin presupuesto",
+  "agente.estado.procesando": "{n} en curso",
 
   // ── Los nombres comerciales de los planes ──────────────────────────
   // El precio y la aritmética siguen en `lib/billing/plans.ts`, que no conoce

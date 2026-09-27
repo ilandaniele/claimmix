@@ -22,27 +22,13 @@ import { buildCaseFilters, contarPorEstado, desdeDePeriodo, listCases } from "@/
 import { OPCIONES_DE_ESCENARIO } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
 import { PER_PAGE_OPTIONS } from "./per-page";
-import { ClaimTypeSchema, PeriodoSchema } from "@/lib/schemas/cases";
-import type { CaseStatus, ClaimType, Periodo, Severity } from "@/lib/schemas/cases";
+import { CaseStatusSchema, ChannelSchema, ClaimTypeSchema, FraudRiskLevelSchema, PeriodoSchema, SeveritySchema } from "@/lib/schemas/cases";
+import type { CaseStatus, ClaimType, FraudRiskLevel, Periodo, Severity } from "@/lib/schemas/cases";
 import { Card } from "../_components/ui";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 
-const VALID_STATUSES: CaseStatus[] = [
-  "procesando",
-  "listo",
-  "esperando",
-  "escalado",
-  "cerrado",
-  "recibido",
-  "info_faltante",
-  "confirmacion_pendiente",
-  "requiere_especialista",
-  "listo_para_core",
-  "enviado_a_core",
-  "error_core",
-  "no_relevante",
-];
+export const VALID_STATUSES: CaseStatus[] = CaseStatusSchema.options;
 /*
  * Los tipos que este filtro acepta salen del esquema, no de una lista a mano.
  *
@@ -55,8 +41,9 @@ const VALID_STATUSES: CaseStatus[] = [
  * Cuatro filtros que no filtraban, y ninguno fallaba en voz alta.
  */
 const VALID_TYPES: ClaimType[] = ClaimTypeSchema.options;
-const VALID_SEVERITIES: Severity[] = ["low", "medium", "high", "critical"];
-const VALID_CHANNELS = ["email_sim", "email", "whatsapp_sim", "whatsapp"] as const;
+export const VALID_SEVERITIES: Severity[] = SeveritySchema.options;
+export const VALID_FRAUDE: FraudRiskLevel[] = FraudRiskLevelSchema.options;
+export const VALID_CHANNELS = ChannelSchema.options;
 const VALID_PERIODOS: Periodo[] = PeriodoSchema.options;
 
 /**
@@ -108,14 +95,21 @@ interface BandejaPageProps {
 
 async function BandejaContent({ searchParams }: BandejaPageProps) {
   const params = await searchParams;
-  const t = getT(await getServerLocale());
+  const t = getT(await getAccountLocale());
 
   const statusParam = params["status"];
   const typeParam = params["type"];
   const pageParam = params["page"];
   const channelParam = params["channel"];
   const severityParam = params["severity"];
+  const fraudeParam = params["fraude"];
   const isClaimParam = params["is_claim"];
+  /*
+   * `vista` no es un filtro: no entra en `PARAMS_DE_FILTRO`, no lo mira
+   * `buildCaseFilters` ni `contarPorEstado`, y un valor que no sea "tablero"
+   * cae en "lista" — la misma pantalla de siempre.
+   */
+  const vista: "lista" | "tablero" = params["vista"] === "tablero" ? "tablero" : "lista";
   const para_responder = params["para_responder"] === "true" ? true : undefined;
   const cola = params["cola"] === "mia" ? "mia" : undefined;
 
@@ -139,6 +133,8 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
 
   const severity = valores(severityParam, VALID_SEVERITIES);
 
+  const fraude = valores(fraudeParam, VALID_FRAUDE);
+
   const is_claim =
     isClaimParam === "true" ? true : isClaimParam === "false" ? false : undefined;
 
@@ -146,7 +142,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const periodo = valores(params["periodo"], VALID_PERIODOS)?.[0];
   const desde = desdeDePeriodo(periodo);
 
-  // Resolve the tenant boundary (RLS is gone — explicit tenant_id filter only).
+  // Resolve the tenant boundary (enTenant filter, backed by RLS).
   const session = await getSessionContext();
   if (!session?.user) redirect("/login");
   // Deduplicada con la del layout: ver lib/auth/user-row.ts.
@@ -193,6 +189,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
       // Email-intake filters (AC18)
       channel,
       severity,
+      fraude,
       is_claim,
       para_responder,
       cola,
@@ -208,10 +205,10 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
    *
    * Hoy da lo mismo: la base tiene `cases_status_check` con exactamente estos
    * trece valores, así que no puede haber una fila fuera. Se suma todo igual
-   * porque `VALID_STATUSES` es una copia a mano de esa lista, y el día que el
-   * CHECK sume un estado y esta copia no, la tarjeta «Total casos» bajaría sin
-   * error visible. Sumar lo que vuelve no depende de que las dos listas estén
-   * sincronizadas; sumar lo mapeado sí.
+   * porque `VALID_STATUSES` sale de `CaseStatusSchema`, no de esa columna, y el
+   * día que el CHECK sume un estado y el schema no, la tarjeta «Total casos»
+   * bajaría sin error visible. Sumar lo que vuelve no depende de que las dos
+   * listas estén sincronizadas; sumar lo mapeado sí.
    */
   const cuenta = new Map(porEstado.map((r) => [r.status, r.n]));
   const totalCount = porEstado.reduce((acc, r) => acc + r.n, 0);
@@ -275,6 +272,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
             initialData={initialData}
             scenarios={OPCIONES_DE_ESCENARIO}
             allStatusCounts={allStatusCounts}
+            vista={vista}
           />
         </Card>
       </div>

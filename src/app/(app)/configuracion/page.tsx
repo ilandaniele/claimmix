@@ -21,7 +21,7 @@ import { UserAiKeyPanel } from "./UserAiKeyPanel";
 import { GoogleVinculo } from "./GoogleVinculo";
 import { getUserGeminiKey } from "@/server/ai/provider";
 import { getT } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import packageJson from "../../../../package.json";
 import { ADMIN_ROLES } from "@/lib/auth/require-role";
 
@@ -85,7 +85,7 @@ export default async function ConfiguracionPage({
   searchParams: Promise<{ vinculo?: string }>;
 }) {
   const { vinculo } = await searchParams;
-  const locale = await getServerLocale();
+  const locale = await getAccountLocale();
   const t = getT(locale);
 
   const session = await getSessionContext();
@@ -99,7 +99,6 @@ export default async function ConfiguracionPage({
   // Quién ve los detalles de infraestructura de más abajo.
   const esAdmin = (ADMIN_ROLES as string[]).includes(role);
   const email: string = session.user.email ?? "—";
-  const isAdmin = role === "admin" || role === "owner";
 
   const userHasGeminiKey = Boolean(await getUserGeminiKey(session.user.id).catch(() => null));
 
@@ -152,7 +151,7 @@ export default async function ConfiguracionPage({
         <Section title="Umbrales de IA">
           <div className="divide-y divide-slate-50">
             <Field label="Umbral de confianza">
-              {isAdmin ? (
+              {esAdmin ? (
                 <span className="font-mono text-sm font-medium text-slate-800">
                   {confidenceThreshold.toFixed(2)}
                   <span className="ml-2 text-xs text-slate-500">
@@ -166,7 +165,7 @@ export default async function ConfiguracionPage({
               )}
             </Field>
             <Field label="Cap mensual de IA">
-              {isAdmin ? (
+              {esAdmin ? (
                 <span className="font-mono text-sm font-medium text-slate-800">
                   USD {monthlyBudgetCap}
                   <span className="ml-2 text-xs text-slate-500">
@@ -180,7 +179,7 @@ export default async function ConfiguracionPage({
               )}
             </Field>
           </div>
-          {!isAdmin && (
+          {!esAdmin && (
             <p className="mt-3 text-xs text-slate-500">
               Solo los administradores pueden modificar los umbrales de IA.
             </p>

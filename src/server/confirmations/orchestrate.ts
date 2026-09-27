@@ -28,7 +28,6 @@
 
 import "server-only";
 import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { esSoloUnAcuse } from "@/core/mensajes/acuse";
@@ -36,7 +35,7 @@ import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
 import { contestaSinHora, dichoRecien, esValorVago } from "@/core/mensajes/lo-dicho";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { firstRow } from "@/lib/db/helpers";
+import { firstRow, policyNumberEquals } from "@/lib/db/helpers";
 import {
   cases,
   claimAttachments,
@@ -84,6 +83,7 @@ import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contesta
 import { lastAskedKeys } from "@/server/confirmations/ultimo-pedido";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { redactObject } from "@/lib/audit/redact";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ export interface ExtractedClaimOutput {
  * outbound_messages and claim_field_confirmations before inserting.
  *
  * @param caseId           - UUID of the case.
- * @param tenantId         - UUID of the tenant (explicit tenant scoping — RLS is gone).
+ * @param tenantId         - UUID of the tenant (explicit tenant scoping via enTenant, backed by RLS).
  * @param extractedOutput  - Extraction result + sender info.
  * @param customerMatches  - Customer matches from the customer-matcher module.
  */
@@ -1159,7 +1159,7 @@ async function resolveAnsweredConfirmations(
     const preguntadas = new Set(alreadyAsked);
     return cerradas.map((fila) => fila.campo).filter((campo) => preguntadas.has(campo));
   } catch (err) {
-    logger.error({ code: errCode(err) }, "orchestrate.failed_to_resolve_confirmations");
+    logger.error({ code: errorCode(err) }, "orchestrate.failed_to_resolve_confirmations");
     return [];
   }
 }
@@ -1205,7 +1205,7 @@ async function askedPendingFields(
     );
     return buildAskList([], ranked).fields;
   } catch (err) {
-    logger.error({ code: errCode(err) }, "orchestrate.failed_to_read_pending_confirmations");
+    logger.error({ code: errorCode(err) }, "orchestrate.failed_to_read_pending_confirmations");
     return [];
   }
 }
@@ -1444,7 +1444,7 @@ async function recordLookedUpFields(
       }, "agent.resolved_by_lookup");
   } catch (err) {
     // The claim survives: the field simply stays missing and gets asked for.
-    logger.error({ code: errCode(err) }, "orchestrate.failed_to_store_looked_up_fields");
+    logger.error({ code: errorCode(err) }, "orchestrate.failed_to_store_looked_up_fields");
   }
 }
 
@@ -1503,9 +1503,7 @@ async function inicialesDelTitularAjeno(
           .leftJoin(customers, eq(policies.customer_id, customers.id))
           // Los dos lados sin espacios y en mayúsculas, igual que los
           // buscadores: el número lo tipea una persona.
-          .where(
-            sql`upper(replace(${policies.policy_number}, ' ', '')) = ${normalizarNumeroPoliza(numero)}`
-          )
+          .where(policyNumberEquals(policies.policy_number, normalizarNumeroPoliza(numero)))
           .limit(1)
       )
     );
@@ -1523,7 +1521,7 @@ async function inicialesDelTitularAjeno(
   } catch (err) {
     // Sin las iniciales el mensaje dice menos; sin derivación no se entera
     // nadie. La derivación gana.
-    logger.error({ code: errCode(err) }, "orchestrate.holder_lookup_failed");
+    logger.error({ code: errorCode(err) }, "orchestrate.holder_lookup_failed");
     return null;
   }
 }
@@ -1809,14 +1807,6 @@ function collectConfirmableFields(
   );
 }
 
-/** Extract a loggable error code from a thrown DB error (PII-safe). */
-function errCode(err: unknown): string {
-  return (
-    (err as { code?: string })?.code ??
-    (err instanceof Error ? err.name : "UnknownError")
-  );
-}
-
 /** Update the case status (no FSM transition check — worker already validated). */
 async function setStatus(
   caseId: string,
@@ -1836,7 +1826,7 @@ async function setStatus(
         .where(eq(cases.id, caseId))
     );
   } catch (err) {
-    logger.error({ code: errCode(err), case_id: caseId }, "orchestrate.failed_to_update_case_status");
+    logger.error({ code: errorCode(err), case_id: caseId }, "orchestrate.failed_to_update_case_status");
   }
 }
 
@@ -1954,7 +1944,7 @@ async function guardarConfirmaciones(
       );
     }
   } catch (err) {
-    logger.error({ code: errCode(err), case_id: caseId }, "orchestrate.guardarconfirmaciones");
+    logger.error({ code: errorCode(err), case_id: caseId }, "orchestrate.guardarconfirmaciones");
   }
 }
 
@@ -2053,7 +2043,7 @@ async function cuandoHablamosPorUltimaVez(
     return fila?.created_at ?? null;
   } catch (err) {
     logger.error(
-      { code: errCode(err) },
+      { code: errorCode(err) },
       "orchestrate.ultimo_saliente_fallo"
     );
     return null;
@@ -2102,7 +2092,7 @@ async function filesArrivedSinceWeLastSpoke(
     return Boolean(since);
   } catch (err) {
     // Speaking is the safe direction here too.
-    logger.error({ code: errCode(err) }, "orchestrate.failed_to_check_for_new_files");
+    logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_for_new_files");
     return false;
   }
 }
@@ -2149,7 +2139,7 @@ async function factsLearnedSinceWeLastSpoke(
     return Boolean(since);
   } catch (err) {
     // Callarse es la dirección insegura acá: ante la duda, contestar.
-    logger.error({ code: errCode(err) }, "orchestrate.failed_to_check_for_new_facts");
+    logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_for_new_facts");
     return false;
   }
 }
@@ -2172,7 +2162,7 @@ async function hasPriorOutbound(caseId: string, tenantId: string): Promise<boole
   } catch (err) {
     // Fall back to the first-contact wording: greeting someone twice is a
     // smaller error than closing a conversation that never happened.
-    logger.error({ code: errCode(err) }, "orchestrate.failed_to_check_prior_outbound");
+    logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_prior_outbound");
     return false;
   }
 }
@@ -2221,7 +2211,7 @@ async function checkConfirmationAlreadySent(
 
     return ultimo !== null && cierre.includes(ultimo.template);
   } catch (err) {
-    logger.error({ code: errCode(err) }, "orchestrate.failed_to_check_outbound_messages");
+    logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_outbound_messages");
     return false;
   }
 }

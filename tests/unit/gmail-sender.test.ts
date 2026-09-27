@@ -77,10 +77,6 @@ describe("GmailSender", () => {
       "@/server/email/gmail/gmail-client"
     );
     resetGmailAuth();
-
-    // Reset the provider factory singleton.
-    const { resetEmailProvider } = await import("@/server/email/gmail/index");
-    resetEmailProvider();
   });
 
   // ── AC9: name === 'gmail' ────────────────────────────────────────────────────
@@ -89,13 +85,6 @@ describe("GmailSender", () => {
     const { GmailSender } = await import("@/server/email/gmail/gmail-sender");
     const sender = new GmailSender();
     expect(sender.name).toBe("gmail");
-  });
-
-  it("AC9: getEmailProvider().name === 'gmail'", async () => {
-    // getEmailProvider() lazy-inits GmailSender — provider name must be 'gmail'.
-    const { getEmailProvider } = await import("@/server/email/gmail/index");
-    const provider = getEmailProvider();
-    expect(provider.name).toBe("gmail");
   });
 
   // ── AC5: send() success ──────────────────────────────────────────────────────
@@ -266,6 +255,30 @@ describe("GmailSender", () => {
     const decoded = Buffer.from(callArg.requestBody.raw, "base64url").toString("utf-8");
     expect(decoded).toContain("In-Reply-To: <original-msg-id@mail.gmail.com>");
     expect(decoded).toContain("References: <original-msg-id@mail.gmail.com>");
+  });
+
+  // ── Header injection (CRLF stripping) ────────────────────────────────────────
+
+  it("strips CR/LF from headers so a crafted subject can't inject a Bcc line", async () => {
+    mockMessagesSend.mockResolvedValueOnce({ data: { id: "gmail-msg-id-injection" } });
+
+    const { GmailSender } = await import("@/server/email/gmail/gmail-sender");
+    const sender = new GmailSender();
+
+    await sender.send({
+      to: "claimant@example.com",
+      from: "claims@test.com",
+      subject: "Hola\r\nBcc: x@y.z",
+      textBody: "Hello",
+    });
+
+    expect(mockMessagesSend).toHaveBeenCalledOnce();
+    const callArg = mockMessagesSend.mock.calls[0][0] as {
+      requestBody: { raw: string };
+    };
+    const decoded = Buffer.from(callArg.requestBody.raw, "base64url").toString("utf-8");
+    const lines = decoded.split("\r\n");
+    expect(lines.some((l) => l.startsWith("Bcc:"))).toBe(false);
   });
 
   // ── base64url encoding verification ──────────────────────────────────────────

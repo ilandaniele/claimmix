@@ -8,8 +8,8 @@
  * can poll while the case is still 'procesando' (extraction in flight).
  *
  * Auth: any authenticated role (viewers may inspect). Explicit tenant_id
- * filters scope the tenant (RLS is gone); wrong-tenant case → 404 (never 403 —
- * no tenant enumeration).
+ * filters scope the tenant (enTenant, backed by RLS); wrong-tenant case → 404
+ * (never 403 — no tenant enumeration).
  *
  * Response:
  *   {
@@ -26,14 +26,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { and, asc, eq, isNull } from "drizzle-orm";
-import {
-  ALL_ROLES,
-  CUSTOMER_PII_ROLES,
-  type UserRole,
-} from "@/lib/auth/require-role";
+import { ALL_ROLES } from "@/lib/auth/require-role";
 import { sinPiiSiNoCorresponde } from "@/server/cases/pii";
 import { entrar } from "@/lib/api/entrada";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import {

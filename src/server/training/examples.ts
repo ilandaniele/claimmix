@@ -18,7 +18,7 @@
  */
 
 import "server-only";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import {
   enTenant,
@@ -26,7 +26,7 @@ import {
   type ClienteDatos,
   type TenantContext,
 } from "@/data/scope";
-import { countRows, firstRow } from "@/lib/db/helpers";
+import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { UNSAFE_BLOCKING_REASONS } from "./trainability";
 import { logger } from "@/lib/observability/logger";

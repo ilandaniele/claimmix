@@ -38,6 +38,7 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments, claimFieldConfirmations, users } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import type { CaseRow, ExtractedFieldRow, MissingDocRow } from "@/lib/db/types";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import {
   fetchAuditLog,
@@ -152,11 +153,7 @@ async function fetchConfirmaciones(
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
     // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
     // persona no mandó nada.
-    logger.error({
-        error_code:
-          (err as { code?: string })?.code ??
-          (err instanceof Error ? err.name : "UnknownError"),
-      }, "cases.detail_view.query_failed");
+    logger.error({ error_code: errorCode(err) }, "cases.detail_view.query_failed");
     return [];
   }
 }
@@ -194,11 +191,7 @@ async function fetchAdjuntos(
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
     // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
     // persona no mandó nada.
-    logger.error({
-        error_code:
-          (err as { code?: string })?.code ??
-          (err instanceof Error ? err.name : "UnknownError"),
-      }, "cases.detail_view.query_failed");
+    logger.error({ error_code: errorCode(err) }, "cases.detail_view.query_failed");
     return [];
   }
 }

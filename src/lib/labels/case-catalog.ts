@@ -47,18 +47,12 @@ export function claimTypeOptions(locale: Locale = "es-AR"): Array<{
   }));
 }
 
-/** El mapa, para cuando se necesita buscar por clave y no recorrer. */
-export function statusLabels(locale: Locale = "es-AR"): Record<CaseStatus, string> {
-  return Object.fromEntries(
-    statusOptions(locale).map((o) => [o.value, o.label])
-  ) as Record<CaseStatus, string>;
-}
-
 /*
- * Acá vivía `claimTypeLabels`, el gemelo de `statusLabels`.
+ * Acá vivían `statusLabels` y `claimTypeLabels`, el mapa por clave y su
+ * gemelo.
  *
- * Lo escribí por simetría al armar este módulo y no lo llamó nunca nadie. Un
- * export es una promesa —«esto lo usa alguien, cuidado al cambiarlo»— y una
+ * Los escribí por simetría al armar este módulo y no los llamó nunca nadie.
+ * Un export es una promesa —«esto lo usa alguien, cuidado al cambiarlo»— y una
  * promesa que nadie cobra sólo hace parecer que el módulo tiene una superficie
  * que no tiene. Si mañana hace falta, son cuatro líneas.
  */

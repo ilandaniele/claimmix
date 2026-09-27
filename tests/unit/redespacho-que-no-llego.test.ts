@@ -16,7 +16,7 @@
  * segundo de diferencia, y el segundo no lo lee nadie nunca.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
 const FUENTE = readFileSync("src/server/worker/extract.ts", "utf8");

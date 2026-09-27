@@ -1,7 +1,7 @@
 # ADR 0001 — In-process AI extraction worker (not a queue)
 
 **Date:** 2026-06-02
-**Status:** Accepted
+**Status:** Superseded — extraction now runs as a durable workflow (`src/workflows/`, `workflow/api`), not a bare `waitUntil()`/`after()` call. See the "Upgrade path" note below: it happened, just not via Inngest.
 **Deciders:** Senior Dev (ClaimMix crew)
 
 ## Context

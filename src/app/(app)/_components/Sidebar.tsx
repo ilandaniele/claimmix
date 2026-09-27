@@ -23,6 +23,7 @@ import {
   MessageSquareReply,
   Sparkles,
   ListTodo,
+  CalendarClock,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -114,6 +115,7 @@ export function NavLink({
   return (
     <Link
       href={href}
+      aria-current={isActive ? "page" : undefined}
       className={[
         // El anillo de foco, con el acento nuevo. `focus-visible` y no `focus`:
         // así aparece para quien navega con teclado y no en cada clic del mouse.
@@ -141,12 +143,15 @@ export function Sidebar({
   role,
   isOperator = false,
   esPro = false,
+  estadoDelAgente,
 }: {
   role: string;
   /** Quien opera ClaimMix, no el asegurador. Ve la cartera de clientes. */
   isOperator?: boolean;
   /** Sin el Plan Pro, lo del Plan Pro va con candado. */
   esPro?: boolean;
+  /** El indicador del agente (`EstadoDelAgente`), servido ya resuelto por el layout. */
+  estadoDelAgente?: React.ReactNode;
 }) {
   const t = useT();
   const pathname = usePathname();
@@ -156,7 +161,7 @@ export function Sidebar({
 
   const operacionItems: NavItemDef[] = conCandadoPro([
     { label: t("nav.miCola"), href: "/bandeja?cola=mia", icon: ListTodo },
-    { label: t("nav.bandeja") || "Bandeja", href: "/bandeja", icon: Inbox },
+    { label: t("nav.bandeja"), href: "/bandeja", icon: Inbox },
     { label: t("bandeja.paraResponder"), href: "/bandeja?para_responder=true", icon: MessageSquareReply },
     /*
      * Directo a la bandeja filtrada. `/escalados` era una pagina de nueve
@@ -164,8 +169,10 @@ export function Sidebar({
      * servidor. La pagina sigue existiendo para quien tenga el enlace
      * guardado; la barra ya no pasa por ella.
      */
-    { label: t("nav.escalados") || "Escalados", href: "/bandeja?status=escalado", icon: AlertTriangle },
+    { label: t("nav.escalados"), href: "/bandeja?status=escalado", icon: AlertTriangle },
     { label: t("nav.noRelevantes"), href: "/bandeja?is_claim=false", icon: MailX },
+    // D-D1: la abre cualquier rol; `leerAgenda` tapa el titular por su cuenta.
+    { label: t("nav.agenda"), href: "/agenda", icon: CalendarClock },
     /*
      * «Clientes» sólo para quien puede ver datos personales.
      *
@@ -183,12 +190,12 @@ export function Sidebar({
      * donde estaba. Esto es que el menú diga la verdad.
      */
     ...(puedeVerClientes
-      ? [{ label: t("nav.clientes") || "Clientes", href: "/clientes", icon: Users }]
+      ? [{ label: t("nav.clientes"), href: "/clientes", icon: Users }]
       : []),
   ], esPro, t);
 
   const analisisItems: NavItemDef[] = conCandadoPro([
-    { label: t("nav.metricas") || "Métricas", href: "/metricas", icon: BarChart2 },
+    { label: t("nav.metricas"), href: "/metricas", icon: BarChart2 },
     { label: t("nav.asistente"), href: "/asistente", icon: Sparkles, pro: true },
     { label: t("nav.demo"), href: "/demo", icon: Play },
     {
@@ -208,7 +215,7 @@ export function Sidebar({
      */
     ...(esAdmin
       ? [
-          { label: t("nav.admin") || "Usuarios", href: "/admin/users", icon: Shield },
+          { label: t("nav.admin"), href: "/admin/users", icon: Shield },
           { label: t("nav.facturacion"), href: "/admin/facturacion", icon: Receipt },
         ]
       : []),
@@ -283,12 +290,15 @@ export function Sidebar({
         <div className="space-y-0.5 pb-2">
           <NavLink
             href={CONFIG_HREF}
-            label={t("nav.configuracion") || "Configuración"}
+            label={t("nav.configuracion")}
             icon={Settings}
             active={CONFIG_HREF === activo}
           />
         </div>
       </div>
+
+      {/* El indicador del agente, al pie y fuera del scroll de arriba. */}
+      {estadoDelAgente}
     </nav>
   );
 }

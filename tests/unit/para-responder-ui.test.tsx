@@ -37,6 +37,7 @@ function detalle(locale: Locale, paraResponder: boolean, puedeMarcar: boolean) {
         puedeMarcar={puedeMarcar}
         acciones={SIN_ACCIONES}
         puedeCambiarEstado={true}
+        puedeTomarElControl={false}
       />
     </LocaleProvider>
   );

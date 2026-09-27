@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { enmascararCampo, maskFullName, renderTemplate } from "../../src/server/email/render";
+import { enmascararCampo, renderTemplate } from "../../src/server/email/render";
 
 describe("enmascararCampo", () => {
   it("el nombre de nuestro padrón sale en iniciales, no entero", () => {

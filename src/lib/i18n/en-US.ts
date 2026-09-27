@@ -17,6 +17,7 @@ export const enUS: Record<TranslationKey, string> = {
   "nav.escalados": "Escalated",
   "nav.noRelevantes": "Not relevant",
   "nav.miCola": "My queue",
+  "nav.agenda": "Agenda",
   "nav.clientes": "Clients",
   "nav.analisis": "Analysis",
   "nav.metricas": "Metrics",
@@ -137,6 +138,21 @@ export const enUS: Record<TranslationKey, string> = {
   "bandeja.tableLabel": "Claims table",
   "bandeja.toastNew": "New claim received:",
   "bandeja.toastUpdated": "updated:",
+  "bandeja.vista.lista": "List",
+  "bandeja.vista.tablero": "Board",
+
+  // ── Inbox board (G36) — read-only, no drag-and-drop ─────────────────────────
+  "tablero.verTodos": "See all",
+  "tablero.vacio": "No claims in this column.",
+
+  // ── Agenda (G39) ───────────────────────────────────────────────────────────
+  "agenda.title": "Agenda",
+  "agenda.subtitle": "What's due: WhatsApp windows and conversations to close.",
+  "agenda.empty": "Nothing due right now.",
+  "agenda.hoy": "Today",
+  "agenda.manana": "Tomorrow",
+  "agenda.tipo.ventanaWhatsapp": "WhatsApp window",
+  "agenda.tipo.cierreAbandono": "Abandonment closure",
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simulate new claim",
@@ -262,6 +278,13 @@ export const enUS: Record<TranslationKey, string> = {
   "escalate.cancel": "Cancel",
   "escalate.success": "Claim escalated successfully.",
   "escalate.error": "Error escalating the claim. Please try again.",
+
+  // ── Tomar el control (D-F2) ──────────────────────────────────────────────────
+  "case.detail.tomarElControl": "Take over",
+  "tomarElControl.title": "Take over the case",
+  "tomarElControl.description": "The agent stops answering this case, which moves to requires specialist. This is a one-way step: it cannot be undone.",
+  "tomarElControl.confirm": "Take over",
+  "tomarElControl.cancel": "Cancel",
 
   // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
   "reenvio.boton": "Resend request",
@@ -393,6 +416,7 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Bandeja filter labels ───────────────────────────────────────────────────
   "filter.channel": "Channel",
   "filter.severity": "Severity",
+  "filter.fraude": "Fraud",
   // Was "Type", colliding with the claim-type chips above. See the es-AR note.
   "filter.isClaim": "Relevance",
   "filter.todos": "All",
@@ -453,6 +477,9 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.technicalData": "Show technical data",
   "case.detail.verDetalleTecnico": "Show technical details",
   "case.detail.injuries": "Injuries",
+  "case.detail.fraudAnalysis": "Fraud alerts",
+  "case.detail.fraudDisclaimer": "Automated analysis — for guidance only. The adjuster makes the final call.",
+  "case.detail.fraudNoDetails": "No additional details.",
   "case.detail.ramoSinCalibrar": "Uncalibrated claim type",
   "case.detail.ramoSinCalibrarAyuda": "This claim type has no specific rules yet: the agent does not know which data or documents to ask for. Review it more carefully.",
   "case.detail.resumen.reportaTipo": "{quien} reports a {tipo} claim",
@@ -641,6 +668,11 @@ export const enUS: Record<TranslationKey, string> = {
   "agente.valoresExtraidos": "Extracted values (latest analysis)",
   "agente.yaConfirmado": "Example already confirmed",
 
+  // ── El indicador de estado del agente, al pie del sidebar (G37) ─────
+  "agente.estado.activo": "Agent active",
+  "agente.estado.modo_prueba": "Test mode",
+  "agente.estado.sin_presupuesto": "Out of budget",
+  "agente.estado.procesando": "{n} in progress",
 
   // ── Los nombres comerciales de los planes ──────────────────────────
   // El precio y la aritmética siguen en `lib/billing/plans.ts`, que no conoce

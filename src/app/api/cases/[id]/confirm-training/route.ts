@@ -23,10 +23,9 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { TRAINING_APPROVER_ROLES } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
-import { cases } from "@/lib/db/schema";
+import { cases, agentRuns } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { approveTrainingExample } from "@/server/training/examples";
@@ -105,6 +104,20 @@ export async function POST(
           "No hay ejecución del agente registrada para este caso."
         )
       );
+    }
+
+    // ── 5b. El run tiene que ser de ESTE caso, no de otro del mismo inquilino ─
+    const runRow = firstRow(
+      await enTenant(tenantCtx, (db) =>
+        db
+          .select({ id: agentRuns.id })
+          .from(agentRuns)
+          .where(and(eq(agentRuns.id, agentRunId), eq(agentRuns.case_id, caseId)))
+          .limit(1)
+      )
+    );
+    if (!runRow) {
+      return err(new AppError("NOT_FOUND", "La ejecución del agente no existe para este caso."));
     }
 
     // ── 6. Approve (explicit tenant scoping enforced inside the module) ──────

@@ -26,8 +26,8 @@ import "server-only";
 
 import { and, eq, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
+import { digitsOnlyEquals, policyNumberEquals } from "@/lib/db/helpers";
 import { customers, insuredAssets, policies } from "@/lib/db/schema";
 /*
  * La misma normalización que usan los buscadores, y no una copia.
@@ -41,6 +41,7 @@ import { customers, insuredAssets, policies } from "@/lib/db/schema";
 import { normalizarDni, normalizarNumeroPoliza } from "@/core/matching/normalizar";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { polizaEnVigencia } from "@/core/case/poliza-vigente";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 export interface ToolContext {
@@ -135,11 +136,7 @@ const verificarPoliza: AgentTool = {
         })
         .from(policies)
         .leftJoin(customers, eq(policies.customer_id, customers.id))
-        .where(
-          and(
-            sql`upper(replace(${policies.policy_number}, ' ', '')) = ${number}`
-          )
-        )
+        .where(and(policyNumberEquals(policies.policy_number, number)))
         .limit(1)
     );
 
@@ -235,11 +232,7 @@ const polizasPorDni: AgentTool = {
         })
         .from(policies)
         .innerJoin(customers, eq(policies.customer_id, customers.id))
-        .where(
-          and(
-            sql`regexp_replace(coalesce(${customers.dni}, ''), '[^0-9]', '', 'g') = ${dni}`
-          )
-        )
+        .where(and(digitsOnlyEquals(customers.dni, dni)))
         .limit(10)
     );
 
@@ -347,10 +340,7 @@ export async function runTool(
   try {
     return await tool.run(args, ctx);
   } catch (err) {
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
-    logger.error({ error_name: name, code }, "agent_tools.failed");
+    logger.error({ error_name: name, code: errorCode(err) }, "agent_tools.failed");
     return { error: "la consulta falló, seguí sin este dato" };
   }
 }

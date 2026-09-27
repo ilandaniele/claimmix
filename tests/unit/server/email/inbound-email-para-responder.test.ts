@@ -6,18 +6,26 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockThreadLookup, mockReabrir, mockMarcar, mockInsert } = vi.hoisted(() => ({
-  mockThreadLookup: vi.fn(),
-  mockReabrir: vi.fn(),
-  mockMarcar: vi.fn(),
-  mockInsert: vi.fn(),
-}));
+const { mockThreadLookup, mockReabrir, mockMarcar, mockInsert, mockEnTenantVarias, mockLoggerWarn, mockLoggerError } =
+  vi.hoisted(() => ({
+    mockThreadLookup: vi.fn(),
+    mockReabrir: vi.fn(),
+    mockMarcar: vi.fn(),
+    mockInsert: vi.fn(),
+    mockEnTenantVarias: vi.fn(),
+    mockLoggerWarn: vi.fn(),
+    mockLoggerError: vi.fn(),
+  }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/data/scope", () => ({
   enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
     Promise.resolve(armar({ insert: mockInsert })),
+  enTenantVarias: mockEnTenantVarias,
+}));
+vi.mock("@/lib/observability/logger", () => ({
+  logger: { warn: mockLoggerWarn, error: mockLoggerError, info: vi.fn(), debug: vi.fn() },
 }));
 vi.mock("@/server/email/thread-lookup", () => ({ threadLookup: mockThreadLookup }));
 vi.mock("@/server/email/relevance-prefilter", async (original) => ({
@@ -102,5 +110,67 @@ describe("ingestInboundEmail — «Para responder»", () => {
     await ingestInboundEmail(CORREO);
 
     expect(mockMarcar).not.toHaveBeenCalled();
+  });
+});
+
+// Un run anterior puede haber creado el caso y fallado antes de guardar el
+// mensaje. El 23505 de hoy trataba eso como duplicado y perdía el correo para
+// siempre en el reintento.
+describe("ingestInboundEmail — alta parcial recuperada (23505)", () => {
+  const violacionUnica = () =>
+    Promise.reject(Object.assign(new Error("duplicate key"), { code: "23505" }));
+
+  beforeEach(() => {
+    mockThreadLookup.mockResolvedValue({ existingCaseId: null });
+    mockInsert.mockImplementationOnce(() => ({
+      values: () => ({ returning: violacionUnica }),
+    }));
+  });
+
+  it("con el caso pero sin su mensaje, sigue el alta con ese caso", async () => {
+    mockEnTenantVarias.mockResolvedValue([[{ id: "caso-recuperado" }], []]);
+
+    const result = await ingestInboundEmail(CORREO);
+
+    expect(result).toMatchObject({
+      outcome: "processed",
+      caseId: "caso-recuperado",
+      isNewCase: true,
+    });
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      { case_id: "caso-recuperado" },
+      "inbound_email.case_insert_recovered"
+    );
+  });
+
+  it("si el mensaje ya se había guardado, sigue siendo un duplicado", async () => {
+    mockEnTenantVarias.mockResolvedValue([[{ id: "caso-recuperado" }], [{ id: "mensaje-viejo" }]]);
+
+    await expect(ingestInboundEmail(CORREO)).resolves.toEqual({
+      outcome: "skipped",
+      reason: "duplicate",
+    });
+  });
+
+  it("si no hay caso con ese email_message_id, sigue siendo un duplicado", async () => {
+    mockEnTenantVarias.mockResolvedValue([[], []]);
+
+    await expect(ingestInboundEmail(CORREO)).resolves.toEqual({
+      outcome: "skipped",
+      reason: "duplicate",
+    });
+  });
+
+  it("si la búsqueda de recuperación falla, no se rompe: sigue siendo un duplicado", async () => {
+    mockEnTenantVarias.mockRejectedValue(Object.assign(new Error("neon"), { code: "ECONNRESET" }));
+
+    await expect(ingestInboundEmail(CORREO)).resolves.toEqual({
+      outcome: "skipped",
+      reason: "duplicate",
+    });
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      { code: "ECONNRESET" },
+      "inbound_email.case_insert_recovery_failed"
+    );
   });
 });

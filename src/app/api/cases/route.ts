@@ -1,7 +1,7 @@
 /**
  * GET /api/cases — list cases with filtering, pagination, and sorting.
  *
- * AC9:  Tenant-isolated by explicit tenant_id filter (RLS is gone).
+ * AC9:  Tenant-isolated by explicit tenant_id filter (enTenant, backed by RLS).
  * AC11: Filter by claim type returns only matching cases.
  * AC12: Pagination per_page capped at 100.
  *
@@ -73,6 +73,10 @@ export async function GET(request: NextRequest) {
     order: searchParams.get("order") ?? undefined,
     // Email-intake filters (AC18)
     severity: searchParams.getAll("severity"),
+    // Filtro de fraude de la bandeja (G35): el sondeo de useCasesRealtime lo
+    // reenvía porque ya está en PARAMS_DE_FILTRO — sin esto, el sondeo lo
+    // ignoraba y la lista se contradecía sola a los pocos segundos.
+    fraude: searchParams.getAll("fraude"),
     customer_id: searchParams.get("customer_id") ?? undefined,
     policy_id: searchParams.get("policy_id") ?? undefined,
     channel: searchParams.getAll("channel"),
@@ -92,7 +96,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── 4. Fetch data (explicit tenant_id filter — RLS is gone) ───────────────
+  // ── 4. Fetch data (explicit tenant_id filter, backed by RLS) ───────────────
   try {
     const result = await listCases({ tenantId: userRow.tenant_id }, parsed.data, userRow.id);
     // Drizzle numeric columns surface as strings — convert at the boundary so

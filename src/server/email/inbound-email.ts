@@ -18,16 +18,17 @@
 
 import "server-only";
 
-import { db } from "@/lib/db";
+import { eq } from "drizzle-orm";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, claimMessages } from "@/lib/db/schema";
 import { threadLookup } from "@/server/email/thread-lookup";
 import { classifyInboundEmailForIntake, isBulkHeader } from "@/server/email/relevance-prefilter";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import { enTenant } from "@/data/scope";
+import { enTenant, enTenantVarias } from "@/data/scope";
 import { reabrirSiEraNoRelevante } from "@/server/cases/reabrir-no-relevante";
 import { marcarParaResponder } from "@/server/cases/para-responder";
 import { ESTADOS_DEL_AGENTE_TERMINADO } from "@/core/case/para-responder";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 export interface InboundEmail {
@@ -134,11 +135,46 @@ export async function ingestInboundEmail(
       caseId = created.id;
     } catch (err) {
       const code = (err as { code?: string })?.code;
-      // A unique violation means a previous partial run already opened the
-      // case. Treat it as done rather than opening a second one.
-      if (code === "23505") return { outcome: "skipped", reason: "duplicate" };
-      logger.error({ code }, "inbound_email.case_insert_failed");
-      throw new Error(`case_insert_failed: ${code ?? "unknown"}`);
+      if (code === "23505") {
+        /*
+         * A unique violation means a previous run already opened the case.
+         * That run may have died before saving the message that triggered
+         * it — `insertInboundMessage` below can return null and throw. If so
+         * the case exists with nothing in it, and treating this retry as a
+         * plain duplicate would drop the mail for good.
+         */
+        try {
+          const [casoExistente, mensajeExistente] = await enTenantVarias<
+            [{ id: string }[], { id: string }[]]
+          >({ tenantId }, (db) => [
+            db
+              .select({ id: cases.id })
+              .from(cases)
+              .where(eq(cases.email_message_id, email.messageId))
+              .limit(1),
+            db
+              .select({ id: claimMessages.id })
+              .from(claimMessages)
+              .where(eq(claimMessages.provider_message_id, email.messageId))
+              .limit(1),
+          ]);
+
+          const found = firstRow(casoExistente);
+          if (!found || firstRow(mensajeExistente)) {
+            return { outcome: "skipped", reason: "duplicate" };
+          }
+
+          caseId = found.id;
+          logger.warn({ case_id: caseId }, "inbound_email.case_insert_recovered");
+        } catch (recoveryErr) {
+          const recoveryCode = (recoveryErr as { code?: string })?.code;
+          logger.error({ code: recoveryCode }, "inbound_email.case_insert_recovery_failed");
+          return { outcome: "skipped", reason: "duplicate" };
+        }
+      } else {
+        logger.error({ code }, "inbound_email.case_insert_failed");
+        throw new Error(`case_insert_failed: ${code ?? "unknown"}`);
+      }
     }
   }
 
@@ -224,10 +260,7 @@ async function insertInboundMessage(
     return inserted?.id ?? null;
   } catch (err) {
     // Code only: the body and headers carry personal data.
-    const code =
-      (err as { code?: string })?.code ??
-      (err instanceof Error ? err.name : "UnknownError");
-    logger.error({ code }, "inbound_email.claim_messages_insert_failed");
+    logger.error({ code: errorCode(err) }, "inbound_email.claim_messages_insert_failed");
     return null;
   }
 }

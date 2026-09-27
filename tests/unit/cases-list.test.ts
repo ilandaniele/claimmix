@@ -45,7 +45,6 @@ import {
   listCasesForExport,
 } from "@/server/cases/list";
 import { db } from "@/lib/db";
-import { countRows } from "@/lib/db/helpers";
 import { enTenant, enTenantVarias } from "@/data/scope";
 
 // ── Base query fixture ────────────────────────────────────────────────────────
@@ -227,6 +226,7 @@ describe("listCasesForExport", () => {
    */
   it.each([
     ["severity", { severity: "critical" }],
+    ["fraude", { fraude: "high" }],
     ["channel", { channel: "email" }],
     ["is_claim", { is_claim: true }],
     ["customer_id", { customer_id: "c-1" }],
@@ -369,6 +369,23 @@ describe("buildCaseFilters — q", () => {
     expect(where).toBeDefined();
     const { sql: compilado } = new PgDialect().sqlToQuery(where!);
     expect(compilado).not.toContain("replace(");
+  });
+});
+
+describe("buildCaseFilters — fraude (G35)", () => {
+  it("fraude agrega inArray sobre fraud_risk_level", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const where = buildCaseFilters({ fraude: ["high"] });
+
+    expect(where).toBeDefined();
+    const { sql: compilado, params } = new PgDialect().sqlToQuery(where!);
+    expect(compilado).toContain('"fraud_risk_level"');
+    expect(params).toContain("high");
+  });
+
+  it("sin fraude las condiciones son idénticas a las de antes", () => {
+    expect(buildCaseFilters({})).toEqual(buildCaseFilters({ fraude: undefined }));
+    expect(buildCaseFilters({})).toBeUndefined();
   });
 });
 

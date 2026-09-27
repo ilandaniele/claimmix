@@ -14,6 +14,7 @@ import { and, desc, eq, inArray, lte } from "drizzle-orm";
 import { enTenantVarias } from "@/data/scope";
 import { claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { yaSeLeContesto } from "@/core/case/reply-decision";
 
@@ -69,14 +70,7 @@ export async function yaContestamosElUltimoMensaje(
     );
   } catch (err) {
     // Contestar es la dirección segura acá: ante la duda, no callarse.
-    logger.error({ code: errCode(err) }, "orchestrate.ya_contestado_fallo");
+    logger.error({ code: errorCode(err) }, "orchestrate.ya_contestado_fallo");
     return false;
   }
-}
-
-function errCode(err: unknown): string {
-  return (
-    (err as { code?: string })?.code ??
-    (err instanceof Error ? err.name : "UnknownError")
-  );
 }

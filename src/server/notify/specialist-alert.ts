@@ -18,9 +18,8 @@
 import "server-only";
 
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { authUsers, cases, claimMessages, users } from "@/lib/db/schema";
+import { auditLog, authUsers, cases, claimMessages, users } from "@/lib/db/schema";
 import { isReservedTestAddress } from "@/lib/email/reserved";
 import { isReservedTestNumber } from "@/core/phone/reserved";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
@@ -300,7 +299,6 @@ async function alreadyAlerted(caseId: string, tenantId: string): Promise<boolean
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
-    const { auditLog } = await import("@/lib/db/schema");
     const rows = await enTenant(tenantCtx, (db) =>
       db
         .select({ id: auditLog.id })

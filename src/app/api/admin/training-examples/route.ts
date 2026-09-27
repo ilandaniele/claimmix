@@ -2,7 +2,7 @@
  * /api/admin/training-examples - approved/rejected training examples list.
  */
 
-import { desc, eq } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { tables } from "@/lib/db";

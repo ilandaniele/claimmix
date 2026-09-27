@@ -28,6 +28,7 @@ import { db, tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { logger } from "@/lib/observability/logger";
+import { resolverAiMode, type AiMode } from "@/server/ai/ai-mode";
 
 export type AiProvider = "gemini";
 export type ExtractionEngine = AiProvider | "mock";
@@ -183,13 +184,6 @@ export async function setTenantGeminiKey(tenantId: string, apiKey: string): Prom
   );
 }
 
-// ── Provider key checks ───────────────────────────────────────────────────────
-
-/** True when the provider's API key is configured in env (non-empty). */
-export function hasProviderKey(_provider: AiProvider): boolean {
-  return Boolean(process.env.GEMINI_API_KEY?.trim());
-}
-
 export function getDefaultGeminiModel(): string {
   // gemini-flash-latest (not a pinned 2.5/2.0 name): pinned older models get
   // "no longer available to new users" 404s on freshly-created keys. -latest
@@ -287,6 +281,15 @@ export async function hasProviderKeyForTenant(tenantId: string, _provider: AiPro
 export function isVertexConfigured(): boolean {
   if (process.env.GEMINI_TRANSPORT?.trim().toLowerCase() !== "vertex") return false;
   return Boolean(process.env.GOOGLE_CLOUD_PROJECT?.trim());
+}
+
+/** Mock o gemini: lo que informan `/api/admin/health` y el indicador del sidebar. */
+export function modoDeIa(): AiMode {
+  return resolverAiMode({
+    mockAi: process.env.MOCK_AI,
+    aiMock: process.env.AI_MOCK,
+    geminiConfigurado: isVertexConfigured() || Boolean(process.env.GEMINI_API_KEY?.trim()),
+  });
 }
 
 /** Env-level default provider (AI_PROVIDER, default "gemini"). */

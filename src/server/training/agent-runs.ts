@@ -13,8 +13,8 @@
  */
 
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
-import { db, tables } from "@/lib/db";
+import { desc, eq } from "drizzle-orm";
+import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { getDefaultGeminiModel } from "@/server/ai/provider";
@@ -224,7 +224,8 @@ export interface AgentRunRow {
 
 /**
  * Fetch the most recent agent run for a case. Tenant scoping is enforced
- * explicitly (RLS is gone): pass the tenant id from the authenticated context.
+ * explicitly via enTenant, backed by RLS: pass the tenant id from the
+ * authenticated context.
  */
 export async function getLatestAgentRun(
   tenantId: string,

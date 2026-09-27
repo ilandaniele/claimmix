@@ -35,6 +35,7 @@ import {
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { camposRequeridosDelRamo, clavesQueSatisfacen } from "@/core/case/required-fields";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -116,7 +117,7 @@ export interface GapAnalysisResult {
  *
  * @param caseId         - UUID of the case being analyzed.
  * @param extractedFields - Fields extracted in this run (from ExtractedClaimSchema.fields).
- * @param tenantId       - UUID of the tenant (explicit tenant scoping — RLS is gone).
+ * @param tenantId       - UUID of the tenant (explicit tenant scoping via enTenant, backed by RLS).
  */
 export async function analyzeEmailClaimGaps(
   caseId: string,
@@ -344,7 +345,7 @@ async function leerElCaso(
     };
   } catch (err) {
     logger.error({
-        code: codigoDeError(err),
+        code: errorCode(err),
         nota: "Se vuelve al camino de a uno, donde cada lectura degrada sola.",
       }, "gap_analyzer.lote_fallo");
 
@@ -374,13 +375,6 @@ function mejorEntreClaves(
     }
   }
   return mejor;
-}
-
-function codigoDeError(err: unknown): string {
-  return (
-    (err as { code?: string })?.code ??
-    (err instanceof Error ? err.name : "UnknownError")
-  );
 }
 
 interface FilaDeCampo {
@@ -503,7 +497,7 @@ async function fetchStoredFields(
       await enTenant<FilaDeCampo[]>({ tenantId }, (db) => consultaCampos(db, caseId))
     );
   } catch (err) {
-    logger.error({ detalle: codigoDeError(err) }, "gap_analyzer.extracted_fields_fetch_error");
+    logger.error({ detalle: errorCode(err) }, "gap_analyzer.extracted_fields_fetch_error");
     return [];
   }
 }
@@ -526,7 +520,7 @@ async function fetchMissingDocKeys(
       )
     );
   } catch (err) {
-    logger.error({ detalle: codigoDeError(err) }, "gap_analyzer.missing_docs_fetch_error");
+    logger.error({ detalle: errorCode(err) }, "gap_analyzer.missing_docs_fetch_error");
     return [];
   }
 }
@@ -550,7 +544,7 @@ async function fetchConfirmaciones(
       )
     );
   } catch (err) {
-    logger.error({ detalle: codigoDeError(err) }, "gap_analyzer.claim_field_confirmations_fetch_error");
+    logger.error({ detalle: errorCode(err) }, "gap_analyzer.claim_field_confirmations_fetch_error");
     return [];
   }
 }

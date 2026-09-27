@@ -31,10 +31,10 @@ vi.mock("@/server/cases/list", async (importOriginal) => {
   };
 });
 
-// getServerLocale lee la cookie del pedido vía next/headers — fuera de
+// resolveAccountLocale lee la cookie del pedido vía next/headers — fuera de
 // alcance de un pedido real acá. El idioma no es lo que este test cubre.
 vi.mock("@/lib/i18n/locale", () => ({
-  getServerLocale: vi.fn().mockResolvedValue("es-AR"),
+  resolveAccountLocale: vi.fn().mockResolvedValue("es-AR"),
 }));
 
 import { GET } from "@/app/api/cases/export.csv/route";
@@ -111,6 +111,17 @@ describe("GET /api/cases/export.csv — filtros multi-select", () => {
     expect(mockListCasesForExport).toHaveBeenCalledWith(
       TENANT_ID,
       expect.objectContaining({ q: "abc" }),
+      USER_ID
+    );
+  });
+
+  it("fraude también filtra el CSV (G35)", async () => {
+    const res = await GET(makeRequest("?fraude=high"));
+
+    expect(res.status).toBe(200);
+    expect(mockListCasesForExport).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({ fraude: ["high"] }),
       USER_ID
     );
   });

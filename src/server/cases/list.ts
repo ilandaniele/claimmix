@@ -2,8 +2,8 @@
  * Cases list query — `GET /api/cases`.
  *
  * Builds the Drizzle query for the cases listing endpoint.
- * Tenant isolation is enforced by an explicit tenant_id filter
- * (RLS is gone — the explicit filter is the ONLY tenant boundary):
+ * Tenant isolation is enforced by an explicit tenant_id filter via enTenant,
+ * backed by RLS (FORCE ROW LEVEL SECURITY) as the DB-level backstop:
  *   - IDOR: not applicable to list — users only see their tenant's rows
  *
  * AC9:  List is isolated by tenant_id.
@@ -28,8 +28,7 @@ import {
 import { estadosAConsultar } from "@/core/case/filtro-de-estado";
 import { ESTADOS_ESCALADO, ESTADOS_ESPERANDO_AL_DENUNCIANTE } from "@/core/case/fsm";
 import { medianocheHaceDias } from "@/core/fecha/dia-argentino";
-import { db } from "@/lib/db";
-import { countRows, escapeLike, ilikeAny } from "@/lib/db/helpers";
+import { escapeLike, ilikeAny } from "@/lib/db/helpers";
 import {
   enTenant,
   enTenantVarias,
@@ -39,6 +38,7 @@ import {
 import { cases } from "@/lib/db/schema";
 import type { CaseRow as CasesTableRow } from "@/lib/db/types";
 import type { CaseQuery, Periodo, SortColumn } from "@/lib/schemas/cases";
+import { errorCode } from "@/lib/observability/error-code";
 
 /**
  * La fila que devuelve este listado: las columnas de `cases` más lo que
@@ -61,14 +61,6 @@ export interface CaseListResult {
     per_page: number;
     pages: number;
   };
-}
-
-/** Extract a loggable error code from a thrown DB error (PII-safe). */
-function errCode(err: unknown): string {
-  return (
-    (err as { code?: string })?.code ??
-    (err instanceof Error ? err.name : "UnknownError")
-  );
 }
 
 /** Whitelisted sort columns (SortColumnSchema prevents arbitrary input). */
@@ -104,6 +96,7 @@ export function buildCaseFilters(
     q,
     desde,
     severity,
+    fraude,
     customer_id,
     policy_id,
     channel,
@@ -169,6 +162,8 @@ export function buildCaseFilters(
   if (desde) conditions.push(gte(cases.created_at, desde));
   // AC18: Email-intake filters
   if (severity?.length) conditions.push(inArray(cases.severity, severity));
+  // G35: filtro de fraude de la bandeja.
+  if (fraude?.length) conditions.push(inArray(cases.fraud_risk_level, fraude));
   if (customer_id) conditions.push(eq(cases.customer_id, customer_id));
   if (policy_id) conditions.push(eq(cases.policy_id, policy_id));
   if (channel?.length) conditions.push(inArray(cases.channel, channel));
@@ -401,7 +396,7 @@ export async function listCases(
     // Antes eran dos errores distintos, "count error" y "data error", porque
     // eran dos viajes. Ahora es uno solo y no hay forma de distinguirlos: decir
     // cuál de los dos falló sería inventarlo.
-    throw new Error(`[listCases] query error: ${errCode(err)}`);
+    throw new Error(`[listCases] query error: ${errorCode(err)}`);
   }
 
   const rows = data as unknown as CaseRow[];
@@ -459,6 +454,6 @@ export async function listCasesForExport(
 
     return data as unknown as CaseRow[];
   } catch (err) {
-    throw new Error(`[listCasesForExport] error: ${errCode(err)}`);
+    throw new Error(`[listCasesForExport] error: ${errorCode(err)}`);
   }
 }

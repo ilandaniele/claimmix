@@ -199,7 +199,6 @@ vi.mock("@/lib/email/claim-parser", () => ({
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
-import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";

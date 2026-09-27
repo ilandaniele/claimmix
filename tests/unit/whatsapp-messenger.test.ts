@@ -28,7 +28,22 @@ vi.mock("@/data/scope", async () => {
 });
 
 vi.mock("@/lib/db", () => ({
-  db: { insert: vi.fn() },
+  db: { insert: vi.fn(), update: vi.fn() },
+}));
+
+// Sólo para leer el id que `marcarSalida` pasa a `where(eq(...))`: el resto
+// de `drizzle-orm` queda real, porque otros módulos importados acá lo usan.
+vi.mock("drizzle-orm", async (importOriginal) => {
+  const real = await importOriginal<typeof import("drizzle-orm")>();
+  return { ...real, eq: vi.fn((col: unknown, val: unknown) => ({ col, val })) };
+});
+
+const { mockLogError, mockLogInfo } = vi.hoisted(() => ({
+  mockLogError: vi.fn(),
+  mockLogInfo: vi.fn(),
+}));
+vi.mock("@/lib/observability/logger", () => ({
+  logger: { error: mockLogError, warn: vi.fn(), info: mockLogInfo, debug: vi.fn() },
 }));
 
 vi.mock("@/server/whatsapp/cloud-api", () => ({
@@ -71,15 +86,35 @@ const TENANT = "10000000-0000-0000-0000-000000000001";
 const TO = "5491100000000";
 
 let inserted: Record<string, unknown>[];
+let updated: Array<{ id: string; status: string }>;
+let nextId: number;
 
 beforeEach(() => {
   vi.clearAllMocks();
   inserted = [];
+  updated = [];
+  nextId = 0;
   (db.insert as ReturnType<typeof vi.fn>).mockReturnValue({
-    values: (v: Record<string, unknown>) => {
-      inserted.push(v);
-      return Promise.resolve();
-    },
+    values: (v: Record<string, unknown>) => ({
+      // El insert liso, sin `.returning()` — como usa `recordOutbound`.
+      then: (resolve: (v?: undefined) => void) => {
+        inserted.push(v);
+        resolve(undefined);
+      },
+      // El insert con `.returning()` — como usa `reservarSalida`.
+      returning: () => {
+        inserted.push(v);
+        return Promise.resolve([{ id: `outbound-${++nextId}` }]);
+      },
+    }),
+  });
+  (db.update as ReturnType<typeof vi.fn>).mockReturnValue({
+    set: (v: { status: string }) => ({
+      where: (cond: { val: string }) => {
+        updated.push({ id: cond.val, status: v.status });
+        return Promise.resolve();
+      },
+    }),
   });
   (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
 });
@@ -698,21 +733,153 @@ describe("whatsappMessenger — the record", () => {
       tenant_id: TENANT,
       channel: "whatsapp",
       template: "wa_confirmation_received",
-      status: "sent",
+      status: "queued",
     });
+    expect(updated).toEqual([{ id: "outbound-1", status: "sent" }]);
   });
 
   it("records a failed send as failed rather than pretending", async () => {
     (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false });
     await send("confirmation_received", { caseId: CASE });
 
-    expect(inserted[0]).toMatchObject({ status: "failed" });
+    expect(updated).toEqual([{ id: "outbound-1", status: "failed" }]);
   });
 
   it("never throws — the claim is already stored", async () => {
     (sendWhatsAppText as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("network"));
 
     await expect(send("confirmation_received", { caseId: CASE })).resolves.toBeUndefined();
+  });
+});
+
+/*
+ * G13: la fila "queued" antes de mandar, y sólo el resultado del envío
+ * cambia su estado — nunca un segundo envío.
+ *
+ * La alternativa conservadora manda igual si la reserva falla: una denuncia
+ * ya guardada no se puede perder porque la base no respondió a tiempo.
+ */
+describe("whatsappMessenger — la fila antes del envío (G13)", () => {
+  it("(a) el insert 'queued' pasa antes de mandar por Meta", async () => {
+    await send("confirmation_received", { caseId: CASE });
+
+    const ordenInsert = (db.insert as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
+    const ordenEnvio = (sendWhatsAppText as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
+    expect(ordenInsert).toBeLessThan(ordenEnvio);
+    expect(inserted[0]).toMatchObject({ status: "queued" });
+  });
+
+  it("(b) un envío ok actualiza esa fila a 'sent' por id", async () => {
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(updated).toEqual([{ id: "outbound-1", status: "sent" }]);
+  });
+
+  it("(c) un envío fallido la actualiza a 'failed'", async () => {
+    (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false });
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(updated).toEqual([{ id: "outbound-1", status: "failed" }]);
+  });
+
+  it("(d) si la reserva falla, igual manda y el resguardo anota el resultado final", async () => {
+    (db.insert as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      values: () => ({ returning: () => Promise.reject(new Error("db down")) }),
+    });
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(sendWhatsAppText).toHaveBeenCalledTimes(1);
+    expect(mockLogError).toHaveBeenCalledWith(
+      expect.objectContaining({ case_id: CASE }),
+      "whatsapp.messenger.ledger_failed"
+    );
+    // Ninguna fila "queued" quedó anotada: el resguardo es el único insert.
+    expect(inserted).toEqual([
+      expect.objectContaining({
+        case_id: CASE,
+        tenant_id: TENANT,
+        channel: "whatsapp",
+        template: "wa_confirmation_received",
+        status: "sent",
+      }),
+    ]);
+    // Sin id reservado, no hay update a hacer.
+    expect(updated).toHaveLength(0);
+  });
+
+  it("(e) si el update falla después de mandar, el mensajero no tira", async () => {
+    (db.update as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      set: () => ({ where: () => Promise.reject(new Error("db down")) }),
+    });
+
+    await expect(send("confirmation_received", { caseId: CASE })).resolves.toBeUndefined();
+
+    expect(sendWhatsAppText).toHaveBeenCalledTimes(1);
+    expect(mockLogError).toHaveBeenCalledWith(
+      expect.objectContaining({ case_id: CASE }),
+      "whatsapp.messenger.ledger_failed"
+    );
+    // No hay un segundo insert de resguardo: la reserva sí existía.
+    expect(inserted).toHaveLength(1);
+  });
+
+  it("(f) el camino simulado sigue con un solo insert, sin pasar por la reserva", async () => {
+    await whatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: "5490000123456",
+      template: "confirmation_received",
+      data: { caseId: CASE },
+    });
+
+    expect(sendWhatsAppText).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toMatchObject({ status: "skipped_simulated" });
+    expect(updated).toHaveLength(0);
+  });
+});
+
+/*
+ * G29: el resultado del envío pasa por `logger`, no por `console`, con las
+ * mismas claves de `msg` y los mismos campos que tenía antes.
+ */
+describe("whatsappMessenger — el resultado del envío pasa por logger (G29)", () => {
+  it("un envío ok anota 'whatsapp.messenger.sent' por logger.info", async () => {
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(mockLogInfo).toHaveBeenCalledWith(
+      { case_id: CASE, template: "confirmation_received" },
+      "whatsapp.messenger.sent"
+    );
+  });
+
+  it("un envío fallido anota 'whatsapp.messenger.send_failed' por logger.error, con el motivo recortado a 200", async () => {
+    (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      error: "Cloud API 400: " + "x".repeat(300),
+    });
+
+    await send("confirmation_received", { caseId: CASE });
+
+    const [campos] = mockLogError.mock.calls.find(
+      ([, msg]) => msg === "whatsapp.messenger.send_failed"
+    )!;
+    expect(campos.case_id).toBe(CASE);
+    expect(campos.template).toBe("confirmation_received");
+    expect(campos.detalle).toHaveLength(200);
+    expect(campos.detalle).toBe(("Cloud API 400: " + "x".repeat(300)).slice(0, 200));
+  });
+
+  it("un envío fallido sin motivo no agrega 'detalle'", async () => {
+    (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false });
+
+    await send("confirmation_received", { caseId: CASE });
+
+    const [campos] = mockLogError.mock.calls.find(
+      ([, msg]) => msg === "whatsapp.messenger.send_failed"
+    )!;
+    expect(campos).not.toHaveProperty("detalle");
   });
 });
 

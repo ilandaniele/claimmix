@@ -23,13 +23,13 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { computeContentHash, uploadAttachment } from "@/server/storage/claim-attachments-bucket";
 import { validateAttachment, MAX_AGGREGATE_SIZE_BYTES } from "@/server/email/attachment-validator";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -316,10 +316,7 @@ export async function rehostAndRecordAttachments(
         })
       );
     } catch (err) {
-      const code =
-        (err as { code?: string })?.code ??
-        (err instanceof Error ? err.name : "UnknownError");
-      logger.error({ code }, "attachments.row_insert_failed");
+      logger.error({ code: errorCode(err) }, "attachments.row_insert_failed");
       continue;
     }
 

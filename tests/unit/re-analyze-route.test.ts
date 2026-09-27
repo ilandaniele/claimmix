@@ -250,17 +250,35 @@ describe("POST /api/cases/:id/re-analyze", () => {
     });
   });
 
-  it("returns a clear error when the reset update does not affect the case", async () => {
+  it("returns FSM_INVALID_TRANSITION when the reset update matches no rows (el caso cambió en la carrera)", async () => {
     mockDb.update.mockReturnValue(makeUpdateChain([]));
 
     const res = await POST(makeRequest(), {
       params: Promise.resolve({ id: CASE_ID }),
     });
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(409);
     await expect(res.json()).resolves.toMatchObject({
-      error: { code: "INTERNAL_ERROR" },
+      error: { code: "FSM_INVALID_TRANSITION" },
     });
+    expect(mockAfter).not.toHaveBeenCalled();
+    expect(mockRunIntakeAgent).not.toHaveBeenCalled();
+  });
+
+  it("does not re-analyze a case already sent to core, and does not update", async () => {
+    mockDb.select.mockReturnValue(
+      makeSelectChain([{ id: CASE_ID, status: "enviado_a_core" }])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "FSM_INVALID_TRANSITION" },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
     expect(mockAfter).not.toHaveBeenCalled();
     expect(mockRunIntakeAgent).not.toHaveBeenCalled();
   });
@@ -286,6 +304,29 @@ describe("POST /api/cases/:id/re-analyze", () => {
 
   it("allows admin to re-analyze no_relevante cases (provider-error recovery)", async () => {
     // Admin is the default in beforeEach (role: "admin")
+    mockDb.select.mockReturnValue(
+      makeSelectChain([{ id: CASE_ID, status: "no_relevante" }])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(202);
+    await expect(res.json()).resolves.toMatchObject({
+      case_id: CASE_ID,
+      status: "procesando",
+    });
+    expect(mockDb.update).toHaveBeenCalledTimes(1);
+    expect(mockAfter).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows owner to re-analyze no_relevante cases (owner cuenta como admin)", async () => {
+    mockRequireRole.mockResolvedValue({
+      db: mockDb,
+      user: { id: USER_ID },
+      userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "owner" },
+    });
     mockDb.select.mockReturnValue(
       makeSelectChain([{ id: CASE_ID, status: "no_relevante" }])
     );

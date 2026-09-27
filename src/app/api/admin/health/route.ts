@@ -16,22 +16,13 @@ import { NextResponse } from "next/server";
 import { db, tables } from "@/lib/db";
 // package.json is a static asset — importing version avoids a runtime read.
 import packageJson from "../../../../../package.json";
-import { isVertexConfigured } from "@/server/ai/provider";
-import { resolverAiMode } from "@/server/ai/ai-mode";
+import { modoDeIa } from "@/server/ai/provider";
 
 export async function GET() {
   // ── AI mode ──────────────────────────────────────────────────────────────────
   // Vertex authenticates with a service account, so "is Gemini configured?"
-  // cannot be "is there an API key?" — that reading is what silently sent the
-  // extractor to the mock, and here it would have this page report "mock" over
-  // a perfectly working deployment.
-  const geminiConfigured =
-    isVertexConfigured() || Boolean(process.env.GEMINI_API_KEY?.trim());
-  const aiMode = resolverAiMode({
-    mockAi: process.env.MOCK_AI,
-    aiMock: process.env.AI_MOCK,
-    geminiConfigurado: geminiConfigured,
-  });
+  // cannot be "is there an API key?" — modoDeIa ya lo resuelve así.
+  const aiMode = modoDeIa();
 
   // ── DB ping ───────────────────────────────────────────────────────────────────
   let dbStatus: "connected" | "error" = "connected";
@@ -46,8 +37,7 @@ export async function GET() {
     const code = (e as { code?: string })?.code;
     if (code !== "42P01") {
       dbStatus = "error";
-      dbError =
-        code ?? (e instanceof Error ? e.message.slice(0, 50) : "UNKNOWN");
+      dbError = code ?? "UNKNOWN";
     }
   }
 

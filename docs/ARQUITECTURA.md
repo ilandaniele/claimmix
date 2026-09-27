@@ -435,20 +435,21 @@ beneficio de orientación alto.
 No antes: probar la estructura vieja es pagar dos veces.
 - **Unitarias:** el núcleo, con datos planos. Objetivo declarado: **menos de 100
   mocks en todo el repo** (hoy 349).
-- **Punta a punta:** Playwright ya está instalado y sin usar. Los recorridos que
+- **Punta a punta:** Playwright corre los e2e (`tests/e2e/`). Los recorridos que
   importan: alta de tenant, un siniestro de principio a fin, confirmación
   humana, cierre.
-- **Carga masiva:** decidido en contra de k6, y vale el motivo. Lo que hace
-  valioso a `pnpm load` es justamente lo que k6 no puede hacer por arquitectura:
-  pedirle el plan a Postgres, afirmar que un índice sigue existiendo, plantarse
-  si el extractor resolvió a `mock` o si el cupo del tenant está agotado —los dos
-  falsos verdes más caros— y correlacionar el acuse del webhook con la respuesta
-  del agente leyendo `outbound_messages`. k6 corre un runtime JS adentro de un
-  binario Go: no tiene driver de Postgres ni puede importar nuestro código, así
-  que cada una de esas comprobaciones se volvería un proceso satélite y
-  quedarían dos herramientas contestando media pregunta cada una. En su lugar el
-  script creció a cuatro formas (carga, pico, resistencia, estrés) con reporte a
-  JSON y HTML.
+- **Carga masiva:** k6 se sumó después (`.github/workflows/load-tests.yml`) para
+  los perfiles livianos por VUs (smoke/load/stress/spike/soak/peak). Sigue vivo
+  `pnpm load` (`scripts/load-test.mts`) porque hace lo que k6 no puede por
+  arquitectura: pedirle el plan a Postgres, afirmar que un índice sigue
+  existiendo, plantarse si el extractor resolvió a `mock` o si el cupo del
+  tenant está agotado —los dos falsos verdes más caros— y correlacionar el
+  acuse del webhook con la respuesta del agente leyendo `outbound_messages`.
+  k6 corre un runtime JS adentro de un binario Go: no tiene driver de Postgres
+  ni puede importar nuestro código, así que cada una de esas comprobaciones se
+  volvería un proceso satélite. Por eso conviven las dos herramientas en vez de
+  una sola contestando toda la pregunta: el script propio creció a cuatro
+  formas (carga, pico, resistencia, estrés) con reporte a JSON y HTML.
 
 ### Fase 5 — Seguridad
 `security-review` sobre la arquitectura nueva, más lo que hoy no se cubre:

@@ -19,15 +19,15 @@
  */
 
 import "server-only";
-import { createHash } from "crypto";
 import { tokenDeGcp } from "@/server/gcp/credenciales";
 import { and, desc, eq, inArray } from "drizzle-orm";
 
-import { db, tables } from "@/lib/db";
+import { tables } from "@/lib/db";
 import {
   approvedExamplesForTenant,
   buildExpectedOutput,
-  stableHash,
+  OPEN_JOB_STATUSES,
+  splitJsonl,
 } from "@/server/training/dataset";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -157,17 +157,7 @@ function toGeminiJsonlLine(example: {
  */
 export async function buildVertexAiJsonl(tenantId: string) {
   const examples = await approvedExamplesForTenant(tenantId);
-  const lines = examples.map(toGeminiJsonlLine);
-  const validationCount =
-    lines.length >= 10 ? Math.max(1, Math.floor(lines.length * 0.2)) : 0;
-  const validation = validationCount > 0 ? lines.slice(0, validationCount) : [];
-  const training = validationCount > 0 ? lines.slice(validationCount) : lines;
-  return {
-    trainingJsonl: training.join("\n") + "\n",
-    validationJsonl: validation.length > 0 ? validation.join("\n") + "\n" : "",
-    trainingCount: training.length,
-    validationCount: validation.length,
-  };
+  return splitJsonl(examples.map(toGeminiJsonlLine));
 }
 
 // ── GCS upload ─────────────────────────────────────────────────────────────
@@ -315,7 +305,6 @@ export async function createVertexAiTuningDraft(
   const t = tables.modelTrainingJobs;
 
   // Block if an open Vertex AI job already exists for this tenant
-  const OPEN_JOB_STATUSES = ["draft", "queued", "running", "eval_pending", "approved"];
   const existing = firstRow(
     await enTenant(tenantCtx, (db) =>
       db

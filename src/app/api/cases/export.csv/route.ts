@@ -4,7 +4,7 @@
  * AC13: Returns text/csv with Content-Disposition attachment.
  *       Formula-injection-safe values (=, +, -, @ prefixed with single quote).
  *       Max 1000 rows per export.
- *       Same explicit tenant_id isolation as GET /api/cases (RLS is gone).
+ *       Same explicit tenant_id isolation as GET /api/cases (enTenant, backed by RLS).
  *
  * Columns: Nro. Siniestro, Asegurado, Póliza, Tipo, Situación, Confianza, Fecha, Analista.
  * Filters: same query params as GET /api/cases (status, type, q, periodo).
@@ -17,7 +17,7 @@ import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
 import { CaseQuerySchema, type CaseStatus, type ClaimType } from "@/lib/schemas/cases";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
-import { getServerLocale } from "@/lib/i18n/locale";
+import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { formatDate } from "@/lib/utils";
 import { desdeDePeriodo, listCasesForExport } from "@/server/cases/list";
 import { buildCsv } from "@/lib/csv/safe-encode";
@@ -161,6 +161,10 @@ export async function GET(request: NextRequest) {
     q: qCorto && qCorto.length >= 3 ? qCorto : undefined,
     periodo: searchParams.get("periodo") ?? undefined,
     severity: searchParams.getAll("severity"),
+    // Filtro de fraude de la bandeja (G35): mismo motivo que en /api/cases —
+    // «Exportar» reenvía la URL tal cual, y sin esto el CSV salía sin filtrar
+    // por fraude aunque la pantalla sí lo estuviera.
+    fraude: searchParams.getAll("fraude"),
     channel: searchParams.getAll("channel"),
     is_claim: searchParams.get("is_claim") ?? undefined,
     para_responder: searchParams.get("para_responder") ?? undefined,
@@ -194,6 +198,7 @@ export async function GET(request: NextRequest) {
       q: parsed.data.q,
       desde: desdeDePeriodo(parsed.data.periodo),
       severity: parsed.data.severity,
+      fraude: parsed.data.fraude,
       channel: parsed.data.channel,
       is_claim: parsed.data.is_claim,
       para_responder: parsed.data.para_responder,
@@ -210,8 +215,10 @@ export async function GET(request: NextRequest) {
   // ── 5. Build CSV rows ─────────────────────────────────────────────────────
   // El mismo idioma que la pantalla desde la que se apretó «Exportar CSV»: un
   // archivo en castellano bajado desde la interfaz en inglés se lee como un
-  // error del producto.
-  const locale = await getServerLocale();
+  // error del producto. `ctx.userRow` ya está en la mano —de `entrar()`, más
+  // arriba— así que se usa directo y no un segundo lookup por `cache()`, que
+  // acá no vale: un Route Handler no es un render de React.
+  const locale = await resolveAccountLocale(ctx.userRow.locale);
   const t = getT(locale);
   const TIPOS = etiquetasDeTipo(t);
   const ESTADOS = etiquetasDeEstado(t);

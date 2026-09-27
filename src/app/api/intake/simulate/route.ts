@@ -16,7 +16,6 @@
  */
 
 import { type NextRequest, after } from "next/server";
-import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, rawMessages } from "@/lib/db/schema";
 import {

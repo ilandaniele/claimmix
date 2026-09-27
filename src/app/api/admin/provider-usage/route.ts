@@ -10,9 +10,9 @@
 
 import { ok, err } from "@/lib/api/respond";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { db, tables } from "@/lib/db";
-import { enTenant, type TenantContext, enTenantVarias } from "@/data/scope";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { tables } from "@/lib/db";
+import { type TenantContext, enTenantVarias } from "@/data/scope";
+import { and, gte, sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 

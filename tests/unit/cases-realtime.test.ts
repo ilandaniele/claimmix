@@ -5,10 +5,9 @@
  *   - formatCaseNumber: deterministic SIN-XXXX-XXXX format
  *   - mergeCaseUpdate insert: prepends, avoids duplicates
  *   - mergeCaseUpdate update: replaces in-place
- *   - computeStatusCounts: counts all statuses correctly
  */
 
-import { mergeCaseUpdate, computeStatusCounts } from "@/app/(app)/bandeja/components/casesRealtimeUtils";
+import { mergeCaseUpdate } from "@/app/(app)/bandeja/components/casesRealtimeUtils";
 import { formatCaseNumber } from "@/core/case/numero";
 import type { CaseRow } from "@/server/cases/list";
 
@@ -123,45 +122,5 @@ describe("mergeCaseUpdate — update", () => {
     const result = mergeCaseUpdate(existing, notFound, "update");
     expect(result).toHaveLength(1);
     expect(result[0]!.id).toBe("case-001");
-  });
-});
-
-describe("computeStatusCounts", () => {
-  it("returns zero counts for empty array", () => {
-    const counts = computeStatusCounts([]);
-    expect(counts.get("todos")).toBe(0);
-    expect(counts.get("listo")).toBe(0);
-    expect(counts.get("procesando")).toBe(0);
-    expect(counts.get("esperando")).toBe(0);
-    expect(counts.get("escalado")).toBe(0);
-    expect(counts.get("cerrado")).toBe(0);
-  });
-
-  it("counts each status correctly", () => {
-    const cases = [
-      makeCase({ status: "listo" }),
-      makeCase({ status: "listo" }),
-      makeCase({ status: "procesando" }),
-      makeCase({ status: "esperando" }),
-      makeCase({ status: "escalado" }),
-      makeCase({ status: "cerrado" }),
-    ];
-    const counts = computeStatusCounts(cases);
-    expect(counts.get("todos")).toBe(6);
-    expect(counts.get("listo")).toBe(2);
-    expect(counts.get("procesando")).toBe(1);
-    expect(counts.get("esperando")).toBe(1);
-    expect(counts.get("escalado")).toBe(1);
-    expect(counts.get("cerrado")).toBe(1);
-  });
-
-  it("todos count equals total cases", () => {
-    const cases = [
-      makeCase({ status: "listo" }),
-      makeCase({ status: "escalado" }),
-      makeCase({ status: "cerrado" }),
-    ];
-    const counts = computeStatusCounts(cases);
-    expect(counts.get("todos")).toBe(cases.length);
   });
 });

@@ -14,12 +14,20 @@
  * AC3: audit log row inserted on auth.rate_limited.
  */
 
-import { db } from "@/lib/db";
+import { isIP } from "node:net";
 import { auditLog } from "@/lib/db/schema";
 import type { AuditLogInsert } from "@/lib/db/types";
 import type { AuditPayload } from "./redact";
 import { enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
+
+/**
+ * `getClientIp` puede devolver "anonymous", que no es un `inet` válido y
+ * tiraría abajo la escritura de auditoría.
+ */
+export function ipValida(ip?: string | null): string | null {
+  return ip && isIP(ip) !== 0 ? ip : null;
+}
 
 export interface AuditLogEntry {
   tenant_id: string;
@@ -50,7 +58,7 @@ export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
       target_type: entry.target_type ?? null,
       target_id: entry.target_id ?? null,
       payload: entry.payload ?? {},
-      ip: entry.ip ?? null,
+      ip: ipValida(entry.ip),
       ua: entry.ua ?? null,
     };
 
@@ -77,6 +85,8 @@ export const AuditEvent = {
   AUTH_SIGN_OUT: "auth.sign_out",
   AUTH_RATE_LIMITED: "auth.rate_limited",
   AUTH_SIGN_UP: "auth.sign_up",
+  /** USER_CREATED: un admin dio de alta a otra persona desde el panel. */
+  USER_CREATED: "auth.user_created",
   USER_ROLE_CHANGED: "auth.user_role_changed",
   PASSWORD_RESET_REQUESTED: "auth.password_reset_requested",
   PASSWORD_RESET_COMPLETED: "auth.password_reset_completed",

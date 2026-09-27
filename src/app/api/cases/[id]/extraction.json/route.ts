@@ -8,16 +8,15 @@
  * are UUIDs/sanitized, no user-controlled text).
  *
  * Auth: any authenticated role (viewers can inspect extracted JSON).
- * Explicit tenant_id filters scope the tenant (RLS is gone);
+ * Explicit tenant_id filters scope the tenant (enTenant, backed by RLS);
  * wrong-tenant case → 404.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { ALL_ROLES } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, extractedFields } from "@/lib/db/schema";

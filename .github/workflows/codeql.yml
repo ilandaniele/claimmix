@@ -31,6 +31,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # El evento `schedule` no documenta `repository` en su payload; la API
+      # dice si el repo es privado para cualquier evento.
+      - name: Visibilidad del repo
+        id: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" >> "$GITHUB_OUTPUT"
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
@@ -45,3 +53,32 @@ jobs:
         uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           category: "/language:javascript-typescript"
+          # Un repo privado sin Advanced Security rechaza el SARIF. El análisis
+          # corre igual y el paso siguiente lo lee acá.
+          upload: ${{ steps.repo.outputs.private == 'true' && 'never' || 'always' }}
+          output: sarif
+
+      # Sin la pestaña de seguridad nadie ve los hallazgos, así que el job
+      # falla con los de gravedad alta o crítica (security-severity >= 7), el
+      # mismo umbral con el que GitHub marca rojo un PR cuando sí hay subida.
+      # Los descartados después de revisarlos viven en codeql-descartados.txt.
+      - name: Hallazgos graves
+        if: steps.repo.outputs.private == 'true'
+        run: |
+          jq -r '
+            .runs[] as $r
+            | ([$r.tool.driver.rules[]?, $r.tool.extensions[]?.rules[]?]
+               | map({key: .id, value: (.properties["security-severity"] // "0" | tonumber)})
+               | from_entries) as $sev
+            | $r.results[]
+            | select(($sev[.ruleId] // 0) >= 7)
+            | "\(.ruleId) \(.locations[0].physicalLocation.artifactLocation.uri) \(.locations[0].physicalLocation.region.startLine)"
+          ' sarif/*.sarif | sort -u > graves.txt
+          awk 'NR == FNR { if ($0 !~ /^[[:space:]]*(#|$)/) ok[$1 " " $2] = 1; next }
+               !(($1 " " $2) in ok)' .github/codeql-descartados.txt graves.txt > nuevos.txt
+          echo "Resultados de CodeQL: $(jq -s '[.[].runs[].results[]] | length' sarif/*.sarif); graves: $(wc -l < graves.txt), sin descartar: $(wc -l < nuevos.txt)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s nuevos.txt ]; then
+            { echo '```'; cat nuevos.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            cat nuevos.txt
+            exit 1
+          fi

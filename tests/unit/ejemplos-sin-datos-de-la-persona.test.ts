@@ -86,6 +86,30 @@ describe("ejemploSinDatosDeLaPersona", () => {
     expect(body).toBe("Soy [NOMBRE], DNI [DNI]. Otro dato: [NOMBRE].");
   });
 
+  it("tacha también al tercero y al conductor, no sólo al asegurado", () => {
+    const ejemplo = {
+      input_payload: {
+        subject: "",
+        body: "Me chocó Laura Quiroga, DNI 28.555.101. Manejaba mi hijo Tomás Sosa.",
+      },
+      expected_output: {
+        confirmed_fields: [{ field_key: "nombre_tercero", field_value: "Laura Quiroga", confidence: 0.9 }],
+        agent_output: {
+          extracted_fields: { driver_name: "Tomás Sosa", dni_tercero: "28.555.101" },
+        },
+      },
+    };
+
+    const resultado = JSON.stringify(ejemploSinDatosDeLaPersona(ejemplo));
+
+    for (const dato of ["Laura", "Quiroga", "Tomás", "Sosa", "28.555.101"]) {
+      expect(resultado).not.toContain(dato);
+    }
+    expect((ejemploSinDatosDeLaPersona(ejemplo).input_payload as { body: string }).body).toBe(
+      "Me chocó [NOMBRE], DNI [DNI]. Manejaba mi hijo [NOMBRE]."
+    );
+  });
+
   it("saca sender_email de donde aparezca", () => {
     const ejemplo = {
       input_payload: { subject: "x", body: "y", sender_email: "persona@mail.com" },

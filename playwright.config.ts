@@ -39,17 +39,19 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "pnpm dev",
+    /*
+     * En CI, el build de producción, que el job arma en el paso anterior.
+     *
+     * `next dev` compila cada ruta la primera vez que se pide y Turbopack no
+     * devuelve esa memoria. En el runner de un repo privado —7 GB y 3 GB de
+     * swap— la suite lo llenaba en tres minutos y GitHub apagaba la máquina a
+     * mitad de los tests, sin un error de Node que lo explicara. `next start`
+     * arranca con todo compilado y con el mismo `NODE_ENV` que producción.
+     */
+    command: process.env.CI ? "pnpm start" : "pnpm dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
-
-    /*
-     * En CI arranca en frío: sin caché de Turbopack, `next dev` compila la
-     * primera ruta recién cuando Playwright la pide. Con 120 s un runner cargado
-     * llegaba justo y a veces no llegaba — un run entero perdido sin ninguna
-     * falla real.
-     */
-    timeout: process.env.CI ? 240_000 : 120_000,
+    timeout: 120_000,
 
     /*
      * La salida del servidor, a la vista.

@@ -26,7 +26,7 @@ export const TRAINING_APPROVER_ROLES: UserRole[] = ["owner", "admin", "specialis
  * teléfono.
  *
  * Tiene los mismos tres miembros que TRAINING_APPROVER_ROLES y son constantes
- * separadas a propósito. Aprobar un ejemplo de entrenamiento y leer el padrón
+ * separadas a propósito. Aprobar un ejemplo de referencia y leer el padrón
  * de clientes cambian por razones distintas: el día que se decida que un
  * analista puede aprobar ejemplos, eso no debería abrirle el padrón. Unificarlas
  * porque hoy coinciden es exactamente cómo un cambio de producto en una se

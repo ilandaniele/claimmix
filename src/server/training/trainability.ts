@@ -3,7 +3,7 @@
  *
  * Every processed email gets a SUGGESTION of whether it is a good training
  * candidate. This is only a suggestion — the agent NEVER learns from an email
- * until a human clicks "Confirmar como ejemplo de entrenamiento seguro".
+ * until a human clicks "Usar como ejemplo de referencia".
  * Emails are untrusted until reviewed.
  *
  * Blocking reasons (suggestion forced to false, and approval API refuses

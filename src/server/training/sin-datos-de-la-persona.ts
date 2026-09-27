@@ -1,6 +1,6 @@
 /**
- * El nombre y el DNI de una persona, tachados de un ejemplo entero antes de
- * que llegue al prompt few-shot.
+ * Los nombres y los DNI de las personas de un caso, tachados de un ejemplo
+ * entero antes de que llegue al prompt few-shot o salga en un export.
  *
  * `training_examples` guarda el email o el WhatsApp completos: el nombre y el
  * DNI pueden aparecer en cualquier parte del texto libre, no sólo en el campo
@@ -13,58 +13,62 @@ import "server-only";
 import { DNI_RE, tacharNombreYDni } from "@/server/ai/hydrate-fields";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 
-interface DatosDeLaPersona {
-  nombre?: string | null;
-  dni?: string | null;
+interface DatosDeLasPersonas {
+  nombres: string[];
+  dnis: string[];
 }
 
-/** El valor de `field_key` en `confirmed_fields`, el array que arma `examples.ts`. */
-function campoConfirmado(confirmedFields: unknown, clave: "full_name" | "dni"): string | undefined {
-  if (!Array.isArray(confirmedFields)) return undefined;
-  const fila = confirmedFields.find(
-    (f) =>
-      f &&
-      typeof f === "object" &&
-      canonicalFieldKey(String((f as { field_key?: unknown }).field_key)) === clave
-  ) as { field_value?: unknown } | undefined;
-  return typeof fila?.field_value === "string" ? fila.field_value : undefined;
-}
-
-/** El valor de `clave` en `extracted_fields`, aunque el modelo haya usado un alias. */
-function campoExtraido(extraidos: unknown, clave: "full_name" | "dni"): string | undefined {
-  if (!extraidos || typeof extraidos !== "object") return undefined;
-  for (const [k, v] of Object.entries(extraidos)) {
-    if (canonicalFieldKey(k) === clave && typeof v === "string" && v) return v;
-  }
-  return undefined;
-}
+const EN = { nombre: "[NOMBRE]", dni: "[DNI]" };
 
 /**
- * De dónde salen el nombre y el DNI: primero lo que confirmó un humano,
- * porque es el dato bueno; si no hay confirmación, lo que propuso el modelo.
- * Por clave canónica: `nombre_asegurado` es el mismo nombre que `full_name`.
+ * Los nombres y los DNI de todas las personas del caso: el asegurado, el
+ * tercero, el conductor. Una clave de nombre termina en `_name`
+ * (`full_name`, `party_b_name`, `driver_name`); una de DNI es `dni` o lo lleva
+ * como parte (`dni_tercero`).
+ *
+ * Por clave canónica, primero lo que confirmó un humano, porque es el dato
+ * bueno; si no hay confirmación, lo que propuso el modelo. `nombre_asegurado`
+ * es el mismo nombre que `full_name`.
  */
-function datosDeLaPersona(expectedOutput: unknown): DatosDeLaPersona {
-  if (!expectedOutput || typeof expectedOutput !== "object") return {};
+function datosDeLasPersonas(expectedOutput: unknown): DatosDeLasPersonas {
+  const datos: DatosDeLasPersonas = { nombres: [], dnis: [] };
+  if (!expectedOutput || typeof expectedOutput !== "object") return datos;
   const eo = expectedOutput as {
     confirmed_fields?: unknown;
     agent_output?: { extracted_fields?: unknown };
   };
-  const extraidos = eo.agent_output?.extracted_fields;
 
-  return {
-    nombre: campoConfirmado(eo.confirmed_fields, "full_name") ?? campoExtraido(extraidos, "full_name"),
-    dni: campoConfirmado(eo.confirmed_fields, "dni") ?? campoExtraido(extraidos, "dni"),
-  };
+  const porClave = new Map<string, string>();
+  const extraidos = eo.agent_output?.extracted_fields;
+  if (extraidos && typeof extraidos === "object") {
+    for (const [k, v] of Object.entries(extraidos)) {
+      if (typeof v === "string" && v) porClave.set(canonicalFieldKey(k), v);
+    }
+  }
+  // `confirmed_fields` es el array que arma `examples.ts`; pisa lo extraído.
+  if (Array.isArray(eo.confirmed_fields)) {
+    for (const f of eo.confirmed_fields) {
+      const { field_key, field_value } = (f ?? {}) as { field_key?: unknown; field_value?: unknown };
+      if (typeof field_value === "string" && field_value) {
+        porClave.set(canonicalFieldKey(String(field_key)), field_value);
+      }
+    }
+  }
+
+  for (const [clave, valor] of porClave) {
+    if (/(^|_)name$/.test(clave)) datos.nombres.push(valor);
+    else if (/(^|_)dni($|_)/.test(clave)) datos.dnis.push(valor);
+  }
+  return datos;
 }
 
-/** Tacha nombre y DNI en cada string; saca `sender_email` en cada objeto. */
-function tachar(valor: unknown, datos: DatosDeLaPersona): unknown {
+/** Tacha nombres y DNI en cada string; saca `sender_email` en cada objeto. */
+function tachar(valor: unknown, datos: DatosDeLasPersonas): unknown {
   if (typeof valor === "string") {
-    return tacharNombreYDni(valor, datos, { nombre: "[NOMBRE]", dni: "[DNI]" }, { porPalabra: true }).replace(
-      DNI_RE,
-      "[DNI]"
-    );
+    let out = valor;
+    for (const nombre of datos.nombres) out = tacharNombreYDni(out, { nombre }, EN, { porPalabra: true });
+    for (const dni of datos.dnis) out = tacharNombreYDni(out, { dni }, EN);
+    return out.replace(DNI_RE, EN.dni);
   }
   if (Array.isArray(valor)) {
     return valor.map((v) => tachar(v, datos));
@@ -81,7 +85,7 @@ function tachar(valor: unknown, datos: DatosDeLaPersona): unknown {
 }
 
 /**
- * Un ejemplo de `training_examples`, con el nombre y el DNI de la persona
+ * Un ejemplo de `training_examples`, con los nombres y los DNI de las personas
  * tachados en cada string de `input_payload` y `expected_output`, y sin
  * `sender_email` (el worker lo guarda junto a `subject`/`body`, ver
  * `extract.ts`).
@@ -92,7 +96,7 @@ export function ejemploSinDatosDeLaPersona<
   T extends { input_payload: unknown; expected_output: unknown },
 >(ej: T): T {
   if (!ej || typeof ej !== "object") return ej;
-  const datos = datosDeLaPersona(ej.expected_output);
+  const datos = datosDeLasPersonas(ej.expected_output);
 
   return {
     ...ej,

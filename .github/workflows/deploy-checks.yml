@@ -186,6 +186,27 @@ jobs:
     # workflow_dispatch directo sobre este archivo, dispararlo a mano ya es
     # la decisión.
     steps:
+      # Este workflow recibe la URL de su caller (o de quien lo dispare a
+      # mano) y siete jobs cuelgan de este primero, todos con secretos. Antes
+      # de que exista ninguno, se comprueba a qué despliegue apunta.
+      - name: ¿A dónde apunta esto?
+        env:
+          URL: ${{ inputs.url }}
+        run: |
+          set -u
+          case "$URL" in
+            https://*) ;;
+            *) echo "::error::La URL tiene que empezar con https://"; exit 1 ;;
+          esac
+          HOST="${URL#https://}"
+          case "$HOST" in
+            *[/?#@:]*) echo "::error::La URL no puede llevar ruta, puerto, credenciales ni fragmento: ${HOST}"; exit 1 ;;
+          esac
+          case "$HOST" in
+            claimmix.vercel.app|claimmix-qa.vercel.app|claimmix-*-ilandaniele-3471s-projects.vercel.app) ;;
+            *) echo "::error::Host fuera de la lista: ${HOST}"; exit 1 ;;
+          esac
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Historia completa: el chequeo compara el commit que pidió este run
         # con el que producción está sirviendo, y para saber cuál viene

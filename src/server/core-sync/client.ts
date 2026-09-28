@@ -5,14 +5,11 @@
  *       On success: cases.status='enviado_a_core', cases.core_external_id set.
  *       On failure: cases.status='error_core', cases.core_error_message set.
  *
- * IC7: No real external API exists — only MockCoreSyncClient is implemented.
- *      Unset (the default) means `sin_configurar`: the route answers 501 and
- *      writes nothing; a person moves the case by hand (`SALIDAS_A_MANO`).
- *      CORE_SYNC_MODE=mock is only for tests and the demo.
- *      CORE_SYNC_MODE=real without a real client also counts as `sin_configurar`.
- *
- * This file defines the interface contract and the factory function.
- * The mock implementation lives in ./mock.ts.
+ * El modo sale de la fila de `core_sync_settings` de cada aseguradora (0036):
+ * con `enabled` hay webhook real (./real.ts). Sin fila, apagada o con la
+ * migración sin aplicar es `sin_configurar`: la ruta contesta 501 sin escribir
+ * y el caso sale a mano (`SALIDAS_A_MANO`). CORE_SYNC_MODE=mock pisa todo eso,
+ * sólo para tests y la demo; cualquier otro valor se ignora.
  */
 
 // ── Payload and result types ──────────────────────────────────────────────────
@@ -42,22 +39,23 @@ export interface CoreSyncPayload {
   accidentDescription: string | null;
   /** Full snapshot of extracted fields as key-value pairs. */
   extractedFields: Record<string, string>;
+  /** `cases.updated_at`: con el caseId arma X-ClaimMix-Event-Id. */
+  updatedAt: string | null;
+  /** Sólo en el envío de prueba de /configuracion: no es un caso. */
+  prueba?: true;
 }
 
 /**
  * Result returned by CoreSyncClient.syncCase().
  *
- * On success: externalId is set, success=true.
- * On failure: success=false, errorMessage explains the failure.
+ * Una unión para que no se pueda armar un éxito con un id inventado: el
+ * `externalId` es el que devolvió el Core, o null. `motivo` es un código fijo
+ * (timeout, red, http_<n>, redireccion, destino_rechazado), nunca texto del
+ * otro lado.
  */
-export interface CoreSyncResult {
-  /** External ID assigned by the core system (only set on success). */
-  externalId: string;
-  /** Whether the sync was successful. */
-  success: boolean;
-  /** Error message if success=false. */
-  errorMessage?: string;
-}
+export type CoreSyncResult =
+  | { ok: true; externalId: string | null }
+  | { ok: false; motivo: string };
 
 // ── Interface ─────────────────────────────────────────────────────────────────
 
@@ -66,7 +64,7 @@ export interface CoreSyncResult {
  *
  * Implementations:
  *   - MockCoreSyncClient (./mock.ts) — simulates success/failure deterministically.
- *   - (Future) RealCoreSyncClient — calls the actual external core API.
+ *   - RealCoreSyncClient (./real.ts) — webhook firmado a la URL de la aseguradora.
  */
 export interface ICoreSyncClient {
   syncCase(caseData: CoreSyncPayload): Promise<CoreSyncResult>;
@@ -74,36 +72,42 @@ export interface ICoreSyncClient {
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
+import { descifrar } from "@/lib/security/cifrado";
 import { MockCoreSyncClient } from "./mock";
+import { RealCoreSyncClient } from "./real";
 
-/**
- * En qué modo está la integración con el sistema del asegurador.
- *
- * `sin_configurar` es el default, y ése es el cambio: antes el default era
- * `mock`.
- */
+/** Lo que la fábrica lee de `core_sync_settings` (`consultaDeLaConfig`). */
+export interface FilaDeCoreSync {
+  enabled: boolean;
+  webhook_url: string | null;
+  signing_secret_enc: string | null;
+}
+
+/** En qué modo está la integración con el sistema del asegurador. */
 export type ModoDeCoreSync = "mock" | "real" | "sin_configurar";
 
-export function modoDeCoreSync(): ModoDeCoreSync {
-  const crudo = process.env.CORE_SYNC_MODE?.trim();
-  if (crudo === "mock") return "mock";
-  if (crudo === "real") return "real";
-  return "sin_configurar";
+/** Con el mock no hace falta leer la fila: ni la demo ni los tests dependen de la 0036. */
+export function esModoMock(): boolean {
+  return process.env.CORE_SYNC_MODE?.trim() === "mock";
+}
+
+export function modoDeCoreSync(fila?: Pick<FilaDeCoreSync, "enabled"> | null): ModoDeCoreSync {
+  if (esModoMock()) return "mock";
+  return fila?.enabled ? "real" : "sin_configurar";
 }
 
 /**
  * Si `getCoreSyncClient` devuelve un cliente: la ficha muestra el botón sólo
- * con esto. Preguntar por `sin_configurar` dejaba a `real` con un botón que
- * siempre recibe 501.
+ * con esto, así nunca hay un botón que siempre recibe 501.
  */
-export function hayClienteDeCoreSync(): boolean {
-  return modoDeCoreSync() === "mock";
+export function hayClienteDeCoreSync(fila?: Pick<FilaDeCoreSync, "enabled"> | null): boolean {
+  return modoDeCoreSync(fila) !== "sin_configurar";
 }
 
 /** No hay a quién mandarle el caso. La tira `getCoreSyncClient`. */
 export class CoreSyncSinConfigurar extends Error {
   constructor(readonly modo: ModoDeCoreSync) {
-    super(`core-sync sin cliente real (modo=${modo})`);
+    super(`core-sync sin cliente (modo=${modo})`);
     this.name = "CoreSyncSinConfigurar";
   }
 }
@@ -124,21 +128,29 @@ export class CoreSyncSinConfigurar extends Error {
  * `core_external_id = 'CORE-' + los primeros 8 caracteres del id`, ponía el
  * caso en `enviado_a_core` y escribía un `CORE_SYNC_SUCCESS` en la auditoría.
  * Un identificador inventado, un estado que dice «entregado» y un registro de
- * auditoría de algo que no pasó. Y los ids que terminan en `0` —uno de cada
- * dieciséis, porque son UUID— devolvían un «Core timeout» igual de inventado,
- * que es un error que el analista sale a investigar.
+ * auditoría de algo que no pasó.
  *
  * Fabricar el comprobante de una entrega que nunca ocurrió es lo peor que
- * puede hacer este archivo, así que ahora el default es no hacer nada y
- * decirlo.
+ * puede hacer este archivo. Por eso el mock hay que pedirlo por su nombre
+ * (tests y demo), y el cliente real sólo sale de una fila activada: el id que
+ * se guarda es el que devolvió el Core, o null, nunca uno armado acá.
  *
- * `mock` sigue existiendo y hay que pedirlo por su nombre: lo usan los tests y
- * sirve para probar la pantalla sin un sistema del otro lado.
+ * Un secreto que no se puede descifrar —se rotó GMAIL_TOKEN_ENCRYPTION_KEY—
+ * también es `sin_configurar` para la ruta: 501 sin escribir, hasta generar
+ * otro desde /configuracion.
  */
-export function getCoreSyncClient(): ICoreSyncClient {
-  if (hayClienteDeCoreSync()) return new MockCoreSyncClient();
+export function getCoreSyncClient(fila?: FilaDeCoreSync | null): ICoreSyncClient {
+  const modo = modoDeCoreSync(fila);
+  if (modo === "mock") return new MockCoreSyncClient();
+  if (modo === "sin_configurar" || !fila?.webhook_url || !fila.signing_secret_enc) {
+    throw new CoreSyncSinConfigurar(modo);
+  }
 
-  // `real` todavía no existe. Cuando exista, entra en `hayClienteDeCoreSync`
-  // y acá va `return new RealCoreSyncClient()`.
-  throw new CoreSyncSinConfigurar(modoDeCoreSync());
+  let secreto: string;
+  try {
+    secreto = descifrar(fila.signing_secret_enc);
+  } catch {
+    throw new CoreSyncSinConfigurar("real");
+  }
+  return new RealCoreSyncClient({ url: fila.webhook_url, secreto });
 }

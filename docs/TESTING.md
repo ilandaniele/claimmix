@@ -615,6 +615,35 @@ Esto prueba que la ruta hace streaming desde `next start`; el lado de Vercel
 —que la función responda igual en producción— es una comprobación aparte, de
 una sola vez, que sigue anotada en `docs/PROJECT_STATUS.md`.
 
+#### La entrega al sistema central (B5)
+
+`api-v1.spec.ts` rota la clave de `/api/v1` desde /configuracion con la sesión admin, lee
+`/api/v1/cases` desde un cliente sin cookies, comprueba que la clave con un
+carácter cambiado da 401 y al final la revoca. Nunca prende el webhook. Si la
+base de ENSAYO no tiene la 0036, se saltea y lo dice.
+
+El resto de B5 vive en `pnpm verify`, sin red ni base:
+
+| test | qué cubre |
+| --- | --- |
+| `tests/unit/core-sync-firma.test.ts` | el vector fijo de la firma y que `verificar-firma.mjs` rechace sin tirar |
+| `tests/unit/core-sync-destino.test.ts` | la guarda SSRF: forma de la URL, IPs literales y cada rango privado detrás de un DNS |
+| `tests/unit/core-sync-real.test.ts` | el webhook contra un servidor local: encabezados, firma, id externo, 3xx, 5xx y plazo |
+| `tests/unit/core-sync-hay-cliente.test.ts` | qué cliente sale de cada fila de `core_sync_settings` |
+| `tests/unit/core-sync-config.test.ts` | que la vista de /configuracion no lea el secreto ni el hash, y el código de Postgres envuelto |
+| `tests/unit/motivo-de-core.test.ts` | cada código de fallo (`timeout`, `http_502`…) en palabras, en los dos idiomas |
+| `tests/unit/components/CoreSyncPanel.test.tsx` | rotar o revocar la clave no borra el secreto recién generado; cada aviso dice qué muestra; el rechazo del servidor se lee en el idioma de la cuenta |
+| `tests/unit/components/CoreSyncButton.test.tsx` | el fallo en palabras y en el idioma de la cuenta; el éxito refresca la ficha; la sección se ve en todos los canales |
+| `tests/unit/configuracion-para-admin.test.ts` | /configuracion lee avisos y entrega en un lote y no se cae si la base falla |
+| `tests/unit/migracion-0036.test.ts` | RLS, CHECKs y permisos de la 0036, leídos del SQL |
+| `tests/integration/api-v1-cases.test.ts` | la clave: 401 sin tocar la base, cupo, 404 ajeno y comparación de tiempo constante; fechas ISO, cursor, sin simulados ni pruebas |
+| `tests/integration/sync-to-core.test.ts` | el envío; la ruta admite los mismos roles que ven el botón (`CORE_SYNC_ROLES`); `updatedAt` en ISO; un caso simulado no sale al webhook real; el 2xx gana sobre `error_core` |
+| `tests/integration/export-to-core.test.ts` | el JSON a mano: la forma entera, fechas ISO, un lote, 404 ajeno |
+| `tests/integration/admin/core-sync.test.ts` | la ruta admin: rol y cupo por `entrar`, URL, CHECK, `motivo` de cada rechazo, clave una sola vez y con el formato que lee `/api/v1`, auditoría sin secretos |
+
+`pnpm pentest` suma sondas sin credenciales: `/api/v1` con Bearer basura y con
+una clave forjada, y `/api/admin/core-sync` sin sesión.
+
 ---
 
 ## Cuándo correr qué

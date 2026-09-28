@@ -9,15 +9,14 @@
  * IDOR: case must belong to authenticated user's tenant.
  */
 
-import { eq } from "drizzle-orm";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/require-role";
-import { enTenant, type TenantContext } from "@/data/scope";
-import { cases, extractedFields, missingDocs } from "@/lib/db/schema";
+import { enTenantVarias, type TenantContext } from "@/data/scope";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { consultasDelCaso, type DelCaso } from "@/server/core-sync/lectura";
 
 const ParamsSchema = z.object({
   id: z.string().uuid("ID de caso inválido."),
@@ -47,54 +46,14 @@ export async function POST(
   // Este contexto es lo único que le dice de quién son los datos.
   const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
-  // ── Case detail (explicit tenant filter = IDOR protection) ───────────────────
-  const [caseRow] = await enTenant(tenantCtx, (db) =>
-    db
-      .select()
-      .from(cases)
-      .where(eq(cases.id, caseId))
-      .limit(1)
-  );
-
-  if (!caseRow) return err(new AppError("NOT_FOUND"));
-
-  // ── Extracted fields ─────────────────────────────────────────────────────────
-  const fields = await enTenant(tenantCtx, (db) =>
-    db
-      .select({ field_key: extractedFields.field_key, field_value: extractedFields.field_value, confidence: extractedFields.confidence })
-      .from(extractedFields)
-      .where(eq(extractedFields.case_id, caseId))
-  );
-
-  // ── Missing docs ─────────────────────────────────────────────────────────────
-  const docs = await enTenant(tenantCtx, (db) =>
-    db
-      .select({
-        doc_key: missingDocs.doc_key,
-        requested_at: missingDocs.requested_at,
-        satisfied_at: missingDocs.satisfied_at,
-        // Carried through separately: the core system must not read "the
-        // claimant says no such report exists" as "we have the report".
-        declined_at: missingDocs.declined_at,
-        declined_note: missingDocs.declined_note,
-      })
-      .from(missingDocs)
-      .where(eq(missingDocs.case_id, caseId))
-  );
+  // Caso, campos y documentos en un solo viaje; la forma es la de /api/v1.
+  const [[caso], fields, docs] = await enTenantVarias<DelCaso>(tenantCtx, (db) => consultasDelCaso(db, caseId));
+  if (!caso) return err(new AppError("NOT_FOUND"));
 
   // ── Build core-system payload ─────────────────────────────────────────────────
   const payload = {
     _note: "Payload de integración. En producción este objeto se enviaría al sistema core del asegurador vía HTTP POST.",
-    case_id: caseRow.id,
-    policy_number: caseRow.policy_number,
-    policyholder_name: caseRow.policyholder_name,
-    claim_type: caseRow.claim_type,
-    status: caseRow.status,
-    confidence_min: caseRow.confidence_min,
-    channel: caseRow.channel,
-    created_at: caseRow.created_at,
-    updated_at: caseRow.updated_at,
-    closed_at: caseRow.closed_at,
+    ...caso,
     extracted_fields: fields,
     missing_docs: docs,
     exported_at: new Date().toISOString(),

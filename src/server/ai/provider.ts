@@ -22,13 +22,13 @@
  */
 
 import "server-only";
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { logger } from "@/lib/observability/logger";
 import { resolverAiMode, type AiMode } from "@/server/ai/ai-mode";
+import { cifrar, descifrar } from "@/lib/security/cifrado";
 
 export type AiProvider = "gemini";
 export type ExtractionEngine = AiProvider | "mock";
@@ -39,63 +39,6 @@ const DEFAULT_AI_PROVIDER: AiProvider = "gemini";
 
 function isAiProvider(value: unknown): value is AiProvider {
   return value === "gemini";
-}
-
-// ── Key encryption (AES-256-GCM, same as Gmail token storage) ────────────────
-
-const KEY_ALGORITHM = "aes-256-gcm";
-
-function getEncryptionKey(): Buffer {
-  const secret = process.env.GMAIL_TOKEN_ENCRYPTION_KEY;
-  if (!secret) throw new Error("GMAIL_TOKEN_ENCRYPTION_KEY must be set to store API keys");
-  return createHash("sha256").update(secret).digest();
-}
-
-/*
- * El largo de la etiqueta se fija a mano, y no es cosmético.
- *
- * En GCM la etiqueta de autenticación es lo único que distingue un texto
- * cifrado legítimo de uno fabricado. Node, si no se le dice el largo, acepta
- * al descifrar etiquetas de 4, 8, 12, 13, 14, 15 o 16 bytes: quien pueda
- * escribir el texto cifrado guardado puede mandar una de 4 bytes y bajar el
- * costo de falsificarla de 2^128 a 2^32, que es un rato de CPU.
- *
- * Acá adentro viaja el token de Gmail —el permiso permanente para leer y
- * escribir en la casilla— así que el largo se declara en los dos lados y una
- * etiqueta de otro tamaño se rechaza antes de intentar descifrar.
- *
- * Compatible con lo ya guardado: `getAuthTag()` viene devolviendo 16 bytes,
- * que es el valor por omisión. Esto no cambia lo que se escribe; cierra lo
- * que se acepta.
- */
-const TAG_BYTES = 16;
-
-function encryptApiKey(key: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv(KEY_ALGORITHM, getEncryptionKey(), iv, {
-    authTagLength: TAG_BYTES,
-  });
-  const encrypted = Buffer.concat([cipher.update(key, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return [iv, tag, encrypted].map((b) => b.toString("base64url")).join(".");
-}
-
-function decryptApiKey(encryptedKey: string): string {
-  const [ivRaw, tagRaw, encryptedRaw] = encryptedKey.split(".");
-  if (!ivRaw || !tagRaw || !encryptedRaw) throw new Error("Invalid API key payload");
-  const tag = Buffer.from(tagRaw, "base64url");
-  if (tag.length !== TAG_BYTES) throw new Error("Invalid API key payload");
-  const decipher = createDecipheriv(
-    KEY_ALGORITHM,
-    getEncryptionKey(),
-    Buffer.from(ivRaw, "base64url"),
-    { authTagLength: TAG_BYTES }
-  );
-  decipher.setAuthTag(tag);
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedRaw, "base64url")),
-    decipher.final(),
-  ]).toString("utf8");
 }
 
 // ── Per-user Gemini key helpers ───────────────────────────────────────────────
@@ -113,7 +56,7 @@ export async function getUserGeminiKey(userId: string): Promise<string | null> {
       .where(eq(tables.userAiSettings.user_id, userId))
       .limit(1)
       .then(firstRow);
-    if (row?.enc) return decryptApiKey(row.enc);
+    if (row?.enc) return descifrar(row.enc, "Invalid API key payload");
   } catch {
     // table missing or DB error — fall through
   }
@@ -122,7 +65,7 @@ export async function getUserGeminiKey(userId: string): Promise<string | null> {
 
 /** Encrypt and persist a Gemini API key for this user. */
 export async function setUserGeminiKey(userId: string, apiKey: string): Promise<void> {
-  const encrypted = encryptApiKey(apiKey);
+  const encrypted = cifrar(apiKey);
   const t = tables.userAiSettings;
   // sin-inquilino: Idem.
   await db
@@ -154,7 +97,7 @@ export async function getTenantGeminiKey(tenantId: string, userId?: string): Pro
         .from(tables.tenantAiSettings)
         .limit(1)
     ).then(firstRow);
-    if (row?.enc) return decryptApiKey(row.enc);
+    if (row?.enc) return descifrar(row.enc, "Invalid API key payload");
   } catch {
     // DB error — fall through to env
   }
@@ -163,7 +106,7 @@ export async function getTenantGeminiKey(tenantId: string, userId?: string): Pro
 
 /** Encrypt and persist a Gemini API key for this tenant. */
 export async function setTenantGeminiKey(tenantId: string, apiKey: string): Promise<void> {
-  const encrypted = encryptApiKey(apiKey);
+  const encrypted = cifrar(apiKey);
   const t = tables.tenantAiSettings;
   await enTenant({ tenantId }, (db) =>
     db

@@ -327,3 +327,22 @@ export const requiredDocsConfig = pgTable(
   },
   (t) => [primaryKey({ columns: [t.claim_type, t.doc_key] })],
 );
+
+/**
+ * Entrega al Core por aseguradora (0036). El secreto de firma va cifrado y de
+ * la clave de /api/v1 sólo se guarda el sha256; ninguno sale de acá en claro.
+ */
+export const coreSyncSettings = pgTable("core_sync_settings", {
+  tenant_id: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  webhook_url: text("webhook_url"),
+  signing_secret_enc: text("signing_secret_enc"),
+  enabled: boolean("enabled").notNull().default(false),
+  api_key_hash: text("api_key_hash"),
+  api_key_prefix: text("api_key_prefix"),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+  updated_by: uuid("updated_by"),
+});

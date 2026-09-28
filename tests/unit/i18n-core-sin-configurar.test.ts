@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { AuditEvent } from "@/lib/audit/log";
 import { esAR } from "@/lib/i18n/es-AR";
 import { enUS } from "@/lib/i18n/en-US";
 
@@ -21,5 +22,13 @@ describe.each([
 
   it("la pista para quien tiene permiso nombra el botón", () => {
     expect(dict["case.detail.coreSyncEntregadoPorFuera"]).toContain(boton);
+  });
+});
+
+/* La entrega al Core (B5): una clave que falta en un idioma se ve como la clave cruda. */
+describe("claves de la entrega al Core", () => {
+  it.each([AuditEvent.CORE_SETTINGS_CHANGED, AuditEvent.CORE_WEBHOOK_TESTED])("el evento %s tiene texto", (evento) => {
+    expect(esAR).toHaveProperty([`audit.${evento}`]);
+    expect(enUS).toHaveProperty([`audit.${evento}`]);
   });
 });

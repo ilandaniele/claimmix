@@ -3807,10 +3807,13 @@ tope de 310 kB de `pnpm peso` no se tocó.
 - ~~`src/server/confirmations/messenger.ts` manda el WhatsApp antes de
   grabar la fila saliente~~. Resuelto en #328: graba la fila `queued` antes
   de mandar.
-- El export en `full_admin_only` sigue sacando en claro la memoria de
+- ~~El export en `full_admin_only` sigue sacando en claro la memoria de
   remitentes (`sender_profile`, con nombre y DNI) y, en modo `full`, los
   argumentos de las herramientas en la auditoría. Es el modo en claro para
-  un administrador; tacharlo es aplicar el mismo helper a esas filas.
+  un administrador; tacharlo es aplicar el mismo helper a esas filas.~~.
+  Resuelto en #339: el export tacha `claim_memory` (valor tachado, clave
+  como huella) y los argumentos de herramientas en `claim_events`, en todos
+  los modos.
 - ~~Un analista confirma o marca «Revisado» sólo en casos asignados, y la
   entrada real no asigna~~. Resuelto (E3): un analista actúa sobre uno suyo o
   sin asignar, nunca sobre uno de otro analista; misma regla en PATCH y en

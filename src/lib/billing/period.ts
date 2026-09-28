@@ -66,3 +66,14 @@ export function resolveBillingPeriod(
     month: `${year}-${String(month).padStart(2, "0")}`,
   };
 }
+
+/**
+ * El período terminó antes de que existiera la cuenta: no hay nada que
+ * facturar ni que congelar. Una fecha que no se puede leer no lo excluye.
+ */
+export function periodoAntesDelAlta(
+  range: Pick<BillingPeriod, "next">,
+  createdAt: string
+): boolean {
+  return new Date(range.next).getTime() <= new Date(createdAt).getTime();
+}

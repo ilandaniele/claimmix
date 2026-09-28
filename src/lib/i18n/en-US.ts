@@ -301,6 +301,7 @@ export const enUS: Record<TranslationKey, string> = {
   "reenvio.motivo.estado": "The case is not waiting for an answer",
   "reenvio.motivo.sin_destinatario": "No recipient on file",
   "reenvio.motivo.ventana_cerrada": "More than 24 h since their last WhatsApp message",
+  "reenvio.motivo.plantilla_sin_aprobar": "The template to write after 24 h is not approved by Meta yet",
   "reenvio.motivo.nada_pendiente": "Nothing left to ask for",
   "reenvio.motivo.reciente": "Asked less than 10 minutes ago",
   "reenvio.motivo.cierre_no_es_abandono": "Closed by a team member: it cannot be reopened here",
@@ -371,7 +372,25 @@ export const enUS: Record<TranslationKey, string> = {
   "admin.users.title": "Analyst management",
   "admin.users.invite": "Invite analyst",
   "configuracion.title": "Settings",
-  "configuracion.subtitle": "Environment variables (read-only)",
+  "configuracion.subtitle": "Account preferences and system settings",
+
+  // ── Configuración — account, AI thresholds, system and alerts (E10) ─
+  "configuracion.cuenta": "Account",
+  "configuracion.umbrales": "AI thresholds",
+  "configuracion.umbralConfianza": "Confidence threshold",
+  "configuracion.umbralAyuda": "(set via the CONFIDENCE_THRESHOLD variable)",
+  "configuracion.capMensual": "Monthly AI cap",
+  "configuracion.capAyuda": "(set in the deployment plan)",
+  "configuracion.soloAdmins": "Only administrators can change the AI thresholds.",
+  "configuracion.miClave": "My AI key",
+  "configuracion.sistema": "System information",
+  "configuracion.version": "App version",
+  "configuracion.node": "Node.js version",
+  "configuracion.region": "Deployment region",
+  "configuracion.alertas.titulo": "Urgent case alerts",
+  "configuracion.alertas.ayuda": "One address per line, up to 10. Leave it empty to keep the current behaviour.",
+  "configuracion.alertas.guardadas": "List saved.",
+  "configuracion.alertas.error": "Could not save the list.",
 
   // ── Health ─────────────────────────────────────────────────────────────────
   "health.ok": "ok",
@@ -716,6 +735,7 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Facturacion — la liquidacion del mes de una aseguradora ───────
   "facturacion.aFacturar": "Charges",
   "facturacion.abonoPlan": "{n} plan fee",
+  "facturacion.antesDelAlta": "This month is before the account was created: nothing is billed.",
   "facturacion.bucket.facturables": "Billable",
   "facturacion.bucket.mensajesEnTotal": "Total messages",
   "facturacion.bucket.noEranDenuncias": "Not claims",
@@ -754,6 +774,8 @@ export const enUS: Record<TranslationKey, string> = {
   "metricas.actividad.whatsapps": "WhatsApps handled",
   "metricas.actividad.mails": "Emails handled",
   "metricas.actividad.nota": "Real WhatsApp and email only, no simulations. A claim opened is a case confirmed as a claim, so there can be fewer than the month's total.",
+  "metricas.ayer.titulo": "Yesterday's summary",
+  "metricas.ayer.ahora": "Pending now",
   "metricas.card.completitudAuto": "Auto-completion rate",
   "metricas.card.escalados": "Escalated claims",
   "metricas.card.primeraRespuesta": "Average time to first response",
@@ -861,6 +883,8 @@ export const enUS: Record<TranslationKey, string> = {
 
   // ── El shell — lo poco que el layout dice por sí mismo ────────────
   "layout.nombreFallback": "Analyst",
+  "toast.cerrar": "Close notification",
+  "toast.region": "Notifications",
 
 
   // ── Ejemplos aprobados — la solapa de la consola del agente ───────
@@ -1077,6 +1101,7 @@ export const enUS: Record<TranslationKey, string> = {
   "ft.titulo": "Agent training",
   "ft.vertex.activarModelo": "Activate model",
   "ft.vertex.activoDesde": "Active since {f}",
+  "ft.vertex.aprobar": "Approve evaluation",
   "ft.vertex.cancelar": "Cancel",
   "ft.vertex.cargando": "Loading Vertex AI…",
   "ft.vertex.confirmar": "Confirm",
@@ -1085,6 +1110,7 @@ export const enUS: Record<TranslationKey, string> = {
   "ft.vertex.crearBorrador": "Create draft",
   "ft.vertex.deshabilitado": "Vertex AI is not enabled. Set the environment variables on the server to turn it on.",
   "ft.vertex.errorActivar": "The model could not be activated.",
+  "ft.vertex.errorAprobar": "The decision could not be saved.",
   "ft.vertex.errorBorrador": "The draft could not be created.",
   "ft.vertex.errorIniciar": "The job could not be started.",
   "ft.vertex.errorSincronizar": "Sync failed.",
@@ -1095,6 +1121,7 @@ export const enUS: Record<TranslationKey, string> = {
   "ft.vertex.modeloBase": "Base model:",
   "ft.vertex.precio": "and GCP configuration. Estimated price: $0.008 per 1,000 training tokens.",
   "ft.vertex.proyecto": "Project:",
+  "ft.vertex.rechazar": "Reject",
   "ft.vertex.region": "Region:",
   "ft.vertex.requiere": "Real training through Google Cloud. Requires",
   "ft.vertex.sinTrabajos": "No Vertex AI jobs.",

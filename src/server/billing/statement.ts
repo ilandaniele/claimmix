@@ -17,6 +17,9 @@
  * None of those is a bug. Letting them rewrite an invoice that was already sent
  * is. The client who asks for March in June must get March.
  *
+ * A month that ended before the tenant existed is never closed, because
+ * freezing it would store an invoice for a client that did not exist yet.
+ *
  * WHY ON READ, NOT ON A SCHEDULE. Vercel's Hobby plan allows two cron jobs a
  * day and both are taken (gmail-poll, reap-stuck). So the first request for a
  * month that has already ended is what closes it. That is deterministic — the
@@ -29,7 +32,7 @@ import { and, eq, gte, lt, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
-import type { BillingPeriod } from "@/lib/billing/period";
+import { periodoAntesDelAlta, type BillingPeriod } from "@/lib/billing/period";
 
 export interface Statement {
   month: string;
@@ -43,6 +46,8 @@ export interface Statement {
     contact_email: string | null;
     trial_ends_at: string | null;
     activated_at: string | null;
+    /** Opcional: las facturas congeladas antes de este cambio no lo tienen. */
+    created_at?: string;
   };
   volume: {
     total_cases: number;
@@ -101,6 +106,7 @@ export async function computeStatement(
         contact_email: tables.tenants.contact_email,
         trial_ends_at: tables.tenants.trial_ends_at,
         activated_at: tables.tenants.activated_at,
+        created_at: tables.tenants.created_at,
       })
       .from(tables.tenants)
       .where(eq(tables.tenants.id, tenantId))
@@ -148,10 +154,11 @@ export async function computeStatement(
   // The tenant's stored terms are authoritative — they are what was signed.
   // The catalog only fills in for a row written before migration 0010.
   const fallback = isPlan(tenantRow.plan) ? PLAN_CATALOG[tenantRow.plan] : PLAN_CATALOG.piloto;
+  const antesDelAlta = periodoAntesDelAlta(range, tenantRow.created_at);
 
   const invoice = computeInvoice({
-    claims: counts?.billable ?? 0,
-    monthly_fee_usd: Number(tenantRow.monthly_fee_usd ?? fallback.monthly_fee_usd),
+    claims: antesDelAlta ? 0 : counts?.billable ?? 0,
+    monthly_fee_usd: antesDelAlta ? 0 : Number(tenantRow.monthly_fee_usd ?? fallback.monthly_fee_usd),
     included_claims: Number(tenantRow.included_claims ?? fallback.included_claims),
     overage_price_usd: Number(tenantRow.overage_price_usd ?? fallback.overage_price_usd),
     label: fallback.label,
@@ -172,6 +179,7 @@ export async function computeStatement(
       contact_email: tenantRow.contact_email,
       trial_ends_at: tenantRow.trial_ends_at,
       activated_at: tenantRow.activated_at,
+      created_at: tenantRow.created_at,
     },
     volume: {
       total_cases: counts?.total ?? 0,
@@ -240,7 +248,7 @@ export async function getStatement(
   const live = await computeStatement(tenantId, range);
   if (!live) return null;
 
-  if (!periodHasEnded(range, now)) {
+  if (!periodHasEnded(range, now) || periodoAntesDelAlta(range, live.tenant.created_at ?? "")) {
     return { ...live, frozen: false, frozen_at: null };
   }
 

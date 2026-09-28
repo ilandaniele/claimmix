@@ -20,7 +20,7 @@
 
 import "server-only";
 import { tokenDeGcp } from "@/server/gcp/credenciales";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 
 import { tables } from "@/lib/db";
 import {
@@ -205,8 +205,8 @@ interface VertexTuningJobResponse {
   tunedModelDisplayName?: string;
   tunedModel?: {
     model?: string;
-    modelVersionId?: string;
-    endpoints?: { deployedModel?: string }[];
+    endpoint?: string;
+    checkpoints?: unknown[];
   };
   error?: { message?: string; code?: number };
 }
@@ -498,6 +498,7 @@ export async function syncVertexAiTuningJobStatus(
           status: t.status,
           openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
           eval_result: t.eval_result,
+          completed_at: t.completed_at,
         })
         .from(t)
         .where(eq(t.id, jobId))
@@ -523,15 +524,19 @@ export async function syncVertexAiTuningJobStatus(
     ? mapVertexAiStatus(vertexJob.state)
     : job.status;
 
+  // Un job ya decidido (aprobado, rechazado o desplegado) no vuelve a
+  // `eval_pending` porque Vertex sigue reportando SUCCEEDED: esa decisión ya
+  // la tomó una persona y una sincronización no la puede deshacer.
+  const status = ["approved", "rejected", "deployed"].includes(job.status)
+    ? job.status
+    : mappedStatus;
+
   const isTerminal =
     mappedStatus === "eval_pending" || mappedStatus === "failed";
 
   // Extract the tuned model endpoint from the Vertex AI response.
   // When SUCCEEDED, tunedModel.model holds the tuned model resource name.
-  const tunedModelId =
-    vertexJob.tunedModel?.model ??
-    vertexJob.tunedModel?.endpoints?.[0]?.deployedModel ??
-    null;
+  const tunedModelId = vertexJob.tunedModel?.model ?? null;
 
   const existingEval =
     job.eval_result && typeof job.eval_result === "object"
@@ -543,7 +548,7 @@ export async function syncVertexAiTuningJobStatus(
       db
         .update(t)
         .set({
-          status: mappedStatus,
+          status,
           fine_tuned_model_id: tunedModelId,
           error_message: vertexJob.error?.message ?? null,
           eval_result: {
@@ -552,7 +557,7 @@ export async function syncVertexAiTuningJobStatus(
             vertex_error: vertexJob.error ?? null,
             tuned_model: vertexJob.tunedModel ?? null,
           },
-          completed_at: isTerminal ? new Date().toISOString() : null,
+          completed_at: job.completed_at ?? (isTerminal ? new Date().toISOString() : null),
         })
         .where(eq(t.id, jobId))
         .returning({ id: t.id, status: t.status, fine_tuned_model_id: t.fine_tuned_model_id })
@@ -573,6 +578,54 @@ export async function syncVertexAiTuningJobStatus(
   });
 
   return updated;
+}
+
+/**
+ * Aprueba o rechaza un trabajo que Vertex ya terminó de evaluar
+ * (`eval_pending`). Aprobar sin un modelo entrenado no tiene sentido, así que
+ * la guarda lo exige sólo en ese caso.
+ */
+export async function approveVertexAiTuningJob(
+  tenantId: string,
+  userId: string,
+  jobId: string,
+  decision: "approved" | "rejected"
+): Promise<{ id: string; status: "approved" | "rejected" }> {
+  if (!isTuningEnabled()) {
+    throw new Error("VERTEX_AI_TUNING_DISABLED");
+  }
+
+  const tenantCtx: TenantContext = { tenantId };
+  const t = tables.modelTrainingJobs;
+
+  const job = firstRow(
+    await enTenant(tenantCtx, (db) =>
+      db
+        .update(t)
+        .set({ status: decision })
+        .where(
+          and(
+            eq(t.id, jobId),
+            eq(t.provider, "vertex_ai_gemini"),
+            eq(t.status, "eval_pending"),
+            ...(decision === "approved" ? [isNotNull(t.fine_tuned_model_id)] : [])
+          )
+        )
+        .returning({ id: t.id })
+    )
+  );
+  if (!job) throw new Error("JOB_NOT_EVAL_PENDING");
+
+  await writeAuditLog({
+    tenant_id: tenantId,
+    actor_id: userId,
+    event_type: AuditEvent.FINETUNE_JOB_APPROVED,
+    target_type: "model_training_job",
+    target_id: jobId,
+    payload: { job_id: jobId, decision },
+  });
+
+  return { id: job.id, status: decision };
 }
 
 /**
@@ -686,6 +739,10 @@ export async function activateVertexAiModel(
  * Reverts tenantAiSettings.gemini_model (active_model) to previous_model.
  */
 export async function rollbackVertexAiModel(tenantId: string, userId: string) {
+  if (!isTuningEnabled()) {
+    throw new Error("VERTEX_AI_TUNING_DISABLED");
+  }
+
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const settings = tables.tenantAiSettings;
@@ -767,8 +824,8 @@ export async function listVertexAiTuningJobs(tenantId: string) {
         status: t.status,
         provider: t.provider,
         base_model: t.base_model,
-        fine_tuned_model_id: t.fine_tuned_model_id,
-        openai_fine_tuning_job_id: t.openai_fine_tuning_job_id,
+        vertex_tuned_model_endpoint: t.fine_tuned_model_id,
+        vertex_tuning_job_name: t.openai_fine_tuning_job_id,
         training_file_id: t.training_file_id,
         validation_file_id: t.validation_file_id,
         error_message: t.error_message,

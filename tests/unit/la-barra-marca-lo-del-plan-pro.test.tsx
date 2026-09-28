@@ -21,11 +21,12 @@ const { mockGetUserRow } = vi.hoisted(() => ({ mockGetUserRow: vi.fn() }));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/bandeja",
   useSearchParams: () => new URLSearchParams(),
+  redirect: vi.fn(),
 }));
 vi.mock("@/lib/auth/session", () => ({
   getSessionContext: async () => ({ user: { id: "u-1", email: "v@ejemplo.com" } }),
 }));
-vi.mock("@/lib/auth/user-row", () => ({ getUserRow: mockGetUserRow }));
+vi.mock("@/lib/auth/user-row", () => ({ getUserRow: mockGetUserRow, getUserRowOrThrow: mockGetUserRow }));
 vi.mock("@/lib/auth/require-operator", () => ({ isOperatorEmail: () => false }));
 vi.mock("@/lib/i18n/locale", () => ({
   getServerLocale: async () => "es-AR",

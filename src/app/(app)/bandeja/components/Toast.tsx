@@ -8,6 +8,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useT } from "@/lib/i18n/LocaleContext";
 
 export interface ToastMessage {
   id: string;
@@ -27,6 +28,8 @@ function ToastItem({
   toast: ToastMessage;
   onDismiss: (id: string) => void;
 }) {
+  const t = useT();
+
   useEffect(() => {
     const timer = setTimeout(() => onDismiss(toast.id), 4000);
     return () => clearTimeout(timer);
@@ -48,7 +51,7 @@ function ToastItem({
       <span>{toast.message}</span>
       <button
         onClick={() => onDismiss(toast.id)}
-        aria-label="Cerrar notificación"
+        aria-label={t("toast.cerrar")}
         className="ml-2 shrink-0 text-slate-400 hover:text-slate-700"
       >
         ✕
@@ -58,11 +61,12 @@ function ToastItem({
 }
 
 export function ToastContainer({ toasts, onDismiss }: ToastProps) {
+  const t = useT();
   if (toasts.length === 0) return null;
 
   return (
     <div
-      aria-label="Notificaciones"
+      aria-label={t("toast.region")}
       className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 w-80"
     >
       {toasts.map((toast) => (

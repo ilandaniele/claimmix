@@ -30,7 +30,8 @@ import {
   type EmailTemplate,
   type OrigenDelValor,
 } from "@/server/email/render";
-import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
+import { olvidarEstadoDePlantilla, sendWhatsAppTemplate, sendWhatsAppText } from "@/server/whatsapp/cloud-api";
+import { PLANTILLA_REABRIR, textoDeReabrir } from "@/core/mensajes/reabrir-denuncia";
 import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
 import { isReservedTestNumber } from "@/core/phone/reserved";
 import { enTenant } from "@/data/scope";
@@ -301,6 +302,20 @@ function listar(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
 }
 
+/**
+ * Las dos variables de la plantilla `reabrir_denuncia`: el número de
+ * referencia y una lista corta de lo que falta. La plantilla no tiene margen
+ * para el mensaje completo de `renderAsk` — sólo dos huecos de texto — así que
+ * arma su propia lista, con el mismo tope de `MAX_WHATSAPP_ITEMS`.
+ */
+function parametrosDeReabrir(message: AgentMessage): [string, string] {
+  const claves = Array.isArray(message.data.missingFields)
+    ? (message.data.missingFields as unknown[]).map(String)
+    : [];
+  const lista = listar(claves.slice(0, MAX_WHATSAPP_ITEMS).map((k) => labelForField(k).label));
+  return [message.caseId, (lista || "algunos datos").replace(/\s+/g, " ").trim()];
+}
+
 /** Nothing left to ask: an acknowledgement, or a closing if we already spoke. */
 function renderClosing(data: Record<string, unknown>): string {
   const claimLabel = labelForClaimType(
@@ -512,6 +527,43 @@ function conPie(message: AgentMessage, texto: string): string {
   return pie.length > 0 ? `${texto}\n\n${pie.join(" ")}` : texto;
 }
 
+/**
+ * Cierra la fila reservada y deja el log, sea el envío de texto o de
+ * plantilla. Un envío fallido anota por `logger.error`, no por `logger.info`:
+ * quien filtre por nivel —que es lo que hace cualquier alerta— no lo veía, y
+ * el motivo va recortado porque el cuerpo de error de Meta puede traer el
+ * payload que mandamos, con el texto del mensaje adentro.
+ */
+async function anotarEnvio(
+  message: AgentMessage,
+  outboundId: string | null,
+  finalBody: string,
+  res: { ok: boolean; error?: string }
+): Promise<void> {
+  const status = res.ok ? "sent" : "failed";
+  if (outboundId) {
+    await marcarSalida(message, outboundId, status);
+  } else {
+    await recordOutbound(message, finalBody, status);
+  }
+
+  if (res.ok) {
+    logger.info(
+      { case_id: message.caseId, template: message.template },
+      "whatsapp.messenger.sent"
+    );
+  } else {
+    logger.error(
+      {
+        case_id: message.caseId,
+        template: message.template,
+        ...(res.ok || !res.error ? {} : { detalle: res.error.slice(0, 200) }),
+      },
+      "whatsapp.messenger.send_failed"
+    );
+  }
+}
+
 export const whatsappMessenger: AgentMessenger = {
   async send(message) {
     try {
@@ -525,6 +577,24 @@ export const whatsappMessenger: AgentMessenger = {
       // producción no puede ser la que nos bloquee el canal.
       if (isReservedTestNumber(message.to)) {
         await simulatedWhatsappMessenger.send(message);
+        return;
+      }
+
+      // Fuera de la ventana de 24 h con la plantilla aprobada: el piso, el
+      // redactor y el pie no corren — Meta sólo deja mandar el cuerpo exacto
+      // que aprobó, con sus dos variables.
+      if (message.data.porPlantilla === true) {
+        const params = parametrosDeReabrir(message);
+        const finalBody = textoDeReabrir(params);
+        const outboundId = await reservarSalida(message, finalBody);
+        const res = await sendWhatsAppTemplate(
+          message.to,
+          PLANTILLA_REABRIR.nombre,
+          PLANTILLA_REABRIR.idioma,
+          params
+        );
+        if (!res.ok) olvidarEstadoDePlantilla();
+        await anotarEnvio(message, outboundId, finalBody, res);
         return;
       }
 
@@ -548,46 +618,7 @@ export const whatsappMessenger: AgentMessenger = {
        */
       const outboundId = await reservarSalida(message, finalBody);
       const res = await sendWhatsAppText(message.to, finalBody);
-      const status = res.ok ? "sent" : "failed";
-      if (outboundId) {
-        await marcarSalida(message, outboundId, status);
-      } else {
-        await recordOutbound(message, finalBody, status);
-      }
-
-      // Un envío fallido anota por `logger.error`, no por `logger.info`. Quien
-      // filtre por nivel —que es lo que hace cualquier alerta— no lo veía: un
-      // mensaje que no le llegó al asegurado quedaba con la misma prioridad que
-      // uno que sí.
-      /*
-       * Y el motivo, que `sendWhatsAppText` ya se tomó el trabajo de armar.
-       *
-       * Devuelve `{ ok: false, error: "Cloud API 400: {…}" }` con el cuerpo de
-       * error de Meta adentro, y acá se descartaba. Token vencido, fuera de la
-       * ventana de 24 h, plantilla sin aprobar, número fuera de la lista
-       * permitida, o Meta con un 503: todos producían la misma línea.
-       *
-       * Es el mismo defecto que los 115 fallos de Gmail de junio, en el otro
-       * canal — con el agravante de que acá el valor ya estaba en la mano.
-       *
-       * Recortado, porque el cuerpo de error de Meta puede traer el payload que
-       * mandamos y ahí adentro va el texto del mensaje.
-       */
-      if (res.ok) {
-        logger.info(
-          { case_id: message.caseId, template: message.template },
-          "whatsapp.messenger.sent"
-        );
-      } else {
-        logger.error(
-          {
-            case_id: message.caseId,
-            template: message.template,
-            ...(res.ok || !res.error ? {} : { detalle: res.error.slice(0, 200) }),
-          },
-          "whatsapp.messenger.send_failed"
-        );
-      }
+      await anotarEnvio(message, outboundId, finalBody, res);
     } catch (err) {
       // Intake already succeeded; a messaging failure must not undo it.
       logger.error({
@@ -698,6 +729,18 @@ async function recordOutbound(
  */
 export const simulatedWhatsappMessenger: AgentMessenger = {
   async send(message) {
+    // Fuera de la ventana con la plantilla aprobada: el cuerpo es el de
+    // Meta, no el del redactor — nada que componer.
+    if (message.data.porPlantilla === true) {
+      const finalBody = textoDeReabrir(parametrosDeReabrir(message));
+      await recordOutbound(message, finalBody, "skipped_simulated");
+      logger.info({
+          case_id: message.caseId,
+          template: message.template,
+        }, "whatsapp.messenger.skipped_simulated");
+      return;
+    }
+
     const body = renderForWhatsApp(message);
     if (!body) return;
     // Compose, then do not send. A rehearsal that skipped the writer would be

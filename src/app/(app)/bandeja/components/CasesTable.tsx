@@ -562,7 +562,7 @@ export function CasesTable({
                     marcado ? "bg-violet-50" : "hover:bg-violet-50"
                   }`}
                   role="row"
-                  aria-label={`Siniestro ${formatCaseId(row.id)}`}
+                  aria-label={`${t("campos.col.siniestro")} ${formatCaseId(row.id)}`}
                   tabIndex={0}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {

@@ -2,7 +2,8 @@
  * /api/admin/fine-tuning/vertex/:id — single Vertex AI tuning job operations.
  *
  * GET  — get a single Vertex AI job by ID
- * POST — activate the tuned model (action="activate")
+ * POST — approve or reject an evaluated job (action="approve"|"reject"),
+ *         activate the tuned model (action="activate"),
  *         or rollback to the previous model (action="rollback")
  */
 
@@ -15,6 +16,7 @@ import { AppError } from "@/lib/errors";
 import {
   getVertexAiTuningJob,
   activateVertexAiModel,
+  approveVertexAiTuningJob,
   rollbackVertexAiModel,
 } from "@/server/training/vertex-ai-fine-tuning";
 
@@ -22,7 +24,7 @@ export const dynamic = "force-dynamic";
 
 const ParamsSchema = z.object({ id: z.string().uuid() });
 const PostSchema = z.object({
-  action: z.enum(["activate", "rollback"]),
+  action: z.enum(["activate", "rollback", "approve", "reject"]),
 });
 
 export async function GET(
@@ -58,6 +60,30 @@ export async function POST(
     }
 
     const { action } = parsed.data;
+
+    if (action === "approve" || action === "reject") {
+      try {
+        const result = await approveVertexAiTuningJob(
+          userRow.tenant_id,
+          user.id,
+          params.data.id,
+          action === "approve" ? "approved" : "rejected"
+        );
+        return ok({ result });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "";
+        if (message === "VERTEX_AI_TUNING_DISABLED") {
+          throw new AppError("VALIDATION_FAILED", "Vertex AI fine-tuning is not enabled.");
+        }
+        if (message === "JOB_NOT_EVAL_PENDING") {
+          throw new AppError(
+            "VALIDATION_FAILED",
+            "Sólo se aprueba un entrenamiento terminado y sin revisar."
+          );
+        }
+        throw e;
+      }
+    }
 
     if (action === "activate") {
       try {

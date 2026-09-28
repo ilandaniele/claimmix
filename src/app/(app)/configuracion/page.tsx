@@ -4,8 +4,8 @@
  * Sections:
  *   1. Cuenta: analyst name, email (read-only), role badge
  *   2. Cambiar contraseña: Better Auth password form
- *   3. Umbrales de IA: confidence threshold + monthly budget cap (read-only for non-admin)
- *   4. Información del sistema: app version, Node version (server env), region
+ *   3. Umbrales de la IA: confidence threshold + monthly budget cap (read-only for non-admin)
+ *   4. Info del sistema: app version, Node version (server env), region
  *
  * Server Component fetches user data; ConfiguracionClient handles the
  * password change form (requires interactivity).
@@ -18,27 +18,24 @@ import { getUserRow } from "@/lib/auth/user-row";
 import { ConfiguracionClient } from "./ConfiguracionClient";
 import { GmailAccountsPanel } from "./GmailAccountsPanel";
 import { UserAiKeyPanel } from "./UserAiKeyPanel";
+import { AlertasPanel } from "./AlertasPanel";
 import { GoogleVinculo } from "./GoogleVinculo";
 import { getUserGeminiKey } from "@/server/ai/provider";
 import { getT } from "@/lib/i18n";
+import { ETIQUETA_DE_ROL } from "@/lib/i18n/etiqueta-de-rol";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import packageJson from "../../../../package.json";
 import { ADMIN_ROLES } from "@/lib/auth/require-role";
+import { listaDelTenant } from "@/server/notify/specialist-alert";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
-
-const ROLE_LABELS: Record<string, string> = {
-  analyst: "Analista",
-  admin: "Administrador",
-};
 
 const ROLE_STYLES: Record<string, string> = {
   analyst: "bg-blue-100 text-blue-800",
   admin: "bg-red-100 text-red-800",
 };
 
-function RoleBadge({ role }: { role: string }) {
-  const label = ROLE_LABELS[role] ?? role;
+function RoleBadge({ role, label }: { role: string; label: string }) {
   const styles = ROLE_STYLES[role] ?? "bg-slate-100 text-slate-800";
   return (
     <span
@@ -94,13 +91,14 @@ export default async function ConfiguracionPage({
   // Deduplicada con la del layout: ver lib/auth/user-row.ts.
   const userRow = await getUserRow(session.user.id);
 
-  const fullName: string = userRow?.full_name ?? session.user.email ?? "Analista";
+  const fullName: string = userRow?.full_name ?? session.user.email ?? t("layout.nombreFallback");
   const role: string = userRow?.role ?? "analyst";
   // Quién ve los detalles de infraestructura de más abajo.
   const esAdmin = (ADMIN_ROLES as string[]).includes(role);
   const email: string = session.user.email ?? "—";
 
   const userHasGeminiKey = Boolean(await getUserGeminiKey(session.user.id).catch(() => null));
+  const alertas = esAdmin && userRow ? await listaDelTenant(userRow.tenant_id) : null;
 
   // AI thresholds — read from env with documented defaults
   const confidenceThreshold = Number(
@@ -116,46 +114,44 @@ export default async function ConfiguracionPage({
   return (
     <div className="px-6 py-8 max-w-2xl">
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-slate-900">Configuración</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Preferencias de cuenta y parámetros del sistema
-        </p>
+        <h1 className="text-xl font-semibold text-slate-900">{t("configuracion.title")}</h1>
+        <p className="mt-1 text-sm text-slate-500">{t("configuracion.subtitle")}</p>
       </div>
 
       <div className="space-y-6">
         {/* ── Cuenta ────────────────────────────────────────────────────────── */}
-        <Section title="Cuenta">
+        <Section title={t("configuracion.cuenta")}>
           <div className="divide-y divide-slate-50">
-            <Field label="Nombre">
+            <Field label={t("usuarios.col.nombre")}>
               <span className="font-medium">{fullName}</span>
             </Field>
-            <Field label="Correo electrónico">
+            <Field label={t("field.email")}>
               <span className="text-slate-600">{email}</span>
             </Field>
-            <Field label="Rol">
-              <RoleBadge role={role} />
+            <Field label={t("usuarios.col.rol")}>
+              <RoleBadge role={role} label={ETIQUETA_DE_ROL[role] ? t(ETIQUETA_DE_ROL[role]) : role} />
             </Field>
           </div>
         </Section>
 
         {/* ── Cambiar contraseña ────────────────────────────────────────────── */}
-        <Section title="Cambiar contraseña">
+        <Section title={t("password.boton")}>
           <ConfiguracionClient />
         </Section>
 
-        {/* ── Umbrales de IA ────────────────────────────────────────────────── */}
+        {/* ── Umbrales de la IA ─────────────────────────────────────────────── */}
         <Section title={t("google.titulo")}>
           <GoogleVinculo aviso={vinculo} />
         </Section>
 
-        <Section title="Umbrales de IA">
+        <Section title={t("configuracion.umbrales")}>
           <div className="divide-y divide-slate-50">
-            <Field label="Umbral de confianza">
+            <Field label={t("configuracion.umbralConfianza")}>
               {esAdmin ? (
                 <span className="font-mono text-sm font-medium text-slate-800">
                   {confidenceThreshold.toFixed(2)}
                   <span className="ml-2 text-xs text-slate-500">
-                    (ajustable vía variable CONFIDENCE_THRESHOLD)
+                    {t("configuracion.umbralAyuda")}
                   </span>
                 </span>
               ) : (
@@ -164,12 +160,12 @@ export default async function ConfiguracionPage({
                 </span>
               )}
             </Field>
-            <Field label="Cap mensual de IA">
+            <Field label={t("configuracion.capMensual")}>
               {esAdmin ? (
                 <span className="font-mono text-sm font-medium text-slate-800">
                   USD {monthlyBudgetCap}
                   <span className="ml-2 text-xs text-slate-500">
-                    (configurado en el plan de despliegue)
+                    {t("configuracion.capAyuda")}
                   </span>
                 </span>
               ) : (
@@ -181,7 +177,7 @@ export default async function ConfiguracionPage({
           </div>
           {!esAdmin && (
             <p className="mt-3 text-xs text-slate-500">
-              Solo los administradores pueden modificar los umbrales de IA.
+              {t("configuracion.soloAdmins")}
             </p>
           )}
         </Section>
@@ -189,7 +185,7 @@ export default async function ConfiguracionPage({
         {/* ── Modelo de IA (admin only) ─────────────────────────────────────── */}
 
         {/* ── Mi API Key de Gemini (todos los usuarios) ─────────────────────── */}
-        <Section title="Mi clave de IA">
+        <Section title={t("configuracion.miClave")}>
           <UserAiKeyPanel initialHasKey={userHasGeminiKey} />
         </Section>
 
@@ -198,13 +194,19 @@ export default async function ConfiguracionPage({
           <GmailAccountsPanel />
         </Section>
 
+        {/* ── Avisos de casos urgentes (E10, sólo admin) ────────────────────── */}
+        {alertas && (
+          <Section title={t("configuracion.alertas.titulo")}>
+            <AlertasPanel inicial={alertas} />
+          </Section>
+        )}
 
         {/* ── Consola de entrenamiento del agente (reglas) ──────────────────── */}
 
-        {/* ── Información del sistema ───────────────────────────────────────── */}
-        <Section title="Información del sistema">
+        {/* ── Info del sistema ───────────────────────────────────────────────── */}
+        <Section title={t("configuracion.sistema")}>
           <div className="divide-y divide-slate-50">
-            <Field label="Versión de la app">
+            <Field label={t("configuracion.version")}>
               <span className="font-mono text-xs text-slate-700">
                 v{appVersion}
               </span>
@@ -225,12 +227,12 @@ export default async function ConfiguracionPage({
               */}
             {esAdmin && (
               <>
-                <Field label="Versión de Node.js">
+                <Field label={t("configuracion.node")}>
                   <span className="font-mono text-xs text-slate-700">
                     {nodeVersion}
                   </span>
                 </Field>
-                <Field label="Región de despliegue">
+                <Field label={t("configuracion.region")}>
                   <span className="font-mono text-xs text-slate-700">{region}</span>
                 </Field>
               </>

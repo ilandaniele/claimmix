@@ -18,13 +18,14 @@ import { AuditEvent } from "@/lib/audit/log";
 import { ultimaCorrida } from "@/server/cases/listo-confirmado";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
-import { consultasDelReenvio, deFilasDelReenvio, decidirReenvio } from "@/server/confirmations/reenvio";
+import { consultasDelReenvio, deFilasDelReenvio, decidirConPlantilla } from "@/server/confirmations/reenvio";
 import { consultaDelUltimoMovimiento, esDevolvible } from "@/server/cases/devolver-al-agente";
 
 export type MotivoSinReenvio =
   | "estado"
   | "sin_destinatario"
   | "ventana_cerrada"
+  | "plantilla_sin_aprobar"
   | "nada_pendiente"
   | "reciente"
   | "cierre_no_es_abandono";
@@ -78,7 +79,7 @@ export async function leerEstadoDeAcciones(
     // `deFilasDelReenvio` sigue leyendo sus 8 filas de siempre; ignora la 9ª.
     const d = deFilasDelReenvio(filas.slice(1));
     const reabrible = d.caso?.status === "cerrado" && d.ultimoCierre === AuditEvent.CASE_CLOSED_ABANDONED;
-    const dec = decidirReenvio(d, new Date(), reabrible);
+    const dec = await decidirConPlantilla(d, new Date(), reabrible);
     const ultimoMovimiento = (filas[9] as Array<{ event_type: string; payload: unknown }>)[0];
 
     return {

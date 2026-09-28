@@ -20,7 +20,7 @@ export default async function AsistentePage() {
   if (!session?.user) redirect("/login");
   // Deduplicada con la del layout: ver lib/auth/user-row.ts.
   const userRow = await getUserRow(session.user.id);
-  if (!userRow) redirect("/login");
+  if (!userRow) redirect("/pendiente");
 
   // Misma preferencia que el layout: la cuenta le gana a la cookie.
   const locale = await resolveAccountLocale(userRow.locale);

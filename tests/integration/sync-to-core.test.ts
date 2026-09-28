@@ -15,25 +15,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-// La capa de datos, corriendo contra el db que este test ya simula.
-//
-// Se lee `mod.db` en CADA llamada y no se desestructura: el mock de @/lib/db
-// suele exponer `db` con un getter para que los tests puedan intercambiar la
-// base simulada entre corridas, y un `const { db } = ...` congelaría el valor
-// de la primera llamada.
-//
-// Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
-// eso se verifica en tests/unit/data-scope-sin-rol.test.ts y, contra bases de
-// verdad, en `pnpm capa-datos` y `pnpm tenancy`.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 /*
  * La sesión, que ahora la ruta mira antes que nada.
@@ -123,55 +105,11 @@ const DEFAULT_EXTRACTED_FIELDS = [
   { field_key: "accident_description", field_value: "Choque en Av. Cabildo" },
 ];
 
-function buildDbMocks(opts: {
-  caseRow?: Record<string, unknown> | null;
-  extractedFields?: Array<{ field_key: string; field_value: string }>;
-} = {}) {
-  const {
-    caseRow = DEFAULT_CASE_ROW,
-    extractedFields = DEFAULT_EXTRACTED_FIELDS,
-  } = opts;
-
-  return {
-    // db.select() returns different data based on call order
-    select: vi.fn().mockImplementation(() => {
-      let callCount = 0;
-      const outerChain: any = {
-        from: vi.fn().mockImplementation(() => {
-          callCount++;
-          if (callCount === 1) {
-            // First select: cases query
-            return {
-              where: vi.fn().mockReturnValue({
-                limit: vi.fn().mockResolvedValue(
-                  caseRow ? [caseRow] : []
-                ),
-              }),
-            };
-          }
-          // Second select: extracted_fields query
-          return {
-            where: vi.fn().mockResolvedValue(extractedFields),
-          };
-        }),
-      };
-      return outerChain;
-    }),
-    update: vi.fn().mockReturnValue({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([{ id: VALID_CASE_ID }]),
-        }),
-      }),
-    }),
-  };
-}
-
 /**
  * Las dos lecturas que hace la ruta antes de llamar al cliente: el caso y sus
- * campos extraidos. Se usa un contador compartido, igual que los casos de mas
- * arriba: `buildDbMocks` arma la cadena de nuevo en cada llamada y su contador
- * vuelve a cero, asi que la segunda lectura nunca devuelve las filas.
+ * campos extraidos. Usa un contador (`n`) que arranca de nuevo en cada llamada
+ * a `db.select.mockImplementation`, asi que la segunda lectura nunca devuelve
+ * las filas.
  *
  * Devuelve el espia de `update` para poder afirmar que NO se llamo.
  */

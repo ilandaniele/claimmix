@@ -25,13 +25,7 @@ vi.mock("@/lib/db", () => ({
   tables: {},
 }));
 
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_c: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar((mod as { db: unknown }).db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/lib/db/helpers", () => ({
   firstRow: (rows: unknown[]) => rows[0] ?? null,

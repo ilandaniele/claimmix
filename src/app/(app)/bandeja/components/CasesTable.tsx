@@ -62,7 +62,6 @@ export function CasesTable({
   }
 
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
-  const someSelected = !allSelected && selectedIds.size > 0;
 
   const toggleAll = useCallback(() => {
     setSelectedIds((prev) =>

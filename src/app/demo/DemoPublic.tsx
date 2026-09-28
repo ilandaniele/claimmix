@@ -113,10 +113,6 @@ const CLAIM_TYPE_LABELS: Record<string, string> = {
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
-function pct(n: number): string {
-  return `${Math.round(n * 100)}%`;
-}
-
 function Spinner({ size = 5 }: { size?: number }) {
   return (
     <svg

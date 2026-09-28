@@ -88,9 +88,7 @@ const fakeDb = {
   }),
 };
 
-vi.mock("@/data/scope", () => ({
-  enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) => Promise.resolve(armar(fakeDb)),
-}));
+vi.mock("@/data/scope", async () => (await import("../mocks/puente-de-alcance")).puenteDeAlcance(() => fakeDb));
 
 import { threadLookup } from "@/server/email/thread-lookup";
 

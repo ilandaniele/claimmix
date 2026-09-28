@@ -37,20 +37,7 @@ const {
 
 // ── Mock modules ──────────────────────────────────────────────────────────────
 
-// La capa de datos, corriendo contra el db que este test ya simula.
-//
-// Se lee `mod.db` en CADA llamada y no se desestructura: hay tests que
-// intercambian la base simulada entre casos, y un `const { db } = ...`
-// congelaría el valor de la primera.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/lib/auth/session", () => ({
   getSessionContext: mockGetSession,
@@ -65,17 +52,6 @@ vi.mock("next/server", async () => {
 });
 
 vi.mock("@/lib/db", () => {
-  const chain: any = {
-    from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    select: vi.fn().mockReturnThis(),
-    insert: vi.fn().mockReturnThis(),
-    values: vi.fn().mockReturnThis(),
-    returning: vi.fn().mockResolvedValue([{ id: "case-uuid-001" }]),
-    then: vi.fn(),
-  };
-
   return {
     db: {
       select: mockDbSelect,
@@ -534,11 +510,6 @@ describe("POST /api/intake/simulate", () => {
   // All calls to POST /api/intake/email return 410 regardless of payload/headers.
   it("POST /api/intake/email returns 410 Gone (Postmark webhook disabled — W5/AC11)", async () => {
     const { POST: emailPOST } = await import("@/app/api/intake/email/route");
-    const req = new Request("http://localhost/api/intake/email", {
-      method: "POST",
-      body: JSON.stringify({ MessageID: "test" }),
-      headers: { "Content-Type": "application/json" },
-    }) as any;
     const res = await emailPOST();
     expect(res.status).toBe(410);
     const body = await res.json();

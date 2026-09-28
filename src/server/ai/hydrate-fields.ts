@@ -29,8 +29,6 @@ import type { ExtractedClaim, ExtractedField, ClaimFields } from "@/lib/schemas/
  */
 const HYDRATED_KEYS = CLAIM_FIELD_KEYS;
 
-type HydratedKey = keyof ClaimFields;
-
 /**
  * Ensure every populated key in extracted_fields also appears in fields[].
  *

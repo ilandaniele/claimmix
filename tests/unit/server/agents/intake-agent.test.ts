@@ -29,15 +29,7 @@ const {
 // Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
 // eso se verifica en tests/unit/data-scope-sin-rol.test.ts y, contra bases de
 // verdad, en `pnpm capa-datos` y `pnpm tenancy`.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../../../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("server-only", () => ({}));
 
@@ -118,15 +110,6 @@ import {
 } from "@/server/agents/intake-agent";
 
 // ---------- helpers to configure the select chain ----------
-function getSelectChain() {
-  // Re-retrieve the chain object from the mock's return value.
-  return mockDbSelect.mock.results[0]?.value as {
-    from: ReturnType<typeof vi.fn>;
-    where: ReturnType<typeof vi.fn>;
-    orderBy: ReturnType<typeof vi.fn>;
-    limit: ReturnType<typeof vi.fn>;
-  } | undefined;
-}
 
 /**
  * Configure the select chain so that its terminal .limit() call resolves

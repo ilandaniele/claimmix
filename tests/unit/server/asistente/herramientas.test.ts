@@ -15,9 +15,7 @@ const { mockDb, mockGetCaseDetail, mockConversacionDelCaso } = vi.hoisted(() => 
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/data/scope", () => ({
-  enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) => Promise.resolve(armar(mockDb)),
-}));
+vi.mock("@/data/scope", async () => (await import("../../../mocks/puente-de-alcance")).puenteDeAlcance(() => mockDb));
 
 vi.mock("@/server/cases/get", () => ({ getCaseDetail: mockGetCaseDetail }));
 vi.mock("@/server/cases/conversacion", () => ({ conversacionDelCaso: mockConversacionDelCaso }));

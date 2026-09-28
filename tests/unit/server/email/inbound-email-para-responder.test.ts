@@ -19,9 +19,9 @@ const { mockThreadLookup, mockReabrir, mockMarcar, mockInsert, mockEnTenantVaria
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: {} }));
-vi.mock("@/data/scope", () => ({
-  enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-    Promise.resolve(armar({ insert: mockInsert })),
+vi.mock("@/data/scope", async () => ({
+  enTenant: (await import("../../../mocks/puente-de-alcance")).puenteDeAlcance(() => ({ insert: mockInsert }))
+    .enTenant,
   enTenantVarias: mockEnTenantVarias,
 }));
 vi.mock("@/lib/observability/logger", () => ({

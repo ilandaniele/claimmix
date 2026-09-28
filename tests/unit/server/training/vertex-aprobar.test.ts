@@ -26,12 +26,7 @@ vi.mock("@/lib/db", async (importOriginal) => {
   return { ...actual, db: { select: mockSelect, update: mockUpdate, insert: vi.fn() } };
 });
 
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) => Promise.resolve(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../../../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/lib/audit/log", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audit/log")>();

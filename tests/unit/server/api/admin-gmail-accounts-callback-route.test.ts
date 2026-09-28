@@ -39,12 +39,9 @@ const {
 // antes por `requireAdmin`/`requireRole`. Esas ayudas ya no reparten un handle
 // —repartían el del rol dueño, que no obedece RLS— así que la ruta la busca
 // acá, y el test la deja acá.
-vi.mock("@/data/scope", () => ({
-  enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-    Promise.resolve(armar(baseSimulada.actual)),
-  enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-    Promise.all(armar(baseSimulada.actual)),
-}));
+vi.mock("@/data/scope", async () =>
+  (await import("../../../mocks/puente-de-alcance")).puenteDeAlcance(() => baseSimulada.actual)
+);
 
 vi.mock("@/server/email/gmail/watch", () => ({
   setupGmailWatch: mockSetupGmailWatch,

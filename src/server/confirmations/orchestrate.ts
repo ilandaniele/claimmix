@@ -1594,9 +1594,6 @@ async function escalate(opts: {
   yaPreguntamos?: boolean;
 }): Promise<void> {
   const { caseId, tenantId, severity } = opts;
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  // Este contexto es lo único que le dice de quién son los datos.
-  const tenantCtx: TenantContext = { tenantId };
 
   if (!(await setStatus(caseId, tenantId, "requiere_especialista"))) {
     // Otra mano ya movió el caso: ni el mensaje al asegurado, ni la auditoría,

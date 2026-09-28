@@ -30,9 +30,7 @@ const { filas, db } = vi.hoisted(() => {
   return { filas, db };
 });
 
-vi.mock("@/data/scope", () => ({
-  enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) => Promise.resolve(armar(db)),
-}));
+vi.mock("@/data/scope", async () => (await import("../mocks/puente-de-alcance")).puenteDeAlcance(() => db));
 
 import { buildAgentMemoryConfigExport, loadApprovedExamplesForExport } from "@/server/agents/export";
 

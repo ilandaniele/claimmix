@@ -32,15 +32,7 @@ import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
 // Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
 // eso se verifica en tests/unit/data-scope-sin-rol.test.ts y, contra bases de
 // verdad, en `pnpm capa-datos` y `pnpm tenancy`.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/lib/db", () => {
   const mockDb = {

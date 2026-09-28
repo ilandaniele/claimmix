@@ -16,14 +16,8 @@ import { NextResponse } from "next/server";
 import { db, tables } from "@/lib/db";
 // package.json is a static asset — importing version avoids a runtime read.
 import packageJson from "../../../../../package.json";
-import { modoDeIa } from "@/server/ai/provider";
 
 export async function GET() {
-  // ── AI mode ──────────────────────────────────────────────────────────────────
-  // Vertex authenticates with a service account, so "is Gemini configured?"
-  // cannot be "is there an API key?" — modoDeIa ya lo resuelve así.
-  const aiMode = modoDeIa();
-
   // ── DB ping ───────────────────────────────────────────────────────────────────
   let dbStatus: "connected" | "error" = "connected";
   let dbError: string | undefined;
@@ -56,9 +50,6 @@ export async function GET() {
    * El monitor de uptime necesita saber si contestamos y si la base está — no
    * cómo está cableado el sistema. Eso vive en /api/health, que pide llave y
    * está protegido justamente por este motivo.
-   *
-   * `aiMode` se sigue calculando porque decide si el estado es sano, pero no
-   * sale en la respuesta.
    */
   return NextResponse.json(
     {

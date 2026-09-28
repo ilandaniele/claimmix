@@ -6,8 +6,10 @@
  *       On failure: cases.status='error_core', cases.core_error_message set.
  *
  * IC7: No real external API exists — only MockCoreSyncClient is implemented.
- *      Set CORE_SYNC_MODE=mock (or leave unset) to use the mock.
- *      Set CORE_SYNC_MODE=real to use a real implementation (not built in this PR).
+ *      Unset (the default) means `sin_configurar`: the route answers 501 and
+ *      writes nothing; a person moves the case by hand (`SALIDAS_A_MANO`).
+ *      CORE_SYNC_MODE=mock is only for tests and the demo.
+ *      CORE_SYNC_MODE=real without a real client also counts as `sin_configurar`.
  *
  * This file defines the interface contract and the factory function.
  * The mock implementation lives in ./mock.ts.
@@ -89,6 +91,15 @@ export function modoDeCoreSync(): ModoDeCoreSync {
   return "sin_configurar";
 }
 
+/**
+ * Si `getCoreSyncClient` devuelve un cliente: la ficha muestra el botón sólo
+ * con esto. Preguntar por `sin_configurar` dejaba a `real` con un botón que
+ * siempre recibe 501.
+ */
+export function hayClienteDeCoreSync(): boolean {
+  return modoDeCoreSync() === "mock";
+}
+
 /** No hay a quién mandarle el caso. La tira `getCoreSyncClient`. */
 export class CoreSyncSinConfigurar extends Error {
   constructor(readonly modo: ModoDeCoreSync) {
@@ -125,11 +136,9 @@ export class CoreSyncSinConfigurar extends Error {
  * sirve para probar la pantalla sin un sistema del otro lado.
  */
 export function getCoreSyncClient(): ICoreSyncClient {
-  const modo = modoDeCoreSync();
+  if (hayClienteDeCoreSync()) return new MockCoreSyncClient();
 
-  if (modo === "mock") return new MockCoreSyncClient();
-
-  // `real` todavía no existe. Cuando exista, acá va
-  // `return new RealCoreSyncClient()` y esta rama desaparece sola.
-  throw new CoreSyncSinConfigurar(modo);
+  // `real` todavía no existe. Cuando exista, entra en `hayClienteDeCoreSync`
+  // y acá va `return new RealCoreSyncClient()`.
+  throw new CoreSyncSinConfigurar(modoDeCoreSync());
 }

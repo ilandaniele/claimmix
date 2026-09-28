@@ -20,7 +20,7 @@ import { cases } from "@/lib/db/schema";
 import type { CaseInsert, CaseRow, UserRow } from "@/lib/db/types";
 import type { CasePatch } from "@/lib/schemas/cases";
 import type { CaseStatus } from "@/lib/schemas/cases";
-import { validateTransition, DEVOLUCION_AL_AGENTE } from "@/core/case/fsm";
+import { validateTransition, DEVOLUCION_AL_AGENTE, ESTADOS_CERRADOS, esSalidaAMano } from "@/core/case/fsm";
 import { reservaViva } from "@/core/case/reserva-de-extraccion";
 import { esPlanPro } from "@/core/billing/plan-pro";
 import { writeAuditLog, AuditEvent, type AuditEventType } from "@/lib/audit/log";
@@ -131,69 +131,64 @@ export async function patchCase(
         "Sólo se devuelve un caso tomado con «Tomar el control»."
       );
     }
-    const ahora = new Date().toISOString();
-    let filas: CaseRow[];
-    try {
-      [filas] = await enTenantVarias<[CaseRow[], unknown]>(tenantCtx, (db) => [
-        db
-          .update(cases)
-          .set({ status: DEVOLUCION_AL_AGENTE.hacia, para_responder_desde: null, updated_at: ahora })
-          .where(and(eq(cases.id, caseId), eq(cases.status, DEVOLUCION_AL_AGENTE.desde)))
-          .returning(),
-        auditoriaSiQuedo(
-          db,
-          {
-            caseId,
-            actorId: actor.id,
-            eventType: AuditEvent.CASE_STATUS_CHANGED,
-            payload: {
-              reason: MOTIVO_DEVOLVER,
-              old_status: DEVOLUCION_AL_AGENTE.desde,
-              new_status: DEVOLUCION_AL_AGENTE.hacia,
-            },
-            ip,
-            ua,
-          },
-          DEVOLUCION_AL_AGENTE.hacia
-        ),
-      ]);
-    } catch (err) {
-      // Sin esto, un error del batch se leía como «el caso cambió» y nadie se enteraba.
-      logger.error({ code: errorCode(err) }, "patch.devolver_fallo");
-      filas = [];
-    }
-    const updated = firstRow(filas);
-    if (!updated) {
-      throw new AppError("FSM_INVALID_TRANSITION", "El caso cambió mientras lo mirabas.");
-    }
+    const updated = await cambiarConAuditoria(
+      tenantCtx,
+      {
+        caseId,
+        desde: DEVOLUCION_AL_AGENTE.desde,
+        hacia: DEVOLUCION_AL_AGENTE.hacia,
+        set: {
+          status: DEVOLUCION_AL_AGENTE.hacia,
+          para_responder_desde: null,
+          updated_at: new Date().toISOString(),
+        },
+      },
+      {
+        actorId: actor.id,
+        eventType: AuditEvent.CASE_STATUS_CHANGED,
+        payload: {
+          reason: MOTIVO_DEVOLVER,
+          old_status: DEVOLUCION_AL_AGENTE.desde,
+          new_status: DEVOLUCION_AL_AGENTE.hacia,
+        },
+        ip,
+        ua,
+      }
+    );
     return { case: updated };
   }
 
-  if (patch.status !== undefined && patch.status !== current.status) {
-    const validationError = validateTransition(
-      current.status as CaseStatus,
-      patch.status as CaseStatus
-    );
+  const desde = current.status as CaseStatus;
+  // Definido sólo si el estado cambia.
+  const hacia = patch.status !== desde ? patch.status : undefined;
+  // Salidas a mano (`SALIDAS_A_MANO`): la entrega a la aseguradora pasó por
+  // fuera, o sigue la liquidación. Fuera del grafo como la devolución.
+  const salidaAMano = hacia !== undefined && esSalidaAMano(desde, hacia);
+
+  if (hacia !== undefined && !salidaAMano) {
+    const validationError = validateTransition(desde, hacia);
     if (validationError) {
       throw new AppError("FSM_INVALID_TRANSITION", validationError);
     }
   }
 
-  const destino = patch.status ?? current.status;
+  const destino = patch.status ?? desde;
   if (patch.confirmar_listo && destino !== "listo_para_core") {
     throw new AppError("FSM_INVALID_TRANSITION", "Sólo se confirma un caso que queda listo para Core.");
   }
 
   // ── 4. Build update payload ────────────────────────────────────────────────
-  const updateData: Partial<CaseInsert> = {
-    updated_at: new Date().toISOString(),
-  };
+  const ahora = new Date().toISOString();
+  const updateData: Partial<CaseInsert> = { updated_at: ahora };
 
   if (patch.status !== undefined) {
     updateData.status = patch.status;
+    // `pagado` y `rechazado` también son un cierre y guardan su fecha ahí; la
+    // de `en_liquidacion` queda en la auditoría del cambio.
+    if (ESTADOS_CERRADOS.has(patch.status)) updateData.closed_at = ahora;
     if (patch.status === "cerrado") {
-      updateData.closed_at = new Date().toISOString();
-      // Un caso cerrado no le debe respuesta a nadie.
+      // Un caso cerrado no le debe respuesta a nadie. Pagado o rechazado sí
+      // (`para-responder.ts`): marcarlos no contesta lo que escribió la persona.
       updateData.para_responder_desde = null;
     }
   }
@@ -202,40 +197,34 @@ export async function patchCase(
     updateData.assigned_to = patch.assigned_to;
   }
 
+  const entregadoPorFuera =
+    salidaAMano && hacia === "en_liquidacion" && (desde === "listo_para_core" || desde === "error_core");
+  const auditPayload: Record<string, unknown> = {
+    reason: patch.reason ?? (entregadoPorFuera ? "entregado_por_fuera" : null),
+  };
+  if (patch.status !== undefined || patch.confirmar_listo) {
+    auditPayload.old_status = desde;
+    auditPayload.new_status = destino;
+  }
+
+  let eventType: AuditEventType = patch.confirmar_listo
+    ? AuditEvent.CASE_READY_CONFIRMED
+    : patch.status === "cerrado"
+      ? AuditEvent.CASE_CLOSED
+      : AuditEvent.CASE_STATUS_CHANGED;
+  if (patch.assigned_to !== undefined) {
+    // Un cierre queda como cierre aunque reasigne: el reenvío lee `case.closed`.
+    if (eventType === AuditEvent.CASE_STATUS_CHANGED) eventType = AuditEvent.CASE_ASSIGNED;
+    auditPayload.assigned_to = patch.assigned_to;
+  }
+
   // ── 5. Apply update (tenant filter ensures only tenant-matching rows) ──────
-  if (patch.confirmar_listo) {
-    let filas: CaseRow[];
-    try {
-      [filas] = await enTenantVarias<[CaseRow[], unknown]>(tenantCtx, (db) => [
-        db
-          .update(cases)
-          .set(updateData)
-          .where(and(eq(cases.id, caseId), eq(cases.status, current.status)))
-          .returning(),
-        auditoriaSiQuedo(
-          db,
-          {
-            caseId,
-            actorId: actor.id,
-            eventType: AuditEvent.CASE_READY_CONFIRMED,
-            payload: { old_status: current.status, new_status: "listo_para_core", reason: patch.reason ?? null },
-            ip,
-            ua,
-          },
-          "listo_para_core"
-        ),
-      ]);
-    } catch (err) {
-      logger.error({ code: errorCode(err) }, "patch.cambio_con_auditoria_fallo");
-      filas = [];
-    }
-
-    const updated = firstRow(filas);
-    if (!updated) {
-      // El caso cambió (otro PATCH, o el estado ya no es el que vimos) mientras confirmábamos.
-      throw new AppError("FSM_INVALID_TRANSITION", "El caso cambió mientras lo mirabas.");
-    }
-
+  if (patch.confirmar_listo || salidaAMano) {
+    const updated = await cambiarConAuditoria(
+      tenantCtx,
+      { caseId, desde, hacia: destino, set: updateData },
+      { actorId: actor.id, eventType, payload: auditPayload, ip, ua }
+    );
     return { case: updated };
   }
 
@@ -243,7 +232,7 @@ export async function patchCase(
   // en el medio (TOCTOU), el update no matchea ninguna fila.
   const whereUpdate =
     patch.status !== undefined
-      ? and(eq(cases.id, caseId), eq(cases.status, current.status))
+      ? and(eq(cases.id, caseId), eq(cases.status, desde))
       : eq(cases.id, caseId);
 
   let updated: CaseRow | null;
@@ -257,7 +246,8 @@ export async function patchCase(
           .returning()
       )
     );
-  } catch {
+  } catch (err) {
+    logger.error({ code: errorCode(err) }, "patch.cambio_fallo");
     updated = null;
   }
 
@@ -270,26 +260,6 @@ export async function patchCase(
   }
 
   // ── 6. Write audit log ────────────────────────────────────────────────────
-  const auditPayload: Record<string, unknown> = {
-    reason: patch.reason ?? null,
-  };
-
-  let eventType: AuditEventType = AuditEvent.CASE_STATUS_CHANGED;
-  if (patch.status === "cerrado") {
-    eventType = AuditEvent.CASE_CLOSED;
-    auditPayload.old_status = current.status;
-    auditPayload.new_status = updated.status;
-  } else if (patch.status !== undefined) {
-    auditPayload.old_status = current.status;
-    auditPayload.new_status = updated.status;
-  }
-
-  if (patch.assigned_to !== undefined) {
-    // Un cierre queda como cierre aunque reasigne: el reenvío lee `case.closed`.
-    if (patch.status !== "cerrado") eventType = AuditEvent.CASE_ASSIGNED;
-    auditPayload.assigned_to = patch.assigned_to;
-  }
-
   // Audit log write must never block the response — errors are logged internally.
   await writeAuditLog({
     tenant_id: current.tenant_id,
@@ -303,4 +273,38 @@ export async function patchCase(
   });
 
   return { case: updated };
+}
+
+/**
+ * El update guardado por el estado que se leyó, con la auditoría en el mismo
+ * batch: si el caso cambió en el medio, no queda ni el cambio ni la fila.
+ */
+async function cambiarConAuditoria(
+  ctx: TenantContext,
+  c: { caseId: string; desde: CaseStatus; hacia: CaseStatus; set: Partial<CaseInsert> },
+  auditoria: Omit<Parameters<typeof auditoriaSiQuedo>[1], "caseId">
+): Promise<CaseRow> {
+  let filas: CaseRow[];
+  try {
+    [filas] = await enTenantVarias<[CaseRow[], unknown]>(ctx, (db) => [
+      db
+        .update(cases)
+        .set(c.set)
+        .where(and(eq(cases.id, c.caseId), eq(cases.status, c.desde)))
+        .returning(),
+      auditoriaSiQuedo(db, { caseId: c.caseId, ...auditoria }, c.hacia),
+    ]);
+  } catch (err) {
+    const code = errorCode(err);
+    // Sin esto, un error del batch se leía como «el caso cambió» y nadie se enteraba.
+    logger.error({ code }, "patch.cambio_con_auditoria_fallo");
+    // 23514: la base todavía no tiene la 0035. No es «el caso cambió».
+    if (code === "23514") throw new AppError("INTERNAL_ERROR");
+    filas = [];
+  }
+  const updated = firstRow(filas);
+  if (!updated) {
+    throw new AppError("FSM_INVALID_TRANSITION", "El caso cambió mientras lo mirabas.");
+  }
+  return updated;
 }

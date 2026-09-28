@@ -33,7 +33,7 @@ describe("las etiquetas del CSV", () => {
     expect(Object.keys(etiquetas)).toHaveLength(ClaimTypeSchema.options.length);
   });
 
-  it("tiene un nombre para los trece estados", () => {
+  it("tiene un nombre para cada estado", () => {
     const etiquetas = etiquetasDeEstado(t);
     for (const estado of CaseStatusSchema.options) {
       expect(etiquetas[estado], `falta el estado ${estado}`).toBeTruthy();

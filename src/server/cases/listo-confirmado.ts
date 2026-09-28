@@ -28,8 +28,22 @@ export const listoConfirmado: SQL = sql`exists (
 )`;
 
 /**
- * Completado de verdad: ya salió a Core, o quedó listo y una persona lo
- * confirmó. El `listo` legado (el simulador viejo, sin persona de por medio)
- * no cuenta acá.
+ * Una persona lo pasó a `en_liquidacion`. Se lee de la auditoría y no por
+ * `event_type`: si reasignó en el mismo cambio queda como `case.assigned`.
  */
-export const completadoConfirmado: SQL = sql`(${cases.status} = 'enviado_a_core' or (${cases.status} = 'listo_para_core' and ${listoConfirmado}))`;
+const pasoPorLiquidacion: SQL = sql`exists (
+  select 1 from ${auditLog}
+   where ${auditLog.target_type} = 'case'
+     and ${auditLog.target_id} = ${cases.id}::text
+     and ${auditLog.payload}->>'new_status' = 'en_liquidacion'
+)`;
+
+/**
+ * Completado de verdad: ya salió a Core o a liquidación, o quedó listo y una
+ * persona lo confirmó. El `listo` legado (el simulador viejo, sin persona de
+ * por medio) no cuenta acá.
+ *
+ * Un `cerrado` cuenta si antes se completó: cerrarlo no le quita el mes a la
+ * métrica. El cierre por abandono no pasa por ninguno de los tres.
+ */
+export const completadoConfirmado: SQL = sql`(${cases.status} in ('enviado_a_core', 'en_liquidacion', 'pagado', 'rechazado') or (${cases.status} = 'cerrado' and (${cases.core_sent_at} is not null or ${pasoPorLiquidacion})) or (${cases.status} in ('listo_para_core', 'cerrado') and ${listoConfirmado}))`;

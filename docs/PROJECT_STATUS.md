@@ -3902,6 +3902,14 @@ punto de cada ítem: `docs/AUDITORIA-2026-09.md` §14.
   el token en el mensaje de error, que quedó en la salida de la sesión local;
   no salió a ningún otro servicio. Por decisión del dueño el token no se
   rota; el script ahora tapa el token en toda salida.
+- `feat/listo-para-core-y-post-intake` (B25, sin mergear): sin conector de Core
+  un caso quedaba para siempre en `listo_para_core`; ahora una persona lo pasa
+  a mano a `en_liquidacion` («Entregado por fuera») o lo cierra, y de ahí a
+  `pagado`, `rechazado` o `cerrado` (`SALIDAS_A_MANO`, ADR 0003). La migración
+  0035 sólo cambia el CHECK de `cases.status` (sin columnas: pagado/rechazado
+  usan `closed_at`, la fecha de `en_liquidacion` queda en la auditoría); hay
+  que aplicarla a mano en staging, QA y producción antes del merge. Sin ella la
+  ingesta sigue andando y marcar un estado nuevo da 500 (23514).
 
 **Para decidir.**
 - ~~`src/server/confirmations/messenger.ts` manda el WhatsApp antes de

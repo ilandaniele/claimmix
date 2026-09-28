@@ -74,6 +74,10 @@ describe("conjuntos válidos de la bandeja", () => {
         "enviado_a_core",
         "error_core",
         "no_relevante",
+        // B25, migración 0035
+        "en_liquidacion",
+        "pagado",
+        "rechazado",
       ])
     );
   });

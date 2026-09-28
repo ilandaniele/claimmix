@@ -44,6 +44,7 @@
  */
 
 import {
+  ESTADOS_CERRADOS,
   ESTADOS_COMPLETADO_SIN_PERSONA,
   ESTADOS_ESCALADO,
   ESTADOS_ESPERANDO_AL_DENUNCIANTE,
@@ -80,7 +81,8 @@ export const ESTADOS_DE_LA_OPCION: Record<ClaveDeEstado, ReadonlySet<CaseStatus>
   confirmacion_pendiente: new Set<CaseStatus>(["confirmacion_pendiente"]),
   escalado: ESTADOS_ESCALADO,
   listo: ESTADOS_COMPLETADO_SIN_PERSONA,
-  cerrado: new Set<CaseStatus>(["cerrado"]),
+  // `pagado` y `rechazado` son un cierre con resultado; `en_liquidacion` cae en «Listo».
+  cerrado: ESTADOS_CERRADOS,
 };
 
 export const CLAVES_DE_ESTADO = Object.keys(ESTADOS_DE_LA_OPCION) as ClaveDeEstado[];

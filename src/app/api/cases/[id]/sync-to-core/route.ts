@@ -1,14 +1,17 @@
 /**
  * POST /api/cases/:id/sync-to-core — trigger CoreSyncService for a ready case.
  *
- * AC17: Invokes the mock CoreSyncService.
+ * AC17: Invokes the CoreSyncClient that `CORE_SYNC_MODE` picks.
  *       On success: cases.status='enviado_a_core', cases.core_external_id populated.
  *       On failure: cases.status='error_core', cases.core_error_message populated.
  *       Audit log: CORE_SYNC_SUCCESS or CORE_SYNC_FAILED.
+ *       Sin cliente configurado (`sin_configurar`, el default) responde 501 sin
+ *       escribir nada; el caso sale de ahí a mano (`SALIDAS_A_MANO`).
  *
  * Auth: role must be 'admin' or 'specialist'.
  * Rate limit: SYNC_TO_CORE config (5/min per user).
- * Precondition: cases.status must be 'listo_para_core' (unless force=true).
+ * Precondition: cases.status must be 'listo_para_core'; with force=true also
+ * 'error_core' (retry), and nothing else.
  */
 
 import { and, eq } from "drizzle-orm";
@@ -98,13 +101,18 @@ export async function POST(
   const tenantId = caseRow.tenant_id;
 
   // ── 6. FSM precondition ───────────────────────────────────────────────────────
-  if (!force && currentStatus !== REQUIRED_STATUS) {
-    return err(new AppError("FSM_INVALID_TRANSITION", `El caso debe estar en estado '${REQUIRED_STATUS}'. Estado actual: '${currentStatus}'.`));
-  }
-  // `force` salta el chequeo de arriba, pero no puede mandar el mismo caso al
-  // Core dos veces: eso es un envío externo duplicado, no un reintento local.
-  if (force && currentStatus === SUCCESS_STATUS) {
-    return err(new AppError("FSM_INVALID_TRANSITION", "El caso ya fue enviado al Core."));
+  // `force` es el reintento desde `error_core`, nada más. Desde otro estado
+  // mandaría al Core un caso ya enviado, cerrado o en liquidación.
+  const origenes: readonly string[] = force ? [REQUIRED_STATUS, FAILURE_STATUS] : [REQUIRED_STATUS];
+  if (!origenes.includes(currentStatus)) {
+    return err(
+      new AppError(
+        "FSM_INVALID_TRANSITION",
+        force && currentStatus === SUCCESS_STATUS
+          ? "El caso ya fue enviado al Core."
+          : `El caso debe estar en estado '${REQUIRED_STATUS}'. Estado actual: '${currentStatus}'.`
+      )
+    );
   }
 
   // ── 7. Build CoreSyncPayload ──────────────────────────────────────────────────

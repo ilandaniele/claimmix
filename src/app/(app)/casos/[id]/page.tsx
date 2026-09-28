@@ -41,7 +41,7 @@ import {
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
-import { modoDeCoreSync } from "@/server/core-sync/client";
+import { hayClienteDeCoreSync } from "@/server/core-sync/client";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
 import { formatAge, formatDate } from "@/lib/utils";
 import { getT } from "@/lib/i18n";
@@ -313,6 +313,12 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 ) : null}
               </Field>
               <Field label={t("case.detail.channel")}>{channelLabel}</Field>
+              {/* Pagado y rechazado guardan su fecha en `closed_at`; la de `en_liquidacion` está en el historial. */}
+              {(caseRow.status === "pagado" || caseRow.status === "rechazado") && caseRow.closed_at ? (
+                <Field label={t(caseRow.status === "pagado" ? "case.detail.pagadoAt" : "case.detail.rechazadoAt")}>
+                  <span className="whitespace-nowrap">{formatDate(caseRow.closed_at, locale)}</span>
+                </Field>
+              ) : null}
             </FieldGrid>
           </div>
 
@@ -562,9 +568,10 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               {/*
                 * Section D: el envío al sistema del asegurador (AC17).
                 *
-                * El botón sale sólo si hay a quién mandarle. Sin integración
-                * configurada aparece el mismo panel, en gris y sin botón,
-                * diciendo que el caso está listo pero que el canal no existe.
+                * El botón sale sólo si hay a quién mandarle. Si no, aparece el
+                * mismo panel, en gris y sin botón: la integración no está
+                * configurada y desde acá no se envía. Quien puede cambiar el
+                * estado ve además la pista a «Entregado por fuera».
                 *
                 * Antes el botón salía siempre y la ruta contestaba que sí:
                 * guardaba un `core_external_id` inventado y dejaba el caso en
@@ -573,10 +580,12 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 * vez de devolver el simulador.
                 */}
               {caseRow.status === "listo_para_core" &&
-                (modoDeCoreSync() === "sin_configurar" ? (
+                (!hayClienteDeCoreSync() ? (
                   <PanelSection id="core-sync" titulo={t("case.detail.coreSyncAction")}>
                     <p className="text-[13.5px] text-slate-500">
                       {t("case.detail.coreSyncSinConfigurar")}
+                      {/* El botón sólo lo ve quien puede cambiar el estado. */}
+                      {puedeCambiarEstadoCaso && ` ${t("case.detail.coreSyncEntregadoPorFuera")}`}
                     </p>
                   </PanelSection>
                 ) : (

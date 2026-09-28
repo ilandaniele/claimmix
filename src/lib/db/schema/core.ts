@@ -140,6 +140,9 @@ export const cases = pgTable("cases", {
       "enviado_a_core",
       "error_core",
       "no_relevante",
+      "en_liquidacion",
+      "pagado",
+      "rechazado",
     ],
   })
     .notNull()

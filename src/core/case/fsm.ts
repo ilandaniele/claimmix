@@ -17,9 +17,23 @@
  *   enviado_a_core       → cerrado
  *   error_core           → listo_para_core                            (retry)
  *   no_relevante         → recibido                              (llegó un mensaje nuevo)
+ *   en_liquidacion, pagado, rechazado → (terminales en el grafo, B25)
+ *
+ * Aristas humanas, fuera del grafo (su guarda es `patchCase`):
+ *   REAPERTURA_POR_ABANDONO   cerrado               → info_faltante
+ *   DEVOLUCION_AL_AGENTE      requiere_especialista → info_faltante
+ *   SALIDAS_A_MANO            listo_para_core, error_core → en_liquidacion | cerrado
+ *                             enviado_a_core              → en_liquidacion
+ *                             en_liquidacion              → pagado | rechazado | cerrado
+ *
+ * Una arista vive en el grafo sólo si un camino automático puede tomarla; las
+ * humanas viven afuera y su guarda es `patchCase`. El worker, confirm-field y
+ * la reapertura de no_relevante preguntan a `isValidTransition`: lo que está
+ * acá adentro lo pueden tomar ellos.
  *
  * LLM08 containment:
- *   - AI worker CANNOT directly set terminal states ('cerrado', 'enviado_a_core', 'no_relevante').
+ *   - AI worker CANNOT directly set terminal states ('cerrado', 'enviado_a_core', 'no_relevante',
+ *     'en_liquidacion', 'pagado', 'rechazado').
  *   - Ni sacar un caso de 'no_relevante': la única arista que sale de ahí la
  *     toma el camino de ingreso cuando llega un mensaje, no el modelo.
  *   - AI worker sets 'recibido', 'info_faltante', 'requiere_especialista' only.
@@ -109,12 +123,15 @@ export const FSM_TRANSITIONS: Readonly<Record<CaseStatus, readonly CaseStatus[]>
    *
    * LLM08: AI worker may NOT set this directly when requires_specialist=true.
    *        Human action (confirm-field or specialist sign-off) is required first.
+   *
+   * Sin conector de Core, la salida es a mano: `SALIDAS_A_MANO`.
    */
   listo_para_core: ["enviado_a_core", "error_core"],
 
   /**
    * enviado_a_core: CoreSyncService.send() succeeded; core_external_id populated.
-   * Can only proceed to cerrado (human close action).
+   * Can only proceed to cerrado (human close action), or by hand to
+   * en_liquidacion (`SALIDAS_A_MANO`).
    *
    * LLM08: AI worker CANNOT set this — only the sync-to-core route can.
    */
@@ -149,6 +166,12 @@ export const FSM_TRANSITIONS: Readonly<Record<CaseStatus, readonly CaseStatus[]>
    * el mensaje nuevo tampoco es una denuncia la extracción lo devuelve acá.
    */
   no_relevante: ["recibido"],
+
+  // B25: la liquidación la marca sólo una persona (`SALIDAS_A_MANO`); en el
+  // grafo no tienen salida, así que nadie las re-analiza ni las toma el worker.
+  en_liquidacion: [],
+  pagado: [],
+  rechazado: [],
 } as const;
 
 /**
@@ -253,6 +276,27 @@ export const DEVOLUCION_AL_AGENTE = {
 } as const;
 
 /**
+ * Salidas que marca una persona desde el detalle, cuando la entrega a la
+ * aseguradora pasó por fuera (export JSON/CSV, a mano) o para seguir la
+ * liquidación. Sin conector de Core, `listo_para_core` no tenía salida.
+ *
+ * Mismo criterio que `REAPERTURA_POR_ABANDONO`: fuera de `FSM_TRANSITIONS`,
+ * para que el worker, confirm-field y la reapertura de no_relevante no las
+ * vean. Ninguna escribe `core_external_id` ni finge un envío: `enviado_a_core`
+ * y `error_core` los sigue poniendo sólo sync-to-core.
+ */
+export const SALIDAS_A_MANO: Readonly<Partial<Record<CaseStatus, readonly CaseStatus[]>>> = {
+  listo_para_core: ["en_liquidacion", "cerrado"],
+  error_core: ["en_liquidacion", "cerrado"],
+  enviado_a_core: ["en_liquidacion"],
+  en_liquidacion: ["pagado", "rechazado", "cerrado"],
+};
+
+export function esSalidaAMano(desde: CaseStatus, hacia: CaseStatus): boolean {
+  return SALIDAS_A_MANO[desde]?.includes(hacia) ?? false;
+}
+
+/**
  * Email-intake specific: returns the initial status for a new email case.
  * This is 'recibido' — the email has been received and persisted.
  */
@@ -274,11 +318,21 @@ export const EMAIL_INITIAL_STATUS: CaseStatus = "recibido";
  * sigue siendo un caso que se completó solo. Sin él, el número bajaría a medida
  * que los casos avanzan, que es otra forma del mismo error.
  *
+ * `en_liquidacion` cuenta por lo mismo: es lo que sigue a la entrega.
+ *
  * `cerrado` NO cuenta: ahí adentro están también los que se cierran por
  * abandono, que es lo contrario de completarse solo.
  */
 export const ESTADOS_COMPLETADO_SIN_PERSONA: ReadonlySet<CaseStatus> =
-  new Set<CaseStatus>(["listo", "listo_para_core", "enviado_a_core"]);
+  new Set<CaseStatus>(["listo", "listo_para_core", "enviado_a_core", "en_liquidacion"]);
+
+/**
+ * Los estados de un caso que ya terminó del todo: la opción «Cerrado» del
+ * filtro. `pagado` y `rechazado` son un cierre con el resultado de la
+ * liquidación, y guardan su fecha en `closed_at` como `cerrado`.
+ */
+export const ESTADOS_CERRADOS: ReadonlySet<CaseStatus> =
+  new Set<CaseStatus>(["cerrado", "pagado", "rechazado"]);
 
 /**
  * Los estados que significan «esto lo tiene que mirar una persona».
@@ -330,7 +384,7 @@ export const ESTADOS_ESPERANDO_AL_DENUNCIANTE: ReadonlySet<CaseStatus> =
  */
 export const ESTADOS_RESUELTOS: ReadonlySet<CaseStatus> = new Set<CaseStatus>([
   ...ESTADOS_COMPLETADO_SIN_PERSONA,
-  "cerrado",
+  ...ESTADOS_CERRADOS,
 ]);
 
 /**

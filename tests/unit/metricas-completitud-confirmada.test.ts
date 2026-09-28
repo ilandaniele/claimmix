@@ -37,6 +37,13 @@ describe("completadoConfirmado — el SQL que arma", () => {
     expect(params).toContain("case.ready_confirmed");
   });
 
+  it("cuenta la liquidación, y un cerrado que antes se completó", () => {
+    expect(sql).toContain("'en_liquidacion', 'pagado', 'rechazado'");
+    expect(sql).toContain(`"cases"."status" = 'cerrado' and ("cases"."core_sent_at" is not null or exists`);
+    expect(sql).toContain(`"audit_log"."payload"->>'new_status' = 'en_liquidacion'`);
+    expect(sql).toContain(`"cases"."status" in ('listo_para_core', 'cerrado') and exists`);
+  });
+
   it("nunca cuenta el listo legado", () => {
     expect(sql).not.toMatch(/'listo'/);
   });

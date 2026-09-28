@@ -1,8 +1,8 @@
 /**
  * Mock CoreSyncClient — simulates core system integration deterministically.
  *
- * AC17: Used by POST /api/cases/:id/sync-to-core in all environments where
- *       CORE_SYNC_MODE is not set to 'real'.
+ * AC17: Used by POST /api/cases/:id/sync-to-core only when CORE_SYNC_MODE=mock
+ *       (tests and the demo). Unset, there is no client: see `modoDeCoreSync`.
  *
  * IC7: No real external API. This mock simulates:
  *   - Failure: caseId ends with '0' → returns success=false, errorMessage='Core timeout'.

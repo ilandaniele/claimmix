@@ -251,17 +251,18 @@ jobs:
 
   # ── El ensayo de conversaciones ──────────────────────────────────────────────
   #
-  # Doce denuncias enteras contra el agente real, por WhatsApp y por mail, sobre
-  # los canales simulados. No le manda un mensaje a nadie.
+  # Dieciocho denuncias enteras contra el agente real, por WhatsApp y por mail,
+  # sobre los canales simulados. No le manda un mensaje a nadie.
   #
   # Corre después del smoke y sólo si pasó: si producción no puede llegar a la
   # base o al modelo, el ensayo va a fallar por eso y el resultado no dice nada
   # sobre el agente.
   #
-  # Usa la base de PRODUCCIÓN. Escribe doce casos y los borra al terminar, y al
-  # empezar barre los que hayan quedado de una corrida que se murió a mitad de
-  # camino. Se los reconoce por identidades inventadas — números 5490000… y
-  # direcciones ensayo.*@example.com — que ningún asegurado real puede tener.
+  # Usa la base de PRODUCCIÓN. Escribe dieciocho casos y los borra al terminar,
+  # y al empezar barre los que hayan quedado de una corrida que se murió a
+  # mitad de camino. Se los reconoce por identidades inventadas — números
+  # 5490000… y direcciones ensayo.*@example.com — que ningún asegurado real
+  # puede tener.
   #
   # El reconocimiento de documentos no se ejercita acá: necesita fotos reales, y
   # una licencia de verdad no entra ni al repositorio ni a los secretos de

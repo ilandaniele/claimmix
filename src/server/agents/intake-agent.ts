@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
@@ -9,13 +10,31 @@ import {
   ESTADOS_WHATSAPP_QUE_SUMAN_MENSAJES,
 } from "@/core/case/para-responder";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import { marcarParaResponder } from "@/server/cases/para-responder";
+import {
+  marcarParaResponder,
+  marcarParaResponderAunqueSigaElAgente,
+} from "@/server/cases/para-responder";
 import { downloadWhatsAppMedia, type WhatsAppMediaRef } from "@/server/whatsapp/cloud-api";
 import { rehostAndRecordAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
+import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
+
+/** Cubeta por (inquilino, canal, teléfono) sin el teléfono en claro. */
+function claveDelRemitente(
+  tenantId: string,
+  channel: "whatsapp" | "whatsapp_sim",
+  threadId: string
+): string {
+  const huella = createHash("sha256")
+    .update(`${tenantId}:${channel}:${threadId}`)
+    .digest("hex")
+    .slice(0, 32);
+  return claveDeCupo("whatsapp", huella);
+}
 
 type IntakeChannel = "email" | "email_sim" | "whatsapp" | "whatsapp_sim";
 
@@ -93,6 +112,8 @@ export interface StoredWhatsAppIntake {
    * mensaje al asegurado diciendo lo mismo.
    */
   duplicado: boolean;
+  /** Pasó el tope por remitente (E12): guardado, sin agente, caso en «Para responder». */
+  excedente: boolean;
 }
 
 type CaseRow = {
@@ -242,6 +263,16 @@ export async function createWhatsAppIntake(
     senderName: input.senderName ?? null,
   });
 
+  // Cuenta sólo lo que entró de verdad: una reentrega de Meta no suma.
+  const excedente =
+    !guardado.duplicado &&
+    !(
+      await rateLimit(
+        claveDelRemitente(input.tenantId, channel, threadId),
+        RATE_LIMIT_CONFIGS.WHATSAPP_POR_REMITENTE
+      )
+    ).allowed;
+
   if (guardado.claimMessageId && input.media?.length) {
     await storeWhatsAppMedia(input.tenantId, caseId, guardado.claimMessageId, input.media);
   }
@@ -250,7 +281,24 @@ export async function createWhatsAppIntake(
   // paga otro UPDATE. Con `duplicado` también, por si la primera entrega se cortó
   // antes de marcar, pero sólo si queda un mensaje sin contestar: la reentrega
   // del mensaje que cerró el caso no es nada nuevo.
-  if (existente && (ESTADOS_DEL_AGENTE_TERMINADO as readonly string[]).includes(existente.status)) {
+  if (excedente) {
+    // El mensaje ya está guardado: si esto falla no se devuelve 500, porque la
+    // reentrega llegaría como duplicado y no volvería a marcar.
+    await marcarParaResponderAunqueSigaElAgente(caseId, input.tenantId).catch((err) =>
+      logger.error(
+        { case_id: caseId, error_code: errorCode(err) },
+        "whatsapp.tope_por_remitente.no_se_pudo_marcar"
+      )
+    );
+    await writeAuditLog({
+      tenant_id: input.tenantId,
+      actor_id: input.userId ?? null,
+      event_type: AuditEvent.MESSAGE_NOT_READ,
+      target_type: "case",
+      target_id: caseId,
+      payload: { status: existente?.status ?? "recibido", motivo: "tope_por_remitente" },
+    });
+  } else if (existente && (ESTADOS_DEL_AGENTE_TERMINADO as readonly string[]).includes(existente.status)) {
     await marcarParaResponder(
       caseId,
       input.tenantId,
@@ -276,6 +324,7 @@ export async function createWhatsAppIntake(
     tenantId: input.tenantId,
     created: abierto.creado,
     duplicado: guardado.duplicado,
+    excedente,
   };
 }
 

@@ -465,7 +465,14 @@ export async function callGemini(
   if (finishReason === "MAX_TOKENS") {
     throw new GeminiExtractionError(
       "Gemini cortó la respuesta en el tope de tokens (finishReason=MAX_TOKENS)",
-      { status: 200, code: "MAX_TOKENS" }
+      {
+        status: 200,
+        code: "MAX_TOKENS",
+        usage: {
+          promptTokens: data.usageMetadata?.promptTokenCount ?? 0,
+          completionTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
+        },
+      }
     );
   }
 
@@ -604,6 +611,11 @@ export async function extractEmailClaimGemini(
         completion_tokens: totalCompletionTokens,
       }, "ai.email_extraction.attempt1");
   } catch (e) {
+    const cortada = (e as GeminiExtractionError)?.cause as
+      | { usage?: { promptTokens?: number; completionTokens?: number } }
+      | undefined;
+    totalPromptTokens += cortada?.usage?.promptTokens ?? 0;
+    totalCompletionTokens += cortada?.usage?.completionTokens ?? 0;
     const latency1 = Date.now() - t1;
     const meta = errMeta(e);
     lastErrMeta = meta;
@@ -708,6 +720,11 @@ export async function extractEmailClaimGemini(
         completion_tokens: usage.completionTokens,
       }, "ai.email_extraction.attempt2");
     } catch (e) {
+      const cortada = (e as GeminiExtractionError)?.cause as
+        | { usage?: { promptTokens?: number; completionTokens?: number } }
+        | undefined;
+      totalPromptTokens += cortada?.usage?.promptTokens ?? 0;
+      totalCompletionTokens += cortada?.usage?.completionTokens ?? 0;
       const latency2 = Date.now() - t2;
       const meta = errMeta(e);
       lastErrMeta = meta;
@@ -737,30 +754,33 @@ export async function extractEmailClaimGemini(
     }
   }
 
-  if (result) {
-    // LLM10: track usage so the token caps and the monthly USD cap both apply.
-    //
-    // Registraba 0 con el comentario "free tier", cierto mientras corría por
-    // AI Studio. Con Vertex postpago dejó de serlo y nadie lo notó: un tope en
-    // dólares contra una suma que siempre da cero no salta nunca.
-    const costUsd = computeCostUsd(totalPromptTokens, totalCompletionTokens, model);
-    if (tenantId) {
-      try {
-        /*
-         * `userId` y no `null`.
-         *
-         * Estaba en `null` teniéndolo a mano —llega en la firma de esta
-         * función— así que NINGUNA fila de `ai_usage` tenía usuario: 7.554 de
-         * 7.554 en cero. El cupo diario por usuario suma sobre un conjunto
-         * vacío, da 0, y deja pasar siempre. Un tope que no puede alcanzarse
-         * nunca.
-         */
-        await recordUsage(tenantId, userId ?? null, model, totalPromptTokens, totalCompletionTokens, costUsd);
-      } catch {
-        // recordUsage never throws, but defensive catch.
-      }
+  // LLM10: track usage so the token caps and the monthly USD cap both apply.
+  //
+  // Registraba 0 con el comentario "free tier", cierto mientras corría por
+  // AI Studio. Con Vertex postpago dejó de serlo y nadie lo notó: un tope en
+  // dólares contra una suma que siempre da cero no salta nunca.
+  const costUsd = computeCostUsd(totalPromptTokens, totalCompletionTokens, model);
+  if (tenantId && (result || totalPromptTokens + totalCompletionTokens > 0)) {
+    try {
+      /*
+       * `userId` y no `null`.
+       *
+       * Estaba en `null` teniéndolo a mano —llega en la firma de esta
+       * función— así que NINGUNA fila de `ai_usage` tenía usuario: 7.554 de
+       * 7.554 en cero. El cupo diario por usuario suma sobre un conjunto
+       * vacío, da 0, y deja pasar siempre. Un tope que no puede alcanzarse
+       * nunca.
+       *
+       * Un intento fallido que Google cobró (MAX_TOKENS, JSON inválido)
+       * también cuenta: es plata gastada aunque no haya dado una extracción.
+       */
+      await recordUsage(tenantId, userId ?? null, model, totalPromptTokens, totalCompletionTokens, costUsd);
+    } catch {
+      // recordUsage never throws, but a failure here must never hide the extraction error.
     }
+  }
 
+  if (result) {
     return {
       ...result,
       extraction_model: model,

@@ -424,6 +424,12 @@ async function getSenderEmail(
     orden: "viejos",
     tope: 1,
   });
+  if (primero?.autenticado === false) {
+    // La clave de la memoria es la dirección: si no está autenticada, lo que
+    // confirmó el analista no se le atribuye a esa persona.
+    logger.warn({ case_id: caseId }, "confirm_field.memoria_omitida_remitente_sin_autenticar");
+    return null;
+  }
   return primero?.from_addr || null;
 }
 

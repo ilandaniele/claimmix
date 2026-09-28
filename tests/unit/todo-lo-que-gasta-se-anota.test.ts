@@ -82,6 +82,20 @@ describe("registrarConsumoDelModelo", () => {
     expect(filas[0].user_id).toBeNull();
   });
 
+  it("se lo atribuye a la persona cuando la hay", async () => {
+    // E11: el asistente sabe quién preguntó. Pasarlo hace que el cupo diario
+    // por usuario también cuente estas llamadas.
+    const USUARIO = "20000000-0000-0000-0000-000000000001";
+    await registrarConsumoDelModelo(
+      INQUILINO,
+      "gemini-2.5-flash",
+      { promptTokens: 10, completionTokens: 10 },
+      USUARIO
+    );
+
+    expect(filas[0].user_id).toBe(USUARIO);
+  });
+
   it("cobra con el precio del modelo que se usó, no con otro", async () => {
     // `ratesFor` cobra POR NOMBRE: un nombre que no coincide cae al precio de
     // otro modelo y el costo sale a la mitad. Un tope en dólares calculado con

@@ -75,6 +75,7 @@ const adminActor = {
   full_name: "Carlos Medina",
   role: "admin" as const,
   created_at: "2024-01-01T00:00:00Z",
+  plan: "profesional",
 };
 
 const analystActor = {
@@ -83,7 +84,11 @@ const analystActor = {
   full_name: "Lucía Ramallo",
   role: "analyst" as const,
   created_at: "2024-01-01T00:00:00Z",
+  plan: "profesional",
 };
+
+// E24: «Devolver al agente» exige plan Pro; éste no lo tiene.
+const basicActor = { ...adminActor, plan: "basico" };
 
 const listoCase = {
   id: "case-1",
@@ -133,6 +138,30 @@ function setupPatchMocks(fetchRows: unknown[], updatedRows: unknown[]) {
  */
 function setupConfirmMocks(fetchRows: unknown[], updatedRows: unknown[]) {
   setupPatchMocks(fetchRows, updatedRows);
+  const insertSelectFn = vi.fn().mockResolvedValue(undefined);
+  vi.mocked(db.insert).mockReturnValue({ select: insertSelectFn } as any);
+}
+
+/**
+ * Para E24: dos `db.select` en fila (el caso, después el último movimiento
+ * vía `consultaDelUltimoMovimiento`, que suma `.orderBy()` a la cadena) y
+ * después el mismo update+insert que `setupConfirmMocks`.
+ */
+function setupDevolverMocks(caseRow: unknown, ultimoMovimiento: unknown[], updatedRows: unknown[]) {
+  const limitFn = vi.fn().mockResolvedValueOnce([caseRow]).mockResolvedValueOnce(ultimoMovimiento);
+  const selectChain: any = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
+    limit: limitFn,
+  };
+  vi.mocked(db.select).mockReturnValue(selectChain as any);
+
+  const returningFn = vi.fn().mockResolvedValue(updatedRows);
+  const whereAfterSet = vi.fn().mockReturnValue({ returning: returningFn });
+  const setChain: any = { set: vi.fn().mockReturnValue({ where: whereAfterSet }) };
+  vi.mocked(db.update).mockReturnValue(setChain as any);
+
   const insertSelectFn = vi.fn().mockResolvedValue(undefined);
   vi.mocked(db.insert).mockReturnValue({ select: insertSelectFn } as any);
 }
@@ -293,6 +322,21 @@ describe("patchCase — tomar el control (D-F2)", () => {
       null
     );
     expect(result.case.status).toBe("requiere_especialista");
+  });
+
+  it("rechaza tomar el control con extraction_pending true aunque no haya reserva", async () => {
+    const infoFaltanteCase = {
+      ...listoCase,
+      status: "info_faltante",
+      extraction_lease_at: null,
+      extraction_pending: true,
+    };
+    setupPatchMocks([infoFaltanteCase], []);
+
+    await expect(
+      patchCase("case-1", { status: "requiere_especialista", reason: "tomar_el_control" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(db.update).not.toHaveBeenCalled();
   });
 });
 
@@ -510,5 +554,113 @@ describe("patchCase — confirmar_listo (P6)", () => {
     const dialecto = new PgDialect();
     const { params } = dialecto.sqlToQuery(columnas.ip.sql as never);
     expect(params).toEqual([null]);
+  });
+});
+
+// ── patchCase — devolver al agente (E24) ─────────────────────────────────────
+
+describe("patchCase — devolver al agente (E24)", () => {
+  const requiereEspecialistaWhatsapp = {
+    ...listoCase,
+    status: "requiere_especialista",
+    channel: "whatsapp",
+    extraction_pending: false,
+    extraction_lease_at: null,
+  };
+  const ultimoTomoElControl = [
+    {
+      event_type: "case.status_changed",
+      payload: { reason: "tomar_el_control", new_status: "requiere_especialista" },
+    },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("devuelve el caso al agente: info_faltante, sin «para responder», auditado", async () => {
+    const updatedCase = { ...requiereEspecialistaWhatsapp, status: "info_faltante" };
+    setupDevolverMocks(requiereEspecialistaWhatsapp, ultimoTomoElControl, [updatedCase]);
+
+    const result = await patchCase(
+      "case-1",
+      { status: "info_faltante", reason: "devolver_al_agente" },
+      adminActor,
+      null,
+      null
+    );
+
+    expect(result.case.status).toBe("info_faltante");
+    const escrito = vi.mocked(db.update).mock.results[0].value.set.mock.calls[0][0];
+    expect(escrito).toMatchObject({ para_responder_desde: null });
+    expect(db.insert).toHaveBeenCalled();
+  });
+
+  it("sin plan Pro, PLAN_REQUERIDO", async () => {
+    setupDevolverMocks(requiereEspecialistaWhatsapp, ultimoTomoElControl, []);
+
+    await expect(
+      patchCase("case-1", { status: "info_faltante", reason: "devolver_al_agente" }, basicActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "PLAN_REQUERIDO" }));
+  });
+
+  it("canal email, FSM_INVALID_TRANSITION (es sólo para WhatsApp)", async () => {
+    const emailCase = { ...requiereEspecialistaWhatsapp, channel: "email_sim" };
+    setupDevolverMocks(emailCase, ultimoTomoElControl, []);
+
+    await expect(
+      patchCase("case-1", { status: "info_faltante", reason: "devolver_al_agente" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+  });
+
+  it("último movimiento no fue «tomar el control», FSM_INVALID_TRANSITION", async () => {
+    setupDevolverMocks(
+      requiereEspecialistaWhatsapp,
+      [{ event_type: "claim.specialist_required", payload: {} }],
+      []
+    );
+
+    await expect(
+      patchCase("case-1", { status: "info_faltante", reason: "devolver_al_agente" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+  });
+
+  it("con extraction_pending, FSM_INVALID_TRANSITION (el agente está trabajando)", async () => {
+    const pendiente = { ...requiereEspecialistaWhatsapp, extraction_pending: true };
+    setupDevolverMocks(pendiente, ultimoTomoElControl, []);
+
+    await expect(
+      patchCase("case-1", { status: "info_faltante", reason: "devolver_al_agente" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+  });
+
+  it("con reserva viva, FSM_INVALID_TRANSITION (el agente está trabajando)", async () => {
+    const reservado = { ...requiereEspecialistaWhatsapp, extraction_lease_at: new Date().toISOString() };
+    setupDevolverMocks(reservado, ultimoTomoElControl, []);
+
+    await expect(
+      patchCase("case-1", { status: "info_faltante", reason: "devolver_al_agente" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+  });
+
+  it("si el update no devuelve filas, «El caso cambió mientras lo mirabas»", async () => {
+    setupDevolverMocks(requiereEspecialistaWhatsapp, ultimoTomoElControl, []);
+
+    await expect(
+      patchCase("case-1", { status: "info_faltante", reason: "devolver_al_agente" }, adminActor, null, null)
+    ).rejects.toThrow(
+      expect.objectContaining({
+        code: "FSM_INVALID_TRANSITION",
+        message: "El caso cambió mientras lo mirabas.",
+      })
+    );
+  });
+
+  it("sin reason: devolver_al_agente, requiere_especialista → info_faltante sigue siendo FSM inválida", async () => {
+    setupPatchMocks([requiereEspecialistaWhatsapp], []);
+
+    await expect(
+      patchCase("case-1", { status: "info_faltante" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
   });
 });

@@ -25,6 +25,7 @@ import {
   resetRateLimit,
   clearAllRateLimits,
 } from "./memory";
+import { claveDeCupo } from "./clave";
 import { logger } from "@/lib/observability/logger";
 
 export { resetRateLimit, clearAllRateLimits };
@@ -76,12 +77,17 @@ export const RATE_LIMIT_CONFIGS = {
   AUTH_SIGN_UP: { limit: 3, windowMs: 60_000 },
 
   /*
-   * Pedir un enlace de recuperacion: tres por hora y por direccion.
+   * Pedir un enlace de recuperacion: tres por hora por (IP, dirección).
    *
    * Este endpoint MANDA UN MAIL a una direccion que elige quien llama, asi que
    * sin techo es un amplificador: uno pide mil veces y la casilla de otro
    * recibe mil mensajes desde una direccion en la que confia. No hace falta
    * adivinar nada para que moleste.
+   *
+   * No es sólo por dirección: dejarlo así le permitiría a cualquiera agotarle
+   * las tres a una víctima y trabarle el reseteo de su propia contraseña. El
+   * tope por IP sola (`AUTH_POR_IP`, 30/min) frena a quien recorre muchas
+   * direcciones desde una misma IP.
    *
    * La ventana es larga a proposito. Recuperar la contrasena es algo que una
    * persona hace una vez y despues va a buscar el mail; reintentar tres veces
@@ -143,6 +149,14 @@ export const RATE_LIMIT_CONFIGS = {
    * Un reenvío manda un WhatsApp o un mail de verdad; frena el doble click.
    */
   REENVIAR_PEDIDO: { limit: 1, windowMs: 30_000 },
+
+  /**
+   * WHATSAPP_POR_REMITENTE: 20 mensajes por 10 minutos por número y canal.
+   * Del 21 en adelante el mensaje se guarda, no se lee, y el caso pasa a
+   * «Para responder» (E12). Ventana fija: una ráfaga a caballo de dos
+   * ventanas puede pasar 40; la cubeta lleva el teléfono hasheado.
+   */
+  WHATSAPP_POR_REMITENTE: { limit: 20, windowMs: 10 * 60_000 },
 } as const;
 
 /**
@@ -205,7 +219,7 @@ export interface RateLimitResult {
 /**
  * Check the rate limit for the given key and profile.
  *
- * @param key    - Unique identifier string (e.g. "ip:email" or "user:id")
+ * @param key    - Unique identifier string (e.g. claveDeCupo("auth:in", ip, email))
  * @param config - Limit configuration from RATE_LIMIT_CONFIGS. Con `lote`,
  *                 reserva ese número de créditos de una escritura y los gasta
  *                 en memoria — ver `credito-local.ts`. Sin `lote` (todos los
@@ -269,19 +283,10 @@ async function rateLimitDeALotes(
 }
 
 /**
- * Build a rate-limit key for sign-in using IP + email.
- * Combining both prevents per-IP flooding as well as per-email brute force.
- */
-export function buildSignInKey(ip: string, email: string): string {
-  // Lowercase email to prevent case-variation bypass.
-  return `signin:${ip}:${email.toLowerCase().trim()}`;
-}
-
-/**
  * El techo por IP sola de los caminos de autenticación.
  *
- * Es el segundo tope, y frena un ataque distinto del de `buildSignInKey`. Ese
- * es por (IP, dirección): corta a quien prueba contraseñas contra UNA cuenta.
+ * Es el segundo tope, y frena un ataque distinto del de el cupo por (IP,
+ * dirección). Ese corta a quien prueba contraseñas contra UNA cuenta.
  * Pero con sólo ése, alguien con una lista de diez mil direcciones tiene cinco
  * intentos en cada una y ninguno en total — cincuenta mil pruebas desde una
  * sola IP sin tocar el techo. Es el ataque más común contra un login: no
@@ -295,14 +300,7 @@ export function buildSignInKey(ip: string, email: string): string {
  * el camino que usa el formulario de la pantalla era el que no tenía techo.
  */
 export function topePorIp(ip: string): Promise<RateLimitResult> {
-  return rateLimit(`auth:ip:${ip}`, RATE_LIMIT_CONFIGS.AUTH_POR_IP);
-}
-
-/**
- * Build a rate-limit key for authenticated user endpoints.
- */
-export function buildUserKey(userId: string, endpoint: string): string {
-  return `user:${userId}:${endpoint}`;
+  return rateLimit(claveDeCupo("auth:ip", ip), RATE_LIMIT_CONFIGS.AUTH_POR_IP);
 }
 
 /**

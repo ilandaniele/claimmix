@@ -27,7 +27,8 @@
  */
 
 import "server-only";
-import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { ESTADOS_DE_ARRANQUE } from "@/core/case/estados-de-arranque";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { esSoloUnAcuse } from "@/core/mensajes/acuse";
@@ -575,39 +576,43 @@ export async function orchestratePostExtraction(
      * un evento de auditoría que nunca emitió sería inventar historia.
      */
     if (!derivaSola) {
-      await setStatus(caseId, tenantId, "confirmacion_pendiente");
-
-      await messenger.send({
-        caseId,
-        tenantId,
-        to: senderEmail,
-        lastMessage: latestMessageText,
-        template: "data_confirmation_request",
-        data: {
+      if (!(await setStatus(caseId, tenantId, "confirmacion_pendiente"))) {
+        // Otra mano ya movió el caso: el pedido llegaría a un estado que ya no
+        // es el que lo generó, y el analista vería un mail sin sentido.
+        logger.warn({ case_id: caseId }, "orchestrate.confirmation_skipped_case_moved");
+      } else {
+        await messenger.send({
           caseId,
-          claimantName,
-          fields: conflictos.map((c) => ({
-            fieldKey: c.fieldKey,
-            proposedValue: c.proposedValue,
-            conflictWithValue: c.conflictWithValue,
-          })),
-          // Se deriva abajo en esta misma vuelta: el pedido no pregunta nada.
-          titularAjeno: extractedOutput.titularAjeno === true,
-        },
-        inReplyToMessageId,
-      });
-      confirmationEmailDispatched = true;
+          tenantId,
+          to: senderEmail,
+          lastMessage: latestMessageText,
+          template: "data_confirmation_request",
+          data: {
+            caseId,
+            claimantName,
+            fields: conflictos.map((c) => ({
+              fieldKey: c.fieldKey,
+              proposedValue: c.proposedValue,
+              conflictWithValue: c.conflictWithValue,
+            })),
+            // Se deriva abajo en esta misma vuelta: el pedido no pregunta nada.
+            titularAjeno: extractedOutput.titularAjeno === true,
+          },
+          inReplyToMessageId,
+        });
+        confirmationEmailDispatched = true;
 
-      await writeAuditLog({
-        tenant_id: tenantId,
-        actor_id: null,
-        event_type: AuditEvent.CONFIRMATION_REQUESTED,
-        target_type: "case",
-        target_id: caseId,
-        // Sólo las claves: el valor es dato de una persona, y el que teníamos
-        // guardado también.
-        payload: { field_keys: conflictos.map((c) => c.fieldKey), reason: "conflict" },
-      });
+        await writeAuditLog({
+          tenant_id: tenantId,
+          actor_id: null,
+          event_type: AuditEvent.CONFIRMATION_REQUESTED,
+          target_type: "case",
+          target_id: caseId,
+          // Sólo las claves: el valor es dato de una persona, y el que teníamos
+          // guardado también.
+          payload: { field_keys: conflictos.map((c) => c.fieldKey), reason: "conflict" },
+        });
+      }
     }
   }
 
@@ -1590,7 +1595,12 @@ async function escalate(opts: {
   // Este contexto es lo único que le dice de quién son los datos.
   const tenantCtx: TenantContext = { tenantId };
 
-  await setStatus(caseId, tenantId, "requiere_especialista");
+  if (!(await setStatus(caseId, tenantId, "requiere_especialista"))) {
+    // Otra mano ya movió el caso: ni el mensaje al asegurado, ni la auditoría,
+    // ni el aviso al especialista corresponden a un traspaso que no ocurrió.
+    logger.warn({ case_id: caseId, reason: opts.reason }, "escalation.skipped_case_moved");
+    return;
+  }
 
   /*
    * Dos mensajes en la misma vuelta no pueden tirar para lados opuestos.
@@ -1808,25 +1818,52 @@ function collectConfirmableFields(
 }
 
 /** Update the case status (no FSM transition check — worker already validated). */
+/**
+ * Desde dónde el orquestador puede pisar el estado.
+ *
+ * `ESTADOS_DE_ARRANQUE` más `listo`: el worker deja el caso en `listo` antes
+ * de llamar al orquestador en la misma vuelta, así que ese estado también es
+ * «todavía del agente». Afuera de esta lista el caso ya lo tiene una persona
+ * o está cerrado, y una escritura tardía del agente lo pisaría (E2).
+ */
+const ESTADOS_QUE_PISA_EL_AGENTE = [...ESTADOS_DE_ARRANQUE, "listo"] as const;
+
+/**
+ * Cambia el estado del caso, pero sólo si todavía es del agente.
+ *
+ * Guarda atómica: si para cuando esta escritura llega el caso ya lo movió
+ * otra mano —un analista, otra vuelta del worker—, `where` no matchea
+ * ninguna fila y no se pisa nada. Devuelve si se aplicó, para que quien llama
+ * decida si lo que sigue (el mensaje, la auditoría) todavía corresponde.
+ */
 async function setStatus(
   caseId: string,
   tenantId: string,
-  status: string
-): Promise<void> {
+  status: CaseRow["status"]
+): Promise<boolean> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
-    await enTenant(tenantCtx, (db) =>
+    const filas = await enTenant(tenantCtx, (db) =>
       db
         .update(cases)
-        .set({
-          status: status as CaseRow["status"],
-          updated_at: new Date().toISOString(),
-        })
-        .where(eq(cases.id, caseId))
+        .set({ status, updated_at: new Date().toISOString() })
+        .where(
+          and(
+            eq(cases.id, caseId),
+            or(inArray(cases.status, ESTADOS_QUE_PISA_EL_AGENTE), eq(cases.status, status))
+          )
+        )
+        .returning({ id: cases.id })
     );
+    if (filas.length === 0) {
+      logger.warn({ case_id: caseId, status }, "orchestrate.status_not_applied");
+      return false;
+    }
+    return true;
   } catch (err) {
     logger.error({ code: errorCode(err), case_id: caseId }, "orchestrate.failed_to_update_case_status");
+    return false;
   }
 }
 

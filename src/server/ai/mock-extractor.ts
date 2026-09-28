@@ -8,6 +8,9 @@
  *       quedaria esperando.
  * AC8:  Extraction completes in < 500ms deterministically.
  * W3:   extractEmailClaimMock() added for unit testing the email claim pipeline.
+ * E16:  extractEmailClaimMock() con la denuncia fija (Juan Pérez, POL-1234, etc.)
+ *       queda sólo como constructor de fixtures para tests. El pipeline en modo
+ *       mock llama a denunciaSimuladaVacia(), que no inventa ningún dato.
  *
  * Extraction strategy:
  *   - Date: regex for DD/MM/YYYY or YYYY-MM-DD patterns in the text.
@@ -17,7 +20,7 @@
  *   - Confidence: scaled by keyword match quality (0.50–0.95 range per spec).
  *
  * Mismo contrato que el extractor real (ExtractedClaim).
- * The worker uses this transparently when MOCK_AI=true.
+ * El pipeline usa denunciaSimuladaVacia() cuando MOCK_AI=true (ver más abajo).
  */
 
 import type { ClaimType } from "@/lib/schemas/cases";
@@ -360,11 +363,30 @@ export function runMockExtractor(
   };
 }
 
+/** Lo que devuelve el pipeline con MOCK_AI: nada inventado, derivado a una persona. */
+export function denunciaSimuladaVacia(): ExtractedClaim {
+  return extractEmailClaimMock({
+    is_claim: true,
+    confidence: 0,
+    severity: "critical",
+    requires_specialist: true,
+    fields: [],
+    extracted_fields: {},
+    field_confidences: {},
+    missing_fields: [],
+    fields_pending_confirmation: [],
+    summary: "Extracción simulada (MOCK_AI): sin datos.",
+    suggested_reply: "",
+    extraction_model: "mock-email-v1",
+  });
+}
+
 /**
  * Mock extractor for the email claim extraction pipeline (W3).
  *
- * Lo elige `resolveExtractionEngine`: MOCK_AI=true, AI_MOCK=true, o Gemini sin
- * configurar. OPENAI_API_KEY no se lee en ningun lado.
+ * E16: la denuncia fija de acá abajo (Juan Pérez, POL-1234, etc.) es sólo un
+ * constructor de fixtures para tests — el pipeline real en modo mock usa
+ * denunciaSimuladaVacia(), que no inventa ningún dato.
  * Accepts overrides to simulate specific test scenarios without real LLM calls.
  *
  * Returned output:

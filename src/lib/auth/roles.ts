@@ -48,7 +48,8 @@ export const ADMIN_ROLES: UserRole[] = ["owner", "admin"];
  */
 export const CASE_EDITOR_ROLES: UserRole[] = ["owner", "admin", "specialist", "analyst"];
 
-/** Quién cambia el estado de un caso: un editor, y si es analista, sólo el suyo. */
+/** Quién cambia el estado de un caso: un editor; si es analista, sólo uno suyo o sin asignar (decisión 27/09). */
 export function puedeCambiarEstado(actor: { role: string; id: string }, assignedTo: string | null): boolean {
-  return (CASE_EDITOR_ROLES as readonly string[]).includes(actor.role) && (actor.role !== "analyst" || assignedTo === actor.id);
+  return (CASE_EDITOR_ROLES as readonly string[]).includes(actor.role)
+    && (actor.role !== "analyst" || assignedTo === null || assignedTo === actor.id);
 }

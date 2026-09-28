@@ -88,6 +88,11 @@ const DEL_HILO = {
   received_at: "2026-08-02T10:00:00Z",
 };
 
+const DEL_HILO_SIN_AUTENTICAR = {
+  ...DEL_HILO,
+  headers: [{ name: "Authentication-Results", value: "mx.google.com; spf=fail smtp.mailfrom=x@y" }],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -104,6 +109,7 @@ describe("mensajesEntrantes — la cascada", () => {
         body: "Choqué en Corrientes y Callao.",
         from_addr: "asegurado@ejemplo.com",
         received_at: "2026-08-01T10:00:00Z",
+        autenticado: true,
       },
     ]);
     // Una sola consulta: el respaldo no se paga si no hace falta.
@@ -119,6 +125,15 @@ describe("mensajesEntrantes — la cascada", () => {
     expect(consultas).toHaveLength(2);
     expect(consultas[1].tabla).toBe(claimMessages);
     expect(res[0].body).toBe("Texto del hilo");
+    expect(res[0].autenticado).toBe(true);
+  });
+
+  it("del hilo con spf=fail en las cabeceras, sale sin autenticar", async () => {
+    conRespuestas([], [DEL_HILO_SIN_AUTENTICAR]);
+
+    const res = await mensajesEntrantes(CTX, CASO);
+
+    expect(res[0].autenticado).toBe(false);
   });
 
   it("sin nada en ninguna de las dos, devuelve vacío", async () => {

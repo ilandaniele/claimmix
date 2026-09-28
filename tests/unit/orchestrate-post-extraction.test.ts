@@ -97,6 +97,12 @@ vi.mock("@/server/confirmations/ya-contestado", () => ({
   yaContestamosElUltimoMensaje: vi.fn().mockResolvedValue(false),
 }));
 
+// Mock del aviso interno a especialistas: no manda mail de verdad y deja
+// afirmar si `escalate()` llegó a llamarlo (E2: no cuando el caso ya se movió).
+vi.mock("@/server/notify/specialist-alert", () => ({
+  alertSpecialists: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Mock gap analyzer.
 vi.mock("@/server/cases/gap-analyzer", () => ({
   // Real value: the orchestrator resolves pending confirmations against the
@@ -127,6 +133,7 @@ import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { deliberate } from "@/server/ai/deliberate";
 import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contestado";
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
+import { alertSpecialists } from "@/server/notify/specialist-alert";
 
 // ── DB mock builder ───────────────────────────────────────────────────────────
 
@@ -213,6 +220,12 @@ function setupDbMocks({
   confirmacionesCerradas = [] as Array<{ campo: string }>,
   /** Los documentos pendientes del caso, como los lee `pendingDocKeys`. */
   missingDocsRows = [] as Array<{ doc_key: string }>,
+  /**
+   * El caso ya no es del agente (E2): el `UPDATE ... RETURNING` de `cases` no
+   * matchea ninguna fila, y `setStatus` en el orquestador corta el paso antes
+   * de mandar el mail y de auditar.
+   */
+  casoMovido = false,
 } = {}) {
   const mockDbTyped = db as unknown as MockDb;
 
@@ -338,7 +351,17 @@ function setupDbMocks({
           missingDocsRows = missingDocsRows.filter((r) => !cerrados.includes(r.doc_key));
         }
         return {
-          returning: () => Promise.resolve(confirmacionesCerradas),
+          // `cases` usa el `RETURNING` como guarda atómica (E2): por omisión
+          // matchea, `casoMovido` lo vacía. Las demás tablas siguen leyendo
+          // `confirmacionesCerradas`, como antes.
+          returning: () =>
+            Promise.resolve(
+              getTableName(table) === "cases"
+                ? casoMovido
+                  ? []
+                  : [{ id: CASE_ID }]
+                : confirmacionesCerradas
+            ),
           then: (r: (v: unknown) => void, j?: (e: unknown) => void) =>
             Promise.resolve(escrito).then(r, j),
         };
@@ -5197,5 +5220,76 @@ describe("orchestratePostExtraction — lo dicho recién no vuelve como «¿…,
 
     expect(fila("hay_heridos")?.suggested_value).toBe("");
     expect(pedido?.knownValues).not.toHaveProperty("hay_heridos");
+  });
+});
+
+// ── Test suite: el caso ya no es del agente (E2) ─────────────────────────────
+
+describe("orchestratePostExtraction — el caso ya se movió (E2)", () => {
+  it("escalado: con el caso movido, no manda mail ni audita ni avisa al especialista", async () => {
+    setupDbMocks({ casoMovido: true });
+    const claim = extractEmailClaimMock({ severity: "critical", requires_specialist: true });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(
+      vi.mocked(dispatchOutboundEmail).mock.calls.some((c) => c[0].template === "specialist_escalation")
+    ).toBe(false);
+    expect(
+      vi.mocked(writeAuditLog).mock.calls.some((c) => c[0].event_type === "claim.specialist_required")
+    ).toBe(false);
+    expect(alertSpecialists).not.toHaveBeenCalled();
+  });
+
+  it("conflicto: con el caso movido, no manda el pedido de confirmación ni audita", async () => {
+    setupDbMocks({ casoMovido: true });
+
+    const claim = extractEmailClaimMock({
+      fields: [
+        ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "full_name"),
+        { field_key: "full_name", field_value: "Pedro García", confidence: 0.92, source: "ai" as const },
+      ],
+    });
+    const conflictingMatch: CustomerMatch = {
+      customerId: "cust-caso-movido",
+      matchType: "email",
+      storedValues: {},
+      confidence: 0.75,
+      customerName: "Juan Pérez",
+      conflictsWithExtracted: ["full_name"],
+    };
+
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [],
+      fieldsNeedingConfirmation: [
+        {
+          fieldName: "full_name",
+          suggestedValue: "Pedro García",
+          conflictValue: "Juan Pérez",
+          reason: "conflict",
+        },
+      ],
+      isComplete: false,
+      status: "confirmacion_pendiente",
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      [conflictingMatch]
+    );
+
+    expect(
+      vi.mocked(dispatchOutboundEmail).mock.calls.some((c) => c[0].template === "data_confirmation_request")
+    ).toBe(false);
+    expect(
+      vi.mocked(writeAuditLog).mock.calls.some((c) => c[0].event_type === "claim.confirmation_requested")
+    ).toBe(false);
   });
 });

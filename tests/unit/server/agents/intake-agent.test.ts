@@ -7,8 +7,10 @@ const {
   mockDbSelect,
   mockDbInsert,
   mockMarcarParaResponder,
+  mockMarcarAunqueSiga,
 } = vi.hoisted(() => ({
   mockMarcarParaResponder: vi.fn(),
+  mockMarcarAunqueSiga: vi.fn(),
   mockRunEmailExtractionWorker: vi.fn(),
   mockWriteAuditLog: vi.fn(),
   // select chain: .select().from().where().orderBy().limit()
@@ -92,6 +94,7 @@ vi.mock("@/lib/db/helpers", () => ({
 
 vi.mock("@/server/cases/para-responder", () => ({
   marcarParaResponder: mockMarcarParaResponder,
+  marcarParaResponderAunqueSigaElAgente: mockMarcarAunqueSiga,
 }));
 
 vi.mock("@/server/worker/extract", () => ({
@@ -102,11 +105,14 @@ vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: mockWriteAuditLog,
   AuditEvent: {
     EMAIL_RECEIVED: "email.received",
+    MESSAGE_NOT_READ: "claim.message_not_read",
   },
 }));
 
 import { PgDialect } from "drizzle-orm/pg-core";
+import { clearAllRateLimits } from "@/lib/rate-limit/index";
 import {
+  createWhatsAppIntake,
   createWhatsAppIntakeAndRunAgent,
   runIntakeAgent,
 } from "@/server/agents/intake-agent";
@@ -568,5 +574,151 @@ describe("createWhatsAppIntake — el nombre de perfil", () => {
     });
 
     expect(mensaje().raw_payload).toEqual({});
+  });
+});
+
+/**
+ * Más de 20 mensajes en 10 minutos del mismo número (E12): del 21° en adelante
+ * el mensaje se guarda sin correr el agente, y el caso pasa a «Para
+ * responder» aunque la conversación siga abierta.
+ *
+ * Ventana fija de Postgres, no deslizante: una ráfaga a caballo de dos
+ * ventanas puede pasar hasta 40 mensajes. Aceptado por el dueño; no se prueba
+ * acá porque el limitador en memoria del test no mueve el reloj.
+ */
+describe("tope por remitente (E12)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWriteAuditLog.mockResolvedValue(undefined);
+    mockMarcarAunqueSiga.mockResolvedValue(undefined);
+    clearAllRateLimits();
+  });
+
+  /**
+   * Arma los selects e inserts de `n` mensajes seguidos del mismo remitente.
+   * `dupEn` son los índices (0-based) que llegan como reentrega (código 23505):
+   * no crean fila nueva y no cuentan para el tope.
+   */
+  function armarTanda(n: number, dupEn: Set<number> = new Set()) {
+    const selects: unknown[][] = [];
+    const inserts: Array<{ rows?: unknown[]; rejectWith?: Error }> = [];
+    for (let i = 0; i < n; i++) {
+      selects.push(i === 0 ? [] : [{ id: "case-remitente", status: "recibido" }]);
+      if (i === 0) inserts.push({ rows: [{ id: "case-remitente" }] }); // cases insert
+      if (dupEn.has(i)) {
+        inserts.push({ rejectWith: Object.assign(new Error("dup"), { code: "23505" }) });
+      } else {
+        inserts.push({ rows: [] }); // claimMessages
+        inserts.push({ rows: [] }); // rawMessages
+      }
+    }
+    setupSelectResults(selects);
+    setupInsertResults(inserts);
+  }
+
+  it("las primeras 20 pasan, sin marcar", async () => {
+    armarTanda(20);
+
+    for (let i = 0; i < 20; i++) {
+      const r = await createWhatsAppIntake({
+        tenantId: "tenant-001",
+        from: "5490000000021",
+        body: `mensaje ${i}`,
+      });
+      expect(r.excedente).toBe(false);
+    }
+    expect(mockMarcarAunqueSiga).not.toHaveBeenCalled();
+  });
+
+  it("el 21° pasa el tope: se guarda, no se lee, y marca aunque el agente siga", async () => {
+    armarTanda(21);
+
+    let ultimo;
+    for (let i = 0; i < 21; i++) {
+      ultimo = await createWhatsAppIntake({
+        tenantId: "tenant-001",
+        from: "5490000000021",
+        body: `mensaje ${i}`,
+      });
+    }
+
+    expect(ultimo?.excedente).toBe(true);
+    expect(mockMarcarAunqueSiga).toHaveBeenCalledWith("case-remitente", "tenant-001");
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "claim.message_not_read",
+        payload: expect.objectContaining({ motivo: "tope_por_remitente" }),
+      })
+    );
+    // El EMAIL_RECEIVED sigue: el mensaje entró y quedó guardado.
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ event_type: "email.received" })
+    );
+  });
+
+  it("un remitente distinto en la misma ventana no comparte cupo", async () => {
+    armarTanda(21);
+    let ultimoA;
+    for (let i = 0; i < 21; i++) {
+      ultimoA = await createWhatsAppIntake({
+        tenantId: "tenant-001",
+        from: "5490000000021",
+        body: `mensaje ${i}`,
+      });
+    }
+    expect(ultimoA?.excedente).toBe(true);
+
+    // Otro número, mismo tenant, misma ventana: cupo propio, todavía entero.
+    setupSelectResults([[]]);
+    setupInsertResults([{ rows: [{ id: "case-otro" }] }, { rows: [] }, { rows: [] }]);
+    const otro = await createWhatsAppIntake({
+      tenantId: "tenant-001",
+      from: "5490000000099",
+      body: "otro remitente",
+    });
+    expect(otro.excedente).toBe(false);
+  });
+
+  it("una reentrega no suma para el tope", async () => {
+    // 20 reales de verdad, con 5 reentregas de por medio que no cuentan.
+    const dupEn = new Set([4, 9, 14, 19, 24]);
+    armarTanda(26, dupEn);
+
+    let ultimo;
+    for (let i = 0; i < 26; i++) {
+      ultimo = await createWhatsAppIntake({
+        tenantId: "tenant-001",
+        from: "5490000000021",
+        body: `mensaje ${i}`,
+      });
+      if (dupEn.has(i)) expect(ultimo.excedente).toBe(false);
+    }
+
+    // El intento real número 21 (el 26° de la tanda) es el que pasa el tope.
+    expect(ultimo?.excedente).toBe(true);
+  });
+
+  it("simulado y real del mismo número no comparten cupo", async () => {
+    armarTanda(21);
+    let ultimoSim;
+    for (let i = 0; i < 21; i++) {
+      ultimoSim = await createWhatsAppIntake({
+        tenantId: "tenant-001",
+        from: "5490000000021",
+        body: `mensaje ${i}`,
+        simulated: true,
+      });
+    }
+    expect(ultimoSim?.excedente).toBe(true);
+
+    // El mismo número, sin simular: cupo propio, porque el canal entra en el hash.
+    setupSelectResults([[]]);
+    setupInsertResults([{ rows: [{ id: "case-real" }] }, { rows: [] }, { rows: [] }]);
+    const real = await createWhatsAppIntake({
+      tenantId: "tenant-001",
+      from: "5490000000021",
+      body: "sin simular",
+    });
+    expect(real.excedente).toBe(false);
   });
 });

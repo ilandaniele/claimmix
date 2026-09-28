@@ -24,6 +24,7 @@ import "server-only";
 
 import { and, asc, desc, eq } from "drizzle-orm";
 
+import { autenticacionFallida, type Cabecera } from "@/core/email/autenticacion";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimMessages, rawMessages } from "@/lib/db/schema";
 import { errorCode } from "@/lib/observability/error-code";
@@ -34,6 +35,8 @@ export interface MensajeEntrante {
   body: string;
   from_addr: string;
   received_at: string;
+  /** Falso si el mensaje falló SPF/DKIM; `raw_messages` no tiene cabeceras y vale true. */
+  autenticado: boolean;
 }
 
 export interface OpcionesDeLectura {
@@ -76,6 +79,7 @@ export async function mensajesEntrantes(
         body: m.body ?? "",
         from_addr: m.from_addr ?? "",
         received_at: m.received_at,
+        autenticado: true,
       }));
     }
 
@@ -86,6 +90,7 @@ export async function mensajesEntrantes(
           body_text: claimMessages.body_text,
           from_addr: claimMessages.from_addr,
           received_at: claimMessages.received_at,
+          headers: claimMessages.headers,
         })
         .from(claimMessages)
         .where(
@@ -100,6 +105,7 @@ export async function mensajesEntrantes(
       body: m.body_text ?? "",
       from_addr: m.from_addr ?? "",
       received_at: m.received_at,
+      autenticado: !autenticacionFallida((m.headers as Cabecera[] | null) ?? []),
     }));
   } catch (err) {
     // Degrada a propósito —la pantalla no se cae porque falle una consulta—

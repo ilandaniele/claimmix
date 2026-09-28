@@ -1,6 +1,6 @@
 /**
- * Quién cambia el estado de un caso (P6): un editor, y si es analista, sólo
- * el suyo.
+ * Quién cambia el estado de un caso (P6, E3): un editor; si es analista,
+ * sólo uno suyo o sin asignar (decisión 27/09).
  */
 
 import { describe, it, expect } from "vitest";
@@ -15,8 +15,8 @@ describe("puedeCambiarEstado", () => {
     expect(puedeCambiarEstado({ role: "analyst", id: "u1" }, "u1")).toBe(true);
   });
 
-  it("un analyst no puede si el caso está sin asignar", () => {
-    expect(puedeCambiarEstado({ role: "analyst", id: "u1" }, null)).toBe(false);
+  it("un analyst puede si el caso está sin asignar", () => {
+    expect(puedeCambiarEstado({ role: "analyst", id: "u1" }, null)).toBe(true);
   });
 
   it("un analyst no puede si el caso es de otro", () => {

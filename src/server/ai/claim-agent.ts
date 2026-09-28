@@ -13,7 +13,7 @@
 import "server-only";
 import type { ClaimType } from "@/lib/schemas/cases";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
-import { runMockExtractor, extractEmailClaimMock } from "@/server/ai/mock-extractor";
+import { runMockExtractor, denunciaSimuladaVacia } from "@/server/ai/mock-extractor";
 import type { EmailClaimPayload } from "@/server/ai/model-response";
 import {
   runGeminiExtractor,
@@ -64,7 +64,7 @@ export async function runEmailClaimAgent(params: {
   userId: string | null;
 }): Promise<ExtractedClaim> {
   const engine = await resolveExtractionEngine(params.tenantId, params.userId);
-  if (engine === "mock") return extractEmailClaimMock();
+  if (engine === "mock") return denunciaSimuladaVacia();
   return extractEmailClaimGemini(
     params.payload,
     params.tenantId,

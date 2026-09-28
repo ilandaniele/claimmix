@@ -186,6 +186,7 @@ vi.mock("@/lib/schemas/cases", async (importOriginal) => {
 vi.mock("@/server/ai/mock-extractor", () => ({
   extractEmailClaimMock: vi.fn(),
   runMockExtractor: vi.fn(),
+  denunciaSimuladaVacia: vi.fn(),
 }));
 
 // ── Imports (after vi.mock declarations) ─────────────────────────────────────
@@ -197,7 +198,7 @@ import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-class
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
-import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
+import { extractEmailClaimMock, denunciaSimuladaVacia } from "@/server/ai/mock-extractor";
 import { mergeExtractedFields } from "@/lib/email/claim-parser";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { extraccion } from "../helpers/extraccion";
@@ -362,7 +363,11 @@ async function runWorker(
   buildDbMocks(caseRow, caseUpdateSpy);
 
   // The worker calls extractEmailClaimMock() when engine === "mock".
-  vi.mocked(extractEmailClaimMock).mockReturnValue(makeExtractedClaim(extractedFields));
+  // denunciaSimuladaVacia devuelve lo mismo: es el otro camino por el que
+  // claim-agent.ts llega al mock (E16).
+  const denuncia = makeExtractedClaim(extractedFields);
+  vi.mocked(extractEmailClaimMock).mockReturnValue(denuncia);
+  vi.mocked(denunciaSimuladaVacia).mockReturnValue(denuncia);
 
   await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
 

@@ -55,7 +55,7 @@ de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
 
 ### 2. `pnpm rehearse` — minutos, gasta tokens
 
-Catorce denuncias enteras, de punta a punta, contra el mismo código, la misma base
+Dieciocho denuncias enteras, de punta a punta, contra el mismo código, la misma base
 y el mismo modelo que producción. Por los canales simulados: en los dos el
 mensajero redacta la respuesta exactamente como lo haría; WhatsApp la guarda en
 vez de enviarla, y mail hace lo mismo con cualquier dirección `@example.com`.
@@ -72,9 +72,10 @@ Escenarios: la denuncia completa hasta quedar lista, el incendio con heridos que
 se deriva, la cotización que no es un reclamo, los datos que llegan de a uno, el
 mensaje que no aporta nada y no merece respuesta, la pregunta que hay que
 contestar, la póliza que hay que buscar por DNI, la póliza vencida, la foto que
-no es ningún documento, y los cinco equivalentes por mail — entre ellos el
+no es ningún documento, los cinco equivalentes por mail — entre ellos el
 nombre que viene en el sobre y no en el cuerpo, y el familiar del titular cuyos
-datos no coinciden con el padrón.
+datos no coinciden con el padrón — y `tomar-el-control`/`devolver-al-agente`
+(E24, ver abajo).
 
 Ese último está porque no estaba: es el único mensaje del producto cuyo piso ES
 un dato —dice cuáles son los dos valores que no coinciden— y se rompió sin que
@@ -101,6 +102,15 @@ Toda conversación con `finally` que termina en `listo_para_core` o
 `requiere_especialista` corre `traspaso`: el último mensaje avisa que la carga
 de datos se cierra por ese medio y que una persona escribe desde otro número o
 correo, con `mencionaElTraspaso` de `src/core/mensajes/traspaso.ts`.
+
+`tomar-el-control` y `devolver-al-agente` no le escriben nada al agente: un
+turno de acción (`{ accion: "tomar_el_control" | "devolver_al_agente" }`) hace
+el mismo PATCH que haría una persona desde la pantalla — E24 —, para probar
+que el agente se calla mientras dura el control y retoma en cuanto se lo
+devuelven. Con el caso tomado, `traspaso` no corre: no hubo mensaje de
+traspaso porque no escribió el agente, escribió una persona. Necesitan un
+actor de verdad: un owner o, si no hay, un admin, con Plan Pro. Sin uno esos
+dos escenarios se reportan sin ensayar, no en rojo.
 
 También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
 hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún

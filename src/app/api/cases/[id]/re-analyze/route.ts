@@ -15,7 +15,7 @@ import { type NextRequest, after } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
-import { ADMIN_ROLES } from "@/lib/auth/roles";
+import { ADMIN_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
 import { entrar } from "@/lib/api/entrada";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -24,11 +24,13 @@ import { CaseStatusSchema, type CaseStatus } from "@/lib/schemas/cases";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
 import { ESTADOS_QUE_NO_SE_REABREN_A_MANO } from "@/core/case/fsm";
+import { reservaViva } from "@/core/case/reserva-de-extraccion";
 import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import {
   getClientIp,
   type RateLimitResult,
@@ -57,12 +59,12 @@ export async function POST(
   // ── Quién sos, qué podés y cuánto venís pidiendo — en un solo viaje ─────────
   //
   // El cupo de acá es POR CASO, no por usuario: cinco re-análisis por hora sobre
-  // el mismo siniestro. Por eso la clave se arma a mano y no con `buildUserKey`.
+  // el mismo siniestro. Por eso la clave es por caso y usuario, no el `user:` de siempre.
   let ctx: RoleContext;
   let rlResult: RateLimitResult;
   try {
     ({ ctx, rl: rlResult } = await entrar(
-      (userId) => `re-analyze:${caseId}:${userId}`,
+      (userId) => claveDeCupo("re-analyze", caseId, userId),
       RE_ANALYZE_LIMIT,
       ...ALL_ROLES
     ));
@@ -94,12 +96,24 @@ export async function POST(
   }
 
   // ── Verify case belongs to tenant (IDOR — explicit tenant_id filter) ─────────
-  let caseRow: { id: string; status: string } | null;
+  let caseRow: {
+    id: string;
+    status: string;
+    assigned_to: string | null;
+    extraction_lease_at: string | null;
+    extraction_pending: boolean;
+  } | null;
   try {
     caseRow = firstRow(
       await enTenant(tenantCtx, (db) =>
         db
-          .select({ id: cases.id, status: cases.status })
+          .select({
+            id: cases.id,
+            status: cases.status,
+            assigned_to: cases.assigned_to,
+            extraction_lease_at: cases.extraction_lease_at,
+            extraction_pending: cases.extraction_pending,
+          })
           .from(cases)
           .where(eq(cases.id, caseId))
           .limit(1)
@@ -110,6 +124,12 @@ export async function POST(
   }
 
   if (!caseRow) return err(new AppError("NOT_FOUND"));
+
+  // E3: un analyst re-analiza sólo un caso suyo o sin asignar — misma regla que el PATCH.
+  if (!puedeCambiarEstado(userRow, caseRow.assigned_to)) {
+    return err(new AppError("NOT_FOUND", "El caso no existe o no tenés acceso."));
+  }
+
   const statusParsed = CaseStatusSchema.safeParse(caseRow.status);
   /*
    * `ESTADOS_QUE_NO_SE_REABREN_A_MANO` y no `isTerminalStatus`.
@@ -141,6 +161,11 @@ export async function POST(
     return err(
       new AppError("FSM_INVALID_TRANSITION", "El caso ya se envió a Core. No se puede re-analizar.")
     );
+  }
+
+  // E4: no se re-analiza un caso mientras el agente sigue trabajando en él.
+  if (caseRow.extraction_pending || reservaViva(caseRow.extraction_lease_at, new Date())) {
+    return err(new AppError("FSM_INVALID_TRANSITION", "El agente está trabajando en este caso."));
   }
 
   // ── Budget check ──────────────────────────────────────────────────────────────

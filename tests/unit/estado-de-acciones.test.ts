@@ -26,7 +26,7 @@ beforeEach(() => vi.clearAllMocks());
 
 describe("leerEstadoDeAcciones", () => {
   it("una fila confirma y trae el nombre de quien confirmó", async () => {
-    mockEnTenantVarias.mockResolvedValue([[{ quien: "Ana" }], ...SIN_REENVIO()]);
+    mockEnTenantVarias.mockResolvedValue([[{ quien: "Ana" }], ...SIN_REENVIO(), []]);
 
     const acciones = await leerEstadoDeAcciones(CTX, CASE_ID);
 
@@ -38,7 +38,7 @@ describe("leerEstadoDeAcciones", () => {
   });
 
   it("un nombre nulo confirma sin decir quién", async () => {
-    mockEnTenantVarias.mockResolvedValue([[{ quien: null }], ...SIN_REENVIO()]);
+    mockEnTenantVarias.mockResolvedValue([[{ quien: null }], ...SIN_REENVIO(), []]);
 
     const acciones = await leerEstadoDeAcciones(CTX, CASE_ID);
 
@@ -59,6 +59,7 @@ describe("leerEstadoDeAcciones", () => {
       [{ from_addr: "juan@x.com", received_at: "2026-09-25T00:00:00.000Z" }],
       [],
       [{ asked_keys: ["full_name"], created_at: "2026-09-01T00:00:00.000Z" }],
+      [],
       [],
       [],
       [],
@@ -90,6 +91,7 @@ describe("leerEstadoDeAcciones", () => {
       [],
       [],
       [{ event_type: "claim.closed_abandoned", created_at: "2026-09-20T00:00:00.000Z" }],
+      [],
     ]);
 
     const acciones = await leerEstadoDeAcciones(CTX, CASE_ID);
@@ -117,6 +119,7 @@ describe("leerEstadoDeAcciones", () => {
       [],
       [],
       [{ event_type: "claim.closed_abandoned", created_at: "2026-09-10T00:00:00.000Z" }],
+      [],
     ]);
 
     const acciones = await leerEstadoDeAcciones(CTX, CASE_ID);

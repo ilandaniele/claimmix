@@ -21,6 +21,7 @@
  * **Por qué por IP + dirección.** Sólo por IP, una oficina entera detrás de un
  * NAT comparte el cupo y se traba sola. Sólo por dirección, el atacante rota
  * direcciones y no lo frena nada. Juntos, cada combinación tiene su cuenta.
+ * El alta es la excepción: va sólo por IP (ver más abajo).
  */
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextResponse, type NextRequest } from "next/server";
@@ -32,6 +33,7 @@ import {
   rateLimit,
   topePorIp,
 } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 
 const handler = toNextJsHandler(auth);
 
@@ -72,7 +74,10 @@ export async function POST(req: NextRequest) {
       : ruta.includes("request-password-reset")
         ? "reset"
         : "in";
-    const clave = `auth:${cual}:${ip}:${direccion}`;
+    const clave =
+      cual === "up"
+        ? claveDeCupo("auth:up", ip)
+        : claveDeCupo(cual === "reset" ? "auth:reset" : "auth:in", ip, direccion);
     const config =
       cual === "up"
         ? RATE_LIMIT_CONFIGS.AUTH_SIGN_UP

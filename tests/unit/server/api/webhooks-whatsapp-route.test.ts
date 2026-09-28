@@ -77,6 +77,7 @@ describe("/api/webhooks/whatsapp", () => {
       tenantId: TENANT,
       created: true,
       duplicado: false,
+      excedente: false,
     });
     mockRunIntakeAgent.mockResolvedValue(undefined);
     mockReap.mockResolvedValue({ reaped: 0, caseIds: [] });
@@ -238,6 +239,60 @@ describe("/api/webhooks/whatsapp", () => {
     expect(mockCreateWhatsAppIntake).not.toHaveBeenCalled();
   });
 
+  // ── Tope por remitente (E12) ────────────────────────────────────────────────
+
+  it("el que pasó el tope se guarda pero no corre el agente", async () => {
+    mockCreateWhatsAppIntake.mockResolvedValue({
+      caseId: "case-1",
+      tenantId: TENANT,
+      created: false,
+      duplicado: false,
+      excedente: true,
+    });
+
+    const res = await POST(metaReq(TEXT_PAYLOAD, sign(TEXT_PAYLOAD)));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, received: 1 });
+    // `scheduleAgent([])` vuelve antes de programar el `after()`.
+    expect(mockAfter).not.toHaveBeenCalled();
+    expect(mockRunIntakeAgent).not.toHaveBeenCalled();
+  });
+
+  it("lote con dos remitentes: el excedente no corre, el otro sí", async () => {
+    const dosMensajes = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ changes: [{ value: {
+        contacts: [{ wa_id: "5490000000021", profile: { name: "Ilan" } }],
+        messages: [
+          { from: "5490000000021", id: "wamid.1", type: "text", text: { body: "Choqué" } },
+          { from: "5491112345678", id: "wamid.2", type: "text", text: { body: "Choqué yo también" } },
+        ],
+      } }] }],
+    });
+
+    let llamada = 0;
+    mockCreateWhatsAppIntake.mockImplementation(async () => {
+      llamada++;
+      return {
+        caseId: `case-${llamada}`,
+        tenantId: TENANT,
+        created: true,
+        duplicado: false,
+        excedente: llamada === 2,
+      };
+    });
+
+    const res = await POST(metaReq(dosMensajes, sign(dosMensajes)));
+    expect(res.status).toBe(200);
+
+    await afterCallbacks[0]();
+
+    expect(mockRunIntakeAgent).toHaveBeenCalledTimes(1);
+    expect(mockRunIntakeAgent).toHaveBeenCalledWith(expect.objectContaining({ caseId: "case-1" }));
+  });
+
   // ── Normalized + Bearer POST ────────────────────────────────────────────────
 
   it("accepts the normalized payload with a valid Bearer secret", async () => {
@@ -266,6 +321,24 @@ describe("/api/webhooks/whatsapp", () => {
 
     expect(mockReap).not.toHaveBeenCalled();
     expect(mockRetomar).not.toHaveBeenCalled();
+  });
+
+  it("bearer: el que pasó el tope no programa el agente", async () => {
+    mockCreateWhatsAppIntake.mockResolvedValue({
+      caseId: "case-1",
+      tenantId: TENANT,
+      created: false,
+      duplicado: false,
+      excedente: true,
+    });
+    const req = new NextRequest("http://localhost/api/webhooks/whatsapp", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer bearer-secret" },
+      body: JSON.stringify({ from: "5490000000021", body: "Ensayo" }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(202);
+    expect(mockAfter).not.toHaveBeenCalled();
   });
 
   // ── El nombre de perfil ─────────────────────────────────────────────────────

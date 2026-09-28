@@ -9,7 +9,7 @@
  *   procesando:                sin botones — spinner
  *   listo_para_core:           «Confirmar y dejar listo» (sin confirmar, con permiso),
  *                              o «Confirmado por …» ya confirmado
- *   requiere_especialista:     «Revisado: pasar a Listo para Core» + «Cerrar»
+ *   requiere_especialista:     «Revisado: pasar a Listo para Core» + «Cerrar» + «Devolver al agente» (E24)
  *   info_faltante /
  *   confirmacion_pendiente:    reenviar el pedido (P8), «Tomar el control» (D-F2)
  *   cerrado:                   banner de sólo lectura, o «Reabrir y reenviar» (P8)
@@ -45,6 +45,9 @@ interface StatusActionsProps {
   /** D-F2. Sin esto el botón de «Tomar el control» no se muestra. */
   puedeTomarElControl?: boolean;
   onTomarElControl?: () => void;
+  /** E24. Sin esto el botón de «Devolver al agente» no se muestra. */
+  puedeDevolverAlAgente?: boolean;
+  onDevolverAlAgente?: () => void;
 }
 
 function ReAnalyzeButton({
@@ -114,6 +117,8 @@ export function StatusActions({
   reenviando,
   puedeTomarElControl,
   onTomarElControl,
+  puedeDevolverAlAgente,
+  onDevolverAlAgente,
 }: StatusActionsProps) {
   const t = useT();
   // ── cerrado — read-only banner, o «Reabrir y reenviar» (P8) ────────────────
@@ -394,6 +399,17 @@ export function StatusActions({
               {t("case.detail.close")}
             </button>
           </>
+        )}
+        {puedeDevolverAlAgente && onDevolverAlAgente && (
+          <button
+            type="button"
+            onClick={onDevolverAlAgente}
+            disabled={dialogOpen}
+            data-testid="action-devolver-al-agente"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {t("case.detail.devolverAlAgente")}
+          </button>
         )}
         <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
       </div>

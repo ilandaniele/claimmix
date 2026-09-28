@@ -23,11 +23,8 @@ import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
-import {
-  rateLimit,
-  RATE_LIMIT_CONFIGS,
-  buildUserKey,
-} from "@/lib/rate-limit/index";
+import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 
 const RULE_TYPES = [
   "extraction",
@@ -91,7 +88,7 @@ export async function POST(request: NextRequest) {
     const { user, userRow } = await requireAdmin();
 
     const rl = await rateLimit(
-      buildUserKey(user.id, "prompt-rules"),
+      claveDeCupo("user", user.id, "prompt-rules"),
       RATE_LIMIT_CONFIGS.CASES_API
     );
     if (!rl.allowed) return err(new AppError("RATE_LIMITED"));

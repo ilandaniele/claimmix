@@ -94,8 +94,8 @@ app.post("/claimmix", express.raw({ type: "application/json" }), (req, res) => {
   const caso = JSON.parse(req.body.toString("utf8"));
   if (caso.prueba) return res.status(200).json({ id: "prueba" });
 
-  // Deduplicá por Idempotency-Key (el caso) o por X-ClaimMix-Event-Id (la versión).
-  const id = guardarSiniestro(caso, req.get("Idempotency-Key"));
+  // Deduplicá por caso.caseId (el caso) y caso.updatedAt (la versión): van firmados.
+  const id = guardarSiniestro(caso, caso.caseId);
   res.status(200).json({ id });
 });
 ```
@@ -111,8 +111,12 @@ app.post("/claimmix", express.raw({ type: "application/json" }), (req, res) => {
 Un reintento desde `error_core` puede llegar después de que el sistema central
 ya guardó el caso: por ejemplo, si guardó y la respuesta no llegó a tiempo.
 
-- `Idempotency-Key` es el `caseId`. Si ya lo tenés, respondé 2xx con el mismo `id`.
-- `X-ClaimMix-Event-Id` distingue versiones del mismo caso.
+- `caseId` del cuerpo identifica el caso. Si ya lo tenés, respondé 2xx con el mismo `id`.
+- `updatedAt` del cuerpo distingue versiones del mismo caso.
+- `Idempotency-Key` (el `caseId`) y `X-ClaimMix-Event-Id` (`caseId:updatedAt`)
+  repiten esos datos para un proxy o un log, pero **no van firmados**: quien
+  tenga una copia del pedido puede cambiarlos sin romper la firma. Deduplicá
+  siempre por el cuerpo.
 
 ### Qué responder
 

@@ -28,6 +28,8 @@ import { puedeCambiarEstado } from "@/lib/auth/roles";
 import { auditoriaSiQuedo } from "@/server/cases/auditoria-si-quedo";
 import { consultaDelUltimoMovimiento, esDevolvible, MOTIVO_DEVOLVER } from "@/server/cases/devolver-al-agente";
 import { AppError } from "@/lib/errors";
+import { errorCode } from "@/lib/observability/error-code";
+import { logger } from "@/lib/observability/logger";
 
 /** The actor fields patchCase actually needs (matches requireRole's userRow). */
 export type PatchActor = Pick<UserRow, "id" | "tenant_id" | "role"> & { plan: string | null };
@@ -152,10 +154,12 @@ export async function patchCase(
             ip,
             ua,
           },
-          sql`${cases.updated_at} = ${ahora}::timestamptz and ${cases.status} = 'info_faltante'`
+          DEVOLUCION_AL_AGENTE.hacia
         ),
       ]);
-    } catch {
+    } catch (err) {
+      // Sin esto, un error del batch se leía como «el caso cambió» y nadie se enteraba.
+      logger.error({ code: errorCode(err) }, "patch.devolver_fallo");
       filas = [];
     }
     const updated = firstRow(filas);
@@ -200,7 +204,6 @@ export async function patchCase(
 
   // ── 5. Apply update (tenant filter ensures only tenant-matching rows) ──────
   if (patch.confirmar_listo) {
-    const ahora = updateData.updated_at!;
     let filas: CaseRow[];
     try {
       [filas] = await enTenantVarias<[CaseRow[], unknown]>(tenantCtx, (db) => [
@@ -219,10 +222,11 @@ export async function patchCase(
             ip,
             ua,
           },
-          sql`${cases.updated_at} = ${ahora}::timestamptz and ${cases.status} = 'listo_para_core'`
+          "listo_para_core"
         ),
       ]);
-    } catch {
+    } catch (err) {
+      logger.error({ code: errorCode(err) }, "patch.cambio_con_auditoria_fallo");
       filas = [];
     }
 

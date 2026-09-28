@@ -37,6 +37,8 @@ import { valorLegible } from "@/core/mensajes/valor-legible";
 import { esValorVago } from "@/core/mensajes/lo-dicho";
 import { MEDIUM_CONFIDENCE_HIGH, MEDIUM_CONFIDENCE_LOW } from "@/server/cases/gap-analyzer";
 import { ABANDONABLE_STATUSES } from "@/server/intake/close-abandoned";
+import { errorCode } from "@/lib/observability/error-code";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Las 8 consultas del reenvío, en este orden fijo. `acciones.ts` las agrega a
@@ -412,7 +414,7 @@ export async function reenviarPedido(
               eventType: AuditEvent.CASE_STATUS_CHANGED,
               payload: { old_status: "cerrado", new_status: "info_faltante", motivo: "reabrir_abandono" },
             },
-            sql`${cases.updated_at} = ${ahora}::timestamptz and ${cases.status} = 'info_faltante'`
+            "info_faltante"
           ),
         ]
       );
@@ -433,7 +435,8 @@ export async function reenviarPedido(
       ]);
       filaEscrita = firstRow(actualizadas);
     }
-  } catch {
+  } catch (err) {
+    logger.error({ code: errorCode(err) }, "reenvio.escritura_fallo");
     filaEscrita = null;
   }
 

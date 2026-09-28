@@ -32,6 +32,9 @@ For local work without external AI calls, set:
 MOCK_AI=true
 ```
 
+MOCK_AI: el caso queda en Requiere especialista, sin datos inventados; nada se
+escribe como si viniera de la persona.
+
 ## Database
 
 Migrations live in `neon/migrations/`.
@@ -62,7 +65,7 @@ Optional seed data lives in `neon/seed.sql`.
 | `AI_PROVIDER` | no | Defaults to `gemini` (only supported provider — OpenAI was removed) |
 | `GEMINI_API_KEY` | no | Global Gemini provider key used by the default provider |
 | `GEMINI_MODEL` | no | Default Gemini model, defaults to `gemini-2.5-flash` |
-| `MOCK_AI` | no | Set `true` to use deterministic mock agent output |
+| `MOCK_AI` | no | Set `true` to use a deterministic mock agent: the case is left in Requiere especialista, with no data invented |
 | `GMAIL_CLIENT_ID` | email | Google OAuth client ID |
 | `GMAIL_CLIENT_SECRET` | email | Google OAuth client secret |
 | `GMAIL_TOKEN_ENCRYPTION_KEY` | email | Encryption secret for Gmail and AI provider keys — 32+ random bytes, e.g. `openssl rand -hex 32` |
@@ -114,7 +117,7 @@ Some integration and E2E scenarios require a seeded Neon database and authentica
 
 - [ ] Neon database created and migrations applied
 - [ ] `DATABASE_URL`, Better Auth, Gmail, and provider env vars set in Vercel
-- [ ] `MOCK_AI=false` in production
+- [ ] `MOCK_AI=false` in production (the mock always leaves the case in Requiere especialista, with no data)
 - [ ] First admin user created and role set to `admin` or `owner`
 - [ ] Gmail watch configured or cron poll enabled
 - [ ] CI passing

@@ -13,6 +13,7 @@ import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-class
 import { hayHeridos } from "@/core/case/heridos-supuestos";
 import { checkDemoBudget, getDemoTenantId } from "@/server/ai/budget";
 import { rateLimit, getClientIp } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { logger } from "@/lib/observability/logger";
@@ -42,7 +43,7 @@ const AnalyzeSchema = z.object({
 
 export async function POST(request: NextRequest): Promise<Response> {
   const ip = getClientIp(request);
-  const rl = await rateLimit(`demo-public:${ip}`, { limit: 5, windowMs: 3_600_000 });
+  const rl = await rateLimit(claveDeCupo("demo-public", ip), { limit: 5, windowMs: 3_600_000 });
   if (!rl.allowed) {
     return new Response(
       JSON.stringify({

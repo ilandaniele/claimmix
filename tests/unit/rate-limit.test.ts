@@ -161,21 +161,20 @@ describe("rate-limit facade", () => {
 
   it("uses memory provider by default", async () => {
     vi.stubEnv("RATE_LIMIT_PROVIDER", "memory");
-    const { rateLimit, buildSignInKey, RATE_LIMIT_CONFIGS } = await import(
-      "@/lib/rate-limit/index"
-    );
+    const { rateLimit, RATE_LIMIT_CONFIGS } = await import("@/lib/rate-limit/index");
+    const { claveDeCupo } = await import("@/lib/rate-limit/clave");
 
-    const key = buildSignInKey("127.0.0.1", "test@example.com");
+    const key = claveDeCupo("auth:in", "127.0.0.1", "test@example.com");
     const result = await rateLimit(key, RATE_LIMIT_CONFIGS.AUTH_SIGN_IN);
     expect(result.allowed).toBe(true);
     expect(typeof result.remaining).toBe("number");
     expect(typeof result.retryAfterSeconds).toBe("number");
   });
 
-  it("buildSignInKey normalizes email to lowercase", async () => {
-    const { buildSignInKey } = await import("@/lib/rate-limit/index");
-    const key1 = buildSignInKey("1.2.3.4", "User@Example.COM");
-    const key2 = buildSignInKey("1.2.3.4", "user@example.com");
+  it("claveDeCupo normalizes email to lowercase", async () => {
+    const { claveDeCupo } = await import("@/lib/rate-limit/clave");
+    const key1 = claveDeCupo("auth:in", "1.2.3.4", "User@Example.COM");
+    const key2 = claveDeCupo("auth:in", "1.2.3.4", "user@example.com");
     expect(key1).toBe(key2);
   });
 

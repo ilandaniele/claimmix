@@ -1,7 +1,7 @@
 /**
  * La decisión de si el asegurado recibe un mensaje.
  *
- * Sin un solo mock: entran ocho señales y sale una decisión. Antes esto
+ * Sin un solo mock: entran nueve señales y sale una decisión. Antes esto
  * vivía dentro de una función de 1.424 líneas enredada con la base, y probar
  * un caso costaba montar media aplicación — por eso el bug de abajo se
  * descubrió con un ensayo contra el agente real, en producción, y no acá.
@@ -21,6 +21,7 @@ const base: SeñalesDeRespuesta = {
   nosPreguntoAlgo: false,
   llegoUnArchivo: false,
   nosContestoElPedido: false,
+  nosLoDevolvieron: false,
   aprendimosAlgo: false,
   datosQueFaltan: 3,
   esGrave: false,
@@ -50,6 +51,14 @@ describe("qué hacer con el asegurado", () => {
 
   it("no pide nada si no falta nada", () => {
     expect(queHacer(con({ datosQueFaltan: 0 }))).toBe("callar");
+  });
+
+  it("devuelto por una persona: vuelve a pedir aunque ya se pidió y el agente espera", () => {
+    expect(
+      queHacer(con({ nosLoDevolvieron: true, yaSePidio: true, elAgenteEspera: true }))
+    ).toBe("pedir");
+    // Un caso grave sigue siendo de una persona.
+    expect(queHacer(con({ nosLoDevolvieron: true, esGrave: true }))).toBe("callar");
   });
 });
 

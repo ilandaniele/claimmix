@@ -241,4 +241,17 @@ describe("StatusActions — requiere_especialista", () => {
     expect(screen.queryByTestId("action-cerrar")).not.toBeInTheDocument();
     expect(screen.getByTestId("action-re-analizar")).toBeInTheDocument();
   });
+
+  // E24
+  it("con puedeDevolverAlAgente, muestra el botón y llama a su handler", () => {
+    const onDevolverAlAgente = vi.fn();
+    renderStatus("requiere_especialista", { puedeDevolverAlAgente: true, onDevolverAlAgente });
+    fireEvent.click(screen.getByTestId("action-devolver-al-agente"));
+    expect(onDevolverAlAgente).toHaveBeenCalledOnce();
+  });
+
+  it("sin puedeDevolverAlAgente, no aparece el botón", () => {
+    renderStatus("requiere_especialista");
+    expect(screen.queryByTestId("action-devolver-al-agente")).not.toBeInTheDocument();
+  });
 });

@@ -17,7 +17,7 @@ import { CASE_EDITOR_ROLES } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
-import { RATE_LIMIT_CONFIGS, buildUserKey } from "@/lib/rate-limit/index";
+import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { reenviarPedido } from "@/server/confirmations/reenvio";
 
 export const maxDuration = 60;
@@ -33,7 +33,7 @@ export async function POST(
     const valido = ParamsSchema.safeParse(await context.params);
 
     const { ctx, rl } = await entrar(
-      (u) => buildUserKey(u, `reenviar-pedido:${valido.success ? valido.data.id : "x"}`),
+      `reenviar-pedido:${valido.success ? valido.data.id : "x"}`,
       RATE_LIMIT_CONFIGS.REENVIAR_PEDIDO,
       ...CASE_EDITOR_ROLES
     );

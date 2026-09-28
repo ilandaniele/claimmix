@@ -4,7 +4,7 @@
  * Toda ruta de la API hacía lo mismo y en fila:
  *
  *   const ctx = await requireRole(...ALL_ROLES);          // sesión + fila de users
- *   const rl  = await rateLimit(buildUserKey(id, "…"));   // el cupo
+ *   const rl  = await rateLimit(claveDeCupo("user", id, "…"));   // el cupo
  *   const datos = await loQueLaRutaHace();                // recién acá
  *
  * Son tres idas a Neon antes del primer byte útil, y la ida es lo que se paga:
@@ -36,7 +36,8 @@ import {
   type RoleContext,
   type UserRole,
 } from "@/lib/auth/require-role";
-import { buildUserKey, rateLimit, type RateLimitResult } from "@/lib/rate-limit/index";
+import { rateLimit, type RateLimitResult } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { AppError } from "@/lib/errors";
 
 export interface Entrada {
@@ -62,7 +63,7 @@ export async function entrar(
   const userId = session.user.id;
 
   const clave =
-    typeof etiqueta === "function" ? etiqueta(userId) : buildUserKey(userId, etiqueta);
+    typeof etiqueta === "function" ? etiqueta(userId) : claveDeCupo("user", userId, etiqueta);
 
   const [ctx, rl] = await Promise.all([
     requireRole(...roles),

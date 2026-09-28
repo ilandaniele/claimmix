@@ -282,9 +282,15 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Tomar el control (D-F2) ──────────────────────────────────────────────────
   "case.detail.tomarElControl": "Take over",
   "tomarElControl.title": "Take over the case",
-  "tomarElControl.description": "The agent stops answering this case, which moves to requires specialist. This is a one-way step: it cannot be undone.",
+  "tomarElControl.description": "From now on you answer on WhatsApp; the agent stops writing in this case. On Pro plans you can hand it back later.",
   "tomarElControl.confirm": "Take over",
   "tomarElControl.cancel": "Cancel",
+
+  // ── Hand back to the agent (E24) ───────────────────────────────────────────
+  "case.detail.devolverAlAgente": "Hand back to the agent",
+  "devolverAlAgente.title": "Hand the case back to the agent?",
+  "devolverAlAgente.description": "The agent answers on WhatsApp again from the next message. What you wrote stays in the history.",
+  "devolverAlAgente.confirm": "Hand back",
 
   // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
   "reenvio.boton": "Resend request",
@@ -366,16 +372,6 @@ export const enUS: Record<TranslationKey, string> = {
   "admin.users.invite": "Invite analyst",
   "configuracion.title": "Settings",
   "configuracion.subtitle": "Environment variables (read-only)",
-  "configuracion.agentTraining.title": "Agent training",
-  "configuracion.agentTraining.label": "Instructions and examples for the agent",
-  "configuracion.agentTraining.enabled": "Active in production",
-  "configuracion.agentTraining.helper": "Injected into the email agent prompt for future extractions. It does not re-process previous cases.",
-  "configuracion.agentTraining.save": "Save training",
-  "configuracion.agentTraining.saving": "Saving...",
-  "configuracion.agentTraining.saved": "Training saved. The agent will use it in production on the next analysis.",
-  "configuracion.agentTraining.loadError": "Could not load agent training.",
-  "configuracion.agentTraining.saveError": "Could not save agent training.",
-  "configuracion.agentTraining.placeholder": "Example guidance:\n- For emails with \"Datos del asegurado\", extract Nombre completo as full_name and Numero de poliza as policy_number with high confidence.\n- If \"Documentacion adjunta\" lists photos, license, or police report, mark those document fields as present.\n- For a two-car crash with plates and no injuries, severity should usually be medium.\n- Only ask for confirmation when a value is ambiguous or conflicts with stored customer/policy data.",
 
   // ── Health ─────────────────────────────────────────────────────────────────
   "health.ok": "ok",
@@ -493,6 +489,7 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.motivo.conflict": "A value does not match what we had",
   "case.detail.motivo.severidad": "Severity: {nivel}",
   "case.detail.motivo.lesiones": "Injuries or health data mentioned",
+  "case.detail.motivo.topePorRemitente": "More than 20 messages in 10 minutes from the same number: stored, not read.",
 
   // ── Why an attachment was not stored ───────────────────────────────────────
   // These lead with the CAUSE because they are read in two places: the amber

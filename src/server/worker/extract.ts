@@ -39,7 +39,7 @@ import {
   missingDocs,
   rawMessages,
 } from "@/lib/db/schema";
-import type { CaseInsert } from "@/lib/db/types";
+import type { CaseInsert, CaseRow } from "@/lib/db/types";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { checkBudget } from "@/server/ai/budget";
 import { runEmailClaimAgent } from "@/server/ai/claim-agent";
@@ -62,7 +62,7 @@ import { esTitularAjeno } from "@/core/case/titular-ajeno";
 import { hayHeridos, respuestaAHeridos, sinHeridosSupuestos } from "@/core/case/heridos-supuestos";
 import { ultimoPedido } from "@/server/confirmations/ultimo-pedido";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
-import { puedeArrancar } from "@/core/case/estados-de-arranque";
+import { ESTADOS_DE_ARRANQUE, puedeArrancar } from "@/core/case/estados-de-arranque";
 import { marcarParaResponder } from "@/server/cases/para-responder";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
@@ -110,6 +110,7 @@ import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle"
 import { mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
+import { autenticacionFallida } from "@/core/email/autenticacion";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
@@ -754,9 +755,13 @@ export async function runEmailExtractionWorker(
     }
 
     // ── b) Load memory hints from claim_memory ───────────────────────────────
-    const memoryHints = toPromptMemoryHints(
-      await loadClaimMemoryHints(tenantId, senderEmail, undefined, caseId)
-    );
+    let memoryHints: ReturnType<typeof toPromptMemoryHints> = [];
+    if (conversation?.remitenteAutenticado === false) {
+      // El remitente no pasó SPF/DKIM: con su dirección no se hereda nada.
+      logger.warn({ case_id: caseId }, "email_worker.memoria_omitida_remitente_sin_autenticar");
+    } else {
+      memoryHints = toPromptMemoryHints(await loadClaimMemoryHints(tenantId, senderEmail, undefined, caseId));
+    }
     const memoryApplied = memoryHints.length > 0;
 
     // ── c) Todo lo que arma el prompt, en un solo viaje ──────────────────────
@@ -790,7 +795,7 @@ export async function runEmailExtractionWorker(
         db
           .update(cases)
           .set({ status: "escalado", updated_at: new Date().toISOString() })
-          .where(eq(cases.id, caseId))
+          .where(and(eq(cases.id, caseId), inArray(cases.status, ESTADOS_DE_ARRANQUE)))
       );
       return;
     }
@@ -1261,9 +1266,19 @@ export async function runEmailExtractionWorker(
     }
 
     try {
-      await enTenant(tenantCtx, (db) =>
-        db.update(cases).set(caseUpdate).where(eq(cases.id, caseId))
+      const filas = await enTenant(tenantCtx, (db) =>
+        db
+          .update(cases)
+          .set(caseUpdate)
+          .where(and(eq(cases.id, caseId), eq(cases.status, currentStatus as CaseRow["status"])))
+          .returning({ id: cases.id })
       );
+      if (filas.length === 0) {
+        // Otra mano ya movió el caso desde que se leyó: escribir campos y
+        // estado encima sería pisar lo que esa mano decidió.
+        logger.warn({ case_id: caseId, seen: currentStatus }, "email_worker.case_update_not_applied");
+        return;
+      }
     } catch (err) {
       logger.error({ code: errorCode(err) }, "email_worker.case_update_error");
     }
@@ -1835,9 +1850,16 @@ async function updateCaseStatus(
   }
 
   try {
-    await enTenant(tenantCtx, (db) =>
-      db.update(cases).set(updatePayload).where(eq(cases.id, caseId))
+    const filas = await enTenant(tenantCtx, (db) =>
+      db
+        .update(cases)
+        .set(updatePayload)
+        .where(and(eq(cases.id, caseId), inArray(cases.status, ESTADOS_DE_ARRANQUE)))
+        .returning({ id: cases.id })
     );
+    if (filas.length === 0) {
+      logger.warn({ case_id: caseId, to: newStatus }, "worker.status_not_applied");
+    }
   } catch (err) {
     logger.error({ code: errorCode(err), case_id: caseId }, "worker.failed_to_update_case_status");
   }
@@ -1900,6 +1922,8 @@ interface LoadedConversation {
   entrantes: Array<{ id: string; texto: string; recibido: string }>;
   claimMessageId: string | null;
   providerMessageId: string | null;
+  /** Falso cuando el último entrante falló SPF/DKIM (E17). */
+  remitenteAutenticado: boolean;
 }
 
 /**
@@ -1922,6 +1946,7 @@ export async function loadInboundConversation(
       from_addr: claimMessages.from_addr,
       profile_name: sql<string | null>`${claimMessages.raw_payload}->>'profile_name'`,
       received_at: claimMessages.received_at,
+      headers: claimMessages.headers,
     })
     .from(claimMessages)
     .where(
@@ -1955,6 +1980,7 @@ export async function loadInboundConversation(
     })),
     claimMessageId: latest.id ?? null,
     providerMessageId: latest.provider_message_id ?? null,
+    remitenteAutenticado: !autenticacionFallida(latest.headers),
   };
 }
 

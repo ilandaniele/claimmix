@@ -1,9 +1,9 @@
 /**
  * El segundo techo del login: el que cuenta por IP sola.
  *
- * `buildSignInKey` cuenta por (IP, dirección) y corta a quien prueba
- * contraseñas contra UNA cuenta. Pero con sólo ése, alguien con una lista de
- * diez mil direcciones tiene cinco intentos en cada una y ninguno en total:
+ * El cupo por (IP, dirección) (`claveDeCupo("auth:in", ...)`) corta a quien
+ * prueba contraseñas contra UNA cuenta. Pero con sólo ése, alguien con una
+ * lista de diez mil direcciones tiene cinco intentos en cada una y ninguno en total:
  * cincuenta mil pruebas desde una sola IP sin tocar el techo. Es el ataque más
  * común contra un login — no adivinar la contraseña de una persona, sino probar
  * una contraseña conocida contra mucha gente.
@@ -28,10 +28,10 @@ vi.mock("@/lib/rate-limit/postgres", () => ({
 
 import {
   topePorIp,
-  buildSignInKey,
   clientIpFromHeaders,
   RATE_LIMIT_CONFIGS,
 } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 
 
 beforeEach(() => {
@@ -92,8 +92,8 @@ describe("topePorIp", () => {
     let ultimo = await topePorIp(ip);
     for (let i = 1; i < tope + 1; i++) {
       // Cada intento sería contra una dirección distinta: el otro tope no lo vería.
-      expect(buildSignInKey(ip, `victima${i}@ejemplo.com`)).not.toBe(
-        buildSignInKey(ip, `victima${i + 1}@ejemplo.com`)
+      expect(claveDeCupo("auth:in", ip, `victima${i}@ejemplo.com`)).not.toBe(
+        claveDeCupo("auth:in", ip, `victima${i + 1}@ejemplo.com`)
       );
       ultimo = await topePorIp(ip);
     }

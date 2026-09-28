@@ -20,15 +20,19 @@ import { cases } from "@/lib/db/schema";
 import type { CaseInsert, CaseRow, UserRow } from "@/lib/db/types";
 import type { CasePatch } from "@/lib/schemas/cases";
 import type { CaseStatus } from "@/lib/schemas/cases";
-import { validateTransition } from "@/core/case/fsm";
+import { validateTransition, DEVOLUCION_AL_AGENTE } from "@/core/case/fsm";
 import { reservaViva } from "@/core/case/reserva-de-extraccion";
+import { esPlanPro } from "@/core/billing/plan-pro";
 import { writeAuditLog, AuditEvent, type AuditEventType } from "@/lib/audit/log";
 import { puedeCambiarEstado } from "@/lib/auth/roles";
 import { auditoriaSiQuedo } from "@/server/cases/auditoria-si-quedo";
+import { consultaDelUltimoMovimiento, esDevolvible, MOTIVO_DEVOLVER } from "@/server/cases/devolver-al-agente";
 import { AppError } from "@/lib/errors";
+import { errorCode } from "@/lib/observability/error-code";
+import { logger } from "@/lib/observability/logger";
 
 /** The actor fields patchCase actually needs (matches requireRole's userRow). */
-export type PatchActor = Pick<UserRow, "id" | "tenant_id" | "role">;
+export type PatchActor = Pick<UserRow, "id" | "tenant_id" | "role"> & { plan: string | null };
 
 export interface PatchResult {
   case: CaseRow;
@@ -93,8 +97,76 @@ export async function patchCase(
 
   // D-F2: «tomar el control» sólo con el agente terminado del todo. La UI ya
   // esconde el botón, pero la guarda de verdad es ésta.
-  if (patch.status === "requiere_especialista" && reservaViva(current.extraction_lease_at, new Date())) {
+  if (
+    patch.status === "requiere_especialista" &&
+    (current.extraction_pending || reservaViva(current.extraction_lease_at, new Date()))
+  ) {
     throw new AppError("FSM_INVALID_TRANSITION", "El agente está trabajando en este caso.");
+  }
+
+  // E24: «Devolver al agente», el espejo de «Tomar el control» — mismo PATCH,
+  // discriminado por `reason`. Va antes del chequeo genérico de FSM porque
+  // `requiere_especialista → info_faltante` es una arista humana, Pro, que
+  // nunca se agrega a `FSM_TRANSITIONS` (como `REAPERTURA_POR_ABANDONO`).
+  if (patch.reason === MOTIVO_DEVOLVER) {
+    if (patch.status !== DEVOLUCION_AL_AGENTE.hacia || current.status !== DEVOLUCION_AL_AGENTE.desde) {
+      throw new AppError(
+        "FSM_INVALID_TRANSITION",
+        "Devolver al agente sólo va de requiere_especialista a info_faltante."
+      );
+    }
+    if (current.channel !== "whatsapp" && current.channel !== "whatsapp_sim") {
+      throw new AppError("FSM_INVALID_TRANSITION", "Devolver al agente es sólo para WhatsApp.");
+    }
+    if (!esPlanPro(actor.plan)) {
+      throw new AppError("PLAN_REQUERIDO");
+    }
+    if (current.extraction_pending || reservaViva(current.extraction_lease_at, new Date())) {
+      throw new AppError("FSM_INVALID_TRANSITION", "El agente está trabajando en este caso.");
+    }
+    const ultimo = firstRow(await enTenant(tenantCtx, (db) => consultaDelUltimoMovimiento(db, caseId)));
+    if (!esDevolvible(ultimo)) {
+      throw new AppError(
+        "FSM_INVALID_TRANSITION",
+        "Sólo se devuelve un caso tomado con «Tomar el control»."
+      );
+    }
+    const ahora = new Date().toISOString();
+    let filas: CaseRow[];
+    try {
+      [filas] = await enTenantVarias<[CaseRow[], unknown]>(tenantCtx, (db) => [
+        db
+          .update(cases)
+          .set({ status: DEVOLUCION_AL_AGENTE.hacia, para_responder_desde: null, updated_at: ahora })
+          .where(and(eq(cases.id, caseId), eq(cases.status, DEVOLUCION_AL_AGENTE.desde)))
+          .returning(),
+        auditoriaSiQuedo(
+          db,
+          {
+            caseId,
+            actorId: actor.id,
+            eventType: AuditEvent.CASE_STATUS_CHANGED,
+            payload: {
+              reason: MOTIVO_DEVOLVER,
+              old_status: DEVOLUCION_AL_AGENTE.desde,
+              new_status: DEVOLUCION_AL_AGENTE.hacia,
+            },
+            ip,
+            ua,
+          },
+          DEVOLUCION_AL_AGENTE.hacia
+        ),
+      ]);
+    } catch (err) {
+      // Sin esto, un error del batch se leía como «el caso cambió» y nadie se enteraba.
+      logger.error({ code: errorCode(err) }, "patch.devolver_fallo");
+      filas = [];
+    }
+    const updated = firstRow(filas);
+    if (!updated) {
+      throw new AppError("FSM_INVALID_TRANSITION", "El caso cambió mientras lo mirabas.");
+    }
+    return { case: updated };
   }
 
   if (patch.status !== undefined && patch.status !== current.status) {
@@ -132,7 +204,6 @@ export async function patchCase(
 
   // ── 5. Apply update (tenant filter ensures only tenant-matching rows) ──────
   if (patch.confirmar_listo) {
-    const ahora = updateData.updated_at!;
     let filas: CaseRow[];
     try {
       [filas] = await enTenantVarias<[CaseRow[], unknown]>(tenantCtx, (db) => [
@@ -151,10 +222,11 @@ export async function patchCase(
             ip,
             ua,
           },
-          sql`${cases.updated_at} = ${ahora}::timestamptz and ${cases.status} = 'listo_para_core'`
+          "listo_para_core"
         ),
       ]);
-    } catch {
+    } catch (err) {
+      logger.error({ code: errorCode(err) }, "patch.cambio_con_auditoria_fallo");
       filas = [];
     }
 

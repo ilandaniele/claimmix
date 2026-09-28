@@ -293,9 +293,15 @@ export const esAR = {
   // ── Tomar el control (D-F2) ──────────────────────────────────────────────────
   "case.detail.tomarElControl": "Tomar el control",
   "tomarElControl.title": "Tomar el control del caso",
-  "tomarElControl.description": "El agente deja de responder este caso, que pasa a requerir especialista. Es un paso de un solo sentido: no se puede deshacer.",
+  "tomarElControl.description": "Desde ahora contestás vos por WhatsApp; el agente no escribe más en este caso. En planes Pro podés devolvérselo después.",
   "tomarElControl.confirm": "Tomar el control",
   "tomarElControl.cancel": "Cancelar",
+
+  // ── Devolver al agente (E24) ───────────────────────────────────────────────
+  "case.detail.devolverAlAgente": "Devolver al agente",
+  "devolverAlAgente.title": "¿Devolver el caso al agente?",
+  "devolverAlAgente.description": "El agente vuelve a contestar por WhatsApp desde el próximo mensaje. Lo que escribiste vos queda en el historial.",
+  "devolverAlAgente.confirm": "Devolver",
 
   // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
   "reenvio.boton": "Reenviar pedido",
@@ -377,16 +383,6 @@ export const esAR = {
   "admin.users.invite": "Invitar analista",
   "configuracion.title": "Configuración",
   "configuracion.subtitle": "Variables de entorno (sólo lectura)",
-  "configuracion.agentTraining.title": "Entrenamiento del agente",
-  "configuracion.agentTraining.label": "Instrucciones y ejemplos para el agente",
-  "configuracion.agentTraining.enabled": "Activo en producción",
-  "configuracion.agentTraining.helper": "Se inyecta en el prompt del agente de email para futuras extracciones. No re-procesa casos anteriores.",
-  "configuracion.agentTraining.save": "Guardar entrenamiento",
-  "configuracion.agentTraining.saving": "Guardando...",
-  "configuracion.agentTraining.saved": "Entrenamiento guardado. El agente lo usará en producción en el próximo análisis.",
-  "configuracion.agentTraining.loadError": "No se pudo cargar el entrenamiento del agente.",
-  "configuracion.agentTraining.saveError": "No se pudo guardar el entrenamiento del agente.",
-  "configuracion.agentTraining.placeholder": "Ejemplos de guía:\n- Para emails con \"Datos del asegurado\", extraer Nombre completo como full_name y Número de póliza como policy_number con alta confianza.\n- Si \"Documentación adjunta\" lista fotos, licencia o denuncia policial, marcar esos documentos como presentes.\n- Para un choque entre dos autos con patentes y sin heridos, la severidad suele ser medium.\n- Pedir confirmación solo cuando un valor sea ambiguo o entre en conflicto con datos guardados de cliente/póliza.",
 
   // ── Health ─────────────────────────────────────────────────────────────────
   "health.ok": "ok",
@@ -511,6 +507,7 @@ export const esAR = {
   "case.detail.motivo.conflict": "Un dato no coincide con lo que teníamos",
   "case.detail.motivo.severidad": "Severidad: {nivel}",
   "case.detail.motivo.lesiones": "Mencionó lesiones o datos de salud",
+  "case.detail.motivo.topePorRemitente": "Más de 20 mensajes en 10 minutos del mismo número: se guardó y no se leyó.",
 
   // ── Por qué un adjunto no quedó guardado ───────────────────────────────────
   // La fila rechazada se escribe para que el analista vea que le mandaron algo

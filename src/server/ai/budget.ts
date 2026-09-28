@@ -501,15 +501,15 @@ export async function recordUsage(
  * IA y el MARGEN con ella. O sea que el techo no cortaba cuando tenía que
  * cortar, y el margen que muestra la pantalla es sistemáticamente alto.
  *
- * Sin usuario a propósito. Estas llamadas las dispara un mensaje que entró
- * por el webhook, no una persona sentada en la aplicación: no hay a quién
- * atribuirlas y `null` es la verdad. El cupo por usuario no las cuenta; el
- * del inquilino y el mensual, sí, que es donde faltaban.
+ * `null` es el default para las llamadas que dispara el webhook o el worker,
+ * donde no hay ninguna persona sentada en la aplicación. El asistente (E11)
+ * pasa quién preguntó, así que el cupo por usuario también lo cuenta a él.
  */
 export async function registrarConsumoDelModelo(
   tenantId: string,
   model: string,
-  usage: { promptTokens?: number; completionTokens?: number } | undefined
+  usage: { promptTokens?: number; completionTokens?: number } | undefined,
+  userId: string | null = null
 ): Promise<void> {
   // `usage` puede venir incompleto —Gemini omite `usageMetadata` a veces, y
   // las pruebas que simulan el modelo devuelven `usage: {}`—. `undefined <= 0`
@@ -521,7 +521,7 @@ export async function registrarConsumoDelModelo(
 
   await recordUsage(
     tenantId,
-    null,
+    userId,
     model,
     prompt,
     completion,

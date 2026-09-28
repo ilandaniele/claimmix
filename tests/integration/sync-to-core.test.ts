@@ -159,7 +159,9 @@ function buildDbMocks(opts: {
     }),
     update: vi.fn().mockReturnValue({
       set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: VALID_CASE_ID }]),
+        }),
       }),
     }),
   };
@@ -195,7 +197,9 @@ function montarLecturaDelCaso(db: any) {
 
   const update = vi.fn().mockReturnValue({
     set: vi.fn().mockReturnValue({
-      where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+      where: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([{ id: VALID_CASE_ID }]),
+      }),
     }),
   });
   db.update.mockImplementation(update);
@@ -254,7 +258,9 @@ describe("POST /api/cases/:id/sync-to-core", () => {
 
     vi.mocked(db.update).mockReturnValue({
       set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: VALID_CASE_ID }]),
+        }),
       }),
     } as any);
 
@@ -301,7 +307,9 @@ describe("POST /api/cases/:id/sync-to-core", () => {
 
     vi.mocked(db.update).mockReturnValue({
       set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: VALID_CASE_ID }]),
+        }),
       }),
     } as any);
 
@@ -361,7 +369,9 @@ describe("POST /api/cases/:id/sync-to-core", () => {
 
     vi.mocked(db.update).mockReturnValue({
       set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: FAILING_CASE_ID }]),
+        }),
       }),
     } as any);
 
@@ -420,7 +430,9 @@ describe("POST /api/cases/:id/sync-to-core", () => {
 
     vi.mocked(db.update).mockReturnValue({
       set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue({ rowCount: 1 }),
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: FAILING_CASE_ID }]),
+        }),
       }),
     } as any);
 
@@ -599,5 +611,172 @@ describe("POST /api/cases/:id/sync-to-core", () => {
 
     expect(response.status).toBe(501);
     expect(update).not.toHaveBeenCalled();
+  });
+
+  /*
+   * E25: la escritura de estado ya no es incondicional.
+   *
+   * Entre leer el caso y escribir el resultado del envío puede pasar cualquier
+   * cosa: otra pestaña, un reintento, el barrido de fondo. Si la fila ya no
+   * está en el estado que se leyó, `.returning()` vuelve vacío y hay que
+   * avisarlo — nunca pisar un estado que ya cambió.
+   */
+  it("E25: éxito con la fila movida — 409 y CORE_SYNC_SUCCESS con status_not_applied", async () => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+    const { writeAuditLog } = await import("@/lib/audit/log");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    } as never);
+
+    let selectCallCount = 0;
+    vi.mocked(db.select).mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return {
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([DEFAULT_CASE_ROW]),
+            }),
+          }),
+        } as any;
+      }
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(DEFAULT_EXTRACTED_FIELDS),
+        }),
+      } as any;
+    });
+
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    } as any);
+
+    const { POST } = await import(
+      "@/app/api/cases/[id]/sync-to-core/route"
+    );
+
+    const response = await POST(makeRequest(), makeContext(VALID_CASE_ID));
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("FSM_INVALID_TRANSITION");
+
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "core.sync_success",
+        target_id: VALID_CASE_ID,
+        payload: expect.objectContaining({ status_not_applied: true }),
+      })
+    );
+  });
+
+  it("E25: fallo con la fila movida — 200 synced:false y CORE_SYNC_FAILED con status_not_applied", async () => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+    const { writeAuditLog } = await import("@/lib/audit/log");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    } as never);
+
+    const failingCaseRow = {
+      id: FAILING_CASE_ID,
+      status: "listo_para_core",
+      tenant_id: "tenant-1",
+      claim_type: "choque",
+      severity: "medium",
+      policy_number: null,
+      policyholder_name: null,
+      customer_id: null,
+      policy_id: null,
+    };
+
+    let selectCallCount = 0;
+    vi.mocked(db.select).mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return {
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([failingCaseRow]),
+            }),
+          }),
+        } as any;
+      }
+      return {
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(DEFAULT_EXTRACTED_FIELDS),
+        }),
+      } as any;
+    });
+
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+    } as any);
+
+    const { POST } = await import(
+      "@/app/api/cases/[id]/sync-to-core/route"
+    );
+
+    const response = await POST(makeRequest(), makeContext(FAILING_CASE_ID));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.synced).toBe(false);
+
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "core.sync_failed",
+        target_id: FAILING_CASE_ID,
+        payload: expect.objectContaining({ status_not_applied: true }),
+      })
+    );
+  });
+
+  it("E25: force con el caso ya enviado al Core — 409, no llama al cliente del Core", async () => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+    const coreSyncClient = await import("@/server/core-sync/client");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    } as never);
+
+    const yaEnviadoCaseRow = { ...DEFAULT_CASE_ROW, status: "enviado_a_core" };
+
+    vi.mocked(db.select).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([yaEnviadoCaseRow]),
+        }),
+      }),
+    } as any);
+
+    const espiaCliente = vi.spyOn(coreSyncClient, "getCoreSyncClient");
+
+    const { POST } = await import(
+      "@/app/api/cases/[id]/sync-to-core/route"
+    );
+
+    const response = await POST(makeRequest({ force: true }), makeContext(VALID_CASE_ID));
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("FSM_INVALID_TRANSITION");
+    expect(espiaCliente).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
   });
 });

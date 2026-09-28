@@ -20,7 +20,11 @@ vi.mock("@/lib/observability/logger", () => ({
 }));
 
 import { drizzle } from "drizzle-orm/pg-proxy";
-import { marcarParaResponder, marcarRespondido } from "@/server/cases/para-responder";
+import {
+  marcarParaResponder,
+  marcarParaResponderAunqueSigaElAgente,
+  marcarRespondido,
+} from "@/server/cases/para-responder";
 
 const CASE_ID = "123e4567-e89b-12d3-a456-426614174001";
 const TENANT_ID = "10000000-0000-0000-0000-000000000001";
@@ -94,6 +98,21 @@ describe("marcarParaResponder", () => {
     expect(sql).toMatch(/and exists \(select .* from "claim_messages"/);
     expect(sql).toContain('"claim_messages"."id" not in ($');
     expect(params).toEqual(expect.arrayContaining(["inbound", "m1", "m2"]));
+  });
+});
+
+describe("marcarParaResponderAunqueSigaElAgente", () => {
+  // El tope por remitente (E12) llega en mitad de la conversación: a diferencia
+  // de marcarParaResponder, esto marca aunque el agente no haya terminado.
+  it("marca sin mirar el estado, conserva la primera hora y mueve updated_at", async () => {
+    await marcarParaResponderAunqueSigaElAgente(CASE_ID, TENANT_ID);
+
+    expect(mockEnTenant).toHaveBeenCalledWith({ tenantId: TENANT_ID }, expect.any(Function));
+    const [{ sql, params }] = consultas;
+    expect(sql).toContain('"para_responder_desde" = coalesce("cases"."para_responder_desde", now())');
+    expect(sql).toContain('"updated_at" = $');
+    expect(sql).not.toContain('"cases"."status"');
+    expect(params).toContain(CASE_ID);
   });
 });
 

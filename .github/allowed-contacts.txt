@@ -13,8 +13,11 @@
 # El bloque con el que este sistema inventa asegurados. No es un móvil argentino
 # válido: no le pertenece a nadie y nunca va a pertenecerle. El mensajero se
 # niega a escribirle a este bloque venga por donde venga el mensaje
-# (src/lib/phone/reserved.ts), así que un test puede usarlo sin que salga nada.
+# (src/core/phone/reserved.ts), así que un test puede usarlo sin que salga nada.
 5490000123456
+5490000000001
+5490000000021
+5490000000099
 
 # Números de prueba obviamente sintéticos, ya usados en tests.
 541112345678

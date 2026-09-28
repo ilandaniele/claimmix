@@ -41,6 +41,9 @@ import { readable } from "@/core/email/texto-legible";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { diceCuidado } from "@/core/mensajes/derivacion";
 import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
+import { esPlanPro } from "@/core/billing/plan-pro";
+import { AppError } from "@/lib/errors";
+import type { PatchActor } from "@/server/cases/patch";
 import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
 import { pideAlgo } from "./lib/pide-algo.mjs";
 import { confirmaLoDicho, formaDePedirLaHora } from "./lib/ensayo-confirmaciones.mjs";
@@ -71,6 +74,8 @@ const {
   outboundMessages,
   extractedFields,
   policies,
+  users,
+  tenants,
 } = await import("@/lib/db/schema");
 const { and, eq, asc, inArray, isNotNull, like, lt, or, sql } = await import("drizzle-orm");
 
@@ -85,7 +90,7 @@ const { and, eq, asc, inArray, isNotNull, like, lt, or, sql } = await import("dr
  * way, because a reply that is technically correct and reads badly is a
  * failure this file cannot see but a person reading the output can.
  */
-interface Turn {
+interface TurnDicho {
   say: string;
   /**
    * Attach a file.
@@ -201,6 +206,17 @@ interface Turn {
     sinPedido?: boolean;
   };
 }
+
+/**
+ * Lo hace una persona desde la pantalla, vía `patchCase`, no por WhatsApp: E24
+ * y su espejo. Necesita un actor de verdad (owner/admin, Plan Pro).
+ */
+interface TurnAccion {
+  accion: "tomar_el_control" | "devolver_al_agente";
+  expect?: { status?: string; paraResponder?: boolean };
+}
+
+type Turn = TurnDicho | TurnAccion;
 
 interface Scenario {
   id: string;
@@ -686,6 +702,46 @@ const SCENARIOS: Scenario[] = [
       },
     ],
   },
+
+  // ── Tomar el control / Devolver al agente (E24) ─────────────────────────────
+
+  {
+    id: "tomar-el-control",
+    what: "Una persona toma el control a mitad de la charla y el agente se calla.",
+    turns: [
+      // El arranque de "choque-completo": dejo el caso en info_faltante con una
+      // respuesta, sin ser el escenario que ya lo prueba.
+      {
+        say: "Hola, choqué ayer a las 19 en Bahía Blanca, Av. Alem al 2300, con mi Gol patente AB 123 CD. Soy Martín Sosa, póliza POL-4471-A, DNI 30.145.882. No hubo heridos.",
+        expect: { replies: 1 },
+      },
+      { accion: "tomar_el_control", expect: { status: "requiere_especialista", paraResponder: false } },
+      {
+        // Tomado el control, el agente calla y el mensaje queda «Para responder».
+        say: "es un gol blanco patente AB123CD, póliza 4455",
+        expect: { replies: 0, status: "requiere_especialista", paraResponder: true },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+  {
+    id: "devolver-al-agente",
+    what: "Tomado y devuelto: el agente retoma con el próximo mensaje.",
+    turns: [
+      {
+        say: "Hola, choqué ayer a las 19 en Bahía Blanca, Av. Alem al 2300, con mi Gol patente AB 123 CD. Soy Martín Sosa, póliza POL-4471-A, DNI 30.145.882. No hubo heridos.",
+        expect: { replies: 1 },
+      },
+      { accion: "tomar_el_control", expect: { status: "requiere_especialista", paraResponder: false } },
+      { say: "sigo acá", expect: { replies: 0, paraResponder: true } },
+      { accion: "devolver_al_agente", expect: { status: "info_faltante", paraResponder: false } },
+      {
+        // Devuelto, el agente vuelve a contestar.
+        say: "es un gol blanco patente AB123CD, póliza 4455",
+        expect: { replies: 1, paraResponder: false },
+      },
+    ],
+  },
 ];
 
 // ── Running one ──────────────────────────────────────────────────────────────
@@ -849,7 +905,7 @@ async function seedPolicyFor(
  */
 async function deliverWhatsApp(
   scenario: Scenario,
-  turn: Turn,
+  turn: TurnDicho,
   i: number,
   phone: string
 ): Promise<string> {
@@ -885,7 +941,7 @@ async function deliverWhatsApp(
  */
 async function deliverEmail(
   scenario: Scenario,
-  turn: Turn,
+  turn: TurnDicho,
   i: number,
   address: string,
   caseId: string | null
@@ -972,7 +1028,47 @@ async function repliesSince(
   }));
 }
 
-async function runScenario(scenario: Scenario): Promise<string | null> {
+/** Un actor de verdad para los turnos de acción — owner, si no admin, con Plan Pro (E24). */
+async function actorParaAcciones(): Promise<PatchActor | null> {
+  const [row] = await db
+    .select({ id: users.id, tenant_id: users.tenant_id, role: users.role, plan: tenants.plan })
+    .from(users)
+    .innerJoin(tenants, eq(tenants.id, users.tenant_id))
+    .where(and(eq(users.tenant_id, TENANT_ID!), inArray(users.role, ["owner", "admin"])))
+    .orderBy(sql`case ${users.role} when 'owner' then 0 else 1 end`)
+    .limit(1);
+  return row ?? null;
+}
+
+/** Estado y «Para responder» después de un turno o de un turno de acción: el mismo chequeo. */
+async function checkStatusYParaResponder(
+  scenarioId: string,
+  turn: number,
+  caseId: string,
+  want: { status?: string; paraResponder?: boolean } | undefined
+): Promise<void> {
+  if (!want || (!want.status && want.paraResponder === undefined)) return;
+  const row = await db
+    .select({ status: cases.status, paraResponderDesde: cases.para_responder_desde })
+    .from(cases)
+    .where(eq(cases.id, caseId));
+  if (want.status && row[0]?.status !== want.status) {
+    note(scenarioId, turn, `estado ${row[0]?.status}, esperaba ${want.status}`, "estado");
+  }
+  if (
+    want.paraResponder !== undefined &&
+    (row[0]?.paraResponderDesde != null) !== want.paraResponder
+  ) {
+    note(
+      scenarioId,
+      turn,
+      want.paraResponder ? "no quedó «Para responder»" : "quedó «Para responder» y no debía",
+      "para-responder"
+    );
+  }
+}
+
+async function runScenario(scenario: Scenario, actor: PatchActor | null): Promise<string | null> {
   console.log(`\n▸ ${scenario.id} — ${scenario.what}`);
 
   // A fresh identity per run, so nothing joins a conversation from an earlier
@@ -1002,11 +1098,43 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
   let pedidoAnterior: string[] = [];
   let contestoHeridos = false;
   const formasDeLaHora = new Set<string>();
+  // Tomado por una persona: mientras dure, un final en `requiere_especialista`
+  // no lleva mensaje de traspaso del agente, porque el agente no escribió.
+  let tomado = false;
 
   const seeded = scenario.policy ? await seedPolicy(scenario.policy) : null;
   try {
 
     for (const [i, turn] of scenario.turns.entries()) {
+      if ("accion" in turn) {
+        console.log(`\n   [${i + 1}] 🧑‍💼 ${turn.accion}`);
+        if (!caseId) {
+          note(scenario.id, i + 1, "acción sin caso previo: ningún turno anterior lo creó", "accion");
+          continue;
+        }
+        if (!actor) {
+          note(scenario.id, i + 1, "sin actor Pro para ejecutar la acción", "accion");
+          continue;
+        }
+        const { patchCase } = await import("@/server/cases/patch");
+        const body =
+          turn.accion === "tomar_el_control"
+            ? { status: "requiere_especialista" as const, reason: "tomar_el_control" }
+            : { status: "info_faltante" as const, reason: "devolver_al_agente" };
+        try {
+          await patchCase(caseId, body, actor, null, "rehearsal");
+        } catch (err) {
+          if (err instanceof AppError) {
+            note(scenario.id, i + 1, `${err.code}: ${err.message}`, "accion");
+            continue;
+          }
+          throw err;
+        }
+        await checkStatusYParaResponder(scenario.id, i + 1, caseId, turn.expect);
+        tomado = turn.accion === "tomar_el_control";
+        continue;
+      }
+
       console.log(`\n   [${i + 1}] 👤 ${turn.say}${turn.photo ? "  📎" : ""}`);
 
       // Qué estaba cerrado antes de este turno. En el primero no hay caso
@@ -1069,6 +1197,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
       // «¿Hubo personas lastimadas?: no» a quien nunca habló de heridos (23/09).
       const dijo = scenario.turns
         .slice(0, i + 1)
+        .filter((t): t is TurnDicho => "say" in t)
         .map((t) => `${t.subject ?? ""}\n${t.say}`)
         .join("\n");
       contestoHeridos ||= respuestaAHeridos(pedidoAnterior, turn.say) !== null;
@@ -1179,31 +1308,7 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
           );
         }
       }
-      if (want.status || want.paraResponder !== undefined) {
-        const row = await db
-          .select({ status: cases.status, paraResponderDesde: cases.para_responder_desde })
-          .from(cases)
-          .where(eq(cases.id, active));
-        if (want.status && row[0]?.status !== want.status) {
-          note(
-            scenario.id,
-            i + 1,
-            `estado ${row[0]?.status}, esperaba ${want.status}`,
-            "estado"
-          );
-        }
-        if (
-          want.paraResponder !== undefined &&
-          (row[0]?.paraResponderDesde != null) !== want.paraResponder
-        ) {
-          note(
-            scenario.id,
-            i + 1,
-            want.paraResponder ? "no quedó «Para responder»" : "quedó «Para responder» y no debía",
-            "para-responder"
-          );
-        }
-      }
+      await checkStatusYParaResponder(scenario.id, i + 1, active, want);
 
       /*
        * El reconocimiento de documentos, que estaba declarado y no se miraba.
@@ -1286,7 +1391,9 @@ async function runScenario(scenario: Scenario): Promise<string | null> {
         );
       }
       const terminado = row?.status === "listo_para_core" || row?.status === "requiere_especialista";
-      if (terminado && ultimo !== null && !mencionaElTraspaso(ultimo)) {
+      // Tomado y sin devolver: no hubo traspaso del agente porque no escribió.
+      const saltearTraspaso = tomado && row?.status === "requiere_especialista";
+      if (terminado && !saltearTraspaso && ultimo !== null && !mencionaElTraspaso(ultimo)) {
         note(
           scenario.id,
           0,
@@ -1629,10 +1736,26 @@ await sweepOldSeeds();
 await refuseIfPadronCargado();
 await sweepOldRehearsalCases();
 
+// Los turnos de acción los ejecuta una persona de verdad (owner/admin, Plan
+// Pro): sin uno, el escenario se reporta sin ensayar en vez de fallar rojo.
+const requiereActor = (s: Scenario) => s.turns.some((t) => "accion" in t);
+const actor = chosen.some(requiereActor) ? await actorParaAcciones() : null;
+const actorValido = actor !== null && esPlanPro(actor.plan);
+if (chosen.some(requiereActor)) {
+  if (actorValido) {
+    console.log(`Actor de los turnos de acción: ${actor!.id} (${actor!.role}).\n`);
+  } else {
+    for (const s of chosen) {
+      if (requiereActor(s)) unrehearsed.add(`actor:${s.id}`);
+    }
+  }
+}
+const paraCorrer = chosen.filter((s) => !requiereActor(s) || actorValido);
+
 const created: string[] = [];
-for (const scenario of chosen) {
+for (const scenario of paraCorrer) {
   try {
-    const id = await runScenario(scenario);
+    const id = await runScenario(scenario, actor);
     if (id) created.push(id);
   } catch (err) {
     note(
@@ -1646,7 +1769,7 @@ for (const scenario of chosen) {
 
 console.log("\n" + "─".repeat(70));
 if (failures.length === 0) {
-  console.log(`✓ ${chosen.length} conversación(es), sin diferencias con lo esperado.`);
+  console.log(`✓ ${paraCorrer.length} conversación(es), sin diferencias con lo esperado.`);
 } else {
   console.log(`✗ ${failures.length} diferencia(s):\n`);
   for (const f of failures) {
@@ -1663,10 +1786,21 @@ if (reporte) {
 if (unrehearsed.size > 0) {
   // Said out loud rather than left implicit. A suite that reports "todo verde"
   // while quietly skipping a whole capability is worse than one that fails.
-  console.log(
-    "\n⋯ Reconocimiento de documentos NO ensayado: faltan " +
-      [...unrehearsed].map((n) => `tests/fixtures/${n}.jpg`).join(", ")
-  );
+  const fotos = [...unrehearsed].filter((n) => !n.startsWith("actor:"));
+  const sinActor = [...unrehearsed]
+    .filter((n) => n.startsWith("actor:"))
+    .map((n) => n.slice("actor:".length));
+  if (fotos.length > 0) {
+    console.log(
+      "\n⋯ Reconocimiento de documentos NO ensayado: faltan " +
+        fotos.map((n) => `tests/fixtures/${n}.jpg`).join(", ")
+    );
+  }
+  if (sinActor.length > 0) {
+    console.log(
+      "\n⋯ Sin actor Pro (owner/admin) para los turnos de acción: " + sinActor.join(", ")
+    );
+  }
 }
 
 if (keep) {

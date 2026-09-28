@@ -11,11 +11,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSesion, mockRequireRole, mockRateLimit, mockBuildUserKey } = vi.hoisted(() => ({
+const { mockSesion, mockRequireRole, mockRateLimit } = vi.hoisted(() => ({
   mockSesion: vi.fn(),
   mockRequireRole: vi.fn(),
   mockRateLimit: vi.fn(),
-  mockBuildUserKey: vi.fn((id: string, etiqueta: string) => `user:${id}:${etiqueta}`),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -23,7 +22,6 @@ vi.mock("@/lib/auth/session", () => ({ getSessionContext: mockSesion }));
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: mockRequireRole }));
 vi.mock("@/lib/rate-limit/index", () => ({
   rateLimit: mockRateLimit,
-  buildUserKey: mockBuildUserKey,
 }));
 
 import { entrar } from "@/lib/api/entrada";
@@ -80,7 +78,6 @@ describe("entrar", () => {
     // El re-análisis cuenta por CASO: cinco por hora sobre el mismo siniestro.
     await entrar((id) => `re-analyze:caso-9:${id}`, CUPO, "analyst");
     expect(mockRateLimit).toHaveBeenCalledWith("re-analyze:caso-9:u-1", CUPO);
-    expect(mockBuildUserKey).not.toHaveBeenCalled();
   });
 
   it("sin sesión no consulta nada", async () => {

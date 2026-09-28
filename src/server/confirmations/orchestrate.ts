@@ -27,16 +27,18 @@
  */
 
 import "server-only";
-import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { ESTADOS_DE_ARRANQUE } from "@/core/case/estados-de-arranque";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { esSoloUnAcuse } from "@/core/mensajes/acuse";
 import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
 import { contestaSinHora, dichoRecien, esValorVago } from "@/core/mensajes/lo-dicho";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { firstRow, policyNumberEquals } from "@/lib/db/helpers";
 import {
+  auditLog,
   cases,
   claimAttachments,
   claimFieldConfirmations,
@@ -82,6 +84,7 @@ import {
 import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contestado";
 import { lastAskedKeys } from "@/server/confirmations/ultimo-pedido";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { MOTIVO_DEVOLVER } from "@/server/cases/devolver-al-agente";
 import { redactObject } from "@/lib/audit/redact";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
@@ -575,39 +578,43 @@ export async function orchestratePostExtraction(
      * un evento de auditoría que nunca emitió sería inventar historia.
      */
     if (!derivaSola) {
-      await setStatus(caseId, tenantId, "confirmacion_pendiente");
-
-      await messenger.send({
-        caseId,
-        tenantId,
-        to: senderEmail,
-        lastMessage: latestMessageText,
-        template: "data_confirmation_request",
-        data: {
+      if (!(await setStatus(caseId, tenantId, "confirmacion_pendiente"))) {
+        // Otra mano ya movió el caso: el pedido llegaría a un estado que ya no
+        // es el que lo generó, y el analista vería un mail sin sentido.
+        logger.warn({ case_id: caseId }, "orchestrate.confirmation_skipped_case_moved");
+      } else {
+        await messenger.send({
           caseId,
-          claimantName,
-          fields: conflictos.map((c) => ({
-            fieldKey: c.fieldKey,
-            proposedValue: c.proposedValue,
-            conflictWithValue: c.conflictWithValue,
-          })),
-          // Se deriva abajo en esta misma vuelta: el pedido no pregunta nada.
-          titularAjeno: extractedOutput.titularAjeno === true,
-        },
-        inReplyToMessageId,
-      });
-      confirmationEmailDispatched = true;
+          tenantId,
+          to: senderEmail,
+          lastMessage: latestMessageText,
+          template: "data_confirmation_request",
+          data: {
+            caseId,
+            claimantName,
+            fields: conflictos.map((c) => ({
+              fieldKey: c.fieldKey,
+              proposedValue: c.proposedValue,
+              conflictWithValue: c.conflictWithValue,
+            })),
+            // Se deriva abajo en esta misma vuelta: el pedido no pregunta nada.
+            titularAjeno: extractedOutput.titularAjeno === true,
+          },
+          inReplyToMessageId,
+        });
+        confirmationEmailDispatched = true;
 
-      await writeAuditLog({
-        tenant_id: tenantId,
-        actor_id: null,
-        event_type: AuditEvent.CONFIRMATION_REQUESTED,
-        target_type: "case",
-        target_id: caseId,
-        // Sólo las claves: el valor es dato de una persona, y el que teníamos
-        // guardado también.
-        payload: { field_keys: conflictos.map((c) => c.fieldKey), reason: "conflict" },
-      });
+        await writeAuditLog({
+          tenant_id: tenantId,
+          actor_id: null,
+          event_type: AuditEvent.CONFIRMATION_REQUESTED,
+          target_type: "case",
+          target_id: caseId,
+          // Sólo las claves: el valor es dato de una persona, y el que teníamos
+          // guardado también.
+          payload: { field_keys: conflictos.map((c) => c.fieldKey), reason: "conflict" },
+        });
+      }
     }
   }
 
@@ -874,7 +881,7 @@ export async function orchestratePostExtraction(
   // recognise what it was.
   // Una sola lectura de «cuándo hablamos» para las dos preguntas de abajo: no
   // hay ninguna escritura entre ellas. Ver `cuandoHablamosPorUltimaVez`.
-  const hablamos = await cuandoHablamosPorUltimaVez(caseId, tenantId);
+  const { hablamos, nosLoDevolvieron } = await cuandoHablamosPorUltimaVez(caseId, tenantId);
   const somethingArrived = await filesArrivedSinceWeLastSpoke(
     caseId,
     tenantId,
@@ -894,6 +901,7 @@ export async function orchestratePostExtraction(
     nosPreguntoAlgo: owesAnAnswer,
     llegoUnArchivo: somethingArrived,
     nosContestoElPedido,
+    nosLoDevolvieron,
     datosQueFaltan: askItems.fields.length,
     esGrave: derivaSola,
   } as const;
@@ -1590,7 +1598,12 @@ async function escalate(opts: {
   // Este contexto es lo único que le dice de quién son los datos.
   const tenantCtx: TenantContext = { tenantId };
 
-  await setStatus(caseId, tenantId, "requiere_especialista");
+  if (!(await setStatus(caseId, tenantId, "requiere_especialista"))) {
+    // Otra mano ya movió el caso: ni el mensaje al asegurado, ni la auditoría,
+    // ni el aviso al especialista corresponden a un traspaso que no ocurrió.
+    logger.warn({ case_id: caseId, reason: opts.reason }, "escalation.skipped_case_moved");
+    return;
+  }
 
   /*
    * Dos mensajes en la misma vuelta no pueden tirar para lados opuestos.
@@ -1808,25 +1821,52 @@ function collectConfirmableFields(
 }
 
 /** Update the case status (no FSM transition check — worker already validated). */
+/**
+ * Desde dónde el orquestador puede pisar el estado.
+ *
+ * `ESTADOS_DE_ARRANQUE` más `listo`: el worker deja el caso en `listo` antes
+ * de llamar al orquestador en la misma vuelta, así que ese estado también es
+ * «todavía del agente». Afuera de esta lista el caso ya lo tiene una persona
+ * o está cerrado, y una escritura tardía del agente lo pisaría (E2).
+ */
+const ESTADOS_QUE_PISA_EL_AGENTE = [...ESTADOS_DE_ARRANQUE, "listo"] as const;
+
+/**
+ * Cambia el estado del caso, pero sólo si todavía es del agente.
+ *
+ * Guarda atómica: si para cuando esta escritura llega el caso ya lo movió
+ * otra mano —un analista, otra vuelta del worker—, `where` no matchea
+ * ninguna fila y no se pisa nada. Devuelve si se aplicó, para que quien llama
+ * decida si lo que sigue (el mensaje, la auditoría) todavía corresponde.
+ */
 async function setStatus(
   caseId: string,
   tenantId: string,
-  status: string
-): Promise<void> {
+  status: CaseRow["status"]
+): Promise<boolean> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
-    await enTenant(tenantCtx, (db) =>
+    const filas = await enTenant(tenantCtx, (db) =>
       db
         .update(cases)
-        .set({
-          status: status as CaseRow["status"],
-          updated_at: new Date().toISOString(),
-        })
-        .where(eq(cases.id, caseId))
+        .set({ status, updated_at: new Date().toISOString() })
+        .where(
+          and(
+            eq(cases.id, caseId),
+            or(inArray(cases.status, ESTADOS_QUE_PISA_EL_AGENTE), eq(cases.status, status))
+          )
+        )
+        .returning({ id: cases.id })
     );
+    if (filas.length === 0) {
+      logger.warn({ case_id: caseId, status }, "orchestrate.status_not_applied");
+      return false;
+    }
+    return true;
   } catch (err) {
     logger.error({ code: errorCode(err), case_id: caseId }, "orchestrate.failed_to_update_case_status");
+    return false;
   }
 }
 
@@ -2012,7 +2052,7 @@ async function alreadyAskedFor(
 async function cuandoHablamosPorUltimaVez(
   caseId: string,
   tenantId: string
-): Promise<string | null> {
+): Promise<{ hablamos: string | null; nosLoDevolvieron: boolean }> {
   /*
    * Atrapa acá, y no en quien llama.
    *
@@ -2023,30 +2063,56 @@ async function cuandoHablamosPorUltimaVez(
    *
    * `null` es lo mismo que decía antes: las dos preguntas de «¿pasó algo desde
    * que hablamos?» contestan que no, y el resto sigue.
+   *
+   * En el mismo viaje va la última vez que una persona devolvió el caso al
+   * agente (E24): si fue después de lo último que dijimos, el pedido no queda
+   * en espera.
    */
   try {
-    const fila = firstRow(
-      await enTenant({ tenantId }, (db) =>
-        db
-          .select({ created_at: outboundMessages.created_at })
-          .from(outboundMessages)
-          .where(
-            and(
-              eq(outboundMessages.case_id, caseId),
-              inArray(outboundMessages.status, ["sent", "skipped_simulated"])
+    type Fecha = { created_at: string };
+    const [salidas, devoluciones] = await enTenantVarias<[Fecha[], Fecha[]]>(
+      { tenantId },
+      (db) =>
+        [
+          db
+            .select({ created_at: outboundMessages.created_at })
+            .from(outboundMessages)
+            .where(
+              and(
+                eq(outboundMessages.case_id, caseId),
+                inArray(outboundMessages.status, ["sent", "skipped_simulated"])
+              )
             )
-          )
-          .orderBy(desc(outboundMessages.created_at))
-          .limit(1)
-      )
+            .orderBy(desc(outboundMessages.created_at))
+            .limit(1),
+          db
+            .select({ created_at: auditLog.created_at })
+            .from(auditLog)
+            .where(
+              and(
+                eq(auditLog.target_type, "case"),
+                eq(auditLog.target_id, caseId),
+                eq(auditLog.event_type, AuditEvent.CASE_STATUS_CHANGED),
+                sql`${auditLog.payload}->>'reason' = ${MOTIVO_DEVOLVER}`
+              )
+            )
+            .orderBy(desc(auditLog.created_at))
+            .limit(1),
+        ]
     );
-    return fila?.created_at ?? null;
+    const hablamos = firstRow(salidas)?.created_at ?? null;
+    const devuelto = firstRow(devoluciones)?.created_at ?? null;
+    return {
+      hablamos,
+      nosLoDevolvieron:
+        devuelto !== null && (hablamos === null || Date.parse(devuelto) > Date.parse(hablamos)),
+    };
   } catch (err) {
     logger.error(
       { code: errorCode(err) },
       "orchestrate.ultimo_saliente_fallo"
     );
-    return null;
+    return { hablamos: null, nosLoDevolvieron: false };
   }
 }
 

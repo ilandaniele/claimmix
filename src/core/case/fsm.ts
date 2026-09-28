@@ -240,6 +240,19 @@ export const REAPERTURA_POR_ABANDONO = {
 } as const;
 
 /**
+ * «Devolver al agente» (E24): una persona que tomó el control lo suelta.
+ *
+ * Misma lógica que `REAPERTURA_POR_ABANDONO`: es una arista humana, Pro, que
+ * NO se agrega a `FSM_TRANSITIONS` (hoy `requiere_especialista` sólo sale a
+ * `listo_para_core`/`cerrado`; ese grafo no cambia). La guarda de verdad vive
+ * en `patchCase`.
+ */
+export const DEVOLUCION_AL_AGENTE = {
+  desde: "requiere_especialista",
+  hacia: "info_faltante",
+} as const;
+
+/**
  * Email-intake specific: returns the initial status for a new email case.
  * This is 'recibido' — the email has been received and persisted.
  */

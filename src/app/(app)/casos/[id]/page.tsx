@@ -17,7 +17,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { CASE_EDITOR_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
-import { puedeTomarElControl } from "@/core/case/tomar-el-control";
+import { puedeTomarElControl, puedeDevolverAlAgente } from "@/core/case/tomar-el-control";
 import type { TenantContext } from "@/data/scope";
 import {
   cargarDetalleDeCaso,
@@ -217,6 +217,16 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     extractionLeaseAt: caseRow.extraction_lease_at,
     ahora: new Date(),
   });
+  const puedeDevolverAlAgenteCaso = puedeDevolverAlAgente({
+    puedeCambiarEstado: puedeCambiarEstadoCaso,
+    plan: me.plan,
+    channel: caseRow.channel,
+    status: caseRow.status,
+    extractionPending: caseRow.extraction_pending,
+    extractionLeaseAt: caseRow.extraction_lease_at,
+    devolvible: acciones.devolvible,
+    ahora: new Date(),
+  });
 
   return (
     <div className="mx-auto max-w-5xl px-6 pb-8 pt-1">
@@ -325,6 +335,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             acciones={acciones}
             puedeCambiarEstado={puedeCambiarEstadoCaso}
             puedeTomarElControl={puedeTomarElControlCaso}
+            puedeDevolverAlAgente={puedeDevolverAlAgenteCaso}
           />
         </div>
       </Card>

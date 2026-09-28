@@ -55,6 +55,8 @@ const MOTIVOS_DEL_CASO: Record<string, TranslationKey> = {
   conflict: "case.detail.motivo.conflict",
   lesiones: "case.detail.motivo.lesiones",
   tomar_el_control: "case.detail.tomarElControl",
+  tope_por_remitente: "case.detail.motivo.topePorRemitente",
+  devolver_al_agente: "case.detail.devolverAlAgente",
 };
 
 const SEVERIDAD = /^severidad (high|critical)$/;

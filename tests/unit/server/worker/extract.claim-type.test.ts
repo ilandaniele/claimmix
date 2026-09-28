@@ -75,9 +75,8 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
       registerCommonMocks(caseRow, caseUpdateSpy, auditLogSpy);
 
       // Override the mock to return "robo" as claim_type.
-      vi.doMock("@/server/ai/mock-extractor", () => ({
-        runMockExtractor:      vi.fn(),
-        extractEmailClaimMock: vi.fn().mockReturnValue({
+      vi.doMock("@/server/ai/mock-extractor", () => {
+        const claimSimulado = vi.fn().mockReturnValue({
           extraction_model: "mock-email-v1",
           fields: [
             { field_key: "claim_type", field_value: "robo", confidence: 0.90, source: "ai" },
@@ -98,8 +97,15 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
           not_relevant_reason: undefined,
           summary: "",
           suggested_reply: "",
-        }),
-      }));
+        });
+        return {
+          runMockExtractor: vi.fn(),
+          extractEmailClaimMock: claimSimulado,
+          // claim-agent.ts llama denunciaSimuladaVacia (no extractEmailClaimMock)
+          // cuando el motor cae a mock; ver worker-harness.ts.
+          denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
+        };
+      });
 
       const { runEmailExtractionWorker } = await import("@/server/worker/extract");
       await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
@@ -133,9 +139,8 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
 
       registerCommonMocks(caseRow, caseUpdateSpy, auditLogSpy);
 
-      vi.doMock("@/server/ai/mock-extractor", () => ({
-        runMockExtractor:      vi.fn(),
-        extractEmailClaimMock: vi.fn().mockReturnValue({
+      vi.doMock("@/server/ai/mock-extractor", () => {
+        const claimSimulado = vi.fn().mockReturnValue({
           extraction_model: "mock-email-v1",
           fields: [
             { field_key: "claim_type", field_value: "other", confidence: 0.80, source: "ai" },
@@ -156,8 +161,13 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
           not_relevant_reason: undefined,
           summary: "",
           suggested_reply: "",
-        }),
-      }));
+        });
+        return {
+          runMockExtractor: vi.fn(),
+          extractEmailClaimMock: claimSimulado,
+          denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
+        };
+      });
 
       const { runEmailExtractionWorker } = await import("@/server/worker/extract");
 
@@ -187,9 +197,8 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
 
       registerCommonMocks(caseRow, caseUpdateSpy, auditLogSpy);
 
-      vi.doMock("@/server/ai/mock-extractor", () => ({
-        runMockExtractor:      vi.fn(),
-        extractEmailClaimMock: vi.fn().mockReturnValue({
+      vi.doMock("@/server/ai/mock-extractor", () => {
+        const claimSimulado = vi.fn().mockReturnValue({
           extraction_model: "mock-email-v1",
           fields: [
             // No claim_type field in the fields array
@@ -214,8 +223,13 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
           not_relevant_reason: undefined,
           summary: "",
           suggested_reply: "",
-        }),
-      }));
+        });
+        return {
+          runMockExtractor: vi.fn(),
+          extractEmailClaimMock: claimSimulado,
+          denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
+        };
+      });
 
       const { runEmailExtractionWorker } = await import("@/server/worker/extract");
 
@@ -246,9 +260,8 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
 
       registerCommonMocks(caseRow, caseUpdateSpy, auditLogSpy);
 
-      vi.doMock("@/server/ai/mock-extractor", () => ({
-        runMockExtractor:      vi.fn(),
-        extractEmailClaimMock: vi.fn().mockReturnValue({
+      vi.doMock("@/server/ai/mock-extractor", () => {
+        const claimSimulado = vi.fn().mockReturnValue({
           extraction_model: "mock-email-v1",
           fields: [
             { field_key: "claim_type", field_value: "choque", confidence: 0.88, source: "ai" },
@@ -269,8 +282,13 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
           not_relevant_reason: undefined,
           summary: "",
           suggested_reply: "",
-        }),
-      }));
+        });
+        return {
+          runMockExtractor: vi.fn(),
+          extractEmailClaimMock: claimSimulado,
+          denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
+        };
+      });
 
       const { runEmailExtractionWorker } = await import("@/server/worker/extract");
       await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
@@ -298,9 +316,8 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
 
       registerCommonMocks(caseRow, caseUpdateSpy, auditLogSpy);
 
-      vi.doMock("@/server/ai/mock-extractor", () => ({
-        runMockExtractor:      vi.fn(),
-        extractEmailClaimMock: vi.fn().mockReturnValue({
+      vi.doMock("@/server/ai/mock-extractor", () => {
+        const claimSimulado = vi.fn().mockReturnValue({
           extraction_model: "mock-email-v1",
           fields: [
             { field_key: "claim_type", field_value: "invalid_type", confidence: 0.50, source: "ai" },
@@ -321,8 +338,13 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
           not_relevant_reason: undefined,
           summary: "",
           suggested_reply: "",
-        }),
-      }));
+        });
+        return {
+          runMockExtractor: vi.fn(),
+          extractEmailClaimMock: claimSimulado,
+          denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
+        };
+      });
 
       const { runEmailExtractionWorker } = await import("@/server/worker/extract");
 

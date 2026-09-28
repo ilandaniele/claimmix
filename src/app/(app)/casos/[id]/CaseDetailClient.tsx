@@ -40,6 +40,8 @@ interface CaseDetailClientProps {
   puedeCambiarEstado: boolean;
   /** D-F2. Sin esto no se muestra «Tomar el control». */
   puedeTomarElControl: boolean;
+  /** E24. Sin esto no se muestra «Devolver al agente». */
+  puedeDevolverAlAgente: boolean;
 }
 
 type Aviso = [TranslationKey, "success" | "info"];
@@ -54,6 +56,7 @@ export function CaseDetailClient({
   acciones,
   puedeCambiarEstado,
   puedeTomarElControl,
+  puedeDevolverAlAgente,
 }: CaseDetailClientProps) {
   const t = useT();
   const router = useRouter();
@@ -62,12 +65,13 @@ export function CaseDetailClient({
   const [showClose, setShowClose] = useState(false);
   const [showEscalate, setShowEscalate] = useState(false);
   const [showTomarElControl, setShowTomarElControl] = useState(false);
+  const [showDevolver, setShowDevolver] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   const [reAnalyzing, setReAnalyzing] = useState(false);
   const [marcando, setMarcando] = useState(false);
   const [reenviando, setReenviando] = useState(false);
 
-  const dialogOpen = showClose || showEscalate || showTomarElControl || transitioning;
+  const dialogOpen = showClose || showEscalate || showTomarElControl || showDevolver || transitioning;
 
   // Las acciones directas hacen lo mismo: pedir, avisar y refrescar. Cambian
   // la ruta, el aviso y qué error se reconoce.
@@ -123,6 +127,20 @@ export function CaseDetailClient({
       { 409: "close.errorFsm" }
     );
 
+  // E24: el espejo de «Tomar el control» — mismo PATCH, discriminado por `reason`.
+  const handleDevolverAlAgente = () =>
+    accion(
+      setTransitioning,
+      `/api/cases/${caseId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "info_faltante", reason: "devolver_al_agente" }),
+      },
+      () => ["case.detail.statusUpdated", "success"],
+      { 409: "close.errorFsm", 403: "error.generic" }
+    );
+
   const confirmarListo = (cuerpo: Record<string, unknown>) =>
     accion(setTransitioning, `/api/cases/${caseId}`,
       { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) },
@@ -136,7 +154,7 @@ export function CaseDetailClient({
       `/api/cases/${caseId}/re-analyze`,
       { method: "POST" },
       () => ["case.detail.reAnalyzeStarted", "success"],
-      { 429: "case.detail.reAnalyzeRateLimit" }
+      { 429: "case.detail.reAnalyzeRateLimit", 409: "close.errorFsm" }
     );
 
   // Si entró algo después de `vistoEn`, el caso sigue marcado: se refresca para
@@ -231,6 +249,8 @@ export function CaseDetailClient({
           reenviando={reenviando}
           puedeTomarElControl={puedeTomarElControl}
           onTomarElControl={() => setShowTomarElControl(true)}
+          puedeDevolverAlAgente={puedeDevolverAlAgente}
+          onDevolverAlAgente={() => setShowDevolver(true)}
         />
       </div>
 
@@ -266,6 +286,15 @@ export function CaseDetailClient({
         <TomarElControlDialog
           onClose={() => setShowTomarElControl(false)}
           onConfirm={handleTomarElControl}
+        />
+      )}
+
+      {/* Devolver al agente dialog (E24) */}
+      {showDevolver && (
+        <TomarElControlDialog
+          variante="devolver"
+          onClose={() => setShowDevolver(false)}
+          onConfirm={handleDevolverAlAgente}
         />
       )}
 

@@ -39,7 +39,9 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 - **AI:** Gemini `gemini-2.5-flash` **via Vertex AI** (`GEMINI_TRANSPORT=vertex`),
   `MOCK_AI=true` para local. **No hay fallback de OpenAI**: el extractor se borró
   y `OPENAI_API_KEY` no se lee en ningún archivo. El selector real es
-  `resolverAiMode` (`MOCK_AI`, `AI_MOCK`, o Gemini sin configurar).
+  `resolverAiMode` (`MOCK_AI`, `AI_MOCK`, o Gemini sin configurar). En modo
+  mock la denuncia queda vacía y en `requiere_especialista`: no se inventan
+  datos (E16).
 
 ## Cómo probar que todo anda
 
@@ -3794,6 +3796,10 @@ tope de 310 kB de `pnpm peso` no se tocó.
   existentes: el cierre de la ventana de 24 h de WhatsApp y el cierre por
   abandono. Todos los roles la ven; quien no puede ver datos del cliente ve
   el titular tapado.
+- «Devolver al agente» (E24) es el botón espejo: sólo aparece en un caso
+  tomado con «Tomar el control» y lo suelta a `info_faltante` para que el
+  agente retome. Mismo Plan Pro, mismo canal WhatsApp, guarda en `patchCase`
+  — no es una arista nueva en `FSM_TRANSITIONS` (ver ADR 0003).
 - El resumen diario por mail quedó sólo explicado en el informe, sin
   construir.
 
@@ -3805,8 +3811,10 @@ tope de 310 kB de `pnpm peso` no se tocó.
   remitentes (`sender_profile`, con nombre y DNI) y, en modo `full`, los
   argumentos de las herramientas en la auditoría. Es el modo en claro para
   un administrador; tacharlo es aplicar el mismo helper a esas filas.
-- Un analista confirma o marca «Revisado» sólo en casos asignados, y la
-  entrada real no asigna. Cambiarlo es una línea en `puedeCambiarEstado`.
+- ~~Un analista confirma o marca «Revisado» sólo en casos asignados, y la
+  entrada real no asigna~~. Resuelto (E3): un analista actúa sobre uno suyo o
+  sin asignar, nunca sobre uno de otro analista; misma regla en PATCH y en
+  re-análisis (`puedeCambiarEstado`, decisión 27/09).
 - «Reabrir y reenviar» queda deshabilitado para WhatsApp hasta que haya una
   plantilla aprobada por Meta: el barrido cierra a los 14 días, fuera de la
   ventana. Los casos de mail funcionan.

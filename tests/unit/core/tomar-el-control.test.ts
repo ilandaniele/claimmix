@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { puedeTomarElControl } from "@/core/case/tomar-el-control";
+import { puedeTomarElControl, puedeDevolverAlAgente } from "@/core/case/tomar-el-control";
 import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 
 const AHORA = new Date("2026-09-27T12:00:00.000Z");
@@ -66,5 +66,51 @@ describe("puedeTomarElControl", () => {
   it("da true con una reserva ya vencida", () => {
     const vencida = new Date(AHORA.getTime() - RESERVA_DE_EXTRACCION_MS - 1_000).toISOString();
     expect(puedeTomarElControl({ ...CASO_OK, extractionLeaseAt: vencida })).toBe(true);
+  });
+});
+
+describe("puedeDevolverAlAgente", () => {
+  const CASO_DEVOLVIBLE = {
+    puedeCambiarEstado: true,
+    plan: "profesional",
+    channel: "whatsapp",
+    status: "requiere_especialista",
+    extractionPending: false,
+    extractionLeaseAt: null,
+    devolvible: true,
+    ahora: AHORA,
+  };
+
+  it("da true cuando todas las condiciones se cumplen", () => {
+    expect(puedeDevolverAlAgente(CASO_DEVOLVIBLE)).toBe(true);
+  });
+
+  it("da false sin permiso para cambiar el estado", () => {
+    expect(puedeDevolverAlAgente({ ...CASO_DEVOLVIBLE, puedeCambiarEstado: false })).toBe(false);
+  });
+
+  it("da false por mail (no es un canal de WhatsApp)", () => {
+    expect(puedeDevolverAlAgente({ ...CASO_DEVOLVIBLE, channel: "email" })).toBe(false);
+  });
+
+  it("da false con un plan que no es Pro", () => {
+    expect(puedeDevolverAlAgente({ ...CASO_DEVOLVIBLE, plan: "piloto" })).toBe(false);
+  });
+
+  it("da false fuera de requiere_especialista", () => {
+    expect(puedeDevolverAlAgente({ ...CASO_DEVOLVIBLE, status: "info_faltante" })).toBe(false);
+  });
+
+  it("da false con una corrida pendiente", () => {
+    expect(puedeDevolverAlAgente({ ...CASO_DEVOLVIBLE, extractionPending: true })).toBe(false);
+  });
+
+  it("da false con la reserva todavía viva", () => {
+    const haceUnMinuto = new Date(AHORA.getTime() - 60_000).toISOString();
+    expect(puedeDevolverAlAgente({ ...CASO_DEVOLVIBLE, extractionLeaseAt: haceUnMinuto })).toBe(false);
+  });
+
+  it("da false si el último movimiento no fue tomar el control", () => {
+    expect(puedeDevolverAlAgente({ ...CASO_DEVOLVIBLE, devolvible: false })).toBe(false);
   });
 });

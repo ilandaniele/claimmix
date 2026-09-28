@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { resolveBillingPeriod } from "@/lib/billing/period";
+import { resolveBillingPeriod, periodoAntesDelAlta } from "@/lib/billing/period";
 
 describe("resolveBillingPeriod", () => {
   it("resolves an ordinary month to its exact UTC bounds", () => {
@@ -100,5 +100,35 @@ describe("resolveBillingPeriod", () => {
     // The label is what ends up on the invoice, so it must be normalised.
     expect(resolveBillingPeriod("2026-01")!.month).toBe("2026-01");
     expect(resolveBillingPeriod("2026-09")!.month).toBe("2026-09");
+  });
+});
+
+describe("periodoAntesDelAlta", () => {
+  it("el límite: alta justo al empezar el mes siguiente excluye el período", () => {
+    expect(
+      periodoAntesDelAlta(resolveBillingPeriod("2026-03")!, "2026-04-01T00:00:00.000Z")
+    ).toBe(true);
+  });
+
+  it("acepta la forma de texto de Postgres", () => {
+    expect(
+      periodoAntesDelAlta(resolveBillingPeriod("2026-03")!, "2026-04-01 00:00:00+00")
+    ).toBe(true);
+  });
+
+  it("un alta durante el mes no lo excluye", () => {
+    expect(
+      periodoAntesDelAlta(resolveBillingPeriod("2026-03")!, "2026-03-15T10:00:00.000Z")
+    ).toBe(false);
+  });
+
+  it("un alta muy anterior no lo excluye", () => {
+    expect(
+      periodoAntesDelAlta(resolveBillingPeriod("2026-03")!, "2026-01-01T00:00:00.000Z")
+    ).toBe(false);
+  });
+
+  it("una fecha que no se puede leer no lo excluye", () => {
+    expect(periodoAntesDelAlta(resolveBillingPeriod("2026-03")!, "no es fecha")).toBe(false);
   });
 });

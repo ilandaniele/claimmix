@@ -48,19 +48,18 @@ function baseQueDevuelve(total: number, marcar?: () => void) {
   };
 }
 
-vi.mock("@/data/scope", () => ({
-  // Una base DISTINTA de la cruda: la acotada al inquilino.
-  enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-    Promise.resolve(
-      armar(
-        baseQueDevuelve(GASTO_DE_UN_INQUILINO, () => {
-          porInquilino.usada = true;
-        })
-      )
-    ),
-  enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-    Promise.all(armar(baseQueDevuelve(GASTO_DE_UN_INQUILINO))),
-}));
+vi.mock("@/data/scope", async () => {
+  const { puenteDeAlcance } = await import("../mocks/puente-de-alcance");
+  return {
+    // Una base DISTINTA de la cruda: la acotada al inquilino.
+    enTenant: puenteDeAlcance(() =>
+      baseQueDevuelve(GASTO_DE_UN_INQUILINO, () => {
+        porInquilino.usada = true;
+      })
+    ).enTenant,
+    enTenantVarias: puenteDeAlcance(() => baseQueDevuelve(GASTO_DE_UN_INQUILINO)).enTenantVarias,
+  };
+});
 
 vi.mock("@/lib/db", () => ({
   db: baseQueDevuelve(GASTO_DEL_PROYECTO),

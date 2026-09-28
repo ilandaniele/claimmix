@@ -156,7 +156,7 @@ function tieneMontoInventado(resumen: string, d: DetalleDelCaso): boolean {
  * respeta `IntencionSchema` —la letra del modelo, no la infraestructura— cae
  * en "ninguna".
  */
-async function clasificarIntencion(tenantId: string, pregunta: string): Promise<Intencion> {
+async function clasificarIntencion(tenantId: string, userId: string, pregunta: string): Promise<Intencion> {
   const mensaje = `<pregunta_del_usuario>${sinCentinelas(pregunta)}</pregunta_del_usuario>`;
 
   let text: string | null;
@@ -168,7 +168,7 @@ async function clasificarIntencion(tenantId: string, pregunta: string): Promise<
     throw new AppError("IA_NO_DISPONIBLE");
   }
 
-  await registrarConsumoDelModelo(tenantId, model, usage);
+  await registrarConsumoDelModelo(tenantId, model, usage, userId);
   if (!text) return { herramienta: "ninguna" };
 
   try {
@@ -180,12 +180,12 @@ async function clasificarIntencion(tenantId: string, pregunta: string): Promise<
 }
 
 /** El resumen de un único caso. Valida la salida del modelo antes de confiar en ella. */
-async function resumenDelCaso(tenantId: string, detalle: DetalleDelCaso): Promise<string> {
+async function resumenDelCaso(tenantId: string, userId: string, detalle: DetalleDelCaso): Promise<string> {
   const prefijo = resumenDeterministico(detalle);
   try {
     const datos = `<datos_del_caso>${sinCentinelas(JSON.stringify(detalle))}</datos_del_caso>`;
     const { text, usage, model } = await callGemini(PROMPT_RESUMEN, datos);
-    await registrarConsumoDelModelo(tenantId, model, usage);
+    await registrarConsumoDelModelo(tenantId, model, usage, userId);
 
     if (text) {
       const parsed = JSON.parse(text) as { resumen?: unknown };
@@ -223,7 +223,7 @@ export async function responderPregunta(
   const presupuesto = await checkBudget(tenantId, ctx.user.id);
   if (presupuesto.exceeded) throw new AppError("AI_BUDGET_EXCEEDED", presupuesto.reason);
 
-  const intencion = await clasificarIntencion(tenantId, pregunta);
+  const intencion = await clasificarIntencion(tenantId, ctx.user.id, pregunta);
 
   let respuesta: RespuestaDelAsistente;
 
@@ -242,7 +242,7 @@ export async function responderPregunta(
       const unSoloCaso = resultado.coincidencias.length === 1 && resultado.detalle;
       respuesta = {
         texto: unSoloCaso
-          ? await resumenDelCaso(tenantId, resultado.detalle!)
+          ? await resumenDelCaso(tenantId, ctx.user.id, resultado.detalle!)
           : textoDeBusqueda(resultado.coincidencias.length, resultado.hayMas),
         herramienta: "buscar_caso",
         casos: resultado.coincidencias,

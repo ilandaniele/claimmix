@@ -18,7 +18,7 @@
  */
 
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import {
   enTenant,
@@ -33,6 +33,7 @@ import { logger } from "@/lib/observability/logger";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { ejemploSinDatosDeLaPersona } from "./sin-datos-de-la-persona";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
+import { CANALES_DE_EJEMPLO } from "./dataset";
 
 // ── Few-shot retrieval (immediate learning layer) ─────────────────────────────
 
@@ -75,14 +76,22 @@ export function consultasDeEjemplos(db: ClienteDatos, claimType?: string | null)
   const delTipo = db
     .select(columnas)
     .from(t)
-    .where(and(eq(t.status, "approved"), eq(t.claim_type, claimType ?? "")))
+    .innerJoin(tables.cases, eq(tables.cases.id, t.case_id))
+    .where(
+      and(
+        eq(t.status, "approved"),
+        eq(t.claim_type, claimType ?? ""),
+        inArray(tables.cases.channel, [...CANALES_DE_EJEMPLO])
+      )
+    )
     .orderBy(desc(t.approved_at))
     .limit(MAX_EXAMPLES);
 
   const relleno = db
     .select(columnas)
     .from(t)
-    .where(eq(t.status, "approved"))
+    .innerJoin(tables.cases, eq(tables.cases.id, t.case_id))
+    .where(and(eq(t.status, "approved"), inArray(tables.cases.channel, [...CANALES_DE_EJEMPLO])))
     .orderBy(desc(t.approved_at))
     .limit(MAX_EXAMPLES * 2);
 
@@ -208,7 +217,13 @@ export type ApproveResult =
   | { ok: true; exampleId: string }
   | {
       ok: false;
-      reason: "run_not_found" | "duplicate" | "unsafe_run" | "insert_failed";
+      reason:
+        | "run_not_found"
+        | "duplicate"
+        | "unsafe_run"
+        | "insert_failed"
+        | "gmail_limited_use"
+        | "channel_unknown";
     };
 
 export interface ApproveTrainingExampleParams {
@@ -341,13 +356,43 @@ export async function approveTrainingExample(
     }
   }
 
+  // Fail-closed: un run sin caso, o una consulta de caso que falló, no sabe
+  // por qué canal llegó — y sin saberlo no se puede afirmar que no es Gmail.
+  if (!channel) {
+    await writeAuditLog({
+      tenant_id: tenantId,
+      actor_id: approvedBy,
+      event_type: AuditEvent.TRAINING_EXAMPLE_REJECTED,
+      target_type: "case",
+      target_id: run.case_id,
+      payload: { agent_run_id: agentRunId, reason: "channel_unknown" },
+    });
+    return { ok: false, reason: "channel_unknown" };
+  }
+
+  // Gmail Limited Use: un caso real llegado por Gmail nunca es ejemplo de
+  // referencia.
+  if (!(CANALES_DE_EJEMPLO as readonly string[]).includes(channel)) {
+    await writeAuditLog({
+      tenant_id: tenantId,
+      actor_id: approvedBy,
+      event_type: AuditEvent.TRAINING_EXAMPLE_REJECTED,
+      target_type: "case",
+      target_id: run.case_id,
+      payload: { agent_run_id: agentRunId, reason: "gmail_limited_use" },
+    });
+    return { ok: false, reason: "gmail_limited_use" };
+  }
+
   const expectedOutput = {
     agent_output: run.output_payload ?? {},
     confirmed_fields: confirmedFields,
   };
 
   // Simulado: se guarda tal cual, para que el conjunto de fine-tuning siga
-  // siendo realista (A-22). Real: se tacha nombre y DNI antes de guardar.
+  // siendo realista (A-22). El único canal real que llega hasta acá es
+  // whatsapp (Gmail Limited Use ya rechazó email arriba): se tacha nombre y
+  // DNI antes de guardar.
   const esSimulado = channel === "email_sim" || channel === "whatsapp_sim";
   const paraGuardar = esSimulado
     ? { input_payload: run.input_payload ?? {}, expected_output: expectedOutput }

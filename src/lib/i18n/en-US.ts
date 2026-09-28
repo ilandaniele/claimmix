@@ -282,9 +282,15 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Tomar el control (D-F2) ──────────────────────────────────────────────────
   "case.detail.tomarElControl": "Take over",
   "tomarElControl.title": "Take over the case",
-  "tomarElControl.description": "The agent stops answering this case, which moves to requires specialist. This is a one-way step: it cannot be undone.",
+  "tomarElControl.description": "From now on you answer on WhatsApp; the agent stops writing in this case. On Pro plans you can hand it back later.",
   "tomarElControl.confirm": "Take over",
   "tomarElControl.cancel": "Cancel",
+
+  // ── Hand back to the agent (E24) ───────────────────────────────────────────
+  "case.detail.devolverAlAgente": "Hand back to the agent",
+  "devolverAlAgente.title": "Hand the case back to the agent?",
+  "devolverAlAgente.description": "The agent answers on WhatsApp again from the next message. What you wrote stays in the history.",
+  "devolverAlAgente.confirm": "Hand back",
 
   // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
   "reenvio.boton": "Resend request",
@@ -295,6 +301,7 @@ export const enUS: Record<TranslationKey, string> = {
   "reenvio.motivo.estado": "The case is not waiting for an answer",
   "reenvio.motivo.sin_destinatario": "No recipient on file",
   "reenvio.motivo.ventana_cerrada": "More than 24 h since their last WhatsApp message",
+  "reenvio.motivo.plantilla_sin_aprobar": "The template to write after 24 h is not approved by Meta yet",
   "reenvio.motivo.nada_pendiente": "Nothing left to ask for",
   "reenvio.motivo.reciente": "Asked less than 10 minutes ago",
   "reenvio.motivo.cierre_no_es_abandono": "Closed by a team member: it cannot be reopened here",
@@ -365,17 +372,25 @@ export const enUS: Record<TranslationKey, string> = {
   "admin.users.title": "Analyst management",
   "admin.users.invite": "Invite analyst",
   "configuracion.title": "Settings",
-  "configuracion.subtitle": "Environment variables (read-only)",
-  "configuracion.agentTraining.title": "Agent training",
-  "configuracion.agentTraining.label": "Instructions and examples for the agent",
-  "configuracion.agentTraining.enabled": "Active in production",
-  "configuracion.agentTraining.helper": "Injected into the email agent prompt for future extractions. It does not re-process previous cases.",
-  "configuracion.agentTraining.save": "Save training",
-  "configuracion.agentTraining.saving": "Saving...",
-  "configuracion.agentTraining.saved": "Training saved. The agent will use it in production on the next analysis.",
-  "configuracion.agentTraining.loadError": "Could not load agent training.",
-  "configuracion.agentTraining.saveError": "Could not save agent training.",
-  "configuracion.agentTraining.placeholder": "Example guidance:\n- For emails with \"Datos del asegurado\", extract Nombre completo as full_name and Numero de poliza as policy_number with high confidence.\n- If \"Documentacion adjunta\" lists photos, license, or police report, mark those document fields as present.\n- For a two-car crash with plates and no injuries, severity should usually be medium.\n- Only ask for confirmation when a value is ambiguous or conflicts with stored customer/policy data.",
+  "configuracion.subtitle": "Account preferences and system settings",
+
+  // ── Configuración — account, AI thresholds, system and alerts (E10) ─
+  "configuracion.cuenta": "Account",
+  "configuracion.umbrales": "AI thresholds",
+  "configuracion.umbralConfianza": "Confidence threshold",
+  "configuracion.umbralAyuda": "(set via the CONFIDENCE_THRESHOLD variable)",
+  "configuracion.capMensual": "Monthly AI cap",
+  "configuracion.capAyuda": "(set in the deployment plan)",
+  "configuracion.soloAdmins": "Only administrators can change the AI thresholds.",
+  "configuracion.miClave": "My AI key",
+  "configuracion.sistema": "System information",
+  "configuracion.version": "App version",
+  "configuracion.node": "Node.js version",
+  "configuracion.region": "Deployment region",
+  "configuracion.alertas.titulo": "Urgent case alerts",
+  "configuracion.alertas.ayuda": "One address per line, up to 10. Leave it empty to keep the current behaviour.",
+  "configuracion.alertas.guardadas": "List saved.",
+  "configuracion.alertas.error": "Could not save the list.",
 
   // ── Health ─────────────────────────────────────────────────────────────────
   "health.ok": "ok",
@@ -493,6 +508,7 @@ export const enUS: Record<TranslationKey, string> = {
   "case.detail.motivo.conflict": "A value does not match what we had",
   "case.detail.motivo.severidad": "Severity: {nivel}",
   "case.detail.motivo.lesiones": "Injuries or health data mentioned",
+  "case.detail.motivo.topePorRemitente": "More than 20 messages in 10 minutes from the same number: stored, not read.",
 
   // ── Why an attachment was not stored ───────────────────────────────────────
   // These lead with the CAUSE because they are read in two places: the amber
@@ -719,6 +735,7 @@ export const enUS: Record<TranslationKey, string> = {
   // ── Facturacion — la liquidacion del mes de una aseguradora ───────
   "facturacion.aFacturar": "Charges",
   "facturacion.abonoPlan": "{n} plan fee",
+  "facturacion.antesDelAlta": "This month is before the account was created: nothing is billed.",
   "facturacion.bucket.facturables": "Billable",
   "facturacion.bucket.mensajesEnTotal": "Total messages",
   "facturacion.bucket.noEranDenuncias": "Not claims",
@@ -757,6 +774,8 @@ export const enUS: Record<TranslationKey, string> = {
   "metricas.actividad.whatsapps": "WhatsApps handled",
   "metricas.actividad.mails": "Emails handled",
   "metricas.actividad.nota": "Real WhatsApp and email only, no simulations. A claim opened is a case confirmed as a claim, so there can be fewer than the month's total.",
+  "metricas.ayer.titulo": "Yesterday's summary",
+  "metricas.ayer.ahora": "Pending now",
   "metricas.card.completitudAuto": "Auto-completion rate",
   "metricas.card.escalados": "Escalated claims",
   "metricas.card.primeraRespuesta": "Average time to first response",
@@ -864,6 +883,8 @@ export const enUS: Record<TranslationKey, string> = {
 
   // ── El shell — lo poco que el layout dice por sí mismo ────────────
   "layout.nombreFallback": "Analyst",
+  "toast.cerrar": "Close notification",
+  "toast.region": "Notifications",
 
 
   // ── Ejemplos aprobados — la solapa de la consola del agente ───────
@@ -1080,6 +1101,7 @@ export const enUS: Record<TranslationKey, string> = {
   "ft.titulo": "Agent training",
   "ft.vertex.activarModelo": "Activate model",
   "ft.vertex.activoDesde": "Active since {f}",
+  "ft.vertex.aprobar": "Approve evaluation",
   "ft.vertex.cancelar": "Cancel",
   "ft.vertex.cargando": "Loading Vertex AI…",
   "ft.vertex.confirmar": "Confirm",
@@ -1088,6 +1110,7 @@ export const enUS: Record<TranslationKey, string> = {
   "ft.vertex.crearBorrador": "Create draft",
   "ft.vertex.deshabilitado": "Vertex AI is not enabled. Set the environment variables on the server to turn it on.",
   "ft.vertex.errorActivar": "The model could not be activated.",
+  "ft.vertex.errorAprobar": "The decision could not be saved.",
   "ft.vertex.errorBorrador": "The draft could not be created.",
   "ft.vertex.errorIniciar": "The job could not be started.",
   "ft.vertex.errorSincronizar": "Sync failed.",
@@ -1098,6 +1121,7 @@ export const enUS: Record<TranslationKey, string> = {
   "ft.vertex.modeloBase": "Base model:",
   "ft.vertex.precio": "and GCP configuration. Estimated price: $0.008 per 1,000 training tokens.",
   "ft.vertex.proyecto": "Project:",
+  "ft.vertex.rechazar": "Reject",
   "ft.vertex.region": "Region:",
   "ft.vertex.requiere": "Real training through Google Cloud. Requires",
   "ft.vertex.sinTrabajos": "No Vertex AI jobs.",

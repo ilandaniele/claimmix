@@ -11,11 +11,12 @@
  */
 
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 
 import { esPlanPro } from "@/core/billing/plan-pro";
 import { getSessionContext } from "@/lib/auth/session";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
-import { getUserRow, type UserRow } from "@/lib/auth/user-row";
+import { getUserRowOrThrow, type UserRow } from "@/lib/auth/user-row";
 import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
 import { AsistenteFlotante } from "./_components/AsistenteFlotante";
@@ -36,9 +37,19 @@ export default async function AppLayout({
   // Direct lookup by PK — graceful null handling: a missing/failed profile row
   // must never crash the shell (falls back to session email / defaults).
   let userRow: UserRow | null = null;
-  // La misma fila que despues pide la pagina: `getUserRow` la dedupe por
-  // pedido, asi que entre el layout y la pagina la base la entrega una vez.
-  if (user?.id) userRow = await getUserRow(user.id);
+  // La misma fila que despues pide la pagina: `getUserRowOrThrow` la dedupe
+  // por pedido, asi que entre el layout y la pagina la base la entrega una vez.
+  let filaLeida = false;
+  if (user?.id) {
+    try {
+      userRow = await getUserRowOrThrow(user.id);
+      filaLeida = true;
+    } catch {
+      // La base no respondió: el shell sigue con valores por defecto, como antes.
+    }
+  }
+  // Sesión sin fila de `users`: cuenta creada sin acceso. Fuera del try.
+  if (filaLeida && !userRow) redirect("/pendiente");
 
   // El nombre en el idioma del usuario, así que se resuelve DESPUÉS del
   // locale — ver más abajo, donde la preferencia de la cuenta le gana a la

@@ -17,15 +17,7 @@
 // Se lee `mod.db` en CADA llamada y no se desestructura: hay tests que
 // intercambian la base simulada entre casos, y un `const { db } = ...`
 // congelaría el valor de la primera.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/lib/db", () => ({
   db: { insert: vi.fn(), update: vi.fn() },
@@ -48,6 +40,8 @@ vi.mock("@/lib/observability/logger", () => ({
 
 vi.mock("@/server/whatsapp/cloud-api", () => ({
   sendWhatsAppText: vi.fn(),
+  sendWhatsAppTemplate: vi.fn(),
+  olvidarEstadoDePlantilla: vi.fn(),
 }));
 
 vi.mock("@/server/email/dispatch", () => ({
@@ -68,7 +62,7 @@ import {
   emailMessenger,
 } from "@/server/confirmations/messenger";
 import { db } from "@/lib/db";
-import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
+import { sendWhatsAppText, sendWhatsAppTemplate, olvidarEstadoDePlantilla } from "@/server/whatsapp/cloud-api";
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { CUIDADO, diceCuidado, hablaDeLaSalud } from "@/core/mensajes/derivacion";
@@ -79,6 +73,7 @@ import {
   mencionaElTraspaso,
 } from "@/core/mensajes/traspaso";
 import { pideAlgo } from "../../scripts/lib/pide-algo.mjs";
+import { PLANTILLA_REABRIR, textoDeReabrir } from "@/core/mensajes/reabrir-denuncia";
 import type { EmailTemplate } from "@/server/email/render";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
@@ -117,6 +112,7 @@ beforeEach(() => {
     }),
   });
   (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+  (sendWhatsAppTemplate as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
 });
 
 function sentBody(): string {
@@ -1086,5 +1082,60 @@ describe("whatsappMessenger — después del traspaso", () => {
     redacta(redactado);
     await send("specialist_escalation", { caseId: CASE, severity: "high" });
     expect(sentBody()).not.toContain(NO_HACE_FALTA_CONTESTAR);
+  });
+});
+
+/*
+ * Fuera de la ventana de 24 h con la plantilla aprobada: el orquestador ya
+ * decidió `porPlantilla`, así que acá no hay piso ni redactor — Meta sólo
+ * deja mandar el cuerpo exacto que aprobó.
+ */
+describe("whatsappMessenger — reabrir con plantilla", () => {
+  it("manda sendWhatsAppTemplate con la plantilla, el idioma y los dos parámetros", async () => {
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: ["policy_number"],
+      porPlantilla: true,
+    });
+
+    expect(sendWhatsAppTemplate).toHaveBeenCalledWith(
+      TO,
+      PLANTILLA_REABRIR.nombre,
+      PLANTILLA_REABRIR.idioma,
+      [CASE, "Número de póliza"]
+    );
+  });
+
+  it("no llama a sendWhatsAppText ni al redactor", async () => {
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: ["policy_number"],
+      porPlantilla: true,
+    });
+
+    expect(sendWhatsAppText).not.toHaveBeenCalled();
+    expect(callGemini).not.toHaveBeenCalled();
+  });
+
+  it("la fila del libro guarda el cuerpo ya completado con los datos", async () => {
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: ["policy_number"],
+      porPlantilla: true,
+    });
+
+    expect(inserted[0]?.rendered_body).toBe(textoDeReabrir([CASE, "Número de póliza"]));
+  });
+
+  it("un envío fallido olvida el estado cacheado de la plantilla", async () => {
+    (sendWhatsAppTemplate as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false });
+
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: ["policy_number"],
+      porPlantilla: true,
+    });
+
+    expect(olvidarEstadoDePlantilla).toHaveBeenCalledTimes(1);
   });
 });

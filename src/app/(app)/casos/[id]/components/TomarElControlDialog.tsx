@@ -1,5 +1,6 @@
 /**
- * TomarElControlDialog — confirmación simple para «tomar el control» (D-F2).
+ * TomarElControlDialog — confirmación simple para «tomar el control» (D-F2)
+ * y, con `variante="devolver"`, para su espejo «devolver al agente» (E24).
  *
  * Sólo avisa que es un paso de un solo sentido; no pide escribir nada. El
  * PATCH lo manda `onConfirm`, que en `CaseDetailClient` es el mismo `accion()`
@@ -14,15 +15,18 @@ import { useDialogoModal } from "../../../_components/dialogo-modal";
 import { useT } from "@/lib/i18n/LocaleContext";
 
 interface TomarElControlDialogProps {
+  variante?: "tomar" | "devolver";
   onClose: () => void;
   onConfirm: () => void;
 }
 
-export function TomarElControlDialog({ onClose, onConfirm }: TomarElControlDialogProps) {
+export function TomarElControlDialog({ variante = "tomar", onClose, onConfirm }: TomarElControlDialogProps) {
   const t = useT();
   const dialogRef = useDialogoModal<HTMLDivElement>(onClose);
   const titleId = useId();
   const descId = useId();
+  const esDevolver = variante === "devolver";
+  const testid = esDevolver ? "devolver-al-agente-confirm-button" : "tomar-el-control-confirm-button";
 
   function handleConfirm() {
     onConfirm();
@@ -45,10 +49,10 @@ export function TomarElControlDialog({ onClose, onConfirm }: TomarElControlDialo
         className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
       >
         <h2 id={titleId} className="text-base font-semibold text-slate-900 mb-2">
-          {t("tomarElControl.title")}
+          {esDevolver ? t("devolverAlAgente.title") : t("tomarElControl.title")}
         </h2>
         <p id={descId} className="text-sm text-slate-600 mb-6">
-          {t("tomarElControl.description")}
+          {esDevolver ? t("devolverAlAgente.description") : t("tomarElControl.description")}
         </p>
 
         <div className="flex justify-end gap-3">
@@ -62,10 +66,10 @@ export function TomarElControlDialog({ onClose, onConfirm }: TomarElControlDialo
           <button
             type="button"
             onClick={handleConfirm}
-            data-testid="tomar-el-control-confirm-button"
+            data-testid={testid}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
           >
-            {t("tomarElControl.confirm")}
+            {esDevolver ? t("devolverAlAgente.confirm") : t("tomarElControl.confirm")}
           </button>
         </div>
       </div>

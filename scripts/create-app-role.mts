@@ -97,7 +97,14 @@ try {
   ]) {
     await cx.query(sql);
   }
-  ok("lectura, escritura, secuencias y funciones — más los permisos por omisión");
+
+  // Lo único que el rol NO puede: reescribir la auditoría (migración 0032).
+  // Va después del GRANT ON ALL TABLES, que lo volvería a conceder.
+  // En una base todavía sin migrar la tabla no existe: no hay nada que sacar.
+  await cx.query(
+    `DO $$ BEGIN IF to_regclass('public.audit_log') IS NOT NULL THEN REVOKE UPDATE, DELETE ON public.audit_log FROM ${ROL}; END IF; END $$`,
+  );
+  ok("lectura, escritura, secuencias y funciones — más los permisos por omisión; audit_log sólo de alta");
 
   // ── Comprobación de atributos ─────────────────────────────────────────────
   paso("Comprobación");

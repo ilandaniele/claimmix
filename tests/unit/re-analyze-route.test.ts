@@ -45,15 +45,7 @@ const {
 // Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
 // eso se verifica en tests/unit/data-scope-sin-rol.test.ts y, contra bases de
 // verdad, en `pnpm capa-datos` y `pnpm tenancy`.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("server-only", () => ({}));
 
@@ -161,7 +153,7 @@ describe("POST /api/cases/:id/re-analyze", () => {
 
     // db.select returns a case in "listo_para_core" status by default
     mockDb.select.mockReturnValue(
-      makeSelectChain([{ id: CASE_ID, status: "listo_para_core" }])
+      makeSelectChain([{ id: CASE_ID, status: "listo_para_core", assigned_to: null, extraction_lease_at: null, extraction_pending: false }])
     );
 
     // db.update succeeds
@@ -226,7 +218,7 @@ describe("POST /api/cases/:id/re-analyze", () => {
 
   it("re-analyzes an escalated case after resetting it to procesando", async () => {
     mockDb.select.mockReturnValue(
-      makeSelectChain([{ id: CASE_ID, status: "escalado" }])
+      makeSelectChain([{ id: CASE_ID, status: "escalado", assigned_to: null, extraction_lease_at: null, extraction_pending: false }])
     );
 
     const res = await POST(makeRequest(), {
@@ -267,7 +259,7 @@ describe("POST /api/cases/:id/re-analyze", () => {
 
   it("does not re-analyze a case already sent to core, and does not update", async () => {
     mockDb.select.mockReturnValue(
-      makeSelectChain([{ id: CASE_ID, status: "enviado_a_core" }])
+      makeSelectChain([{ id: CASE_ID, status: "enviado_a_core", assigned_to: null, extraction_lease_at: null, extraction_pending: false }])
     );
 
     const res = await POST(makeRequest(), {
@@ -286,7 +278,7 @@ describe("POST /api/cases/:id/re-analyze", () => {
   it("does not schedule the agent for closed cases", async () => {
     // Return a closed case
     mockDb.select.mockReturnValue(
-      makeSelectChain([{ id: CASE_ID, status: "cerrado" }])
+      makeSelectChain([{ id: CASE_ID, status: "cerrado", assigned_to: null, extraction_lease_at: null, extraction_pending: false }])
     );
 
     const res = await POST(makeRequest(), {
@@ -305,7 +297,7 @@ describe("POST /api/cases/:id/re-analyze", () => {
   it("allows admin to re-analyze no_relevante cases (provider-error recovery)", async () => {
     // Admin is the default in beforeEach (role: "admin")
     mockDb.select.mockReturnValue(
-      makeSelectChain([{ id: CASE_ID, status: "no_relevante" }])
+      makeSelectChain([{ id: CASE_ID, status: "no_relevante", assigned_to: null, extraction_lease_at: null, extraction_pending: false }])
     );
 
     const res = await POST(makeRequest(), {
@@ -328,7 +320,7 @@ describe("POST /api/cases/:id/re-analyze", () => {
       userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "owner" },
     });
     mockDb.select.mockReturnValue(
-      makeSelectChain([{ id: CASE_ID, status: "no_relevante" }])
+      makeSelectChain([{ id: CASE_ID, status: "no_relevante", assigned_to: null, extraction_lease_at: null, extraction_pending: false }])
     );
 
     const res = await POST(makeRequest(), {
@@ -351,7 +343,7 @@ describe("POST /api/cases/:id/re-analyze", () => {
       userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "analyst" },
     });
     mockDb.select.mockReturnValue(
-      makeSelectChain([{ id: CASE_ID, status: "no_relevante" }])
+      makeSelectChain([{ id: CASE_ID, status: "no_relevante", assigned_to: null, extraction_lease_at: null, extraction_pending: false }])
     );
 
     const res = await POST(makeRequest(), {
@@ -444,5 +436,202 @@ describe("POST /api/cases/:id/re-analyze", () => {
       error: { code: "AI_BUDGET_EXCEEDED" },
     });
     expect(mockAfter).not.toHaveBeenCalled();
+  });
+
+  // ── E3: un analyst re-analiza sólo un caso suyo o sin asignar ──────────────
+
+  it("returns 404 when an analyst re-analyzes a case assigned to someone else", async () => {
+    mockRequireRole.mockResolvedValue({
+      db: mockDb,
+      user: { id: USER_ID },
+      userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "analyst" },
+    });
+    mockDb.select.mockReturnValue(
+      makeSelectChain([
+        {
+          id: CASE_ID,
+          status: "listo_para_core",
+          assigned_to: "other-analyst-id",
+          extraction_lease_at: null,
+          extraction_pending: false,
+        },
+      ])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "NOT_FOUND" },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+  });
+
+  it("allows an analyst to re-analyze an unassigned case", async () => {
+    mockRequireRole.mockResolvedValue({
+      db: mockDb,
+      user: { id: USER_ID },
+      userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "analyst" },
+    });
+    mockDb.select.mockReturnValue(
+      makeSelectChain([
+        {
+          id: CASE_ID,
+          status: "listo_para_core",
+          assigned_to: null,
+          extraction_lease_at: null,
+          extraction_pending: false,
+        },
+      ])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(202);
+  });
+
+  it("allows an analyst to re-analyze their own case", async () => {
+    mockRequireRole.mockResolvedValue({
+      db: mockDb,
+      user: { id: USER_ID },
+      userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "analyst" },
+    });
+    mockDb.select.mockReturnValue(
+      makeSelectChain([
+        {
+          id: CASE_ID,
+          status: "listo_para_core",
+          assigned_to: USER_ID,
+          extraction_lease_at: null,
+          extraction_pending: false,
+        },
+      ])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(202);
+  });
+
+  it("allows an admin to re-analyze a case assigned to someone else", async () => {
+    mockDb.select.mockReturnValue(
+      makeSelectChain([
+        {
+          id: CASE_ID,
+          status: "listo_para_core",
+          assigned_to: "other-analyst-id",
+          extraction_lease_at: null,
+          extraction_pending: false,
+        },
+      ])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(202);
+  });
+
+  // ── E4: no se re-analiza mientras el agente sigue trabajando ───────────────
+
+  it("returns FSM_INVALID_TRANSITION with the reservation still alive", async () => {
+    mockDb.select.mockReturnValue(
+      makeSelectChain([
+        {
+          id: CASE_ID,
+          status: "listo_para_core",
+          assigned_to: null,
+          extraction_lease_at: new Date(Date.now() - 60_000).toISOString(),
+          extraction_pending: false,
+        },
+      ])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "FSM_INVALID_TRANSITION" },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockAfter).not.toHaveBeenCalled();
+    expect(mockWriteAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("allows re-analysis with an expired reservation and no pending run", async () => {
+    mockDb.select.mockReturnValue(
+      makeSelectChain([
+        {
+          id: CASE_ID,
+          status: "listo_para_core",
+          assigned_to: null,
+          extraction_lease_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+          extraction_pending: false,
+        },
+      ])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(202);
+  });
+
+  it("returns FSM_INVALID_TRANSITION with extraction_pending true and no reservation", async () => {
+    mockDb.select.mockReturnValue(
+      makeSelectChain([
+        {
+          id: CASE_ID,
+          status: "listo_para_core",
+          assigned_to: null,
+          extraction_lease_at: null,
+          extraction_pending: true,
+        },
+      ])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "FSM_INVALID_TRANSITION" },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+  });
+
+  it("a closed case with a live reservation still gets the terminal-state error (that guard runs first)", async () => {
+    mockDb.select.mockReturnValue(
+      makeSelectChain([
+        {
+          id: CASE_ID,
+          status: "cerrado",
+          assigned_to: null,
+          extraction_lease_at: new Date(Date.now() - 60_000).toISOString(),
+          extraction_pending: false,
+        },
+      ])
+    );
+
+    const res = await POST(makeRequest(), {
+      params: Promise.resolve({ id: CASE_ID }),
+    });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "FSM_INVALID_TRANSITION" },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
   });
 });

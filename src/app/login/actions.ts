@@ -28,11 +28,11 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import {
   RATE_LIMIT_CONFIGS,
-  buildSignInKey,
   clientIpFromHeaders,
   rateLimit,
   topePorIp,
 } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { SignInSchema } from "@/lib/schemas/auth";
 import { logger } from "@/lib/observability/logger";
 
@@ -82,7 +82,7 @@ export async function signIn(
    * formulario de la pantalla— aplicaba sólo el primero. O sea que el camino
    * real de la gente era el que no tenía techo.
    */
-  const rl = await rateLimit(buildSignInKey(ip, email), RATE_LIMIT_CONFIGS.AUTH_SIGN_IN);
+  const rl = await rateLimit(claveDeCupo("auth:in", ip, email), RATE_LIMIT_CONFIGS.AUTH_SIGN_IN);
   const porIp = await topePorIp(ip);
 
   if (!rl.allowed || !porIp.allowed) {

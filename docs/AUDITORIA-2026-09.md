@@ -535,20 +535,26 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 | `llamarAlWorker` sin plazo | MEDIUM | `src/server/email/gmail/gmail-poller.ts` | Espera la corrida entera del worker. Un worker colgado ocupa la función del poller hasta su propio límite. | Medir la duración real de las corridas antes de poner un `AbortSignal.timeout`; un plazo corto cortaría corridas sanas. |
 | `runClaimTextAgent` sin caller | LOW | `src/server/ai/claim-agent.ts` | Quedó sin uso de producción al borrarse `runExtractionWorker` (#329) y arrastra el bug #18. | Borrarlo en un PR propio junto con los dos mocks de tests que lo nombran. |
 | Tests de la guarda atómica | LOW | tests de `cases-patch` y `re-analyze-route` (#328) | Prueban el 409 cuando el `UPDATE` no devuelve filas, pero no fijan que el `WHERE` incluya el estado leído. Un cambio que saque esa condición pasaría los tests. | Un test de integración contra Postgres con dos escrituras en carrera. |
-| `setStatus` de las confirmaciones sin guarda | MEDIUM | `src/server/confirmations/orchestrate.ts` (E2) | Escribe el estado sin condicionarlo al anterior, a diferencia del PATCH y del re-análisis. | Ver E2 y E25. |
+| `setStatus` de las confirmaciones sin guarda | MEDIUM | `src/server/confirmations/orchestrate.ts` (E2) | Escribe el estado sin condicionarlo al anterior, a diferencia del PATCH y del re-análisis. | Cerrado en #338 (ver E2 y E25): ahora compara el estado esperado antes de escribir, igual que el PATCH y el re-análisis. |
 | E2E sólo en CI | LOW | `.github/workflows/ci.yml` | Los tests de Playwright no corren en `pnpm verify` local; un cambio de UI se descubre recién en el PR. | Sin cambio: correrlos local pide la base de E2E. Documentado en `docs/TESTING.md`. |
-| G30 parcial | LOW | `src/app/(app)/bandeja/DashboardClient.tsx`, `/configuracion` | Los textos del panel de fraude pasaron a i18n (#331); quedan textos fijos en español en la bandeja y en configuración. | Seguir con el mismo patrón, pantalla por pantalla, con un test de claves en los tres idiomas. |
+| G30 parcial | LOW | `src/app/(app)/bandeja/DashboardClient.tsx`, `/configuracion` | Los textos del panel de fraude pasaron a i18n (#331); quedan textos fijos en español en la bandeja y en configuración. | Cerrado en #340: bandeja, barra superior, toast y /configuracion pasaron a i18n, con un test que falla si vuelve un literal fijo. |
 | Variables vacías en `.env.example` | LOW | consumidores con `??` | Una variable definida como cadena vacía cuenta como definida y pisa el valor por omisión. Por eso las 27 nuevas van comentadas. | Si alguna vez se descomentan, cambiar esos `??` por `||` con un test. |
 | Promociones sin Carga ni Post-deploy de QA | LOW | c83553d, 474d536, 3aef30b | Durante el tope de deploys de Vercel del 27/09 esos commits no tuvieron deploy de QA. El deploy de QA del commit final los cubre a todos juntos. | Ninguna: queda asentado para no leer esos tres commits como verificados en QA por separado. |
 | Tres parsers de `ADMIN_EMAILS` | MEDIUM | ver Sección 8 | Dan resultados distintos ante mayúsculas, espacios y separadores. Unificarlos puede cambiar quién es admin en algún entorno. | Decidir el formato canónico y migrar con la tabla de caracterización como red. |
 | Mapas de etiquetas repetidos (#60) | LOW | UI | Nueve mapas de tipo y canal. Un tipo nuevo puede quedar sin etiqueta en alguna pantalla. | Unificar con un test de snapshot de los textos visibles. |
 | `drizzle-kit` sin uso en scripts | LOW | `package.json` | Se mantiene porque el dueño puede usar `drizzle-kit studio`. | Sacarlo cuando el dueño confirme que no lo usa. |
-| Guarda de «Tomar el control» sin `extraction_pending` | LOW | `src/server/cases/patch.ts` (#334) | El servidor rechaza el PATCH a `requiere_especialista` mientras la reserva de extracción está viva, pero no mira `extraction_pending`. La pantalla ya esconde el botón en ese caso. Por la API se puede tomar el control con un mensaje encolado: el agente encuentra el caso en `requiere_especialista` y no responde, que es lo que se buscaba. | Sumar `current.extraction_pending` a la guarda con un test, después de confirmar que ningún caso queda con esa marca trabada, porque bloquearía la acción. |
-| Peso del bundle | LOW | `scripts/medir-peso.mjs` | Las funciones nuevas llevaron el JavaScript del navegador de 306 a 308 kB, con el tope en 310. Los dos diccionarios de i18n viajan enteros a todas las pantallas (27,5 kB comprimidos) y cada clave nueva suma. | Mandar al cliente sólo el diccionario del idioma de la cuenta. Es un cambio de arquitectura: ver Recomendaciones. |
+| Guarda de «Tomar el control» sin `extraction_pending` | LOW | `src/server/cases/patch.ts` (#334) | El servidor rechaza el PATCH a `requiere_especialista` mientras la reserva de extracción está viva, pero no mira `extraction_pending`. La pantalla ya esconde el botón en ese caso. Por la API se puede tomar el control con un mensaje encolado: el agente encuentra el caso en `requiere_especialista` y no responde, que es lo que se buscaba. | Cerrado en #338: «Tomar el control» ahora se bloquea también mientras `extraction_pending` sigue vivo. |
+| Peso del bundle | LOW | `scripts/medir-peso.mjs` | Las funciones nuevas llevaron el JavaScript del navegador de 306 a 308 kB, con el tope en 310. Los dos diccionarios de i18n viajan enteros a todas las pantallas (27,5 kB comprimidos) y cada clave nueva suma. | El peso bajó solo: #339 sacó `@tanstack/react-table` y llevó el bundle a 295 kB; #340 sumó la UI de alertas y quedó en 296 kB, bajo el tope de 310. La idea de mandar un solo diccionario de idioma sigue en Recomendaciones si hiciera falta más margen. |
+| Cambio de póliza sin aviso del agente | LOW | comportamiento del agente (ensayo `devolver-al-agente`, #338) | El reclamante dio `POL-4471-A` en el primer mensaje y, después de la devolución, escribió «póliza 4455»; el agente aceptó el número nuevo sin señalar la diferencia con el anterior. | Decidir si el agente debe preguntar cuál vale antes de aceptar un número de póliza distinto del ya confirmado. |
+| Plantilla `reabrir_denuncia` pendiente de aprobación | LOW | WhatsApp, WABA 1727802301698317 | Meta todavía no la aprobó (estado PENDING desde el 28/09); hasta que apruebe, un reenvío pasadas las 24 h de la ventana no se puede mandar. El código consulta el estado solo, sin que haga falta un redeploy cuando pase a aprobada. | Ninguna: esperar la aprobación de Meta. |
+| Título cortado del commit `fe7d15a` | LOW | historial de git | El título quedó sin la palabra final («...vuelven a quedar», falta «auditadas»). | Ninguna: no se reescribe un commit ya mergeado a `qa`. |
+| `huellaDelRemitente` sin sal (#339) | LOW | `src/server/training/sin-datos-de-la-persona.ts` | Es un sha256 sin sal: quien tenga un export puede confirmar una dirección que ya sospecha. Es el contrato de esta ola. | Si hace falta que no se pueda enlazar, pasar a un HMAC por inquilino. |
 
 ### Ítems que se decidió sólo explicar
 
 Ítems marcados en el plan de cambios como "sólo explicar": se entienden, tienen alternativa conservadora identificada, pero se decide no tocarlos ahora por su riesgo. Cada uno lleva qué, por qué, beneficio, riesgo, impacto, cómo verificarlo y alternativa conservadora.
+
+El 27/09 el dueño decidió cada ítem uno por uno (`.claude/handoff/pendientes-auditoria.md`); la mayoría se implementó en las olas #338-#341 y en este PR, con el estado de cada uno en su bullet «Estado» más abajo.
 
 ### E1. Un ingreso de mail parcial deja un caso vacío (gravedad alta) — arreglado en #328 (G40)
 
@@ -560,8 +566,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test de integración con una falla inyectada, `pnpm rehearse` de mail y `pnpm smoke`.
 - **Alternativa conservadora:** un barrido en `reap-stuck` que sólo loguee los casos sin mensajes, sin tocar el ingreso.
 
-### E2. `setStatus` de orchestrate sin guarda
+### E2. `setStatus` de orchestrate sin guarda — arreglado en #338
 
+- **Estado:** cerrado en #338: `setStatus` ahora compara el estado esperado antes de escribir, igual que el PATCH y el re-análisis.
 - **Qué:** agregar `where status = esperado` a las escrituras de estado que hace el agente.
 - **Por qué:** hoy puede pisar un cambio humano hecho en simultáneo, incluido el caso cubierto por el grupo G38 del plan.
 - **Beneficio:** cierra la carrera residual entre agente y humano.
@@ -570,8 +577,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** `pnpm check` completo y leer los 15 transcriptos de ensayo.
 - **Alternativa conservadora:** loguear cuando el estado leído y el escrito difieren, sin bloquear la escritura.
 
-### E3. El re-análisis exige que el analista sea dueño del caso
+### E3. El re-análisis exige que el analista sea dueño del caso — arreglado en #338
 
+- **Estado:** cerrado en #338, según la decisión del dueño (27/09): el analista actúa sobre casos asignados a él o sin asignar; uno asignado a otro queda cerrado, misma regla en el PATCH y en el re-análisis.
 - **Qué:** agregar `puedeCambiarEstado(userRow, assigned_to)` al re-análisis y devolver 404 si no se cumple.
 - **Por qué:** es la misma regla que ya aplica el PATCH de casos.
 - **Beneficio:** evita IDOR entre analistas.
@@ -580,8 +588,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** `tests/unit/re-analyze-route.test.ts` y `pnpm pentest`.
 - **Alternativa conservadora:** esperar la decisión del dueño del producto sobre la regla de asignación de analistas (bloqueo B2 del plan).
 
-### E4. Re-análisis desde `procesando`
+### E4. Re-análisis desde `procesando` — arreglado en #338
 
+- **Estado:** cerrado en #338: el re-análisis rechaza el pedido mientras hay una reserva de extracción viva sobre el caso.
 - **Qué:** rechazar el re-análisis si hay una reserva de extracción viva sobre el caso.
 - **Por qué:** hoy el re-análisis compite con el worker que ya está corriendo.
 - **Beneficio:** evita dos corridas de extracción a la vez sobre el mismo caso.
@@ -590,8 +599,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test con una reserva viva y otra vieja.
 - **Alternativa conservadora:** dejarlo como está; `reap-stuck` ya destraba los casos con reserva vencida.
 
-### E5. Política `FOR ALL` de la migración 0019 sobre `known_claim_patterns`
+### E5. Política `FOR ALL` de la migración 0019 sobre `known_claim_patterns` — arreglado en #339
 
+- **Estado:** cerrado en #339, migración 0033: `known_claim_patterns` pasó de 3 políticas (dos `FOR ALL`) a 4, una por comando; un tenant sigue leyendo lo propio y lo global, pero ya no puede borrar ni cambiar una regla global. Aplicada en producción el 28/09 (`ep-proud-resonance`): antes 3 políticas viejas, después 4 por comando, las mismas 41 reglas globales antes y después. `pnpm permisos`, `pnpm tenancy` y `pnpm esquemas` en verde contra prod.
 - **Qué:** separar la política en una regla de SELECT y otra de INSERT/UPDATE/DELETE.
 - **Por qué:** hoy una sola política `FOR ALL` permite que cualquier tenant borre o tome control de filas globales.
 - **Beneficio:** cierra el hallazgo #43 sin tocar la visibilidad de lectura compartida.
@@ -600,8 +610,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** `pnpm permisos`, `pnpm tenancy` y `pnpm esquemas` contra la base de producción real.
 - **Alternativa conservadora:** documentar la regla actual y revisar manualmente cualquier escritura sobre esa tabla.
 
-### E6. `REVOKE UPDATE, DELETE` sobre `audit_log`
+### E6. `REVOKE UPDATE, DELETE` sobre `audit_log` — arreglado en #339
 
+- **Estado:** cerrado en #339, migración 0032: `claimmix_app` pierde UPDATE y DELETE sobre `audit_log`; sólo puede agregar. Aplicada en producción el 28/09: antes `audit_log` tenía DELETE, INSERT, SELECT, UPDATE para `claimmix_app`; después, sólo INSERT y SELECT, con las mismas 109362 filas de auditoría antes y después. `pnpm permisos` y `pnpm tenancy` en verde contra prod.
 - **Qué:** sacarle al rol de aplicación los privilegios de UPDATE y DELETE sobre `audit_log`, para que la auditoría de sólo-alta lo sea también a nivel de base.
 - **Por qué:** hoy es sólo una convención de código, no una barrera real.
 - **Beneficio:** cierra el hallazgo #47.
@@ -610,8 +621,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** `pnpm permisos` contra la base real.
 - **Alternativa conservadora:** agregar un test de arquitectura que prohíba llamadas de UPDATE/DELETE sobre `audit_log` en el código, sin tocar los grants de base.
 
-### E7. `reuseExistingServer` de Playwright y e2e contra la base viva
+### E7. `reuseExistingServer` de Playwright y e2e contra la base viva — arreglado en #341
 
+- **Estado:** cerrado en #341: Playwright se planta si la base es la de producción (`tests/e2e/base-de-ensayo.ts`) y nunca reusa un servidor que no levantó él, con un test unitario que lo fija.
 - **Qué:** que el e2e use siempre una base de datos separada, nunca la de desarrollo local ni la de producción.
 - **Por qué:** hoy Playwright puede reusar un servidor de desarrollo corriendo, lo que saltea el override de `DATABASE_URL` (hallazgo #106).
 - **Beneficio:** elimina el riesgo de que un e2e escriba en una base que no le corresponde.
@@ -620,8 +632,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** correr el e2e con un servidor de desarrollo ya levantado apuntando a otra base, y confirmar que aborta.
 - **Alternativa conservadora:** un chequeo que aborte el e2e si `DATABASE_URL` apunta a la base de producción conocida.
 
-### E8. Adjuntos de Gmail bajados antes de medir tamaño
+### E8. Adjuntos de Gmail bajados antes de medir tamaño — arreglado en #339
 
+- **Estado:** cerrado en #339: un adjunto de Gmail que declara más del tope se descarta antes de bajarlo.
 - **Qué:** leer `part.body.size` antes de descargar el adjunto completo.
 - **Por qué:** hoy se descarga entero y recién después se mide (hallazgo #134).
 - **Beneficio:** rechaza adjuntos grandes sin gastar ancho de banda ni memoria en descargarlos.
@@ -630,8 +643,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test con un adjunto grande simulado y comparación contra el comportamiento actual.
 - **Alternativa conservadora:** poner un tope de bytes durante la descarga que aborte el streaming al llegar al límite, sin depender del campo `size` reportado.
 
-### E9. `demo/analyze` abierto al rol viewer
+### E9. `demo/analyze` abierto al rol viewer — arreglado en #338
 
+- **Estado:** cerrado en #338: `/api/demo/analyze` quedó restringido a roles que pueden editar; `/demo` pública sigue igual.
 - **Qué:** restringir `/api/demo/analyze` a roles editores.
 - **Por qué:** hoy un viewer puede correr extracción real de Gemini contra el presupuesto del tenant (hallazgo #130).
 - **Beneficio:** evita gasto de presupuesto por un rol de sólo lectura.
@@ -640,8 +654,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test de rol sobre el endpoint.
 - **Alternativa conservadora:** poner un límite de uso propio para el rol viewer, sin cambiar el permiso de acceso.
 
-### E10. `SPECIALIST_ALERT_EMAILS` global entre tenants
+### E10. `SPECIALIST_ALERT_EMAILS` global entre tenants — arreglado en #340
 
+- **Estado:** cerrado en #340, migración 0034: cada tenant carga su propia lista de hasta 10 direcciones en /configuracion (`tenants.specialist_alert_emails`, `PATCH /api/admin/alertas`), auditado con el conteo, nunca las direcciones. Precedencia: lista del tenant, después `SPECIALIST_ALERT_EMAILS` sólo para el tenant principal, después roles, después el dueño; la dirección vedada se filtra en cada paso, según la decisión del dueño. La migración 0034 ya está aplicada en producción, desde el 28/09; la lectura por lista de tenant llega con la promoción que trae este PR. Mientras tanto, producción de Vercel no tiene `SPECIALIST_ALERT_EMAILS`.
 - **Qué:** configurar los destinatarios de alerta de especialista por tenant, no por variable de entorno global.
 - **Por qué:** hoy un tenant puede recibir alertas de casos de otro tenant (hallazgo #73).
 - **Beneficio:** aislamiento correcto de las notificaciones entre tenants.
@@ -650,8 +665,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test con dos tenants configurados con destinatarios distintos.
 - **Alternativa conservadora:** mandar la alerta sólo si el caso pertenece al tenant principal, sin agregar configuración nueva.
 
-### E11. Consumo del asistente registrado con `user_id` nulo
+### E11. Consumo del asistente registrado con `user_id` nulo — arreglado en #338
 
+- **Estado:** cerrado en #338, según la decisión del dueño de contar el uso del asistente: el consumo ahora se registra con el `user_id` real y cuenta contra el tope diario por usuario.
 - **Qué:** pasar `ctx.user.id` a la función que registra el consumo del modelo del asistente.
 - **Por qué:** hoy ese consumo no cuenta contra el tope diario por usuario (hallazgo #72).
 - **Beneficio:** el tope de presupuesto por usuario refleja el uso real.
@@ -660,8 +676,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test de presupuesto con uso del asistente incluido.
 - **Alternativa conservadora:** registrar el `user_id` sólo para mostrarlo en el panel de uso, sin sumarlo al cálculo del tope.
 
-### E12. Webhook de WhatsApp sin tope por remitente
+### E12. Webhook de WhatsApp sin tope por remitente — arreglado en #338
 
+- **Estado:** cerrado en #338: más de 20 mensajes de un mismo número en 10 minutos se guardan sin llamar a Gemini y el caso pasa a «Para responder»; la clave del cupo es un hash, nunca el teléfono en claro.
 - **Qué:** limitar la frecuencia de mensajes procesados por número de teléfono.
 - **Por qué:** hoy un solo remitente puede agotar el presupuesto de IA del tenant (hallazgo #140).
 - **Beneficio:** evita que un remitente hostil o un bucle bloqueen el canal de IA para todo el tenant.
@@ -670,8 +687,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test de carga simulando un remitente repetido.
 - **Alternativa conservadora:** por ahora, sólo loguear o alertar cuando un remitente supera un umbral, sin bloquear mensajes.
 
-### E13. CI y cadena de suministro
+### E13. CI y cadena de suministro — arreglado en #341
 
+- **Estado:** cerrado en #341: un solo `pnpm build` por corrida (los demás jobs bajan el artefacto), banderas `HAY_ENSAYO`/`HAY_E2E` booleanas, los despachos manuales (`barrer-trabados.yml`, `deploy-checks.yml`) validan la URL antes de mandar el `CRON_SECRET`, techos de versión en los overrides de pnpm y lista explícita de qué dependencia puede correr scripts de instalación. Probado con un despacho hostil a `evil.example`: las dos corridas cortaron en el paso del host, como se esperaba.
 - **Qué:** validar secretos y entradas de los workflows, sacar builds duplicados de CI, poner techo de major a los overrides, restringir scripts de instalación de dependencias.
 - **Por qué:** cubre varios hallazgos de la Sección 5.5 y el hallazgo de complejidad #101 (CI corre el mismo trabajo varias veces).
 - **Beneficio:** menos superficie de cadena de suministro y menos minutos de CI gastados.
@@ -680,8 +698,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** `pnpm flujos`, con revisión adicional en Fable por tratarse de cadena de suministro.
 - **Alternativa conservadora:** por ahora, sacar sólo los builds duplicados, sin tocar secretos ni overrides.
 
-### E14. Tokens de extracciones fallidas no llegan a `ai_usage`
+### E14. Tokens de extracciones fallidas no llegan a `ai_usage` — arreglado en #338
 
+- **Estado:** cerrado en #338, según la decisión del dueño de contar también las extracciones fallidas: una extracción fallida ya anota su consumo de tokens en `ai_usage`.
 - **Qué:** registrar el consumo de tokens también cuando la extracción falla.
 - **Por qué:** hoy el tope de presupuesto subcuenta el gasto real (hallazgo #17).
 - **Beneficio:** el tope de presupuesto refleja el gasto real ante Vertex.
@@ -690,8 +709,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** comparar la suma de `ai_usage` con la facturación real de Vertex del mes.
 - **Alternativa conservadora:** dejarlo como está y aceptar el subconteo conocido.
 
-### E15. Facturación congela meses anteriores a la existencia del tenant
+### E15. Facturación congela meses anteriores a la existencia del tenant — arreglado en #340
 
+- **Estado:** cerrado en #340: nunca se congela un mes que terminó antes de que existiera el tenant. En producción había 0 facturas afectadas (`billing_invoices`), así que no hubo nada que borrar además del arreglo de código.
 - **Qué:** no congelar meses previos a `tenants.created_at`.
 - **Por qué:** hoy cualquier mes terminado se congela a tarifa completa en su primera vista, incluso si el tenant no existía ese mes (hallazgo #76).
 - **Beneficio:** evita facturar meses en los que el tenant no operó.
@@ -700,8 +720,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** comparar meses congelados contra `tenants.created_at` en producción.
 - **Alternativa conservadora:** ocultar esos meses en la vista de cartera, sin tocar los datos ya congelados.
 
-### E16. El extractor mock inventa un reclamo fijo
+### E16. El extractor mock inventa un reclamo fijo — arreglado en #338
 
+- **Estado:** cerrado en #338: el respaldo mock ya no inventa un reclamo fijo; `denunciaSimuladaVacia()` deja los campos vacíos en vez de simular datos.
 - **Qué:** que el respaldo mock degradado falle en vez de escribir datos inventados.
 - **Por qué:** contradice la regla del propio proyecto de fallar ante problemas técnicos en vez de simular éxito (hallazgo #12).
 - **Beneficio:** ningún caso queda vinculado por error a datos de ejemplo.
@@ -710,8 +731,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test forzando la ausencia de credencial de Gemini.
 - **Alternativa conservadora:** marcar esos casos como `requiere_especialista` en vez de fallar o de usar datos inventados.
 
-### E17. Pistas de memoria usan como clave un remitente no autenticado
+### E17. Pistas de memoria usan como clave un remitente no autenticado — arreglado en #338
 
+- **Estado:** cerrado en #338: un remitente de mail sin autenticar no recibe pistas de memoria.
 - **Qué:** atar la memoria de pistas al caso o a un remitente verificado, no al remitente crudo del mensaje.
 - **Por qué:** hoy alguien que falsee el remitente puede heredar pistas confirmadas por un analista para otra persona (hallazgo #16).
 - **Beneficio:** cierra una vía de suplantación de identidad vía memoria.
@@ -720,8 +742,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test con un remitente falseado que intente heredar pistas ajenas.
 - **Alternativa conservadora:** no usar pistas de memoria en mails con SPF/DKIM fallido.
 
-### E18. Ciclo de aprobación de Vertex
+### E18. Ciclo de aprobación de Vertex — arreglado en #340
 
+- **Estado:** cerrado en #340: la sincronización ya no pisa `approved`/`deployed`, hay paso de aprobación para Vertex y Sincronizar/Activar se habilitan cuando corresponde; el dataset del próximo entrenamiento sale sólo de casos simulados (`email_sim`, `whatsapp_sim`) ya tachados. Con el OK del dueño se hizo además la limpieza: el proyecto GCP viejo `claimmix` quedó `DELETE_REQUESTED` (se va con el modelo del 30/06), los archivos train/val del bucket se borraron, la fila `2eb72bbc` de prod pasó a `rejected` con `training_jsonl`/`validation_jsonl` en NULL, y se purgaron 28 ejemplos de entrenamiento de casos reales (25 de mail, 3 de WhatsApp); quedan 26 `email_sim` y 181 sin caso. No se entrena ningún modelo nuevo por ahora.
 - **Qué:** ordenar los estados de aprobado y activado del modelo afinado en Vertex.
 - **Por qué:** hoy ningún camino mueve un job a `approved`, así que activar es inalcanzable (hallazgo #86).
 - **Beneficio:** el flujo de fine-tuning en Vertex queda utilizable de punta a punta.
@@ -732,6 +755,7 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 
 ### E19. Dependencias grandes
 
+- **Estado:** hecho en gran parte en #339: `googleapis` pasó a `@googleapis/gmail`, `google-auth-library` quedó en una sola versión (11.x, camino WIF verde) y `@tanstack/react-table` salió del bundle (tabla en React simple, con snapshots de paridad). Sentry se quedó: el gate de arranque encontró `SENTRY_DSN` en uso en QA, así que en vez de sacarlo se construyó el filtro de `beforeSend`/`beforeSendTransaction` (#137). zod se queda en 3.x a propósito: pasar a v4 toca unos 50 archivos y rechaza los ids de prueba que no son RFC.
 - **Qué:** evaluar pasar de `googleapis` a `@googleapis/gmail`, revisar el uso de `@tanstack/react-table` y de Sentry, deduplicar las versiones de zod.
 - **Por qué:** cubre los hallazgos de peso de la Sección 15 (#118, #119, #123, #124).
 - **Beneficio:** menos peso de bundle y de tiempo de arranque.
@@ -740,8 +764,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** `scripts/medir-peso.mjs` antes y después, más los tests de Gmail.
 - **Alternativa conservadora:** por ahora, deduplicar sólo las versiones de zod.
 
-### E20. Bucle entre registro y bandeja (gravedad alta)
+### E20. Bucle entre registro y bandeja (gravedad alta) — arreglado en #340
 
+- **Estado:** cerrado en #340, según la decisión del dueño: quien tiene cuenta pero no tiene fila de usuario ve una pantalla «Tu cuenta está creada; un administrador tiene que darte acceso», con Cerrar sesión, en vez del bucle de redirecciones.
 - **Qué:** llevar a una pantalla de "cuenta pendiente" en vez de a `/login` cuando hay sesión sin fila de usuario (`src/app/(app)/bandeja/page.tsx:154`).
 - **Por qué:** cierra el bucle de HIGH #42, que afecta a toda alta exitosa por `/registro`.
 - **Beneficio:** una cuenta recién creada no queda atrapada en un loop entre login y bandeja.
@@ -750,8 +775,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test de alta de punta a punta, más `pnpm rehearse` de onboarding.
 - **Alternativa conservadora:** cerrar la sesión y mostrar un mensaje de error en `/login`, sin crear una pantalla nueva.
 
-### E21. Unificar claves del límite de tasa
+### E21. Unificar claves del límite de tasa — arreglado en #338
 
+- **Estado:** cerrado en #338: una sola función (`claveDeCupo`) arma la clave de todos los límites de tasa; formulario y API comparten una sola clave de cupo por usuario, y la clave de WhatsApp por remitente es un hash sin el teléfono en claro.
 - **Qué:** usar un único formato de clave para todos los límites de tasa.
 - **Por qué:** hoy conviven formatos distintos entre módulos.
 - **Beneficio:** simplifica el código y evita confusión al leer contadores.
@@ -760,8 +786,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** comparación de contadores antes/después en producción.
 - **Alternativa conservadora:** documentar el formato actual de cada clave, sin unificarlas.
 
-### E22. Consolidar el helper del puente de alcance (scope-bridge)
+### E22. Consolidar el helper del puente de alcance (scope-bridge) — arreglado en este PR
 
+- **Estado:** cerrado en este PR: un solo puente de alcance (`tests/mocks/puente-de-alcance.ts`, `puenteDeAlcance(obtenerDb)` y `puenteSobreLibDb()`) reemplaza los bloques repetidos en los tests, con `scripts/add-scope-bridge.mjs` al día y una guarda (`tests/unit/un-solo-puente-de-alcance.test.ts`) que falla si vuelve el bloque viejo.
 - **Qué:** un único helper para el puente de alcance de tenant, en vez de la copia repetida detectada en el hallazgo #105.
 - **Por qué:** hoy ese puente está duplicado en 85 archivos y resuelve thenables, lo que ya escondió 15 consultas rotas en producción.
 - **Beneficio:** una sola fuente de verdad para una pieza que toca directamente el aislamiento por RLS entre tenants.
@@ -770,8 +797,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** `pnpm tenancy`, `pnpm capa-datos`, y revisión adicional en Fable por ser superficie de RLS.
 - **Alternativa conservadora:** no tocarlo por ahora; dejar la duplicación documentada.
 
-### E23. Resumen diario por mail al dueño del tenant
+### E23. Resumen diario por mail al dueño del tenant — arreglado en #340
 
+- **Estado:** cerrado en #340, con la alternativa conservadora que ya había elegido el dueño (27/09): un bloque «Resumen de ayer» dentro de /metricas, sin mail y sin migración.
 - **Qué:** en el cron `reap-stuck` (04:07 UTC según `vercel.json`), mandar un mail por tenant con un resumen del día anterior, con opt-in, reusando el `GmailSender` existente.
 - **Por qué:** da visibilidad diaria sin depender de que alguien entre al panel.
 - **Beneficio:** los dueños de tenant se enteran de casos trabados o pendientes sin revisar la bandeja.
@@ -780,8 +808,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** `pnpm rehearse` con el resumen activado, revisión del contenido del mail generado.
 - **Alternativa conservadora:** mostrar un bloque "Resumen de ayer" dentro de `/metricas`, sin mandar ningún mail.
 
-### E24. Devolver el caso al agente después de "Tomar el control"
+### E24. Devolver el caso al agente después de "Tomar el control" — arreglado en #338
 
+- **Estado:** cerrado en #338: botón Pro «Devolver al agente», visible sólo en casos tomados con «Tomar el control»; pasa el caso a `info_faltante`, queda auditado y el servidor comprueba plan, evidencia de la toma y estado de forma atómica, sin agregarlo a `FSM_TRANSITIONS`. Se ensayó contra el agente real; los bugs que salieron de ese ensayo están en «Hechos de la segunda vuelta» más abajo.
 - **Qué:** agregar una arista de `requiere_especialista` hacia `info_faltante` o `recibido` en la FSM.
 - **Por qué:** hoy, una vez que un humano toma el control de un caso escalado, no hay camino de vuelta al agente.
 - **Beneficio:** evita cerrar y volver a abrir un caso para que el agente retome la conversación.
@@ -790,8 +819,9 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Cómo verificarlo:** test de transición de FSM más `pnpm pentest` sobre el nuevo camino.
 - **Alternativa conservadora:** dejarlo como está: cerrar el caso y que un mensaje nuevo del reclamante abra un caso distinto.
 
-### E25. Otros escritores humanos de estado
+### E25. Otros escritores humanos de estado — arreglado en #338
 
+- **Estado:** cerrado en #338: `sync-to-core` y `respondido` quedan con la misma guarda atómica de estado esperado que ya tenían el PATCH y el re-análisis.
 - **Qué:** aplicar a `sync-to-core` (con `force`), `respondido` y `reenviar-pedido` la misma guarda atómica de estado esperado que ya se aplica en el grupo G15 del plan.
 - **Por qué:** son otros puntos donde un humano escribe estado sin la misma protección contra condiciones de carrera.
 - **Beneficio:** consistencia de guardas en todos los escritores humanos de estado.
@@ -799,6 +829,17 @@ Ninguno rompe una función existente. Son los bordes que los PR dejaron a la vis
 - **Impacto:** los tres endpoints mencionados.
 - **Cómo verificarlo:** los mismos tests de condición de carrera usados para validar G15.
 - **Alternativa conservadora:** aplicar por ahora sólo los grupos G15 y G16 del plan, y dejar estos tres para más adelante.
+
+### Hechos de la segunda vuelta (28/09)
+
+- **`auditoriaSiQuedo` en producción (bug ya viejo).** Al `insert().select()` le faltaban `id` y `created_at`, así que Drizzle tiraba antes de mandar nada, y la guarda comparaba `updated_at` con la hora del código en vez de con la que pone el trigger; el efecto era que la confirmación de listo (P6) y la reapertura (P8) respondían «El caso cambió mientras lo mirabas» o quedaban sin auditar. Invisible en los datos de producción hasta ahora: cero `case.ready_confirmed` y cero reaperturas auditadas. Arreglado en `fe7d15a`.
+- **Regresión de cabeceras de WhatsApp (`ec89771`).** `autenticacionFallida` hacía `.filter` sobre `headers`, que en WhatsApp llega como `{}` y no como lista; cada mensaje de WhatsApp tiraba la extracción. Ahora lo que no es una lista cuenta como «no falló».
+- **Señal «nos lo devolvieron» (`157a601`).** Después de «Devolver al agente» el caso volvía con el pedido ya hecho y la regla de no repetirse dejaba al reclamante sin respuesta; la decisión suma esa señal para que el próximo mensaje tenga respuesta.
+- **Zona horaria de la bandeja (`4fbbebb`).** La fecha de siniestro guardada como fecha sola se parseaba como medianoche UTC y se formateaba en la zona del navegador, así que en Argentina salía un día antes; el título de «Respondido» tenía el mismo problema. Ahora todo se formatea en la zona argentina.
+- **E2E del PDF de 8 MB en CI.** Corre de verdad contra el balde de QA con los secretos `QA_R2_*` que ya existían, sin pedir secretos nuevos; en la corrida de #341: 8388608 bytes, 341 trozos, 92 tests pasados, 0 salteados.
+- **Prueba de despacho hostil.** `barrer-trabados.yml` y `deploy-checks.yml` despachados con `url=https://evil.example` cortaron en el paso «¿A dónde apunta esto?», como se esperaba (corridas 36375585034 y 36375587032).
+- **Incidente del token de WhatsApp (28/09).** El primer intento del script de plantillas leyó mal `.env.local` (la línea del token termina en un comentario) y Graph devolvió el token en el mensaje de error, que quedó en la salida de la sesión local; no salió a ningún otro servicio. Por decisión del dueño el token no se rota; el script ahora tapa el token en toda salida.
+- **Avisos por aseguradora en producción.** Vercel de producción no tiene `SPECIALIST_ALERT_EMAILS` (QA sí); la migración 0034 ya está aplicada en producción, pero la lectura por lista de tenant llega recién con la promoción que trae este PR.
 
 ---
 

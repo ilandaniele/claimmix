@@ -12,6 +12,8 @@
  */
 
 import { vi, type Mock } from "vitest";
+import type { Cabecera } from "@/core/email/autenticacion";
+import { puenteDeAlcance } from "../../../mocks/puente-de-alcance";
 
 export interface FilaDeCaso {
   id: string;
@@ -60,7 +62,7 @@ export function dbSimulado(
   espiaDeUpdate: Mock<(data: Record<string, unknown>) => void>,
   cuerpo = "Buenos días, tuve un choque ayer.",
   pedido: string[] = [],
-  { conversacion, propuestos = {} }: Conversacion = {}
+  { conversacion, propuestos = {}, cabecerasDelUltimo, casoMovido = false }: Conversacion = {}
 ) {
   let n = 0;
 
@@ -89,16 +91,17 @@ export function dbSimulado(
       }),
     });
     if (entrantes && conversacion) {
-      orderBy.mockReturnValue(
-        Promise.resolve(
-          conversacion.mensajes.map(([body_text, received_at], i) => ({
-            id: `entrante-${i + 1}`,
-            body_text,
-            received_at,
-            subject: "Siniestro",
-          }))
-        )
-      );
+      const filas = conversacion.mensajes.map(([body_text, received_at], i) => ({
+        id: `entrante-${i + 1}`,
+        body_text,
+        received_at,
+        subject: "Siniestro",
+        headers: [] as Cabecera[],
+      }));
+      if (cabecerasDelUltimo && filas.length > 0) {
+        filas[filas.length - 1] = { ...filas[filas.length - 1], headers: cabecerasDelUltimo };
+      }
+      orderBy.mockReturnValue(Promise.resolve(filas));
     }
     const where = vi.fn().mockReturnValue({ limit, orderBy });
 
@@ -122,9 +125,19 @@ export function dbSimulado(
   const cadenaUpdate = {
     set: vi.fn<(data: Record<string, unknown>) => unknown>().mockImplementation((data: Record<string, unknown>) => {
       espiaDeUpdate(data);
+      // Guarda atómica (E2): un `UPDATE ... RETURNING` sin filas dice «otra
+      // mano ya movió el caso». `casoMovido` sólo la simula para las escrituras
+      // que la guarda protege —las que tocan `status`—; la reserva de
+      // extracción (`extraction_lease_at`/`extraction_pending`) usa el mismo
+      // `db.update`, pero no es lo que E2 prueba, y sin esta distinción
+      // `casoMovido` la hace fallar también y el worker nunca llega a extraer.
+      const filasDelUpdate = casoMovido && "status" in data ? [] : [{ id: fila.id }];
       return {
-        where: vi.fn().mockResolvedValue([]),
-        returning: vi.fn().mockResolvedValue([]),
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue(filasDelUpdate),
+          then: (r: (v: unknown) => void, j?: (e: unknown) => void) => Promise.resolve([]).then(r, j),
+        }),
+        returning: vi.fn().mockResolvedValue(filasDelUpdate),
       };
     }),
   };
@@ -154,6 +167,10 @@ export interface Conversacion {
   conversacion?: { enviado: string; mensajes: Array<[string, string]> };
   /** Las confirmaciones pendientes: `{ clave: valor propuesto }`. */
   propuestos?: Record<string, string>;
+  /** Cabeceras del último entrante, para E17: `spf=fail` sale sin autenticar. */
+  cabecerasDelUltimo?: Cabecera[];
+  /** El caso ya no es del agente: todo `UPDATE` con guarda no matchea ninguna fila (E2). */
+  casoMovido?: boolean;
 }
 
 export interface OpcionesDelExtractor {
@@ -209,29 +226,23 @@ export function registrarMocks(opciones: {
     pedido,
     conversacion,
     propuestos,
+    cabecerasDelUltimo,
+    casoMovido,
   } = opciones;
 
-  const mockDb = dbSimulado(fila, espiaDeUpdate, cuerpo, pedido, { conversacion, propuestos });
+  const mockDb = dbSimulado(fila, espiaDeUpdate, cuerpo, pedido, {
+    conversacion,
+    propuestos,
+    cabecerasDelUltimo,
+    casoMovido,
+  });
 
   vi.doMock("@/lib/db", () => ({
     db: mockDb,
     tables: { claimMemory: {}, tenantAiSettings: {} },
   }));
 
-  /*
-   * La capa de datos, corriendo contra el mismo db simulado.
-   *
-   * Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
-   * eso no se puede simular sin mentir. Se verifica en
-   * `tests/unit/data-scope-sin-rol.test.ts` y, contra bases de verdad, en
-   * `pnpm capa-datos` y `pnpm tenancy`.
-   */
-  vi.doMock("@/data/scope", () => ({
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mockDb)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mockDb)),
-  }));
+  vi.doMock("@/data/scope", () => puenteDeAlcance(() => mockDb));
 
   vi.doMock("@/server/memory/load", () => ({
     loadMemoryHints: vi.fn().mockResolvedValue([]),
@@ -286,36 +297,46 @@ export function registrarMocks(opciones: {
     isValidTransition: vi.fn().mockReturnValue(transicionValida),
   }));
 
+  const claimSimulado = vi.fn().mockReturnValue({
+    extraction_model: "mock-email-v1",
+    fields: extractor.fields ?? [
+      { field_key: "full_name", field_value: "Juan Pérez", confidence: 0.92, source: "ai" },
+      { field_key: "claim_type", field_value: "choque", confidence: 0.88, source: "ai" },
+    ],
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    cost_usd: 0,
+    is_claim: true,
+    confidence: 0.92,
+    extracted_fields: extractor.extracted_fields ?? {
+      full_name: "Juan Pérez",
+      claim_type: "choque",
+      ...(extractor.extracted_fields_extra ?? {}),
+    },
+    field_confidences: { claim_type: 0.88 },
+    missing_fields: extractor.missing_fields ?? [],
+    fields_pending_confirmation: extractor.fields_pending_confirmation ?? [],
+    possible_customer_matches: [],
+    possible_policy_matches: [],
+    severity: extractor.severity ?? "medium",
+    requires_specialist: extractor.requires_specialist ?? false,
+    injury_severity: extractor.injury_severity ?? null,
+    not_relevant_reason: undefined,
+    summary: "",
+    suggested_reply: "",
+  });
+
   vi.doMock("@/server/ai/mock-extractor", () => ({
     runMockExtractor: vi.fn(),
-    extractEmailClaimMock: vi.fn().mockReturnValue({
-      extraction_model: "mock-email-v1",
-      fields: extractor.fields ?? [
-        { field_key: "full_name", field_value: "Juan Pérez", confidence: 0.92, source: "ai" },
-        { field_key: "claim_type", field_value: "choque", confidence: 0.88, source: "ai" },
-      ],
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      cost_usd: 0,
-      is_claim: true,
-      confidence: 0.92,
-      extracted_fields: extractor.extracted_fields ?? {
-        full_name: "Juan Pérez",
-        claim_type: "choque",
-        ...(extractor.extracted_fields_extra ?? {}),
-      },
-      field_confidences: { claim_type: 0.88 },
-      missing_fields: extractor.missing_fields ?? [],
-      fields_pending_confirmation: extractor.fields_pending_confirmation ?? [],
-      possible_customer_matches: [],
-      possible_policy_matches: [],
-      severity: extractor.severity ?? "medium",
-      requires_specialist: extractor.requires_specialist ?? false,
-      injury_severity: extractor.injury_severity ?? null,
-      not_relevant_reason: undefined,
-      summary: "",
-      suggested_reply: "",
-    }),
+    extractEmailClaimMock: claimSimulado,
+    // Stub agregado porque `claim-agent.ts` ahora llama `denunciaSimuladaVacia`
+    // en vez de `extractEmailClaimMock` cuando el motor cae a mock (fuera de
+    // E2/E17): sin esto, todo test que pasa por `runEmailClaimAgent` revienta
+    // con "No denunciaSimuladaVacia export". Delega a la misma denuncia
+    // configurable por `extractor` para no romper los tests que ya la usan;
+    // `extract.mock-vacio.test.ts` pisa esto con el módulo real cuando le
+    // hace falta probar la denuncia vacía de verdad.
+    denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
   }));
 
   return { mockDb, espiaDeAuditoria, espiaDeBusqueda };

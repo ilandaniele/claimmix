@@ -62,7 +62,7 @@ import { rehostAndRecordAttachments } from "@/server/email/rehost-attachments";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
 import { sinLosCuerposYaDecodificados } from "@/server/email/gmail/payload-sin-duplicados";
-import type { gmail_v1 } from "googleapis";
+import type { gmail_v1 } from "@googleapis/gmail";
 import { logger } from "@/lib/observability/logger";
 
 // ── Constants ─────────────────────────────────────────────────────────────────

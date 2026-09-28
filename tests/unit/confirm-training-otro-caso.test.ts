@@ -34,20 +34,17 @@ vi.mock("@/lib/db/schema", () => ({
 }));
 // Cada llamada a `enTenant` corre contra un `db` de juguete que devuelve, en
 // orden, lo que cada test cargó en `selectQueue` — una fila por `select()`.
-vi.mock("@/data/scope", () => ({
-  enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) => {
-    const fakeDb = {
-      select: () => ({
-        from: () => ({
-          where: () => ({
-            limit: () => Promise.resolve(selectQueue.shift() ?? []),
-          }),
-        }),
+const fakeDb = {
+  select: () => ({
+    from: () => ({
+      where: () => ({
+        limit: () => Promise.resolve(selectQueue.shift() ?? []),
       }),
-    };
-    return Promise.resolve(armar(fakeDb));
-  },
-}));
+    }),
+  }),
+};
+
+vi.mock("@/data/scope", async () => (await import("../mocks/puente-de-alcance")).puenteDeAlcance(() => fakeDb));
 
 import { POST } from "@/app/api/cases/[id]/confirm-training/route";
 

@@ -181,7 +181,7 @@ describe("responderPregunta — contar_casos", () => {
     expect(mockRegistrarConsumo).toHaveBeenCalledWith(TENANT_ID, "gemini-2.5-flash", {
       promptTokens: 100,
       completionTokens: 20,
-    });
+    }, USER_ID);
   });
 
   it("audita sólo herramienta y cantidad de casos, nunca la pregunta", async () => {
@@ -357,6 +357,7 @@ describe("responderPregunta — buscar_caso, un solo resultado", () => {
 
     await responderPregunta(ctx(), "qué pasó con el caso de Roberto Paz");
     expect(mockRegistrarConsumo).toHaveBeenCalledTimes(2);
+    for (const c of mockRegistrarConsumo.mock.calls) expect(c[3]).toBe(USER_ID);
   });
 });
 

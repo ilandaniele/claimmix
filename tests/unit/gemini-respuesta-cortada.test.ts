@@ -87,6 +87,17 @@ describe("callGemini con la respuesta cortada", () => {
     expect((error as Error).message).toMatch(/tope de tokens/);
   });
 
+  it("el error de MAX_TOKENS trae los tokens que Google cobró", async () => {
+    globalThis.fetch = vi.fn(async () => respuesta("MAX_TOKENS", '{"is_claim":tr')) as unknown as typeof fetch;
+
+    const { callGemini } = await import("@/server/ai/gemini-extractor");
+    const e = await callGemini("s", "u").catch((x) => x);
+
+    // E14: sin esto, un intento que Google ya facturó no dejaba rastro —
+    // ni en el resultado devuelto ni en `ai_usage` cuando los dos intentos fallan.
+    expect(e.cause).toMatchObject({ code: "MAX_TOKENS", usage: { promptTokens: 10000, completionTokens: 8192 } });
+  });
+
   it("una respuesta que termina bien pasa como siempre", async () => {
     // La otra mitad, y la que evita que esto se convierta en un extractor que
     // no acepta nada: STOP es el final normal.

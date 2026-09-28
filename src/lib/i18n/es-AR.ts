@@ -293,9 +293,15 @@ export const esAR = {
   // ── Tomar el control (D-F2) ──────────────────────────────────────────────────
   "case.detail.tomarElControl": "Tomar el control",
   "tomarElControl.title": "Tomar el control del caso",
-  "tomarElControl.description": "El agente deja de responder este caso, que pasa a requerir especialista. Es un paso de un solo sentido: no se puede deshacer.",
+  "tomarElControl.description": "Desde ahora contestás vos por WhatsApp; el agente no escribe más en este caso. En planes Pro podés devolvérselo después.",
   "tomarElControl.confirm": "Tomar el control",
   "tomarElControl.cancel": "Cancelar",
+
+  // ── Devolver al agente (E24) ───────────────────────────────────────────────
+  "case.detail.devolverAlAgente": "Devolver al agente",
+  "devolverAlAgente.title": "¿Devolver el caso al agente?",
+  "devolverAlAgente.description": "El agente vuelve a contestar por WhatsApp desde el próximo mensaje. Lo que escribiste vos queda en el historial.",
+  "devolverAlAgente.confirm": "Devolver",
 
   // ── Reenviar pedido (P8) ───────────────────────────────────────────────────
   "reenvio.boton": "Reenviar pedido",
@@ -306,6 +312,7 @@ export const esAR = {
   "reenvio.motivo.estado": "El caso no está esperando una respuesta",
   "reenvio.motivo.sin_destinatario": "No sabemos a quién escribirle",
   "reenvio.motivo.ventana_cerrada": "Pasaron más de 24 h desde su último mensaje de WhatsApp",
+  "reenvio.motivo.plantilla_sin_aprobar": "La plantilla para escribirle después de 24 h todavía no está aprobada por Meta",
   "reenvio.motivo.nada_pendiente": "No queda nada por pedir",
   "reenvio.motivo.reciente": "Se le pidió hace menos de 10 minutos",
   "reenvio.motivo.cierre_no_es_abandono": "Lo cerró una persona: no se reabre desde acá",
@@ -376,17 +383,25 @@ export const esAR = {
   "admin.users.title": "Gestión de analistas",
   "admin.users.invite": "Invitar analista",
   "configuracion.title": "Configuración",
-  "configuracion.subtitle": "Variables de entorno (sólo lectura)",
-  "configuracion.agentTraining.title": "Entrenamiento del agente",
-  "configuracion.agentTraining.label": "Instrucciones y ejemplos para el agente",
-  "configuracion.agentTraining.enabled": "Activo en producción",
-  "configuracion.agentTraining.helper": "Se inyecta en el prompt del agente de email para futuras extracciones. No re-procesa casos anteriores.",
-  "configuracion.agentTraining.save": "Guardar entrenamiento",
-  "configuracion.agentTraining.saving": "Guardando...",
-  "configuracion.agentTraining.saved": "Entrenamiento guardado. El agente lo usará en producción en el próximo análisis.",
-  "configuracion.agentTraining.loadError": "No se pudo cargar el entrenamiento del agente.",
-  "configuracion.agentTraining.saveError": "No se pudo guardar el entrenamiento del agente.",
-  "configuracion.agentTraining.placeholder": "Ejemplos de guía:\n- Para emails con \"Datos del asegurado\", extraer Nombre completo como full_name y Número de póliza como policy_number con alta confianza.\n- Si \"Documentación adjunta\" lista fotos, licencia o denuncia policial, marcar esos documentos como presentes.\n- Para un choque entre dos autos con patentes y sin heridos, la severidad suele ser medium.\n- Pedir confirmación solo cuando un valor sea ambiguo o entre en conflicto con datos guardados de cliente/póliza.",
+  "configuracion.subtitle": "Preferencias de cuenta y parámetros del sistema",
+
+  // ── Configuración — cuenta, umbrales de IA, sistema y avisos (E10) ─
+  "configuracion.cuenta": "Cuenta",
+  "configuracion.umbrales": "Umbrales de IA",
+  "configuracion.umbralConfianza": "Umbral de confianza",
+  "configuracion.umbralAyuda": "(ajustable vía variable CONFIDENCE_THRESHOLD)",
+  "configuracion.capMensual": "Cap mensual de IA",
+  "configuracion.capAyuda": "(configurado en el plan de despliegue)",
+  "configuracion.soloAdmins": "Solo los administradores pueden modificar los umbrales de IA.",
+  "configuracion.miClave": "Mi clave de IA",
+  "configuracion.sistema": "Información del sistema",
+  "configuracion.version": "Versión de la app",
+  "configuracion.node": "Versión de Node.js",
+  "configuracion.region": "Región de despliegue",
+  "configuracion.alertas.titulo": "Avisos de casos urgentes",
+  "configuracion.alertas.ayuda": "Un correo por línea, hasta 10. Si la dejás vacía, se avisa como hasta ahora.",
+  "configuracion.alertas.guardadas": "Lista guardada.",
+  "configuracion.alertas.error": "No se pudo guardar la lista.",
 
   // ── Health ─────────────────────────────────────────────────────────────────
   "health.ok": "ok",
@@ -511,6 +526,7 @@ export const esAR = {
   "case.detail.motivo.conflict": "Un dato no coincide con lo que teníamos",
   "case.detail.motivo.severidad": "Severidad: {nivel}",
   "case.detail.motivo.lesiones": "Mencionó lesiones o datos de salud",
+  "case.detail.motivo.topePorRemitente": "Más de 20 mensajes en 10 minutos del mismo número: se guardó y no se leyó.",
 
   // ── Por qué un adjunto no quedó guardado ───────────────────────────────────
   // La fila rechazada se escribe para que el analista vea que le mandaron algo
@@ -749,6 +765,7 @@ export const esAR = {
   // ── Facturacion — la liquidacion del mes de una aseguradora ───────
   "facturacion.aFacturar": "A facturar",
   "facturacion.abonoPlan": "Abono {n}",
+  "facturacion.antesDelAlta": "Este mes es anterior al alta de la cuenta: no se factura.",
   "facturacion.bucket.facturables": "Facturables",
   "facturacion.bucket.mensajesEnTotal": "Mensajes en total",
   "facturacion.bucket.noEranDenuncias": "No eran denuncias",
@@ -787,6 +804,8 @@ export const esAR = {
   "metricas.actividad.whatsapps": "WhatsApps atendidos",
   "metricas.actividad.mails": "Mails atendidos",
   "metricas.actividad.nota": "Sólo WhatsApp y mail reales, sin simulaciones. Un reclamo abierto es un caso confirmado como siniestro, así que pueden ser menos que el total del mes.",
+  "metricas.ayer.titulo": "Resumen de ayer",
+  "metricas.ayer.ahora": "Pendientes ahora",
   "metricas.card.completitudAuto": "Tasa de completitud automática",
   "metricas.card.escalados": "Siniestros escalados",
   "metricas.card.primeraRespuesta": "Tiempo medio hasta la primera respuesta",
@@ -894,6 +913,8 @@ export const esAR = {
 
   // ── El shell — lo poco que el layout dice por sí mismo ────────────
   "layout.nombreFallback": "Analista",
+  "toast.cerrar": "Cerrar notificación",
+  "toast.region": "Notificaciones",
 
 
   // ── Ejemplos aprobados — la solapa de la consola del agente ───────
@@ -1110,6 +1131,7 @@ export const esAR = {
   "ft.titulo": "Entrenamiento del agente",
   "ft.vertex.activarModelo": "Activar modelo",
   "ft.vertex.activoDesde": "Activo desde {f}",
+  "ft.vertex.aprobar": "Aprobar evaluación",
   "ft.vertex.cancelar": "Cancelar",
   "ft.vertex.cargando": "Cargando Vertex AI…",
   "ft.vertex.confirmar": "Confirmar",
@@ -1118,6 +1140,7 @@ export const esAR = {
   "ft.vertex.crearBorrador": "Crear borrador",
   "ft.vertex.deshabilitado": "Vertex AI no está habilitado. Configurá las variables de entorno en el servidor para activarlo.",
   "ft.vertex.errorActivar": "No se pudo activar el modelo.",
+  "ft.vertex.errorAprobar": "No se pudo guardar la decisión.",
   "ft.vertex.errorBorrador": "No se pudo crear el borrador.",
   "ft.vertex.errorIniciar": "No se pudo iniciar el trabajo.",
   "ft.vertex.errorSincronizar": "No se pudo sincronizar.",
@@ -1128,6 +1151,7 @@ export const esAR = {
   "ft.vertex.modeloBase": "Modelo base:",
   "ft.vertex.precio": "y configuración de GCP. Precio estimado: US$ 0,008 cada 1.000 tokens de entrenamiento.",
   "ft.vertex.proyecto": "Proyecto:",
+  "ft.vertex.rechazar": "Rechazar",
   "ft.vertex.region": "Región:",
   "ft.vertex.requiere": "Entrenamiento real por Google Cloud. Requiere",
   "ft.vertex.sinTrabajos": "No hay trabajos de Vertex AI.",

@@ -319,8 +319,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         // La base ya frenaba el mensaje repetido, pero el aviso se perdía y
         // esto se llamaba igual: cada reintento de Meta era otra extracción
         // contra Vertex y un segundo mensaje al asegurado diciendo lo mismo.
-        // Meta reintenta cuando el acuse tarda, y el acuse mide 2,9 s p95.
-        if (!stored.duplicado) paraElAgente.add(stored.caseId);
+        // Meta reintenta cuando el acuse tarda, y el acuse mide 2,9 s p95. Y el
+        // que pasó el tope por remitente (E12) tampoco: se guardó y no se lee.
+        if (!stored.duplicado && !stored.excedente) paraElAgente.add(stored.caseId);
       } catch (err) {
         sinGuardar++;
         // El mensaje del error, no su nombre: `insertWhatsAppMessage` se toma
@@ -428,8 +429,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // account gets flagged.
       simulated: true,
     });
-    // Igual que arriba: un adaptador que reintenta no dispara otra extracción.
-    if (!stored.duplicado) scheduleAgent([stored.caseId], tenantId, false, hasta);
+    // Igual que arriba: un adaptador que reintenta no dispara otra extracción,
+    // y el que pasó el tope por remitente (E12) tampoco.
+    if (!stored.duplicado && !stored.excedente) scheduleAgent([stored.caseId], tenantId, false, hasta);
 
     return NextResponse.json(
       { ok: true, case_id: stored.caseId, created: stored.created, status: "received" },

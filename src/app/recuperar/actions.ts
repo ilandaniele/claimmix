@@ -27,6 +27,7 @@ import {
   rateLimit,
   topePorIp,
 } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 const Schema = z.object({
@@ -66,7 +67,7 @@ export async function pedirEnlace(
    * recorre una lista pidiendo un enlace por dirección, que además de ser
    * ruidoso sirve para averiguar qué direcciones existen midiendo el tiempo.
    */
-  const rl = await rateLimit(`reset:${ip}:${email}`, RATE_LIMIT_CONFIGS.AUTH_RESET);
+  const rl = await rateLimit(claveDeCupo("auth:reset", ip, email), RATE_LIMIT_CONFIGS.AUTH_RESET);
   const porIp = await topePorIp(ip);
   if (!rl.allowed || !porIp.allowed) {
     await writeAuditLog({

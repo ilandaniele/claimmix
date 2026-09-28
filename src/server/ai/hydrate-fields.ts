@@ -29,8 +29,6 @@ import type { ExtractedClaim, ExtractedField, ClaimFields } from "@/lib/schemas/
  */
 const HYDRATED_KEYS = CLAIM_FIELD_KEYS;
 
-type HydratedKey = keyof ClaimFields;
-
 /**
  * Ensure every populated key in extracted_fields also appears in fields[].
  *
@@ -84,6 +82,15 @@ export const DNI_RE = /\b\d{1,2}\.?\d{3}\.?\d{3}\b/g;
  * common abbreviations like "AC6", "T01", etc.).
  */
 const POLICY_RE = /\b[A-Z0-9]{4,}-?\d{1,4}\b/g;
+
+/**
+ * Email y teléfono en texto libre. Las mismas que usa el export
+ * (`src/server/agents/export.ts`), acá para que las dos capas de tachado
+ * —el export y `sinDatosDeLaPersona`— compartan la misma regla en vez de
+ * mantener cada una la suya.
+ */
+export const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+export const PHONE_RE = /(?<!\w)(?:\+?\d[\d .()/-]{7,}\d)(?!\w)/g;
 
 /**
  * Tacha el nombre y el DNI de una persona en un texto libre.

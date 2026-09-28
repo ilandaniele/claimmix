@@ -20,9 +20,11 @@ import { describe, it, expect, vi } from "vitest";
 import {
   base64urlToBase64,
   adaptGmailAttachments,
+  TOPE_ANTES_DE_BAJAR,
 } from "@/server/email/gmail/gmail-attachment-adapter";
 import type { GmailAttachmentFetcher } from "@/server/email/gmail/gmail-attachment-adapter";
-import type { gmail_v1 } from "googleapis";
+import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
+import type { gmail_v1 } from "@googleapis/gmail";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +35,7 @@ function makePart(opts: {
   data?: string;
   attachmentId?: string;
   disposition?: string;
+  size?: number;
   parts?: gmail_v1.Schema$MessagePart[];
 }): gmail_v1.Schema$MessagePart {
   const headers: gmail_v1.Schema$MessagePartHeader[] = [];
@@ -47,7 +50,7 @@ function makePart(opts: {
     body: {
       data: opts.data,
       attachmentId: opts.attachmentId,
-      size: opts.data ? Math.floor(opts.data.length * 0.75) : 0,
+      size: opts.size ?? (opts.data ? Math.floor(opts.data.length * 0.75) : 0),
     },
     parts: opts.parts,
   };
@@ -369,6 +372,110 @@ describe("adaptGmailAttachments — attachmentId fallback fetch", () => {
 
     const result = await adaptGmailAttachments([part], "msg-1", gmail);
     expect(result).toHaveLength(0);
+  });
+});
+
+// ── E8: part.body.size pre-check before downloading ──────────────────────────
+
+describe("adaptGmailAttachments — size pre-check before downloading", () => {
+  it("rejects an oversized PDF without calling attachments.get", async () => {
+    const gmail = makeGmailMock();
+    const parts: gmail_v1.Schema$MessagePart[] = [
+      makePart({
+        filename: "huge.pdf",
+        mimeType: "application/pdf",
+        attachmentId: "attach-id-huge",
+        size: TOPE_ANTES_DE_BAJAR + 1,
+      }),
+    ];
+
+    const result = await adaptGmailAttachments(parts, "msg-1", gmail);
+
+    expect(gmail.users.messages.attachments.get).not.toHaveBeenCalled();
+    expect(result).toHaveLength(1);
+    expect(result[0].rechazoPrevio).toBe("size_exceeded");
+    expect(result[0].Content).toBe("");
+    expect(result[0].ContentLength).toBe(TOPE_ANTES_DE_BAJAR + 1);
+  });
+
+  it("rejects a disallowed content type over the pre-check cap without fetching", async () => {
+    const gmail = makeGmailMock();
+    const parts: gmail_v1.Schema$MessagePart[] = [
+      makePart({
+        filename: "virus.exe",
+        mimeType: "application/x-msdownload",
+        attachmentId: "attach-id-exe",
+        size: TOPE_ANTES_DE_BAJAR + 1,
+      }),
+    ];
+
+    const result = await adaptGmailAttachments(parts, "msg-1", gmail);
+
+    expect(gmail.users.messages.attachments.get).not.toHaveBeenCalled();
+    expect(result).toHaveLength(1);
+    expect(result[0].rechazoPrevio).toBe("content_type_not_allowed");
+  });
+
+  it("fetches when the declared size is exactly the pre-check cap (boundary inclusive)", async () => {
+    const fetchedData = Buffer.from("at the boundary").toString("base64url");
+    const gmail = makeGmailMock(fetchedData);
+    const parts: gmail_v1.Schema$MessagePart[] = [
+      makePart({
+        filename: "boundary.pdf",
+        mimeType: "application/pdf",
+        attachmentId: "attach-id-boundary",
+        size: TOPE_ANTES_DE_BAJAR,
+      }),
+    ];
+
+    const result = await adaptGmailAttachments(parts, "msg-1", gmail);
+
+    expect(gmail.users.messages.attachments.get).toHaveBeenCalled();
+    expect(result).toHaveLength(1);
+    expect(result[0].rechazoPrevio).toBeUndefined();
+  });
+
+  it("fetches when the declared size is over MAX_ATTACHMENT_SIZE_BYTES but under the pre-check cap", async () => {
+    const fetchedData = Buffer.from("still fetched").toString("base64url");
+    const gmail = makeGmailMock(fetchedData);
+    const parts: gmail_v1.Schema$MessagePart[] = [
+      makePart({
+        filename: "borderline.pdf",
+        mimeType: "application/pdf",
+        attachmentId: "attach-id-borderline",
+        size: MAX_ATTACHMENT_SIZE_BYTES + 1,
+      }),
+    ];
+
+    const result = await adaptGmailAttachments(parts, "msg-1", gmail);
+
+    expect(gmail.users.messages.attachments.get).toHaveBeenCalled();
+    expect(result).toHaveLength(1);
+    expect(result[0].rechazoPrevio).toBeUndefined();
+  });
+
+  it("fetches when size is 0 or undefined", async () => {
+    const fetchedData = Buffer.from("no declared size").toString("base64url");
+    const gmail = makeGmailMock(fetchedData);
+    const undefSizePart: gmail_v1.Schema$MessagePart = {
+      filename: "undef.pdf",
+      mimeType: "application/pdf",
+      headers: [],
+      body: { attachmentId: "attach-id-undef" }, // no size key at all
+    };
+    const parts: gmail_v1.Schema$MessagePart[] = [
+      makePart({ filename: "zero.pdf", mimeType: "application/pdf", attachmentId: "attach-id-zero", size: 0 }),
+      undefSizePart,
+    ];
+
+    const result = await adaptGmailAttachments(parts, "msg-1", gmail);
+
+    expect(gmail.users.messages.attachments.get).toHaveBeenCalledTimes(2);
+    expect(result).toHaveLength(2);
+  });
+
+  it("pins TOPE_ANTES_DE_BAJAR to 13_981_016", () => {
+    expect(TOPE_ANTES_DE_BAJAR).toBe(13_981_016);
   });
 });
 

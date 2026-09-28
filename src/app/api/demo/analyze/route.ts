@@ -2,7 +2,7 @@
  * POST /api/demo/analyze — run Gemini extraction on pasted email text without
  * creating a case. Designed for live demos to aseguradoras.
  *
- * Auth: required (any authenticated user).
+ * Auth: required (roles que editan casos: owner, admin, specialist, analyst; viewer no — E9).
  * Rate limit: 10/min per user (reuses INTAKE_SIMULATE config).
  * Presupuesto: pasa por `checkBudget`, como toda ruta que llama al modelo.
  */
@@ -10,7 +10,7 @@
 import "server-only";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
-import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
+import { CASE_EDITOR_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
 import { extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
 import { ok, err } from "@/lib/api/respond";
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     ({ ctx, rl: rlResult } = await entrar(
       "demo-analyze",
       RATE_LIMIT_CONFIGS.INTAKE_SIMULATE,
-      ...ALL_ROLES
+      ...CASE_EDITOR_ROLES
     ));
   } catch (e) {
     return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));

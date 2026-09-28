@@ -186,6 +186,27 @@ jobs:
     # workflow_dispatch directo sobre este archivo, dispararlo a mano ya es
     # la decisión.
     steps:
+      # Este workflow recibe la URL de su caller (o de quien lo dispare a
+      # mano) y siete jobs cuelgan de este primero, todos con secretos. Antes
+      # de que exista ninguno, se comprueba a qué despliegue apunta.
+      - name: ¿A dónde apunta esto?
+        env:
+          URL: ${{ inputs.url }}
+        run: |
+          set -u
+          case "$URL" in
+            https://*) ;;
+            *) echo "::error::La URL tiene que empezar con https://"; exit 1 ;;
+          esac
+          HOST="${URL#https://}"
+          case "$HOST" in
+            *[/?#@:]*) echo "::error::La URL no puede llevar ruta, puerto, credenciales ni fragmento: ${HOST}"; exit 1 ;;
+          esac
+          case "$HOST" in
+            claimmix.vercel.app|claimmix-qa.vercel.app|claimmix-*-ilandaniele-3471s-projects.vercel.app) ;;
+            *) echo "::error::Host fuera de la lista: ${HOST}"; exit 1 ;;
+          esac
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Historia completa: el chequeo compara el commit que pidió este run
         # con el que producción está sirviendo, y para saber cuál viene
@@ -251,17 +272,18 @@ jobs:
 
   # ── El ensayo de conversaciones ──────────────────────────────────────────────
   #
-  # Doce denuncias enteras contra el agente real, por WhatsApp y por mail, sobre
-  # los canales simulados. No le manda un mensaje a nadie.
+  # Dieciocho denuncias enteras contra el agente real, por WhatsApp y por mail,
+  # sobre los canales simulados. No le manda un mensaje a nadie.
   #
   # Corre después del smoke y sólo si pasó: si producción no puede llegar a la
   # base o al modelo, el ensayo va a fallar por eso y el resultado no dice nada
   # sobre el agente.
   #
-  # Usa la base de PRODUCCIÓN. Escribe doce casos y los borra al terminar, y al
-  # empezar barre los que hayan quedado de una corrida que se murió a mitad de
-  # camino. Se los reconoce por identidades inventadas — números 5490000… y
-  # direcciones ensayo.*@example.com — que ningún asegurado real puede tener.
+  # Usa la base de PRODUCCIÓN. Escribe dieciocho casos y los borra al terminar,
+  # y al empezar barre los que hayan quedado de una corrida que se murió a
+  # mitad de camino. Se los reconoce por identidades inventadas — números
+  # 5490000… y direcciones ensayo.*@example.com — que ningún asegurado real
+  # puede tener.
   #
   # El reconocimiento de documentos no se ejercita acá: necesita fotos reales, y
   # una licencia de verdad no entra ni al repositorio ni a los secretos de

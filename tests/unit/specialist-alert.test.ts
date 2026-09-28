@@ -29,15 +29,7 @@ const { mockSelect, mockGetAccount, mockSend, mockAudit } = vi.hoisted(() => ({
 // Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
 // eso se verifica en tests/unit/data-scope-sin-rol.test.ts y, contra bases de
 // verdad, en `pnpm capa-datos` y `pnpm tenancy`.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/lib/db", () => ({ db: { select: mockSelect } }));
 
@@ -57,17 +49,22 @@ vi.mock("@/lib/audit/log", () => ({
 }));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { tenants } from "@/lib/db/schema";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
 
 /** El `where` con el que se preguntó «¿ya se avisó?», para poder compilarlo. */
 const condicionesDeYaSeAviso: unknown[] = [];
+/** El `where` con el que se pidió la lista del tenant, para poder compilarlo. */
+const condicionDelTenant: unknown[] = [];
 
 const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
 
 /**
- * The module makes three different selects. They are told apart by the shape
- * of the chain, which is the only thing distinguishing them from outside:
+ * The module makes four different selects. They are told apart by the table
+ * passed to `from` and by the shape of the chain, which is the only thing
+ * distinguishing them from outside:
+ *   tenants  → select().from(tenants).where().limit()   (la lista del tenant)
  *   channel  → select().from().where().limit()
  *   already  → select().from().where().limit()  (audit_log)
  *   people   → select().from().innerJoin().where()
@@ -82,6 +79,10 @@ function database(opts: {
   owners?: string[];
   /** Con qué dirección o teléfono entró el denunciante. */
   remitente?: string;
+  /** La lista que cargó un admin en /configuracion para este tenant. */
+  listaDelTenant?: string[];
+  /** Simula que la migración 0034 todavía no se aplicó en esta base. */
+  listaDelTenantFalla?: boolean;
 }) {
   const channel = opts.channel ?? "email";
   // Una persona de verdad, salvo que el test diga otra cosa.
@@ -93,38 +94,52 @@ function database(opts: {
   // listas distintas y probar cuál gana.
   let porRol = 0;
   condicionesDeYaSeAviso.length = 0;
+  condicionDelTenant.length = 0;
 
   mockSelect.mockImplementation(() => ({
-    from: () => ({
-      innerJoin: () => ({
-        where: () => {
-          porRol += 1;
-          if (opts.especialistas !== undefined || opts.owners !== undefined) {
-            const lista = porRol === 1 ? (opts.especialistas ?? []) : (opts.owners ?? []);
-            return Promise.resolve(lista.map((email) => ({ email })));
+    from: (tabla: unknown) =>
+      tabla === tenants
+        ? {
+            where: (cond: unknown) => {
+              condicionDelTenant.push(cond);
+              return {
+                limit: () =>
+                  opts.listaDelTenantFalla
+                    ? Promise.reject({ code: "42703" })
+                    : Promise.resolve([{ emails: opts.listaDelTenant ?? [] }]),
+              };
+            },
           }
-          return Promise.resolve(staff.map((email) => ({ email })));
-        },
-      }),
-      where: (cond: unknown) => ({
-        limit: () => {
-          call += 1;
-          // First: the case's channel. Second: has an alert already gone out.
-          if (call === 1) return Promise.resolve([{ channel }]);
-          // El `where` de la segunda se guarda: es lo único que distingue «ya se
-          // avisó» de «ya se avisó Y SE ENTREGÓ», y el mock devuelve filas sin
-          // mirarlo.
-          condicionesDeYaSeAviso.push(cond);
-          return Promise.resolve(opts.alreadySent ? [{ id: 1 }] : []);
-        },
-        // El contacto del denunciante, que es lo único que distingue a un
-        // asegurado inventado cuando el canal es de verdad:
-        //   select().from().where().orderBy().limit()
-        orderBy: () => ({
-          limit: () => Promise.resolve([{ from_addr: remitente }]),
-        }),
-      }),
-    }),
+        : {
+            innerJoin: () => ({
+              where: () => {
+                porRol += 1;
+                if (opts.especialistas !== undefined || opts.owners !== undefined) {
+                  const lista = porRol === 1 ? (opts.especialistas ?? []) : (opts.owners ?? []);
+                  return Promise.resolve(lista.map((email) => ({ email })));
+                }
+                return Promise.resolve(staff.map((email) => ({ email })));
+              },
+            }),
+            where: (cond: unknown) => ({
+              limit: () => {
+                call += 1;
+                // First: the case's channel. Second: has an alert already gone out.
+                if (call === 1) return Promise.resolve([{ channel }]);
+                // El `where` de la segunda se guarda: es lo único que distingue «ya se
+                // avisó» de «ya se avisó Y SE ENTREGÓ», y el mock devuelve filas sin
+                // mirarlo.
+                condicionesDeYaSeAviso.push(cond);
+                return Promise.resolve(opts.alreadySent ? [{ id: 1 }] : []);
+              },
+              // El contacto del denunciante, que es lo único que distingue a un
+              // asegurado inventado cuando el canal es de verdad:
+              //   select().from().where().orderBy().limit()
+              orderBy: () => ({
+                limit: () => Promise.resolve([{ from_addr: remitente }]),
+              }),
+            }),
+          },
   }));
 }
 
@@ -267,12 +282,22 @@ describe("alertSpecialists — when it cannot do its job", () => {
  */
 describe("a quién le llega", () => {
   const guardada = process.env.SPECIALIST_ALERT_EMAILS;
+  const guardadaGoogle = process.env.GOOGLE_DEFAULT_TENANT_ID;
+  const guardadaDefault = process.env.DEFAULT_TENANT_ID;
+  const guardadaGmail = process.env.GMAIL_TENANT_ID;
   afterEach(() => {
     if (guardada === undefined) delete process.env.SPECIALIST_ALERT_EMAILS;
     else process.env.SPECIALIST_ALERT_EMAILS = guardada;
+    if (guardadaGoogle === undefined) delete process.env.GOOGLE_DEFAULT_TENANT_ID;
+    else process.env.GOOGLE_DEFAULT_TENANT_ID = guardadaGoogle;
+    if (guardadaDefault === undefined) delete process.env.DEFAULT_TENANT_ID;
+    else process.env.DEFAULT_TENANT_ID = guardadaDefault;
+    if (guardadaGmail === undefined) delete process.env.GMAIL_TENANT_ID;
+    else process.env.GMAIL_TENANT_ID = guardadaGmail;
   });
 
-  it("la lista explícita gana sobre cualquier deducción", async () => {
+  it("para el tenant principal, la variable gana sobre los roles", async () => {
+    process.env.GOOGLE_DEFAULT_TENANT_ID = TENANT;
     process.env.SPECIALIST_ALERT_EMAILS = "guardia@aseguradora.com, siniestros@aseguradora.com";
     database({ especialistas: ["nadie@no.com"], owners: ["tampoco@no.com"] });
 
@@ -333,6 +358,113 @@ describe("a quién le llega", () => {
     // Cuántos, no quiénes: una dirección es un dato personal y esto es un registro.
     expect(j.destinatarios_de_respaldo).toBe(1);
     expect(JSON.stringify(j)).not.toContain("@");
+  });
+
+  it("la lista del tenant gana sobre la variable y los roles", async () => {
+    process.env.GOOGLE_DEFAULT_TENANT_ID = TENANT;
+    process.env.SPECIALIST_ALERT_EMAILS = "otra@aseguradora.com";
+    database({
+      listaDelTenant: ["guardia@aseguradora.com"],
+      especialistas: ["especialista@aseguradora.com"],
+      owners: ["dueña@aseguradora.com"],
+    });
+
+    await alert();
+
+    const para = mockSend.mock.calls[0][0].to as string;
+    expect(para).toBe("guardia@aseguradora.com");
+  });
+
+  it("dos aseguradoras, dos listas", async () => {
+    const TENANT_A = "20000000-0000-0000-0000-00000000000a";
+    const TENANT_B = "20000000-0000-0000-0000-00000000000b";
+
+    database({ listaDelTenant: ["a@x.com"] });
+    await alertSpecialists({ caseId: CASE, tenantId: TENANT_A, severity: "critical" });
+    expect(mockSend.mock.calls[0][0].to).toBe("a@x.com");
+    mockSend.mockClear();
+
+    database({ listaDelTenant: ["b@y.com"] });
+    await alertSpecialists({ caseId: CASE, tenantId: TENANT_B, severity: "critical" });
+    expect(mockSend.mock.calls[0][0].to).toBe("b@y.com");
+  });
+
+  it("la variable no se filtra a otro tenant", async () => {
+    process.env.GOOGLE_DEFAULT_TENANT_ID = "30000000-0000-0000-0000-000000000099";
+    process.env.SPECIALIST_ALERT_EMAILS = "otra-aseguradora@ejemplo.com";
+    database({ especialistas: ["peritaje@aseguradora.com"] });
+
+    await alert();
+
+    const para = mockSend.mock.calls[0][0].to as string;
+    expect(para).toContain("peritaje@aseguradora.com");
+    expect(para).not.toContain("otra-aseguradora@ejemplo.com");
+  });
+
+  describe("la dirección vedada no recibe nunca", () => {
+    const casos: Array<[string, () => void]> = [
+      [
+        "la lista del tenant",
+        // googlemail.com: mismo alias que gmail.com para vedadaParaAlertas,
+        // sin repetir la dirección real con otra ortografía (scripts/check-personal-data.sh).
+        () => database({ listaDelTenant: ["Ilan.Daniele@googlemail.com", "guardia@aseguradora.com"] }),
+      ],
+      [
+        "la variable, en el tenant principal",
+        () => {
+          process.env.GOOGLE_DEFAULT_TENANT_ID = TENANT;
+          process.env.SPECIALIST_ALERT_EMAILS = "ilandaniele+x@googlemail.com, guardia@aseguradora.com";
+          database({});
+        },
+      ],
+      [
+        "los especialistas",
+        () => database({ especialistas: ["Ilan.Daniele@googlemail.com", "peritaje@aseguradora.com"] }),
+      ],
+      [
+        "el respaldo de owners",
+        () => database({ especialistas: [], owners: ["ilandaniele+x@googlemail.com", "dueña@aseguradora.com"] }),
+      ],
+    ];
+
+    it.each(casos)("nunca desde %s", async (_nombre, preparar) => {
+      preparar();
+
+      await alert();
+
+      const para = mockSend.mock.calls[0][0].to as string;
+      expect(para).not.toMatch(/ilan\.?daniele/i);
+    });
+  });
+
+  it("el respaldo salta al owner vedado", async () => {
+    database({ especialistas: [], owners: ["ilan.daniele@gmail.com", "dueña@aseguradora.com"] });
+
+    await alert();
+
+    const para = mockSend.mock.calls[0][0].to as string;
+    expect(para).toBe("dueña@aseguradora.com");
+  });
+
+  it("si la lista no se puede leer, sigue la regla de siempre", async () => {
+    database({ listaDelTenantFalla: true, especialistas: ["peritaje@aseguradora.com"] });
+
+    await alert();
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0][0].to).toContain("peritaje@aseguradora.com");
+  });
+
+  it("la lista se pide por el id del tenant", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    database({ especialistas: ["peritaje@aseguradora.com"] });
+
+    await alert();
+
+    expect(condicionDelTenant.length).toBeGreaterThan(0);
+    const compilado = new PgDialect().sqlToQuery(condicionDelTenant[0] as never);
+    expect(compilado.sql).toContain('"tenants"."id"');
+    expect(compilado.params).toContain(TENANT);
   });
 });
 

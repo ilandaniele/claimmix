@@ -38,12 +38,7 @@ vi.mock("@/lib/db", () => ({
   tables: { aiUsage: "ai_usage" },
 }));
 
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_c: unknown, armar: (d: unknown) => unknown) => Promise.resolve(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 import { registrarConsumoDelModelo, computeCostUsd } from "@/server/ai/budget";
 
@@ -80,6 +75,20 @@ describe("registrarConsumoDelModelo", () => {
     });
 
     expect(filas[0].user_id).toBeNull();
+  });
+
+  it("se lo atribuye a la persona cuando la hay", async () => {
+    // E11: el asistente sabe quién preguntó. Pasarlo hace que el cupo diario
+    // por usuario también cuente estas llamadas.
+    const USUARIO = "20000000-0000-0000-0000-000000000001";
+    await registrarConsumoDelModelo(
+      INQUILINO,
+      "gemini-2.5-flash",
+      { promptTokens: 10, completionTokens: 10 },
+      USUARIO
+    );
+
+    expect(filas[0].user_id).toBe(USUARIO);
   });
 
   it("cobra con el precio del modelo que se usó, no con otro", async () => {

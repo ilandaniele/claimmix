@@ -55,7 +55,7 @@ de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
 
 ### 2. `pnpm rehearse` — minutos, gasta tokens
 
-Catorce denuncias enteras, de punta a punta, contra el mismo código, la misma base
+Dieciocho denuncias enteras, de punta a punta, contra el mismo código, la misma base
 y el mismo modelo que producción. Por los canales simulados: en los dos el
 mensajero redacta la respuesta exactamente como lo haría; WhatsApp la guarda en
 vez de enviarla, y mail hace lo mismo con cualquier dirección `@example.com`.
@@ -72,9 +72,10 @@ Escenarios: la denuncia completa hasta quedar lista, el incendio con heridos que
 se deriva, la cotización que no es un reclamo, los datos que llegan de a uno, el
 mensaje que no aporta nada y no merece respuesta, la pregunta que hay que
 contestar, la póliza que hay que buscar por DNI, la póliza vencida, la foto que
-no es ningún documento, y los cinco equivalentes por mail — entre ellos el
+no es ningún documento, los cinco equivalentes por mail — entre ellos el
 nombre que viene en el sobre y no en el cuerpo, y el familiar del titular cuyos
-datos no coinciden con el padrón.
+datos no coinciden con el padrón — y `tomar-el-control`/`devolver-al-agente`
+(E24, ver abajo).
 
 Ese último está porque no estaba: es el único mensaje del producto cuyo piso ES
 un dato —dice cuáles son los dos valores que no coinciden— y se rompió sin que
@@ -101,6 +102,15 @@ Toda conversación con `finally` que termina en `listo_para_core` o
 `requiere_especialista` corre `traspaso`: el último mensaje avisa que la carga
 de datos se cierra por ese medio y que una persona escribe desde otro número o
 correo, con `mencionaElTraspaso` de `src/core/mensajes/traspaso.ts`.
+
+`tomar-el-control` y `devolver-al-agente` no le escriben nada al agente: un
+turno de acción (`{ accion: "tomar_el_control" | "devolver_al_agente" }`) hace
+el mismo PATCH que haría una persona desde la pantalla — E24 —, para probar
+que el agente se calla mientras dura el control y retoma en cuanto se lo
+devuelven. Con el caso tomado, `traspaso` no corre: no hubo mensaje de
+traspaso porque no escribió el agente, escribió una persona. Necesitan un
+actor de verdad: un owner o, si no hay, un admin, con Plan Pro. Sin uno esos
+dos escenarios se reportan sin ensayar, no en rojo.
 
 También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
 hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún
@@ -539,6 +549,18 @@ pnpm sembrar          # crea las cuatro cuentas, los dos casos y el estado de la
 pnpm test:e2e
 ```
 
+Antes, frená cualquier `pnpm dev` que haya quedado escuchando en el puerto
+3000: `reuseExistingServer` es `false` a propósito, así que Playwright ya no lo
+reusa y falla con «is already used» en vez de correr contra un servidor que
+puede estar leyendo otra base.
+
+Y exportá la base de ENSAYO en la misma terminal antes de `pnpm test:e2e`
+—`DATABASE_URL` y `DATABASE_URL_APP` con los valores de `STAGING_DATABASE_URL`—
+porque la config se los pasa a mano al servidor, y una cadena vacía lo frena con
+«DATABASE_URL is not set» en vez de arrancar contra `.env.local`. Si cualquiera
+de las dos apunta al host de producción (`ep-proud-resonance`), la config se
+planta antes de levantar nada.
+
 `pnpm sembrar` se planta si la cadena es la de producción, y necesita en
 `.env.local`:
 
@@ -549,6 +571,7 @@ pnpm test:e2e
 | `INTEGRATION_ADMIN_PASSWORD` | la cuenta admin — sin valor por omisión, a propósito |
 | `INTEGRATION_LOGIN_PASSWORD` | la cuenta de los tests que prueban el login |
 | `INTEGRATION_E2E_PASSWORD` | la cuenta de los e2e |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (y opcional `R2_BUCKET`) | el PDF de 8 MB, para `pnpm sembrar-adjunto` |
 
 **Entrecomillá los valores.** Una contraseña con `#` adentro, sin comillas,
 dotenv la corta ahí porque toma el resto como comentario: el sembrado guarda una
@@ -572,6 +595,25 @@ resto de los tests levanta (`auth.setup.ts`); los cuatro que sí prueban el logi
 tienen su propia cuenta. En CI los e2e corren **después** de los de integración
 y no en paralelo, porque los dos entran por `localhost` y para el limitador eso
 es la misma IP.
+
+#### El PDF de 8 MB
+
+`adjunto-de-8mb.spec.ts` prueba aparte que un adjunto grande se sirve por
+streaming, y necesita su propio sembrado: `pnpm sembrar-adjunto` sube un PDF de
+8 MiB a R2 (con los `R2_*` de la tabla de arriba, contra la misma base de
+ENSAYO) y deja la fila en `claim_attachments` del caso de siempre
+(`PLAYWRIGHT_EMAIL_CASE_ID`); el spec la busca por
+`PLAYWRIGHT_PDF_ATTACHMENT_ID=e2e00000-0000-4000-8000-0000000000f8`. Igual que
+`pnpm sembrar`, se planta si la cadena es la de producción. En CI usa el balde
+de QA (`QA_R2_*`, el mismo del ensayo de QA), y un paso anterior corta el job
+si esos secretos resultan ser los de producción. Sin las credenciales de R2 el
+spec se saltea solo y lo dice — no hace falta nada más para que el resto de la
+suite corra. Al terminar, `pnpm sembrar-adjunto --limpiar` saca el objeto de R2
+y la fila.
+
+Esto prueba que la ruta hace streaming desde `next start`; el lado de Vercel
+—que la función responda igual en producción— es una comprobación aparte, de
+una sola vez, que sigue anotada en `docs/PROJECT_STATUS.md`.
 
 ---
 
@@ -663,7 +705,8 @@ chequeos: el smoke primero, y colgando de él los otros seis.
    (`migrate.mjs --exigir-al-dia`, sólo SELECT); si ésa falla, la paridad
    corre igual.
 7. `pnpm permisos`: el rol restringido con el que consulta la aplicación puede
-   hacer lo que la capa de datos le pide. Sólo lee.
+   hacer lo que la capa de datos le pide — y en `audit_log`, que es sólo de
+   alta desde 0032, comprueba que NO tenga UPDATE ni DELETE. Sólo lee.
 
 Hay un octavo trabajo que no verifica nada, `alcance`. Corre con `if: always()`
 y escribe en el resumen del run una fila por chequeo: **corrió**, **corrió y

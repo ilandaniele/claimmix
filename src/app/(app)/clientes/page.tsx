@@ -58,7 +58,7 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
   if (!session?.user) redirect("/login");
   // Deduplicada con la del layout: ver lib/auth/user-row.ts.
   const userRow = await getUserRow(session.user.id);
-  if (!userRow) redirect("/login");
+  if (!userRow) redirect("/pendiente");
 
   /*
    * Quién puede ver esto: el mismo rol que exige /api/customers.

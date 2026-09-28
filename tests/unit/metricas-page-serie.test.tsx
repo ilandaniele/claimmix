@@ -29,7 +29,7 @@ import type { MetricasData } from "@/server/metrics/kpis";
 
 const SIN_USO = { calls: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 };
 
-function datos(casos: number): MetricasData {
+function datos(casos: number, ayer?: MetricasData["ayer"]): MetricasData {
   return {
     summary: {
       total_cases_month: casos,
@@ -52,6 +52,7 @@ function datos(casos: number): MetricasData {
         reclamos_mail: 0,
       },
     ],
+    ...(ayer ? { ayer } : {}),
   };
 }
 
@@ -67,7 +68,7 @@ describe("/metricas — la serie de actividad", () => {
 
     await dibujar("dia");
 
-    expect(mockKpis).toHaveBeenCalledWith({ tenantId: "t1" }, { serie: "dia" });
+    expect(mockKpis).toHaveBeenCalledWith({ tenantId: "t1" }, { serie: "dia", ayer: true });
     expect(screen.getByTestId("serie-actividad")).toBeInTheDocument();
     expect(screen.getByRole("link", { current: "page" })).toHaveTextContent("Por día");
   });
@@ -77,7 +78,7 @@ describe("/metricas — la serie de actividad", () => {
 
     await dibujar();
 
-    expect(mockKpis).toHaveBeenCalledWith({ tenantId: "t1" }, { serie: "dia" });
+    expect(mockKpis).toHaveBeenCalledWith({ tenantId: "t1" }, { serie: "dia", ayer: true });
   });
 
   it("sin ningún caso, la actividad reciente se muestra igual bajo el aviso", async () => {
@@ -87,5 +88,24 @@ describe("/metricas — la serie de actividad", () => {
 
     expect(screen.getByText(/No hay datos disponibles/)).toBeInTheDocument();
     expect(screen.getByTestId("serie-actividad")).toBeInTheDocument();
+  });
+
+  it("sin ningún caso, el resumen de ayer se muestra igual junto al aviso", async () => {
+    mockKpis.mockResolvedValue(
+      datos(0, {
+        reclamos: 0,
+        whatsapps: 0,
+        mails: 0,
+        escalados: 0,
+        cerrados: 0,
+        para_responder: 0,
+        confirmacion_pendiente: 0,
+      })
+    );
+
+    await dibujar("dia");
+
+    expect(screen.getByText(/No hay datos disponibles/)).toBeInTheDocument();
+    expect(screen.getByTestId("resumen-de-ayer")).toBeInTheDocument();
   });
 });

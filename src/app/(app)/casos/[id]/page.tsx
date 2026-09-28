@@ -17,7 +17,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { CASE_EDITOR_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
-import { puedeTomarElControl } from "@/core/case/tomar-el-control";
+import { puedeTomarElControl, puedeDevolverAlAgente } from "@/core/case/tomar-el-control";
 import type { TenantContext } from "@/data/scope";
 import {
   cargarDetalleDeCaso,
@@ -75,14 +75,6 @@ interface ExtractedFieldRow {
   extracted_at: string;
 }
 
-/** Safe jsonb → Record normalization (audit payloads are objects in practice). */
-function toPayloadRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
-}
-
 export default async function CaseDetailPage({ params, searchParams }: CaseDetailPageProps) {
   const { id } = await params;
   // Abierto desde «Para responder», «Volver» sigue con la cola.
@@ -112,7 +104,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   // Deduplicada con la del layout: ver lib/auth/user-row.ts.
   const me = await getUserRow(session.user.id);
   if (!me) {
-    redirect("/login");
+    redirect("/pendiente");
   }
   const tenantId = me.tenant_id;
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
@@ -215,6 +207,16 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     status: caseRow.status,
     extractionPending: caseRow.extraction_pending,
     extractionLeaseAt: caseRow.extraction_lease_at,
+    ahora: new Date(),
+  });
+  const puedeDevolverAlAgenteCaso = puedeDevolverAlAgente({
+    puedeCambiarEstado: puedeCambiarEstadoCaso,
+    plan: me.plan,
+    channel: caseRow.channel,
+    status: caseRow.status,
+    extractionPending: caseRow.extraction_pending,
+    extractionLeaseAt: caseRow.extraction_lease_at,
+    devolvible: acciones.devolvible,
     ahora: new Date(),
   });
 
@@ -325,6 +327,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             acciones={acciones}
             puedeCambiarEstado={puedeCambiarEstadoCaso}
             puedeTomarElControl={puedeTomarElControlCaso}
+            puedeDevolverAlAgente={puedeDevolverAlAgenteCaso}
           />
         </div>
       </Card>

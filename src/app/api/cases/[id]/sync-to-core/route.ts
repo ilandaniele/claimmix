@@ -11,7 +11,7 @@
  * Precondition: cases.status must be 'listo_para_core' (unless force=true).
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 
@@ -101,6 +101,11 @@ export async function POST(
   if (!force && currentStatus !== REQUIRED_STATUS) {
     return err(new AppError("FSM_INVALID_TRANSITION", `El caso debe estar en estado '${REQUIRED_STATUS}'. Estado actual: '${currentStatus}'.`));
   }
+  // `force` salta el chequeo de arriba, pero no puede mandar el mismo caso al
+  // Core dos veces: eso es un envío externo duplicado, no un reintento local.
+  if (force && currentStatus === SUCCESS_STATUS) {
+    return err(new AppError("FSM_INVALID_TRANSITION", "El caso ya fue enviado al Core."));
+  }
 
   // ── 7. Build CoreSyncPayload ──────────────────────────────────────────────────
   const fieldRows = await enTenant(tenantCtx, (db) =>
@@ -157,9 +162,27 @@ export async function POST(
   const now = new Date().toISOString();
 
   if (result.success) {
-    await enTenant(tenantCtx, (db) =>
-      db.update(cases).set({ status: SUCCESS_STATUS, core_external_id: result.externalId, core_sent_at: now, updated_at: now }).where(eq(cases.id, caseId))
+    const [quedo] = await enTenant(tenantCtx, (db) =>
+      db.update(cases)
+        .set({ status: SUCCESS_STATUS, core_external_id: result.externalId, core_sent_at: now, updated_at: now })
+        .where(and(eq(cases.id, caseId), eq(cases.status, currentStatus)))
+        .returning({ id: cases.id })
     );
+
+    if (!quedo) {
+      // El Core ya recibió el caso; lo que se perdió es el estado local, no el
+      // envío. Se audita igual — con el id externo — para no perder el rastro.
+      logger.warn({ case_id: caseId, seen: currentStatus, core_external_id: result.externalId }, "core_sync.status_not_applied");
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: userRow.id,
+        event_type: AuditEvent.CORE_SYNC_SUCCESS,
+        target_type: "case",
+        target_id: caseId,
+        payload: { case_id: caseId, core_external_id: result.externalId, from_status: currentStatus, new_status: SUCCESS_STATUS, status_not_applied: true },
+      });
+      return err(new AppError("FSM_INVALID_TRANSITION", "El caso cambió mientras se enviaba; el envío al Core quedó registrado en la auditoría."));
+    }
 
     await writeAuditLog({
       tenant_id: tenantId,
@@ -174,9 +197,27 @@ export async function POST(
   } else {
     const errorMessage = result.errorMessage ?? "Error desconocido al sincronizar.";
 
-    await enTenant(tenantCtx, (db) =>
-      db.update(cases).set({ status: FAILURE_STATUS, core_error_message: errorMessage, updated_at: now }).where(eq(cases.id, caseId))
+    const [quedo] = await enTenant(tenantCtx, (db) =>
+      db.update(cases)
+        .set({ status: FAILURE_STATUS, core_error_message: errorMessage, updated_at: now })
+        .where(and(eq(cases.id, caseId), eq(cases.status, currentStatus)))
+        .returning({ id: cases.id })
     );
+
+    if (!quedo) {
+      // No hay nada que deshacer: el envío ya falló solo. Sólo queda avisar
+      // que el estado local no se pudo escribir.
+      logger.warn({ case_id: caseId, seen: currentStatus }, "core_sync.status_not_applied");
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: userRow.id,
+        event_type: AuditEvent.CORE_SYNC_FAILED,
+        target_type: "case",
+        target_id: caseId,
+        payload: { case_id: caseId, error_code: "CORE_SYNC_FAILED", from_status: currentStatus, new_status: FAILURE_STATUS, status_not_applied: true },
+      });
+      return ok({ synced: false, errorMessage });
+    }
 
     await writeAuditLog({
       tenant_id: tenantId,

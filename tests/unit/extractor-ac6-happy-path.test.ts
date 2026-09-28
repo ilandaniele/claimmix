@@ -33,21 +33,7 @@
 // eso no se puede simular sin mentir. Se verifica en
 // tests/unit/data-scope-sin-rol.test.ts y, contra bases de verdad, en
 // `pnpm capa-datos` y `pnpm tenancy`.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  // Se lee `mod.db` en CADA llamada, sin desestructurar.
-  //
-  // El mock de @/lib/db expone `db` con un getter para que los tests puedan
-  // intercambiar la base simulada entre corridas. Un `const { db } = ...`
-  // llama al getter una sola vez y congela ese valor: al cambiar la base, el
-  // puente seguía entregando la anterior y el caso aparecía como inexistente.
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -137,6 +123,7 @@ vi.mock("@/server/ai/severity-classifier", () => ({
 vi.mock("@/server/ai/mock-extractor", () => ({
   extractEmailClaimMock: vi.fn(),
   runMockExtractor: vi.fn(),
+  denunciaSimuladaVacia: vi.fn(),
 }));
 
 vi.mock("@/server/ai/gemini-extractor", () => ({
@@ -203,7 +190,7 @@ import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
 import { findCustomerMatches } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
-import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
+import { extractEmailClaimMock, denunciaSimuladaVacia } from "@/server/ai/mock-extractor";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { db } from "@/lib/db";
 import { extraccion } from "../helpers/extraccion";
@@ -359,7 +346,9 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
       ]);
 
       // Set up extractEmailClaimMock to return a valid claim.
-      vi.mocked(extractEmailClaimMock).mockReturnValue(extraccion({
+      // denunciaSimuladaVacia devuelve lo mismo: es el otro camino por el que
+      // claim-agent.ts llega al mock (E16).
+      const denunciaConPolizaYNombre = extraccion({
         extraction_model: "mock-email-v1",
         fields: [
           { field_key: "policy_number", field_value: "POL-1234",   confidence: 0.92, source: "ai" as const },
@@ -381,7 +370,9 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
         not_relevant_reason: undefined,
         summary: "Choque claim",
         suggested_reply: "",
-      }));
+      });
+      vi.mocked(extractEmailClaimMock).mockReturnValue(denunciaConPolizaYNombre);
+      vi.mocked(denunciaSimuladaVacia).mockReturnValue(denunciaConPolizaYNombre);
 
       await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
 
@@ -445,7 +436,9 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
       vi.mocked(findPolicyMatches).mockResolvedValue([]);
 
       // Set up extractEmailClaimMock to return a valid claim.
-      vi.mocked(extractEmailClaimMock).mockReturnValue(extraccion({
+      // denunciaSimuladaVacia devuelve lo mismo: es el otro camino por el que
+      // claim-agent.ts llega al mock (E16).
+      const denunciaConTelefonoYNombre = extraccion({
         extraction_model: "mock-email-v1",
         fields: [
           { field_key: "phone",         field_value: "1155551234", confidence: 0.92, source: "ai" as const },
@@ -467,7 +460,9 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
         not_relevant_reason: undefined,
         summary: "Choque claim",
         suggested_reply: "",
-      }));
+      });
+      vi.mocked(extractEmailClaimMock).mockReturnValue(denunciaConTelefonoYNombre);
+      vi.mocked(denunciaSimuladaVacia).mockReturnValue(denunciaConTelefonoYNombre);
 
       await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
 

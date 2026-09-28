@@ -30,6 +30,8 @@ import { puedeCambiarEstado } from "@/lib/auth/roles";
 import { consultaDelPedido } from "@/server/confirmations/ultimo-pedido";
 import { messengerFor } from "@/server/confirmations/messenger";
 import { vencimientoDeLaVentana } from "@/core/whatsapp/puede-responder";
+import { estadoDePlantilla } from "@/server/whatsapp/cloud-api";
+import { PLANTILLA_REABRIR } from "@/core/mensajes/reabrir-denuncia";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
 import { clavesQueSatisfacen } from "@/core/case/required-fields";
@@ -37,6 +39,8 @@ import { valorLegible } from "@/core/mensajes/valor-legible";
 import { esValorVago } from "@/core/mensajes/lo-dicho";
 import { MEDIUM_CONFIDENCE_HIGH, MEDIUM_CONFIDENCE_LOW } from "@/server/cases/gap-analyzer";
 import { ABANDONABLE_STATUSES } from "@/server/intake/close-abandoned";
+import { errorCode } from "@/lib/observability/error-code";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Las 8 consultas del reenvío, en este orden fijo. `acciones.ts` las agrega a
@@ -295,7 +299,15 @@ export function clavesAbiertas(
 }
 
 export type DecisionDelReenvio =
-  | { ok: true; claves: string[]; conocidos: Record<string, string>; reabre: boolean; to: string; claimantName: string | null }
+  | {
+      ok: true;
+      claves: string[];
+      conocidos: Record<string, string>;
+      reabre: boolean;
+      to: string;
+      claimantName: string | null;
+      porPlantilla?: true;
+    }
   | { ok: false; motivo: MotivoSinReenvio };
 
 const DIEZ_MINUTOS_MS = 10 * 60 * 1000;
@@ -303,8 +315,18 @@ const DIEZ_MINUTOS_MS = 10 * 60 * 1000;
 /**
  * Decide si el reenvío sale, en el mismo orden en que se comprueba: el primer
  * motivo que falla es el que se devuelve.
+ *
+ * `plantilla` sólo importa cuando la ventana de 24 h ya cerró: `aprobada` deja
+ * seguir por la plantilla de Meta, `pendiente` corta con un motivo distinto de
+ * `ventana_cerrada` (para no confundir «no hay plantilla» con «nunca la
+ * pedimos»), y `no_disponible` es el resultado de hoy.
  */
-export function decidirReenvio(d: DatosDelReenvio, ahora: Date, reabrir: boolean): DecisionDelReenvio {
+export function decidirReenvio(
+  d: DatosDelReenvio,
+  ahora: Date,
+  reabrir: boolean,
+  plantilla: "aprobada" | "pendiente" | "no_disponible" = "no_disponible"
+): DecisionDelReenvio {
   const caso = d.caso;
   if (!caso) return { ok: false, motivo: "estado" };
 
@@ -323,9 +345,16 @@ export function decidirReenvio(d: DatosDelReenvio, ahora: Date, reabrir: boolean
 
   if (!d.destinatario) return { ok: false, motivo: "sin_destinatario" };
 
+  let porPlantilla = false;
   if (caso.channel === "whatsapp" || caso.channel === "whatsapp_sim") {
     if (!vencimientoDeLaVentana(d.ultimoEntrante, ahora)) {
-      return { ok: false, motivo: "ventana_cerrada" };
+      if (plantilla === "aprobada") {
+        porPlantilla = true;
+      } else if (plantilla === "pendiente") {
+        return { ok: false, motivo: "plantilla_sin_aprobar" };
+      } else {
+        return { ok: false, motivo: "ventana_cerrada" };
+      }
     }
   }
 
@@ -343,7 +372,25 @@ export function decidirReenvio(d: DatosDelReenvio, ahora: Date, reabrir: boolean
     reabre,
     to: d.destinatario,
     claimantName: nombreDelReclamante(d.campos),
+    ...(porPlantilla ? { porPlantilla: true as const } : {}),
   };
+}
+
+/**
+ * `decidirReenvio` sin preguntarle a Meta, y esto encima: si la ventana ya
+ * cerró, consulta el estado de la plantilla `reabrir_denuncia` y decide de
+ * nuevo con esa respuesta. El llamado a Graph sólo pasa cuando hace falta —
+ * un caso con la ventana abierta, o que ya se cae por otro motivo, nunca lo
+ * dispara.
+ */
+export async function decidirConPlantilla(
+  d: DatosDelReenvio,
+  ahora: Date,
+  reabrir: boolean
+): Promise<DecisionDelReenvio> {
+  const primera = decidirReenvio(d, ahora, reabrir);
+  if (primera.ok || primera.motivo !== "ventana_cerrada") return primera;
+  return decidirReenvio(d, ahora, reabrir, await estadoDePlantilla(PLANTILLA_REABRIR.nombre, PLANTILLA_REABRIR.idioma));
 }
 
 export type ResultadoDelReenvio =
@@ -376,7 +423,7 @@ export async function reenviarPedido(
     return { ok: false, motivo: "no_encontrado" };
   }
 
-  const decision = decidirReenvio(datos, new Date(), reabrir);
+  const decision = await decidirConPlantilla(datos, new Date(), reabrir);
   if (!decision.ok) return { ok: false, motivo: decision.motivo };
 
   const ahora = new Date().toISOString();
@@ -412,7 +459,7 @@ export async function reenviarPedido(
               eventType: AuditEvent.CASE_STATUS_CHANGED,
               payload: { old_status: "cerrado", new_status: "info_faltante", motivo: "reabrir_abandono" },
             },
-            sql`${cases.updated_at} = ${ahora}::timestamptz and ${cases.status} = 'info_faltante'`
+            "info_faltante"
           ),
         ]
       );
@@ -433,7 +480,8 @@ export async function reenviarPedido(
       ]);
       filaEscrita = firstRow(actualizadas);
     }
-  } catch {
+  } catch (err) {
+    logger.error({ code: errorCode(err) }, "reenvio.escritura_fallo");
     filaEscrita = null;
   }
 
@@ -452,6 +500,7 @@ export async function reenviarPedido(
       knownValues: decision.conocidos,
       claimantName: decision.claimantName,
       isFollowUp: true,
+      ...(decision.porPlantilla ? { porPlantilla: true } : {}),
     },
   });
 
@@ -461,7 +510,11 @@ export async function reenviarPedido(
     event_type: AuditEvent.CLAIM_REQUEST_RESENT,
     target_type: "case",
     target_id: caseId,
-    payload: { claves: decision.claves, reabierto: decision.reabre },
+    payload: {
+      claves: decision.claves,
+      reabierto: decision.reabre,
+      ...(decision.porPlantilla ? { por_plantilla: true } : {}),
+    },
   });
 
   return { ok: true, claves: decision.claves, reabierto: decision.reabre };

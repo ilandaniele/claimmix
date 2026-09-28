@@ -17,6 +17,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
 import { tables } from "@/lib/db";
+import { ejemploSinDatosDeLaPersona } from "./sin-datos-de-la-persona";
 
 /**
  * Huella de un ejemplo, para descartar repetidos.
@@ -54,6 +55,11 @@ export function buildExpectedOutput(
   return agentOutput;
 }
 
+/** Canales con los que se entrena un modelo: sólo simulados. */
+export const CANALES_DE_ENTRENAMIENTO = ["email_sim", "whatsapp_sim"] as const;
+/** Canales que pueden ser ejemplo few-shot: nunca un caso real llegado por Gmail (Limited Use). */
+export const CANALES_DE_EJEMPLO = [...CANALES_DE_ENTRENAMIENTO, "whatsapp"] as const;
+
 /** Job abierto: sigue existiendo entre `draft` y `approved`, antes de desplegarse. */
 export const OPEN_JOB_STATUSES = ["draft", "queued", "running", "eval_pending", "approved"];
 
@@ -82,7 +88,15 @@ export interface TrainingExample {
   created_at: string;
 }
 
-/** Sólo casos simulados: con datos de personas reales no se entrena un modelo. */
+/**
+ * Sólo casos simulados, y tachados: con datos de personas reales no se
+ * entrena un modelo.
+ *
+ * Entrada y salida se tachan con la misma función, así que el modelo puede
+ * aprender a copiar `[NOMBRE]`/`[DNI]` de una a la otra en vez de generar el
+ * dato real — antes de aprobar cualquier entrenamiento hay que revisar que la
+ * evaluación no deje pasar un modelo que emite ese literal tal cual.
+ */
 export async function approvedExamplesForTenant(
   tenantId: string
 ): Promise<TrainingExample[]> {
@@ -103,7 +117,7 @@ export async function approvedExamplesForTenant(
       .where(
         and(
           eq(t.status, "approved"),
-          inArray(tables.cases.channel, ["email_sim", "whatsapp_sim"])
+          inArray(tables.cases.channel, [...CANALES_DE_ENTRENAMIENTO])
         )
       )
       .orderBy(desc(t.created_at))
@@ -117,6 +131,7 @@ export async function approvedExamplesForTenant(
       input_payload: (row.input_payload ?? {}) as Record<string, unknown>,
       expected_output: (row.expected_output ?? {}) as Record<string, unknown>,
     }))
+    .map(ejemploSinDatosDeLaPersona)
     .filter((row) => {
       const hash = stableHash([row.input_payload, row.expected_output]);
       if (seen.has(hash)) return false;

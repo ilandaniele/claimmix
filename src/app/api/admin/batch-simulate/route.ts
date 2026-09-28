@@ -28,6 +28,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { rateLimit, getClientIp } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import type { ClaimType } from "@/lib/schemas/cases";
 import { internalAuthHeaders, isInternalRequest } from "@/lib/security/internal-auth";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
@@ -180,7 +181,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const { user, userRow } = await requireAdmin();
 
     const ip = getClientIp(request);
-    const rlKey = `batch-simulate:${userRow.id}`;
+    const rlKey = claveDeCupo("batch-simulate", userRow.id);
     const rlResult = await rateLimit(rlKey, { limit: 2, windowMs: 600_000 });
     if (!rlResult.allowed) {
       return err(new AppError("RATE_LIMITED", "Máximo 2 lotes cada 10 minutos."));

@@ -466,18 +466,17 @@ export interface SendResult {
 }
 
 /**
- * Sends an outbound WhatsApp text via the Cloud API.
- *
- * Note: outside the 24-hour customer-service window, free-form text is rejected
- * by Meta — only pre-approved message templates may be sent. Acknowledging a
- * claim the customer JUST sent is always inside the window, so this is safe for
- * "we received your claim" replies.
+ * Un envío a la Cloud API, sea texto o plantilla: arma el sobre común
+ * (`messaging_product`, `recipient_type`, `to`) y le agrega el contenido que
+ * cada uno trae. Antes esto vivía sólo adentro de `sendWhatsAppText`;
+ * `sendWhatsAppTemplate` necesita el mismo plazo, el mismo manejo de error y el
+ * mismo `never throws`, no una segunda copia.
  *
  * Never throws — returns { ok:false, error } so callers can log and continue.
  */
-export async function sendWhatsAppText(
+async function enviarAMeta(
   to: string,
-  body: string,
+  contenido: Record<string, unknown>,
   opts?: { accessToken?: string; phoneNumberId?: string }
 ): Promise<SendResult> {
   const accessToken = opts?.accessToken ?? process.env.WHATSAPP_ACCESS_TOKEN;
@@ -497,8 +496,7 @@ export async function sendWhatsAppText(
         messaging_product: "whatsapp",
         recipient_type: "individual",
         to,
-        type: "text",
-        text: { preview_url: false, body: body.slice(0, 4096) },
+        ...contenido,
       }),
       signal: AbortSignal.timeout(PLAZO_ENVIO_WHATSAPP_MS),
     });
@@ -512,4 +510,116 @@ export async function sendWhatsAppText(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "network error" };
   }
+}
+
+/**
+ * Sends an outbound WhatsApp text via the Cloud API.
+ *
+ * Note: outside the 24-hour customer-service window, free-form text is rejected
+ * by Meta — only pre-approved message templates may be sent. Acknowledging a
+ * claim the customer JUST sent is always inside the window, so this is safe for
+ * "we received your claim" replies.
+ *
+ * Never throws — returns { ok:false, error } so callers can log and continue.
+ */
+export async function sendWhatsAppText(
+  to: string,
+  body: string,
+  opts?: { accessToken?: string; phoneNumberId?: string }
+): Promise<SendResult> {
+  return enviarAMeta(to, { type: "text", text: { preview_url: false, body: body.slice(0, 4096) } }, opts);
+}
+
+/**
+ * Manda una plantilla aprobada por Meta — el único envío que sale fuera de la
+ * ventana de 24 h. Los parámetros se colapsan a una sola línea: una plantilla
+ * no admite el salto que puede traer, por ejemplo, la lista de campos que
+ * faltan.
+ *
+ * Never throws.
+ */
+export async function sendWhatsAppTemplate(
+  to: string,
+  nombre: string,
+  idioma: string,
+  parametros: string[],
+  opts?: { accessToken?: string; phoneNumberId?: string }
+): Promise<SendResult> {
+  return enviarAMeta(
+    to,
+    {
+      type: "template",
+      template: {
+        name: nombre,
+        language: { code: idioma },
+        components: [
+          {
+            type: "body",
+            parameters: parametros.map((p) => ({ type: "text", text: p.replace(/\s+/g, " ").trim() })),
+          },
+        ],
+      },
+    },
+    opts
+  );
+}
+
+type EstadoDePlantilla = "aprobada" | "pendiente" | "no_disponible";
+
+/** Cuánto dura cada estado en la caché antes de volver a preguntarle a Meta. */
+const TTL_ESTADO_PLANTILLA_MS: Record<EstadoDePlantilla, number> = {
+  aprobada: 60 * 60_000,
+  pendiente: 10 * 60_000,
+  no_disponible: 60_000,
+};
+
+const PLAZO_ESTADO_PLANTILLA_MS = 3_000;
+
+/**
+ * Caché en memoria del estado de cada plantilla, clave `${nombre}:${idioma}`.
+ * Sin esto, cada reenvío fuera de ventana le preguntaría a Meta si la
+ * plantilla ya está aprobada — un fetch por cada caso cerrado hace más de 24 h.
+ */
+const cacheDeEstadoDePlantilla = new Map<string, { valor: EstadoDePlantilla; vence: number }>();
+
+/**
+ * Si Meta ya aprobó la plantilla para reabrir un pedido después de las 24 h.
+ *
+ * Sin `WHATSAPP_BUSINESS_ACCOUNT_ID` o sin token no hay a quién preguntarle:
+ * devuelve `no_disponible` sin pedir nada y sin tocar la caché, que es el
+ * comportamiento de hoy (ventana cerrada, sin plantilla).
+ */
+export async function estadoDePlantilla(nombre: string, idioma: string): Promise<EstadoDePlantilla> {
+  const clave = `${nombre}:${idioma}`;
+  const cacheado = cacheDeEstadoDePlantilla.get(clave);
+  if (cacheado && cacheado.vence > Date.now()) return cacheado.valor;
+
+  const wabaId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!wabaId || !accessToken) return "no_disponible";
+
+  const conCache = (valor: EstadoDePlantilla): EstadoDePlantilla => {
+    cacheDeEstadoDePlantilla.set(clave, { valor, vence: Date.now() + TTL_ESTADO_PLANTILLA_MS[valor] });
+    return valor;
+  };
+
+  try {
+    const url = `${GRAPH_API_BASE}/${apiVersion()}/${wabaId}/message_templates?name=${encodeURIComponent(nombre)}&fields=name,status,language`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(PLAZO_ESTADO_PLANTILLA_MS),
+    });
+    if (!res.ok) return conCache("no_disponible");
+
+    const data = (await res.json()) as { data?: Array<{ name?: string; status?: string; language?: string }> };
+    const fila = data.data?.find((f) => f.name === nombre && f.language === idioma);
+    return conCache(fila?.status === "APPROVED" ? "aprobada" : "pendiente");
+  } catch {
+    return conCache("no_disponible");
+  }
+}
+
+/** Limpia la caché de `estadoDePlantilla`: después de un envío fallido, o desde un test. */
+export function olvidarEstadoDePlantilla(): void {
+  cacheDeEstadoDePlantilla.clear();
 }

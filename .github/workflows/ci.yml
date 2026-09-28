@@ -200,6 +200,20 @@ jobs:
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN || '' }}
           MOCK_AI: "true"
 
+      # Un solo build por corrida. `e2e-tests`, `bundle-size` y `pen-test-local`
+      # lo bajan de acá en vez de compilar de nuevo: mismo código, mismas
+      # variables de mentira, tres compilaciones menos por PR.
+      - name: Guardar el build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: next-build
+          path: |
+            .next
+            !.next/cache
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
   # ── 5. Tests de integración ──────────────────────────────────────────────────
   # Runs when INTEGRATION_ENABLED secret is set; skipped otherwise (no live Neon DB).
   # To enable: set INTEGRATION_ENABLED=true in GitHub Actions secrets.
@@ -248,7 +262,9 @@ jobs:
     # aparte, con su propia medición.
     env:
       # Un secreto no se puede leer desde un `if:`; una variable de entorno sí.
-      HAY_ENSAYO: ${{ secrets.STAGING_DATABASE_URL }}
+      # Es un booleano, no la cadena: el env de un job lo ve cualquier paso,
+      # incluida una acción de terceros, y acá sólo hace falta saber si existe.
+      HAY_ENSAYO: ${{ secrets.STAGING_DATABASE_URL != '' && 'true' || '' }}
       # Sólo en un fork GitHub retiene los secretos por diseño. En cualquier
       # otro caso —`main`, un PR interno, `workflow_dispatch`— faltar el
       # secreto es un descuido y no un límite de la plataforma.
@@ -477,7 +493,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Mismo motivo que en `integration-tests`.
-      HAY_E2E: ${{ secrets.E2E_DATABASE_URL }}
+      HAY_E2E: ${{ secrets.E2E_DATABASE_URL != '' && 'true' || '' }}
+      # Sin credenciales de R2 el spec de 8 MB se saltea solo y lo dice; el job
+      # sigue verde. Mismo estilo de bandera que `HAY_E2E`.
+      HAY_R2: ${{ secrets.QA_R2_ACCOUNT_ID != '' && 'true' || '' }}
       ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
     # El mismo grupo que `integration-tests`: comparten la base y su cupo.
     # Adentro de una corrida ya van en serie por el `needs:` de mas abajo;
@@ -567,7 +586,7 @@ jobs:
       # ensayo puede estar al día y ésta no. Se pregunta acá también.
       - name: El ensayo de los e2e está al día con las migraciones
         run: |
-          if [ "${{ secrets.E2E_DATABASE_URL }}" != "" ]; then
+          if [ -n "$ENSAYO_URL" ]; then
             node scripts/migrate.mjs --url "$ENSAYO_URL" --exigir-al-dia
           fi
         # Ver el paso equivalente de `integration-tests` para por qué el nombre
@@ -575,16 +594,49 @@ jobs:
         env:
           ENSAYO_URL: ${{ secrets.E2E_DATABASE_URL }}
 
+      # El PDF va al balde de QA (`QA_R2_*`), el mismo que usa el ensayo de
+      # QA. Si esos secretos fueran los de producción, sembrar y limpiar
+      # subirían y borrarían en el balde de un cliente: se corta acá, igual
+      # que en `post-deploy.yml`.
+      - name: El balde de los e2e no es el de producción
+        if: env.HAY_E2E != '' && env.HAY_R2 != ''
+        run: |
+          if { [ -n "$R2_BALDE_PROD" ] && [ "$R2_BALDE" = "$R2_BALDE_PROD" ]; } ||
+             { [ -n "$R2_LLAVE_PROD" ] && [ "$R2_LLAVE" = "$R2_LLAVE_PROD" ]; }; then
+            echo "::error title=Los e2e apuntan al balde de producción::QA_R2_BUCKET (o QA_R2_ACCESS_KEY_ID) es el de producción."
+            exit 1
+          fi
+        env:
+          R2_BALDE: ${{ secrets.QA_R2_BUCKET }}
+          R2_LLAVE: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
+          R2_BALDE_PROD: ${{ secrets.R2_BUCKET }}
+          R2_LLAVE_PROD: ${{ secrets.R2_ACCESS_KEY_ID }}
+
+      # El PDF de 8 MB que abre `adjunto-de-8mb.spec.ts`. Se genera acá, no vive
+      # en el repo; sin credenciales de R2 el spec se saltea y lo dice.
+      - name: Sembrar el PDF de 8 MB
+        if: env.HAY_E2E != '' && env.HAY_R2 != ''
+        run: pnpm sembrar-adjunto
+        env:
+          SEED_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.QA_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.QA_R2_BUCKET }}
+
       # Playwright levanta `pnpm start` en CI, no `pnpm dev`: el porqué está en
       # `playwright.config.ts`. Sin base los tests no corren y el build sobra.
-      - name: Build
+      # El build viene del job `build`: un solo `pnpm build` por corrida.
+      - name: Bajar el build
         if: env.HAY_E2E != ''
-        run: pnpm build
-        env:
-          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
-          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
-          BETTER_AUTH_SECRET: placeholder-secret-for-build-only
-          MOCK_AI: "true"
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: next-build
+          path: .next
+
+      - name: El build llegó entero
+        if: env.HAY_E2E != ''
+        run: test -f .next/BUILD_ID && test -d .next/static/chunks
 
       - name: Run E2E tests
         run: |
@@ -653,6 +705,23 @@ jobs:
           TEST_ANALYST_EMAIL: ${{ secrets.TEST_ANALYST_EMAIL }}
           TEST_ANALYST_PASSWORD: ${{ secrets.TEST_ANALYST_PASSWORD }}
           MOCK_AI: "true"
+          # El servidor que levanta Playwright también tiene que llegar al bucket
+          # para servir el adjunto de 8 MB. Sin `HAY_R2` el spec se saltea solo.
+          R2_ACCOUNT_ID: ${{ secrets.QA_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.QA_R2_BUCKET }}
+          PLAYWRIGHT_PDF_ATTACHMENT_ID: ${{ env.HAY_R2 != '' && 'e2e00000-0000-4000-8000-0000000000f8' || '' }}
+
+      - name: Sacar el PDF de 8 MB
+        if: always() && env.HAY_E2E != '' && env.HAY_R2 != ''
+        run: pnpm sembrar-adjunto --limpiar
+        env:
+          SEED_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.QA_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.QA_R2_BUCKET }}
 
       - name: Upload Playwright report
         if: always()
@@ -778,15 +847,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build for bundle analysis
-        run: pnpm build
-        env:
-          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
-          # La capa de datos usa su propio rol. Sin esta variable, cualquier
-          # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
-          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
-          BETTER_AUTH_SECRET: placeholder-secret-for-build-only
-          MOCK_AI: "true"
+      # El build viene del job `build`: un solo `pnpm build` por corrida.
+      - name: Bajar el build
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: next-build
+          path: .next
+
+      - name: El build llegó entero
+        run: test -f .next/BUILD_ID && test -d .next/static/chunks
 
       # Este paso imprimía "Bundle size check passed" SIEMPRE.
       #
@@ -907,7 +976,7 @@ jobs:
       contents: read
     env:
       # Mismo motivo que en `integration-tests`.
-      HAY_ENSAYO: ${{ secrets.STAGING_DATABASE_URL }}
+      HAY_ENSAYO: ${{ secrets.STAGING_DATABASE_URL != '' && 'true' || '' }}
       ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -977,6 +1046,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    needs: [build]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1000,15 +1070,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build
-        run: pnpm build
-        env:
-          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
-          # La capa de datos usa su propio rol. Sin esta variable, cualquier
-          # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
-          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
-          BETTER_AUTH_SECRET: placeholder-secret-for-build-only
-          MOCK_AI: "true"
+      # El build viene del job `build`: un solo `pnpm build` por corrida.
+      - name: Bajar el build
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: next-build
+          path: .next
+
+      - name: El build llegó entero
+        run: test -f .next/BUILD_ID && test -d .next/static/chunks
 
       - name: Levantar el servidor
         run: |

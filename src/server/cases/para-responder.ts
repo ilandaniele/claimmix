@@ -16,6 +16,16 @@ import { logger } from "@/lib/observability/logger";
  */
 export type SoloSiHay = { sinLeer: string[] } | "sinContestar";
 
+/** Lo que pone un caso en «Para responder». */
+function marca() {
+  return {
+    // Guarda cuándo llegó el primero que nadie contestó.
+    para_responder_desde: sql`coalesce(${cases.para_responder_desde}, now())`,
+    // La ventana de siete días de WhatsApp cuenta desde acá.
+    updated_at: new Date().toISOString(),
+  };
+}
+
 /**
  * Pone el caso en «Para responder» si el agente ya terminó con él.
  *
@@ -54,12 +64,7 @@ export async function marcarParaResponder(
         : undefined;
       return db
         .update(cases)
-        .set({
-          // Guarda cuándo llegó el primero que nadie contestó.
-          para_responder_desde: sql`coalesce(${cases.para_responder_desde}, now())`,
-          // La ventana de siete días de WhatsApp cuenta desde el último mensaje.
-          updated_at: new Date().toISOString(),
-        })
+        .set(marca())
         .where(
           and(eq(cases.id, caseId), inArray(cases.status, [...ESTADOS_DEL_AGENTE_TERMINADO]), entrante)
         );
@@ -71,6 +76,20 @@ export async function marcarParaResponder(
     );
     throw err;
   }
+}
+
+/**
+ * Pone el caso en «Para responder» sin mirar el estado: el tope por remitente
+ * (E12) llega en mitad de la conversación, cuando el agente no terminó, y el
+ * mensaje excedente lo contesta una persona. Tira si la base falla.
+ */
+export async function marcarParaResponderAunqueSigaElAgente(
+  caseId: string,
+  tenantId: string
+): Promise<void> {
+  await enTenant({ tenantId }, (db) =>
+    db.update(cases).set(marca()).where(eq(cases.id, caseId))
+  );
 }
 
 // `received_at` se toma antes del INSERT: un mensaje con hora anterior a `visto`

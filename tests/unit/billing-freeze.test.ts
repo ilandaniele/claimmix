@@ -17,25 +17,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const queued: unknown[][] = [];
 const inserted: Record<string, unknown>[] = [];
 
-// La capa de datos, corriendo contra el db que este test ya simula.
-//
-// Se lee `mod.db` en CADA llamada y no se desestructura: el mock de @/lib/db
-// suele exponer `db` con un getter para que los tests puedan intercambiar la
-// base simulada entre corridas, y un `const { db } = ...` congelaría el valor
-// de la primera llamada.
-//
-// Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:
-// eso se verifica en tests/unit/data-scope-sin-rol.test.ts y, contra bases de
-// verdad, en `pnpm capa-datos` y `pnpm tenancy`.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("server-only", () => ({}));
 
@@ -72,6 +54,7 @@ vi.mock("@/lib/db", () => ({
       contact_email: { name: "contact_email" },
       trial_ends_at: { name: "trial_ends_at" },
       activated_at: { name: "activated_at" },
+      created_at: { name: "created_at" },
     },
     cases: { tenant_id: { name: "tenant_id" }, created_at: { name: "created_at" } },
     aiUsage: {
@@ -108,6 +91,7 @@ const tenantRow = {
   contact_email: "facturacion@example.com",
   trial_ends_at: null,
   activated_at: null,
+  created_at: "2026-01-01T00:00:00.000Z",
 };
 
 /** Lo que devuelven las tres consultas de un cálculo en vivo, en orden. */
@@ -207,5 +191,54 @@ describe("getStatement", () => {
 
     expect(await getStatement(TENANT, MARZO, new Date("2026-04-01T03:00:00Z"))).toBeNull();
     expect(inserted).toHaveLength(0);
+  });
+
+  it("no congela un mes anterior al alta", async () => {
+    queued.push(
+      [],
+      [{ ...tenantRow, created_at: "2026-04-01T00:00:00.000Z" }],
+      [{ total: 805, billable: 800, rejected: 5, unresolved: 0 }],
+      [{ calls: 800, prompt_tokens: 1000, completion_tokens: 100, cost_usd: 2 }]
+    );
+
+    const s = await getStatement(TENANT, MARZO, new Date("2026-04-02T00:00:00Z"));
+
+    expect(inserted).toHaveLength(0);
+    expect(s?.frozen).toBe(false);
+    expect(s?.frozen_at).toBeNull();
+    expect(s?.invoice.monthly_fee_usd).toBe(0);
+    expect(s?.invoice.total_usd).toBe(0);
+    expect(s?.volume.billable_claims).toBe(800);
+  });
+
+  it("un mes con el alta adentro se congela entero", async () => {
+    queued.push(
+      [],
+      [{ ...tenantRow, created_at: "2026-03-15T00:00:00.000Z" }],
+      [{ total: 805, billable: 800, rejected: 5, unresolved: 0 }],
+      [{ calls: 800, prompt_tokens: 1000, completion_tokens: 100, cost_usd: 2 }]
+    );
+    queued.push([{ payload: { month: "2026-03", invoice: { total_usd: 412.5 } }, frozen_at: "2026-04-01T03:00:00.000Z" }]);
+
+    const s = await getStatement(TENANT, MARZO, new Date("2026-04-01T03:00:00Z"));
+
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]!.total_usd).toBe("412.50");
+    expect(s?.frozen).toBe(true);
+    expect(s?.invoice.total_usd).toBe(412.5);
+  });
+
+  it("una factura congelada sin created_at se sigue leyendo", async () => {
+    queued.push([
+      {
+        payload: { month: "2026-03", tenant: { id: TENANT, name: "Aseguradora de prueba" }, invoice: { total_usd: 412.5 } },
+        frozen_at: "2026-04-01T03:00:00.000Z",
+      },
+    ]);
+
+    const s = await getStatement(TENANT, MARZO, new Date("2026-06-10T00:00:00Z"));
+
+    expect(s?.frozen).toBe(true);
+    expect(s?.invoice.total_usd).toBe(412.5);
   });
 });

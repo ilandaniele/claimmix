@@ -1,13 +1,34 @@
 import "server-only";
 
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import * as tables from "@/lib/db/schema";
 import type { UserRole } from "@/lib/auth/require-role";
 import { getDefaultGeminiModel } from "@/server/ai/provider";
-import { ejemploSinDatosDeLaPersona } from "@/server/training/sin-datos-de-la-persona";
+import { EMAIL_RE, PHONE_RE } from "@/server/ai/hydrate-fields";
+import {
+  ejemploSinDatosDeLaPersona,
+  huellaDelRemitente,
+  nombresEn,
+  sinDatosDeLaPersona,
+} from "@/server/training/sin-datos-de-la-persona";
+import { CANALES_DE_EJEMPLO } from "@/server/training/dataset";
+
+/** Los argumentos de las consultas del agente, con las claves y sin los valores. */
+function sinArgumentosDeHerramientas(payload: unknown): unknown {
+  if (!isObject(payload) || !Array.isArray(payload.tools)) return payload;
+  const tapar = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(tapar)
+      : isObject(v)
+        ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, tapar(x)]))
+        : v == null
+          ? v
+          : "[TACHADO]";
+  return { ...payload, tools: payload.tools.map((t) => (isObject(t) ? { ...t, args: tapar(t.args) } : t)) };
+}
 
 export const AGENT_EXPORT_TYPES = ["config_only", "memory_only", "full"] as const;
 export const AGENT_EXPORT_PII_MODES = ["masked", "excluded", "full_admin_only"] as const;
@@ -60,11 +81,9 @@ const SECRET_KEY_RE =
 const SENSITIVE_KEY_RE =
   /(^|_)(dni|document|documento|policy[_-]?number|poliza|email|mail|phone|telefono|address|direccion|location|ubicacion|bank|banco|cbu|cvu|iban|account|cuenta|from[_-]?addr|to[_-]?addr|sender[_-]?email|policyholder[_-]?name|full[_-]?name)($|_)/i;
 
-const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const DNI_RE = /\b\d{1,3}\.?\d{3}\.?\d{3}\b/g;
 const POLICY_RE = /\b(?:POL|POLIZA)-?[A-Z0-9-]*\d{3,}\b/gi;
 const BANK_RE = /\b(?:CBU|CVU|IBAN|CUENTA)\s*[:#-]?\s*[A-Z0-9-]{8,34}\b/gi;
-const PHONE_RE = /(?<!\w)(?:\+?\d[\d .()/-]{7,}\d)(?!\w)/g;
 
 function isObject(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -437,9 +456,9 @@ async function loadApprovedExampleRows(tenantId: string) {
         trainability_score: r.trainability_score,
       })
       .from(t)
-      .leftJoin(c, eq(c.id, t.case_id))
+      .innerJoin(c, eq(c.id, t.case_id))
       .leftJoin(r, eq(r.id, t.agent_run_id))
-      .where(eq(t.status, "approved"))
+      .where(and(eq(t.status, "approved"), inArray(c.channel, [...CANALES_DE_EJEMPLO])))
       .orderBy(desc(t.approved_at))) as ApprovedExampleExportRow[]
   );
   return rows.map(ejemploSinDatosDeLaPersona);
@@ -543,7 +562,11 @@ async function loadMemorySection(tenantId: string) {
     approved_training_examples: approvedTrainingExamples,
     rejected_training_examples: rejectedTrainingExamples,
     agent_feedback: agentFeedback,
-    claim_memory: claimMemory,
+    claim_memory: claimMemory.map((fila) => ({
+      ...fila,
+      key: huellaDelRemitente(fila.key),
+      value: sinDatosDeLaPersona(fila.value, nombresEn(fila.value)),
+    })),
     known_claim_patterns: knownClaimPatterns.map((pattern) => ({
       ...pattern,
       scope: pattern.tenant_id ? "tenant" : "global",
@@ -592,7 +615,13 @@ async function loadFullMetadata(tenantId: string) {
     ),
   ]);
 
-  return { agent_runs: agentRuns, claim_events: claimEvents };
+  return {
+    agent_runs: agentRuns,
+    claim_events: claimEvents.map((e) => ({
+      ...e,
+      payload: sinArgumentosDeHerramientas(sinDatosDeLaPersona(e.payload, nombresEn(e.payload))),
+    })),
+  };
 }
 
 export async function loadApprovedExamplesForExport(

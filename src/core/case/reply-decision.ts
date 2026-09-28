@@ -5,8 +5,8 @@
  * y hasta acá vivía enredada entre consultas a la base, dentro de una función
  * de mil cuatrocientas líneas. Para probarla había que montar media aplicación.
  *
- * Acá no hay base, ni red, ni reloj: entran ocho señales y sale una decisión.
- * Se prueba con siete booleanos y un número.
+ * Acá no hay base, ni red, ni reloj: entran nueve señales y sale una decisión.
+ * Se prueba con ocho booleanos y un número.
  *
  * ── Por qué cada señal está ────────────────────────────────────────────────
  *
@@ -37,6 +37,11 @@
  * persona había hecho su parte. Del otro lado eso es un pedido que nunca se
  * cierra y un caso que muere de abandono dos semanas después.
  *
+ * **Y un caso que una persona devolvió tampoco espera.** Mientras lo tenía
+ * alguien con «Tomar el control», lo que escribió el asegurado quedó sin
+ * contestar. El primer mensaje después de «Devolver al agente» lleva
+ * respuesta, aunque el pedido sea el mismo de antes.
+ *
  * **La severidad alta manda callar.** Un caso grave lo toma una persona; el
  * agente no debe adelantarse con un mensaje automático.
  */
@@ -59,6 +64,8 @@ export type SeñalesDeRespuesta = {
    * algo», es «contestó lo que le preguntamos».
    */
   readonly nosContestoElPedido: boolean;
+  /** ¿Una persona devolvió el caso al agente después de la última vez que hablamos? */
+  readonly nosLoDevolvieron: boolean;
   /** ¿Aparecieron datos que antes no teníamos? */
   readonly aprendimosAlgo: boolean;
   /** Cuántos datos faltan todavía. Cero significa que no hay nada que pedir. */
@@ -88,7 +95,8 @@ export function elPedidoQuedaEnEspera(s: SeñalesDeRespuesta): boolean {
     (s.yaSePidio || s.elAgenteEspera) &&
     !s.nosPreguntoAlgo &&
     !s.llegoUnArchivo &&
-    !s.nosContestoElPedido
+    !s.nosContestoElPedido &&
+    !s.nosLoDevolvieron
   );
 }
 

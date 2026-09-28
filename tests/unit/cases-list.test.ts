@@ -46,6 +46,7 @@ import {
 } from "@/server/cases/list";
 import { db } from "@/lib/db";
 import { enTenant, enTenantVarias } from "@/data/scope";
+import { puenteDeAlcance } from "../mocks/puente-de-alcance";
 
 // ── Base query fixture ────────────────────────────────────────────────────────
 
@@ -63,39 +64,6 @@ const baseQuery = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/**
- * Build a chainable mock for db.select() that resolves to `rows` at any
- * terminal step (.limit(), .offset(), or awaiting directly).
- */
-function makeSelectChain(rows: unknown[]): any {
-  const chain: any = {
-    from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    orderBy: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    offset: vi.fn().mockResolvedValue(rows),
-    // For listCasesForExport the terminal call is .limit() not .offset()
-    // We override this below per test.
-    then: (resolve: (v: unknown) => void, reject?: (e: unknown) => void) =>
-      Promise.resolve(rows).then(resolve, reject),
-    catch: (onRejected: (e: unknown) => void) =>
-      Promise.resolve(rows).catch(onRejected),
-  };
-  // Make .limit() also awaitable directly (needed for export path)
-  chain.limit.mockImplementation(() => {
-    const limitChain: any = {
-      ...chain,
-      offset: vi.fn().mockResolvedValue(rows),
-      then: (resolve: (v: unknown) => void, reject?: (e: unknown) => void) =>
-        Promise.resolve(rows).then(resolve, reject),
-      catch: (onRejected: (e: unknown) => void) =>
-        Promise.resolve(rows).catch(onRejected),
-    };
-    return limitChain;
-  });
-  return chain;
-}
-
 // ── listCases ─────────────────────────────────────────────────────────────────
 
 /**
@@ -103,8 +71,9 @@ function makeSelectChain(rows: unknown[]): any {
  * imitar la cadena de drizzle: alcanza con decir qué devuelve la capa.
  *
  * Es la diferencia entre probar el comportamiento y probar la forma en que se
- * arma una consulta. `makeSelectChain` sigue existiendo más abajo sólo porque
- * `listCasesForExport` todavía no se migró.
+ * arma una consulta. `listCasesForExport`, más abajo, arma su propia cadena
+ * porque ahí lo que se prueba es la consulta misma, y también está cubierto
+ * en `tests/unit/coverage-gap-fill.test.ts`.
  */
 const CTX = { tenantId: TENANT_ID };
 
@@ -177,10 +146,7 @@ describe("listCasesForExport", () => {
     // El tapón de arriba —que devuelve vacío— existe para la hidratación de
     // `listCases`, donde lo normal es que no haya nada que hidratar; la
     // exportación, en cambio, es la consulta misma.
-    vi.mocked(enTenant).mockImplementation(
-      ((_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(db))) as never
-    );
+    vi.mocked(enTenant).mockImplementation(puenteDeAlcance(() => db).enTenant as never);
   });
 
   it("returns array of case rows", async () => {

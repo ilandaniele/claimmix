@@ -24,12 +24,7 @@ const { mockSelect, mockUpdate, mockRunIntakeAgent } = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: { select: mockSelect, update: mockUpdate }, tables: {} }));
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) => Promise.resolve(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 vi.mock("@/server/agents/intake-agent", () => ({ runIntakeAgent: mockRunIntakeAgent }));
 
 import { retomarExtraccionesPendientes, marcarPendientes, MINIMO_PARA_RETOMAR_MS } from "@/server/intake/retomar-pendientes";

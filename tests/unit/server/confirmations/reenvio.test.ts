@@ -10,26 +10,29 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { enTenantMock, enTenantVariasMock, mockSend, mockMessengerFor, mockWriteAuditLog } = vi.hoisted(
-  () => ({
-    enTenantMock: vi.fn(),
-    enTenantVariasMock: vi.fn(),
-    mockSend: vi.fn(),
-    mockMessengerFor: vi.fn(),
-    mockWriteAuditLog: vi.fn(),
-  })
-);
+const {
+  enTenantMock,
+  enTenantVariasMock,
+  mockSend,
+  mockMessengerFor,
+  mockWriteAuditLog,
+  mockEstadoDePlantilla,
+} = vi.hoisted(() => ({
+  enTenantMock: vi.fn(),
+  enTenantVariasMock: vi.fn(),
+  mockSend: vi.fn(),
+  mockMessengerFor: vi.fn(),
+  mockWriteAuditLog: vi.fn(),
+  mockEstadoDePlantilla: vi.fn(),
+}));
 
 vi.mock("server-only", () => ({}));
 
 vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  enTenantMock.mockImplementation((_ctx: unknown, armar: (d: unknown) => unknown) =>
-    Promise.resolve(armar(mod.db))
-  );
-  enTenantVariasMock.mockImplementation((_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-    Promise.all(armar(mod.db))
-  );
+  const { puenteSobreLibDb } = await import("../../../mocks/puente-de-alcance");
+  const puente = await puenteSobreLibDb();
+  enTenantMock.mockImplementation(puente.enTenant);
+  enTenantVariasMock.mockImplementation(puente.enTenantVarias);
   return { enTenant: enTenantMock, enTenantVarias: enTenantVariasMock };
 });
 
@@ -40,6 +43,10 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/server/confirmations/messenger", () => ({
   messengerFor: mockMessengerFor,
+}));
+
+vi.mock("@/server/whatsapp/cloud-api", () => ({
+  estadoDePlantilla: mockEstadoDePlantilla,
 }));
 
 vi.mock("@/lib/audit/log", async (importOriginal) => ({
@@ -75,6 +82,7 @@ function filasBase(
     ultimoCierre: string;
     closedAt: string | null;
     cierreEn: string;
+    ultimoEntrante: string;
   }> = {}
 ) {
   return [
@@ -86,7 +94,7 @@ function filasBase(
       updated_at: LEIDO,
       closed_at: o.closedAt ?? (o.ultimoCierre ? "2026-09-20T00:00:00.000Z" : null),
     }],
-    [{ from_addr: "juan@x.com", received_at: "2026-09-25T00:00:00.000Z" }],
+    [{ from_addr: "juan@x.com", received_at: o.ultimoEntrante ?? "2026-09-25T00:00:00.000Z" }],
     [],
     [{ asked_keys: ["full_name"], created_at: "2026-09-01T00:00:00.000Z" }],
     [],
@@ -245,5 +253,61 @@ describe("reenviarPedido", () => {
     expect(db.update).not.toHaveBeenCalled();
     expect(mockSend).not.toHaveBeenCalled();
     expect(mockWriteAuditLog).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * WHATSAPP-PLANTILLA-REABRIR: la ventana de 24 h ya cerró. `decidirConPlantilla`
+ * sólo entonces le pregunta a Meta por `reabrir_denuncia`, y decide de nuevo con
+ * esa respuesta.
+ */
+describe("reenviarPedido — WhatsApp fuera de la ventana", () => {
+  it("con la plantilla aprobada, manda por plantilla y audita por_plantilla", async () => {
+    mockEstadoDePlantilla.mockResolvedValue("aprobada");
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+    configurarEscritura([{ id: CASE_ID }]);
+
+    const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(r).toEqual({ ok: true, claves: ["full_name"], reabierto: false });
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ porPlantilla: true }) })
+    );
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: { claves: ["full_name"], reabierto: false, por_plantilla: true } })
+    );
+  });
+
+  it("con la plantilla pendiente, no manda: el motivo es plantilla_sin_aprobar", async () => {
+    mockEstadoDePlantilla.mockResolvedValue("pendiente");
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+
+    const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(r).toEqual({ ok: false, motivo: "plantilla_sin_aprobar" });
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("sin plantilla disponible, el motivo sigue siendo ventana_cerrada", async () => {
+    mockEstadoDePlantilla.mockResolvedValue("no_disponible");
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+
+    const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(r).toEqual({ ok: false, motivo: "ventana_cerrada" });
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("con la ventana abierta, no consulta la plantilla y manda sin porPlantilla", async () => {
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: new Date().toISOString() }));
+    configurarEscritura([{ id: CASE_ID }]);
+
+    const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(r).toEqual({ ok: true, claves: ["full_name"], reabierto: false });
+    expect(mockEstadoDePlantilla).not.toHaveBeenCalled();
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.not.objectContaining({ porPlantilla: true }) })
+    );
   });
 });

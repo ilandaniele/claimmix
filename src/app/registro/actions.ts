@@ -31,7 +31,9 @@ import {
   RATE_LIMIT_CONFIGS,
   clientIpFromHeaders,
   rateLimit,
+  topePorIp,
 } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { SignUpSchema } from "@/lib/schemas/auth";
 import { logger } from "@/lib/observability/logger";
 
@@ -59,18 +61,20 @@ export async function signUp(
 
   const { full_name, email, password } = parsed.data;
 
-  // ── 2. Rate limiting (per IP) ──────────────────────────────────────────────
+  // ── 2. Rate limiting (por IP, y el mismo techo por IP sola que el login) ───
   const headerStore = await headers();
   // La misma resolución que la ruta HTTP: prefiere `x-vercel-forwarded-for`,
   // que es la única cabecera que no puede escribir quien llama.
   const ip = clientIpFromHeaders(headerStore);
   const ua = headerStore.get("user-agent") ?? null;
 
-  const rl = await rateLimit(`signup:${ip}`, RATE_LIMIT_CONFIGS.AUTH_SIGN_UP);
-  if (!rl.allowed) {
-    return {
-      error: `Demasiados intentos. Intente en ${rl.retryAfterSeconds} segundos.`,
-    };
+  // La ruta HTTP de alta ya aplicaba `topePorIp`; este Server Action —el que
+  // usa el formulario de la pantalla— no. Mismo agujero que tenía el login.
+  const rl = await rateLimit(claveDeCupo("auth:up", ip), RATE_LIMIT_CONFIGS.AUTH_SIGN_UP);
+  const porIp = await topePorIp(ip);
+  if (!rl.allowed || !porIp.allowed) {
+    const cual = !porIp.allowed ? porIp : rl;
+    return { error: `Demasiados intentos. Intente en ${cual.retryAfterSeconds} segundos.` };
   }
 
   // ── 3. Preconditions ───────────────────────────────────────────────────────

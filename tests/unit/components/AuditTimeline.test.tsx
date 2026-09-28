@@ -38,6 +38,7 @@ const VALORES_EXCLUIDOS = new Set([
   "email.webhook_rejected",
   "email.deduplicated",
   "case.deleted",
+  "tenant.specialist_alert_recipients_changed",
 ]);
 
 const ADJUNTO_RECHAZADO = {
@@ -128,6 +129,8 @@ describe("AuditTimeline", () => {
     ["conflict", "Un dato no coincide con lo que teníamos"],
     ["lesiones", "Mencionó lesiones o datos de salud"],
     ["tomar_el_control", "Tomar el control"],
+    ["tope_por_remitente", "Más de 20 mensajes en 10 minutos del mismo número: se guardó y no se leyó."],
+    ["devolver_al_agente", "Devolver al agente"],
   ])("el motivo %s se traduce", (reason, esperado) => {
     render(
       <AuditTimeline

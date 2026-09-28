@@ -19,9 +19,10 @@ import "server-only";
 
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { auditLog, authUsers, cases, claimMessages, users } from "@/lib/db/schema";
-import { isReservedTestAddress } from "@/lib/email/reserved";
+import { auditLog, authUsers, cases, claimMessages, tenants, users } from "@/lib/db/schema";
+import { isReservedTestAddress, vedadaParaAlertas } from "@/lib/email/reserved";
 import { isReservedTestNumber } from "@/core/phone/reserved";
+import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
 import { isSendSuccess } from "@/server/email/provider";
@@ -31,13 +32,16 @@ import { logger } from "@/lib/observability/logger";
 /**
  * Quién se entera, y en qué orden.
  *
- *   1. `SPECIALIST_ALERT_EMAILS`, si está. Una lista explícita gana sobre
- *      cualquier deducción: es la única forma de decir "a estas direcciones y
- *      a ninguna otra" sin tener que tocarle el rol a nadie.
- *   2. Los usuarios con rol `specialist`. El caso está dirigido a ellos.
- *   3. UN owner, y no todos los admins.
+ *   1. La lista que cargó un admin en /configuracion
+ *      (`tenants.specialist_alert_emails`). Cada aseguradora tiene la suya, y
+ *      gana sobre cualquier deducción.
+ *   2. `SPECIALIST_ALERT_EMAILS`, y sólo para el tenant principal: es una
+ *      única variable de entorno, así que no hay forma de que otra aseguradora
+ *      cargue la suya ahí, y no se le filtra.
+ *   3. Los usuarios con rol `specialist`. El caso está dirigido a ellos.
+ *   4. UN owner, y no todos los admins.
  *
- * El tercer punto cambió después de que pasara. El respaldo eran `owner` Y
+ * El cuarto punto cambió después de que pasara. El respaldo eran `owner` Y
  * `admin`, con el argumento de que un aviso de más es mejor que un siniestro
  * que nadie mira. El argumento sigue siendo cierto y la implementación no:
  * ninguna aseguradora tenía usuarios `specialist`, así que TODAS las alertas
@@ -48,6 +52,9 @@ import { logger } from "@/lib/observability/logger";
  * "Mejor de más que ninguno" justifica UN destinatario, no una lista que crece
  * cada vez que alguien suma un admin. Y avisa en los registros, para que la
  * ausencia de especialistas se note en vez de convertirse en la normalidad.
+ *
+ * La dirección vedada (`vedadaParaAlertas`) no recibe nunca, en ninguno de
+ * los cuatro pasos.
  */
 type TenantRole = "owner" | "admin" | "specialist" | "analyst" | "viewer";
 
@@ -142,6 +149,22 @@ async function isSimulatedCase(tenantId: string, caseId: string): Promise<boolea
   }
 }
 
+/** La lista que cargó un admin en /configuracion. Vacía si no hay o si no se pudo leer. */
+export async function listaDelTenant(tenantId: string): Promise<string[]> {
+  try {
+    const [fila] = await enTenant({ tenantId }, (db) =>
+      db
+        .select({ emails: tenants.specialist_alert_emails })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId))
+        .limit(1)
+    );
+    return fila?.emails ?? [];
+  } catch {
+    return [];
+  }
+}
+
 async function recipientsFor(tenantId: string): Promise<string[]> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId: tenantId };
@@ -155,20 +178,26 @@ async function recipientsFor(tenantId: string): Promise<string[]> {
     );
     return rows.map((r) => r.email).filter(Boolean);
   };
+  const permitida = (e: string) => !vedadaParaAlertas(e);
 
-  const explicita = listaExplicita();
-  if (explicita.length > 0) return explicita;
+  const delTenant = (await listaDelTenant(tenantId)).filter(permitida);
+  if (delTenant.length > 0) return delTenant;
 
-  const specialists = await byRoles(PREFERRED_ROLES);
+  if (tenantId === resolveDefaultTenantId()) {
+    const explicita = listaExplicita().filter(permitida);
+    if (explicita.length > 0) return explicita;
+  }
+
+  const specialists = (await byRoles(PREFERRED_ROLES)).filter(permitida);
   if (specialists.length > 0) return specialists;
 
   // Sin especialistas: UNO solo, y que se sepa.
-  const respaldo = (await byRoles(FALLBACK_ROLES)).slice(0, 1);
+  const respaldo = (await byRoles(FALLBACK_ROLES)).filter(permitida).slice(0, 1);
   logger.warn({
         tenant_id: tenantId,
         // Cuántos, no quiénes: es un registro, y una dirección es un dato personal.
       destinatarios_de_respaldo: respaldo.length,
-        nota: "Nadie tiene rol specialist. El aviso va a un owner. Asigná el rol, o fijá SPECIALIST_ALERT_EMAILS.",
+        nota: "Nadie tiene rol specialist. El aviso va a un owner. Asigná el rol, o cargá la lista de avisos en /configuracion.",
       }, "specialist_alert.sin_especialistas");
   return respaldo;
 }
@@ -199,9 +228,6 @@ function renderAlert(input: SpecialistAlertInput, caseUrl: string) {
  */
 export async function alertSpecialists(input: SpecialistAlertInput): Promise<void> {
   const { caseId, tenantId } = input;
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  // Este contexto es lo único que le dice de quién son los datos.
-  const tenantCtx: TenantContext = { tenantId: tenantId };
 
   try {
     if (await isSimulatedCase(input.tenantId, caseId)) {

@@ -16,15 +16,7 @@ import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import type { AgentMessenger } from "@/server/confirmations/messenger";
 
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/lib/db", () => {
   const mockDb = {
@@ -118,7 +110,9 @@ function setupDbMocks() {
     returning: () => Promise.resolve([]),
   });
 
-  const updateSpy = vi.fn().mockResolvedValue([]);
+  // Un array no vacío: la guarda atómica (E2) de `setStatus` mira las filas
+  // que devuelve `.returning()` para saber si el UPDATE aplicó.
+  const updateSpy = vi.fn().mockResolvedValue([{ id: "updated" }]);
 
   mockDbTyped.select.mockImplementation(() => ({
     from: (table: unknown) => {
@@ -149,7 +143,10 @@ function setupDbMocks() {
 
   mockDbTyped.update.mockImplementation(() => ({
     set: (data: unknown) => ({
-      where: () => updateSpy(data),
+      where: () => ({
+        returning: () => updateSpy(data),
+        then: (r: (v: unknown) => void, j?: (e: unknown) => void) => updateSpy(data).then(r, j),
+      }),
     }),
   }));
 

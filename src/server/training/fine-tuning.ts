@@ -199,6 +199,7 @@ export async function listFineTuneJobs(tenantId: string) {
         activated_at: t.activated_at,
       })
       .from(t)
+      .where(eq(t.provider, "gemini"))
       .orderBy(desc(t.created_at))
       .limit(50)
   );
@@ -226,7 +227,7 @@ export async function startFineTuneJob(tenantId: string, userId: string, jobId: 
   const t = tables.modelTrainingJobs;
   const job = firstRow(
     await enTenant({ tenantId }, (db) =>
-      db.select({ id: t.id }).from(t).where(eq(t.id, jobId)).limit(1)
+      db.select({ id: t.id }).from(t).where(and(eq(t.id, jobId), eq(t.provider, "gemini"))).limit(1)
     )
   );
   if (!job) throw new Error("NOT_FOUND");
@@ -242,7 +243,7 @@ export async function activateFineTunedModel(tenantId: string, userId: string, j
       db
         .select({ id: mtj.id, base_model: mtj.base_model })
         .from(mtj)
-        .where(eq(mtj.id, jobId))
+        .where(and(eq(mtj.id, jobId), eq(mtj.provider, "gemini")))
         .limit(1)
     )
   );

@@ -323,6 +323,8 @@ function setupDbMocks({
       // el test fallaba por el mock y no por el código.
       const vacio = {
         limit: () => Promise.resolve([]),
+        // audit_log: la última vez que una persona devolvió el caso al agente.
+        orderBy: () => ({ limit: () => Promise.resolve([]) }),
         then: (r: (v: unknown) => void, j?: (e: unknown) => void) =>
           Promise.resolve([]).then(r, j),
       };
@@ -1763,6 +1765,7 @@ describe("orchestratePostExtraction — checkConfirmationAlreadySent error paths
         return {
           where: () => ({
             limit: () => Promise.resolve([]),
+            orderBy: () => ({ limit: () => Promise.resolve([]) }),
           }),
         };
       },

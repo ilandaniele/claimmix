@@ -35,9 +35,10 @@ import { esSoloUnAcuse } from "@/core/mensajes/acuse";
 import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
 import { contestaSinHora, dichoRecien, esValorVago } from "@/core/mensajes/lo-dicho";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { firstRow, policyNumberEquals } from "@/lib/db/helpers";
 import {
+  auditLog,
   cases,
   claimAttachments,
   claimFieldConfirmations,
@@ -83,6 +84,7 @@ import {
 import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contestado";
 import { lastAskedKeys } from "@/server/confirmations/ultimo-pedido";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { MOTIVO_DEVOLVER } from "@/server/cases/devolver-al-agente";
 import { redactObject } from "@/lib/audit/redact";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
@@ -879,7 +881,7 @@ export async function orchestratePostExtraction(
   // recognise what it was.
   // Una sola lectura de «cuándo hablamos» para las dos preguntas de abajo: no
   // hay ninguna escritura entre ellas. Ver `cuandoHablamosPorUltimaVez`.
-  const hablamos = await cuandoHablamosPorUltimaVez(caseId, tenantId);
+  const { hablamos, nosLoDevolvieron } = await cuandoHablamosPorUltimaVez(caseId, tenantId);
   const somethingArrived = await filesArrivedSinceWeLastSpoke(
     caseId,
     tenantId,
@@ -899,6 +901,7 @@ export async function orchestratePostExtraction(
     nosPreguntoAlgo: owesAnAnswer,
     llegoUnArchivo: somethingArrived,
     nosContestoElPedido,
+    nosLoDevolvieron,
     datosQueFaltan: askItems.fields.length,
     esGrave: derivaSola,
   } as const;
@@ -2049,7 +2052,7 @@ async function alreadyAskedFor(
 async function cuandoHablamosPorUltimaVez(
   caseId: string,
   tenantId: string
-): Promise<string | null> {
+): Promise<{ hablamos: string | null; nosLoDevolvieron: boolean }> {
   /*
    * Atrapa acá, y no en quien llama.
    *
@@ -2060,30 +2063,56 @@ async function cuandoHablamosPorUltimaVez(
    *
    * `null` es lo mismo que decía antes: las dos preguntas de «¿pasó algo desde
    * que hablamos?» contestan que no, y el resto sigue.
+   *
+   * En el mismo viaje va la última vez que una persona devolvió el caso al
+   * agente (E24): si fue después de lo último que dijimos, el pedido no queda
+   * en espera.
    */
   try {
-    const fila = firstRow(
-      await enTenant({ tenantId }, (db) =>
-        db
-          .select({ created_at: outboundMessages.created_at })
-          .from(outboundMessages)
-          .where(
-            and(
-              eq(outboundMessages.case_id, caseId),
-              inArray(outboundMessages.status, ["sent", "skipped_simulated"])
+    type Fecha = { created_at: string };
+    const [salidas, devoluciones] = await enTenantVarias<[Fecha[], Fecha[]]>(
+      { tenantId },
+      (db) =>
+        [
+          db
+            .select({ created_at: outboundMessages.created_at })
+            .from(outboundMessages)
+            .where(
+              and(
+                eq(outboundMessages.case_id, caseId),
+                inArray(outboundMessages.status, ["sent", "skipped_simulated"])
+              )
             )
-          )
-          .orderBy(desc(outboundMessages.created_at))
-          .limit(1)
-      )
+            .orderBy(desc(outboundMessages.created_at))
+            .limit(1),
+          db
+            .select({ created_at: auditLog.created_at })
+            .from(auditLog)
+            .where(
+              and(
+                eq(auditLog.target_type, "case"),
+                eq(auditLog.target_id, caseId),
+                eq(auditLog.event_type, AuditEvent.CASE_STATUS_CHANGED),
+                sql`${auditLog.payload}->>'reason' = ${MOTIVO_DEVOLVER}`
+              )
+            )
+            .orderBy(desc(auditLog.created_at))
+            .limit(1),
+        ]
     );
-    return fila?.created_at ?? null;
+    const hablamos = firstRow(salidas)?.created_at ?? null;
+    const devuelto = firstRow(devoluciones)?.created_at ?? null;
+    return {
+      hablamos,
+      nosLoDevolvieron:
+        devuelto !== null && (hablamos === null || Date.parse(devuelto) > Date.parse(hablamos)),
+    };
   } catch (err) {
     logger.error(
       { code: errorCode(err) },
       "orchestrate.ultimo_saliente_fallo"
     );
-    return null;
+    return { hablamos: null, nosLoDevolvieron: false };
   }
 }
 

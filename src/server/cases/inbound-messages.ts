@@ -24,7 +24,7 @@ import "server-only";
 
 import { and, asc, desc, eq } from "drizzle-orm";
 
-import { autenticacionFallida, type Cabecera } from "@/core/email/autenticacion";
+import { autenticacionFallida } from "@/core/email/autenticacion";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimMessages, rawMessages } from "@/lib/db/schema";
 import { errorCode } from "@/lib/observability/error-code";
@@ -105,7 +105,7 @@ export async function mensajesEntrantes(
       body: m.body_text ?? "",
       from_addr: m.from_addr ?? "",
       received_at: m.received_at,
-      autenticado: !autenticacionFallida((m.headers as Cabecera[] | null) ?? []),
+      autenticado: !autenticacionFallida(m.headers),
     }));
   } catch (err) {
     // Degrada a propósito —la pantalla no se cae porque falle una consulta—

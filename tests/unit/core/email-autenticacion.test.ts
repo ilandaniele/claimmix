@@ -20,6 +20,10 @@ describe("autenticacionFallida", () => {
     expect(autenticacionFallida(null)).toBe(false);
   });
 
+  it("WhatsApp guarda {} y no una lista: no falló", () => {
+    expect(autenticacionFallida({})).toBe(false);
+  });
+
   it("spf=none, spf=neutral y dkim=temperror no fallan", () => {
     expect(autenticacionFallida(cab("Authentication-Results", "mx.google.com; spf=none"))).toBe(false);
     expect(autenticacionFallida(cab("Authentication-Results", "mx.google.com; spf=neutral"))).toBe(false);

@@ -110,7 +110,7 @@ import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle"
 import { mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
-import { autenticacionFallida, type Cabecera } from "@/core/email/autenticacion";
+import { autenticacionFallida } from "@/core/email/autenticacion";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
@@ -1980,7 +1980,7 @@ export async function loadInboundConversation(
     })),
     claimMessageId: latest.id ?? null,
     providerMessageId: latest.provider_message_id ?? null,
-    remitenteAutenticado: !autenticacionFallida((latest.headers as Cabecera[] | null) ?? []),
+    remitenteAutenticado: !autenticacionFallida(latest.headers),
   };
 }
 

@@ -21,9 +21,11 @@ export interface Cabecera {
  * Verdadero sólo con un `spf=fail`, `spf=softfail` o `dkim=fail` (sin un
  * `dkim=pass` al lado) en `Authentication-Results`. Sin cabecera, o con
  * none/neutral/temperror, no falló: el simulado y WhatsApp no la traen.
+ * WhatsApp guarda `{}` en vez de una lista: tampoco falló.
  */
-export function autenticacionFallida(headers: readonly Cabecera[] | null | undefined): boolean {
-  const valor = (headers ?? [])
+export function autenticacionFallida(headers: unknown): boolean {
+  if (!Array.isArray(headers)) return false;
+  const valor = (headers as readonly Cabecera[])
     .filter((h) => (h.name ?? "").toLowerCase() === "authentication-results")
     .map((h) => (h.value ?? "").toLowerCase())
     .join(" ");

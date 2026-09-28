@@ -17,6 +17,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
 import { tables } from "@/lib/db";
+import { ejemploSinDatosDeLaPersona } from "./sin-datos-de-la-persona";
 
 /**
  * Huella de un ejemplo, para descartar repetidos.
@@ -87,7 +88,15 @@ export interface TrainingExample {
   created_at: string;
 }
 
-/** Sólo casos simulados: con datos de personas reales no se entrena un modelo. */
+/**
+ * Sólo casos simulados, y tachados: con datos de personas reales no se
+ * entrena un modelo.
+ *
+ * Entrada y salida se tachan con la misma función, así que el modelo puede
+ * aprender a copiar `[NOMBRE]`/`[DNI]` de una a la otra en vez de generar el
+ * dato real — antes de aprobar cualquier entrenamiento hay que revisar que la
+ * evaluación no deje pasar un modelo que emite ese literal tal cual.
+ */
 export async function approvedExamplesForTenant(
   tenantId: string
 ): Promise<TrainingExample[]> {
@@ -122,6 +131,7 @@ export async function approvedExamplesForTenant(
       input_payload: (row.input_payload ?? {}) as Record<string, unknown>,
       expected_output: (row.expected_output ?? {}) as Record<string, unknown>,
     }))
+    .map(ejemploSinDatosDeLaPersona)
     .filter((row) => {
       const hash = stableHash([row.input_payload, row.expected_output]);
       if (seen.has(hash)) return false;

@@ -60,6 +60,7 @@ export const tenants = pgTable("tenants", {
   contact_email: text("contact_email"),
   trial_ends_at: timestamp("trial_ends_at", { withTimezone: true, mode: "string" }),
   activated_at: timestamp("activated_at", { withTimezone: true, mode: "string" }),
+  specialist_alert_emails: text("specialist_alert_emails").array().notNull().default(sql`'{}'::text[]`),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),

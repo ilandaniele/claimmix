@@ -112,7 +112,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   // Deduplicada con la del layout: ver lib/auth/user-row.ts.
   const me = await getUserRow(session.user.id);
   if (!me) {
-    redirect("/login");
+    redirect("/pendiente");
   }
   const tenantId = me.tenant_id;
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.

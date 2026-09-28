@@ -36,4 +36,23 @@ describe("approvedExamplesForTenant — el SQL que arma", () => {
     expect(sql).toMatch(/"cases"\."channel" in \(\$\d+, \$\d+\)/);
     expect(params).toEqual(expect.arrayContaining(["email_sim", "whatsapp_sim"]));
   });
+
+  it("tacha el nombre confirmado, en el cuerpo simulado y en la salida esperada", async () => {
+    mockTenant.mockImplementation(async () => [
+      {
+        id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        input_payload: { body: "Hola, soy Juan Pérez y tuve un choque en la ruta 3." },
+        expected_output: {
+          confirmed_fields: [{ field_key: "full_name", field_value: "Juan Pérez" }],
+        },
+        created_at: "2026-09-01T00:00:00.000Z",
+      },
+    ]);
+
+    const [ejemplo] = await approvedExamplesForTenant("10000000-0000-0000-0000-000000000001");
+
+    const body = (ejemplo!.input_payload as { body: string }).body;
+    expect(body).toContain("[NOMBRE]");
+    expect(body).not.toContain("Pérez");
+  });
 });

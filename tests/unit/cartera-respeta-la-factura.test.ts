@@ -93,7 +93,7 @@ const UNO = "10000000-0000-0000-0000-000000000001";
 const OTRO = "10000000-0000-0000-0000-000000000002";
 const MES = "2026-07";
 
-function tenant(id: string, name: string) {
+function tenant(id: string, name: string, createdAt = "2026-01-01T00:00:00.000Z") {
   return {
     id,
     name,
@@ -104,7 +104,7 @@ function tenant(id: string, name: string) {
     overage_price_usd: "2",
     contact_email: null,
     trial_ends_at: null,
-    created_at: "2026-01-01T00:00:00.000Z",
+    created_at: createdAt,
   };
 }
 
@@ -217,5 +217,21 @@ describe("la cartera lee la factura congelada", () => {
     expect(tenants[0]!.total_cases).toBe(0);
     expect(tenants[0]!.ai_cost_usd).toBe(0);
     expect(tenants[0]!.invoice_total_usd).toBe(100);
+  });
+
+  it("un tenant dado de alta después del mes no aparece en la cartera", async () => {
+    // Julio terminó antes de que "La Nueva" existiera: no hay nada que
+    // facturarle. "Seguros del Sur" se dio de alta adentro de julio y sí entra.
+    baseCon({
+      tenants: [
+        tenant(UNO, "Seguros del Sur", "2026-07-15T00:00:00.000Z"),
+        tenant(OTRO, "La Nueva", "2026-08-01T00:00:00.000Z"),
+      ],
+    });
+
+    const { tenants } = await listTenantSummaries(MES);
+
+    expect(tenants).toHaveLength(1);
+    expect(tenants[0]!.id).toBe(UNO);
   });
 });

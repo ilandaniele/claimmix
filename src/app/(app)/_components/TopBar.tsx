@@ -6,6 +6,7 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Ayuda } from "./Ayuda";
 import { useT } from "@/lib/i18n/LocaleContext";
+import { ETIQUETA_DE_ROL } from "@/lib/i18n/etiqueta-de-rol";
 import { signOut } from "@/app/login/actions";
 
 interface TopBarProps {
@@ -62,16 +63,7 @@ export function TopBar({ fullName, role }: TopBarProps) {
 
   const initials = getInitials(fullName);
   const isAdmin = role === "admin" || role === "owner";
-  const roleLabel =
-    role === "owner"
-      ? "Owner"
-      : role === "admin"
-        ? t("role.admin") || "Administrador"
-        : role === "specialist"
-          ? "Especialista"
-          : role === "viewer"
-            ? "Visor"
-            : t("role.analyst") || "Analista";
+  const roleLabel = t(ETIQUETA_DE_ROL[role] ?? "role.analyst");
 
   return (
     <header className="flex h-16 flex-shrink-0 items-center justify-end px-6">
@@ -120,7 +112,7 @@ export function TopBar({ fullName, role }: TopBarProps) {
           * en el mismo pedido.
           */}
         <form action={signOut}>
-          <BotonSalir etiqueta={t("nav.signOut") || "Cerrar sesión"} />
+          <BotonSalir etiqueta={t("nav.signOut")} />
         </form>
       </div>
     </header>

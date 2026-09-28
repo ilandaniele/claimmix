@@ -35,6 +35,7 @@ import { connection } from "next/server";
 import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 import { logger } from "@/lib/observability/logger";
 import { SerieDeActividad } from "./_components/SerieDeActividad";
+import { ResumenDeAyer } from "./_components/ResumenDeAyer";
 
 /*
  * Los números salen de `getTenantKpis`, que también usa /api/metricas.
@@ -58,7 +59,7 @@ async function fetchMetricas(unidad: Unidad): Promise<MetricasData | null> {
     // sesión sin perfil reventaba en la línea de abajo en vez de devolver null.
     if (!userRow) return null;
 
-    return await getTenantKpis({ tenantId: userRow.tenant_id }, { serie: unidad });
+    return await getTenantKpis({ tenantId: userRow.tenant_id }, { serie: unidad, ayer: true });
   } catch (e) {
     unstable_rethrow(e);
     if (e instanceof AppError) throw e;
@@ -217,6 +218,12 @@ export default async function MetricasPage({
             value={`${data!.summary.escalated_count} ${t("bandeja.claims")}`}
             accent="red"
           />
+        </div>
+      )}
+
+      {data?.ayer && (
+        <div className="mb-8">
+          <ResumenDeAyer resumen={data.ayer} locale={locale} />
         </div>
       )}
 

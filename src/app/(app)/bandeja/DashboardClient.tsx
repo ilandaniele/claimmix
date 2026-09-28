@@ -90,7 +90,7 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }: DeleteConfirmDialog
         <p className="text-sm text-slate-500 mb-5">
           {count === 1
             ? t("bandeja.deleteConfirmBody1")
-            : `${t("bandeja.deleteConfirmBodyN")} ${count} siniestros. ${t("bandeja.deleteConfirmIrreversible")}`}
+            : `${t("bandeja.deleteConfirmBodyN")} ${count} ${t("bandeja.claims")}. ${t("bandeja.deleteConfirmIrreversible")}`}
         </p>
 
         {/* Remember checkbox */}

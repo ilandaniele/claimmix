@@ -312,6 +312,7 @@ export const esAR = {
   "reenvio.motivo.estado": "El caso no está esperando una respuesta",
   "reenvio.motivo.sin_destinatario": "No sabemos a quién escribirle",
   "reenvio.motivo.ventana_cerrada": "Pasaron más de 24 h desde su último mensaje de WhatsApp",
+  "reenvio.motivo.plantilla_sin_aprobar": "La plantilla para escribirle después de 24 h todavía no está aprobada por Meta",
   "reenvio.motivo.nada_pendiente": "No queda nada por pedir",
   "reenvio.motivo.reciente": "Se le pidió hace menos de 10 minutos",
   "reenvio.motivo.cierre_no_es_abandono": "Lo cerró una persona: no se reabre desde acá",
@@ -382,7 +383,25 @@ export const esAR = {
   "admin.users.title": "Gestión de analistas",
   "admin.users.invite": "Invitar analista",
   "configuracion.title": "Configuración",
-  "configuracion.subtitle": "Variables de entorno (sólo lectura)",
+  "configuracion.subtitle": "Preferencias de cuenta y parámetros del sistema",
+
+  // ── Configuración — cuenta, umbrales de IA, sistema y avisos (E10) ─
+  "configuracion.cuenta": "Cuenta",
+  "configuracion.umbrales": "Umbrales de IA",
+  "configuracion.umbralConfianza": "Umbral de confianza",
+  "configuracion.umbralAyuda": "(ajustable vía variable CONFIDENCE_THRESHOLD)",
+  "configuracion.capMensual": "Cap mensual de IA",
+  "configuracion.capAyuda": "(configurado en el plan de despliegue)",
+  "configuracion.soloAdmins": "Solo los administradores pueden modificar los umbrales de IA.",
+  "configuracion.miClave": "Mi clave de IA",
+  "configuracion.sistema": "Información del sistema",
+  "configuracion.version": "Versión de la app",
+  "configuracion.node": "Versión de Node.js",
+  "configuracion.region": "Región de despliegue",
+  "configuracion.alertas.titulo": "Avisos de casos urgentes",
+  "configuracion.alertas.ayuda": "Un correo por línea, hasta 10. Si la dejás vacía, se avisa como hasta ahora.",
+  "configuracion.alertas.guardadas": "Lista guardada.",
+  "configuracion.alertas.error": "No se pudo guardar la lista.",
 
   // ── Health ─────────────────────────────────────────────────────────────────
   "health.ok": "ok",
@@ -746,6 +765,7 @@ export const esAR = {
   // ── Facturacion — la liquidacion del mes de una aseguradora ───────
   "facturacion.aFacturar": "A facturar",
   "facturacion.abonoPlan": "Abono {n}",
+  "facturacion.antesDelAlta": "Este mes es anterior al alta de la cuenta: no se factura.",
   "facturacion.bucket.facturables": "Facturables",
   "facturacion.bucket.mensajesEnTotal": "Mensajes en total",
   "facturacion.bucket.noEranDenuncias": "No eran denuncias",
@@ -784,6 +804,8 @@ export const esAR = {
   "metricas.actividad.whatsapps": "WhatsApps atendidos",
   "metricas.actividad.mails": "Mails atendidos",
   "metricas.actividad.nota": "Sólo WhatsApp y mail reales, sin simulaciones. Un reclamo abierto es un caso confirmado como siniestro, así que pueden ser menos que el total del mes.",
+  "metricas.ayer.titulo": "Resumen de ayer",
+  "metricas.ayer.ahora": "Pendientes ahora",
   "metricas.card.completitudAuto": "Tasa de completitud automática",
   "metricas.card.escalados": "Siniestros escalados",
   "metricas.card.primeraRespuesta": "Tiempo medio hasta la primera respuesta",
@@ -891,6 +913,8 @@ export const esAR = {
 
   // ── El shell — lo poco que el layout dice por sí mismo ────────────
   "layout.nombreFallback": "Analista",
+  "toast.cerrar": "Cerrar notificación",
+  "toast.region": "Notificaciones",
 
 
   // ── Ejemplos aprobados — la solapa de la consola del agente ───────
@@ -1107,6 +1131,7 @@ export const esAR = {
   "ft.titulo": "Entrenamiento del agente",
   "ft.vertex.activarModelo": "Activar modelo",
   "ft.vertex.activoDesde": "Activo desde {f}",
+  "ft.vertex.aprobar": "Aprobar evaluación",
   "ft.vertex.cancelar": "Cancelar",
   "ft.vertex.cargando": "Cargando Vertex AI…",
   "ft.vertex.confirmar": "Confirmar",
@@ -1115,6 +1140,7 @@ export const esAR = {
   "ft.vertex.crearBorrador": "Crear borrador",
   "ft.vertex.deshabilitado": "Vertex AI no está habilitado. Configurá las variables de entorno en el servidor para activarlo.",
   "ft.vertex.errorActivar": "No se pudo activar el modelo.",
+  "ft.vertex.errorAprobar": "No se pudo guardar la decisión.",
   "ft.vertex.errorBorrador": "No se pudo crear el borrador.",
   "ft.vertex.errorIniciar": "No se pudo iniciar el trabajo.",
   "ft.vertex.errorSincronizar": "No se pudo sincronizar.",
@@ -1125,6 +1151,7 @@ export const esAR = {
   "ft.vertex.modeloBase": "Modelo base:",
   "ft.vertex.precio": "y configuración de GCP. Precio estimado: US$ 0,008 cada 1.000 tokens de entrenamiento.",
   "ft.vertex.proyecto": "Proyecto:",
+  "ft.vertex.rechazar": "Rechazar",
   "ft.vertex.region": "Región:",
   "ft.vertex.requiere": "Entrenamiento real por Google Cloud. Requiere",
   "ft.vertex.sinTrabajos": "No hay trabajos de Vertex AI.",

@@ -146,7 +146,7 @@ function VertexAiSection() {
 
   async function vtxJobPost(
     jobId: string,
-    actionName: "activate" | "rollback",
+    actionName: "activate" | "rollback" | "approve" | "reject",
     fallback: string
   ) {
     setBusy(`${jobId}:${actionName}`);
@@ -379,6 +379,30 @@ function VertexAiSection() {
                     >
                       {t("ft.sincronizar")}
                     </button>
+                    {job.status === "eval_pending" && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={busy !== null || !enabled || !job.vertex_tuned_model_endpoint}
+                          onClick={() =>
+                            vtxJobPost(job.id, "approve", t("ft.vertex.errorAprobar"))
+                          }
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                        >
+                          {t("ft.vertex.aprobar")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy !== null || !enabled}
+                          onClick={() =>
+                            vtxJobPost(job.id, "reject", t("ft.vertex.errorAprobar"))
+                          }
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                        >
+                          {t("ft.vertex.rechazar")}
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
                       disabled={busy !== null || !enabled || !isActivatable}

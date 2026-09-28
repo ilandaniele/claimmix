@@ -9,8 +9,11 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { createHmac } from "crypto";
 import {
   downloadWhatsAppMedia,
+  estadoDePlantilla,
+  olvidarEstadoDePlantilla,
   parseCloudApiMessages,
   resolveWebhookChallenge,
+  sendWhatsAppTemplate,
   sendWhatsAppText,
   verifyMetaSignature,
 } from "@/server/whatsapp/cloud-api";
@@ -157,6 +160,179 @@ describe("sendWhatsAppText — plazo del envío", () => {
     await sendWhatsAppText("5491100000000", "hola");
 
     expect(signalRecibido).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("sendWhatsAppText — el JSON no cambió", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
+    process.env.WHATSAPP_PHONE_NUMBER_ID = "123";
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete process.env.WHATSAPP_ACCESS_TOKEN;
+    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+  });
+
+  it("manda exactamente el mismo cuerpo de siempre", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ messages: [{ id: "wamid.out" }] }), { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await sendWhatsAppText("5491100000000", "hola");
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "5491100000000",
+      type: "text",
+      text: { preview_url: false, body: "hola" },
+    });
+  });
+});
+
+describe("sendWhatsAppTemplate", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
+    process.env.WHATSAPP_PHONE_NUMBER_ID = "123";
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete process.env.WHATSAPP_ACCESS_TOKEN;
+    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+  });
+
+  it("manda la plantilla con el payload exacto", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ messages: [{ id: "wamid.tpl" }] }), { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const r = await sendWhatsAppTemplate("5491100000000", "reabrir_denuncia", "es_AR", ["abc-123", "la foto"]);
+
+    expect(r).toEqual({ ok: true, messageId: "wamid.tpl" });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "5491100000000",
+      type: "template",
+      template: {
+        name: "reabrir_denuncia",
+        language: { code: "es_AR" },
+        components: [
+          {
+            type: "body",
+            parameters: [
+              { type: "text", text: "abc-123" },
+              { type: "text", text: "la foto" },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  it("colapsa saltos de línea, tabs y espacios repetidos en cada parámetro", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ messages: [{ id: "wamid.tpl" }] }), { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await sendWhatsAppTemplate("5491100000000", "reabrir_denuncia", "es_AR", ["a\nb", "c\td", "e    f"]);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.template.components[0].parameters).toEqual([
+      { type: "text", text: "a b" },
+      { type: "text", text: "c d" },
+      { type: "text", text: "e f" },
+    ]);
+  });
+});
+
+describe("estadoDePlantilla", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    olvidarEstadoDePlantilla();
+    process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = "waba-1";
+    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
+    delete process.env.WHATSAPP_ACCESS_TOKEN;
+    olvidarEstadoDePlantilla();
+  });
+
+  it("sin WHATSAPP_BUSINESS_ACCOUNT_ID: no_disponible, y no llama a fetch", async () => {
+    delete process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("no_disponible");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("APPROVED da aprobada", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ name: "reabrir_denuncia", status: "APPROVED", language: "es_AR" }] }), { status: 200 })
+    ) as unknown as typeof fetch;
+
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("aprobada");
+  });
+
+  it("PENDING da pendiente", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ name: "reabrir_denuncia", status: "PENDING", language: "es_AR" }] }), { status: 200 })
+    ) as unknown as typeof fetch;
+
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("pendiente");
+  });
+
+  it("otro idioma solamente: pendiente", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ name: "reabrir_denuncia", status: "APPROVED", language: "en_US" }] }), { status: 200 })
+    ) as unknown as typeof fetch;
+
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("pendiente");
+  });
+
+  it("HTTP 500 da no_disponible", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("error", { status: 500 })) as unknown as typeof fetch;
+
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("no_disponible");
+  });
+
+  it("una segunda llamada dentro del TTL no vuelve a pedir", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ name: "reabrir_denuncia", status: "APPROVED", language: "es_AR" }] }), { status: 200 })
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await estadoDePlantilla("reabrir_denuncia", "es_AR");
+    await estadoDePlantilla("reabrir_denuncia", "es_AR");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("después de olvidarEstadoDePlantilla() vuelve a pedir", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ name: "reabrir_denuncia", status: "APPROVED", language: "es_AR" }] }), { status: 200 })
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await estadoDePlantilla("reabrir_denuncia", "es_AR");
+    olvidarEstadoDePlantilla();
+    await estadoDePlantilla("reabrir_denuncia", "es_AR");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

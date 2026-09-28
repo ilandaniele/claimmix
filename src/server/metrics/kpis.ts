@@ -16,7 +16,7 @@ import "server-only";
 import { and, count, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { ESTADOS_ESCALADO } from "@/core/case/fsm";
 
-import { mesArgentino, ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
+import { mesArgentino, medianocheHaceDias, ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import {
   completarSerie,
   desdeDe,
@@ -42,6 +42,16 @@ export interface MetricasSummary {
   escalated_count: number;
 }
 
+export interface ResumenDeAyer {
+  reclamos: number;
+  whatsapps: number;
+  mails: number;
+  escalados: number;
+  cerrados: number;
+  para_responder: number;
+  confirmacion_pendiente: number;
+}
+
 export interface MetricasData {
   summary: MetricasSummary;
   by_status: Record<string, number>;
@@ -56,6 +66,8 @@ export interface MetricasData {
   period: { start: string; end: string };
   /** Sólo si se pidió: /api/metricas no la pide y devuelve null. */
   serie: PuntoSerie[] | null;
+  /** Sólo si se pidió: /api/metricas no lo pide y la clave no aparece. */
+  ayer?: ResumenDeAyer | null;
 }
 
 export interface AiUsageSummary {
@@ -123,15 +135,33 @@ export function consultaDeActividad(db: ClienteDatos, unidad: Unidad, desde: str
     .orderBy(sql`1`);
 }
 
+/** Un solo conteo; sólo canales reales (whatsapp, email), como la serie. */
+export function consultaDeAyer(db: ClienteDatos, desde: string, hasta: string) {
+  const creadoAyer = and(gte(cases.created_at, desde), lt(cases.created_at, hasta));
+  return db
+    .select({
+      reclamos: sql<number>`count(*) filter (where ${creadoAyer} and ${cases.is_claim} is true)::int`,
+      whatsapps: sql<number>`count(*) filter (where ${creadoAyer} and ${cases.channel} = 'whatsapp')::int`,
+      mails: sql<number>`count(*) filter (where ${creadoAyer} and ${cases.channel} = 'email')::int`,
+      escalados: sql<number>`count(*) filter (where ${creadoAyer} and ${inArray(cases.status, [...ESTADOS_ESCALADO])})::int`,
+      cerrados: sql<number>`count(*) filter (where ${cases.status} = 'cerrado' and ${and(gte(cases.closed_at, desde), lt(cases.closed_at, hasta))})::int`,
+      para_responder: sql<number>`count(*) filter (where ${cases.para_responder_desde} is not null)::int`,
+      confirmacion_pendiente: sql<number>`count(*) filter (where ${cases.status} = 'confirmacion_pendiente')::int`,
+    })
+    .from(cases)
+    .where(inArray(cases.channel, ["whatsapp", "email"]));
+}
+
 /**
  * Todo lo que muestra la pantalla, para un inquilino.
  *
  * `serie` agrega la consulta de actividad al MISMO lote, así la pantalla sigue
- * en un viaje. Sin ella no se lee y vuelve null.
+ * en un viaje. Sin ella no se lee y vuelve null. `ayer` hace lo mismo con el
+ * resumen del día anterior.
  */
 export async function getTenantKpis(
   tenantCtx: TenantContext,
-  opts?: { serie?: Unidad }
+  opts?: { serie?: Unidad; ayer?: boolean }
 ): Promise<MetricasData> {
   /*
    * ── La ventana del mes, en horario argentino ────────────────────────────────
@@ -164,9 +194,10 @@ export async function getTenantKpis(
     [usageAllTimeRow],
     usageByUserRows,
     usageByModelRows,
-    serieFilas,
+    ...opcionales
   /*
-   * Nueve consultas —diez con la serie— en UN viaje, no en nueve.
+   * Nueve consultas —diez con la serie, once con las dos— en UN viaje, no en
+   * nueve.
    *
    * Estaba en `Promise.all([enTenant(...), enTenant(...), ...])`, que las pone
    * en paralelo pero NO las junta: cada `enTenant` abre su propio `batch()` con
@@ -191,7 +222,7 @@ export async function getTenantKpis(
       [Usos],
       Array<Usos & { user_id: string | null; full_name: string | null; email: string | null }>,
       Array<Usos & { model: string }>,
-      PuntoSerie[]?,
+      ...Array<PuntoSerie[] | ResumenDeAyer[]>,
     ]
   >(tenantCtx, (db) => {
     /*
@@ -331,8 +362,14 @@ export async function getTenantKpis(
       ...(opts?.serie
         ? [consultaDeActividad(db, opts.serie, desdeDe(opts.serie, ahora))]
         : []),
+      ...(opts?.ayer
+        ? [consultaDeAyer(db, medianocheHaceDias(2, ahora), medianocheHaceDias(1, ahora))]
+        : []),
     ];
   });
+
+  const serieFilas = opts?.serie ? (opcionales.shift() as PuntoSerie[] | undefined) : undefined;
+  const ayerFilas = opts?.ayer ? (opcionales.shift() as ResumenDeAyer[] | undefined) : undefined;
 
   const totalCasesMonth = resumenMes?.total ?? 0;
 
@@ -403,5 +440,6 @@ export async function getTenantKpis(
     serie: opts?.serie
       ? completarSerie(opts.serie, ahora, serieFilas ?? [])
       : null,
+    ...(opts?.ayer ? { ayer: ayerFilas?.[0] ?? null } : {}),
   };
 }

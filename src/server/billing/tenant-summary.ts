@@ -20,7 +20,7 @@ import "server-only";
 import { and, eq, gte, lt, ne, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
-import { resolveBillingPeriod } from "@/lib/billing/period";
+import { resolveBillingPeriod, periodoAntesDelAlta } from "@/lib/billing/period";
 import { getDemoTenantId } from "@/server/ai/budget";
 
 export interface TenantSummary {
@@ -138,50 +138,52 @@ export async function listTenantSummaries(month?: string | null): Promise<{
 
   const facturaPorInquilino = new Map(congeladas.map((f) => [f.tenant_id, f]));
 
-  const tenants = tenantRows.map((t): TenantSummary => {
-    const counts = casesByTenant.get(t.id);
-    const cost = costByTenant.get(t.id) ?? 0;
-    const facturada = facturaPorInquilino.get(t.id);
-    const fallback = isPlan(t.plan) ? PLAN_CATALOG[t.plan] : PLAN_CATALOG.piloto;
+  const tenants = tenantRows
+    .filter((t) => !periodoAntesDelAlta(range, t.created_at))
+    .map((t): TenantSummary => {
+      const counts = casesByTenant.get(t.id);
+      const cost = costByTenant.get(t.id) ?? 0;
+      const facturada = facturaPorInquilino.get(t.id);
+      const fallback = isPlan(t.plan) ? PLAN_CATALOG[t.plan] : PLAN_CATALOG.piloto;
 
-    // Los términos guardados del tenant mandan sobre el catálogo: un contrato
-    // firmado no cambia porque alguien haya editado la lista de precios.
-    const invoice = computeInvoice({
-      claims: counts?.billable ?? 0,
-      monthly_fee_usd: Number(t.monthly_fee_usd ?? fallback.monthly_fee_usd),
-      included_claims: Number(t.included_claims ?? fallback.included_claims),
-      overage_price_usd: Number(t.overage_price_usd ?? fallback.overage_price_usd),
-      label: fallback.label,
+      // Los términos guardados del tenant mandan sobre el catálogo: un contrato
+      // firmado no cambia porque alguien haya editado la lista de precios.
+      const invoice = computeInvoice({
+        claims: counts?.billable ?? 0,
+        monthly_fee_usd: Number(t.monthly_fee_usd ?? fallback.monthly_fee_usd),
+        included_claims: Number(t.included_claims ?? fallback.included_claims),
+        overage_price_usd: Number(t.overage_price_usd ?? fallback.overage_price_usd),
+        label: fallback.label,
+      });
+
+      return {
+        id: t.id,
+        name: t.name,
+        plan: t.plan,
+        plan_label: fallback.label,
+        billing_status: t.billing_status,
+        contact_email: t.contact_email,
+        trial_ends_at: t.trial_ends_at,
+        created_at: t.created_at,
+        monthly_fee_usd: invoice.monthly_fee_usd,
+        included_claims: invoice.included_claims,
+        overage_price_usd: invoice.overage_price_usd,
+        // Si el mes ya se facturó, lo que vale es lo que dice la factura.
+        billable_claims: facturada
+          ? Number(facturada.billable_claims)
+          : counts?.billable ?? 0,
+        total_cases: counts?.total ?? 0,
+        invoice_total_usd: facturada
+          ? Number(facturada.total_usd)
+          : invoice.total_usd,
+        ai_cost_usd: Math.round(cost * 10000) / 10000,
+        // El margen, contra el total que de verdad se cobró.
+        margin_pct: computeMargin(
+          facturada ? Number(facturada.total_usd) : invoice.total_usd,
+          cost
+        ).margin_pct,
+      };
     });
-
-    return {
-      id: t.id,
-      name: t.name,
-      plan: t.plan,
-      plan_label: fallback.label,
-      billing_status: t.billing_status,
-      contact_email: t.contact_email,
-      trial_ends_at: t.trial_ends_at,
-      created_at: t.created_at,
-      monthly_fee_usd: invoice.monthly_fee_usd,
-      included_claims: invoice.included_claims,
-      overage_price_usd: invoice.overage_price_usd,
-      // Si el mes ya se facturó, lo que vale es lo que dice la factura.
-      billable_claims: facturada
-        ? Number(facturada.billable_claims)
-        : counts?.billable ?? 0,
-      total_cases: counts?.total ?? 0,
-      invoice_total_usd: facturada
-        ? Number(facturada.total_usd)
-        : invoice.total_usd,
-      ai_cost_usd: Math.round(cost * 10000) / 10000,
-      // El margen, contra el total que de verdad se cobró.
-      margin_pct: computeMargin(
-        facturada ? Number(facturada.total_usd) : invoice.total_usd,
-        cost
-      ).margin_pct,
-    };
-  });
 
   return { month: range.month, tenants };
 }

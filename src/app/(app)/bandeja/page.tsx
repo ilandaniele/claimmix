@@ -147,7 +147,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   if (!session?.user) redirect("/login");
   // Deduplicada con la del layout: ver lib/auth/user-row.ts.
   const userRow = await getUserRow(session.user.id);
-  if (!userRow) redirect("/login");
+  if (!userRow) redirect("/pendiente");
   const tenantId = userRow.tenant_id;
 
   // Fetch cases matching the current filter.

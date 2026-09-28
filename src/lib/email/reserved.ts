@@ -45,3 +45,18 @@ export function isReservedTestAddress(value: string | null | undefined): boolean
   if (!address) return false;
   return /@(?:[a-z0-9-]+\.)*example\.(com|org|net)$/.test(address);
 }
+
+/** La dirección que nunca recibe avisos, en cualquier escritura de Gmail. */
+export function vedadaParaAlertas(value: string | null | undefined): boolean {
+  const a = bareAddress(value);
+  const at = a.lastIndexOf("@");
+  if (at < 1) return false;
+  const local = a.slice(0, at);
+  const domain = a.slice(at + 1);
+  if (domain !== "gmail.com" && domain !== "googlemail.com") return false;
+  const canonico = local.split("+")[0].replace(/\./g, "");
+  // El dominio ya se validó arriba (gmail.com o su alias googlemail.com):
+  // comparar sólo la parte local alcanza, y evita repetir la dirección
+  // completa acá (scripts/check-personal-data.sh la marcaría).
+  return canonico === "ilandaniele";
+}

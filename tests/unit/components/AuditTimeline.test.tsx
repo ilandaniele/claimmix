@@ -38,6 +38,7 @@ const VALORES_EXCLUIDOS = new Set([
   "email.webhook_rejected",
   "email.deduplicated",
   "case.deleted",
+  "tenant.specialist_alert_recipients_changed",
 ]);
 
 const ADJUNTO_RECHAZADO = {

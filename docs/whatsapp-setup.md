@@ -124,3 +124,35 @@ It needs the **same** Meta credentials from Part B, so finish that first.
 
 > Avoid `whatsmeow`-based servers (they pair a personal account by QR) for
 > anything business-facing — that's the ban risk you're trying to avoid.
+
+---
+
+## Part E — Reopening a claim after the 24h window
+
+Meta only lets a business message a claimant with plain text inside 24 h of
+their last inbound message. Past that window, the **only** thing Meta accepts
+is an approved template — so ClaimMix ships one to ask again for what's still
+missing, `reabrir_denuncia`:
+
+| Field | Value |
+|---|---|
+| Name | `reabrir_denuncia` |
+| Category | Utility |
+| Language | `es_AR` (Spanish — Argentina) |
+| Body | `Hola. Te escribimos por tu denuncia con número de referencia {{1}}. Para poder seguir, todavía necesitamos: {{2}}. Podés responder a este mensaje; las fotos o archivos mandalos por este mismo chat.` |
+| Sample for `{{1}}` | `a1b2c3d4-...` (a case id) |
+| Sample for `{{2}}` | `Número de póliza` |
+
+Create it in **Meta Business Manager → WhatsApp Manager → Message Templates**
+with those exact values, then submit it for Meta's review.
+
+Set `WHATSAPP_BUSINESS_ACCOUNT_ID` (the WABA id from Part B, step 3) so ClaimMix
+can ask Meta whether the template got approved. The system-user token from Part
+B needs the `whatsapp_business_management` permission for that lookup — add it
+alongside `whatsapp_business_messaging` on the same system user.
+
+There is nothing else to configure: ClaimMix checks the template's approval
+status on its own, and caches it briefly. Without `WHATSAPP_BUSINESS_ACCOUNT_ID`,
+or while the template is not yet approved, behaviour stays exactly as it is
+today — a reopened-by-abandonment case outside the window simply can't be
+reopened by resending.

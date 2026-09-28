@@ -239,6 +239,14 @@ export const AuditEvent = {
   SPECIALIST_ALERTED: "claim.specialist_alerted",
 
   /**
+   * SPECIALIST_ALERT_RECIPIENTS_CHANGED: an admin edited the tenant's list of
+   * addresses for urgent-case alerts, from /configuracion.
+   * Payload: { count }. Never the addresses themselves.
+   * Targets a tenant, not a case: it needs no `audit.*` key.
+   */
+  SPECIALIST_ALERT_RECIPIENTS_CHANGED: "tenant.specialist_alert_recipients_changed",
+
+  /**
    * CASE_CLOSED_ABANDONED: the claimant never answered and the conversation
    * was closed by the nightly sweep.
    * Payload: { case_id, after_days, reason }.

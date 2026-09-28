@@ -20,7 +20,7 @@ import { redirect } from "next/navigation";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { AppError } from "@/lib/errors";
-import { resolveBillingPeriod } from "@/lib/billing/period";
+import { resolveBillingPeriod, periodoAntesDelAlta } from "@/lib/billing/period";
 import { getStatement } from "@/server/billing/statement";
 import { mesDeCalendario } from "@/core/fecha/mes-calendario";
 import { nombreDePlan } from "@/lib/billing/plan-label";
@@ -83,6 +83,13 @@ export default async function FacturacionPage({
   const { volume, invoice, ai_cost: cost, margin, tenant } = statement;
   const current = resolveBillingPeriod(null)!.month;
 
+  // Un mes anterior al alta del cliente no tiene nada que mostrar: ni factura
+  // ni mes en curso, así que ninguno de los dos estados de siempre le calza.
+  const alta = tenant.created_at;
+  const esteMesAntesDelAlta =
+    !statement.frozen && !!alta && periodoAntesDelAlta({ next: statement.period.end }, alta);
+  const anteriorAntesDelAlta = !!alta && periodoAntesDelAlta({ next: statement.period.start }, alta);
+
   return (
     <div className="px-6 py-8 max-w-5xl">
       <div className="mb-6 flex items-start justify-between gap-4">
@@ -97,12 +104,14 @@ export default async function FacturacionPage({
         </div>
 
         <nav className="flex items-center gap-1 text-sm" aria-label={t("facturacion.cambiarMes")}>
-          <Link
-            href={`/admin/facturacion?month=${shiftMonth(statement.month, -1)}`}
-            className="rounded-md border border-slate-200 px-2.5 py-1.5 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
-            ← {t("facturacion.mesAnterior")}
-          </Link>
+          {!anteriorAntesDelAlta && (
+            <Link
+              href={`/admin/facturacion?month=${shiftMonth(statement.month, -1)}`}
+              className="rounded-md border border-slate-200 px-2.5 py-1.5 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              ← {t("facturacion.mesAnterior")}
+            </Link>
+          )}
           {statement.month !== current && (
             <Link
               href={`/admin/facturacion?month=${shiftMonth(statement.month, 1)}`}
@@ -121,7 +130,7 @@ export default async function FacturacionPage({
       */}
       <p
         className={`mb-6 rounded-md border px-4 py-2.5 text-sm ${
-          statement.frozen
+          statement.frozen || esteMesAntesDelAlta
             ? "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300"
             : "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200"
         }`}
@@ -133,6 +142,8 @@ export default async function FacturacionPage({
             {new Date(statement.frozen_at!).toLocaleDateString(locale, { timeZone: "UTC" })}{" "}
             {t("facturacion.cerradoDespuesDeLaFecha")}
           </>
+        ) : esteMesAntesDelAlta ? (
+          <>{t("facturacion.antesDelAlta")}</>
         ) : (
           <>
             <strong>{t("facturacion.mesEnCurso")}</strong> {t("facturacion.mesEnCursoDetalle")}

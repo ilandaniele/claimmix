@@ -11,12 +11,15 @@ import { ConfidenceBar } from "./ConfidenceBar";
 import { Vacio } from "./Vacio";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import { formatAge, formatDate } from "@/lib/utils";
+import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 
 function formatCaseId(id: string): string {
   const suffix = id.replace(/-/g, "").slice(-8).toUpperCase();
   return `SIN-${suffix.slice(0, 4)}-${suffix.slice(4)}`;
 }
+
+const SOLO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
 type Columna = { id: string; header: string; cell: (row: CaseRow, marcado: boolean) => ReactNode };
 
@@ -151,6 +154,9 @@ export function CasesTable({
               day: "2-digit",
               month: "short",
               year: "numeric",
+              // Una fecha sola se parsea como medianoche UTC: formateada en
+              // otra zona, en Argentina sale el día anterior.
+              timeZone: SOLO_FECHA.test(raw) ? "UTC" : ZONA_ARGENTINA,
             }).format(fecha)
           ) : (
             raw
@@ -311,6 +317,7 @@ export function CasesTable({
               title={new Intl.DateTimeFormat(locale, {
                 dateStyle: "medium",
                 timeStyle: "short",
+                timeZone: ZONA_ARGENTINA,
               }).format(new Date(at))}
             >
               {t("table.replied.yes")}

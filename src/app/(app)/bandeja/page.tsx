@@ -204,7 +204,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
    * estados de la lista de arriba.
    *
    * Hoy da lo mismo: la base tiene `cases_status_check` con exactamente estos
-   * trece valores, así que no puede haber una fila fuera. Se suma todo igual
+   * dieciséis valores (0035), así que no puede haber una fila fuera. Se suma todo igual
    * porque `VALID_STATUSES` sale de `CaseStatusSchema`, no de esa columna, y el
    * día que el CHECK sume un estado y el schema no, la tarjeta «Total casos»
    * bajaría sin error visible. Sumar lo que vuelve no depende de que las dos

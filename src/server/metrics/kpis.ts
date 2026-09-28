@@ -14,7 +14,7 @@
 import "server-only";
 
 import { and, count, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
-import { ESTADOS_ESCALADO } from "@/core/case/fsm";
+import { ESTADOS_CERRADOS, ESTADOS_ESCALADO } from "@/core/case/fsm";
 
 import { mesArgentino, medianocheHaceDias, ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import {
@@ -135,6 +135,9 @@ export function consultaDeActividad(db: ClienteDatos, unidad: Unidad, desde: str
     .orderBy(sql`1`);
 }
 
+// Un cierre es `cerrado`, `pagado` o `rechazado`; los tres guardan su fecha en `closed_at`.
+const esCierre = inArray(cases.status, [...ESTADOS_CERRADOS]);
+
 /** Un solo conteo; sólo canales reales (whatsapp, email), como la serie. */
 export function consultaDeAyer(db: ClienteDatos, desde: string, hasta: string) {
   const creadoAyer = and(gte(cases.created_at, desde), lt(cases.created_at, hasta));
@@ -144,7 +147,7 @@ export function consultaDeAyer(db: ClienteDatos, desde: string, hasta: string) {
       whatsapps: sql<number>`count(*) filter (where ${creadoAyer} and ${cases.channel} = 'whatsapp')::int`,
       mails: sql<number>`count(*) filter (where ${creadoAyer} and ${cases.channel} = 'email')::int`,
       escalados: sql<number>`count(*) filter (where ${creadoAyer} and ${inArray(cases.status, [...ESTADOS_ESCALADO])})::int`,
-      cerrados: sql<number>`count(*) filter (where ${cases.status} = 'cerrado' and ${and(gte(cases.closed_at, desde), lt(cases.closed_at, hasta))})::int`,
+      cerrados: sql<number>`count(*) filter (where ${esCierre} and ${and(gte(cases.closed_at, desde), lt(cases.closed_at, hasta))})::int`,
       para_responder: sql<number>`count(*) filter (where ${cases.para_responder_desde} is not null)::int`,
       confirmacion_pendiente: sql<number>`count(*) filter (where ${cases.status} = 'confirmacion_pendiente')::int`,
     })
@@ -299,7 +302,7 @@ export async function getTenantKpis(
           .from(cases)
           .leftJoin(users, eq(cases.assigned_to, users.id))
           .where(and(
-            eq(cases.status, "cerrado"),
+            esCierre,
             gte(cases.closed_at, monthStart),
             lt(cases.closed_at, monthEnd),
             isNotNull(cases.assigned_to),

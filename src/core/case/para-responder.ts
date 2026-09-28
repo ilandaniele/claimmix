@@ -16,17 +16,26 @@
  *   `ESTADOS_DEL_AGENTE_TERMINADO`; `no_relevante` se reabre
  *   (`reabrir-no-relevante`), y `cerrado` o `esperando` quedan sólo en la
  *   auditoría, como antes.
+ *
+ * La liquidación (`en_liquidacion`, `pagado`, `rechazado`) cuenta como
+ * terminada con respuesta: el traspaso le prometió a la persona que si escribe
+ * la lee alguien (`SI_VOLVES_A_ESCRIBIR`), y después de un pago o un rechazo es
+ * cuando más escribe. `cerrado` no: un cierre a mano es la última palabra del
+ * equipo, como `enviado_a_core → cerrado` desde antes.
  */
 import type { CaseStatus } from "@/lib/schemas/cases";
 
 // El agente ya le contestó a la persona: la dejó lista, la mandó al core o le
-// dijo que la toma un especialista. `error_core` viene después de
-// `listo_para_core`, así que también.
+// dijo que la toma un especialista. `error_core` y la liquidación vienen
+// después de `listo_para_core`, así que también.
 const TERMINADOS_CON_RESPUESTA = [
   "listo",
   "listo_para_core",
   "enviado_a_core",
   "error_core",
+  "en_liquidacion",
+  "pagado",
+  "rechazado",
   "requiere_especialista",
 ] as const satisfies readonly CaseStatus[];
 

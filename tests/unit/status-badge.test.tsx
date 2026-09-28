@@ -2,14 +2,14 @@
  * La insignia de estado.
  *
  * Antes esto fijaba un matiz por estado —`listo` es `bg-green-100`, `procesando`
- * es `bg-blue-100`— para cinco de los trece estados que existen. Eso no era una
+ * es `bg-blue-100`— para cinco de los trece estados que había. Eso no era una
  * invariante sino una foto de la hoja de estilos: cualquier cambio de paleta lo
  * rompía sin que nada estuviera mal, y los otros ocho estados no los miraba
  * nadie.
  *
  * Lo que sí es una invariante, y es lo que se prueba acá:
  *
- *   1. Los trece estados tienen etiqueta, color y `data-status`. Trece, no cinco:
+ *   1. Todos los estados tienen etiqueta, color y `data-status`. Todos, no cinco:
  *      un estado sin entrada en el mapa caía al color por defecto y se veía
  *      «terminado» aunque estuviera escalado.
  *
@@ -28,7 +28,7 @@
 import { render, screen } from "@testing-library/react";
 import { StatusBadge } from "../../src/app/(app)/bandeja/components/StatusBadge";
 import { esAR } from "../../src/lib/i18n/es-AR";
-import type { CaseStatus } from "../../src/lib/schemas/cases";
+import { CaseStatusSchema, type CaseStatus } from "../../src/lib/schemas/cases";
 
 /** Los cinco tonos, con el fondo y el texto que le corresponde a cada uno. */
 const TONOS = {
@@ -40,7 +40,7 @@ const TONOS = {
 } as const;
 
 /**
- * Los trece estados del CHECK de la base, con el tono que les toca.
+ * Los estados del CHECK de la base, con el tono que les toca.
  *
  * La etiqueta NO se escribe acá: sale del mismo diccionario del que la saca el
  * componente. Copiada a mano, este test sólo comprobaría que dos listas dicen lo
@@ -60,6 +60,10 @@ const ESTADOS: { status: CaseStatus; tono: keyof typeof TONOS }[] = [
   { status: "enviado_a_core", tono: "terminado" },
   { status: "cerrado", tono: "terminado" },
   { status: "no_relevante", tono: "terminado" },
+  // B25: en curso en la aseguradora, pagado salió bien, rechazado terminó.
+  { status: "en_liquidacion", tono: "enVuelo" },
+  { status: "pagado", tono: "bien" },
+  { status: "rechazado", tono: "terminado" },
 ];
 
 /** La etiqueta que le corresponde a un estado, según el diccionario. */
@@ -90,11 +94,11 @@ describe("StatusBadge", () => {
     });
   }
 
-  it("los trece estados están cubiertos: ninguno cae al color por defecto", () => {
+  it("todos los estados están cubiertos: ninguno cae al color por defecto", () => {
     // Si mañana el CHECK de la base suma un estado y este mapa no, la lista de
     // arriba deja de cubrirlo — y el estado nuevo se vería «terminado» (gris)
     // aunque fuera urgente. Esta cuenta es la que se pone en rojo.
-    const ESTADOS_EN_LA_BASE = 13;
+    const ESTADOS_EN_LA_BASE = CaseStatusSchema.options.length;
     expect(ESTADOS).toHaveLength(ESTADOS_EN_LA_BASE);
     expect(new Set(ESTADOS.map((e) => e.status)).size).toBe(ESTADOS_EN_LA_BASE);
   });

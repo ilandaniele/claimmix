@@ -52,6 +52,10 @@ export const CaseStatusSchema = z.enum([
   "enviado_a_core",
   "error_core",
   "no_relevante",
+  // Después de la entrega a la aseguradora; los marca una persona (B25)
+  "en_liquidacion",
+  "pagado",
+  "rechazado",
 ]);
 export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 
@@ -181,7 +185,8 @@ export type ConfirmField = z.infer<typeof ConfirmFieldSchema>;
 /**
  * POST /api/cases/:id/sync-to-core request body (AC17).
  * Triggers CoreSyncService for a case that is listo_para_core.
- * force=true bypasses the status precondition check (admin only).
+ * `force` sólo suma el reintento desde `error_core`; no saltea ninguna otra
+ * precondición ni pide otro rol.
  */
 export const SyncToCoreSchema = z.object({
   force: z.boolean().optional().default(false),

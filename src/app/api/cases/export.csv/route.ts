@@ -91,6 +91,9 @@ export function etiquetasDeEstado(
     enviado_a_core: t("status.enviado_a_core"),
     error_core: t("status.error_core"),
     no_relevante: t("status.no_relevante"),
+    en_liquidacion: t("status.en_liquidacion"),
+    pagado: t("status.pagado"),
+    rechazado: t("status.rechazado"),
   };
 }
 

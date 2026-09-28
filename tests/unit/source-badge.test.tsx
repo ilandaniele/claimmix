@@ -15,24 +15,10 @@ import { describe, it, expect } from "vitest";
 import { SourceBadge } from "../../src/app/(app)/bandeja/components/SourceBadge";
 import { StatusBadge } from "../../src/app/(app)/bandeja/components/StatusBadge";
 import { SeverityBadge } from "../../src/app/(app)/bandeja/components/SeverityBadge";
-import type { CaseStatus, Severity } from "../../src/lib/schemas/cases";
+import { CaseStatusSchema, type Severity } from "../../src/lib/schemas/cases";
 
-/** Los trece estados y las cuatro severidades: todas las variantes, no una muestra. */
-const STATUS_VALUES: CaseStatus[] = [
-  "procesando",
-  "listo",
-  "esperando",
-  "escalado",
-  "cerrado",
-  "recibido",
-  "info_faltante",
-  "confirmacion_pendiente",
-  "requiere_especialista",
-  "listo_para_core",
-  "enviado_a_core",
-  "error_core",
-  "no_relevante",
-];
+/** Todos los estados y las cuatro severidades: todas las variantes, no una muestra. */
+const STATUS_VALUES = CaseStatusSchema.options;
 
 const SEVERITY_VALUES: Severity[] = ["low", "medium", "high", "critical"];
 import { CasesTable } from "../../src/app/(app)/bandeja/components/CasesTable";

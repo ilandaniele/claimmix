@@ -198,10 +198,10 @@ export const AuditEvent = {
    * MESSAGE_NOT_READ: llegó un mensaje a un caso del que el worker no vuelve a
    * arrancar, así que no se leyó. Payload: { status, motivo }.
    *
-   * `no_relevante` y `listo_para_core` son terminales en la máquina de estados
-   * —`no_relevante` a propósito, bajo LLM08: la IA no saca un caso de un estado
-   * terminal— y el worker tiene una lista de estados desde los que puede
-   * empezar. Cuando llega un mensaje a un caso que quedó afuera de esa lista, el
+   * `no_relevante` y `listo_para_core` no son estados de arranque del worker
+   * —`no_relevante` a propósito, bajo LLM08: la IA no saca un caso de ahí; de
+   * `listo_para_core` lo saca sync-to-core o una persona (`SALIDAS_A_MANO`)— y
+   * el worker tiene una lista de estados desde los que puede empezar. Cuando llega un mensaje a un caso que quedó afuera de esa lista, el
    * mensaje se guarda y NO se lee.
    *
    * Alguien escribe «hola», el clasificador dice que no es una denuncia, y

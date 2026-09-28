@@ -113,7 +113,7 @@ const DEFAULT_EXTRACTED_FIELDS = [
  *
  * Devuelve el espia de `update` para poder afirmar que NO se llamo.
  */
-function montarLecturaDelCaso(db: any) {
+function montarLecturaDelCaso(db: any, caseRow: unknown = DEFAULT_CASE_ROW) {
   let n = 0;
   db.select.mockImplementation(() => {
     n += 1;
@@ -121,7 +121,7 @@ function montarLecturaDelCaso(db: any) {
       return {
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([DEFAULT_CASE_ROW]),
+            limit: vi.fn().mockResolvedValue([caseRow]),
           }),
         }),
       };
@@ -716,5 +716,49 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     expect(body.error.code).toBe("FSM_INVALID_TRANSITION");
     expect(espiaCliente).not.toHaveBeenCalled();
     expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it.each(["cerrado", "en_liquidacion", "pagado", "rechazado", "enviado_a_core", "listo"])(
+    "force desde %s — 409, no llama al cliente del Core",
+    async (status) => {
+      const { requireRole } = await import("@/lib/auth/require-role");
+      const { db } = await import("@/lib/db");
+      const coreSyncClient = await import("@/server/core-sync/client");
+
+      vi.mocked(requireRole).mockResolvedValue({
+        user: { id: "user-1" },
+        userRow: DEFAULT_USER_ROW,
+      } as never);
+      const update = montarLecturaDelCaso(db, { ...DEFAULT_CASE_ROW, status });
+      const espiaCliente = vi.spyOn(coreSyncClient, "getCoreSyncClient");
+
+      const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+      const response = await POST(makeRequest({ force: true }), makeContext(VALID_CASE_ID));
+      const body = await response.json();
+
+      expect(response.status).toBe(409);
+      expect(body.error.code).toBe("FSM_INVALID_TRANSITION");
+      expect(espiaCliente).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["error_core", "listo_para_core"])("force desde %s sigue enviando", async (status) => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    } as never);
+    const update = montarLecturaDelCaso(db, { ...DEFAULT_CASE_ROW, status });
+
+    const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+    const response = await POST(makeRequest({ force: true }), makeContext(VALID_CASE_ID));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.synced).toBe(true);
+    expect(update).toHaveBeenCalled();
   });
 });

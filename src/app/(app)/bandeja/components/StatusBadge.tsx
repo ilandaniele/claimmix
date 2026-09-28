@@ -8,7 +8,7 @@ interface StatusBadgeProps {
 }
 
 /**
- * Trece estados, cinco colores.
+ * Dieciséis estados, cinco colores.
  *
  * Antes cada estado tenía su propio matiz —verde, amarillo, rojo, azul, celeste,
  * ámbar, naranja, rosa, esmeralda, verde azulado— y una columna con trece
@@ -24,7 +24,7 @@ interface StatusBadgeProps {
  *   esmeralda → salió bien
  *   gris      → terminado, no requiere nada
  *
- * La palabra sigue distinguiendo los trece; el color agrupa los cinco. Y son
+ * La palabra sigue distinguiendo los dieciséis; el color agrupa los cinco. Y son
  * los mismos cinco tonos de `Pill`, así que el detalle del caso y la bandeja
  * dicen lo mismo con la misma pintura.
  *
@@ -45,13 +45,17 @@ const STATUS_CLASSES: Record<CaseStatus, string> = {
   // En vuelo: el sistema todavía está haciendo algo.
   recibido: "bg-violet-50 text-violet-700",
   procesando: "bg-violet-50 text-violet-700",
+  // La aseguradora lo está liquidando: sigue en curso, pero no en nuestras manos.
+  en_liquidacion: "bg-violet-50 text-violet-700",
   // Salió bien.
   listo: "bg-emerald-50 text-emerald-700",
   listo_para_core: "bg-emerald-50 text-emerald-700",
+  pagado: "bg-emerald-50 text-emerald-700",
   // Terminado. No hay nada que hacer.
   enviado_a_core: "bg-slate-100 text-slate-700",
   cerrado: "bg-slate-100 text-slate-700",
   no_relevante: "bg-slate-100 text-slate-700",
+  rechazado: "bg-slate-100 text-slate-700",
 };
 
 export function StatusBadge({ status }: StatusBadgeProps) {
@@ -72,6 +76,9 @@ export function StatusBadge({ status }: StatusBadgeProps) {
     enviado_a_core: t("status.enviado_a_core"),
     error_core: t("status.error_core"),
     no_relevante: t("status.no_relevante"),
+    en_liquidacion: t("status.en_liquidacion"),
+    pagado: t("status.pagado"),
+    rechazado: t("status.rechazado"),
   };
 
   const label = STATUS_LABELS[status] ?? status;

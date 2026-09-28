@@ -114,3 +114,28 @@ describe("consultaDeAyer, a través del lote — la ventana y el SQL que arma", 
     expect(params.filter((p) => String(p).endsWith("_sim"))).toEqual([]);
   });
 });
+
+// Un cierre también es `pagado` o `rechazado` (B25), que guardan su fecha en
+// `closed_at`: contar sólo `cerrado` los dejaba afuera de «Cerrados ayer» y
+// del ranking de analistas.
+describe("los cierres cuentan pagado y rechazado", () => {
+  function sqlDelLote(i: number) {
+    const armador = mockVarias.mock.calls.at(-1)![1] as (
+      db: unknown
+    ) => { toSQL(): { sql: string; params: unknown[] } }[];
+    return armador(new QueryBuilder() as never).at(i)!.toSQL();
+  }
+
+  it.each([
+    ["el resumen de ayer", -1],
+    ["los cinco analistas del mes", 4],
+  ])("%s", async (_, i) => {
+    mockVarias.mockResolvedValue(filasDelLote([[]]));
+
+    await getTenantKpis(CTX, { ayer: true });
+
+    const { sql, params } = sqlDelLote(i);
+    expect(params).toEqual(expect.arrayContaining(["cerrado", "pagado", "rechazado"]));
+    expect(sql).toContain(`"cases"."closed_at" >= $`);
+  });
+});

@@ -29,6 +29,16 @@ vi.mock("@/data/scope", async () => {
   return { enTenant: enTenantMock, enTenantVarias: enTenantVariasMock };
 });
 
+// `auditoriaSiQuedo` real, envuelta para poder mirar con qué la llamó patch.ts.
+vi.mock("@/server/cases/auditoria-si-quedo", async () => {
+  const actual = await vi.importActual<typeof import("@/server/cases/auditoria-si-quedo")>(
+    "@/server/cases/auditoria-si-quedo"
+  );
+  return { auditoriaSiQuedo: vi.fn(actual.auditoriaSiQuedo) };
+});
+
+vi.mock("@/lib/observability/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: vi.fn(),
@@ -63,6 +73,9 @@ import { AppError } from "@/lib/errors";
 import { db } from "@/lib/db";
 import { enTenantVarias } from "@/data/scope";
 import { writeAuditLog } from "@/lib/audit/log";
+import { auditoriaSiQuedo } from "@/server/cases/auditoria-si-quedo";
+import { logger } from "@/lib/observability/logger";
+import type { CaseStatus } from "@/lib/schemas/cases";
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
@@ -83,6 +96,8 @@ const analystActor = {
   created_at: "2024-01-01T00:00:00Z",
   plan: "profesional",
 };
+
+const viewerActor = { ...adminActor, id: "user-viewer-1", role: "viewer" as const };
 
 // E24: «Devolver al agente» exige plan Pro; éste no lo tiene.
 const basicActor = { ...adminActor, plan: "basico" };
@@ -659,5 +674,216 @@ describe("patchCase — devolver al agente (E24)", () => {
     await expect(
       patchCase("case-1", { status: "info_faltante" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+  });
+});
+
+// ── patchCase — salidas a mano (listo_para_core atascado, B25) ───────────────
+
+describe("patchCase — salidas a mano", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const SALIDAS: [CaseStatus, CaseStatus][] = [
+    ["listo_para_core", "en_liquidacion"],
+    ["listo_para_core", "cerrado"],
+    ["error_core", "en_liquidacion"],
+    ["error_core", "cerrado"],
+    ["enviado_a_core", "en_liquidacion"],
+    ["en_liquidacion", "pagado"],
+    ["en_liquidacion", "rechazado"],
+    ["en_liquidacion", "cerrado"],
+  ];
+
+  it.each(SALIDAS)("%s → %s: un solo batch con el update guardado y su auditoría", async (desde, hacia) => {
+    const caso = { ...listoCase, status: desde };
+    setupConfirmMocks([caso], [{ ...caso, status: hacia }]);
+
+    const result = await patchCase("case-1", { status: hacia }, adminActor, null, null);
+
+    expect(result.case.status).toBe(hacia);
+    expect(enTenantVarias).toHaveBeenCalledTimes(1);
+    // El único enTenant es la lectura del caso: el update va en el batch.
+    expect(enTenantMock).toHaveBeenCalledTimes(1);
+    expect(writeAuditLog).not.toHaveBeenCalled();
+
+    const cadena = vi.mocked(db.update).mock.results[0]!.value;
+    const escrito = cadena.set.mock.calls[0][0];
+    expect(escrito.status).toBe(hacia);
+    // Pagado y rechazado son un cierre: su fecha va a `closed_at`. La de
+    // `en_liquidacion` es la de su fila de auditoría, sin columna propia.
+    if (hacia === "en_liquidacion") expect(escrito).not.toHaveProperty("closed_at");
+    else expect(escrito.closed_at).toEqual(expect.any(String));
+    expect(Object.keys(escrito).filter((k) => k.endsWith("_at")).sort()).toEqual(
+      hacia === "en_liquidacion" ? ["updated_at"] : ["closed_at", "updated_at"]
+    );
+    // Sólo el cierre borra «Para responder»: marcar la liquidación no contesta
+    // el mensaje que la persona dejó.
+    if (hacia === "cerrado") expect(escrito).toMatchObject({ para_responder_desde: null });
+    else expect(escrito).not.toHaveProperty("para_responder_desde");
+    expect(escrito).not.toHaveProperty("core_external_id");
+    expect(escrito).not.toHaveProperty("core_sent_at");
+
+    const donde = cadena.set.mock.results[0].value.where.mock.calls[0][0];
+    expect(new PgDialect().sqlToQuery(donde).params).toEqual(["case-1", desde]);
+
+    expect(auditoriaSiQuedo).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: hacia === "cerrado" ? "case.closed" : "case.status_changed",
+        payload: expect.objectContaining({ old_status: desde, new_status: hacia }),
+      }),
+      hacia
+    );
+  });
+
+  it.each([
+    ["listo_para_core", "en_liquidacion", "entregado_por_fuera"],
+    ["error_core", "en_liquidacion", "entregado_por_fuera"],
+    ["enviado_a_core", "en_liquidacion", null],
+    ["listo_para_core", "cerrado", null],
+    ["en_liquidacion", "pagado", null],
+  ] as [CaseStatus, CaseStatus, string | null][])("%s → %s audita reason %s", async (desde, hacia, reason) => {
+    const caso = { ...listoCase, status: desde };
+    setupConfirmMocks([caso], [{ ...caso, status: hacia }]);
+
+    await patchCase("case-1", { status: hacia }, adminActor, null, null);
+
+    expect(vi.mocked(auditoriaSiQuedo).mock.calls[0]![1].payload).toEqual({
+      reason,
+      old_status: desde,
+      new_status: hacia,
+    });
+  });
+
+  it("el reason que manda la persona gana", async () => {
+    const caso = { ...listoCase, status: "listo_para_core" };
+    setupConfirmMocks([caso], [{ ...caso, status: "en_liquidacion" }]);
+
+    await patchCase("case-1", { status: "en_liquidacion", reason: "exportado_csv" }, adminActor, null, null);
+
+    expect(vi.mocked(auditoriaSiQuedo).mock.calls[0]![1].payload).toMatchObject({ reason: "exportado_csv" });
+  });
+
+  // Igual que el camino genérico: la reasignación queda en la auditoría, y un
+  // cierre sigue siendo `case.closed`.
+  it.each([
+    ["cerrado", null, "case.closed"],
+    ["en_liquidacion", "analyst-id", "case.assigned"],
+  ] as [CaseStatus, string | null, string][])("→ %s con assigned_to %s: reasigna y lo audita como %s", async (hacia, assigned_to, eventType) => {
+    const caso = { ...listoCase, status: "listo_para_core" };
+    setupConfirmMocks([caso], [{ ...caso, status: hacia, assigned_to }]);
+
+    await patchCase("case-1", { status: hacia, assigned_to }, adminActor, null, null);
+
+    const escrito = vi.mocked(db.update).mock.results[0]!.value.set.mock.calls[0][0];
+    expect(escrito).toMatchObject({ assigned_to });
+    expect(vi.mocked(auditoriaSiQuedo).mock.calls[0]![1]).toMatchObject({
+      eventType,
+      payload: { old_status: "listo_para_core", new_status: hacia, assigned_to },
+    });
+  });
+
+  it.each([
+    ["pagado", "en_liquidacion"],
+    ["rechazado", "cerrado"],
+    ["en_liquidacion", "listo_para_core"],
+    ["listo", "en_liquidacion"],
+    ["cerrado", "pagado"],
+    ["recibido", "en_liquidacion"],
+    ["enviado_a_core", "pagado"],
+  ] as [CaseStatus, CaseStatus][])("%s → %s no existe: FSM_INVALID_TRANSITION sin escribir nada", async (desde, hacia) => {
+    const caso = { ...listoCase, status: desde };
+    setupConfirmMocks([caso], [{ ...caso, status: hacia }]);
+
+    await expect(
+      patchCase("case-1", { status: hacia }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(db.update).not.toHaveBeenCalled();
+    expect(enTenantVarias).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["en_liquidacion", "enviado_a_core"],
+    ["en_liquidacion", "error_core"],
+    ["listo_para_core", "enviado_a_core"],
+    ["listo_para_core", "error_core"],
+    ["error_core", "enviado_a_core"],
+  ] as [CaseStatus, CaseStatus][])("%s → %s: lo pone sólo el envío a Core", async (desde, hacia) => {
+    const caso = { ...listoCase, status: desde };
+    setupConfirmMocks([caso], []);
+
+    await expect(
+      patchCase("case-1", { status: hacia }, adminActor, null, null)
+    ).rejects.toThrow(
+      expect.objectContaining({ code: "FSM_INVALID_TRANSITION", message: "Ese estado lo pone sólo el envío a Core." })
+    );
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("confirmar_listo junto con una salida a mano: FSM_INVALID_TRANSITION", async () => {
+    const caso = { ...listoCase, status: "listo_para_core" };
+    setupConfirmMocks([caso], [{ ...caso, status: "en_liquidacion" }]);
+
+    await expect(
+      patchCase("case-1", { status: "en_liquidacion", confirmar_listo: true }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("un analyst con un caso ajeno recibe 404 y no escribe", async () => {
+    const ajeno = { ...listoCase, status: "listo_para_core", assigned_to: "other-analyst-id" };
+    setupConfirmMocks([ajeno], [{ ...ajeno, status: "en_liquidacion" }]);
+
+    await expect(
+      patchCase("case-1", { status: "en_liquidacion" }, analystActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("un viewer recibe 404 y no escribe", async () => {
+    const caso = { ...listoCase, status: "en_liquidacion", assigned_to: viewerActor.id };
+    setupConfirmMocks([caso], [{ ...caso, status: "pagado" }]);
+
+    await expect(
+      patchCase("case-1", { status: "pagado" }, viewerActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("si la base todavía no conoce el estado (23514, falta la 0035), INTERNAL_ERROR y log", async () => {
+    const code = "23514";
+    const caso = { ...listoCase, status: "listo_para_core" };
+    setupConfirmMocks([caso], []);
+    enTenantVariasMock.mockRejectedValueOnce({ code });
+
+    await expect(
+      patchCase("case-1", { status: "en_liquidacion" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "INTERNAL_ERROR" }));
+    expect(logger.error).toHaveBeenCalledWith({ code }, "patch.cambio_con_auditoria_fallo");
+  });
+
+  it("si el update no devuelve filas, «El caso cambió mientras lo mirabas»", async () => {
+    const caso = { ...listoCase, status: "en_liquidacion" };
+    setupConfirmMocks([caso], []);
+
+    await expect(
+      patchCase("case-1", { status: "rechazado" }, adminActor, null, null)
+    ).rejects.toThrow(
+      expect.objectContaining({ code: "FSM_INVALID_TRANSITION", message: "El caso cambió mientras lo mirabas." })
+    );
+  });
+
+  it("un error del update genérico queda logueado con su código", async () => {
+    setupPatchMocks([listoCase], []);
+    const returning = vi.fn().mockRejectedValue({ code: "XX000" });
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning }) }),
+    } as any);
+
+    await expect(
+      patchCase("case-1", { status: "escalado" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(logger.error).toHaveBeenCalledWith({ code: "XX000" }, "patch.cambio_fallo");
   });
 });

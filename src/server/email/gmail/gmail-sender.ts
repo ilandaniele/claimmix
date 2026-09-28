@@ -11,7 +11,7 @@
  * AC5:  send() passes threadId in requestBody so reply lands in the same Gmail thread.
  * AC9:  name === 'gmail' (satisfies EmailProvider.name union).
  * AC10: No credential values are ever logged — only error codes.
- * AC12: Only this file (within gmail/) imports from 'googleapis' indirectly via gmail-client.
+ * AC12: Only this file (within gmail/) imports from '@googleapis/gmail' indirectly via gmail-client.
  */
 
 import "server-only";

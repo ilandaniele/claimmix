@@ -132,6 +132,27 @@ try {
       problemas.push(`${sinPol.length} tablas sin política`);
     } else bien("todas con política");
 
+    // ── 2b. Las reglas globales se leen, no se tocan (0033) ─────────────────
+    titulo("known_claim_patterns: una política por comando");
+    const politicas = (
+      await cx.query(`
+        SELECT cmd::text, qual FROM pg_policies
+        WHERE schemaname='public' AND tablename='known_claim_patterns' ORDER BY cmd`)
+    ).rows as { cmd: string; qual: string | null }[];
+    const porComando = politicas.map((r) => r.cmd);
+    if (porComando.includes("ALL")) {
+      mal("todavía hay una política FOR ALL: un inquilino puede borrar una regla global");
+      problemas.push("known_claim_patterns con política FOR ALL");
+    } else if (["DELETE", "INSERT", "SELECT", "UPDATE"].some((c) => !porComando.includes(c))) {
+      mal(`faltan comandos: hay ${porComando.join(", ") || "ninguna"}`);
+      problemas.push("known_claim_patterns sin las cuatro políticas");
+    } else if (
+      politicas.some((r) => ["UPDATE", "DELETE"].includes(r.cmd) && /IS NULL/i.test(r.qual ?? ""))
+    ) {
+      mal("UPDATE o DELETE alcanza filas globales");
+      problemas.push("known_claim_patterns: escritura sobre lo global");
+    } else bien("SELECT ve lo global; INSERT, UPDATE y DELETE sólo lo propio");
+
     // ── 3. La prueba de verdad ──────────────────────────────────────────────
     titulo("La prueba cruzada: dos aseguradoras, una consulta");
 

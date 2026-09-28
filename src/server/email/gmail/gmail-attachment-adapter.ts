@@ -16,20 +16,28 @@
  *
  * AC4:  Correct base64url → base64 conversion.
  * AC14: Content passed to rehostAttachments is decodable via Buffer.from(x, 'base64').
- * AC12: Only this file (within gmail/) calls the Gmail API — no googleapis imports
- *       outside src/server/email/gmail/.
+ * AC12: Only this file (within gmail/) calls the Gmail API — no @googleapis/gmail
+ *       imports outside src/server/email/gmail/.
  */
 
 import "server-only";
-import type { gmail_v1 } from "googleapis";
+import type { gmail_v1 } from "@googleapis/gmail";
 import type { EmailAttachment } from "@/server/email/rehost-attachments";
 import { logger } from "@/lib/observability/logger";
+import { MAX_ATTACHMENT_SIZE_BYTES, validateAttachment } from "@/server/email/attachment-validator";
+
+/**
+ * Largest declared size that still gets downloaded. Gmail's `body.size` is not
+ * documented as decoded or base64 bytes; 4*ceil(MAX/3) covers both readings,
+ * so no attachment that would pass `validateSize` is ever rejected here.
+ */
+export const TOPE_ANTES_DE_BAJAR = 4 * Math.ceil(MAX_ATTACHMENT_SIZE_BYTES / 3); // 13_981_016
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /**
  * Minimal shape of the Gmail API client needed for attachment fetching.
- * Using a structural type so tests can inject a mock without importing googleapis.
+ * Using a structural type so tests can inject a mock without importing @googleapis/gmail.
  */
 export interface GmailAttachmentFetcher {
   users: {
@@ -167,6 +175,18 @@ export async function adaptGmailAttachments(
       base64Data = base64urlToBase64(part.body.data);
     } else if (part.body?.attachmentId) {
       // Large attachment — fetch from Gmail API.
+      const declarado = part.body.size ?? 0;
+      if (declarado > TOPE_ANTES_DE_BAJAR) {
+        const v = validateAttachment(mimeType, declarado);
+        results.push({
+          Name: filename,
+          Content: "",
+          ContentType: mimeType,
+          ContentLength: declarado,
+          rechazoPrevio: v.ok ? "size_exceeded" : v.reason,
+        });
+        continue;
+      }
       try {
         const response = await gmail.users.messages.attachments.get({
           userId: "me",

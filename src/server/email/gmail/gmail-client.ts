@@ -7,13 +7,13 @@
  *
  * AC10: Credentials (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN)
  * are never logged — only error codes are logged on failure paths.
- * AC12: This module is the only place in the codebase that imports from 'googleapis'.
+ * AC12: This module is the only place in the codebase that imports from '@googleapis/gmail'.
  *
  * resetGmailAuth() / resetGmailClient() are exported for test isolation only.
  */
 
 import "server-only";
-import { google } from "googleapis";
+import * as google from "@googleapis/gmail";
 
 // The OAuth2 prototype instance type — inferred to avoid importing the class directly.
 type OAuth2Client = InstanceType<typeof google.auth.OAuth2>;

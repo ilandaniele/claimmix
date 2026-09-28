@@ -42,15 +42,15 @@ import { errorCode } from "@/lib/observability/error-code";
 
 /**
  * La fila que devuelve este listado: las columnas de `cases` más lo que
- * `consultaListado` suma por subconsulta correlacionada — hoy
- * `fecha_siniestro` (y ya antes `replied_at`, que quedó sin sumar acá al
- * tipo cuando se agregó). No es la fila cruda de la tabla: esa sigue siendo
- * `CaseRow` en `@/lib/db/types`, y la sigue usando el resto del código
- * (detalle de un caso, patch, orquestación) donde no hay tal subconsulta.
+ * `consultaListado` suma por subconsulta correlacionada, `fecha_siniestro` y
+ * `replied_at`. No es la fila cruda de la tabla: esa sigue siendo `CaseRow`
+ * en `@/lib/db/types`, y la sigue usando el resto del código (detalle de un
+ * caso, patch, orquestación) donde no hay tal subconsulta.
  */
 export type CaseRow = CasesTableRow & {
   fecha_siniestro: string | null;
   assigned_name: string | null;
+  replied_at: string | null;
 };
 
 export interface CaseListResult {

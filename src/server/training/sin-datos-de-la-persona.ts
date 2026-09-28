@@ -10,7 +10,9 @@
 
 import "server-only";
 
-import { DNI_RE, tacharNombreYDni } from "@/server/ai/hydrate-fields";
+import { createHash } from "node:crypto";
+
+import { DNI_RE, EMAIL_RE, PHONE_RE, tacharNombreYDni } from "@/server/ai/hydrate-fields";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 
 interface DatosDeLasPersonas {
@@ -62,13 +64,21 @@ function datosDeLasPersonas(expectedOutput: unknown): DatosDeLasPersonas {
   return datos;
 }
 
-/** Tacha nombres y DNI en cada string; saca `sender_email` en cada objeto. */
+/** Clave canónica de teléfono o correo: `telefono_contacto` (→ `phone`), `email`, `mail`. */
+const CLAVE_TELEFONO_O_CORREO_RE = /(^|_)(phone|telefono|email|mail)($|_)/i;
+
+/**
+ * Tacha nombres y DNI en cada string, y el email o el teléfono por patrón; saca
+ * `sender_email` y tacha (no saca, para no romper la forma del objeto) cualquier
+ * otra clave que sea teléfono o correo (`telefono_contacto`, `phone`, `email`,
+ * `mail`) en cada objeto.
+ */
 function tachar(valor: unknown, datos: DatosDeLasPersonas): unknown {
   if (typeof valor === "string") {
     let out = valor;
     for (const nombre of datos.nombres) out = tacharNombreYDni(out, { nombre }, EN, { porPalabra: true });
     for (const dni of datos.dnis) out = tacharNombreYDni(out, { dni }, EN);
-    return out.replace(DNI_RE, EN.dni);
+    return out.replace(DNI_RE, EN.dni).replace(EMAIL_RE, "[TACHADO]").replace(PHONE_RE, "[TACHADO]");
   }
   if (Array.isArray(valor)) {
     return valor.map((v) => tachar(v, datos));
@@ -77,6 +87,10 @@ function tachar(valor: unknown, datos: DatosDeLasPersonas): unknown {
     const out: Record<string, unknown> = {};
     for (const [clave, v] of Object.entries(valor)) {
       if (clave === "sender_email") continue;
+      if (CLAVE_TELEFONO_O_CORREO_RE.test(canonicalFieldKey(clave))) {
+        out[clave] = "[TACHADO]";
+        continue;
+      }
       out[clave] = tachar(v, datos);
     }
     return out;
@@ -85,10 +99,10 @@ function tachar(valor: unknown, datos: DatosDeLasPersonas): unknown {
 }
 
 /**
- * Un ejemplo de `training_examples`, con los nombres y los DNI de las personas
- * tachados en cada string de `input_payload` y `expected_output`, y sin
- * `sender_email` (el worker lo guarda junto a `subject`/`body`, ver
- * `extract.ts`).
+ * Un ejemplo de `training_examples`, con los nombres, los DNI, el email y el
+ * teléfono de las personas tachados en cada string de `input_payload` y
+ * `expected_output`, y sin `sender_email` (el worker lo guarda junto a
+ * `subject`/`body`, ver `extract.ts`).
  *
  * Pura, y nunca tira: un payload que no es un objeto vuelve sin tocar.
  */
@@ -103,4 +117,61 @@ export function ejemploSinDatosDeLaPersona<
     input_payload: tachar(ej.input_payload, datos),
     expected_output: tachar(ej.expected_output, datos),
   } as T;
+}
+
+const CLAVES_DE_CAMPO = ["field", "field_key", "field_name"] as const;
+const CLAVES_DE_VALOR = ["value", "field_value", "confirmed_value", "new_value"] as const;
+
+/**
+ * Los nombres que un valor JSON trae declarados: bajo una clave que termina en
+ * `_name` (`full_name`, `party_b_name`, `nombre_asegurado` canonizada) o como
+ * par campo/valor (`{ field: "full_name", value: "…" }`, y las variantes
+ * field_key/field_value, field_name/confirmed_value, new_value). Recorre todo.
+ */
+export function nombresEn(valor: unknown): string[] {
+  const nombres: string[] = [];
+
+  const recorrer = (v: unknown): void => {
+    if (Array.isArray(v)) {
+      v.forEach(recorrer);
+      return;
+    }
+    if (!v || typeof v !== "object") return;
+    const obj = v as Record<string, unknown>;
+
+    for (const [clave, val] of Object.entries(obj)) {
+      if (typeof val === "string" && canonicalFieldKey(clave).endsWith("_name")) {
+        nombres.push(val);
+      }
+    }
+
+    for (const claveDeCampo of CLAVES_DE_CAMPO) {
+      const campo = obj[claveDeCampo];
+      if (typeof campo !== "string" || !canonicalFieldKey(campo).endsWith("_name")) continue;
+      for (const claveDeValor of CLAVES_DE_VALOR) {
+        const val = obj[claveDeValor];
+        if (typeof val === "string") nombres.push(val);
+      }
+    }
+
+    Object.values(obj).forEach(recorrer);
+  };
+
+  recorrer(valor);
+  return nombres;
+}
+
+/**
+ * Cualquier valor JSON sin DNI, email ni teléfono (por patrón), sin los nombres
+ * dados y sin claves `sender_email` u otra de teléfono o correo. Es
+ * `ejemploSinDatosDeLaPersona` para lo que no es un ejemplo: la memoria del
+ * remitente y los payloads de auditoría del export.
+ */
+export function sinDatosDeLaPersona<T>(valor: T, nombres: readonly string[] = []): T {
+  return tachar(valor, { nombres: [...nombres], dnis: [] }) as T;
+}
+
+/** La clave de `claim_memory` es la persona (correo o teléfono): sale como huella. */
+export function huellaDelRemitente(key: string): string {
+  return createHash("sha256").update(key).digest("hex").slice(0, 12);
 }

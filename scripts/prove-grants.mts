@@ -100,14 +100,18 @@ for (const t of tablas) {
     politicas: number;
   }>;
 
+  // `audit_log` es sólo de alta (0032): ahí lo que falla es TENER UPDATE o DELETE.
+  const soloDeAlta = t.tabla === "audit_log";
   const falta = [
     !p.leer && "SELECT",
     !p.insertar && "INSERT",
-    !p.actualizar && "UPDATE",
-    !p.borrar && "DELETE",
+    !soloDeAlta && !p.actualizar && "UPDATE",
+    !soloDeAlta && !p.borrar && "DELETE",
   ].filter(Boolean) as string[];
+  const sobra = soloDeAlta ? [p.actualizar && "UPDATE", p.borrar && "DELETE"].filter(Boolean) as string[] : [];
 
   if (falta.length) faltantes.push(`${t.tabla}: le falta ${falta.join(", ")}`);
+  if (sobra.length) faltantes.push(`${t.tabla}: tiene ${sobra.join(", ")} y es sólo de alta (0032)`);
   if (!t.forzado) sinForzar.push(t.tabla);
   if (p.politicas === 0) sinPolitica.push(t.tabla);
 }
@@ -115,7 +119,7 @@ for (const t of tablas) {
 console.log(`\n▸ ${tablas.length} tabla(s) con columna de inquilino`);
 
 if (faltantes.length === 0) {
-  console.log("   ✓ el rol puede leer, insertar, actualizar y borrar en todas");
+  console.log("   ✓ el rol puede leer, insertar, actualizar y borrar en todas — y en audit_log sólo leer e insertar");
 } else {
   console.log(`   ✗ ${faltantes.length} con permisos incompletos:`);
   for (const f of faltantes) console.log(`      · ${f}`);

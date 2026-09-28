@@ -141,11 +141,9 @@ vi.mock("@/data/scope", async () => {
   };
 });
 
-vi.mock("googleapis", () => ({
-  google: {
-    auth: { OAuth2: MockOAuth2 },
-    gmail: mockGmailFn,
-  },
+vi.mock("@googleapis/gmail", () => ({
+  auth: { OAuth2: MockOAuth2 },
+  gmail: mockGmailFn,
 }));
 
 // Mock @/lib/db so no DATABASE_URL is required and we can track calls.

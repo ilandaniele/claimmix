@@ -8,7 +8,7 @@
  * asset that survives database cleanups and can be re-imported or fed straight
  * into a fine-tuning run, so run it BEFORE deleting anything.
  *
- * Companion: scripts/import-training.mjs restores a dump into an empty DB.
+ * No companion import script exists today.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import pg from "pg";
@@ -26,8 +26,8 @@ const examples = (await c.query(`
   select te.id, te.tenant_id, te.claim_type, te.input_payload, te.expected_output,
          te.status, te.approved_at, cs.channel
     from training_examples te
-    left join cases cs on cs.id = te.case_id
-   where te.status = 'approved'
+    join cases cs on cs.id = te.case_id
+   where te.status = 'approved' and cs.channel in ('email_sim','whatsapp_sim')
    order by te.claim_type, te.approved_at
 `)).rows;
 

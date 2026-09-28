@@ -323,15 +323,15 @@ export async function dispatchOutboundEmail(options: DispatchOptions): Promise<D
   /*
    * En diferido, y son 688 ms de arranque en frío en las DOS rutas calientes.
    *
-   * `GmailSender` arrastra `googleapis` —medido acá: 688 ms de import— y la
-   * cadena que llega hasta él es toda estática:
+   * `GmailSender` arrastra `@googleapis/gmail` —medido acá: 688 ms de import— y
+   * la cadena que llega hasta él es toda estática:
    *
    *   webhooks/whatsapp → intake-agent → worker/extract → confirmations/
-   *   messenger → email/dispatch → gmail/gmail-sender → googleapis
+   *   messenger → email/dispatch → gmail/gmail-sender → @googleapis/gmail
    *
    * O sea que un WhatsApp de texto, que no toca Gmail en ningún momento, pagaba
-   * el import entero antes de atender. Es más caro que los 260 ms de Sentry que
-   * ya se sacaron, en las mismas rutas.
+   * el import entero antes de atender. Es más caro que los ~260 ms que cuesta
+   * cargar Sentry, en las mismas rutas.
    *
    * Acá abajo ya sabemos que hay casilla configurada y que vamos a mandar por
    * ella: es el primer punto donde el costo se justifica.

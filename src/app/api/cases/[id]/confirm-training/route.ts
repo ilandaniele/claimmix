@@ -145,6 +145,20 @@ export async function POST(
               "Esta ejecución no es segura para entrenamiento (JSON inválido o posible inyección de prompt)."
             )
           );
+        case "gmail_limited_use":
+          return err(
+            new AppError(
+              "VALIDATION_FAILED",
+              "Los casos que llegaron por Gmail no se usan como ejemplo de referencia."
+            )
+          );
+        case "channel_unknown":
+          return err(
+            new AppError(
+              "VALIDATION_FAILED",
+              "No se pudo verificar el canal del caso; probá de nuevo."
+            )
+          );
         default:
           return err(new AppError("INTERNAL_ERROR"));
       }

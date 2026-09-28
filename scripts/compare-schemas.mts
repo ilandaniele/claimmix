@@ -90,7 +90,8 @@ const CONSULTAS: Array<{ que: string; sql: string }> = [
   },
   {
     que: "políticas RLS",
-    sql: `SELECT (tablename || '.' || policyname || ' ' || COALESCE(qual, '(sin condición)'))::text
+    sql: `SELECT (tablename || '.' || policyname || ' ' || cmd || ' USING ' || COALESCE(qual, '-')
+                  || ' CHECK ' || COALESCE(with_check, '-'))::text
           FROM pg_policies WHERE schemaname='public' ORDER BY tablename, policyname`,
   },
   {

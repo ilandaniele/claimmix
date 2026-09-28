@@ -23,11 +23,9 @@ const { mockMessagesGet, mockMessagesTrash, MockOAuth2, mockGmailFn } = vi.hoist
   return { mockMessagesGet, mockMessagesTrash, MockOAuth2, mockGmailFn };
 });
 
-vi.mock("googleapis", () => ({
-  google: {
-    auth: { OAuth2: MockOAuth2 },
-    gmail: mockGmailFn,
-  },
+vi.mock("@googleapis/gmail", () => ({
+  auth: { OAuth2: MockOAuth2 },
+  gmail: mockGmailFn,
 }));
 
 function setupGmailMock() {

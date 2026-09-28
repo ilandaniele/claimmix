@@ -54,6 +54,11 @@ export function buildExpectedOutput(
   return agentOutput;
 }
 
+/** Canales con los que se entrena un modelo: sólo simulados. */
+export const CANALES_DE_ENTRENAMIENTO = ["email_sim", "whatsapp_sim"] as const;
+/** Canales que pueden ser ejemplo few-shot: nunca un caso real llegado por Gmail (Limited Use). */
+export const CANALES_DE_EJEMPLO = [...CANALES_DE_ENTRENAMIENTO, "whatsapp"] as const;
+
 /** Job abierto: sigue existiendo entre `draft` y `approved`, antes de desplegarse. */
 export const OPEN_JOB_STATUSES = ["draft", "queued", "running", "eval_pending", "approved"];
 
@@ -103,7 +108,7 @@ export async function approvedExamplesForTenant(
       .where(
         and(
           eq(t.status, "approved"),
-          inArray(tables.cases.channel, ["email_sim", "whatsapp_sim"])
+          inArray(tables.cases.channel, [...CANALES_DE_ENTRENAMIENTO])
         )
       )
       .orderBy(desc(t.created_at))

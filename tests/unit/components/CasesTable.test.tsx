@@ -7,6 +7,8 @@
  * without a LocaleProvider gives Spanish labels — same pattern as status-badge.test.tsx.
  */
 
+import { readFileSync } from "fs";
+import { join } from "path";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 import { CasesTable } from "../../../src/app/(app)/bandeja/components/CasesTable";
@@ -249,5 +251,69 @@ describe("CasesTable — modo selección", () => {
     rerender(pintar(dos));
     for (const c of screen.getAllByRole("checkbox")) expect(c).toHaveAttribute("aria-checked", "false");
     expect(cifra()).toHaveTextContent("0");
+  });
+});
+
+// E19d: sale @tanstack/react-table de esta tabla; el render tiene que ser el
+// mismo antes y después. La comprobación de fuente falla antes del cambio.
+describe("CasesTable — sin @tanstack/react-table", () => {
+  it("no importa @tanstack/react-table", () => {
+    const src = readFileSync(
+      join(__dirname, "../../../src/app/(app)/bandeja/components/CasesTable.tsx"),
+      "utf-8"
+    );
+    expect(src).not.toContain("@tanstack/react-table");
+  });
+});
+
+describe("CasesTable — snapshot del render (E19d)", () => {
+  const filaCompleta = makeCase({
+    id: "00000000-0000-0000-0000-0000000000f1",
+    policy_number: "POL-777",
+    policyholder_name: "Marta Gómez",
+    claim_type: "robo",
+    channel: "whatsapp",
+    status: "listo",
+    replied_at: "2026-09-27T10:00:00.000Z",
+    confidence_min: "0.62",
+    created_at: "2026-09-27T09:00:00.000Z",
+    severity: "high",
+    assigned_to: "user-1",
+    assigned_name: "Ana Torres",
+    fecha_siniestro: "2026-09-20",
+  } as Partial<CaseRow>);
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-27T12:00:00Z"));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("modo normal", () => {
+    const { container } = render(
+      <LocaleProvider locale="es-AR">
+        <CasesTable cases={[filaCompleta]} />
+      </LocaleProvider>
+    );
+    expect(container.innerHTML).toMatchSnapshot();
+  });
+
+  it("con onDeleteMany", () => {
+    const { container } = render(
+      <LocaleProvider locale="es-AR">
+        <CasesTable cases={[filaCompleta]} onDeleteMany={vi.fn()} />
+      </LocaleProvider>
+    );
+    expect(container.innerHTML).toMatchSnapshot();
+  });
+
+  it("con onDeleteMany + seleccionando y una fila marcada", () => {
+    const { container } = render(
+      <LocaleProvider locale="es-AR">
+        <CasesTable cases={[filaCompleta]} onDeleteMany={vi.fn()} seleccionando />
+      </LocaleProvider>
+    );
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(container.innerHTML).toMatchSnapshot();
   });
 });

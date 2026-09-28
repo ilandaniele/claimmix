@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { google } from "googleapis";
+import * as google from "@googleapis/gmail";
 import { requireRole, ADMIN_ROLES } from "@/lib/auth/require-role";
 import {
   COOKIE_ESTADO_OAUTH,

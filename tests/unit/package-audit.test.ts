@@ -2,13 +2,14 @@
  * package.json audit — verifies the dependency graph at commit time.
  *
  * W5 (feat/gmail-email-intake): postmark removed, googleapis added.
+ * E19a: googleapis replaced by the scoped @googleapis/gmail.
  *
  * This is a static structural test; it does not run pnpm audit as a subprocess
  * (that gate lives in CI). It asserts the dependency graph so that the criterion
  * is covered by a real Vitest test file, not only by a CI yml reference.
  *
  * AC9:  No postmark in dependencies (replaced by Gmail API polling).
- * AC12: googleapis present at the expected major version.
+ * AC12: @googleapis/gmail present, googleapis gone.
  */
 
 import { describe, it, expect } from "vitest";
@@ -36,12 +37,11 @@ describe("package.json audit — W5 Gmail migration", () => {
     expect(Object.keys(pkg.devDependencies || {})).not.toContain("postmark");
   });
 
-  it("googleapis is in dependencies (AC9/AC12 — Gmail API polling)", () => {
-    expect(Object.keys(pkg.dependencies || {})).toContain("googleapis");
+  it("@googleapis/gmail is in dependencies (E19a — Gmail API polling)", () => {
+    expect(pkg.dependencies?.["@googleapis/gmail"]).toBeDefined();
   });
 
-  it("googleapis version satisfies ^181.0.0", () => {
-    const version: string = pkg.dependencies?.googleapis ?? "";
-    expect(version).toMatch(/^\^?181\./);
+  it("googleapis is NOT in dependencies (E19a — replaced by @googleapis/gmail)", () => {
+    expect(pkg.dependencies?.googleapis).toBeUndefined();
   });
 });

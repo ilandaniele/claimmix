@@ -18,9 +18,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockEnTenant, mockSubir } = vi.hoisted(() => ({
+const { mockEnTenant } = vi.hoisted(() => ({
   mockEnTenant: vi.fn(),
-  mockSubir: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));

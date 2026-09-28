@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { puenteDeAlcance } from "../mocks/puente-de-alcance";
 
 const gmailMocks = vi.hoisted(() => ({
   send: vi.fn(),
@@ -186,12 +187,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     const result = await dispatchOutboundEmail({
@@ -231,12 +227,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -269,12 +260,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -301,12 +287,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { writeAuditLog } = await import("@/lib/audit/log");
 
@@ -332,12 +313,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     const result = await dispatchOutboundEmail({
@@ -359,12 +335,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
 
@@ -385,12 +356,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     const result = await dispatchOutboundEmail({
@@ -409,12 +375,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -439,12 +400,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { writeAuditLog } = await import("@/lib/audit/log");
 
@@ -471,12 +427,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -502,12 +453,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -532,12 +478,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -562,12 +503,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -591,12 +527,7 @@ describe("dispatchOutboundEmail — W5 (claim_messages dual-write)", () => {
 
     const dbMock = buildDbMock();
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
 
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
@@ -646,12 +577,7 @@ describe("dispatchOutboundEmail — answering the message we were sent", () => {
   async function dispatchWithInbound(inbound: Record<string, unknown> | null) {
     const dbMock = buildDbMock(inbound);
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
       caseId: CASE_ID,
@@ -766,12 +692,7 @@ describe("dispatchOutboundEmail — answering the message we were sent", () => {
       headers: [{ name: "Message-ID", value: MESSAGE_ID }],
     });
     vi.doMock("@/lib/db", () => ({ db: dbMock }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(dbMock)),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(dbMock)),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
 
     await dispatchOutboundEmail({
@@ -808,12 +729,7 @@ describe("dispatchOutboundEmail — one subject per conversation", () => {
 
   async function sendWith(inbound: Record<string, unknown> | null) {
     vi.doMock("@/lib/db", () => ({ db: buildDbMock(inbound) }));
-    vi.doMock("@/data/scope", () => ({
-      enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-        Promise.resolve(armar(buildDbMock(inbound))),
-      enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-        Promise.all(armar(buildDbMock(inbound))),
-    }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => buildDbMock(inbound)));
     const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
     await dispatchOutboundEmail({
       caseId: CASE_ID,

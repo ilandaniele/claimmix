@@ -21,16 +21,14 @@
 // Se lee `mod.db` en CADA llamada y no se desestructura, porque el mock de
 // abajo se reprograma test por test con mockReturnValue.
 vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
+  const { puenteSobreLibDb } = await import("../mocks/puente-de-alcance");
+  const puente = await puenteSobreLibDb();
   return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
+    enTenant: puente.enTenant,
     // Éste va como vi.fn y no como función suelta: los tests de listado lo
     // reprograman con mockResolvedValue en vez de simular la cadena entera.
     // El puente queda de implementación por defecto para todos los demás.
-    enTenantVarias: vi.fn((_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db))
-    ),
+    enTenantVarias: vi.fn(puente.enTenantVarias),
   };
 });
 

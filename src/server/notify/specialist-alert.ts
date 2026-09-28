@@ -228,9 +228,6 @@ function renderAlert(input: SpecialistAlertInput, caseUrl: string) {
  */
 export async function alertSpecialists(input: SpecialistAlertInput): Promise<void> {
   const { caseId, tenantId } = input;
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  // Este contexto es lo único que le dice de quién son los datos.
-  const tenantCtx: TenantContext = { tenantId: tenantId };
 
   try {
     if (await isSimulatedCase(input.tenantId, caseId)) {

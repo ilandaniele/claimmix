@@ -35,9 +35,6 @@ const {
   // DB tracking arrays - shared via closure so tests can inspect inserts/updates
   dbInserts,
   dbUpdates,
-  mockDbInsert,
-  mockDbSelect,
-  mockDbUpdate,
 } = vi.hoisted(() => {
   const mockHistoryList = vi.fn();
   const mockMessagesList = vi.fn();
@@ -59,51 +56,6 @@ const {
   const CASE_UUID = "case-uuid-test-001";
   const CLAIM_MSG_UUID = "claim-msg-uuid-001";
 
-  /**
-   * Build a chainable Drizzle-style insert mock.
-   * Tracks the inserted values in dbInserts and returns the configured id.
-   */
-  function mockDbInsert(returnId: string, tableName: string) {
-    return vi.fn().mockImplementation((values: Record<string, unknown>) => {
-      const rows = Array.isArray(values) ? values : [values];
-      for (const row of rows) {
-        dbInserts.push({ table: tableName, values: row as Record<string, unknown> });
-      }
-      return {
-        returning: vi.fn().mockResolvedValue([{ id: returnId }]),
-        onConflictDoNothing: vi.fn().mockResolvedValue([]),
-        onConflictDoUpdate: vi.fn().mockResolvedValue([]),
-      };
-    });
-  }
-
-  /**
-   * Build a chainable Drizzle-style select mock that returns empty results.
-   */
-  function mockDbSelect() {
-    return vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
-        }),
-      }),
-    });
-  }
-
-  /**
-   * Build a chainable Drizzle-style update mock.
-   */
-  function mockDbUpdate(tableName: string) {
-    return vi.fn().mockReturnValue({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockImplementation((values: unknown) => {
-          dbUpdates.push({ table: tableName, values: values as Record<string, unknown> });
-          return Promise.resolve([]);
-        }),
-      }),
-    });
-  }
-
   return {
     mockHistoryList,
     mockMessagesList,
@@ -116,9 +68,6 @@ const {
     mockSetupGmailWatch,
     dbInserts,
     dbUpdates,
-    mockDbInsert,
-    mockDbSelect,
-    mockDbUpdate,
     CASE_UUID,
     CLAIM_MSG_UUID,
   };
@@ -126,20 +75,7 @@ const {
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
-// La capa de datos, corriendo contra el db que este test ya simula.
-//
-// Se lee `mod.db` en CADA llamada y no se desestructura: hay tests que
-// intercambian la base simulada entre casos, y un `const { db } = ...`
-// congelaría el valor de la primera.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@googleapis/gmail", () => ({
   auth: { OAuth2: MockOAuth2 },
@@ -324,8 +260,6 @@ const MSG_ID_2 = "gmail-msg-002";
 const THREAD_ID_1 = "gmail-thread-001";
 const HISTORY_ID_START = "12345";
 const HISTORY_ID_NEW = "12399";
-const CASE_UUID = "case-uuid-test-001";
-const CLAIM_MSG_UUID = "claim-msg-uuid-001";
 
 // ── Gmail message builder ─────────────────────────────────────────────────────
 

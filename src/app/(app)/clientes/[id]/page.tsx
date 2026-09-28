@@ -45,15 +45,6 @@ interface CustomerCase {
   claim_type: string | null;
 }
 
-interface Customer {
-  id: string;
-  full_name: string;
-  dni: string | null;
-  email: string | null;
-  phone: string | null;
-  created_at: string;
-}
-
 /*
  * Los tres estados, en la paleta que el modo oscuro sabe pintar.
  *

@@ -6,7 +6,8 @@
  * drizzle siguen siendo válidos —lo que verifican es la consulta, y eso no
  * cambió— si la capa les entrega el `db` que ya tenían simulado.
  *
- * Esto agrega ese puente.
+ * Esto agrega la línea que conecta con ese puente. La lógica en sí vive en
+ * `tests/mocks/puente-de-alcance.ts`, no acá.
  *
  * **Qué prueba y qué no.** Prueba la consulta: qué tabla, qué filtros de
  * negocio, qué columnas. NO prueba que el contexto de inquilino llegue a la
@@ -18,6 +19,7 @@
  * comportamiento en vez de la forma de la consulta, va a dejar de hacer falta.
  */
 import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 
 const archivo = process.argv[2];
 if (!archivo) {
@@ -25,28 +27,14 @@ if (!archivo) {
   process.exit(2);
 }
 
-const BLOQUE = [
-  "// La capa de datos, corriendo contra el db que este test ya simula.",
-  "//",
-  "// Se lee `mod.db` en CADA llamada y no se desestructura: el mock de @/lib/db",
-  "// suele exponer `db` con un getter para que los tests puedan intercambiar la",
-  "// base simulada entre corridas, y un `const { db } = ...` congelaría el valor",
-  "// de la primera llamada.",
-  "//",
-  "// Lo que NO se prueba acá es que el contexto de inquilino llegue a la base:",
-  "// eso se verifica en tests/unit/data-scope-sin-rol.test.ts y, contra bases de",
-  "// verdad, en `pnpm capa-datos` y `pnpm tenancy`.",
-  'vi.mock("@/data/scope", async () => {',
-  '  const mod = await import("@/lib/db");',
-  "  return {",
-  "    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>",
-  "      Promise.resolve(armar(mod.db)),",
-  "    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>",
-  "      Promise.all(armar(mod.db)),",
-  "  };",
-  "});",
-  "",
-];
+function bloque(archivo) {
+  const rel = path
+    .relative(path.dirname(path.resolve(archivo)), path.resolve("tests/mocks/puente-de-alcance"))
+    .split(path.sep)
+    .join("/");
+  const especificador = rel.startsWith(".") ? rel : `./${rel}`;
+  return `vi.mock("@/data/scope", () => import("${especificador}").then((m) => m.puenteSobreLibDb()));`;
+}
 
 const s = readFileSync(archivo, "utf8");
 const nl = s.includes("\r\n") ? "\r\n" : "\n";
@@ -67,6 +55,6 @@ if (i === -1) {
   process.exit(1);
 }
 
-lineas.splice(i, 0, ...BLOQUE);
+lineas.splice(i, 0, bloque(archivo), "");
 writeFileSync(archivo, lineas.join(nl), "utf8");
 console.log(`✓ ${archivo}`);

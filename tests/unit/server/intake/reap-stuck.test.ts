@@ -10,9 +10,7 @@ import { readFileSync } from "node:fs";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSelect, mockUpdate, mockWriteAuditLog, state } = vi.hoisted(() => ({
-  mockSelect: vi.fn(),
-  mockUpdate: vi.fn(),
+const { mockWriteAuditLog, state } = vi.hoisted(() => ({
   mockWriteAuditLog: vi.fn(),
   state: {
     // `status` porque el barredor ahora lo lee, para poder decir en el registro

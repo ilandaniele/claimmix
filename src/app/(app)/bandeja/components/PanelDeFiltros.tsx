@@ -231,8 +231,6 @@ export function BotonDeFiltros({
 }) {
   const t = useT();
   const { paramsVisibles } = useNavegacion();
-  const setFilter = useFilterParam();
-  const limpiar = useLimpiarFiltros();
 
   const [abierto, setAbierto] = useState(false);
   const franjaRef = useRef<HTMLDivElement>(null);

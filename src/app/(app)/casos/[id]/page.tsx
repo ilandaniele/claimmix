@@ -75,14 +75,6 @@ interface ExtractedFieldRow {
   extracted_at: string;
 }
 
-/** Safe jsonb → Record normalization (audit payloads are objects in practice). */
-function toPayloadRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
-}
-
 export default async function CaseDetailPage({ params, searchParams }: CaseDetailPageProps) {
   const { id } = await params;
   // Abierto desde «Para responder», «Volver» sigue con la cola.

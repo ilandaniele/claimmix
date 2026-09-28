@@ -13,7 +13,7 @@
  * AC15: Wrong-tenant PATCH returns 404 (tenant filter hides the row → no rows updated).
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";

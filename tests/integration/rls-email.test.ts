@@ -25,20 +25,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-// La capa de datos, corriendo contra el db que este test ya simula.
-//
-// Se lee `mod.db` en CADA llamada y no se desestructura: hay tests que
-// intercambian la base simulada entre casos, y un `const { db } = ...`
-// congelaría el valor de la primera.
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/lib/auth/session", () => ({
   getSessionContext: vi.fn(),
@@ -104,27 +91,6 @@ vi.mock("@/lib/rate-limit/index", () => ({
 // The RLS isolation (empty result) is what we are testing here, not the role guard.
 const TENANT_A_USER = { id: "user-a", tenant_id: "tenant-a", role: "admin" as const, plan: "piloto" };
 const TENANT_B_CASE_ID = "bbbbbbbb-0000-0000-0000-000000000001";
-
-/**
- * Build a fluent Drizzle-style query chain that resolves to the given data.
- */
-function makeChain(data: unknown) {
-  const result = Promise.resolve(Array.isArray(data) ? data : data === null ? [] : [data]);
-  const chain: any = {
-    from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    limit: vi.fn(() => result),
-    orderBy: vi.fn().mockReturnThis(),
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    and: vi.fn().mockReturnThis(),
-    offset: vi.fn().mockReturnThis(),
-  };
-  // Make the chain itself thenable (resolves when awaited directly).
-  chain.then = result.then.bind(result);
-  chain.catch = result.catch.bind(result);
-  return chain;
-}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

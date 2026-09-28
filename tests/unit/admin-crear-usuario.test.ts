@@ -34,10 +34,7 @@ vi.mock("@/lib/db/schema", () => ({
   users: { id: "id", tenant_id: "tenant_id", full_name: "full_name", role: "role" },
   authUsers: { id: "id", role: "role" },
 }));
-vi.mock("@/data/scope", () => ({
-  enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) => Promise.resolve(armar({})),
-  enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) => Promise.all(armar({})),
-}));
+vi.mock("@/data/scope", async () => (await import("../mocks/puente-de-alcance")).puenteDeAlcance(() => ({})));
 
 import { POST } from "@/app/api/admin/users/route";
 import { NextRequest } from "next/server";

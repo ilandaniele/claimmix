@@ -22,13 +22,10 @@ const { enTenantMock, enTenantVariasMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  enTenantMock.mockImplementation((_ctx: unknown, armar: (d: unknown) => unknown) =>
-    Promise.resolve(armar(mod.db))
-  );
-  enTenantVariasMock.mockImplementation((_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-    Promise.all(armar(mod.db))
-  );
+  const { puenteSobreLibDb } = await import("../mocks/puente-de-alcance");
+  const puente = await puenteSobreLibDb();
+  enTenantMock.mockImplementation(puente.enTenant);
+  enTenantVariasMock.mockImplementation(puente.enTenantVarias);
   return { enTenant: enTenantMock, enTenantVarias: enTenantVariasMock };
 });
 

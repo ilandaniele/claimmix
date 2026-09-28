@@ -24,15 +24,7 @@ const gmail = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({ db: {} }));
 
-vi.mock("@/data/scope", async () => {
-  const mod = await import("@/lib/db");
-  return {
-    enTenant: (_ctx: unknown, armar: (d: unknown) => unknown) =>
-      Promise.resolve(armar(mod.db)),
-    enTenantVarias: (_ctx: unknown, armar: (d: unknown) => unknown[]) =>
-      Promise.all(armar(mod.db)),
-  };
-});
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: vi.fn().mockResolvedValue(undefined),

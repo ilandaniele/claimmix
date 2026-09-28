@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-27. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-28. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -895,6 +895,11 @@ contra producción o con un test que falla si deja de ser cierto.
   por el rol —lo que se ve en la pantalla de usuarios— y no por una variable
   del despliegue. La variable sigue existiendo como escotilla para el caso en
   que no haya ningún especialista.
+
+  (28/09: con E10, cada aseguradora carga su propia lista de avisos en
+  /configuracion, `tenants.specialist_alert_emails`. `SPECIALIST_ALERT_EMAILS`
+  pasa a ser sólo el respaldo del tenant principal, antes de caer a los
+  roles.)
 
 **Dos cosas que encontró la revisión, en código escrito el mismo día:**
 
@@ -3803,6 +3808,101 @@ tope de 310 kB de `pnpm peso` no se tocó.
 - El resumen diario por mail quedó sólo explicado en el informe, sin
   construir.
 
+**La segunda vuelta de la auditoría (2026-09-28).** El dueño resolvió cada
+ítem que arriba había quedado «sólo explicado». Los cambios están mergeados en
+`qa`; llegan a producción con la promoción que lleva este PR. Estado punto por
+punto de cada ítem: `docs/AUDITORIA-2026-09.md` §14.
+- #338 (casos y agente): un analista sólo actúa sobre casos suyos o sin
+  asignar, en el PATCH y en el re-análisis (E3); «Tomar el control» se
+  bloquea mientras hay un mensaje en cola para el agente; más de 20 mensajes
+  de un mismo número en 10 minutos se guardan sin llamar a Gemini y el caso
+  pasa a «Para responder», sin el teléfono en la clave (E12); formulario y
+  API comparten una sola clave de cupo (E21); `/api/demo/analyze` es sólo
+  para roles que pueden editar (E9); y un remitente de mail sin autenticar no
+  recibe pistas de memoria (E17). «Devolver al agente» (E24) ya quedó
+  explicado arriba.
+- #339 (datos personales y dependencias): `claimmix_app` pierde UPDATE y
+  DELETE sobre `audit_log` (migración 0032, E6); `known_claim_patterns` pasa
+  de políticas `FOR ALL` a una por comando, así que un inquilino ya no puede
+  borrar ni cambiar una regla global (migración 0033, E5); el export
+  `full_admin_only` tacha también `sender_profile`, los argumentos de las
+  herramientas y las claves de teléfono o correo en `field_correction`;
+  ningún caso real de Gmail entra a entrenamiento ni a few-shot; Sentry limpia
+  breadcrumbs, cabeceras, cookies y query strings; un adjunto de Gmail que
+  declara más del tope se descarta antes de bajarlo (E8); y sale
+  `@tanstack/react-table` a favor de React simple, `googleapis` se reemplaza
+  por `@googleapis/gmail` y `google-auth-library` queda en una sola versión
+  (E19). De paso se arregló que la bandeja mostrara la fecha de siniestro un
+  día antes en Argentina.
+- #340 (avisos por aseguradora, pantalla pendiente, fine-tune y plantilla):
+  cada aseguradora carga su propia lista de avisos para casos derivados a
+  especialista en /configuracion (E10, migración 0034); quien tiene cuenta
+  pero todavía no tiene fila de usuario ve una pantalla que explica que falta
+  el alta de un admin, en vez de rebotar (E20); /metricas suma el «Resumen de
+  ayer» (E23); la facturación no congela un mes anterior al alta del tenant
+  (E15); el fine-tune de Vertex ya puede aprobarse y activarse sin que la
+  sincronización pise esos estados, con el dataset armado sólo con casos
+  simulados tachados (E18); el reenvío por WhatsApp pasadas las 24 h usa la
+  plantilla `reabrir_denuncia` en cuanto Meta la apruebe; y la bandeja, la
+  barra y /configuracion terminan de pasar a i18n (G30).
+- #341 (CI y e2e): Playwright se niega a correr contra la base de producción
+  y no reutiliza un servidor ajeno (E7); el CI compila una sola vez y los
+  demás jobs bajan el artefacto, los despachos manuales validan el host antes
+  de mandar el `CRON_SECRET`, y los techos de los overrides de pnpm y la
+  lista de scripts de instalación quedan explícitos (E13); y un e2e nuevo
+  abre un PDF de 8 MiB por la ruta de adjuntos y prueba que llega por
+  streaming, contra el balde de QA.
+- Este PR (barrido de tests): cierra E22, el último ítem técnico. `type-check`
+  y `verify` corren con `--noUnusedLocals`, con las variables sin uso
+  borradas, y los cerca de 57 bloques repetidos de puente de alcance en los
+  tests quedan reemplazados por un solo `puenteDeAlcance`/`puenteSobreLibDb`,
+  con una guarda que falla si vuelve el bloque viejo.
+- Las migraciones 0032, 0033 y 0034 ya están aplicadas en staging, QA y
+  producción (28/09, `ep-proud-resonance`, `migrate.mjs --apply`). Lecturas
+  antes → después en prod: `audit_log` pasó de DELETE/INSERT/SELECT/UPDATE a
+  sólo INSERT/SELECT para `claimmix_app`; `known_claim_patterns` pasó de 3
+  políticas (dos `FOR ALL`) a 4 por comando, ninguna `ALL`; 41 reglas globales
+  y 109362 filas de auditoría, iguales antes y después; la columna
+  `tenants.specialist_alert_emails` quedó creada y vacía en los dos tenants.
+  `pnpm permisos`, `pnpm tenancy` y `pnpm esquemas` dieron verde contra
+  producción (39 tablas, 422 columnas, 116 índices, 410 restricciones, 81
+  funciones y 33 políticas, iguales entre staging y prod).
+- Limpieza del fine-tune: el modelo del 30/06 se dio de baja (el proyecto GCP
+  viejo quedó `DELETE_REQUESTED`, la fila de Vertex pasó a `rejected` y
+  `active_model` quedó nulo en prod y staging) y se purgaron 28
+  `training_examples` de casos reales (25 de mail, 3 de WhatsApp), con el ok
+  del dueño en el momento. Regla vigente: el próximo entrenamiento usa sólo
+  casos `email_sim` y `whatsapp_sim` tachados; ningún caso real de Gmail
+  entra a entrenamiento ni a few-shot.
+- La plantilla de WhatsApp `reabrir_denuncia` (UTILITY, `es_AR`, id
+  `1396391836035737`) ya está mandada a Meta, en la WABA 1727802301698317, la
+  del número real. Estado: PENDING. El código detecta la aprobación solo, por
+  `WHATSAPP_BUSINESS_ACCOUNT_ID`, con caché de 1 h si está aprobada, 10 min si
+  está pendiente y 60 s ante un error de consulta.
+- El e2e del PDF de 8 MB corre en el CI de #341 contra el balde de QA
+  (`QA_R2_*`, sin secretos nuevos): 8388608 bytes, 341 trozos, 92 tests
+  pasados, 0 salteados.
+- Arreglos que salieron de ensayar «Tomar el control» contra el agente real:
+  `auditoriaSiQuedo` tenía un bug que ya estaba en producción — un
+  `insert().select()` sin `id` ni `created_at` y una guarda que comparaba
+  contra una hora que el trigger pisaba — y hacía que la confirmación de
+  listo (P6) y la reapertura (P8) respondieran «El caso cambió mientras lo
+  mirabas» o quedaran sin auditar (cero `case.ready_confirmed` y cero
+  reaperturas auditadas en producción hasta el arreglo en `fe7d15a`); y una
+  regresión de cabeceras de WhatsApp (`headers` como `{}`, no como lista)
+  tiraba abajo la extracción en cada mensaje de WhatsApp, arreglada en el
+  mismo #338.
+- Observaciones que quedan sin construir, riesgo bajo: en el ensayo de
+  «Devolver al agente» el cliente dio la póliza POL-4471-A y, tras la
+  devolución, escribió «póliza 4455», y el agente aceptó el número nuevo sin
+  señalar la contradicción; y el título del commit `fe7d15a` quedó cortado
+  (le falta «auditadas»), sin corregir para no reescribir la historia.
+- 28/09: el primer intento del script de la plantilla leyó mal `.env.local`
+  (la línea del token de WhatsApp termina en un comentario) y Graph devolvió
+  el token en el mensaje de error, que quedó en la salida de la sesión local;
+  no salió a ningún otro servicio. Por decisión del dueño el token no se
+  rota; el script ahora tapa el token en toda salida.
+
 **Para decidir.**
 - ~~`src/server/confirmations/messenger.ts` manda el WhatsApp antes de
   grabar la fila saliente~~. Resuelto en #328: graba la fila `queued` antes
@@ -3818,14 +3918,25 @@ tope de 310 kB de `pnpm peso` no se tocó.
   entrada real no asigna~~. Resuelto (E3): un analista actúa sobre uno suyo o
   sin asignar, nunca sobre uno de otro analista; misma regla en PATCH y en
   re-análisis (`puedeCambiarEstado`, decisión 27/09).
-- «Reabrir y reenviar» queda deshabilitado para WhatsApp hasta que haya una
-  plantilla aprobada por Meta: el barrido cierra a los 14 días, fuera de la
-  ventana. Los casos de mail funcionan.
-- El modelo afinado del 30/06 se entrenó con ejemplos reales. No está activo:
-  el inquilino usa el modelo base.
-- Gmail «Limited Use» puede alcanzar a los ejemplos tachados de casos reales
-  llegados por Gmail. Lo confirma el dueño.
-- Falta verificar en un preview la apertura de un PDF de 8 MB por streaming.
+- «Reabrir y reenviar» sigue deshabilitado para WhatsApp hasta que Meta
+  apruebe la plantilla: el barrido cierra a los 14 días, fuera de la ventana.
+  Los casos de mail funcionan. 28/09: la plantilla `reabrir_denuncia` ya está
+  mandada a Meta y el código la usa sola en cuanto pase a APPROVED; estado
+  hoy, PENDING.
+- ~~El modelo afinado del 30/06 se entrenó con ejemplos reales. No está
+  activo: el inquilino usa el modelo base.~~ Resuelto (28/09): el modelo se
+  dio de baja (proyecto GCP viejo `DELETE_REQUESTED`, fila de Vertex
+  `rejected`, `active_model` nulo en prod y staging) y aprobar/activar quedó
+  arreglado (E18). El próximo entrenamiento usa sólo casos `email_sim` y
+  `whatsapp_sim` tachados.
+- ~~Gmail «Limited Use» puede alcanzar a los ejemplos tachados de casos
+  reales llegados por Gmail. Lo confirma el dueño.~~ Resuelto en #339:
+  ningún caso real de Gmail entra a entrenamiento ni a few-shot; si no se
+  puede saber el canal, se rechaza (`channel_unknown`) sin decir que vino por
+  Gmail.
+- ~~Falta verificar en un preview la apertura de un PDF de 8 MB por
+  streaming.~~ Resuelto en #341: `adjunto-de-8mb.spec.ts` lo prueba en CI,
+  por streaming, contra el balde de QA.
 
 ### 🙋 Waiting on you (not code)
 
@@ -4105,6 +4216,11 @@ inbox mail, one per distinct sender domain** — including hard cases that carry
 vocabulary without being claims: a bank's *"Recibimos tu Reclamo 0055604264"*, spam
 titled *"Claim your FREE $20"*, health-insurer marketing.
 
+(28/09: those real-inbox examples, and every other `training_example` from a real
+`email`/`whatsapp` case, were purged under the Gmail Limited Use rule — no real
+Gmail case may enter training or few-shot. Going forward, only tagged
+`email_sim`/`whatsapp_sim` cases feed a new training run.)
+
 Guarded against over-correction: after loading the negatives, verified 4/4 — real
 choque and RC claims still classify `is_claim=true`, bank-"Reclamo" and "Claim" spam
 still `false`.
@@ -4141,6 +4257,10 @@ regenerated. Latest dump: `training-examples-2026-08-07.json` (206 + 20 rules).
   real bug to get here: `uploadToGcs` used `PUT` (→404); GCS simple-upload needs `POST`.
   To improve weak classes, re-run once the Gemini key is truly paid + more `rc`/
   `robo_contenido`/`accidente_personal`/`cristales` data is approved, then fine-tune again.
+  (28/09: retired. Row went `eval_pending` → `rejected`, old GCP project
+  `DELETE_REQUESTED`, `active_model` null in prod and staging. No model is
+  active; the next training run uses only tagged `email_sim`/`whatsapp_sim`
+  cases.)
 - Minor: stray objects in the `claimmix-vertex-training` GCS bucket (`_healthcheck_claude.txt`,
   `_probe_*`, plus this run's tuning JSONL) — SA lacks `objects.delete`; clean via Console.
 

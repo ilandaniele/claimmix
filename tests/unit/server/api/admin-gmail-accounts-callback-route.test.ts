@@ -65,16 +65,14 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-vi.mock("googleapis", () => ({
-  google: {
-    auth: {
-      OAuth2: class {
-        getToken = mockGetToken;
-        setCredentials = vi.fn();
-      },
+vi.mock("@googleapis/gmail", () => ({
+  auth: {
+    OAuth2: class {
+      getToken = mockGetToken;
+      setCredentials = vi.fn();
     },
-    gmail: () => ({ users: { getProfile: mockGetProfile } }),
   },
+  gmail: () => ({ users: { getProfile: mockGetProfile } }),
 }));
 
 // ── La ruta, después de los mocks ────────────────────────────────────────────

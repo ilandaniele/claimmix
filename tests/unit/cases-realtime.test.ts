@@ -54,6 +54,7 @@ function makeCase(overrides: Partial<CaseRow> = {}): CaseRow {
     // No son columnas de `cases`: las suma `consultaListado` por subconsulta.
     fecha_siniestro: null,
     assigned_name: null,
+    replied_at: null,
     ...overrides,
   };
 }

@@ -7,7 +7,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { ejemploSinDatosDeLaPersona } from "@/server/training/sin-datos-de-la-persona";
+import {
+  ejemploSinDatosDeLaPersona,
+  nombresEn,
+  sinDatosDeLaPersona,
+} from "@/server/training/sin-datos-de-la-persona";
 import { deEjemplos, type FilaDeEjemplo } from "@/server/training/examples";
 
 describe("ejemploSinDatosDeLaPersona", () => {
@@ -141,6 +145,43 @@ describe("ejemploSinDatosDeLaPersona", () => {
   it("un payload que no es un objeto vuelve sin tocar", () => {
     expect(ejemploSinDatosDeLaPersona(null as never)).toBe(null);
     expect(ejemploSinDatosDeLaPersona(42 as never)).toBe(42);
+  });
+});
+
+describe("nombresEn", () => {
+  it("junta el nombre de una clave que termina en _name y el de un par campo/valor", () => {
+    const nombres = nombresEn({
+      full_name: "Martín Sosa",
+      dni: "30.145.882",
+      resolved: [{ field: "party_b_name", value: "Ana Paz" }],
+    });
+
+    expect(nombres).toEqual(["Martín Sosa", "Ana Paz"]);
+  });
+});
+
+describe("sinDatosDeLaPersona", () => {
+  it("tacha el nombre dado, el DNI por patrón, y saca sender_email", () => {
+    const resultado = sinDatosDeLaPersona(
+      {
+        full_name: "Martín Sosa",
+        dni: "30.145.882",
+        nota: "Sosa llamó; DNI 30145882",
+        sender_email: "x@y",
+      },
+      ["Martín Sosa"]
+    );
+
+    expect(resultado).toEqual({
+      full_name: "[NOMBRE]",
+      dni: "[DNI]",
+      nota: "[NOMBRE] llamó; DNI [DNI]",
+    });
+  });
+
+  it("no tira con texto suelto ni con null", () => {
+    expect(() => sinDatosDeLaPersona("texto", [])).not.toThrow();
+    expect(sinDatosDeLaPersona(null)).toBe(null);
   });
 });
 

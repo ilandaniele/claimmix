@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { google } from "googleapis";
+import * as google from "@googleapis/gmail";
 import { requireRole, ADMIN_ROLES } from "@/lib/auth/require-role";
 import { tables } from "@/lib/db";
 import { encryptRefreshToken } from "@/server/email/gmail/accounts";

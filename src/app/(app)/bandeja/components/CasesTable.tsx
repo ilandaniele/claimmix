@@ -1,15 +1,8 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  useReactTable,
-  getCoreRowModel,
-  flexRender,
-  type CellContext,
-  type ColumnDef,
-} from "@tanstack/react-table";
 import type { CaseRow } from "@/server/cases/list";
 import { StatusBadge } from "./StatusBadge";
 import { SeverityBadge } from "./SeverityBadge";
@@ -18,12 +11,17 @@ import { ConfidenceBar } from "./ConfidenceBar";
 import { Vacio } from "./Vacio";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import { formatAge, formatDate } from "@/lib/utils";
+import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
 
 function formatCaseId(id: string): string {
   const suffix = id.replace(/-/g, "").slice(-8).toUpperCase();
   return `SIN-${suffix.slice(0, 4)}-${suffix.slice(4)}`;
 }
+
+const SOLO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+
+type Columna = { id: string; header: string; cell: (row: CaseRow, marcado: boolean) => ReactNode };
 
 interface CasesTableProps {
   cases: CaseRow[];
@@ -93,7 +91,7 @@ export function CasesTable({
     other: t("type.other"),
   };
 
-  const columns = useMemo<ColumnDef<CaseRow>[]>(
+  const columns = useMemo<Columna[]>(
     () => [
       /*
        * Sin recuadros. Los checkboxes cuadrados en cada fila eran veinte cajas
@@ -101,49 +99,45 @@ export function CasesTable({
        * cuando. La columna existe solo en modo seleccion, y el control es un
        * circulo del acento: vacio, o relleno con un tilde al marcar.
        *
-       * Lo marcado se lee de `meta`, no de la clausura: si `selectedIds`
-       * fuera dependencia de este memo, cada marca rearmaria las columnas y
-       * `flexRender` desmontaria y volveria a montar TODAS las celdas.
+       * Lo marcado llega como segundo argumento de `cell`, calculado por fila
+       * al momento de pintar — no de la clausura de este memo, que si tuviera
+       * `selectedIds` como dependencia se rearmaria entera con cada marca.
        */
       ...(onDeleteMany && seleccionando
         ? [
             {
               id: "select",
               header: "",
-              cell: ({ row, table }: CellContext<CaseRow, unknown>) => {
-                const { selectedIds } = table.options.meta as { selectedIds: Set<string> };
-                const marcado = selectedIds.has(row.original.id);
-                return (
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={marcado}
-                    aria-label={t("bandeja.marcar").replace("{id}", formatCaseId(row.original.id))}
-                    onClick={() => toggleOne(row.original.id)}
-                    className={[
-                      "inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 transition-colors",
-                      marcado
-                        ? "border-violet-600 bg-violet-600 text-white"
-                        : "border-slate-500 bg-white group-hover:border-violet-400",
-                    ].join(" ")}
-                  >
-                    {marcado && (
-                      <svg viewBox="0 0 12 12" className="h-3 w-3" aria-hidden="true">
-                        <path d="M2.5 6.5l2.2 2.2L9.5 3.9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </button>
-                );
-              },
-            } as ColumnDef<CaseRow>,
+              cell: (row: CaseRow, marcado: boolean) => (
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={marcado}
+                  aria-label={t("bandeja.marcar").replace("{id}", formatCaseId(row.id))}
+                  onClick={() => toggleOne(row.id)}
+                  className={[
+                    "inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 transition-colors",
+                    marcado
+                      ? "border-violet-600 bg-violet-600 text-white"
+                      : "border-slate-500 bg-white group-hover:border-violet-400",
+                  ].join(" ")}
+                >
+                  {marcado && (
+                    <svg viewBox="0 0 12 12" className="h-3 w-3" aria-hidden="true">
+                      <path d="M2.5 6.5l2.2 2.2L9.5 3.9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </button>
+              ),
+            } as Columna,
           ]
         : []),
       {
-        accessorKey: "fecha_siniestro",
+        id: "fecha_siniestro",
         header: t("table.col.incidentDate"),
-        cell: ({ getValue, row }) => {
-          const raw = getValue<string | null>();
-          const id = row.original.id;
+        cell: (row: CaseRow) => {
+          const raw = row.fecha_siniestro;
+          const id = row.id;
 
           /*
            * El valor guardado es el string crudo que devolvio el extractor:
@@ -160,6 +154,9 @@ export function CasesTable({
               day: "2-digit",
               month: "short",
               year: "numeric",
+              // Una fecha sola se parsea como medianoche UTC: formateada en
+              // otra zona, en Argentina sale el día anterior.
+              timeZone: SOLO_FECHA.test(raw) ? "UTC" : ZONA_ARGENTINA,
             }).format(fecha)
           ) : (
             raw
@@ -239,11 +236,11 @@ export function CasesTable({
        * nombre se lee como lo que es, y la tabla gana aire horizontal.
        */
       {
-        accessorKey: "policyholder_name",
+        id: "policyholder_name",
         header: t("table.col.policyholder"),
-        cell: ({ row }) => {
-          const nombre = row.original.policyholder_name;
-          const poliza = row.original.policy_number;
+        cell: (row: CaseRow) => {
+          const nombre = row.policyholder_name;
+          const poliza = row.policy_number;
           if (!nombre && !poliza) return <Vacio />;
           return (
             <div className="min-w-0 max-w-[13rem]">
@@ -264,10 +261,10 @@ export function CasesTable({
         },
       },
       {
-        accessorKey: "claim_type",
+        id: "claim_type",
         header: t("table.col.type"),
-        cell: ({ getValue }) => {
-          const type = getValue<ClaimType>();
+        cell: (row: CaseRow) => {
+          const type = row.claim_type as ClaimType;
           return (
             <span className="whitespace-nowrap text-[13.5px] text-slate-700">
               {CLAIM_TYPE_LABELS[type] ?? type}
@@ -276,15 +273,15 @@ export function CasesTable({
         },
       },
       {
-        accessorKey: "channel",
+        id: "channel",
         header: t("table.col.source"),
-        cell: ({ getValue }) => <SourceBadge channel={getValue<string | null>()} />,
+        cell: (row: CaseRow) => <SourceBadge channel={row.channel} />,
       },
       {
-        accessorKey: "status",
+        id: "status",
         header: t("table.col.status"),
-        cell: ({ getValue }) => (
-          <StatusBadge status={getValue<CaseStatus>()} />
+        cell: (row: CaseRow) => (
+          <StatusBadge status={row.status as CaseStatus} />
         ),
       },
       {
@@ -292,17 +289,17 @@ export function CasesTable({
         // they used. A claim nobody has answered is a different kind of
         // problem from one that was acknowledged and is simply waiting, and
         // until now the inbox gave no way to tell them apart.
-        accessorKey: "replied_at",
+        id: "replied_at",
         header: t("table.col.replied"),
-        cell: ({ getValue, row }) => {
-          const at = getValue<string | null>();
+        cell: (row: CaseRow) => {
+          const at = row.replied_at;
           // Llegó algo después de que el agente terminó: lo que importa es que
           // lo conteste una persona, no si antes se le había respondido.
-          const paraResponder = Boolean(row.original.para_responder_desde);
+          const paraResponder = Boolean(row.para_responder_desde);
 
           // Non-claims are answered by design with silence, so "sin responder"
           // would read as a backlog item when it is the correct outcome.
-          if (!paraResponder && row.original.is_claim === false) {
+          if (!paraResponder && row.is_claim === false) {
             return <Vacio />;
           }
 
@@ -320,6 +317,7 @@ export function CasesTable({
               title={new Intl.DateTimeFormat(locale, {
                 dateStyle: "medium",
                 timeStyle: "short",
+                timeZone: ZONA_ARGENTINA,
               }).format(new Date(at))}
             >
               {t("table.replied.yes")}
@@ -328,14 +326,14 @@ export function CasesTable({
         },
       },
       {
-        accessorKey: "confidence_min",
+        id: "confidence_min",
         header: t("table.col.confidence"),
-        cell: ({ getValue }) => (
-          <ConfidenceBar value={getValue<number | null>()} />
+        cell: (row: CaseRow) => (
+          <ConfidenceBar value={row.confidence_min as number | null} />
         ),
       },
       {
-        accessorKey: "created_at",
+        id: "created_at",
         header: t("table.col.received"),
         /*
          * Relativo en la celda, absoluto en el `title`.
@@ -346,8 +344,8 @@ export function CasesTable({
          * eso —y ya lo usa «Antigüedad» en el detalle del caso—; la fecha y
          * hora completas siguen ahí, en el `title`, para quien las necesite.
          */
-        cell: ({ getValue }) => {
-          const iso = getValue<string>();
+        cell: (row: CaseRow) => {
+          const iso = row.created_at;
           return (
             <span
               className="whitespace-nowrap text-[13px] text-slate-500"
@@ -359,20 +357,20 @@ export function CasesTable({
         },
       },
       {
-        accessorKey: "severity",
+        id: "severity",
         header: t("case.detail.severity"),
-        cell: ({ getValue }) => {
-          const severity = getValue<Severity | null>();
+        cell: (row: CaseRow) => {
+          const severity = row.severity as Severity | null;
           return severity ? <SeverityBadge severity={severity} /> : <Vacio />;
         },
       },
       {
-        accessorKey: "assigned_to",
+        id: "assigned_to",
         header: t("table.col.assignedTo"),
-        cell: ({ row }) => (
+        cell: (row: CaseRow) => (
           <span className="whitespace-nowrap text-[13px] text-slate-500">
-            {row.original.assigned_name ??
-              (row.original.assigned_to ? t("case.detail.assigned") : t("case.detail.unassigned"))}
+            {row.assigned_name ??
+              (row.assigned_to ? t("case.detail.assigned") : t("case.detail.unassigned"))}
           </span>
         ),
       },
@@ -381,12 +379,12 @@ export function CasesTable({
             {
               id: "row-delete",
               header: "",
-              cell: ({ row }: { row: { original: CaseRow } }) => (
+              cell: (row: CaseRow) => (
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onDeleteMany([row.original.id]);
+                    onDeleteMany([row.id]);
                   }}
                   /*
                    * `opacity-0` esconde la papelera, pero NO la saca del
@@ -424,21 +422,13 @@ export function CasesTable({
                   </svg>
                 </button>
               ),
-            } as ColumnDef<CaseRow>,
+            } as Columna,
           ]
         : []),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [t, onDeleteMany, seleccionando, toggleOne, desde]
   );
-
-  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table intentionally opts out of React Compiler memoization.
-  const table = useReactTable({
-    data: cases,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    meta: { selectedIds },
-  });
 
   if (cases.length === 0) {
     return (
@@ -517,45 +507,40 @@ export function CasesTable({
           aria-label={t("bandeja.tableLabel")}
         >
           <thead className="sticky top-0 z-10 bg-slate-50">
-            {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <th
-                    key={header.id}
-                    scope="col"
-                    /*
-                     * `rotulo` es la clase de `globals.css` que ya usan los
-                     * indicadores y las etiquetas de campo: el encabezado de
-                     * columna es exactamente eso, un rotulo, y hasta ahora
-                     * repetia las mismas cuatro utilidades a mano con otro
-                     * tamano.
-                     */
-                    /*
-                     * `text-slate-500` y no 400: el 400 sobre blanco da
-                     * 2.6:1, muy por debajo del 4.5:1 que pide texto. El 500 da
-                     * 4.8:1. Es el nombre de la columna, no una decoracion.
-                     */
-                    className="rotulo linea-inferior sticky top-0 whitespace-nowrap bg-slate-50 px-3 py-2.5 text-slate-500 first:pl-5 last:pr-5"
-                  >
-                    {flexRender(
-                      header.column.columnDef.header,
-                      header.getContext()
-                    )}
-                  </th>
-                ))}
-              </tr>
-            ))}
+            <tr>
+              {columns.map((c) => (
+                <th
+                  key={c.id}
+                  scope="col"
+                  /*
+                   * `rotulo` es la clase de `globals.css` que ya usan los
+                   * indicadores y las etiquetas de campo: el encabezado de
+                   * columna es exactamente eso, un rotulo, y hasta ahora
+                   * repetia las mismas cuatro utilidades a mano con otro
+                   * tamano.
+                   */
+                  /*
+                   * `text-slate-500` y no 400: el 400 sobre blanco da
+                   * 2.6:1, muy por debajo del 4.5:1 que pide texto. El 500 da
+                   * 4.8:1. Es el nombre de la columna, no una decoracion.
+                   */
+                  className="rotulo linea-inferior sticky top-0 whitespace-nowrap bg-slate-50 px-3 py-2.5 text-slate-500 first:pl-5 last:pr-5"
+                >
+                  {c.header}
+                </th>
+              ))}
+            </tr>
           </thead>
           <tbody>
-            {table.getRowModel().rows.map((row) => {
-              const isSelected = selectedIds.has(row.original.id);
+            {cases.map((row) => {
+              const marcado = selectedIds.has(row.id);
               return (
                 <tr
                   key={row.id}
                   onClick={() =>
                     seleccionando
-                      ? toggleOne(row.original.id)
-                      : router.push(hrefDelCaso(row.original.id))
+                      ? toggleOne(row.id)
+                      : router.push(hrefDelCaso(row.id))
                   }
                   /*
                    * La ultima fila no lleva linea: el borde de la tarjeta ya
@@ -574,30 +559,30 @@ export function CasesTable({
                      * es de la accion, y pintaba de alarma diez filas que la
                      * persona solo habia marcado.
                      */
-                    isSelected ? "bg-violet-50" : "hover:bg-violet-50"
+                    marcado ? "bg-violet-50" : "hover:bg-violet-50"
                   }`}
                   role="row"
-                  aria-label={`Siniestro ${formatCaseId(row.original.id)}`}
+                  aria-label={`Siniestro ${formatCaseId(row.id)}`}
                   tabIndex={0}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      if (seleccionando) toggleOne(row.original.id);
-                      else router.push(hrefDelCaso(row.original.id));
+                      if (seleccionando) toggleOne(row.id);
+                      else router.push(hrefDelCaso(row.id));
                     }
                   }}
                 >
-                  {row.getVisibleCells().map((cell) => (
+                  {columns.map((c) => (
                     <td
-                      key={cell.id}
+                      key={c.id}
                       className="px-3 py-3 align-middle first:pl-5 last:pr-5"
                       onClick={
-                        cell.column.id === "select" || cell.column.id === "row-delete"
+                        c.id === "select" || c.id === "row-delete"
                           ? (e) => e.stopPropagation()
                           : undefined
                       }
                     >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      {c.cell(row, marcado)}
                     </td>
                   ))}
                 </tr>

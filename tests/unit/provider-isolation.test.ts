@@ -57,10 +57,10 @@ function hasDirectProviderImport(content: string): boolean {
   return importRegex.test(content) || requireRegex.test(content);
 }
 
-/** Check a file's content for direct googleapis imports. */
+/** Check a file's content for direct googleapis / @googleapis/gmail imports. */
 function hasGoogleapisImport(content: string): boolean {
-  const importRegex = /from\s+["']googleapis["']/;
-  const requireRegex = /require\s*\(\s*["']googleapis["']\s*\)/;
+  const importRegex = /from\s+["'](?:googleapis|@googleapis\/gmail)["']/;
+  const requireRegex = /require\s*\(\s*["'](?:googleapis|@googleapis\/gmail)["']\s*\)/;
   return importRegex.test(content) || requireRegex.test(content);
 }
 
@@ -127,6 +127,12 @@ describe("AC12 — provider isolation (no direct postmark/resend/googleapis impo
         `Unexpected 'postmark' import in ${relativePath}`
       ).toBe(false);
     }
+  });
+
+  it("hasGoogleapisImport detects the scoped @googleapis/gmail import (E19a)", () => {
+    expect(
+      hasGoogleapisImport('import * as google from "@googleapis/gmail";')
+    ).toBe(true);
   });
 
   it("only src/server/email/gmail/** files may import googleapis", () => {

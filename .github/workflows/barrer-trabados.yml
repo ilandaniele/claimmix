@@ -93,6 +93,28 @@ jobs:
     permissions:
       contents: read
     steps:
+      # El `if:` de más abajo y la elección del secreto miran el SUFIJO de la
+      # URL (`endsWith(..., '-qa.vercel.app')`), no si el host es de verdad uno
+      # de los nuestros. Este paso es lo que hace que el `CRON_SECRET` sólo
+      # viaje a un despliegue de este proyecto.
+      - name: ¿A dónde apunta esto?
+        env:
+          URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
+        run: |
+          set -u
+          case "$URL" in
+            https://*) ;;
+            *) echo "::error::La URL tiene que empezar con https://"; exit 1 ;;
+          esac
+          HOST="${URL#https://}"
+          case "$HOST" in
+            *[/?#@:]*) echo "::error::La URL no puede llevar ruta, puerto, credenciales ni fragmento: ${HOST}"; exit 1 ;;
+          esac
+          case "$HOST" in
+            claimmix.vercel.app|claimmix-qa.vercel.app|claimmix-*-ilandaniele-3471s-projects.vercel.app) ;;
+            *) echo "::error::Host fuera de la lista: ${HOST}"; exit 1 ;;
+          esac
+
       - name: Pedirle al barredor que pase
         env:
           # El dispatch puede apuntar a QA, y el secreto de producción no
@@ -153,6 +175,28 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # El `if:` de más abajo y la elección del secreto miran el SUFIJO de la
+      # URL (`endsWith(..., '-qa.vercel.app')`), no si el host es de verdad uno
+      # de los nuestros. Este paso es lo que hace que el `CRON_SECRET` sólo
+      # viaje a un despliegue de este proyecto.
+      - name: ¿A dónde apunta esto?
+        env:
+          URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
+        run: |
+          set -u
+          case "$URL" in
+            https://*) ;;
+            *) echo "::error::La URL tiene que empezar con https://"; exit 1 ;;
+          esac
+          HOST="${URL#https://}"
+          case "$HOST" in
+            *[/?#@:]*) echo "::error::La URL no puede llevar ruta, puerto, credenciales ni fragmento: ${HOST}"; exit 1 ;;
+          esac
+          case "$HOST" in
+            claimmix.vercel.app|claimmix-qa.vercel.app|claimmix-*-ilandaniele-3471s-projects.vercel.app) ;;
+            *) echo "::error::Host fuera de la lista: ${HOST}"; exit 1 ;;
+          esac
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

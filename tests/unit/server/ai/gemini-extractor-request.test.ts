@@ -396,8 +396,10 @@ describe("contarTokens", () => {
     expect(await contarTokens(PDF, 1000)).toBe("plazo");
   });
 
-  it("null si rechaza el archivo o se corta la red", async () => {
+  it("\"rechazo\" si no puede leer el archivo; null si falla el servicio o la red", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 400 })));
+    expect(await contarTokens(PDF, 1000)).toBe("rechazo");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
     expect(await contarTokens(PDF, 1000)).toBeNull();
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new TypeError("fetch failed");

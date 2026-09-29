@@ -399,9 +399,13 @@ async function destinoGemini(
 /**
  * Los tokens que el modelo cobraría por leer este archivo, sin mandárselo:
  * `countTokens` no cobra ni interpreta nada nuestro. "plazo" si no contestó a
- * tiempo; null ante cualquier otra falla, incluido un archivo que rechaza.
+ * tiempo, "rechazo" si no pudo leer el archivo (400) y null ante cualquier
+ * otra falla.
  */
-export async function contarTokens(media: InlineMedia, plazoMs: number): Promise<number | "plazo" | null> {
+export async function contarTokens(
+  media: InlineMedia,
+  plazoMs: number
+): Promise<number | "plazo" | "rechazo" | null> {
   try {
     const { endpoint, authHeaders } = await destinoGemini("countTokens");
     const res = await fetch(endpoint, {
@@ -410,6 +414,7 @@ export async function contarTokens(media: InlineMedia, plazoMs: number): Promise
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ inlineData: media }] }] }),
       signal: AbortSignal.timeout(plazoMs),
     });
+    if (res.status === 400) return "rechazo";
     const total = res.ok ? ((await res.json()) as { totalTokens?: unknown }).totalTokens : null;
     return typeof total === "number" ? total : null;
   } catch (err) {

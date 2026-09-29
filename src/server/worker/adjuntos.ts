@@ -137,17 +137,20 @@ export async function paraElModelo(
   // El tope de páginas de la subida lee la estructura del PDF, y un PDF puede
   // esconder páginas de maneras que ningún contador propio ve. Decide lo que
   // el modelo cobraría por leerlo. Un conteo que no llega no manda el PDF; uno
-  // que agota el plazo lo marca, así no le come el tiempo a cada corrida.
+  // que agota el plazo o que el modelo rechaza lo marca, así no le come el
+  // tiempo ni el lugar a cada corrida.
   const cuentas = await Promise.all(
     salida.media.map((m) => (m.mimeType === "application/pdf" ? contarTokens(m, PLAZO_DE_CONTEO_MS) : 0))
   );
-  const estado = cuentas.map((c) => (typeof c !== "number" ? c : c > TOPE_TOKENS_PDF ? "de_mas" : "va"));
+  const estado = cuentas.map((c) => (typeof c !== "number" ? c : c > TOPE_TOKENS_PDF ? "too_many_pages" : "va"));
   const con = (e: string) => salida.hashes.filter((_, i) => estado[i] === e);
-  const deMas = con("de_mas");
   await marcarPlazoAgotado(caseId, tenantCtx, con("plazo"));
-  await marcarArchivos(caseId, tenantCtx, deMas, "email_worker.pdf_descartado", (db) =>
-    consultaDescarte(db, caseId, deMas)
-  );
+  const descartes: [string, string[]][] = [["too_many_pages", con("too_many_pages")], ["pages_unknown", con("rechazo")]];
+  for (const [motivo, hashes] of descartes) {
+    await marcarArchivos(caseId, tenantCtx, hashes, "email_worker.pdf_descartado", (db) =>
+      consultaDescarte(db, caseId, hashes, motivo)
+    );
+  }
   const va = (_: unknown, i: number) => estado[i] === "va";
   return { hashes: salida.hashes.filter(va), media: salida.media.filter(va) };
 }
@@ -191,10 +194,10 @@ export async function anotarLecturas(
 }
 
 /** Suma un plazo agotado a cada archivo. Ver `esperaPorPlazo`. */
-function consultaDescarte(db: ClienteDatos, caseId: string, hashes: string[]) {
+function consultaDescarte(db: ClienteDatos, caseId: string, hashes: string[], motivo: string) {
   return db
     .update(claimAttachments)
-    .set({ metadatos: { descarte: "too_many_pages" } })
+    .set({ metadatos: { descarte: motivo } })
     .where(and(eq(claimAttachments.case_id, caseId), inArray(claimAttachments.content_hash, hashes)));
 }
 

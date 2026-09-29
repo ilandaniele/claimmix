@@ -139,6 +139,18 @@ describe("paraElModelo", () => {
     expect(params).toEqual(['{"descarte":"too_many_pages"}', "caso-1", "hg"]);
   });
 
+  it("un PDF que el modelo no puede leer queda descartado y no vuelve a contarse", async () => {
+    const grande = Buffer.from("grande").toString("base64");
+    readAttachment.mockImplementation(async (ruta: string) => Buffer.from(ruta));
+    contarTokens.mockImplementation(async (m: { data: string }) => (m.data === grande ? "rechazo" : 2064));
+
+    const r = await tres();
+
+    expect(r.hashes).toEqual(["hf", "hc"]);
+    expect(enTenant).toHaveBeenCalledTimes(1);
+    expect(sqlMarcado().params).toEqual(['{"descarte":"pages_unknown"}', "caso-1", "hg"]);
+  });
+
   it("un conteo que agota el plazo marca el PDF; uno que falla no lo manda ni lo marca", async () => {
     contarTokens.mockResolvedValueOnce("plazo").mockResolvedValueOnce(null);
 

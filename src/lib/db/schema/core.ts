@@ -25,6 +25,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { MontoEstimado, RangosDeMonto } from "@/core/case/monto-estimado";
+import type { Responsabilidad } from "@/core/case/responsabilidad";
 
 import { authUsers } from "./auth";
 
@@ -222,6 +223,9 @@ export const cases = pgTable("cases", {
   }),
   // Rango orientativo, sólo para el equipo (migración 0040).
   monto_estimado: jsonb("monto_estimado").$type<MontoEstimado>(),
+  // Opinión orientativa de responsabilidad en un choque, sólo para el equipo
+  // (migración 0041). La mecánica en la que se apoya no se guarda acá.
+  responsabilidad: jsonb("responsabilidad").$type<Responsabilidad>(),
 });
 
 export const rawMessages = pgTable("raw_messages", {

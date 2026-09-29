@@ -18,6 +18,7 @@
 
 import "server-only";
 
+import { nombraCulpaOLey } from "@/core/ai/nombra-culpa";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
@@ -303,6 +304,9 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   for (const pattern of FORBIDDEN) {
     if (pattern.test(trimmed)) return `forbidden:${pattern.source.slice(0, 24)}`;
   }
+  // La opinión de responsabilidad es del equipo (B18). Con motivo propio: el
+  // reintento no puede explicarlo como una promesa de cobertura.
+  if (nombraCulpaOLey(trimmed)) return "nombra_culpa";
 
   // Every field we decided to ask about has to survive into the message. The
   // model rewording "DNI del titular" is fine; dropping it is the orchestrator
@@ -482,6 +486,9 @@ function explain(problem: string): string {
   }
   if (problem.startsWith("forbidden:")) {
     return "prometiste algo sobre cobertura, pagos o plazos. Nadie evaluó el siniestro todavía.";
+  }
+  if (problem === "nombra_culpa") {
+    return "nombraste quién tuvo la culpa o citaste una ley o un artículo de tránsito. Eso lo decide una persona del equipo: no lo adelantes ni lo insinúes.";
   }
   if (problem === "invented_field") {
     return "la lista tiene más ítems que los que te pasé. Pedí sólo lo que está en DATOS A PEDIR, ni uno más.";

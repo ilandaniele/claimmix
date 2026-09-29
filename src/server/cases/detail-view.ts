@@ -34,10 +34,22 @@ import "server-only";
 
 import { asc, eq, sql } from "drizzle-orm";
 
+import { esMotivoSinLeer, type MotivoSinLeer } from "@/core/ai/sin-leer";
 import { evaluarCobertura, type PolizaParaCobertura, type ResultadoDeCobertura } from "@/core/case/cobertura";
 import { dia } from "@/core/case/contradicciones";
 import type { MontoEstimado } from "@/core/case/monto-estimado";
 import { esCandidatoAPresupuesto, type LecturaGuardada } from "@/core/case/presupuesto-taller";
+import {
+  cruzarConHistoria,
+  esCartaDeReclamo,
+  faltantesDelReclamo,
+  ReclamoTerceroSchema,
+  totalDelReclamo,
+  type Cruce,
+  type DocumentoDelCaso,
+  type ReclamoTercero,
+} from "@/core/case/reclamo-tercero";
+import { esChoque, leerResponsabilidad, type Responsabilidad } from "@/core/case/responsabilidad";
 import { clavesQueSatisfacen } from "@/core/case/required-fields";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments, claimFieldConfirmations, policies, users } from "@/lib/db/schema";
@@ -118,6 +130,20 @@ export interface CoberturaEnPantalla {
   monto: MontoEstimado | null;
 }
 
+/** La carta con que un tercero reclama al asegurado, leída para el equipo (B24). */
+export interface CartaEnPantalla {
+  id: string;
+  filename: string;
+  /** `null`: se la reconoció como carta y todavía no se leyó. */
+  reclamo: ReclamoTercero | null;
+  /** Sin lectura: por qué no hay forma de leerla, o `null` si se va a reintentar. */
+  sinLeer: MotivoSinLeer | null;
+  /** Claves de lo que la carta no trae; se traducen en la pantalla. */
+  faltantes: string[];
+  cruces: Cruce[];
+  total: number | null;
+}
+
 export interface DetalleDeCaso {
   case: CaseRow;
   extracted_fields: ExtractedFieldRow[];
@@ -133,6 +159,9 @@ export interface DetalleDeCaso {
   asignado_nombre: string | null;
   /** `null` si la póliza no se pudo leer: mejor sin panel que con un veredicto falso. */
   cobertura: CoberturaEnPantalla | null;
+  /** La opinión orientativa de responsabilidad (B18), o `null` si no hay o no tiene la forma. */
+  responsabilidad: Responsabilidad | null;
+  cartas: CartaEnPantalla[];
 }
 
 /**
@@ -187,10 +216,58 @@ async function fetchConfirmaciones(
   }
 }
 
+interface FilaDeCarta {
+  id: string;
+  filename: string;
+  content_type: string;
+  content_hash: string | null;
+  resumen: string | null;
+  tipo: string | null;
+  nombre: string | null;
+  reclamo: unknown;
+  sin_leer: string | null;
+}
+
+/** Las cartas de terceros del caso, cada una cotejada con los demás documentos que llegaron. */
+function cartasDe(filas: ReadonlyArray<FilaDeCarta>): CartaEnPantalla[] {
+  // La carta misma no cuenta como el presupuesto que dice adjuntar.
+  const documentos: DocumentoDelCaso[] = filas.map((f) => ({
+    tipo: f.tipo,
+    nombre: f.nombre,
+    presupuesto:
+      !esCartaDeReclamo(f.tipo) &&
+      esCandidatoAPresupuesto({ content_type: f.content_type, file_name: f.filename, resumen: f.resumen, datos: { tipo: f.tipo } }),
+  }));
+  const hashes = new Set<string>();
+  return filas.flatMap((f) => {
+    if (!esCartaDeReclamo(f.tipo)) return [];
+    // El mismo archivo mandado dos veces es una carta y un panel.
+    if (f.content_hash) {
+      if (hashes.has(f.content_hash)) return [];
+      hashes.add(f.content_hash);
+    }
+    const leido = ReclamoTerceroSchema.safeParse(f.reclamo);
+    const reclamo = leido.success ? leido.data : null;
+    // Leída y no era un reclamo: no hay nada que mostrar, el archivo sigue en los adjuntos.
+    if (reclamo && !reclamo.es_reclamo) return [];
+    return [
+      {
+        id: f.id,
+        filename: f.filename,
+        reclamo,
+        sinLeer: !reclamo && esMotivoSinLeer(f.sin_leer) ? f.sin_leer : null,
+        faltantes: reclamo ? faltantesDelReclamo(reclamo, documentos) : [],
+        cruces: reclamo ? cruzarConHistoria(reclamo, documentos) : [],
+        total: reclamo ? totalDelReclamo(reclamo) : null,
+      },
+    ];
+  });
+}
+
 async function fetchAdjuntos(
   ctx: TenantContext,
   caseId: string
-): Promise<AdjuntoEnPantalla[]> {
+): Promise<{ adjuntos: AdjuntoEnPantalla[]; cartas: CartaEnPantalla[] }> {
   try {
     const filas = await enTenant(ctx, (db) =>
       db
@@ -207,8 +284,11 @@ async function fetchAdjuntos(
           resumen: claimAttachments.resumen,
           util: claimAttachments.util,
           content_hash: claimAttachments.content_hash,
-          // Sólo el tipo: `datos` entero trae lo que el documento dice, y la pantalla no lo pinta.
+          // `datos` entero trae lo que el documento dice: sólo se trae el tipo, el nombre para cotejar y la carta.
           tipo: sql<string | null>`${claimAttachments.datos}->>'tipo'`,
+          nombre: sql<string | null>`${claimAttachments.datos}->>'nombre'`,
+          reclamo: sql<unknown>`${claimAttachments.datos}->'reclamo'`,
+          sin_leer: sql<string | null>`${claimAttachments.datos}->>'sin_leer'`,
           descarte: sql<string | null>`${claimAttachments.metadatos}->>'descarte'`,
           lectura_presupuesto: claimAttachments.lectura_presupuesto,
         })
@@ -219,7 +299,7 @@ async function fetchAdjuntos(
 
     // Vienen del más viejo al más nuevo: el primero con un hash es el original.
     const vistos = new Set<string>();
-    return filas.map(({ storage_path, content_hash, tipo, descarte, ...f }) => {
+    const adjuntos = filas.map(({ storage_path, content_hash, tipo, nombre: _nombre, reclamo: _reclamo, sin_leer: _sinLeer, descarte, ...f }) => {
       const duplicado = content_hash != null && vistos.has(content_hash);
       if (content_hash != null) vistos.add(content_hash);
       const disponible = storage_path != null && f.rejected_reason == null;
@@ -235,13 +315,14 @@ async function fetchAdjuntos(
           esCandidatoAPresupuesto({ content_type: f.content_type, file_name: f.filename, resumen: f.resumen, datos: { tipo } }),
       };
     });
+    return { adjuntos, cartas: cartasDe(filas.filter((f) => f.rejected_reason == null)) };
   } catch (err) {
     // Degrada a propósito —la pantalla no se cae porque falle una consulta—
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve
     // igual que un caso sin adjuntos, y alguien cierra un caso creyendo que la
     // persona no mandó nada.
     logger.error({ error_code: errorCode(err) }, "cases.detail_view.query_failed");
-    return [];
+    return { adjuntos: [], cartas: [] };
   }
 }
 
@@ -359,7 +440,7 @@ export async function cargarDetalleDeCaso(
    */
   const esDeCorreo = caseRow.channel === "email" || caseRow.channel === "email_sim";
 
-  const [extracted_fields, missing_docs, audit_log, confirmations, attachments, messages, asignado_nombre, poliza] =
+  const [extracted_fields, missing_docs, audit_log, confirmations, { adjuntos: attachments, cartas }, messages, asignado_nombre, poliza] =
     await Promise.all([
       fetchExtractedFields(ctx, caseId),
       fetchMissingDocs(ctx, caseId),
@@ -382,6 +463,9 @@ export async function cargarDetalleDeCaso(
     hayMasMensajes: messages.length >= MENSAJES_A_MOSTRAR,
     asignado_nombre,
     cobertura: coberturaDelCaso(caseRow, extracted_fields, poliza),
+    // Una opinión que quedó de antes de que el caso se reclasificara no se muestra.
+    responsabilidad: esChoque(caseRow.claim_type) ? leerResponsabilidad(caseRow.responsabilidad) : null,
+    cartas,
   };
 }
 

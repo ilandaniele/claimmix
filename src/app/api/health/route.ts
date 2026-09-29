@@ -252,6 +252,8 @@ async function checkSchema(): Promise<Check> {
     ["cases", "monto_estimado"],
     ["tenants", "rangos_de_monto"],
     ["claim_attachments", "lectura_presupuesto"],
+    // 0041: sin esto el worker no procesa ningún caso y la ficha no abre.
+    ["cases", "responsabilidad"],
   ];
 
   try {

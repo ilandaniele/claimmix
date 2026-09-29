@@ -89,6 +89,8 @@ function esquemaSin(...faltan: string[]) {
     { table_name: "cases", column_name: "monto_estimado" },
     { table_name: "tenants", column_name: "rangos_de_monto" },
     { table_name: "claim_attachments", column_name: "lectura_presupuesto" },
+    // 0041.
+    { table_name: "cases", column_name: "responsabilidad" },
   ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
 }
 
@@ -292,6 +294,16 @@ describe("GET /api/health — what it reports", () => {
 
     expect(schema.status).toBe("down");
     for (const col of faltan) expect(schema.detail).toContain(col);
+  });
+
+  it("nota que falta la 0041: la opinión de responsabilidad", async () => {
+    mockExecute.mockResolvedValue({ rows: esquemaSin("cases.responsabilidad") });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    expect(schema.detail).toContain("cases.responsabilidad");
   });
 
   it("answers 503 when anything is down, so a watcher notices", async () => {

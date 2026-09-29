@@ -449,6 +449,35 @@ describe("composeReply — what it refuses to send", () => {
     }
   });
 
+  it("refuses to name who is at fault or cite the traffic law (B18)", async () => {
+    for (const draft of [
+      "El culpable es el tercero, así que quedate tranquilo.",
+      "Según la Ley 24.449 el otro conductor responde.",
+      "Por el artículo 48 la culpa no es tuya.",
+    ]) {
+      replies(draft + " Necesito tu número de póliza.");
+      const out = await composeReply(base({ fields: ["policy_number"] }));
+      expect(out, draft).toBe(FALLBACK);
+    }
+  });
+
+  it("al reintentar tras nombrar la culpa, el redactor recibe ese motivo y no el de las promesas (B18)", async () => {
+    replies("El culpable es el tercero, quedate tranquilo. Necesito tu número de póliza.");
+
+    expect(await composeReply(base({ fields: ["policy_number"] }))).toBe(FALLBACK);
+
+    const reintento = mockCall.mock.calls[1][0] as string;
+    expect(reintento).toContain("nombraste quién tuvo la culpa o citaste una ley");
+    expect(reintento).not.toContain("prometiste algo sobre cobertura");
+  });
+
+  it("una patente vieja o un DNI que se parecen a la ley no lo frenan (B18)", async () => {
+    const draft = "Anotamos la patente ART 123 del titular. Necesito tu número de póliza.";
+    replies(draft);
+
+    expect(await composeReply(base({ fields: ["policy_number"] }))).toBe(draft);
+  });
+
   it("refuses a message too long to read on a phone", async () => {
     replies("Necesito tu número de póliza. " + "Detalle innecesario. ".repeat(60));
 

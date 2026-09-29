@@ -154,6 +154,10 @@ describe("/api/webhooks/whatsapp", () => {
     await afterCallbacks[0]();
 
     expect(mockRetomar).toHaveBeenCalledWith({ tenantId: TENANT, limit: 2, hasta: T0 + maxDuration * 1000 });
+    // El agente también: leer una carta no puede pasarse de lo que le queda a la invocación.
+    expect(mockRunIntakeAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ caseId: "case-1", hasta: T0 + maxDuration * 1000 })
+    );
   });
 
   it("varios mensajes: un after(), agente por caso en serie, un barrido", async () => {

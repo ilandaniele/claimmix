@@ -80,21 +80,32 @@ describe("el worker y «Para responder»", () => {
  * contesta; lo clasifica para la persona que lo atiende.
  */
 describe("el worker y el mensaje tardío", () => {
-  async function tardio(channel: string, falla = false) {
+  async function tardio(
+    channel: string,
+    falla = false,
+    { status = "requiere_especialista", despues, hasta }: { status?: string; despues?: (tarea: () => Promise<void>) => void; hasta?: number } = {}
+  ) {
     vi.resetModules();
+    // `doMock` sobrevive a `resetModules`: sin esto el `after` de un caso queda para los que siguen.
+    vi.doUnmock("next/server");
+    if (despues) {
+      vi.doMock("next/server", async () => ({ ...(await vi.importActual<object>("next/server")), after: despues }));
+    }
     const auditar = vi.fn().mockResolvedValue(undefined);
     registrarMocks({
-      fila: filaDeCaso(CASE_ID, TENANT_ID, { channel, status: "requiere_especialista" }),
+      fila: filaDeCaso(CASE_ID, TENANT_ID, { channel, status }),
       espiaDeUpdate: vi.fn(),
       espiaDeAuditoria: auditar,
     });
     const atender = falla ? vi.fn().mockRejectedValue(new Error("neon")) : vi.fn().mockResolvedValue(undefined);
     vi.doMock("@/server/cases/mensaje-tardio", () => ({ atenderMensajeTardio: atender }));
+    const cartas = vi.fn().mockResolvedValue(undefined);
+    vi.doMock("@/server/cases/lectura-reclamo", () => ({ atenderCartas: vi.fn(), atenderCartasDeUnTardio: cartas }));
 
     const { runEmailExtractionWorker } = await import("@/server/worker/extract");
-    const corrida = runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
+    const corrida = runEmailExtractionWorker(CASE_ID, TENANT_ID, null, hasta ? { hasta } : undefined);
     const { orchestratePostExtraction } = await import("@/server/confirmations/orchestrate");
-    return { corrida, atender, auditar, orquestar: vi.mocked(orchestratePostExtraction) };
+    return { corrida, atender, cartas, auditar, orquestar: vi.mocked(orchestratePostExtraction) };
   }
 
   it.each(["email", "whatsapp"])("por %s lo clasifica después de auditar que no se leyó, y no contesta", async (canal) => {
@@ -116,5 +127,48 @@ describe("el worker y el mensaje tardío", () => {
     // Si la corrida tirara, el test fallaría acá.
     await corrida;
     expect(atender).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["requiere_especialista", "cerrado", "enviado_a_core", "listo_para_core"])(
+    "un caso %s con un mensaje nuevo también lee la carta de un tercero para el equipo",
+    async (status) => {
+      const { corrida, cartas } = await tardio("whatsapp", false, { status });
+      await corrida;
+
+      expect(cartas).toHaveBeenCalledTimes(1);
+      expect(cartas.mock.calls[0]![0]).toMatchObject({ tenantId: TENANT_ID, caseId: CASE_ID });
+    }
+  );
+
+  it("la carta se lee después de clasificar el mensaje, sin contestar nada", async () => {
+    const { corrida, atender, cartas, orquestar } = await tardio("email");
+    await corrida;
+
+    expect(cartas.mock.invocationCallOrder[0]).toBeGreaterThan(atender.mock.invocationCallOrder[0]!);
+    expect(orquestar).not.toHaveBeenCalled();
+  });
+
+  it("le pasa el momento en que Vercel mata la invocación, o uno propio si nadie se lo dio", async () => {
+    const dada = await tardio("whatsapp", false, { hasta: 1_800_000_000_000 });
+    await dada.corrida;
+    expect(dada.cartas.mock.calls[0]![0].hasta).toBe(1_800_000_000_000);
+
+    const antes = Date.now();
+    const propia = await tardio("whatsapp");
+    await propia.corrida;
+    const { hasta } = propia.cartas.mock.calls[0]![0];
+    expect(hasta).toBeGreaterThan(antes);
+    expect(hasta).toBeLessThanOrEqual(Date.now() + 180_000);
+  });
+
+  it("la lectura sale de la respuesta del worker: no demora al re-despacho ni al siguiente mensaje", async () => {
+    const pendientes: Array<() => Promise<void>> = [];
+    const { corrida, cartas } = await tardio("whatsapp", false, { despues: (tarea) => void pendientes.push(tarea) });
+    await corrida;
+
+    expect(cartas).not.toHaveBeenCalled();
+    expect(pendientes).toHaveLength(1);
+    await pendientes[0]!();
+    expect(cartas).toHaveBeenCalledTimes(1);
   });
 });

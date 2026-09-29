@@ -261,6 +261,8 @@ export interface Metadatos {
   plazoAgotado?: { veces: number; en: string };
   /** Por qué no pasó `revisarAdjunto`: se guarda igual, pero no va al modelo. */
   descarte?: string;
+  /** Cuándo una corrida tomó la lectura de la carta de este archivo (B24): mientras no venza, otra no la lee. */
+  leyendoCarta?: string;
 }
 
 export const MAX_PAGINAS_PDF = 10;

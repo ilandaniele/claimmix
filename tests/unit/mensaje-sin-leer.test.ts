@@ -42,8 +42,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 vi.setConfig({ testTimeout: 30_000 });
 
-const { mockAudit, mockSelect, mockUpdate, mockAgente, mockMessenger, mockTardio } = vi.hoisted(() => ({
+const { mockAudit, mockSelect, mockUpdate, mockAgente, mockMessenger, mockTardio, mockCartas } = vi.hoisted(() => ({
   mockTardio: vi.fn(),
+  mockCartas: vi.fn(),
   mockAudit: vi.fn(),
   mockSelect: vi.fn(),
   mockUpdate: vi.fn(),
@@ -69,6 +70,9 @@ vi.mock("@/server/confirmations/messenger", async (importOriginal) => ({
 vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
 vi.mock("@/server/cases/mensaje-tardio", () => ({ atenderMensajeTardio: mockTardio }));
+
+// La lectura de las cartas de un tercero (B24) tiene su propio test: acá sólo se ve que se pide.
+vi.mock("@/server/cases/lectura-reclamo", () => ({ atenderCartas: vi.fn(), atenderCartasDeUnTardio: mockCartas }));
 
 vi.mock("@/lib/db/helpers", () => ({
   firstRow: (rows: unknown[]) => rows[0] ?? null,
@@ -170,6 +174,8 @@ describe("un mensaje a un caso que no se puede reabrir", () => {
     // clasifica B3 por su lado, para quien lo atiende.
     expect(mockSelect).toHaveBeenCalledTimes(1);
     expect(mockTardio).toHaveBeenCalledWith({ tenantId: TENANT, caseId: CASE });
+    // Y si trae la carta de un tercero, se la lee para el equipo, con un plazo de invocación.
+    expect(mockCartas).toHaveBeenCalledWith({ tenantId: TENANT, caseId: CASE, hasta: expect.any(Number) });
   });
 
   // La marca la pone el ingreso con el mensaje de la persona. Este despacho

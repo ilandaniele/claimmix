@@ -22,6 +22,7 @@ import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { auditLog, authUsers, cases, claimMessages, tenants, users } from "@/lib/db/schema";
 import { isReservedTestAddress, vedadaParaAlertas } from "@/lib/email/reserved";
 import { isReservedTestNumber } from "@/core/phone/reserved";
+import { nombraCulpaOLey } from "@/core/ai/nombra-culpa";
 import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
@@ -208,14 +209,23 @@ async function recipientsFor(tenantId: string): Promise<string[]> {
   return respaldo;
 }
 
+/**
+ * El resumen lo escribió el modelo con lo que dijo el denunciante: si nombra la
+ * culpa o cita la ley de tránsito, adelanta una opinión que sólo la ficha
+ * muestra, rotulada como orientativa (B18). Se omite la línea, no se corrige.
+ */
+const resumenSinOpinion = (resumen: string | null | undefined) =>
+  resumen && !nombraCulpaOLey(resumen) ? resumen : null;
+
 function renderAlert(input: SpecialistAlertInput, caseUrl: string) {
   const kind = input.claimTypeLabel ? ` de ${input.claimTypeLabel}` : "";
   const subject = `[Urgente] Siniestro${kind} derivado a especialista`;
 
+  const resumen = resumenSinOpinion(input.summary);
   const lines = [
     `Un siniestro${kind} fue clasificado como severidad ${input.severity ?? "alta"} y derivado a un especialista.`,
     "",
-    input.summary ? `Resumen: ${input.summary}` : "",
+    resumen ? `Resumen: ${resumen}` : "",
     `Caso: ${input.caseId}`,
     caseUrl ? `Abrir: ${caseUrl}` : "",
     "",
@@ -274,6 +284,7 @@ export interface MensajeTardioInput {
  */
 export async function avisarMensajeTardio(input: MensajeTardioInput): Promise<void> {
   const clase = t(`tardio.tipo.${input.tipo ?? "sin_clasificar"}` as TranslationKey);
+  const resumen = resumenSinOpinion(input.resumen);
   await avisar({
     caseId: input.caseId,
     tenantId: input.tenantId,
@@ -290,7 +301,7 @@ export async function avisarMensajeTardio(input: MensajeTardioInput): Promise<vo
         t("tardio.aviso.cuerpo"),
         "",
         t("tardio.aviso.quePide").replace("{tipo}", clase),
-        input.resumen ? t("tardio.aviso.resumen").replace("{resumen}", input.resumen) : null,
+        resumen ? t("tardio.aviso.resumen").replace("{resumen}", resumen) : null,
         t("tardio.aviso.caso").replace("{caso}", input.caseId),
         caseUrl ? t("tardio.aviso.abrir").replace("{link}", caseUrl) : null,
       ]

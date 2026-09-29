@@ -95,9 +95,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     return err(new AppError("RATE_LIMITED", "La demo alcanzó su cupo diario. Volvé mañana."));
   }
 
-  let result;
+  let extraido;
   try {
-    result = await extractEmailClaimGemini(
+    extraido = await extractEmailClaimGemini(
       { subject: parsed.data.subject, body: parsed.data.body, memoryHints: [], knownPatterns: [] },
       demoTenantId,
       "demo",
@@ -111,6 +111,9 @@ export async function POST(request: NextRequest): Promise<Response> {
       }, "demo.public_analyze.provider_error");
     return err(new AppError("INTERNAL_ERROR", "No pudimos analizar el reclamo en este momento. Probá de nuevo en unos minutos."));
   }
+
+  // La mecánica del choque y lo leído de los adjuntos son del equipo: esta pantalla es pública.
+  const { mecanica: _mecanica, adjuntos: _adjuntos, ...result } = extraido;
 
   /*
    * Espeja la regla real de derivación (P2): severidad alta o crítica, o

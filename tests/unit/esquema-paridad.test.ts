@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { MecanicaSchema } from "@/core/case/mecanica";
 import {
   AdjuntoLeidoSchema,
   DocumentoLeidoSchema,
@@ -27,6 +28,12 @@ describe("RESPUESTA_JSON_SCHEMA sigue a ExtractedClaimSchema", () => {
     );
   });
 
+  it("la mecánica del relato y la de cada adjunto piden las claves de MecanicaSchema", () => {
+    const claves = orden(Object.keys(MecanicaSchema.shape));
+    expect(orden(raiz.properties.mecanica.required)).toEqual(claves);
+    expect(orden(raiz.properties.adjuntos.items.properties.mecanica.required)).toEqual(claves);
+  });
+
   it("el enum de indicios del esquema es la lista cerrada", () => {
     expect(raiz.properties.fraud_indicators.items.properties.type.enum).toEqual([...TIPOS_DE_INDICIO]);
   });
@@ -46,6 +53,16 @@ describe("lo que el modelo devuelve mal de un adjunto no tira la extracción", (
     });
     expect(r.adjuntos[0]).toMatchObject({ indice: 1, resumen: "", util: true });
     expect(r.adjuntos[0]!.documento).toMatchObject({ patente: null });
+  });
+
+  it("una mecánica mal escrita queda en null en vez de tirar la extracción", () => {
+    expect(ExtractedClaimSchema.parse({ ...base, mecanica: "choqué" }).mecanica).toBeNull();
+    expect(ExtractedClaimSchema.parse(base).mecanica).toBeNull();
+    const r = ExtractedClaimSchema.parse({
+      ...base,
+      adjuntos: [{ indice: 1, resumen: "parte", util: true, documento: null, mecanica: 7 }],
+    });
+    expect(r.adjuntos[0]!.mecanica).toBeNull();
   });
 
   it("un tipo de indicio fuera de la lista no pasa", () => {

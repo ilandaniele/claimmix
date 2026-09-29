@@ -6,3 +6,10 @@ export type MotivoSinLeer = (typeof MOTIVOS_SIN_LEER)[number];
 export function esMotivoSinLeer(m: unknown): m is MotivoSinLeer {
   return (MOTIVOS_SIN_LEER as readonly unknown[]).includes(m);
 }
+
+/**
+ * Lo que volver a probar no arregla: el archivo, o lo que el modelo contesta de
+ * él. Sin cupo, sin presupuesto, en modo de prueba o con el modelo caído, otro
+ * día se puede.
+ */
+export const esDefinitivo = (m: MotivoSinLeer) => m === "archivo" || m === "paginas" || m === "formato";

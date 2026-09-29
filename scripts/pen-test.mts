@@ -338,9 +338,19 @@ async function attackSurface(): Promise<void> {
   const forjada = `cmk_${tenantReal}_${"A".repeat(43)}`;
   const v1 = [
     { nombre: "/api/v1/cases con Bearer basura", url: "/api/v1/cases", clave: "basura" },
-    { nombre: "/api/v1/cases con una clave forjada", url: "/api/v1/cases", clave: forjada },
-    { nombre: "/api/v1/cases/:id ajeno con una clave forjada", url: `/api/v1/cases/${ajeno}`, clave: forjada },
+    ...(soloSuperficie
+      ? []
+      : [
+          { nombre: "/api/v1/cases con una clave forjada", url: "/api/v1/cases", clave: forjada },
+          { nombre: "/api/v1/cases/:id ajeno con una clave forjada", url: `/api/v1/cases/${ajeno}`, clave: forjada },
+        ]),
   ];
+  if (soloSuperficie) {
+    console.log(
+      "  (--solo-superficie: se saltea la clave forjada, que para rechazarse busca el hash en la base; " +
+        "se sigue comprobando en el post-deploy, contra producción.)"
+    );
+  }
   for (const s of v1) {
     const r = await head(`${BASE}${s.url}`, { headers: { Authorization: `Bearer ${s.clave}` } });
     probe(
@@ -597,11 +607,12 @@ function auditAdminGuards(): void {
 
       const key = `${rel}:${verb}`;
       const body = block.split("\nexport ")[0]!;
-      const gate = /requireRole\(\s*\.\.\.\s*(\w+)/.exec(body)?.[1] ?? null;
+      const gate = /(?:requireRole|entrar)\([^)]*?\.\.\.\s*(\w+)/.exec(body)?.[1] ?? null;
 
       // Qué cuenta como candado de admin, en orden de fuerza:
       //   · requireAdmin()               — el guarda dedicado (owner/admin, 403)
       //   · requireRole(...ADMIN_ROLES)  — lo mismo, deletreado
+      //   · entrar(..., ...ADMIN_ROLES)   — lo mismo, con el cupo en paralelo
       //   · isInternalRequest / CRON_SECRET — ruta interna, secreto compartido
       // getSessionContext sólo prueba que HAY sesión, no de qué rol: no alcanza
       // para algo que modifica.

@@ -20,7 +20,6 @@ import { z } from "zod";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { entrar } from "@/lib/api/entrada";
 import { ok, err } from "@/lib/api/respond";
-import type { RoleContext } from "@/lib/auth/require-role";
 import { ADMIN_ROLES } from "@/lib/auth/roles";
 import { coreSyncSettings } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
@@ -96,9 +95,7 @@ async function guardar(ctx: TenantContext, userId: string, cambios: Cambios) {
 }
 
 /** El admin y su cupo, en paralelo; sin cupo, el 429 que hay que devolver. */
-async function puerta(): Promise<RoleContext | Response> {
-  const { ctx, rl } = await entrar("core-sync", RATE_LIMIT_CONFIGS.SYNC_TO_CORE, ...ADMIN_ROLES);
-  if (rl.allowed) return ctx;
+function limitado(rl: { retryAfterSeconds: number }): Response {
   return err(new AppError("RATE_LIMITED"), undefined, { "Retry-After": String(rl.retryAfterSeconds) });
 }
 
@@ -115,8 +112,8 @@ function auditar(ctx: TenantContext, userId: string, event_type: string, payload
 
 export async function PATCH(request: NextRequest) {
   try {
-    const admin = await puerta();
-    if (admin instanceof Response) return admin;
+    const { ctx: admin, rl } = await entrar("core-sync", RATE_LIMIT_CONFIGS.SYNC_TO_CORE, ...ADMIN_ROLES);
+    if (!rl.allowed) return limitado(rl);
     const { user, userRow } = admin;
 
     const parsed = PatchSchema.safeParse(await request.json().catch(() => null));
@@ -142,8 +139,8 @@ export async function PATCH(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const admin = await puerta();
-    if (admin instanceof Response) return admin;
+    const { ctx: admin, rl } = await entrar("core-sync", RATE_LIMIT_CONFIGS.SYNC_TO_CORE, ...ADMIN_ROLES);
+    if (!rl.allowed) return limitado(rl);
     const { user, userRow } = admin;
 
     const parsed = PostSchema.safeParse(await request.json().catch(() => null));

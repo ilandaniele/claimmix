@@ -150,6 +150,11 @@ describe("paginasPdf", () => {
     expect(paginasPdf(pdfConObjStm("/FlateDecode", paginas))).toBe(12);
   });
 
+  it("da null si el diccionario de un stream de objetos se estira para que no lo vea", () => {
+    const paginas = deflateSync(Buffer.from("<</Type /Page>> ".repeat(12)));
+    expect(paginasPdf(pdfConObjStm(" ".repeat(5000) + "/FlateDecode", paginas))).toBeNull();
+  });
+
   it("da null si un stream de objetos viene con un filtro que no abre", () => {
     expect(paginasPdf(pdfConObjStm("/LZWDecode", ascii("<</Type /Page>>")))).toBeNull();
   });

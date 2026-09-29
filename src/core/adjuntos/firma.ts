@@ -111,12 +111,18 @@ function maxCount(texto: string): number {
 /**
  * Las páginas guardadas en streams de objetos (`/Type /ObjStm`), que es donde
  * las ponen los generadores modernos. `null` si alguno no se deja abrir: con
- * otro filtro, con predictor o roto, puede tener adentro cualquier cantidad.
+ * otro filtro, con predictor, roto o con el diccionario estirado más allá de
+ * lo que se mira para atrás, puede tener adentro cualquier cantidad.
  */
-function paginasEnStreams(crudo: string, bytes: Uint8Array): { paginas: number; cuenta: number } | null {
+function paginasEnStreams(
+  crudo: string,
+  texto: string,
+  bytes: Uint8Array
+): { paginas: number; cuenta: number } | null {
   let paginas = 0;
   let cuenta = 0;
   let inflado = 0;
+  let abiertos = 0;
   const re = /(?<!end)stream\r?\n/g;
   for (let m = re.exec(crudo); m; m = re.exec(crudo)) {
     const previo = crudo.slice(Math.max(0, m.index - 4096), m.index);
@@ -129,11 +135,13 @@ function paginasEnStreams(crudo: string, bytes: Uint8Array): { paginas: number; 
       inflateSync(bytes.subarray(re.lastIndex, fin), { maxOutputLength: MAX_INFLADO - inflado }).toString("latin1")
     );
     inflado += abierto.length;
+    abiertos++;
     paginas += abierto.match(RE_PAGINA)?.length ?? 0;
     cuenta = Math.max(cuenta, maxCount(abierto));
     re.lastIndex = fin;
   }
-  return { paginas, cuenta };
+  const marcados = texto.match(/\/Type\s*\/ObjStm\b/g)?.length ?? 0;
+  return abiertos < marcados ? null : { paginas, cuenta };
 }
 
 /**
@@ -158,7 +166,7 @@ export function paginasPdf(bytes: Uint8Array): number | null {
       else if (objeto !== null) objetos.add(objeto);
       else sueltas++;
     }
-    const enStreams = paginasEnStreams(crudo, bytes);
+    const enStreams = paginasEnStreams(crudo, texto, bytes);
     if (enStreams === null) return null;
     const n = Math.max(objetos.size + sueltas + enStreams.paginas, maxCount(texto), enStreams.cuenta);
     return n > 0 ? n : null;

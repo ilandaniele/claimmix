@@ -247,6 +247,20 @@ export const AuditEvent = {
   SPECIALIST_ALERT_RECIPIENTS_CHANGED: "tenant.specialist_alert_recipients_changed",
 
   /**
+   * CORE_SETTINGS_CHANGED: an admin changed the delivery to the insurer's core
+   * system from /configuracion (B5). Payload: booleans only — url_cambiada,
+   * enabled, secreto_generado, clave_rotada, clave_revocada. Never the URL, the
+   * secret or the key.
+   */
+  CORE_SETTINGS_CHANGED: "tenant.core_settings_changed",
+
+  /**
+   * CORE_WEBHOOK_TESTED: an admin sent the synthetic test payload to the
+   * webhook. Payload: { ok, motivo }. No case is involved.
+   */
+  CORE_WEBHOOK_TESTED: "tenant.core_webhook_tested",
+
+  /**
    * CASE_CLOSED_ABANDONED: the claimant never answered and the conversation
    * was closed by the nightly sweep.
    * Payload: { case_id, after_days, reason }.

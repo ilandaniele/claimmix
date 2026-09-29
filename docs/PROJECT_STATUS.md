@@ -3910,6 +3910,22 @@ punto de cada ítem: `docs/AUDITORIA-2026-09.md` §14.
   usan `closed_at`, la fecha de `en_liquidacion` queda en la auditoría); hay
   que aplicarla a mano en staging, QA y producción antes del merge. Sin ella la
   ingesta sigue andando y marcar un estado nuevo da 500 (23514).
+- `feat/entrega-al-core-b5` (B5, en PR a qa, sin mergear): el caso llega a un
+  sistema de verdad. «Enviar al sistema central» manda un webhook firmado
+  (HMAC-SHA256 sobre `t.body`, `Idempotency-Key` = caseId) a la URL que carga
+  un admin en Configuración, y `/api/v1/cases` deja que el Core lea con una
+  clave `cmk_<tenant>_<azar>` (sha256 en la base, 120/min por IP). `/api/v1`
+  pagina por cursor, no por OFFSET, da fechas ISO en UTC, sólo casos reales
+  (sin `_sim` ni remitentes reservados) y con dos minutos de margen tras el
+  último cambio. Envían owner, admin y specialist (`CORE_SYNC_ROLES`). El destino
+  se valida contra SSRF (https, 443, sin IP literal, DNS sólo a direcciones
+  públicas, conexión a la IP validada, sin redirecciones). El secreto va
+  cifrado con la misma clave que los tokens de Gmail. Contrato del receptor en
+  `docs/entrega-al-core/README.md`. La migración 0036 crea
+  `core_sync_settings` con RLS; hay que aplicarla a mano en staging, QA y
+  producción antes del merge, como la 0035. Sin ella el envío queda
+  `sin_configurar` (501, sin botón), `/api/v1` da 401 y Configuración avisa;
+  `--exigir-al-dia` y «Migraciones aplicadas» dan rojo hasta aplicarla.
 - `feat/documentos-y-voz-b1-b7-b8` (B1, B7 y B8 del informe de Clive, sin
   commitear ni mergear). B1: la IA lee PDFs y notas de voz (ogg, opus, mpeg,
   mp3, mp4, x-m4a, aac, wav, x-wav; sin AMR/3GPP), con firma y topes de

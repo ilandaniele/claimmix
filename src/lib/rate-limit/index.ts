@@ -130,6 +130,14 @@ export const RATE_LIMIT_CONFIGS = {
   SYNC_TO_CORE: { limit: 5, windowMs: 60_000 },
 
   /**
+   * CORE_API: 120 por minuto por IP, para /api/v1 (B5).
+   *
+   * Lo pide el sistema de la aseguradora, no una persona: sondea y pagina. Con
+   * `lote` por la misma razón que CASES_API.
+   */
+  CORE_API: { limit: 120, windowMs: 60_000, lote: 5 },
+
+  /**
    * ASISTENTE: 20 por minuto por usuario.
    *
    * Cada pregunta paga al menos una llamada a Gemini, y hasta dos cuando hay

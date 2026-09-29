@@ -17,7 +17,8 @@ export type AmbitoDeCupo =
   | "demo-public"
   | "batch-simulate"
   | "re-analyze"
-  | "whatsapp";
+  | "whatsapp"
+  | "core-api";
 
 export function claveDeCupo(ambito: AmbitoDeCupo, ...partes: string[]): string {
   return [ambito, ...partes.map((p) => p.trim().toLowerCase())].join(":");

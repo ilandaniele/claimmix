@@ -26,7 +26,7 @@
  * "5490000…" según quién lo escriba, y la diferencia es de formato, no de
  * destinatario.
  */
-const RESERVED_PREFIXES = ["5490000"];
+export const RESERVED_PREFIXES = ["5490000"];
 
 /** ¿Este número es de una persona, o lo inventamos nosotros? */
 export function isReservedTestNumber(to: string | null | undefined): boolean {

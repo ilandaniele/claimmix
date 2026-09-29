@@ -17,6 +17,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { neon } from "@neondatabase/serverless";
+import { PERMISOS_QUITADOS } from "./lib/permisos-quitados.mjs";
 
 const url = process.env.DATABASE_URL_APP?.trim();
 if (!url) {
@@ -100,18 +101,15 @@ for (const t of tablas) {
     politicas: number;
   }>;
 
-  // `audit_log` es sólo de alta (0032): ahí lo que falla es TENER UPDATE o DELETE.
-  const soloDeAlta = t.tabla === "audit_log";
-  const falta = [
-    !p.leer && "SELECT",
-    !p.insertar && "INSERT",
-    !soloDeAlta && !p.actualizar && "UPDATE",
-    !soloDeAlta && !p.borrar && "DELETE",
-  ].filter(Boolean) as string[];
-  const sobra = soloDeAlta ? [p.actualizar && "UPDATE", p.borrar && "DELETE"].filter(Boolean) as string[] : [];
+  // Lo quitado a propósito (`permisos-quitados.mjs`) falla al revés: por TENERLO.
+  const quitados: readonly string[] = PERMISOS_QUITADOS[t.tabla as keyof typeof PERMISOS_QUITADOS] ?? [];
+  const tiene = { SELECT: p.leer, INSERT: p.insertar, UPDATE: p.actualizar, DELETE: p.borrar };
+  const privilegios = Object.keys(tiene) as Array<keyof typeof tiene>;
+  const falta = privilegios.filter((x) => !quitados.includes(x) && !tiene[x]);
+  const sobra = privilegios.filter((x) => quitados.includes(x) && tiene[x]);
 
   if (falta.length) faltantes.push(`${t.tabla}: le falta ${falta.join(", ")}`);
-  if (sobra.length) faltantes.push(`${t.tabla}: tiene ${sobra.join(", ")} y es sólo de alta (0032)`);
+  if (sobra.length) faltantes.push(`${t.tabla}: tiene ${sobra.join(", ")} y se le quitó a propósito`);
   if (!t.forzado) sinForzar.push(t.tabla);
   if (p.politicas === 0) sinPolitica.push(t.tabla);
 }
@@ -119,7 +117,8 @@ for (const t of tablas) {
 console.log(`\n▸ ${tablas.length} tabla(s) con columna de inquilino`);
 
 if (faltantes.length === 0) {
-  console.log("   ✓ el rol puede leer, insertar, actualizar y borrar en todas — y en audit_log sólo leer e insertar");
+  const excepciones = Object.entries(PERMISOS_QUITADOS).map(([tabla, sin]) => `${tabla} sin ${sin.join(", ")}`);
+  console.log(`   ✓ el rol puede leer, insertar, actualizar y borrar en todas — salvo ${excepciones.join("; ")}`);
 } else {
   console.log(`   ✗ ${faltantes.length} con permisos incompletos:`);
   for (const f of faltantes) console.log(`      · ${f}`);

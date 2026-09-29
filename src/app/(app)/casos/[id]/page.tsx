@@ -16,7 +16,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { CASE_EDITOR_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
+import { CASE_EDITOR_ROLES, CORE_SYNC_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
 import { puedeTomarElControl, puedeDevolverAlAgente } from "@/core/case/tomar-el-control";
 import type { TenantContext } from "@/data/scope";
 import {
@@ -41,10 +41,10 @@ import {
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
-import { hayClienteDeCoreSync } from "@/server/core-sync/client";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
 import { formatAge, formatDate } from "@/lib/utils";
 import { getT, type TranslationKey } from "@/lib/i18n";
+import { textoDelMotivo } from "@/lib/i18n/motivo-de-core";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { parseEmailClaimFields } from "@/lib/email/claim-parser";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
@@ -211,6 +211,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   const channelLabel = CHANNEL_LABELS[caseRow.channel] ?? caseRow.channel;
 
   const puedeCambiarEstadoCaso = puedeCambiarEstado(me, caseRow.assigned_to);
+  const puedeEnviarAlCore = (CORE_SYNC_ROLES as string[]).includes(me.role);
   const puedeTomarElControlCaso = puedeTomarElControl({
     puedeCambiarEstado: puedeCambiarEstadoCaso,
     plan: me.plan,
@@ -587,42 +588,65 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                   hoy={hoy}
                 />
               </PanelSection>
-
-              {/*
-                * Section D: el envío al sistema del asegurador (AC17).
-                *
-                * El botón sale sólo si hay a quién mandarle. Si no, aparece el
-                * mismo panel, en gris y sin botón: la integración no está
-                * configurada y desde acá no se envía. Quien puede cambiar el
-                * estado ve además la pista a «Entregado por fuera».
-                *
-                * Antes el botón salía siempre y la ruta contestaba que sí:
-                * guardaba un `core_external_id` inventado y dejaba el caso en
-                * `enviado_a_core`. Esconder el botón es la mitad del arreglo;
-                * la otra mitad está en `getCoreSyncClient`, que ahora tira en
-                * vez de devolver el simulador.
-                */}
-              {caseRow.status === "listo_para_core" &&
-                (!hayClienteDeCoreSync() ? (
-                  <PanelSection id="core-sync" titulo={t("case.detail.coreSyncAction")}>
-                    <p className="text-[13.5px] text-slate-500">
-                      {t("case.detail.coreSyncSinConfigurar")}
-                      {/* El botón sólo lo ve quien puede cambiar el estado. */}
-                      {puedeCambiarEstadoCaso && ` ${t("case.detail.coreSyncEntregadoPorFuera")}`}
-                    </p>
-                  </PanelSection>
-                ) : (
-                  <PanelSection id="core-sync" tono="exito" titulo={t("case.detail.coreSyncAction")}>
-                    <p className="mb-4 text-[13.5px] text-emerald-700">
-                      {t("case.detail.coreReadyDescription")}
-                    </p>
-                    <CoreSyncButton
-                      caseId={caseRow.id}
-                      currentStatus={caseRow.status}
-                    />
-                  </PanelSection>
-                ))}
             </>
+          )}
+
+          {/*
+            * Section D: el envío al sistema del asegurador (AC17), para todos
+            * los canales: vivía en el bloque de correo y un caso de WhatsApp no
+            * lo veía.
+            *
+            * El botón sale sólo si hay a quién mandarle. Si no, aparece el
+            * mismo panel, en gris y sin botón: la integración no está
+            * configurada y desde acá no se envía. Quien puede cambiar el
+            * estado ve además la pista a «Entregado por fuera».
+            *
+            * Antes el botón salía siempre y la ruta contestaba que sí:
+            * guardaba un `core_external_id` inventado y dejaba el caso en
+            * `enviado_a_core`. Esconder el botón es la mitad del arreglo;
+            * la otra mitad está en `getCoreSyncClient`, que ahora tira en
+            * vez de devolver el simulador.
+            */}
+          {/* En `error_core` el mismo botón reintenta (force), si hay a quién mandarle. */}
+          {(caseRow.status === "listo_para_core" || (caseRow.status === "error_core" && acciones.hayCore)) &&
+            (!acciones.hayCore ? (
+              <PanelSection id="core-sync" titulo={t("case.detail.coreSyncAction")}>
+                <p className="text-[13.5px] text-slate-500">
+                  {t(acciones.casoDePrueba ? "case.detail.coreSyncCasoDePrueba" : "case.detail.coreSyncSinConfigurar")}
+                  {/* El botón sólo lo ve quien puede cambiar el estado. */}
+                  {puedeCambiarEstadoCaso && ` ${t("case.detail.coreSyncEntregadoPorFuera")}`}
+                </p>
+              </PanelSection>
+            ) : (
+              <PanelSection id="core-sync" tono="exito" titulo={t("case.detail.coreSyncAction")}>
+                <p className="mb-4 text-[13.5px] text-emerald-700">
+                  {t(caseRow.status === "error_core" ? "case.detail.coreSyncReintentar" : "case.detail.coreReadyDescription")}
+                  {caseRow.status === "error_core" && ` ${textoDelMotivo(t, caseRow.core_error_message)}`}
+                </p>
+                {/* La ruta admite CORE_SYNC_ROLES: a otro rol el botón le daría 403. */}
+                {puedeEnviarAlCore && (
+                  <CoreSyncButton
+                    caseId={caseRow.id}
+                    currentStatus={caseRow.status}
+                  />
+                )}
+              </PanelSection>
+            ))}
+          {/* Lo que devolvió el Core queda a la vista: el botón desaparece al refrescar la ficha. */}
+          {caseRow.status === "enviado_a_core" && (
+            <PanelSection id="core-sync" tono="exito" titulo={t("case.detail.coreSyncAction")}>
+              <p className="mb-4 text-[13.5px] text-emerald-700">{t("case.detail.coreSyncSuccess")}</p>
+              <FieldGrid>
+                {caseRow.core_sent_at && (
+                  <Field label={t("case.detail.coreSentAt")}>{formatDate(caseRow.core_sent_at, locale)}</Field>
+                )}
+                {caseRow.core_external_id && (
+                  <Field label={t("case.detail.coreExternalId")}>
+                    <span className="font-mono">{caseRow.core_external_id}</span>
+                  </Field>
+                )}
+              </FieldGrid>
+            </PanelSection>
           )}
         </div>
 

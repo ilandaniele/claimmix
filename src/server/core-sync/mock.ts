@@ -2,10 +2,12 @@
  * Mock CoreSyncClient — simulates core system integration deterministically.
  *
  * AC17: Used by POST /api/cases/:id/sync-to-core only when CORE_SYNC_MODE=mock
- *       (tests and the demo). Unset, there is no client: see `modoDeCoreSync`.
+ *       (tests and the demo). Otherwise the tenant's webhook in
+ *       `core_sync_settings` gets the case (`RealCoreSyncClient`), or, with the
+ *       delivery off or incomplete, there is no client: see `getCoreSyncClient`.
  *
- * IC7: No real external API. This mock simulates:
- *   - Failure: caseId ends with '0' → returns success=false, errorMessage='Core timeout'.
+ * This mock never leaves the process. It simulates:
+ *   - Failure: caseId ends with '0' → returns ok=false, motivo='timeout'.
  *   - Success: all other cases → returns externalId = 'CORE-' + caseId.slice(0,8).toUpperCase().
  *
  * The deterministic failure rule allows integration tests to reliably test
@@ -23,8 +25,8 @@ const MOCK_DELAY_MS = 10;
 /** Prefix for generated external IDs. */
 const EXTERNAL_ID_PREFIX = "CORE-";
 
-/** Error message returned for simulated failures. */
-const MOCK_FAILURE_MESSAGE = "Core timeout";
+/** Motivo de la falla simulada: el mismo código que da el cliente real. */
+const MOCK_FAILURE_MOTIVO = "timeout";
 
 // ── MockCoreSyncClient ────────────────────────────────────────────────────────
 
@@ -48,11 +50,7 @@ export class MockCoreSyncClient implements ICoreSyncClient {
       logger.info({
         case_id: caseId,
       }, "core_sync.mock_failure");
-      return {
-        externalId: "",
-        success: false,
-        errorMessage: MOCK_FAILURE_MESSAGE,
-      };
+      return { ok: false, motivo: MOCK_FAILURE_MOTIVO };
     }
 
     // Success path: generate a deterministic external ID.
@@ -64,10 +62,7 @@ export class MockCoreSyncClient implements ICoreSyncClient {
         external_id: externalId,
       }, "core_sync.mock_success");
 
-    return {
-      externalId,
-      success: true,
-    };
+    return { ok: true, externalId };
   }
 }
 

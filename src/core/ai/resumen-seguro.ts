@@ -8,7 +8,8 @@
  * ficha.
  *
  * Nacieron en el asistente (G12, `src/server/asistente/responder.ts`) y ahora
- * las usa también el worker para el resumen del caso y el de cada adjunto.
+ * las usa también el worker para el resumen del caso y el de cada adjunto, y el
+ * clasificador del mensaje tardío (B3).
  */
 
 import { RE_CENTINELA } from "@/core/ai/sin-centinelas";

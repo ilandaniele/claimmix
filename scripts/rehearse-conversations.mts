@@ -44,7 +44,9 @@ import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { esPlanPro } from "@/core/billing/plan-pro";
 import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 import { AppError } from "@/lib/errors";
+import { errorCode } from "@/lib/observability/error-code";
 import type { PatchActor } from "@/server/cases/patch";
+import type { TipoMensajeTardio } from "@/core/case/mensaje-tardio";
 import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
 import { pideAlgo } from "./lib/pide-algo.mjs";
 import { confirmaLoDicho, formaDePedirLaHora } from "./lib/ensayo-confirmaciones.mjs";
@@ -62,6 +64,7 @@ if (!process.env.DATABASE_URL || !TENANT_ID) {
 const { createWhatsAppIntakeAndRunAgent } = await import("@/server/agents/intake-agent");
 const { ingestInboundEmail } = await import("@/server/email/inbound-email");
 const { runIntakeAgent } = await import("@/server/agents/intake-agent");
+const { recordarCaso } = await import("@/server/confirmations/recordatorios");
 const { hablaDeHeridos, respuestaAHeridos } = await import("@/core/case/heridos-supuestos");
 const { db } = await import("@/lib/db");
 const { CONTACT_DOC_KEYS } = await import("@/server/cases/documents");
@@ -184,6 +187,12 @@ interface TurnDicho {
      */
     paraResponder?: boolean;
     /**
+     * Qué pide el mensaje que quedó «Para responder» (B3), como lo clasificó el
+     * worker. `sin_clasificar` es un mensaje reservado sin clase: el modelo
+     * falló o no se llamó.
+     */
+    tardio?: Tardio;
+    /**
      * Claves que el mensaje NO tiene que haber pedido.
      *
      * Sobre `outbound_messages.asked_keys`, que es la lista que el propio
@@ -222,6 +231,8 @@ interface TurnDicho {
   };
 }
 
+type Tardio = TipoMensajeTardio | "sin_clasificar";
+
 /**
  * Lo hace una persona desde la pantalla, vía `patchCase`, no por WhatsApp: E24
  * y su espejo. Necesita un actor de verdad (owner/admin, Plan Pro).
@@ -231,7 +242,18 @@ interface TurnAccion {
   expect?: { status?: string; paraResponder?: boolean };
 }
 
-type Turn = TurnDicho | TurnAccion;
+/**
+ * El recordatorio de lo que falta (B4), como si hubieran pasado `horasDespues`
+ * horas. Sólo `recordarCaso` sobre el caso del escenario, con horas propias:
+ * nunca el barrido global ni `recordatorio_horas` del tenant.
+ */
+interface TurnRecordatorio {
+  accion: "recordatorio";
+  horasDespues: number;
+  expect?: { replies?: number; status?: string; recordatorio?: "enviado" | "salteado" | null };
+}
+
+type Turn = TurnDicho | TurnAccion | TurnRecordatorio;
 
 interface Scenario {
   id: string;
@@ -350,6 +372,58 @@ const SCENARIOS: Scenario[] = [
       {
         say: "¿Me pueden llamar?",
         expect: { replies: 0, status: "requiere_especialista", paraResponder: true },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
+  {
+    id: "escribe-tarde-pregunta-como-va",
+    what: "Derivado, pregunta cómo va: el agente calla, queda «Para responder» y el mensaje se clasifica como consulta de estado (B3)",
+    turns: [
+      {
+        say: "Se prendió fuego el auto en la ruta 3, mi esposo está internado con quemaduras. Soy Clara Méndez, póliza POL-5520-B.",
+        expect: { replies: 1, status: "requiere_especialista" },
+      },
+      {
+        say: "¿Cómo va mi denuncia?",
+        expect: { replies: 0, status: "requiere_especialista", paraResponder: true, tardio: "consulta_estado" },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
+  {
+    id: "tardio-siniestro-nuevo",
+    what: "Derivado, cuenta otro choque en otra fecha: no abre otro caso, queda «Para responder» como siniestro nuevo (B3)",
+    turns: [
+      {
+        say: "Se incendió la moto en la ruta 22, mi hermano está internado con quemaduras. Soy Pablo Ortiz, póliza POL-6610-E.",
+        expect: { replies: 1, status: "requiere_especialista" },
+      },
+      {
+        say: "Otra cosa: el sábado 12 de septiembre me chocaron de atrás con el Corsa en Punta Alta. Es otro choque, no tiene nada que ver con el incendio.",
+        expect: { replies: 0, status: "requiere_especialista", paraResponder: true, tardio: "siniestro_nuevo" },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
+  {
+    id: "mail-tardio-pregunta-como-va",
+    channel: "email",
+    what: "Por mail, derivado, contesta en el hilo cómo va: el agente calla, queda «Para responder» y se clasifica (B3)",
+    turns: [
+      {
+        say: [
+          "Se incendió la camioneta en la ruta 51 y mi padre está internado con quemaduras.",
+          "Soy Nora Vidal, póliza POL-3390-G.",
+        ].join("\n"),
+        expect: { replies: 1, status: "requiere_especialista" },
+      },
+      {
+        say: "Hola, ¿cómo va mi denuncia? No tuve novedades.",
+        expect: { replies: 0, status: "requiere_especialista", paraResponder: true, tardio: "consulta_estado" },
       },
     ],
     finally: { status: "requiere_especialista" },
@@ -616,6 +690,27 @@ const SCENARIOS: Scenario[] = [
       docsDeclined: ["parte_amistoso"],
       knows: ["policy_number", "full_name"],
     },
+  },
+
+  {
+    id: "recordatorio-por-mail",
+    channel: "email",
+    what: "Queda esperando datos y no contesta: a las 48 h y a los 5 días se le repite el pedido, una sola vez cada uno (B4)",
+    /*
+     * El reloj se adelanta pasándole `ahora` a `recordarCaso` sobre este caso
+     * solo, con horas propias: el ensayo nunca llama al barrido global ni
+     * prende los recordatorios del tenant.
+     */
+    turns: [
+      {
+        say: "Buenas, ayer me chocaron de atrás en Bahía Blanca. ¿Qué tengo que mandarles?",
+        expect: { replies: 1, status: "info_faltante" },
+      },
+      { accion: "recordatorio", horasDespues: 49, expect: { replies: 1, status: "info_faltante", recordatorio: "enviado" } },
+      { accion: "recordatorio", horasDespues: 49, expect: { replies: 0, status: "info_faltante", recordatorio: null } },
+      { accion: "recordatorio", horasDespues: 121, expect: { replies: 1, status: "info_faltante", recordatorio: "enviado" } },
+    ],
+    finally: { status: "info_faltante" },
   },
 
   {
@@ -1101,16 +1196,21 @@ async function actorParaAcciones(): Promise<PatchActor | null> {
   return row ?? null;
 }
 
-/** Estado y «Para responder» después de un turno o de un turno de acción: el mismo chequeo. */
+/** Estado, «Para responder» y el mensaje tardío después de un turno o de un turno de acción: el mismo chequeo. */
 async function checkStatusYParaResponder(
   scenarioId: string,
   turn: number,
   caseId: string,
-  want: { status?: string; paraResponder?: boolean } | undefined
+  want: { status?: string; paraResponder?: boolean; tardio?: Tardio } | undefined
 ): Promise<void> {
-  if (!want || (!want.status && want.paraResponder === undefined)) return;
+  if (!want || (!want.status && want.paraResponder === undefined && !want.tardio)) return;
   const row = await db
-    .select({ status: cases.status, paraResponderDesde: cases.para_responder_desde })
+    .select({
+      status: cases.status,
+      paraResponderDesde: cases.para_responder_desde,
+      tardioDe: cases.mensaje_tardio_de,
+      tardioTipo: cases.mensaje_tardio_tipo,
+    })
     .from(cases)
     .where(eq(cases.id, caseId));
   if (want.status && row[0]?.status !== want.status) {
@@ -1126,6 +1226,12 @@ async function checkStatusYParaResponder(
       want.paraResponder ? "no quedó «Para responder»" : "quedó «Para responder» y no debía",
       "para-responder"
     );
+  }
+  if (want.tardio) {
+    const tardio = row[0]?.tardioDe == null ? null : (row[0].tardioTipo ?? "sin_clasificar");
+    if (tardio !== want.tardio) {
+      note(scenarioId, turn, `mensaje tardío ${tardio ?? "sin reservar"}, esperaba ${want.tardio}`, "tardio");
+    }
   }
 }
 
@@ -1167,6 +1273,56 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
   try {
 
     for (const [i, turn] of scenario.turns.entries()) {
+      if ("horasDespues" in turn) {
+        console.log(`\n   [${i + 1}] ⏰ recordatorio a +${turn.horasDespues} h`);
+        if (!caseId) {
+          note(scenario.id, i + 1, "recordatorio sin caso previo: ningún turno anterior lo creó", "recordatorio");
+          continue;
+        }
+        const caso: string = caseId;
+        const updatedAt = async () =>
+          (await db.select({ u: cases.updated_at }).from(cases).where(eq(cases.id, caso)))[0]?.u;
+        const antes = await updatedAt();
+        let resultado: Awaited<ReturnType<typeof recordarCaso>>;
+        try {
+          resultado = await recordarCaso(caso, {
+            tenantId: TENANT_ID!,
+            ahora: new Date(Date.now() + turn.horasDespues * 3_600_000),
+            horas: [48, 120],
+          });
+        } catch (err) {
+          // 42703/42P01: falta aplicar la 0039 en esta base, no es un defecto.
+          const code = errorCode((err as { cause?: unknown }).cause ?? err);
+          note(scenario.id, i + 1, `recordarCaso falló (${code})`, "recordatorio");
+          continue;
+        }
+        const said = await repliesSince(caso, seen);
+        seen += said.length;
+        if (said.length > 0) ultimo = readable(said[said.length - 1].body);
+        if (said.length === 0) console.log("       🤖 (silencio)");
+        for (const reply of said) {
+          console.log(`       🤖 ${readable(reply.body).replace(/\n/g, "\n          ")}`);
+        }
+
+        const want = turn.expect;
+        if (want?.replies !== undefined && said.length !== want.replies) {
+          note(scenario.id, i + 1, `esperaba ${want.replies} respuesta(s), hubo ${said.length}`, "cantidad-de-respuestas");
+        }
+        if (want?.recordatorio !== undefined && resultado !== want.recordatorio) {
+          note(scenario.id, i + 1, `recordatorio ${resultado}, esperaba ${want.recordatorio}`, "recordatorio");
+        }
+        // Repite el pedido: las mismas claves que el último.
+        const mismas = (claves: string[]) =>
+          claves.length === pedidoAnterior.length && claves.every((k) => pedidoAnterior.includes(k));
+        if (said.some((r) => !mismas(r.askedKeys))) {
+          note(scenario.id, i + 1, "el recordatorio no repite las claves del último pedido", "recordatorio-claves");
+        }
+        if ((await updatedAt()) !== antes) {
+          note(scenario.id, i + 1, "el recordatorio tocó updated_at del caso", "recordatorio-updated-at");
+        }
+        await checkStatusYParaResponder(scenario.id, i + 1, caso, want);
+        continue;
+      }
       if ("accion" in turn) {
         console.log(`\n   [${i + 1}] 🧑‍💼 ${turn.accion}`);
         if (!caseId) {
@@ -1839,7 +1995,7 @@ await sweepOldRehearsalCases();
 
 // Los turnos de acción los ejecuta una persona de verdad (owner/admin, Plan
 // Pro): sin uno, el escenario se reporta sin ensayar en vez de fallar rojo.
-const requiereActor = (s: Scenario) => s.turns.some((t) => "accion" in t);
+const requiereActor = (s: Scenario) => s.turns.some((t) => "accion" in t && t.accion !== "recordatorio");
 const actor = chosen.some(requiereActor) ? await actorParaAcciones() : null;
 const actorValido = actor !== null && esPlanPro(actor.plan);
 if (chosen.some(requiereActor)) {

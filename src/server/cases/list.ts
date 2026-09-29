@@ -278,6 +278,9 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
       is_claim: cases.is_claim,
       requires_specialist: cases.requires_specialist,
       para_responder_desde: cases.para_responder_desde,
+      // Qué pide el último mensaje (B3): sólo mientras el caso espera respuesta.
+      mensaje_tardio_tipo: sql<string | null>`case when ${cases.para_responder_desde} is not null then ${cases.mensaje_tardio_tipo} end`,
+      mensaje_tardio_resumen: sql<string | null>`case when ${cases.para_responder_desde} is not null then ${cases.mensaje_tardio_resumen} end`,
       assigned_name: sql<string | null>`(select u.full_name from users u where u.id = ${cases.assigned_to})`,
       /*
        * Seis columnas que este listado devolvía y nadie leía.

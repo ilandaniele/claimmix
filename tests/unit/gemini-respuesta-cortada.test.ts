@@ -48,7 +48,7 @@ function respuesta(finishReason: string | undefined, texto: string) {
 }
 
 beforeEach(() => {
-  for (const k of ["GEMINI_TRANSPORT", "GEMINI_API_KEY", "GOOGLE_CLOUD_PROJECT"]) {
+  for (const k of ["GEMINI_TRANSPORT", "GEMINI_API_KEY", "GOOGLE_CLOUD_PROJECT", "GEMINI_MAX_RETRIES"]) {
     guardadas[k] = process.env[k];
   }
   // Por AI Studio, que es el camino que no necesita cuenta de servicio.
@@ -198,5 +198,122 @@ describe("el reintento dice qué salió mal", () => {
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("was invalid JSON");
     expect(prompts[1]).not.toContain("exceeded the length limit");
+  });
+});
+
+/**
+ * Y el reintento que pisaba la causa.
+ *
+ * Si el primer intento moría por un 429 (o por la red) y el segundo por otra
+ * cosa —un MAX_TOKENS, un 400—, el error final se armaba sólo con el segundo.
+ * `esPasajero` daba falso, el worker escalaba el caso con `provider_error` y la
+ * persona esperaba a que alguien tocara «Re-analizar», cuando lo que hubo fue
+ * un cupo agotado que se levanta solo. Además el segundo intento le decía «tu
+ * respuesta anterior fue JSON inválido» a un modelo que no había contestado.
+ */
+describe("una falla pasajera del primer intento no se pierde", () => {
+  const http429 = () =>
+    ({
+      ok: false,
+      status: 429,
+      headers: new Headers(),
+      json: async () => ({ error: { status: "RESOURCE_EXHAUSTED", message: "cupo" } }),
+    }) as unknown as Response;
+  const http400 = () =>
+    ({
+      ok: false,
+      status: 400,
+      headers: new Headers(),
+      json: async () => ({ error: { status: "INVALID_ARGUMENT", message: "pedido roto" } }),
+    }) as unknown as Response;
+  const cortada = () => respuesta("MAX_TOKENS", '{"is_claim":tr');
+  const bien = () => respuesta("STOP", '{"is_claim":true,"fields":[]}');
+  const sinRed = (): Response => {
+    throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
+  };
+
+  beforeEach(() => {
+    // Sin reintentos de transporte: cada llamada a Gemini es un intento del extractor.
+    process.env.GEMINI_MAX_RETRIES = "0";
+  });
+
+  /** Una respuesta por llamada, en orden, y los prompts de sistema que llegaron. */
+  function guion(pasos: Array<() => Response>) {
+    const prompts: string[] = [];
+    globalThis.fetch = vi.fn(async (_url: unknown, init: unknown) => {
+      const body = JSON.parse((init as { body: string }).body);
+      prompts.push(body.systemInstruction?.parts?.[0]?.text ?? "");
+      return pasos[Math.min(prompts.length - 1, pasos.length - 1)]();
+    }) as unknown as typeof fetch;
+    return prompts;
+  }
+
+  async function falla() {
+    const { extractEmailClaimGemini, esPasajero, errMeta } = await import("@/server/ai/gemini-extractor");
+    const err = await extractEmailClaimGemini({
+      subject: "choque",
+      body: "Tuve un choque ayer.",
+      memoryHints: [],
+      knownPatterns: [],
+    }).then(
+      () => {
+        throw new Error("tendría que haber fallado");
+      },
+      (e: unknown) => e
+    );
+    return { err, esPasajero, errMeta };
+  }
+
+  it("un 429 y después un MAX_TOKENS sigue siendo un 429", async () => {
+    guion([http429, cortada]);
+    const { err, esPasajero, errMeta } = await falla();
+
+    expect(esPasajero(err)).toBe(true);
+    expect(errMeta(err).status).toBe(429);
+  });
+
+  it("un 429 y después la red caída sigue siendo pasajero", async () => {
+    guion([http429, sinRed]);
+    const { err, esPasajero, errMeta } = await falla();
+
+    expect(esPasajero(err)).toBe(true);
+    expect(errMeta(err).status).toBe(429);
+  });
+
+  it("la red caída en los dos intentos es pasajero", async () => {
+    guion([sinRed, sinRed]);
+    const { err, esPasajero } = await falla();
+
+    expect(esPasajero(err)).toBe(true);
+  });
+
+  it("control: un 400 y después un MAX_TOKENS escala", async () => {
+    guion([http400, cortada]);
+    const { err, esPasajero } = await falla();
+
+    expect(esPasajero(err)).toBe(false);
+  });
+
+  it("control: MAX_TOKENS en los dos intentos escala", async () => {
+    guion([cortada, cortada]);
+    const { err, esPasajero } = await falla();
+
+    expect(esPasajero(err)).toBe(false);
+  });
+
+  it("tras un 429 el reintento va con el prompt limpio, sin lo del JSON inválido", async () => {
+    const prompts = guion([http429, bien]);
+
+    const { extractEmailClaimGemini } = await import("@/server/ai/gemini-extractor");
+    await extractEmailClaimGemini({
+      subject: "choque",
+      body: "Tuve un choque ayer.",
+      memoryHints: [],
+      knownPatterns: [],
+    });
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).not.toContain("invalid JSON");
+    expect(prompts[1]).toBe(prompts[0]);
   });
 });

@@ -150,3 +150,68 @@ describe("PATCH /api/admin/alertas — permisos", () => {
     expect(mockAudit).not.toHaveBeenCalled();
   });
 });
+
+describe("PATCH /api/admin/alertas — recordatorios (B4)", () => {
+  it("acepta recordatorio_horas válido y lo guarda en el mismo UPDATE que la lista", async () => {
+    const res = await PATCH(request(JSON.stringify({ emails: ["a@x.com"], recordatorio_horas: [48, 120] })));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ emails: ["a@x.com"], recordatorio_horas: [48, 120] });
+    expect(mockEnTenant).toHaveBeenCalledOnce();
+    expect(grabado?.v).toEqual({ specialist_alert_emails: ["a@x.com"], recordatorio_horas: [48, 120] });
+  });
+
+  it("apagar es guardar la lista vacía", async () => {
+    await PATCH(request(JSON.stringify({ emails: [], recordatorio_horas: [] })));
+
+    expect(grabado?.v).toEqual({ specialist_alert_emails: [], recordatorio_horas: [] });
+  });
+
+  it("sin recordatorio_horas no lo toca", async () => {
+    await PATCH(request(JSON.stringify({ emails: ["a@x.com"] })));
+
+    expect(grabado?.v).not.toHaveProperty("recordatorio_horas");
+  });
+
+  it.each([
+    ["más de dos", [48, 120, 240]],
+    ["menos de 24", [12]],
+    ["no ascendente", [120, 48]],
+    ["hueco menor a 24", [48, 60]],
+    ["no número", ["48"]],
+  ])("da 400 con horas inválidas (%s)", async (_nombre, horas) => {
+    const res = await PATCH(request(JSON.stringify({ emails: [], recordatorio_horas: horas })));
+
+    expect(res.status).toBe(400);
+    expect(mockEnTenant).not.toHaveBeenCalled();
+  });
+
+  it("el tenant sale de la sesión aunque el body traiga otro", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+
+    await PATCH(request(JSON.stringify({ emails: [], recordatorio_horas: [48], tenant_id: "otro" })));
+
+    expect(mockEnTenant.mock.calls[0][0]).toEqual({ tenantId: "tenant-1" });
+    const compilado = new PgDialect().sqlToQuery(grabado?.c as never);
+    expect(compilado.params).toContain("tenant-1");
+    expect(compilado.params).not.toContain("otro");
+  });
+
+  it("un rol no admin recibe 403 y no escribe", async () => {
+    mockRequireAdmin.mockRejectedValue(new AppError("FORBIDDEN_ROLE"));
+
+    const res = await PATCH(request(JSON.stringify({ emails: [], recordatorio_horas: [48] })));
+
+    expect(res.status).toBe(403);
+    expect(mockEnTenant).not.toHaveBeenCalled();
+  });
+
+  it("sin la 0039, el mensaje nombra esa migración", async () => {
+    fallaConError = { code: "42703" };
+
+    const res = await PATCH(request(JSON.stringify({ emails: [], recordatorio_horas: [48] })));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("0039");
+  });
+});

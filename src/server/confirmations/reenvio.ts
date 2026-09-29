@@ -30,7 +30,7 @@ import { puedeCambiarEstado } from "@/lib/auth/roles";
 import { consultaDelPedido } from "@/server/confirmations/ultimo-pedido";
 import { messengerFor } from "@/server/confirmations/messenger";
 import { vencimientoDeLaVentana } from "@/core/whatsapp/puede-responder";
-import { estadoDePlantilla } from "@/server/whatsapp/cloud-api";
+import { estadoDePlantilla, type EstadoDePlantilla } from "@/server/whatsapp/cloud-api";
 import { PLANTILLA_REABRIR } from "@/core/mensajes/reabrir-denuncia";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
@@ -319,13 +319,14 @@ const DIEZ_MINUTOS_MS = 10 * 60 * 1000;
  * `plantilla` sólo importa cuando la ventana de 24 h ya cerró: `aprobada` deja
  * seguir por la plantilla de Meta, `pendiente` corta con un motivo distinto de
  * `ventana_cerrada` (para no confundir «no hay plantilla» con «nunca la
- * pedimos»), y `no_disponible` es el resultado de hoy.
+ * pedimos»), `sin_respuesta` corta con su propio motivo porque es pasajero, y
+ * `no_disponible` es el resultado de hoy.
  */
 export function decidirReenvio(
   d: DatosDelReenvio,
   ahora: Date,
   reabrir: boolean,
-  plantilla: "aprobada" | "pendiente" | "no_disponible" = "no_disponible"
+  plantilla: EstadoDePlantilla = "no_disponible"
 ): DecisionDelReenvio {
   const caso = d.caso;
   if (!caso) return { ok: false, motivo: "estado" };
@@ -352,6 +353,8 @@ export function decidirReenvio(
         porPlantilla = true;
       } else if (plantilla === "pendiente") {
         return { ok: false, motivo: "plantilla_sin_aprobar" };
+      } else if (plantilla === "sin_respuesta") {
+        return { ok: false, motivo: "plantilla_sin_respuesta" };
       } else {
         return { ok: false, motivo: "ventana_cerrada" };
       }
@@ -391,6 +394,33 @@ export async function decidirConPlantilla(
   const primera = decidirReenvio(d, ahora, reabrir);
   if (primera.ok || primera.motivo !== "ventana_cerrada") return primera;
   return decidirReenvio(d, ahora, reabrir, await estadoDePlantilla(PLANTILLA_REABRIR.nombre, PLANTILLA_REABRIR.idioma));
+}
+
+/**
+ * Compone y despacha el pedido; la fila de outbound la escribe el mensajero.
+ * Nunca toca `cases`: el reenvío manual y el recordatorio (B4) deciden eso
+ * cada uno por su lado. Nunca tira: un envío que falla queda registrado
+ * adentro y vuelve como `false`.
+ */
+export async function enviarPedido(
+  caso: { id: string; channel: string },
+  tenantId: string,
+  decision: Extract<DecisionDelReenvio, { ok: true }>
+): Promise<boolean> {
+  return messengerFor(caso.channel).send({
+    caseId: caso.id,
+    tenantId,
+    to: decision.to,
+    template: "missing_information_request",
+    data: {
+      caseId: caso.id,
+      missingFields: decision.claves,
+      knownValues: decision.conocidos,
+      claimantName: decision.claimantName,
+      isFollowUp: true,
+      ...(decision.porPlantilla ? { porPlantilla: true } : {}),
+    },
+  });
 }
 
 export type ResultadoDelReenvio =
@@ -488,21 +518,7 @@ export async function reenviarPedido(
   // Cero filas: el caso cambió entre la lectura y la escritura.
   if (!filaEscrita) return { ok: false, motivo: "estado" };
 
-  // Nunca tira: un envío que falla queda registrado adentro, no acá.
-  await messengerFor(datos.caso.channel).send({
-    caseId,
-    tenantId: ctx.userRow.tenant_id,
-    to: decision.to,
-    template: "missing_information_request",
-    data: {
-      caseId,
-      missingFields: decision.claves,
-      knownValues: decision.conocidos,
-      claimantName: decision.claimantName,
-      isFollowUp: true,
-      ...(decision.porPlantilla ? { porPlantilla: true } : {}),
-    },
-  });
+  await enviarPedido(datos.caso, ctx.userRow.tenant_id, decision);
 
   await writeAuditLog({
     tenant_id: ctx.userRow.tenant_id,

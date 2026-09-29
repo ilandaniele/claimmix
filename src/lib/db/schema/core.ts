@@ -61,6 +61,9 @@ export const tenants = pgTable("tenants", {
   trial_ends_at: timestamp("trial_ends_at", { withTimezone: true, mode: "string" }),
   activated_at: timestamp("activated_at", { withTimezone: true, mode: "string" }),
   specialist_alert_emails: text("specialist_alert_emails").array().notNull().default(sql`'{}'::text[]`),
+  // Horas sin respuesta a las que se repite el pedido de lo que falta; vacío =
+  // apagado (migración 0039).
+  recordatorio_horas: integer("recordatorio_horas").array().notNull().default(sql`'{}'::integer[]`),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
@@ -205,6 +208,14 @@ export const cases = pgTable("cases", {
     withTimezone: true,
     mode: "string",
   }),
+  // Qué pidió ese mensaje tardío, clasificado por el worker (migración 0038).
+  mensaje_tardio_de: uuid("mensaje_tardio_de"),
+  mensaje_tardio_tipo: text("mensaje_tardio_tipo"),
+  mensaje_tardio_resumen: text("mensaje_tardio_resumen"),
+  mensaje_tardio_reservado_en: timestamp("mensaje_tardio_reservado_en", {
+    withTimezone: true,
+    mode: "string",
+  }),
 });
 
 export const rawMessages = pgTable("raw_messages", {
@@ -263,6 +274,28 @@ export const missingDocs = pgTable("missing_docs", {
   /** What they said, so an analyst can judge whether to insist. */
   declined_note: text("declined_note"),
 });
+
+/**
+ * Cada recordatorio o aviso de cierre que el barrido ya decidió (0039). La
+ * clave primaria es la idempotencia: se inserta ANTES de mandar, y el que no
+ * inserta no manda. Sin UPDATE ni DELETE para `claimmix_app`.
+ */
+export const caseRecordatorios = pgTable(
+  "case_recordatorios",
+  {
+    case_id: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    tenant_id: uuid("tenant_id").notNull(),
+    ancla: timestamp("ancla", { withTimezone: true, mode: "string" }).notNull(),
+    etapa: smallint("etapa").notNull(),
+    resultado: text("resultado").notNull(),
+    created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.case_id, t.ancla, t.etapa] })],
+);
 
 export const outboundMessages = pgTable("outbound_messages", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),

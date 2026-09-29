@@ -165,6 +165,20 @@ export const RATE_LIMIT_CONFIGS = {
    * ventanas puede pasar 40; la cubeta lleva el teléfono hasheado.
    */
   WHATSAPP_POR_REMITENTE: { limit: 20, windowMs: 10 * 60_000 },
+
+  /**
+   * AVISO_TARDIO_POR_CASO: 3 correos a los especialistas por día y por caso.
+   * Cada mensaje tardío avisa una vez; sin tope, quien escribe veinte veces a
+   * un caso cerrado le manda veinte correos a la guardia.
+   */
+  AVISO_TARDIO_POR_CASO: { limit: 3, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * CLASIFICACION_TARDIA_POR_CASO: 10 llamadas al modelo por día y por caso.
+   * El tope del aviso no frena la clasificación, que va antes: sin esto, quien
+   * escribe cien veces a un caso cerrado gasta el presupuesto de IA del día.
+   */
+  CLASIFICACION_TARDIA_POR_CASO: { limit: 10, windowMs: 24 * 60 * 60_000 },
 } as const;
 
 /**

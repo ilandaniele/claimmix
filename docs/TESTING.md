@@ -55,7 +55,7 @@ de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
 
 ### 2. `pnpm rehearse` — minutos, gasta tokens
 
-Dieciocho denuncias enteras, de punta a punta, contra el mismo código, la misma base
+Veintidós denuncias enteras, de punta a punta, contra el mismo código, la misma base
 y el mismo modelo que producción. Por los canales simulados: en los dos el
 mensajero redacta la respuesta exactamente como lo haría; WhatsApp la guarda en
 vez de enviarla, y mail hace lo mismo con cualquier dirección `@example.com`.
@@ -111,6 +111,33 @@ devuelven. Con el caso tomado, `traspaso` no corre: no hubo mensaje de
 traspaso porque no escribió el agente, escribió una persona. Necesitan un
 actor de verdad: un owner o, si no hay, un admin, con Plan Pro. Sin uno esos
 dos escenarios se reportan sin ensayar, no en rojo.
+
+`escribe-tarde-pregunta-como-va` y `tardio-siniestro-nuevo` (B3) derivan el
+caso en el primer turno y después escriben otra vez: una pregunta por el estado
+y otro choque con otra fecha. El agente no contesta, el caso queda «Para
+responder» y la comprobación `tardio` lee `mensaje_tardio_tipo` en la misma
+consulta que el estado: `consulta_estado` y `siniestro_nuevo`. Un mensaje
+reservado sin clase se lee como `sin_clasificar`. El siniestro nuevo no abre
+otro caso; eso lo decide una persona desde la bandeja.
+`mail-tardio-pregunta-como-va` es la misma pregunta por mail, contestando en el
+hilo: el ingreso marca el caso y el worker lo clasifica. Los contactos son los
+inventados del ensayo (`5490000…` y las direcciones reservadas), como en el
+resto. Sin la 0038 en esa base no caen sólo éstos: Drizzle arma todo INSERT
+a `cases` con cada columna del esquema, así que el ensayo entero muere con
+42703 en el primer mensaje (el 29/09, 21 de 22; sólo sobrevivió
+`mail-no-es-reclamo`, que no crea caso). `node scripts/migrate.mjs` sin
+`--apply` dice qué falta.
+
+`recordatorio-por-mail` (B4) deja el caso en `info_faltante` con un pedido y
+adelanta el reloj con un turno `{ accion: "recordatorio", horasDespues }`, que
+llama a `recordarCaso` sobre ese caso solo, con `ahora` corrido y horas
+`[48, 120]`. A +49 h espera un mensaje con las mismas claves del último pedido
+(`recordatorio-claves`), el estado sin cambiar y `updated_at` intacto
+(`recordatorio-updated-at`); otra vez a +49 h, silencio: la etapa ya se gastó;
+a +121 h, la segunda etapa. No necesita actor. El ensayo nunca llama al barrido
+global (`recordarPendientes`) ni prende `recordatorio_horas` en el tenant, y la
+limpieza borra el caso y, en cascada, sus filas de `case_recordatorios`. Si
+falla con 42703 o 42P01, falta aplicar la 0039 en esa base.
 
 También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
 hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún

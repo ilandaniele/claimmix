@@ -239,6 +239,21 @@ export const AuditEvent = {
   SPECIALIST_ALERTED: "claim.specialist_alerted",
 
   /**
+   * LATE_MESSAGE_CLASSIFIED: el worker clasificó un mensaje que llegó después
+   * de que el agente terminó. Payload: { message_id, tipo } — nunca el texto;
+   * tipo null es «sin clasificar».
+   */
+  LATE_MESSAGE_CLASSIFIED: "claim.late_message_classified",
+
+  /**
+   * LATE_MESSAGE_ALERTED: se avisó a los especialistas de ese mensaje.
+   * Payload: { message_id, recipients, delivered }. Propio y no
+   * SPECIALIST_ALERTED: el aviso de la derivación es uno por caso, éste uno por
+   * mensaje.
+   */
+  LATE_MESSAGE_ALERTED: "claim.late_message_alerted",
+
+  /**
    * SPECIALIST_ALERT_RECIPIENTS_CHANGED: an admin edited the tenant's list of
    * addresses for urgent-case alerts, from /configuracion.
    * Payload: { count }. Never the addresses themselves.
@@ -272,6 +287,24 @@ export const AuditEvent = {
 
   /** CLAIM_REQUEST_RESENT: una persona volvió a pedirle al asegurado lo que falta. */
   CLAIM_REQUEST_RESENT: "claim.request_resent",
+
+  /**
+   * CLAIM_REMINDER_SENT / SKIPPED / FAILED: el recordatorio automático del
+   * pedido. Payload: { etapa, horas, canal, via } al mandarlo; { etapa, reason }
+   * al saltearlo; { etapa, canal } si falla. La etapa queda gastada en los tres.
+   */
+  CLAIM_REMINDER_SENT: "claim.reminder_sent",
+  CLAIM_REMINDER_SKIPPED: "claim.reminder_skipped",
+  CLAIM_REMINDER_FAILED: "claim.reminder_failed",
+
+  /**
+   * CASE_CLOSURE_NOTICE_SENT / SKIPPED / FAILED: el aviso al asegurado de que
+   * su caso se cerró por falta de respuesta. Payload: { canal }, { reason } o
+   * { code }. Sale una vez: la etapa 9 queda gastada en los tres.
+   */
+  CASE_CLOSURE_NOTICE_SENT: "claim.closure_notice_sent",
+  CASE_CLOSURE_NOTICE_SKIPPED: "claim.closure_notice_skipped",
+  CASE_CLOSURE_NOTICE_FAILED: "claim.closure_notice_failed",
 
   /**
    * DOCUMENTS_RECEIVED: a file the claimant sent was recognised as one of the

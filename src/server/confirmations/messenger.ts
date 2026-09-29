@@ -14,7 +14,8 @@
  * what differ.
  *
  * Nothing here throws. A claim that was extracted and stored must not be lost
- * because we could not tell the claimant about it.
+ * because we could not tell the claimant about it. `send` says instead whether
+ * the message went out (or was recorded without sending, for a test contact).
  */
 
 import "server-only";
@@ -23,7 +24,7 @@ import { eq } from "drizzle-orm";
 import { outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { labelForField, labelForClaimType } from "@/lib/labels/claim-fields";
-import { dispatchOutboundEmail } from "@/server/email/dispatch";
+import { dispatchOutboundEmail, seEntrego } from "@/server/email/dispatch";
 import {
   enmascararCampo,
   renderTemplate,
@@ -62,7 +63,7 @@ export interface AgentMessage {
 }
 
 export interface AgentMessenger {
-  send(message: AgentMessage): Promise<void>;
+  send(message: AgentMessage): Promise<boolean>;
 }
 
 /**
@@ -106,8 +107,10 @@ export const emailMessenger: AgentMessenger = {
       }, "email.messenger.compose_failed");
     }
 
-    await dispatchOutboundEmail(
-      cuerpo === null ? message : { ...message, data: { ...message.data, cuerpo } }
+    return seEntrego(
+      await dispatchOutboundEmail(
+        cuerpo === null ? message : { ...message, data: { ...message.data, cuerpo } }
+      )
     );
   },
 };
@@ -576,8 +579,7 @@ export const whatsappMessenger: AgentMessenger = {
       // cuenta de WhatsApp Business. La prueba que sirve para no romper
       // producción no puede ser la que nos bloquee el canal.
       if (isReservedTestNumber(message.to)) {
-        await simulatedWhatsappMessenger.send(message);
-        return;
+        return await simulatedWhatsappMessenger.send(message);
       }
 
       // Fuera de la ventana de 24 h con la plantilla aprobada: el piso, el
@@ -595,7 +597,7 @@ export const whatsappMessenger: AgentMessenger = {
         );
         if (!res.ok) olvidarEstadoDePlantilla();
         await anotarEnvio(message, outboundId, finalBody, res);
-        return;
+        return res.ok;
       }
 
       const body = renderForWhatsApp(message);
@@ -604,7 +606,7 @@ export const whatsappMessenger: AgentMessenger = {
         case_id: message.caseId,
         template: message.template,
       }, "whatsapp.messenger.no_renderer");
-        return;
+        return false;
       }
 
       const finalBody = conPie(message, await writeReply(message, body, "whatsapp"));
@@ -619,12 +621,14 @@ export const whatsappMessenger: AgentMessenger = {
       const outboundId = await reservarSalida(message, finalBody);
       const res = await sendWhatsAppText(message.to, finalBody);
       await anotarEnvio(message, outboundId, finalBody, res);
+      return res.ok;
     } catch (err) {
       // Intake already succeeded; a messaging failure must not undo it.
       logger.error({
         case_id: message.caseId,
         error: err instanceof Error ? err.name : "UnknownError",
       }, "whatsapp.messenger.error");
+      return false;
     }
   },
 };
@@ -738,11 +742,11 @@ export const simulatedWhatsappMessenger: AgentMessenger = {
           case_id: message.caseId,
           template: message.template,
         }, "whatsapp.messenger.skipped_simulated");
-      return;
+      return true;
     }
 
     const body = renderForWhatsApp(message);
-    if (!body) return;
+    if (!body) return false;
     // Compose, then do not send. A rehearsal that skipped the writer would be
     // rehearsing a different script: the template is the floor, and what a
     // claimant actually reads is whatever the model made of it.
@@ -752,6 +756,7 @@ export const simulatedWhatsappMessenger: AgentMessenger = {
         case_id: message.caseId,
         template: message.template,
       }, "whatsapp.messenger.skipped_simulated");
+    return true;
   },
 };
 

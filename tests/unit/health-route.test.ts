@@ -58,6 +58,32 @@ const CONFIGURED: Record<string, string> = {
   GMAIL_TOKEN_ENCRYPTION_KEY: "una-clave-de-prueba-para-los-tests-largos",
 };
 
+/** Todo aplicado menos lo que se saca. */
+function esquemaSin(...faltan: string[]) {
+  return [
+    { table_name: "missing_docs", column_name: "declined_at" },
+    { table_name: "outbound_messages", column_name: "asked_keys" },
+    { table_name: "cases", column_name: "extraction_lease_at" },
+    { table_name: "tenants", column_name: "plan" },
+    { table_name: "tenants", column_name: "monthly_fee_usd" },
+    { table_name: "billing_invoices", column_name: "id" },
+    { table_name: "rate_limit_counters", column_name: "key" },
+    // 0037.
+    { table_name: "cases", column_name: "resumen" },
+    { table_name: "claim_attachments", column_name: "resumen" },
+    { table_name: "claim_attachments", column_name: "util" },
+    { table_name: "claim_attachments", column_name: "datos" },
+    { table_name: "claim_attachments", column_name: "metadatos" },
+    // 0038 y 0039.
+    { table_name: "cases", column_name: "mensaje_tardio_de" },
+    { table_name: "cases", column_name: "mensaje_tardio_tipo" },
+    { table_name: "cases", column_name: "mensaje_tardio_resumen" },
+    { table_name: "cases", column_name: "mensaje_tardio_reservado_en" },
+    { table_name: "tenants", column_name: "recordatorio_horas" },
+    { table_name: "case_recordatorios", column_name: "case_id" },
+  ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   for (const [k, v] of Object.entries(CONFIGURED)) process.env[k] = v;
@@ -72,22 +98,7 @@ beforeEach(() => {
     if (JSON.stringify(q).includes("ai_usage")) {
       return Promise.resolve({ rows: [{ total: gastadoUsd }] });
     }
-    return Promise.resolve({
-    rows: [
-      { table_name: "missing_docs", column_name: "declined_at" },
-      { table_name: "outbound_messages", column_name: "asked_keys" },
-      { table_name: "cases", column_name: "extraction_lease_at" },
-      { table_name: "tenants", column_name: "plan" },
-      { table_name: "tenants", column_name: "monthly_fee_usd" },
-      { table_name: "cases", column_name: "resumen" },
-      { table_name: "claim_attachments", column_name: "resumen" },
-      { table_name: "claim_attachments", column_name: "util" },
-      { table_name: "claim_attachments", column_name: "datos" },
-      { table_name: "claim_attachments", column_name: "metadatos" },
-      { table_name: "billing_invoices", column_name: "id" },
-      { table_name: "rate_limit_counters", column_name: "key" },
-    ],
-    });
+    return Promise.resolve({ rows: esquemaSin() });
   });
   mockSelect.mockReturnValue({
     from: () => ({
@@ -224,32 +235,36 @@ describe("GET /api/health — what it reports", () => {
   it("nota que falta la 0037, la de lo que se leyó de los adjuntos", async () => {
     // Sin estas columnas el worker falla al guardar el resumen y los datos de
     // cada archivo, y la ficha no tiene qué mostrar.
-    mockExecute.mockResolvedValue({
-      rows: [
-        { table_name: "missing_docs", column_name: "declined_at" },
-        { table_name: "outbound_messages", column_name: "asked_keys" },
-        { table_name: "cases", column_name: "extraction_lease_at" },
-        { table_name: "tenants", column_name: "plan" },
-        { table_name: "tenants", column_name: "monthly_fee_usd" },
-        { table_name: "billing_invoices", column_name: "id" },
-        { table_name: "rate_limit_counters", column_name: "key" },
-      ],
-    });
+    const faltan = ["cases.resumen", "claim_attachments.resumen", "claim_attachments.util", "claim_attachments.datos", "claim_attachments.metadatos"];
+    mockExecute.mockResolvedValue({ rows: esquemaSin(...faltan) });
 
     const res = await GET(request(`Bearer ${SECRET}`));
-    const body = await res.json();
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
 
-    const schema = body.checks.find((c: { name: string }) => c.name === "migraciones");
     expect(schema.status).toBe("down");
-    for (const col of [
-      "cases.resumen",
-      "claim_attachments.resumen",
-      "claim_attachments.util",
-      "claim_attachments.datos",
-      "claim_attachments.metadatos",
-    ]) {
-      expect(schema.detail).toContain(col);
-    }
+    for (const col of faltan) expect(schema.detail).toContain(col);
+  });
+
+  it("nota que falta la 0038: sin ella el worker no reserva el mensaje tardío", async () => {
+    mockExecute.mockResolvedValue({ rows: esquemaSin("cases.mensaje_tardio_de", "cases.mensaje_tardio_tipo", "cases.mensaje_tardio_resumen") });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    expect(schema.detail).toContain("cases.mensaje_tardio_de");
+    expect(schema.detail).toContain("cases.mensaje_tardio_resumen");
+  });
+
+  it("nota que falta la 0039: la columna del inquilino y la tabla de recordatorios", async () => {
+    mockExecute.mockResolvedValue({ rows: esquemaSin("tenants.recordatorio_horas", "case_recordatorios") });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    expect(schema.detail).toContain("tenants.recordatorio_horas");
+    expect(schema.detail).toContain("case_recordatorios");
   });
 
   it("answers 503 when anything is down, so a watcher notices", async () => {

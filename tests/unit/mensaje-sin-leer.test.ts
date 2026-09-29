@@ -42,7 +42,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 vi.setConfig({ testTimeout: 30_000 });
 
-const { mockAudit, mockSelect, mockUpdate, mockAgente, mockMessenger } = vi.hoisted(() => ({
+const { mockAudit, mockSelect, mockUpdate, mockAgente, mockMessenger, mockTardio } = vi.hoisted(() => ({
+  mockTardio: vi.fn(),
   mockAudit: vi.fn(),
   mockSelect: vi.fn(),
   mockUpdate: vi.fn(),
@@ -66,6 +67,8 @@ vi.mock("@/server/confirmations/messenger", async (importOriginal) => ({
 }));
 
 vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
+
+vi.mock("@/server/cases/mensaje-tardio", () => ({ atenderMensajeTardio: mockTardio }));
 
 vi.mock("@/lib/db/helpers", () => ({
   firstRow: (rows: unknown[]) => rows[0] ?? null,
@@ -163,8 +166,10 @@ describe("un mensaje a un caso que no se puede reabrir", () => {
       motivo: "estado_no_reanudable",
     });
     expect(dichos.join(" ")).toContain("email_worker.mensaje_sin_leer");
-    // Leyó el caso y nada más: ni el mensaje, ni una extracción.
+    // El worker leyó el caso y nada más: ni una extracción. El mensaje lo
+    // clasifica B3 por su lado, para quien lo atiende.
     expect(mockSelect).toHaveBeenCalledTimes(1);
+    expect(mockTardio).toHaveBeenCalledWith({ tenantId: TENANT, caseId: CASE });
   });
 
   // La marca la pone el ingreso con el mensaje de la persona. Este despacho

@@ -39,6 +39,7 @@ vi.mock("@/lib/db/helpers", async (importOriginal) => {
 
 vi.mock("@/server/email/dispatch", () => ({
   dispatchOutboundEmail: vi.fn().mockResolvedValue(undefined),
+  seEntrego: () => true,
 }));
 
 vi.mock("@/lib/audit/log", () => ({
@@ -188,7 +189,7 @@ const CANALES = [
 
 const mensajero = (porMensajero: boolean) =>
   porMensajero
-    ? { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) }
+    ? { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) }
     : undefined;
 
 /** Lo que salió, por el canal que haya sido. */

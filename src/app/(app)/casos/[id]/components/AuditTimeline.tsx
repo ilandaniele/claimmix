@@ -58,6 +58,10 @@ const MOTIVOS_DEL_CASO: Record<string, TranslationKey> = {
   tope_por_remitente: "case.detail.motivo.topePorRemitente",
   devolver_al_agente: "case.detail.devolverAlAgente",
   entregado_por_fuera: "case.detail.motivo.entregadoPorFuera",
+  plantilla_sin_aprobar: "reenvio.motivo.plantilla_sin_aprobar",
+  ventana_cerrada: "reenvio.motivo.ventana_cerrada",
+  sin_destinatario: "reenvio.motivo.sin_destinatario",
+  nada_pendiente: "reenvio.motivo.nada_pendiente",
 };
 
 const SEVERIDAD = /^severidad (high|critical)$/;

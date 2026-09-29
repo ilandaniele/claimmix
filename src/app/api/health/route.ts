@@ -237,6 +237,13 @@ async function checkSchema(): Promise<Check> {
     ["claim_attachments", "util"],
     ["claim_attachments", "datos"],
     ["claim_attachments", "metadatos"],
+    // 0038: sin esto el worker no puede reservar el mensaje tardío ni la bandeja listarlo.
+    ["cases", "mensaje_tardio_de"],
+    ["cases", "mensaje_tardio_tipo"],
+    ["cases", "mensaje_tardio_resumen"],
+    ["cases", "mensaje_tardio_reservado_en"],
+    // 0039: sin esto el cron de recordatorios y la configuración de alertas fallan.
+    ["tenants", "recordatorio_horas"],
   ];
 
   try {
@@ -250,7 +257,7 @@ async function checkSchema(): Promise<Check> {
 
     // 0017 crea una tabla entera; sin ella una factura cerrada se recalcula en
     // cada consulta, que es justo lo que la 0017 existe para impedir.
-    const requiredTables = ["billing_invoices", "rate_limit_counters"];
+    const requiredTables = ["billing_invoices", "rate_limit_counters", "case_recordatorios"];
     const tablesPresent = new Set(rows.map((r) => r.table_name));
     const missingTables = requiredTables.filter((t) => !tablesPresent.has(t));
     const missing = required

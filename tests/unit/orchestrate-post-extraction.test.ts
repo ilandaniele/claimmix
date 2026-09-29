@@ -59,6 +59,7 @@ vi.mock("@/lib/db/helpers", async (importOriginal) => {
 // Mock dispatchOutboundEmail so no real emails are sent.
 vi.mock("@/server/email/dispatch", () => ({
   dispatchOutboundEmail: vi.fn().mockResolvedValue(undefined),
+  seEntrego: () => true,
 }));
 
 // Mock writeAuditLog to capture audit calls without DB.
@@ -3112,7 +3113,7 @@ describe("orchestratePostExtraction — una deliberación caída no deja una pre
 
   it("por WhatsApp también: el mismo mensaje por el mensajero del canal", async () => {
     pedidoEnPie();
-    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) };
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) };
 
     await correr(MENSAJE, { messenger });
 
@@ -4585,7 +4586,7 @@ describe("orchestratePostExtraction — un reconocedor de negativas caído devue
 
   const mensajero = (porMensajero: boolean) =>
     porMensajero
-      ? { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) }
+      ? { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) }
       : undefined;
 
   async function correr(
@@ -4843,7 +4844,7 @@ describe("orchestratePostExtraction — un documento negado no vuelve como duda"
       ],
     });
     const messenger = porMensajero
-      ? { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) }
+      ? { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) }
       : undefined;
 
     await orchestratePostExtraction(
@@ -4982,7 +4983,7 @@ describe("orchestratePostExtraction — lo dicho recién no vuelve como «¿…,
   });
 
   it("por WhatsApp igual", async () => {
-    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) };
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) };
 
     const { pedido } = await vuelta({
       texto: "Fue un choque, ayer a la tarde",
@@ -5149,7 +5150,7 @@ describe("orchestratePostExtraction — lo dicho recién no vuelve como «¿…,
   });
 
   it("por WhatsApp, «no me acuerdo» también la cierra", async () => {
-    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(undefined) };
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) };
 
     const { fila } = await vuelta({
       texto: "no me acuerdo",

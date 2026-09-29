@@ -19,10 +19,10 @@
 
 import "server-only";
 
-import { and, inArray, lt, sql } from "drizzle-orm";
+import { and, inArray, lt, sql, type AnyColumn } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { cases, outboundMessages } from "@/lib/db/schema";
+import { caseRecordatorios, cases, outboundMessages } from "@/lib/db/schema";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
@@ -58,6 +58,14 @@ export interface CloseAbandonedResult {
   caseIds: string[];
 }
 
+/** Cuándo escribió por última vez el denunciante; si nunca, cuándo se abrió el caso. */
+export function ultimoEntranteDe(caseId: string | AnyColumn) {
+  return sql`coalesce(
+    (select max(cm.received_at) from claim_messages cm where cm.case_id = ${caseId} and cm.direction = 'inbound'),
+    (select max(rm.received_at) from raw_messages rm where rm.case_id = ${caseId}),
+    (select c.created_at from cases c where c.id = ${caseId}))`;
+}
+
 /**
  * ¿Llegamos a preguntar?
  *
@@ -80,11 +88,21 @@ export interface CloseAbandonedResult {
  * mensaje hizo exactamente lo que tenía que hacer. Dejarlas afuera devolvería
  * el problema que este barrido existe para resolver — diecinueve casos a medias
  * en una tarde de pruebas, cerrados a mano.
+ *
+ * Lo que salió desde el primer recordatorio del ciclo (B4) no cuenta: repite
+ * una pregunta que ya llegó, y si falla el caso no puede quedar sin cerrar ni
+ * recordar. El ciclo es el de las reservas con ancla posterior al último
+ * entrante; la del aviso de cierre (ancla 1970) nunca lo es.
  */
 export const leLlegoLaPregunta = sql`coalesce((
   select ${outboundMessages.status}
     from ${outboundMessages}
    where ${outboundMessages.case_id} = ${cases.id}
+     and not exists (
+       select 1 from ${caseRecordatorios} r
+        where r.case_id = ${cases.id}
+          and r.ancla > ${ultimoEntranteDe(cases.id)}
+          and r.created_at <= ${outboundMessages.created_at})
    order by ${outboundMessages.created_at} desc
    limit 1
 ) in ('sent', 'skipped_simulated'), false)`;

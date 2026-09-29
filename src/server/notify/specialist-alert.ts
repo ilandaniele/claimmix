@@ -28,6 +28,10 @@ import { GmailSender } from "@/server/email/gmail/gmail-sender";
 import { isSendSuccess } from "@/server/email/provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
+import { t, type TranslationKey } from "@/lib/i18n";
+import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
+import type { TipoMensajeTardio } from "@/core/case/mensaje-tardio";
 
 /**
  * Quién se entera, y en qué orden.
@@ -149,8 +153,7 @@ async function isSimulatedCase(tenantId: string, caseId: string): Promise<boolea
   }
 }
 
-/** La consulta de la lista, suelta: /configuracion la mete en su lote. */
-export function consultaDeLaLista(db: ClienteDatos, tenantId: string) {
+function consultaDeLaLista(db: ClienteDatos, tenantId: string) {
   return db
     .select({ emails: tenants.specialist_alert_emails })
     .from(tenants)
@@ -223,6 +226,20 @@ function renderAlert(input: SpecialistAlertInput, caseUrl: string) {
   return { subject, text: lines.join("\n") };
 }
 
+/** Un aviso a los especialistas: a quién, cómo se audita y qué dice. */
+interface Aviso {
+  caseId: string;
+  tenantId: string;
+  evento: typeof AuditEvent.SPECIALIST_ALERTED | typeof AuditEvent.LATE_MESSAGE_ALERTED;
+  /** Lo que distingue a este aviso de otro del mismo caso: el mensaje, en el tardío. */
+  marca?: { message_id: string };
+  /** Prefijo de los registros. */
+  log: string;
+  /** Tope de correos, contado sólo cuando el aviso de verdad iba a salir. */
+  cupo?: { clave: string; config: { limit: number; windowMs: number } };
+  render: (caseUrl: string) => { subject: string; text: string };
+}
+
 /**
  * Alert the tenant's specialists that a case escalated.
  *
@@ -230,20 +247,74 @@ function renderAlert(input: SpecialistAlertInput, caseUrl: string) {
  * escalates again does not re-alert. Somebody is already looking.
  */
 export async function alertSpecialists(input: SpecialistAlertInput): Promise<void> {
-  const { caseId, tenantId } = input;
+  await avisar({
+    caseId: input.caseId,
+    tenantId: input.tenantId,
+    evento: AuditEvent.SPECIALIST_ALERTED,
+    log: "specialist_alert",
+    render: (caseUrl) => renderAlert(input, caseUrl),
+  });
+}
+
+export interface MensajeTardioInput {
+  tenantId: string;
+  caseId: string;
+  messageId: string;
+  /** null = sin clasificar. */
+  tipo: TipoMensajeTardio | null;
+  /** Ya filtrado por `esResumenSeguro`; nunca el texto crudo del mensaje. */
+  resumen: string | null;
+}
+
+/**
+ * Avisa que llegó un mensaje a un caso que atiende una persona (B3).
+ *
+ * Idempotente por mensaje, con su propio evento: el de la derivación es uno por
+ * caso y ya está gastado cuando llega esto.
+ */
+export async function avisarMensajeTardio(input: MensajeTardioInput): Promise<void> {
+  const clase = t(`tardio.tipo.${input.tipo ?? "sin_clasificar"}` as TranslationKey);
+  await avisar({
+    caseId: input.caseId,
+    tenantId: input.tenantId,
+    evento: AuditEvent.LATE_MESSAGE_ALERTED,
+    marca: { message_id: input.messageId },
+    log: "late_message_alert",
+    cupo: {
+      clave: claveDeCupo("aviso-tardio", input.tenantId, input.caseId),
+      config: RATE_LIMIT_CONFIGS.AVISO_TARDIO_POR_CASO,
+    },
+    render: (caseUrl) => ({
+      subject: t("tardio.aviso.asunto").replace("{tipo}", clase),
+      text: [
+        t("tardio.aviso.cuerpo"),
+        "",
+        t("tardio.aviso.quePide").replace("{tipo}", clase),
+        input.resumen ? t("tardio.aviso.resumen").replace("{resumen}", input.resumen) : null,
+        t("tardio.aviso.caso").replace("{caso}", input.caseId),
+        caseUrl ? t("tardio.aviso.abrir").replace("{link}", caseUrl) : null,
+      ]
+        .filter((linea) => linea !== null)
+        .join("\n"),
+    }),
+  });
+}
+
+async function avisar(aviso: Aviso): Promise<void> {
+  const { caseId, tenantId } = aviso;
 
   try {
-    if (await isSimulatedCase(input.tenantId, caseId)) {
+    if (await isSimulatedCase(tenantId, caseId)) {
       // Logged rather than passed over: an operator watching a rehearsal
       // should be able to see the alert was deliberately withheld, not
       // wonder whether it silently failed.
       logger.info({
         case_id: caseId,
-      }, "specialist_alert.skipped_simulated");
+      }, `${aviso.log}.skipped_simulated`);
       return;
     }
 
-    if (await alreadyAlerted(caseId, tenantId)) return;
+    if (await alreadyAlerted(aviso)) return;
 
     const recipients = await recipientsFor(tenantId);
     if (recipients.length === 0) {
@@ -252,7 +323,7 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
       logger.error({
         case_id: caseId,
         tenant_id: tenantId,
-      }, "specialist_alert.no_recipients");
+      }, `${aviso.log}.no_recipients`);
       return;
     }
 
@@ -260,12 +331,18 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
     if (!account) {
       logger.error({
         case_id: caseId,
-      }, "specialist_alert.no_mailbox");
+      }, `${aviso.log}.no_mailbox`);
+      return;
+    }
+
+    // El cupo se gasta sólo si hay a quién y desde dónde mandar.
+    if (aviso.cupo && !(await rateLimit(aviso.cupo.clave, aviso.cupo.config)).allowed) {
+      logger.warn({ case_id: caseId }, `${aviso.log}.tope`);
       return;
     }
 
     const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "";
-    const { subject, text } = renderAlert(input, base ? `${base}/casos/${caseId}` : "");
+    const { subject, text } = aviso.render(base ? `${base}/casos/${caseId}` : "");
 
     const sender = new GmailSender(account.refreshToken);
     const result = await sender.send({
@@ -280,23 +357,23 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
     await writeAuditLog({
       tenant_id: tenantId,
       actor_id: null,
-      event_type: AuditEvent.SPECIALIST_ALERTED,
+      event_type: aviso.evento,
       target_type: "case",
       target_id: caseId,
       // Recipient count, not addresses: an audit trail should prove someone
       // was told without becoming a list of staff emails.
-      payload: { recipients: recipients.length, delivered },
+      payload: { ...aviso.marca, recipients: recipients.length, delivered },
     });
 
     logger.info({
         case_id: caseId,
         recipients: recipients.length,
-      }, delivered ? "specialist_alert.sent" : "specialist_alert.send_failed");
+      }, delivered ? `${aviso.log}.sent` : `${aviso.log}.send_failed`);
   } catch (err) {
     logger.error({
         case_id: caseId,
         error: err instanceof Error ? err.name : "UnknownError",
-      }, "specialist_alert.error");
+      }, `${aviso.log}.error`);
   }
 }
 
@@ -324,7 +401,7 @@ export async function alertSpecialists(input: SpecialistAlertInput): Promise<voi
  * correcto del error, y en la base de hoy no hay ninguna: los 28 avisos que hay
  * llevan `delivered: true`.
  */
-async function alreadyAlerted(caseId: string, tenantId: string): Promise<boolean> {
+async function alreadyAlerted({ caseId, tenantId, evento, marca }: Aviso): Promise<boolean> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {
@@ -335,8 +412,9 @@ async function alreadyAlerted(caseId: string, tenantId: string): Promise<boolean
         .where(
           and(
             eq(auditLog.target_id, caseId),
-            eq(auditLog.event_type, AuditEvent.SPECIALIST_ALERTED),
-            sql`${auditLog.payload}->>'delivered' = 'true'`
+            eq(auditLog.event_type, evento),
+            sql`${auditLog.payload}->>'delivered' = 'true'`,
+            marca ? sql`${auditLog.payload}->>'message_id' = ${marca.message_id}` : undefined
           )
         )
         .limit(1)

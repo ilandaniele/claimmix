@@ -571,13 +571,19 @@ export async function sendWhatsAppTemplate(
   );
 }
 
-type EstadoDePlantilla = "aprobada" | "pendiente" | "no_disponible";
+/**
+ * `no_disponible`: no hay cuenta configurada para preguntar, o Meta la rechazó
+ * (4xx). `sin_respuesta`: Meta no contestó (5xx, 429 o plazo); pasajero, así
+ * que quien decide no tiene que tratarlo como una ventana cerrada para siempre.
+ */
+export type EstadoDePlantilla = "aprobada" | "pendiente" | "no_disponible" | "sin_respuesta";
 
 /** Cuánto dura cada estado en la caché antes de volver a preguntarle a Meta. */
 const TTL_ESTADO_PLANTILLA_MS: Record<EstadoDePlantilla, number> = {
   aprobada: 60 * 60_000,
   pendiente: 10 * 60_000,
   no_disponible: 60_000,
+  sin_respuesta: 60_000,
 };
 
 const PLAZO_ESTADO_PLANTILLA_MS = 3_000;
@@ -616,13 +622,14 @@ export async function estadoDePlantilla(nombre: string, idioma: string): Promise
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(PLAZO_ESTADO_PLANTILLA_MS),
     });
-    if (!res.ok) return conCache("no_disponible");
+    // Un 4xx (token vencido, cuenta sin permiso) no se arregla solo: no se reintenta.
+    if (!res.ok) return conCache(res.status === 429 || res.status >= 500 ? "sin_respuesta" : "no_disponible");
 
     const data = (await res.json()) as { data?: Array<{ name?: string; status?: string; language?: string }> };
     const fila = data.data?.find((f) => f.name === nombre && f.language === idioma);
     return conCache(fila?.status === "APPROVED" ? "aprobada" : "pendiente");
   } catch {
-    return conCache("no_disponible");
+    return conCache("sin_respuesta");
   }
 }
 

@@ -17,6 +17,7 @@ import { renderMissingInformationRequest } from "./templates/missing-information
 import { renderDataConfirmationRequest } from "./templates/data-confirmation-request";
 import { renderSpecialistEscalation } from "./templates/specialist-escalation";
 import { renderInformationReceived } from "./templates/information-received";
+import { renderCaseClosureNotice } from "./templates/case-closure-notice";
 import { maskEmail } from "@/lib/email/mask";
 
 /**
@@ -34,7 +35,9 @@ export type EmailTemplate =
   | "specialist_escalation"
   // Acusar recibo sin repetir el pedido: la persona contó algo nuevo y lo
   // que falta sigue siendo lo mismo que ya le pedimos.
-  | "information_received";
+  | "information_received"
+  // El aviso de cierre por abandono (B4): texto fijo, sin redactor.
+  | "case_closure_notice";
 
 export interface RenderedEmail {
   subject: string;
@@ -239,6 +242,9 @@ export function renderTemplate(
         heridos: data.heridos === true,
         yaPreguntamos: data.yaPreguntamos === true,
       });
+
+    case "case_closure_notice":
+      return renderCaseClosureNotice({ caseId: String(data.caseId ?? "") });
 
     default: {
       const exhaustiveCheck: never = template;

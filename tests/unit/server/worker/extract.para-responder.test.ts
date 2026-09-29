@@ -74,3 +74,47 @@ describe("el worker y «Para responder»", () => {
     expect(marcar).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * B3: un mensaje a un caso que el agente ya terminó. El worker no lo lee ni lo
+ * contesta; lo clasifica para la persona que lo atiende.
+ */
+describe("el worker y el mensaje tardío", () => {
+  async function tardio(channel: string, falla = false) {
+    vi.resetModules();
+    const auditar = vi.fn().mockResolvedValue(undefined);
+    registrarMocks({
+      fila: filaDeCaso(CASE_ID, TENANT_ID, { channel, status: "requiere_especialista" }),
+      espiaDeUpdate: vi.fn(),
+      espiaDeAuditoria: auditar,
+    });
+    const atender = falla ? vi.fn().mockRejectedValue(new Error("neon")) : vi.fn().mockResolvedValue(undefined);
+    vi.doMock("@/server/cases/mensaje-tardio", () => ({ atenderMensajeTardio: atender }));
+
+    const { runEmailExtractionWorker } = await import("@/server/worker/extract");
+    const corrida = runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
+    const { orchestratePostExtraction } = await import("@/server/confirmations/orchestrate");
+    return { corrida, atender, auditar, orquestar: vi.mocked(orchestratePostExtraction) };
+  }
+
+  it.each(["email", "whatsapp"])("por %s lo clasifica después de auditar que no se leyó, y no contesta", async (canal) => {
+    const { corrida, atender, auditar, orquestar } = await tardio(canal);
+    await corrida;
+
+    expect(atender).toHaveBeenCalledWith({ tenantId: TENANT_ID, caseId: CASE_ID });
+    const noLeido = auditar.mock.calls.findIndex(
+      ([e]) => (e as { payload?: { motivo?: string } }).payload?.motivo === "estado_no_reanudable"
+    );
+    expect(noLeido).toBeGreaterThanOrEqual(0);
+    expect(atender.mock.invocationCallOrder[0]).toBeGreaterThan(auditar.mock.invocationCallOrder[noLeido]);
+    expect(orquestar).not.toHaveBeenCalled();
+  });
+
+  it("si clasificar falla, la corrida termina igual", async () => {
+    const { corrida, atender } = await tardio("whatsapp", true);
+
+    // Si la corrida tirara, el test fallaría acá.
+    await corrida;
+    expect(atender).toHaveBeenCalledTimes(1);
+  });
+});

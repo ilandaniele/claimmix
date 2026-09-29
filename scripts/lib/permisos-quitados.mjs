@@ -8,8 +8,11 @@
  * - audit_log (0032): sólo de alta; la auditoría no se reescribe.
  * - core_sync_settings (0036): apagar la entrega o revocar la clave es un
  *   UPDATE que queda en audit_log; borrar la fila no dejaría rastro.
+ * - case_recordatorios (0039): una etapa gastada no se reescribe ni se borra;
+ *   si se pudiera, el barrido la volvería a mandar.
  */
 export const PERMISOS_QUITADOS = {
   audit_log: ["UPDATE", "DELETE"],
   core_sync_settings: ["DELETE"],
+  case_recordatorios: ["UPDATE", "DELETE"],
 };

@@ -630,6 +630,10 @@ export async function extractEmailClaimGemini(
   // Last attempt's error status/code — propagated on the final throw so the
   // worker can persist the real cause (429/RESOURCE_EXHAUSTED, 401, ...).
   let lastErrMeta: { name: string; status: number | null; code: string | null } | null = null;
+  // La primera falla pasajera gana sobre la del segundo intento: si el 2.º
+  // termina en MAX_TOKENS o un 400, pisa al 429 y el caso se escalaba con
+  // `provider_error` en vez de volver a la cola.
+  let pasajero: { status: number | null; code: string | null; red: boolean } | null = null;
 
   // ── Attempt 1 ─────────────────────────────────────────────────────────────
   const t1 = Date.now();
@@ -669,6 +673,13 @@ export async function extractEmailClaimGemini(
     const latency1 = Date.now() - t1;
     const meta = errMeta(e);
     lastErrMeta = meta;
+    if (!pasajero && esPasajero(e)) {
+      pasajero = {
+        status: meta.status,
+        code: meta.code,
+        red: ((e as GeminiExtractionError).cause as { red?: unknown } | undefined)?.red === true,
+      };
+    }
     // `timeout` ya estaba previsto en la columna desde el día uno y nunca se
     // escribió, porque no había nada que cortara por tiempo.
     const errStatus =
@@ -738,7 +749,9 @@ export async function extractEmailClaimGemini(
     // contraseña, un JPEG cortado). Reenviarlo da el mismo 400 en cada corrida:
     // el reintento va sin ellos y el worker los da por leídos sin texto.
     const sinArchivos = lastErrMeta?.status === 400 && !!payload.media?.length;
-    const correccion = sinArchivos
+    // Tras una falla pasajera el modelo no llegó a contestar: no hay respuesta
+    // que corregir, así que el reintento va con el prompt limpio.
+    const correccion = sinArchivos || pasajero
       ? ""
       : lastErrMeta?.code === "MAX_TOKENS"
         ? "\n\nIMPORTANT: Your previous response was cut off because it exceeded the length limit. Be concise: emit each field once, do not repeat yourself, and omit fields you have no value for. Return ONLY valid JSON matching the schema."
@@ -786,6 +799,13 @@ export async function extractEmailClaimGemini(
       const latency2 = Date.now() - t2;
       const meta = errMeta(e);
       lastErrMeta = meta;
+      if (!pasajero && esPasajero(e)) {
+        pasajero = {
+          status: meta.status,
+          code: meta.code,
+          red: ((e as GeminiExtractionError).cause as { red?: unknown } | undefined)?.red === true,
+        };
+      }
       // Idem el primer intento: un corte por tiempo se registra como tal.
       const errStatus2 =
         meta.code === "TIMEOUT"
@@ -853,19 +873,21 @@ export async function extractEmailClaimGemini(
   // no_relevante due to a provider/network/quota error, not a genuine classification.
   // The caller (runEmailExtractionWorker) catches GeminiExtractionError and sets
   // the case to 'escalado' so it can be re-analyzed once the provider recovers.
+  const causa = pasajero ?? lastErrMeta;
   logger.error({
         provider: "gemini",
         case_id: logCaseId,
-        status: lastErrMeta?.status ?? null,
-        code: lastErrMeta?.code ?? null,
+        status: causa?.status ?? null,
+        code: causa?.code ?? null,
       }, "ai.email_extraction.both_attempts_failed.provider_error");
   throw new GeminiExtractionError(
     `Gemini extraction technical failure after 2 attempts for case ${logCaseId}`,
     {
       provider_error: true,
       case_id: logCaseId,
-      status: lastErrMeta?.status ?? undefined,
-      code: lastErrMeta?.code ?? undefined,
+      status: causa?.status ?? undefined,
+      code: causa?.code ?? undefined,
+      ...(pasajero?.red ? { red: true } : {}),
     }
   );
 }

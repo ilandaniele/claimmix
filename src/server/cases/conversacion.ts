@@ -7,7 +7,7 @@
  */
 import "server-only";
 
-import { and, count, desc, eq, or } from "drizzle-orm";
+import { and, count, desc, eq, or, sql } from "drizzle-orm";
 import { enTenantVarias, type TenantContext } from "@/data/scope";
 import { readable } from "@/core/email/texto-legible";
 import { PLANTILLA_RESPUESTA_HUMANA } from "@/core/whatsapp/plantillas";
@@ -31,6 +31,8 @@ export interface MensajeDeLaConversacion {
   attachment_count: number;
   /** Quién lo escribió: el denunciante, el agente, o una persona del equipo. */
   autor: "denunciante" | "agente" | "equipo";
+  /** El cuerpo trae la transcripción de una nota de voz, hecha por la IA. */
+  transcripcion: boolean;
 }
 
 /**
@@ -67,7 +69,7 @@ type DelHilo = Omit<MensajeDeLaConversacion, "estado_envio" | "autor"> & {
 };
 type Simulado = Omit<
   MensajeDeLaConversacion,
-  "direction" | "estado_envio" | "attachment_count" | "autor"
+  "direction" | "estado_envio" | "attachment_count" | "autor" | "transcripcion"
 >;
 type Saliente = {
   id: string;
@@ -114,6 +116,7 @@ export async function conversacionDelCaso(
         status: claimMessages.status,
         template: claimMessages.template,
         attachment_count: count(claimAttachments.id),
+        transcripcion: sql<boolean>`coalesce(${claimMessages.raw_payload}->>'transcripcion' = 'true', false)`,
       })
       .from(claimMessages)
       .leftJoin(claimAttachments, eq(claimAttachments.claim_message_id, claimMessages.id))
@@ -203,6 +206,7 @@ export async function conversacionDelCaso(
       estado_envio: null,
       attachment_count: 0,
       autor: "denunciante" as const,
+      transcripcion: false,
     })),
     ...salientes.map((m) => ({
       id: m.id,
@@ -215,6 +219,7 @@ export async function conversacionDelCaso(
       estado_envio: m.status,
       attachment_count: 0,
       autor: autorDeLoSaliente(m.template),
+      transcripcion: false,
     })),
   ];
 

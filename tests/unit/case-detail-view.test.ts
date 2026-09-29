@@ -338,6 +338,48 @@ describe("cargarDetalleDeCaso — las normalizaciones de borde", () => {
     const cual = reg.tablas.indexOf(claimAttachments);
     expect(Object.keys(reg.columnas[cual] ?? {})).toContain("rejected_reason");
   });
+
+  it("marca como duplicado al que repite el hash de uno anterior, y el hash no sale", async () => {
+    const fila = (id: string, content_hash: string | null) => ({
+      id,
+      filename: `${id}.jpg`,
+      content_type: "image/jpeg",
+      size_bytes: 100,
+      external_url: null,
+      uploaded_at: "2026-08-01T10:00:00Z",
+      rejected_reason: null,
+      storage_path: `t/${id}`,
+      matched_doc_key: null,
+      resumen: id === "a-1" ? "Foto del frente." : null,
+      util: id === "a-3" ? false : null,
+      content_hash,
+    });
+    const reg = espiar(
+      new Map(TODO).set(claimAttachments, [
+        fila("a-1", "h1"),
+        fila("a-2", "h1"),
+        fila("a-3", "h2"),
+        fila("a-4", null),
+        fila("a-5", null),
+      ])
+    );
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(res!.attachments.map((a) => a.duplicado)).toEqual([false, true, false, false, false]);
+    expect(res!.attachments[0].resumen).toBe("Foto del frente.");
+    expect(res!.attachments[2].util).toBe(false);
+    for (const a of res!.attachments) {
+      expect(a).not.toHaveProperty("content_hash");
+      expect(a).not.toHaveProperty("storage_path");
+      expect(a).not.toHaveProperty("datos");
+      expect(a).not.toHaveProperty("metadatos");
+    }
+    // Todo sale de la misma consulta de siempre: no hay una segunda para el hash.
+    expect(reg.tablas.filter((t) => t === claimAttachments)).toHaveLength(1);
+    const cual = reg.tablas.indexOf(claimAttachments);
+    expect(Object.keys(reg.columnas[cual] ?? {})).not.toContain("datos");
+  });
 });
 
 describe("ultimoParaReleer", () => {

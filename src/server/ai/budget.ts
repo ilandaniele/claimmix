@@ -28,7 +28,7 @@ import {
   type TenantContext,
 } from "@/data/scope";
 
-const MODEL_COSTS: Record<string, { input: number; output: number }> = {
+const MODEL_COSTS: Record<string, { input: number; output: number; audio?: number }> = {
   "gpt-4o-mini": { input: 0.00000015, output: 0.00000060 },
   "gpt-4o":      { input: 0.0000025,  output: 0.00001 },
   // Gemini por Vertex, precio de lista por token. El tope mensual existía y no
@@ -39,8 +39,11 @@ const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   //
   // Es una estimación, no la factura. Su trabajo es que el tope deje de ser
   // decorativo; para conciliar plata está la consola de Google.
-  "gemini-2.5-flash":      { input: 0.0000003,  output: 0.0000025 },
-  "gemini-2.5-flash-lite": { input: 0.0000001,  output: 0.0000004 },
+  //
+  // El audio de entrada se cobra más caro que el texto: una nota de voz
+  // cobrada como texto dejaría el tope corto por un factor de tres.
+  "gemini-2.5-flash":      { input: 0.0000003,  output: 0.0000025, audio: 0.000001 },
+  "gemini-2.5-flash-lite": { input: 0.0000001,  output: 0.0000004, audio: 0.0000003 },
   "gemini-2.5-pro":        { input: 0.00000125, output: 0.00001 },
 };
 
@@ -51,7 +54,7 @@ const MODEL_COSTS: Record<string, { input: number; output: number }> = {
  * va a coincidir con ninguna clave. Cobra como su modelo base, que es lo que
  * hace Google, así que la aproximación correcta es "flash" y no "gratis".
  */
-function ratesFor(model?: string): { input: number; output: number } {
+function ratesFor(model?: string): { input: number; output: number; audio?: number } {
   const name = (model ?? "").toLowerCase();
   if (MODEL_COSTS[name]) return MODEL_COSTS[name]!;
   for (const [key, rates] of Object.entries(MODEL_COSTS)) {
@@ -67,10 +70,23 @@ function ratesFor(model?: string): { input: number; output: number } {
  * Compute estimated cost for a given token usage.
  * Pass model to get per-model pricing; unknown names fall back to a base rate
  * rather than to zero — see ratesFor.
+ *
+ * `audioTokens` are the part of `promptTokens` that Gemini reports with
+ * modality AUDIO; they are priced at the audio rate instead of the text one.
  */
-export function computeCostUsd(promptTokens: number, completionTokens: number, model?: string): number {
+export function computeCostUsd(
+  promptTokens: number,
+  completionTokens: number,
+  model?: string,
+  audioTokens = 0
+): number {
   const rates = ratesFor(model);
-  return promptTokens * rates.input + completionTokens * rates.output;
+  const audio = Math.min(Math.max(0, audioTokens), promptTokens);
+  return (
+    (promptTokens - audio) * rates.input +
+    audio * (rates.audio ?? rates.input) +
+    completionTokens * rates.output
+  );
 }
 
 /*
@@ -508,7 +524,7 @@ export async function recordUsage(
 export async function registrarConsumoDelModelo(
   tenantId: string,
   model: string,
-  usage: { promptTokens?: number; completionTokens?: number } | undefined,
+  usage: { promptTokens?: number; completionTokens?: number; audioTokens?: number } | undefined,
   userId: string | null = null
 ): Promise<void> {
   // `usage` puede venir incompleto —Gemini omite `usageMetadata` a veces, y
@@ -525,6 +541,6 @@ export async function registrarConsumoDelModelo(
     model,
     prompt,
     completion,
-    computeCostUsd(prompt, completion, model)
+    computeCostUsd(prompt, completion, model, usage?.audioTokens ?? 0)
   );
 }

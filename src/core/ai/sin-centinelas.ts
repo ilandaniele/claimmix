@@ -41,6 +41,8 @@ const CENTINELAS = [
   "tenant_prompt",
   "pregunta_del_usuario",
   "datos_del_caso",
+  // Envuelve cada archivo (foto, PDF, audio) que va al modelo como dato.
+  "adjunto",
 ] as const;
 
 /** La forma de un centinela: `<tag>` o `</tag>`, con o sin espacios adentro. */

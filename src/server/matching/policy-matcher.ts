@@ -9,7 +9,7 @@
  */
 
 import "server-only";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { policyNumberEquals } from "@/lib/db/helpers";
@@ -28,6 +28,9 @@ export interface PolicyMatch {
   status: "active" | "expired" | "cancelled" | string;
   /** Fin de vigencia, AAAA-MM-DD, o null si no vence. */
   endDate: string | null;
+  /** DNI del titular y patentes aseguradas: sólo se cruzan contra los documentos adjuntos. */
+  customerDni: string | null;
+  plates: string[];
   /** Full name of the policyholder (PII — not logged). */
   customerName: string;
   /** Confidence score: active policies rank higher than expired/cancelled. */
@@ -84,6 +87,36 @@ export async function findPolicyMatches(
 
 // ── Private matchers ──────────────────────────────────────────────────────────
 
+type FilaDePoliza = {
+  id: string;
+  policy_number: string;
+  policy_type: string | null;
+  status: string;
+  end_date: string | null;
+  customer_full_name: string | null;
+  customer_dni: string | null;
+  plates: Array<string | null> | null;
+};
+
+/**
+ * Las patentes van en una subconsulta y no en un join: una póliza con tres
+ * autos sería tres filas, y el `limit` de abajo contaría autos, no pólizas.
+ */
+function columnas() {
+  const p = tables.policies;
+  const c = tables.customers;
+  return {
+    id: p.id,
+    policy_number: p.policy_number,
+    policy_type: p.policy_type,
+    status: p.status,
+    end_date: p.end_date,
+    customer_full_name: c.full_name,
+    customer_dni: c.dni,
+    plates: sql<Array<string | null> | null>`(select array_agg(ia.plate) from insured_assets ia where ia.policy_id = ${p.id})`,
+  };
+}
+
 async function matchByPolicyNumber(
   tenantId: string,
   policyNumber: string
@@ -93,25 +126,11 @@ async function matchByPolicyNumber(
   const p = tables.policies;
   const c = tables.customers;
 
-  let data: Array<{
-    id: string;
-    policy_number: string;
-    policy_type: string | null;
-    status: string;
-    end_date: string | null;
-    customer_full_name: string | null;
-  }>;
+  let data: FilaDePoliza[];
   try {
     data = await enTenant(tenantCtx, (db) =>
       db
-        .select({
-          id: p.id,
-          policy_number: p.policy_number,
-          policy_type: p.policy_type,
-          status: p.status,
-          end_date: p.end_date,
-          customer_full_name: c.full_name,
-        })
+        .select(columnas())
         .from(p)
         .leftJoin(c, eq(p.customer_id, c.id))
         /*
@@ -139,6 +158,8 @@ async function matchByPolicyNumber(
       policyType: row.policy_type ?? "other",
       status: row.status,
       endDate: row.end_date ?? null,
+      customerDni: row.customer_dni ?? null,
+      plates: (row.plates ?? []).filter((x): x is string => !!x),
       customerName: row.customer_full_name ?? "",
       confidence,
     };
@@ -154,25 +175,11 @@ async function matchByCustomerId(
   const p = tables.policies;
   const c = tables.customers;
 
-  let data: Array<{
-    id: string;
-    policy_number: string;
-    policy_type: string | null;
-    status: string;
-    end_date: string | null;
-    customer_full_name: string | null;
-  }>;
+  let data: FilaDePoliza[];
   try {
     data = await enTenant(tenantCtx, (db) =>
       db
-        .select({
-          id: p.id,
-          policy_number: p.policy_number,
-          policy_type: p.policy_type,
-          status: p.status,
-          end_date: p.end_date,
-          customer_full_name: c.full_name,
-        })
+        .select(columnas())
         .from(p)
         .leftJoin(c, eq(p.customer_id, c.id))
         .where(eq(p.customer_id, customerId))
@@ -194,6 +201,8 @@ async function matchByCustomerId(
       policyType: row.policy_type ?? "other",
       status: row.status,
       endDate: row.end_date ?? null,
+      customerDni: row.customer_dni ?? null,
+      plates: (row.plates ?? []).filter((x): x is string => !!x),
       customerName: row.customer_full_name ?? "",
       confidence,
     };

@@ -25,6 +25,7 @@ import type { Locale, TranslationKey } from "@/lib/i18n";
 import type { MensajeDeLaConversacion as Message } from "@/server/cases/conversacion";
 import type { EstadoDeRespuesta } from "@/core/whatsapp/puede-responder";
 import { BloqueoPlanPro } from "@/app/(app)/_components/BloqueoPlanPro";
+import { ENCABEZADO_TRANSCRIPCION } from "@/core/adjuntos/transcripcion";
 
 /** Lo que contesta `GET /api/cases/:id/messages`. */
 interface RespuestaDeMensajes {
@@ -177,7 +178,10 @@ function MessageCard({ message, locale }: MessageCardProps) {
       : t("messages.thread.no_subject");
 
   // Body preview: collapsed = first 300 chars; expanded = full body_text (≤2000 from API).
-  const bodyText = message.body_text ?? "";
+  // El encabezado de la transcripción se guarda en castellano dentro del texto.
+  const bodyText = (message.body_text ?? "")
+    .split(ENCABEZADO_TRANSCRIPCION)
+    .join(t("messages.thread.encabezadoTranscripcion"));
   const isLong = bodyText.length > PREVIEW_MAX_CHARS;
   const previewText = isLong && !expanded
     ? `${bodyText.slice(0, PREVIEW_MAX_CHARS)}…`
@@ -232,6 +236,11 @@ function MessageCard({ message, locale }: MessageCardProps) {
                     className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${estado.clase}`}
                   >
                     {t(estado.clave)}
+                  </span>
+                )}
+                {message.transcripcion && (
+                  <span className="flex-shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
+                    {t("messages.thread.transcripcion")}
                   </span>
                 )}
               </div>

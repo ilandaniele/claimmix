@@ -141,6 +141,7 @@ describe("conversacionDelCaso", () => {
       estado_envio: "skipped_simulated",
       attachment_count: 0,
       autor: "agente",
+      transcripcion: false,
     });
   });
 
@@ -199,6 +200,7 @@ describe("conversacionDelCaso", () => {
       estado_envio: "skipped_simulated",
       attachment_count: 0,
       autor: "agente",
+      transcripcion: false,
     });
   });
 
@@ -243,8 +245,26 @@ describe("conversacionDelCaso", () => {
       estado_envio: null,
       attachment_count: 0,
       autor: "denunciante",
+      transcripcion: false,
     });
     expect(respuesta).toMatchObject({ id: "sim-1", direction: "outbound" });
+  });
+
+  it("marca el mensaje cuyo cuerpo trae la transcripción de una nota de voz", async () => {
+    responder([
+      [{ id: CASO }],
+      [
+        entrante({ id: "in-1", provider: "whatsapp", transcripcion: true }),
+        entrante({ id: "in-2", provider: "whatsapp", received_at: "2026-06-01 11:00:00+00", transcripcion: false }),
+      ],
+      [],
+      [],
+      [],
+    ]);
+
+    const { messages } = (await conversacionDelCaso(CTX, CASO))!;
+
+    expect(messages.map((m) => m.transcripcion)).toEqual([true, false]);
   });
 
   describe("el tope", () => {
@@ -305,6 +325,12 @@ describe("conversacionDelCaso", () => {
       expect(hilo!.sql).toMatch(/left join "claim_attachments"/);
       expect(hilo!.sql).toMatch(/group by "claim_messages"\."id"/);
       expect(hilo!.params).toEqual([CASO, POR_FUENTE]);
+    });
+
+    it("la marca de transcripción sale del mismo select del hilo, sin otra consulta", () => {
+      const [, hilo] = armadas;
+      expect(hilo!.sql).toMatch(/"raw_payload"->>'transcripcion' = 'true'/);
+      expect(armadas).toHaveLength(5);
     });
 
     it("la ventana de WhatsApp: último entrante de ese proveedor, aparte del hilo", () => {

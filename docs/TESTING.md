@@ -187,6 +187,15 @@ Viven en la máquina de quien corre el ensayo, en `tests/fixtures/`:
 | `danos.jpg` | Un auto chocado | Que lo reconozca como las fotos de los daños |
 | `licencia.jpg` | Una licencia de conducir | El caso difícil: dos documentos de papel pendientes, tiene que elegir el correcto |
 | `irrelevante.jpg` | Cualquier foto que no sea un documento | El caso negativo: no tiene que cerrar ningún pedido |
+| `nota-de-voz.ogg` | Una nota de voz sintética, en castellano, sin datos de nadie | Que se transcriba (`nota-de-voz-y-pdf`); sin ella va `placeholder.ogg`, un audio mudo |
+
+Dos sí están en el repositorio porque no son de nadie: `placeholder.ogg` (dos
+segundos de silencio en Opus, hecho con ffmpeg) y `sintetico-constancia.pdf`
+(una constancia inventada, escrita a mano, con la patente de la póliza sembrada
+y una fecha tres días después de la que cuenta la persona). Con ellas
+`nota-de-voz-y-pdf` prueba siempre que los dos archivos se guardan y se leen
+(`leidos`), y que la fecha que no coincide queda como indicio para el analista
+(`indicios`) sin que la respuesta lo mencione.
 
 Sin ellas la suite corre igual, avisa cuáles faltan, y no da por probado lo que
 no probó. El caso negativo sí se verifica siempre: una imagen que no

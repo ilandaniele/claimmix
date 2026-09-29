@@ -68,6 +68,12 @@ function esquemaSin(...faltan: string[]) {
     { table_name: "tenants", column_name: "monthly_fee_usd" },
     { table_name: "billing_invoices", column_name: "id" },
     { table_name: "rate_limit_counters", column_name: "key" },
+    // 0037.
+    { table_name: "cases", column_name: "resumen" },
+    { table_name: "claim_attachments", column_name: "resumen" },
+    { table_name: "claim_attachments", column_name: "util" },
+    { table_name: "claim_attachments", column_name: "datos" },
+    { table_name: "claim_attachments", column_name: "metadatos" },
     // 0038 y 0039.
     { table_name: "cases", column_name: "mensaje_tardio_de" },
     { table_name: "cases", column_name: "mensaje_tardio_tipo" },
@@ -224,6 +230,19 @@ describe("GET /api/health — what it reports", () => {
     const schema = body.checks.find((c: { name: string }) => c.name === "migraciones");
     expect(schema.status).toBe("down");
     expect(schema.detail).toContain("tenants.plan");
+  });
+
+  it("nota que falta la 0037, la de lo que se leyó de los adjuntos", async () => {
+    // Sin estas columnas el worker falla al guardar el resumen y los datos de
+    // cada archivo, y la ficha no tiene qué mostrar.
+    const faltan = ["cases.resumen", "claim_attachments.resumen", "claim_attachments.util", "claim_attachments.datos", "claim_attachments.metadatos"];
+    mockExecute.mockResolvedValue({ rows: esquemaSin(...faltan) });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    for (const col of faltan) expect(schema.detail).toContain(col);
   });
 
   it("nota que falta la 0038: sin ella el worker no reserva el mensaje tardío", async () => {

@@ -22,6 +22,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
 import { logger } from "@/lib/observability/logger";
+import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 
 const GRAPH_API_BASE = "https://graph.facebook.com";
 
@@ -180,7 +181,7 @@ function messageBody(msg: CloudApiTextMessage): string {
         (msg.document?.filename ? `[Documento adjunto: ${msg.document.filename}]` : "[Documento adjunto]")
       );
     case "audio":
-      return "[Mensaje de audio adjunto]";
+      return PLACEHOLDER_AUDIO;
     case "button":
       return msg.button?.text?.trim() || "";
     case "interactive":
@@ -231,7 +232,13 @@ function extensionFor(mimeType: string): string {
     "image/webp": ".webp",
     "video/mp4": ".mp4",
     "audio/ogg": ".ogg",
+    "audio/opus": ".opus",
     "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/x-m4a": ".m4a",
+    "audio/aac": ".aac",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
     "application/pdf": ".pdf",
   };
   return known[mimeType.split(";")[0].trim()] ?? "";

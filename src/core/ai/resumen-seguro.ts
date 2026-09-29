@@ -7,8 +7,9 @@
  * resumen que no se muestra es un hueco; uno que miente es un dato falso en la
  * ficha.
  *
- * Nacieron en el asistente (G12, `src/server/asistente/responder.ts`); las usa
- * también el clasificador del mensaje tardío (B3).
+ * Nacieron en el asistente (G12, `src/server/asistente/responder.ts`) y ahora
+ * las usa también el worker para el resumen del caso y el de cada adjunto, y el
+ * clasificador del mensaje tardío (B3).
  */
 
 import { RE_CENTINELA } from "@/core/ai/sin-centinelas";
@@ -24,12 +25,12 @@ function digitosLargos(texto: string): string[] {
  * un número agrupado no se cuele partido en corridas cortas y esquive
  * `digitosLargos`. No toca nada que no tenga esa forma de a-tres-en-tres.
  */
-function normalizarNumeros(t: string): string {
+export function normalizarNumeros(t: string): string {
   return t.replace(/\d{1,3}(?:[.\s]\d{3})+/g, (m) => m.replace(/[.\s]/g, ""));
 }
 
 /** Los números largos (normalizados) de los datos estructurados: lo único que un resumen puede repetir. */
-function digitosConocidos(valores: readonly (string | null | undefined)[]): Set<string> {
+export function digitosConocidos(valores: readonly (string | null | undefined)[]): Set<string> {
   return new Set(valores.flatMap((v) => (v ? digitosLargos(normalizarNumeros(v)) : [])));
 }
 
@@ -42,7 +43,7 @@ function digitosConocidos(valores: readonly (string | null | undefined)[]): Set<
  * lados se normalizan antes de comparar, para que "5.000.000" valga lo mismo
  * que "5000000".
  */
-function tieneNumeroInventado(resumen: string, conocidos: Set<string>): boolean {
+export function tieneNumeroInventado(resumen: string, conocidos: Set<string>): boolean {
   return digitosLargos(normalizarNumeros(resumen)).some((n) => !conocidos.has(n));
 }
 
@@ -53,7 +54,7 @@ function tieneNumeroInventado(resumen: string, conocidos: Set<string>): boolean 
  * corto (por ejemplo "$500") para descartar el resumen, porque un monto nunca
  * es un dato del caso — es una afirmación que el prompt le prohíbe hacer.
  */
-function tieneMontoInventado(resumen: string, conocidos: Set<string>): boolean {
+export function tieneMontoInventado(resumen: string, conocidos: Set<string>): boolean {
   const montos = normalizarNumeros(resumen).match(/(?:\$|u\$s|\b(?:ars|usd)\b)\s?\d[\d.\s]*/gi) ?? [];
   return montos.some((m) => {
     const digitos = m.replace(/\D/g, "");

@@ -13,7 +13,7 @@ vi.mock("@/server/ai/provider", () => ({
   getTenantGeminiKey: vi.fn(async () => null),
 }));
 
-import { extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
+import { callGemini, contarTokens, extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
 
 const ORIGINAL_GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -254,5 +254,156 @@ describe("Gemini extractor transport — a connection that drops", () => {
     // two-attempt loop. Worth knowing the two are multiplied rather than
     // shared — a generous GEMINI_MAX_RETRIES costs twice what it looks like.
     expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+});
+
+describe("Gemini extractor — archivos adjuntos", () => {
+  const media = [{ mimeType: "application/pdf", data: "JVBERi0=" }];
+
+  beforeEach(() => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    process.env.GEMINI_MIN_REQUEST_INTERVAL_MS = "0";
+    process.env.GEMINI_MAX_RETRIES = "0";
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("cada archivo viaja entre centinelas <adjunto>, después del mensaje", async () => {
+    const fetchMock = vi.fn(async (_url?: unknown, _init?: RequestInit) =>
+      new Response(JSON.stringify(geminiJsonResponse()), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await extractEmailClaimGemini({ subject: "S", body: "B", memoryHints: [], knownPatterns: [], media });
+
+    const parts = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)).contents[0].parts;
+    expect(parts.slice(1)).toEqual([
+      { text: "<adjunto indice=1 mime=application/pdf>" },
+      { inlineData: { mimeType: "application/pdf", data: "JVBERi0=" } },
+      { text: "</adjunto>" },
+    ]);
+  });
+
+  it("un mime armado para cerrar la etiqueta no la cierra", async () => {
+    const fetchMock = vi.fn(async (_url?: unknown, _init?: RequestInit) =>
+      new Response(JSON.stringify(geminiJsonResponse()), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await extractEmailClaimGemini({
+      subject: "S", body: "B", memoryHints: [], knownPatterns: [],
+      media: [{ mimeType: "image/png><x", data: "iVBO" }],
+    });
+
+    const parts = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)).contents[0].parts;
+    expect(parts[1].text).toBe("<adjunto indice=1 mime=image/pngx>");
+  });
+
+  it("con archivos, un TIMEOUT no se reintenta en la misma corrida", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw Object.assign(new Error("aborted"), { name: "TimeoutError" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      extractEmailClaimGemini({ subject: "S", body: "B", memoryHints: [], knownPatterns: [], media })
+    ).rejects.toMatchObject({ cause: { code: "TIMEOUT" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("un 400 con archivos se reintenta sin ellos y no da lecturas de lo que no vio", async () => {
+    const respuesta = geminiJsonResponse();
+    const texto = JSON.parse(respuesta.candidates[0]!.content.parts[0]!.text);
+    respuesta.candidates[0]!.content.parts[0]!.text = JSON.stringify({
+      ...texto,
+      adjuntos: [{ indice: 1, resumen: "Constancia.", util: true, documento: null }],
+    });
+    const fetchMock = vi
+      .fn(async (_url?: unknown, _init?: RequestInit) => new Response(JSON.stringify(respuesta), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { status: "INVALID_ARGUMENT" } }), { status: 400 })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const claim = await extractEmailClaimGemini({ subject: "S", body: "B", memoryHints: [], knownPatterns: [], media });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const segundo = JSON.parse(String(fetchMock.mock.calls[1]![1]?.body));
+    expect(JSON.stringify(segundo.contents)).not.toContain("inlineData");
+    expect(JSON.stringify(segundo)).not.toContain("invalid JSON");
+    expect(claim.adjuntos).toEqual([]);
+  });
+});
+
+describe("callGemini — tokens de audio", () => {
+  beforeEach(() => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    process.env.GEMINI_MIN_REQUEST_INTERVAL_MS = "0";
+    process.env.GEMINI_MAX_RETRIES = "0";
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("separa del total los tokens que entraron como audio", async () => {
+    const r = geminiJsonResponse();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ...r,
+      usageMetadata: {
+        promptTokenCount: 900,
+        candidatesTokenCount: 50,
+        promptTokensDetails: [{ modality: "TEXT", tokenCount: 300 }, { modality: "AUDIO", tokenCount: 600 }],
+      },
+    }), { status: 200 })));
+
+    const { usage } = await callGemini("sys", "user", undefined, "gemini-2.5-flash", [{ mimeType: "audio/ogg", data: "T2dn" }]);
+    expect(usage).toEqual({ promptTokens: 900, completionTokens: 50, audioTokens: 600 });
+  });
+
+  it("sin audio no agrega la clave", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(geminiJsonResponse()), { status: 200 })));
+    const { usage } = await callGemini("sys", "user");
+    expect(usage).toEqual({ promptTokens: 10, completionTokens: 20 });
+  });
+});
+
+describe("contarTokens", () => {
+  const PDF = { mimeType: "application/pdf", data: "JVBERi0=" };
+
+  beforeEach(() => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("pide countTokens con el archivo y devuelve el total", async () => {
+    const fetchMock = vi.fn(async (_url?: unknown, _init?: RequestInit) =>
+      new Response(JSON.stringify({ totalTokens: 2580 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await contarTokens(PDF, 1000)).toBe(2580);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toMatch(/:countTokens$/);
+    expect(JSON.parse(String(init?.body))).toEqual({ contents: [{ role: "user", parts: [{ inlineData: PDF }] }] });
+  });
+
+  it("\"plazo\" si no contesta a tiempo", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new DOMException("tarde", "TimeoutError");
+    }));
+    expect(await contarTokens(PDF, 1000)).toBe("plazo");
+  });
+
+  it("\"rechazo\" si no puede leer el archivo; null si falla el servicio o la red", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 400 })));
+    expect(await contarTokens(PDF, 1000)).toBe("rechazo");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
+    expect(await contarTokens(PDF, 1000)).toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    }));
+    expect(await contarTokens(PDF, 1000)).toBeNull();
   });
 });

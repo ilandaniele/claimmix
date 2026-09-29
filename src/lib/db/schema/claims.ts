@@ -97,6 +97,11 @@ export const claimAttachments = pgTable("claim_attachments", {
   intentos_de_identificacion: integer("intentos_de_identificacion")
     .notNull()
     .default(0),
+  // Migración 0037: lo que el modelo leyó del archivo y lo que medimos al recibirlo.
+  resumen: text("resumen"),
+  util: boolean("util"),
+  datos: jsonb("datos"),
+  metadatos: jsonb("metadatos"),
 });
 
 export const claimFieldConfirmations = pgTable("claim_field_confirmations", {

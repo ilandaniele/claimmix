@@ -158,6 +158,11 @@ export interface EmailClaimPayload {
   learning?: PromptLearningContext;
   /** email | email_sim | whatsapp | whatsapp_sim — cambia el consejo sobre el remitente. */
   channel?: string;
+  /**
+   * Fotos y PDFs del caso que el modelo todavía no miró, en base64. Van en la
+   * misma llamada: leerlos aparte sería otra llamada por turno.
+   */
+  media?: { mimeType: string; data: string }[];
 }
 
 

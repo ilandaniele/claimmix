@@ -91,7 +91,7 @@ function setDbResult(rows: Array<{ storage_path: string }>) {
 
 /** Build a valid PDF attachment. */
 function buildPdfAttachment(overrides: Partial<EmailAttachment> = {}): EmailAttachment {
-  const content = Buffer.from("PDF bytes here").toString("base64");
+  const content = Buffer.from("%PDF-1.4 bytes here").toString("base64");
   return {
     Name: "policy.pdf",
     Content: content,
@@ -103,7 +103,7 @@ function buildPdfAttachment(overrides: Partial<EmailAttachment> = {}): EmailAtta
 
 /** Build a PDF attachment whose decoded buffer has a known SHA-256. */
 function buildAttachmentWithKnownHash(): { attachment: EmailAttachment; hash: string } {
-  const raw = Buffer.from("known-content-for-hashing-12345");
+  const raw = Buffer.from("%PDF-known-content-for-hashing-12345");
   const hash = createHash("sha256").update(raw).digest("hex");
   const attachment: EmailAttachment = {
     Name: "known.pdf",
@@ -343,6 +343,7 @@ describe("rehostAttachments", () => {
 
     const makeAttachment = (name: string, sizeBytes: number): EmailAttachment => {
       const buf = Buffer.alloc(sizeBytes, 0x41);
+      buf.write("%PDF-");
       return {
         Name: name,
         Content: buf.toString("base64"),
@@ -422,6 +423,79 @@ describe("rehostAttachments", () => {
   });
 
   // ── Result ordering ────────────────────────────────────────────────────────────
+
+  // ── Lo que va al modelo: firma, páginas y segundos ─────────────────────────────
+
+  it("un ejecutable rotulado como PDF se guarda sin firma: no va al modelo", async () => {
+    mockUploadAttachment.mockResolvedValue({ storagePath: "p" });
+    const results = await rehostAttachments({
+      ...BASE_OPTS,
+      attachments: [buildPdfAttachment({ Content: Buffer.from("MZ payload").toString("base64") })],
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({ stored: true, metadatos: { descarte: "content_mismatch" } }),
+    ]);
+  });
+
+  it("un PDF de más de diez páginas se guarda para el analista, sin firma", async () => {
+    mockUploadAttachment.mockResolvedValue({ storagePath: "p" });
+    const pdf = Buffer.from("%PDF-1.4\n" + "<</Type /Page>>\n".repeat(11));
+    const results = await rehostAttachments({
+      ...BASE_OPTS,
+      attachments: [buildPdfAttachment({ Content: pdf.toString("base64"), ContentLength: pdf.length })],
+    });
+
+    expect(mockUploadAttachment).toHaveBeenCalledTimes(1);
+    expect(results).toEqual([expect.objectContaining({ stored: true, metadatos: { descarte: "too_many_pages" } })]);
+  });
+
+  it("un audio que no se deja medir y pesa más de 2 MB se guarda sin firma", async () => {
+    mockUploadAttachment.mockResolvedValue({ storagePath: "p" });
+    const mp3 = Buffer.alloc(2 * 1024 * 1024 + 1, 0);
+    mp3.write("ID3");
+    const results = await rehostAttachments({
+      ...BASE_OPTS,
+      attachments: [
+        { Name: "audio.mp3", Content: mp3.toString("base64"), ContentType: "audio/mpeg", ContentLength: mp3.length },
+      ],
+    });
+
+    expect(results).toEqual([expect.objectContaining({ stored: true, metadatos: { descarte: "too_long" } })]);
+  });
+
+  it("una nota de voz Opus de más de dos minutos se guarda sin firma", async () => {
+    mockUploadAttachment.mockResolvedValue({ storagePath: "p" });
+    const pagina = (granule: bigint, cuerpo = "") => {
+      const b = Buffer.alloc(27 + cuerpo.length);
+      b.write("OggS");
+      b.writeBigUInt64LE(granule, 6);
+      b.write(cuerpo, 27);
+      return b;
+    };
+    const ogg = Buffer.concat([pagina(BigInt(0), "OpusHead"), pagina(BigInt(48_000 * 121))]);
+    const results = await rehostAttachments({
+      ...BASE_OPTS,
+      attachments: [
+        { Name: "nota.ogg", Content: ogg.toString("base64"), ContentType: "audio/ogg; codecs=opus", ContentLength: ogg.length },
+      ],
+    });
+
+    expect(results).toEqual([expect.objectContaining({ stored: true, metadatos: { descarte: "too_long" } })]);
+  });
+
+  it("devuelve lo que midió con el resultado guardado, también si reusa la copia", async () => {
+    const pdf = Buffer.from("%PDF-1.4\n<</Type /Page>>\n<</Type /Page>>\n");
+    setDbResult([{ storage_path: "ya/estaba.pdf" }]);
+    const results = await rehostAttachments({
+      ...BASE_OPTS,
+      attachments: [buildPdfAttachment({ Content: pdf.toString("base64"), ContentLength: pdf.length })],
+    });
+
+    expect(results).toEqual([
+      { stored: true, storagePath: "ya/estaba.pdf", contentHash: expect.any(String), metadatos: { firma: true, paginas: 2 } },
+    ]);
+  });
 
   it("returns results in the same order as input attachments", async () => {
     const pdf = buildPdfAttachment({ Name: "good.pdf" });

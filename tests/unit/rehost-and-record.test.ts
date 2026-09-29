@@ -60,7 +60,7 @@ const OPTS = { tenantId: "tenant-1", caseId: "case-1", messageId: "msg-1" };
 let rows: Array<Record<string, unknown>>;
 
 function photo(overrides: Partial<EmailAttachment> = {}): EmailAttachment {
-  const raw = Buffer.from("jpeg bytes");
+  const raw = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("jpeg bytes")]);
   return {
     Name: "image-abc.jpg",
     Content: raw.toString("base64"),
@@ -148,6 +148,7 @@ describe("rehostAndRecordAttachments", () => {
         stored: true,
         storagePath: "tenant-1/case-1/msg-1/image-abc.jpg",
         contentHash: "a".repeat(64),
+        metadatos: { firma: true },
       },
     ]);
   });
@@ -187,6 +188,27 @@ describe("rehostAndRecordAttachments", () => {
 
     const events = vi.mocked(writeAuditLog).mock.calls.map((c) => c[0].event_type);
     expect(events).toEqual(["attachment.rejected"]);
+  });
+
+  it("escribe lo que midió del archivo en la misma fila, sin otra consulta", async () => {
+    await rehostAndRecordAttachments({ ...OPTS, attachments: [photo()] });
+
+    expect(mockDbInsert).toHaveBeenCalledTimes(1);
+    expect(rows[0]).toMatchObject({ metadatos: { firma: true } });
+  });
+
+  it("un archivo que no es lo que dice ser se guarda para el analista, con el motivo y sin firma", async () => {
+    await rehostAndRecordAttachments({
+      ...OPTS,
+      attachments: [photo({ Content: Buffer.from("MZ exe").toString("base64") })],
+    });
+
+    expect(mockUploadAttachment).toHaveBeenCalledTimes(1);
+    expect(rows[0]).toMatchObject({
+      storage_path: "tenant-1/case-1/msg-1/image-abc.jpg",
+      rejected_reason: null,
+      metadatos: { descarte: "content_mismatch" },
+    });
   });
 
   it("keeps going when one row fails to insert", async () => {

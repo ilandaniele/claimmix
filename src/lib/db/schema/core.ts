@@ -195,6 +195,8 @@ export const cases = pgTable("cases", {
   // Fraud risk assessment (set by AI extractor, migration 0009)
   fraud_risk_level: text("fraud_risk_level").default("none"),
   fraud_indicators: jsonb("fraud_indicators").default(sql`'[]'::jsonb`),
+  // Resumen del caso que devuelve la extracción, ya filtrado (migración 0037).
+  resumen: text("resumen"),
   // Granular injury severity (migration 0009)
   injury_severity: text("injury_severity"),
   // Llegó un mensaje después de que el agente terminó; lo contesta una persona

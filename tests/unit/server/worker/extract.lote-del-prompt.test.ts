@@ -1,7 +1,7 @@
 /**
  * Todo lo que arma el prompt, en un viaje — y el reserva cuando no se puede.
  *
- * Eran seis llamadas dentro de un `Promise.all`, y siete consultas porque los
+ * Eran siete llamadas dentro de un `Promise.all`, y ocho consultas porque los
  * ejemplos hacen dos. En paralelo, sí, pero no juntas: cada `enTenant` abre su
  * propia transacción HTTP con su `set_config` adelante.
  *
@@ -75,10 +75,10 @@ async function correr(loteFalla: boolean) {
 }
 
 describe("cargarLoDelPrompt", () => {
-  it("manda las siete consultas del prompt en un solo lote", async () => {
+  it("manda las ocho consultas del prompt en un solo lote", async () => {
     const { lotes } = await correr(false);
-    // Patrones, entrenamiento, reglas, los DOS de ejemplos, versión y campos.
-    expect(lotes).toContain(7);
+    // Patrones, entrenamiento, reglas, los DOS de ejemplos, versión, campos y adjuntos.
+    expect(lotes).toContain(8);
   });
 
   it("y si el lote se cae, vuelve por el camino de a uno", async () => {
@@ -87,8 +87,8 @@ describe("cargarLoDelPrompt", () => {
     const { cargasSueltas, errores } = await correr(true);
 
     expect(errores).toContain("email_worker.lote_del_prompt_fallo");
-    // Seis cargadores, cada uno con su `enTenant` y su valor por omisión.
-    expect(cargasSueltas.mock.calls.length).toBeGreaterThanOrEqual(6);
+    // Siete cargadores, cada uno con su `enTenant` y su valor por omisión.
+    expect(cargasSueltas.mock.calls.length).toBeGreaterThanOrEqual(7);
   });
 
   it("y cuando el lote anda, no carga nada de a uno además", async () => {

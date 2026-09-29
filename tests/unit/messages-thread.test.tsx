@@ -20,6 +20,8 @@ import userEvent from "@testing-library/user-event";
 import { vi, beforeEach, describe, it, expect } from "vitest";
 import { MessagesThread } from "../../src/app/(app)/casos/[id]/_components/MessagesThread";
 import type { EstadoDeRespuesta } from "@/core/whatsapp/puede-responder";
+import { ENCABEZADO_TRANSCRIPCION } from "@/core/adjuntos/transcripcion";
+import { LocaleProvider } from "@/lib/i18n/LocaleContext";
 
 // ── Mock fetch globally ────────────────────────────────────────────────────────
 
@@ -54,6 +56,7 @@ function makeMessage(overrides: Partial<{
   estado_envio: string | null;
   attachment_count: number;
   autor: string;
+  transcripcion: boolean;
 }> = {}) {
   return {
     id: "msg-001",
@@ -368,6 +371,39 @@ describe("MessagesThread", () => {
         expect(within(cards[0]!).getByText("Denunciante")).toBeInTheDocument();
         expect(within(cards[1]!).getByText("Agente")).toBeInTheDocument();
       });
+    });
+
+    it("marca el mensaje que trae la transcripción de una nota de voz", async () => {
+      mockFetch.mockReturnValue(
+        makeJsonResponse({
+          messages: [makeMessage({ provider: "whatsapp", transcripcion: true }), makeMessage({ id: "msg-002" })],
+        })
+      );
+
+      render(<MessagesThread caseId={CASE_ID} />);
+
+      await waitFor(() => {
+        const cards = screen.getAllByTestId("message-card");
+        expect(within(cards[0]!).getByText("Transcripción de audio")).toBeInTheDocument();
+        expect(within(cards[1]!).queryByText("Transcripción de audio")).not.toBeInTheDocument();
+      });
+    });
+
+    it("en inglés el encabezado de la transcripción sale traducido", async () => {
+      mockFetch.mockReturnValue(
+        makeJsonResponse({
+          messages: [makeMessage({ body_text: `${ENCABEZADO_TRANSCRIPCION}\nChoqué ayer.`, transcripcion: true })],
+        })
+      );
+
+      render(
+        <LocaleProvider locale="en-US">
+          <MessagesThread caseId={CASE_ID} />
+        </LocaleProvider>
+      );
+
+      await waitFor(() => expect(screen.getByText(/Voice note transcript:/)).toBeInTheDocument());
+      expect(screen.queryByText(new RegExp(ENCABEZADO_TRANSCRIPCION))).not.toBeInTheDocument();
     });
 
     it("lo que se mandó bien no lleva etiqueta de estado", async () => {

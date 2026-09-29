@@ -83,14 +83,7 @@ export const DNI_RE = /\b\d{1,2}\.?\d{3}\.?\d{3}\b/g;
  */
 const POLICY_RE = /\b[A-Z0-9]{4,}-?\d{1,4}\b/g;
 
-/**
- * Email y teléfono en texto libre. Las mismas que usa el export
- * (`src/server/agents/export.ts`), acá para que las dos capas de tachado
- * —el export y `sinDatosDeLaPersona`— compartan la misma regla en vez de
- * mantener cada una la suya.
- */
-export const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
-export const PHONE_RE = /(?<!\w)(?:\+?\d[\d .()/-]{7,}\d)(?!\w)/g;
+export { EMAIL_RE, PHONE_RE } from "@/core/text/contacto";
 
 /**
  * Tacha el nombre y el DNI de una persona en un texto libre.

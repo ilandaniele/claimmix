@@ -1,6 +1,7 @@
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 import { bareAddress } from "@/lib/email/reserved";
 import { nombreDePersona, nombreVisibleDelSobre } from "@/core/nombres/nombre-de-persona";
+import { normalizarPatente } from "@/core/case/patente";
 
 type ParseInput = {
   subject?: string | null;
@@ -100,7 +101,7 @@ export function parseEmailClaimFields(input: ParseInput): ExtractedField[] {
 
   const vehicleMatch = VEHICLE_RE.exec(text);
   const partyAPlate = vehicleMatch?.[1] ?? vehicleMatch?.[2];
-  if (partyAPlate) addField(fields, "party_a_plate", normalizePlate(partyAPlate));
+  if (partyAPlate) addField(fields, "party_a_plate", normalizarPatente(partyAPlate));
 
   return fields;
 }
@@ -350,10 +351,6 @@ function normalizeIncidentDate(value: string | null): string | null {
   const month = months[fold(match[2] ?? "")];
   if (!month) return value;
   return `${(match[1] ?? "").padStart(2, "0")}/${month}/${match[3]}`;
-}
-
-function normalizePlate(value: string): string {
-  return value.replace(/\s+/g, "").toUpperCase();
 }
 
 function normalizeDni(value: string | null): string | null {

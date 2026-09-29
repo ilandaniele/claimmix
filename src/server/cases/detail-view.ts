@@ -89,6 +89,15 @@ export interface AdjuntoEnPantalla {
   disponible: boolean;
   /** Qué documento pedido cerró este adjunto, o `null` si no cerró ninguno. */
   matched_doc_key: string | null;
+  /** Una línea de la IA sobre qué es el archivo, o `null` si todavía no lo leyó. */
+  resumen: string | null;
+  /** `false` si la IA lo dio por ajeno al reclamo; `null` si no opinó. */
+  util: boolean | null;
+  /**
+   * Mismo contenido que un adjunto anterior del caso. El hash no sale de acá:
+   * la pantalla sólo necesita saber que se repite.
+   */
+  duplicado: boolean;
 }
 
 export interface DetalleDeCaso {
@@ -175,17 +184,27 @@ async function fetchAdjuntos(
           rejected_reason: claimAttachments.rejected_reason,
           storage_path: claimAttachments.storage_path,
           matched_doc_key: claimAttachments.matched_doc_key,
+          resumen: claimAttachments.resumen,
+          util: claimAttachments.util,
+          content_hash: claimAttachments.content_hash,
         })
         .from(claimAttachments)
         .where(eq(claimAttachments.case_id, caseId))
         .orderBy(asc(claimAttachments.created_at))
     );
 
-    return filas.map(({ storage_path, ...f }) => ({
-      ...f,
-      external_url: f.external_url ?? "",
-      disponible: storage_path != null && f.rejected_reason == null,
-    }));
+    // Vienen del más viejo al más nuevo: el primero con un hash es el original.
+    const vistos = new Set<string>();
+    return filas.map(({ storage_path, content_hash, ...f }) => {
+      const duplicado = content_hash != null && vistos.has(content_hash);
+      if (content_hash != null) vistos.add(content_hash);
+      return {
+        ...f,
+        external_url: f.external_url ?? "",
+        disponible: storage_path != null && f.rejected_reason == null,
+        duplicado,
+      };
+    });
   } catch (err) {
     // Degrada a propósito —la pantalla no se cae porque falle una consulta—
     // pero no en silencio: sin esto, un adjunto que no se pudo leer se ve

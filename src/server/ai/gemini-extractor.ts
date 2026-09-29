@@ -286,6 +286,25 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
 interface GeminiUsage {
   promptTokens: number;
   completionTokens: number;
+  /** Part of promptTokens that came in as audio; present only when > 0. */
+  audioTokens?: number;
+}
+
+type UsageMetadata = {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  promptTokensDetails?: Array<{ modality?: string; tokenCount?: number }>;
+};
+
+function usoDe(meta: UsageMetadata | undefined): GeminiUsage {
+  const audio = (meta?.promptTokensDetails ?? [])
+    .filter((d) => d.modality === "AUDIO")
+    .reduce((s, d) => s + (d.tokenCount ?? 0), 0);
+  return {
+    promptTokens: meta?.promptTokenCount ?? 0,
+    completionTokens: meta?.candidatesTokenCount ?? 0,
+    ...(audio > 0 ? { audioTokens: audio } : {}),
+  };
 }
 
 // ── Transport: AI Studio (API key) vs Vertex AI (service account) ─────────────
@@ -395,9 +414,14 @@ export async function callGemini(
         role: "user",
         parts: [
           { text: userMessage },
-          ...(media ?? []).map((m) => ({
-            inlineData: { mimeType: m.mimeType, data: m.data },
-          })),
+          // Cada archivo va entre centinelas, como el cuerpo del mensaje: un
+          // PDF o una nota de voz son texto ajeno y pueden traer órdenes. El
+          // índice es el que el modelo devuelve en `adjuntos[].indice`.
+          ...(media ?? []).flatMap((m, i) => [
+            { text: `<adjunto indice=${i + 1} mime=${m.mimeType.replace(/[^\w.+/-]/g, "")}>` },
+            { inlineData: { mimeType: m.mimeType, data: m.data } },
+            { text: "</adjunto>" },
+          ]),
         ],
       },
     ],
@@ -435,7 +459,7 @@ export async function callGemini(
       content?: { parts?: Array<{ text?: string }> };
       finishReason?: string;
     }>;
-    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+    usageMetadata?: UsageMetadata;
   };
 
   /*
@@ -468,10 +492,7 @@ export async function callGemini(
       {
         status: 200,
         code: "MAX_TOKENS",
-        usage: {
-          promptTokens: data.usageMetadata?.promptTokenCount ?? 0,
-          completionTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
-        },
+        usage: usoDe(data.usageMetadata),
       }
     );
   }
@@ -494,10 +515,7 @@ export async function callGemini(
    */
   return {
     text: text && text.trim() ? text : null,
-    usage: {
-      promptTokens: data.usageMetadata?.promptTokenCount ?? 0,
-      completionTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
-    },
+    usage: usoDe(data.usageMetadata),
     model,
   };
 }
@@ -584,7 +602,7 @@ export async function extractEmailClaimGemini(
   // ── Attempt 1 ─────────────────────────────────────────────────────────────
   const t1 = Date.now();
   try {
-    const { text, usage } = await callGemini(systemPrompt, userMessage, tenantKey, model);
+    const { text, usage } = await callGemini(systemPrompt, userMessage, tenantKey, model, payload.media);
     const latency1 = Date.now() - t1;
     totalPromptTokens = usage.promptTokens;
     totalCompletionTokens = usage.completionTokens;
@@ -684,8 +702,13 @@ export async function extractEmailClaimGemini(
         timeout_ms: DEFAULT_GEMINI_TIMEOUT_MS,
       }, "ai.email_extraction.timeout_sin_reintento");
   } else if (!result) {
-    const correccion =
-      lastErrMeta?.code === "MAX_TOKENS"
+    // Un 400 con archivos es casi siempre uno que Vertex no abre (un PDF con
+    // contraseña, un JPEG cortado). Reenviarlo da el mismo 400 en cada corrida:
+    // el reintento va sin ellos y el worker los da por leídos sin texto.
+    const sinArchivos = lastErrMeta?.status === 400 && !!payload.media?.length;
+    const correccion = sinArchivos
+      ? ""
+      : lastErrMeta?.code === "MAX_TOKENS"
         ? "\n\nIMPORTANT: Your previous response was cut off because it exceeded the length limit. Be concise: emit each field once, do not repeat yourself, and omit fields you have no value for. Return ONLY valid JSON matching the schema."
         : "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
 
@@ -693,12 +716,15 @@ export async function extractEmailClaimGemini(
 
     const t2 = Date.now();
     try {
-      const { text, usage } = await callGemini(stricterSystem, userMessage, tenantKey, model);
+      const { text, usage } = await callGemini(
+        stricterSystem, userMessage, tenantKey, model, sinArchivos ? undefined : payload.media
+      );
       const latency2 = Date.now() - t2;
       totalPromptTokens += usage.promptTokens;
       totalCompletionTokens += usage.completionTokens;
 
       result = parseEmailResponse(text, model);
+      if (result && sinArchivos) result.adjuntos = [];
 
       const status2 = result ? "success" : "invalid_json";
       if (tenantId) {

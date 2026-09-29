@@ -20,7 +20,7 @@ import {
   extractEmailClaimGemini,
   GeminiExtractionError,
 } from "@/server/ai/gemini-extractor";
-import { resolveExtractionEngine } from "@/server/ai/provider";
+import { resolveExtractionEngine, type ExtractionEngine } from "@/server/ai/provider";
 
 export class ClaimAgentError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -62,8 +62,10 @@ export async function runEmailClaimAgent(params: {
   tenantId: string;
   caseId: string;
   userId: string | null;
+  /** El que ya resolvió quien llama, para no volver a la base. */
+  engine?: ExtractionEngine;
 }): Promise<ExtractedClaim> {
-  const engine = await resolveExtractionEngine(params.tenantId, params.userId);
+  const engine = params.engine ?? (await resolveExtractionEngine(params.tenantId, params.userId));
   if (engine === "mock") return denunciaSimuladaVacia();
   return extractEmailClaimGemini(
     params.payload,

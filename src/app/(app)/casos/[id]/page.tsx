@@ -44,7 +44,7 @@ import { CoreSyncButton } from "./_components/CoreSyncButton";
 import { hayClienteDeCoreSync } from "@/server/core-sync/client";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
 import { formatAge, formatDate } from "@/lib/utils";
-import { getT } from "@/lib/i18n";
+import { getT, type TranslationKey } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { parseEmailClaimFields } from "@/lib/email/claim-parser";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
@@ -54,7 +54,12 @@ import { resumenDeCaso } from "@/lib/labels/resumen-de-caso";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { formatCaseNumber } from "@/core/case/numero";
 import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
+import { TIPOS_DE_INDICIO } from "@/lib/schemas/extracted-claim";
+import { resumenDeLaIA, textoDeIndicio } from "@/lib/labels/textos-de-la-ia";
 import Link from "next/link";
+
+/** Un tipo viejo o desconocido se pinta crudo: no hay etiqueta para él. */
+const TIPOS = new Set<string>(TIPOS_DE_INDICIO);
 
 interface CaseDetailPageProps {
   params: Promise<{ id: string }>;
@@ -151,6 +156,12 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
 
   const isEmailCase =
     caseRow.channel === "email" || caseRow.channel === "email_sim";
+  const indicios = Array.isArray(caseRow.fraud_indicators)
+    ? (caseRow.fraud_indicators as Array<{ type: string; description: string; clave?: string }>)
+    : [];
+  const resumenIA = resumenDeLaIA(caseRow.resumen, locale);
+  const nivelDeFraude =
+    caseRow.fraud_risk_level && caseRow.fraud_risk_level !== "none" ? caseRow.fraud_risk_level : null;
 
   // Boundary normalization: Drizzle numeric `confidence` arrives as string.
   let displayedExtractedFields: ExtractedFieldRow[] = extracted_fields.map(
@@ -374,8 +385,15 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left column — 2/3 width */}
         <div className="lg:col-span-2 flex flex-col gap-6">
-          {/* Resumen del caso, en una línea */}
-          {(() => {
+          {/* Resumen del caso: el de la IA si lo hay, si no el armado con los campos. */}
+          {resumenIA ? (
+            <Card className="px-5 py-4">
+              <div className="flex items-start gap-2">
+                <Pill tone="acento">{t("case.detail.resumenIA")}</Pill>
+                <p className="text-[15px] text-slate-800">{resumenIA}</p>
+              </div>
+            </Card>
+          ) : (() => {
             const resumen = resumenDeCaso(
               {
                 nombre: displayedPolicyholderName,
@@ -446,6 +464,51 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               mensajes, y sin ellos la tarjeta no tiene que existir. */}
           <MessagesThread caseId={caseRow.id} />
 
+          {/*
+            * Análisis de fraude, para todos los canales: los indicios que salen
+            * de cruzar los adjuntos valen igual para un caso de WhatsApp.
+            */}
+          {(nivelDeFraude || indicios.length > 0) && (
+            <PanelSection
+              id="fraud-analysis"
+              tono={
+                caseRow.fraud_risk_level === "high"
+                  ? "peligro"
+                  : caseRow.fraud_risk_level === "medium"
+                    ? "precaucion"
+                    : "atencion"
+              }
+              titulo={t("case.detail.fraudAnalysis")}
+              accesorio={nivelDeFraude ? <FraudRiskBadge level={nivelDeFraude} /> : null}
+            >
+              <p className="mb-3 text-[12px] text-slate-500 dark:text-slate-400">
+                {t("case.detail.fraudDisclaimer")}
+              </p>
+              {indicios.length > 0 ? (
+                <ul className="space-y-2">
+                  {indicios.map(
+                    (indicator, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm">
+                        <span className={`mt-0.5 shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 font-mono text-[11px] ${
+                          caseRow.fraud_risk_level === "high"
+                            ? "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
+                        }`}>
+                          {TIPOS.has(indicator.type)
+                            ? t(`fraude.indicio.${indicator.type}` as TranslationKey)
+                            : indicator.type.replace(/_/g, " ")}
+                        </span>
+                        <span className="text-slate-700 dark:text-slate-300">{textoDeIndicio(indicator, t)}</span>
+                      </li>
+                    )
+                  )}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-500">{t("case.detail.fraudNoDetails")}</p>
+              )}
+            </PanelSection>
+          )}
+
           {/* Email-specific sections — only shown for email channel cases */}
           {isEmailCase && (
             <>
@@ -494,46 +557,6 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                   )}
                 </FieldGrid>
               </PanelSection>
-
-              {/* Análisis de fraude — solo cuando hay indicadores */}
-              {caseRow.fraud_risk_level && caseRow.fraud_risk_level !== "none" && (
-                <PanelSection
-                  id="fraud-analysis"
-                  tono={
-                    caseRow.fraud_risk_level === "high"
-                      ? "peligro"
-                      : caseRow.fraud_risk_level === "medium"
-                        ? "precaucion"
-                        : "atencion"
-                  }
-                  titulo={t("case.detail.fraudAnalysis")}
-                  accesorio={<FraudRiskBadge level={caseRow.fraud_risk_level} />}
-                >
-                  <p className="mb-3 text-[12px] text-slate-500 dark:text-slate-400">
-                    {t("case.detail.fraudDisclaimer")}
-                  </p>
-                  {Array.isArray(caseRow.fraud_indicators) && caseRow.fraud_indicators.length > 0 ? (
-                    <ul className="space-y-2">
-                      {(caseRow.fraud_indicators as Array<{ type: string; description: string }>).map(
-                        (indicator, i) => (
-                          <li key={i} className="flex items-start gap-2 text-sm">
-                            <span className={`mt-0.5 shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 font-mono text-[11px] ${
-                              caseRow.fraud_risk_level === "high"
-                                ? "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200"
-                                : "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
-                            }`}>
-                              {indicator.type.replace(/_/g, " ")}
-                            </span>
-                            <span className="text-slate-700 dark:text-slate-300">{indicator.description}</span>
-                          </li>
-                        )
-                      )}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-slate-500">{t("case.detail.fraudNoDetails")}</p>
-                  )}
-                </PanelSection>
-              )}
 
               {/* Section B: Field confirmations panel (AC21) */}
               {/*
@@ -621,7 +644,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             */}
           <PanelSection id="attachments" titulo={t("case.detail.attachments")}>
             <AttachmentsPanel
-              attachments={attachments}
+              attachments={attachments.map((a) => ({ ...a, resumen: resumenDeLaIA(a.resumen, locale) }))}
               caseId={caseRow.id}
               puedeAbrir={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
             />

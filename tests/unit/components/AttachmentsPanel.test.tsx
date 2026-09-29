@@ -28,6 +28,9 @@ const GUARDADO = {
   rejected_reason: null,
   disponible: true,
   matched_doc_key: null,
+  resumen: null,
+  util: null,
+  duplicado: false,
 };
 
 const RECHAZADO = {
@@ -41,6 +44,9 @@ const RECHAZADO = {
   rejected_reason: "size_exceeded",
   disponible: false,
   matched_doc_key: null,
+  resumen: null,
+  util: null,
+  duplicado: false,
 };
 
 // Sin `external_url` a propósito: ese branch ya pone su propio «Abrir», y lo
@@ -140,5 +146,42 @@ describe("AttachmentsPanel", () => {
     );
 
     expect(screen.getByText("Reconocido como: Fotos de los daños")).toBeInTheDocument();
+  });
+
+  it("marca el duplicado, el que no sirve y muestra el resumen de la IA", () => {
+    render(
+      <AttachmentsPanel
+        attachments={[
+          { ...GUARDADO, resumen: "Foto del paragolpes trasero abollado." },
+          { ...GUARDADO, id: "a-3", duplicado: true },
+          { ...GUARDADO, id: "a-4", filename: "gato.jpg", util: false },
+        ]}
+        caseId="c-1"
+        puedeAbrir={false}
+      />
+    );
+
+    expect(screen.getByText("Foto del paragolpes trasero abollado.")).toBeInTheDocument();
+    expect(screen.getAllByText("Duplicado")).toHaveLength(1);
+    expect(screen.getAllByText("No sirve")).toHaveLength(1);
+  });
+
+  it("una nota de voz lleva su insignia", () => {
+    render(
+      <AttachmentsPanel
+        attachments={[{ ...GUARDADO, filename: "audio.ogg", content_type: "audio/ogg; codecs=opus" }]}
+        caseId="c-1"
+        puedeAbrir={false}
+      />
+    );
+
+    expect(screen.getByText("Audio")).toBeInTheDocument();
+  });
+
+  it("sin marcas ni resumen, no pinta nada de más", () => {
+    render(<AttachmentsPanel attachments={[{ ...GUARDADO, resumen: "" }]} caseId="c-1" puedeAbrir={false} />);
+
+    expect(screen.queryByText("Duplicado")).not.toBeInTheDocument();
+    expect(screen.queryByText("No sirve")).not.toBeInTheDocument();
   });
 });

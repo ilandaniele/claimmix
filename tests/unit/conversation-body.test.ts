@@ -143,6 +143,11 @@ describe("loadInboundConversation", () => {
 // ── Dates in the rendered conversation ───────────────────────────────────────
 
 import { buildConversationBody } from "@/core/email/conversation";
+import {
+  conTranscripcion,
+  ENCABEZADO_TRANSCRIPCION,
+  PLACEHOLDER_AUDIO,
+} from "@/core/adjuntos/transcripcion";
 
 describe("buildConversationBody — when each message was sent", () => {
   // "Choqué ayer" was read as the 18th on the day it arrived and, two days
@@ -206,6 +211,15 @@ describe("buildConversationBody — when each message was sent", () => {
 
     expect(out).not.toContain("texto citado");
     expect(out).toContain("Fue un choque.");
+  });
+
+  it("la transcripción de una nota de voz llega entera y marcada al modelo", () => {
+    const cuerpo = conTranscripcion(PLACEHOLDER_AUDIO, "Choqué ayer en la rotonda.");
+    const out = buildConversationBody([msg(cuerpo, "2026-08-19T15:00:00Z")]);
+
+    expect(out).toContain(ENCABEZADO_TRANSCRIPCION);
+    expect(out).toContain("Choqué ayer en la rotonda.");
+    expect(out).not.toContain(PLACEHOLDER_AUDIO);
   });
 
   it("returns empty when nothing survives the cleaning", () => {

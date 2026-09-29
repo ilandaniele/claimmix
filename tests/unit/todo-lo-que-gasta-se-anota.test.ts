@@ -124,4 +124,23 @@ describe("registrarConsumoDelModelo", () => {
     expect(filas[0].prompt_tokens).toBe(700);
     expect(filas[0].completion_tokens).toBe(0);
   });
+
+  it("una nota de voz cobra sus tokens de audio a precio de audio", async () => {
+    // Gemini cuenta el audio adentro de promptTokenCount y lo cobra más caro
+    // que el texto: sin separarlo, el tope en dólares ve la nota de voz barata.
+    await registrarConsumoDelModelo(INQUILINO, "gemini-2.5-flash", {
+      promptTokens: 1_000_000,
+      completionTokens: 0,
+      audioTokens: 400_000,
+    });
+
+    const conAudio = computeCostUsd(1_000_000, 0, "gemini-2.5-flash", 400_000);
+    expect(filas[0].cost_usd).toBe(conAudio.toFixed(4));
+    expect(conAudio).toBeGreaterThan(computeCostUsd(1_000_000, 0, "gemini-2.5-flash"));
+  });
+
+  it("sin audio el costo no cambia, y el audio nunca pasa del total de entrada", () => {
+    expect(computeCostUsd(1000, 500, "gemini-2.5-flash", 0)).toBe(computeCostUsd(1000, 500, "gemini-2.5-flash"));
+    expect(computeCostUsd(1000, 0, "gemini-2.5-flash", 5000)).toBe(computeCostUsd(1000, 0, "gemini-2.5-flash", 1000));
+  });
 });

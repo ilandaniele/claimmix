@@ -43,10 +43,25 @@ import type { CaseInsert, CaseRow } from "@/lib/db/types";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { checkBudget } from "@/server/ai/budget";
 import { runEmailClaimAgent } from "@/server/ai/claim-agent";
+import { resolveExtractionEngine } from "@/server/ai/provider";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 import { errMeta, esPasajero, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
+import { esResumenSeguro } from "@/core/ai/resumen-seguro";
+import { fusionarIndicadores } from "@/core/case/contradicciones";
+import {
+  adjuntosDelCaso,
+  anotarLecturas,
+  consultaAdjuntos,
+  deAdjuntos,
+  indiciosDeAdjuntos,
+  marcarPlazoAgotado,
+  paraElModelo,
+  type AdjuntoDelCaso,
+  type ParaElModelo,
+} from "@/server/worker/adjuntos";
+import { transcribirNotasDeVoz } from "@/server/worker/transcribir";
 import { findCustomerMatches, MATCH_QUE_VINCULA } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/core/case/fsm";
@@ -576,6 +591,8 @@ export async function runEmailExtractionWorker(
   let diferida: "sin_tiempo" | "reintento" | null = null;
   // Los entrantes que esta corrida leyó. Lo que entre después no lo contesta.
   let leidos: string[] | null = null;
+  // Los archivos que van al modelo; el catch los marca si la llamada agota el plazo.
+  let vistos: ParaElModelo = { hashes: [], media: [] };
 
   try {
     // ── a) Fetch case + raw_messages ──────────────────────────────────────────
@@ -594,6 +611,8 @@ export async function runEmailExtractionWorker(
             policyholder_name: cases.policyholder_name,
             policy_number: cases.policy_number,
             created_at: cases.created_at,
+            fraud_risk_level: cases.fraud_risk_level,
+            fraud_indicators: cases.fraud_indicators,
           })
           .from(cases)
           // Buscar por id sin contexto sería peor que antes: el id de un
@@ -732,7 +751,7 @@ export async function runEmailExtractionWorker(
       )
     );
 
-    const conversation = await loadInboundConversation(caseId, tenantCtx);
+    let conversation = await loadInboundConversation(caseId, tenantCtx);
     leidos = conversation?.entrantes.map((m) => m.id) ?? null;
 
     if (conversation) {
@@ -765,8 +784,8 @@ export async function runEmailExtractionWorker(
     const memoryApplied = memoryHints.length > 0;
 
     // ── c) Todo lo que arma el prompt, en un solo viaje ──────────────────────
-    const { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields } =
-      await cargarLoDelPrompt(tenantId, tenantCtx, caseRow.claim_type);
+    const { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos } =
+      await cargarLoDelPrompt(tenantId, tenantCtx, caseId, caseRow.claim_type);
 
     const learning = {
       rules: formatPromptRules(promptRules),
@@ -799,6 +818,31 @@ export async function runEmailExtractionWorker(
       );
       return;
     }
+
+    // ── d1) Notas de voz a texto; fotos y PDF para la extracción ─────────────
+    // Después del presupuesto, porque transcribir también es modelo. El texto
+    // queda en el mensaje: la conversación se rearma sin volver a la base.
+    // Con el mock no se transcribe ni se mandan archivos: quedarían dados por
+    // leídos sin que ningún modelo los haya mirado.
+    const engine = await resolveExtractionEngine(tenantId, userId);
+    if (conversation && engine !== "mock") {
+      const nuevos = await transcribirNotasDeVoz({
+        caseId,
+        tenantId,
+        tenantCtx,
+        adjuntos,
+        cuerpos: new Map(conversation.filas.map((f) => [f.id, f.body_text])),
+        restanteMs,
+      });
+      if (nuevos.size > 0) {
+        conversation = armarConversacion(
+          conversation.filas.map((f) => ({ ...f, body_text: nuevos.get(f.id) ?? f.body_text }))
+        );
+        emailBody = conversation?.body ?? emailBody;
+        latestInboundText = conversation?.latestText ?? latestInboundText;
+      }
+    }
+    if (engine !== "mock") vistos = await paraElModelo(adjuntos);
 
     // ── d2) ¿Queda tiempo para lo caro? ──────────────────────────────────────
     //
@@ -850,13 +894,23 @@ export async function runEmailExtractionWorker(
       agentTraining,
       learning,
       channel: caseRow.channel,
+      ...(vistos.media.length > 0 ? { media: vistos.media } : {}),
     };
     extractedClaim = await runEmailClaimAgent({
       payload: emailPayload,
       tenantId,
       caseId,
       userId,
+      engine,
     });
+
+    // Lo que leyó de cada archivo va a su fila y no sigue: ni al registro de la
+    // corrida, que alimenta el entrenamiento, ni al orquestador.
+    const lecturas = extractedClaim.adjuntos ?? [];
+    extractedClaim = { ...extractedClaim, adjuntos: [] };
+    if (extractedClaim.parse_failed !== true) {
+      await anotarLecturas(caseId, tenantCtx, vistos, lecturas);
+    }
 
     // ── e2) Defensive hydration: mirror typed extracted_fields into fields[] + scrub PII ──
     // This is a defensive layer — the primary fix is in the prompt (RULE D / RULE F).
@@ -1253,12 +1307,33 @@ export async function runEmailExtractionWorker(
     // → existing cases.claim_type is preserved (no overwrite).
 
     // ── Fraud risk assessment ─────────────────────────────────────────────────
-    if (extractedClaim.fraud_risk_level && extractedClaim.fraud_risk_level !== "none") {
-      (caseUpdate as Record<string, unknown>).fraud_risk_level = extractedClaim.fraud_risk_level;
+    // Lo del modelo, lo que ya tenía el caso y lo que sale de cruzar los
+    // adjuntos. Nada de esto llega a la persona: va a la ficha, no a
+    // `extractedClaim`, que es lo que lee el orquestador.
+    const fraude = fusionarIndicadores({
+      modelo: {
+        nivel: extractedClaim.fraud_risk_level ?? "none",
+        indicios: extractedClaim.fraud_indicators ?? [],
+      },
+      existentes: { nivel: caseRow.fraud_risk_level, indicios: caseRow.fraud_indicators },
+      derivados: indiciosDeAdjuntos({
+        adjuntos,
+        vistos,
+        lecturas,
+        campos: extractedClaimFields,
+        poliza: policyMatches[0],
+        ahora: new Date(),
+      }),
+    });
+    if (fraude) {
+      caseUpdate.fraud_risk_level = fraude.nivel;
+      caseUpdate.fraud_indicators = fraude.indicios;
     }
-    if (Array.isArray(extractedClaim.fraud_indicators) && extractedClaim.fraud_indicators.length > 0) {
-      (caseUpdate as Record<string, unknown>).fraud_indicators = extractedClaim.fraud_indicators;
-    }
+
+    // El resumen de la ficha sale de la misma extracción, sin otra llamada.
+    // Uno que no pasa borra el anterior: el viejo ya no describe el caso.
+    const resumen = extractedClaim.summary?.trim() ?? "";
+    caseUpdate.resumen = resumen && esResumenSeguro(resumen, Object.values(extractedClaimFields)) ? resumen : null;
 
     // ── Granular injury severity ──────────────────────────────────────────────
     if (extractedClaim.injury_severity != null) {
@@ -1376,6 +1451,7 @@ export async function runEmailExtractionWorker(
       // The error carries the real provider status/code (e.g. 429 /
       // RESOURCE_EXHAUSTED) on its cause — surface it instead of a generic label.
       const { status: errStatus, code: errCode } = errMeta(err);
+      if (errCode === "TIMEOUT") await marcarPlazoAgotado(caseId, tenantCtx, vistos.hashes);
 
       /*
        * Un TIMEOUT no es una escalada. Es «probá de nuevo».
@@ -1509,9 +1585,9 @@ function toPromptMemoryHints(
 /**
  * Todo lo que arma el prompt, en un viaje.
  *
- * Eran seis llamadas dentro de un `Promise.all` —y siete consultas, porque los
+ * Eran siete llamadas dentro de un `Promise.all` —y ocho consultas, porque los
  * ejemplos hacen dos—. En paralelo, sí, pero NO juntas: cada una abría su
- * propia transacción HTTP con su `set_config` adelante. Siete idas a Neon, y la
+ * propia transacción HTTP con su `set_config` adelante. Ocho idas a Neon, y la
  * ida es lo que se paga: las consultas se ejecutan en milisegundos y el viaje
  * son unos 65 ms cada uno.
  *
@@ -1524,16 +1600,17 @@ function toPromptMemoryHints(
  * varios de esos `catch` nombran— dejaría de degradar y pasaría a apagar la
  * carga completa.
  *
- * Así que si el lote se cae, se vuelve por el camino de antes. Siete viajes,
+ * Así que si el lote se cae, se vuelve por el camino de antes. Ocho viajes,
  * pero cada uno con su red. El rápido es el normal; el lento es el raro.
  */
 async function cargarLoDelPrompt(
   tenantId: string,
   tenantCtx: TenantContext,
+  caseId: string,
   claimType: string | null
 ): Promise<LoDelPrompt> {
   try {
-    const [patrones, entrenamiento, reglas, ejemploDelTipo, ejemploRelleno, version, campos] =
+    const [patrones, entrenamiento, reglas, ejemploDelTipo, ejemploRelleno, version, campos, adjuntos] =
       await enTenantVarias<[
         Parameters<typeof deKnownPatterns>[0],
         FilaDeEntrenamiento[],
@@ -1542,6 +1619,7 @@ async function cargarLoDelPrompt(
         FilaDeEjemplo[],
         Parameters<typeof dePromptVersion>[0],
         AgentCustomField[],
+        unknown,
       ]>(tenantCtx, (db) => {
         const ejemplos = consultasDeEjemplos(db, claimType);
         return [
@@ -1552,6 +1630,7 @@ async function cargarLoDelPrompt(
           ejemplos.relleno,
           consultaPromptVersion(db),
           consultaCustomFields(db, claimType),
+          consultaAdjuntos(db, caseId),
         ];
       });
 
@@ -1562,6 +1641,7 @@ async function cargarLoDelPrompt(
       approvedExamples: deEjemplos(claimType ? ejemploDelTipo : [], ejemploRelleno),
       promptVersion: dePromptVersion(version),
       customFields: campos,
+      adjuntos: deAdjuntos(adjuntos),
     };
   } catch (err) {
     logger.error({
@@ -1569,7 +1649,7 @@ async function cargarLoDelPrompt(
         nota: "Se vuelve al camino de a uno, donde cada carga degrada sola.",
       }, "email_worker.lote_del_prompt_fallo");
 
-    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields] =
+    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos] =
       await Promise.all([
         loadKnownPatterns(tenantCtx),
         loadAgentTraining(tenantId),
@@ -1577,9 +1657,10 @@ async function cargarLoDelPrompt(
         loadApprovedExamples(tenantId, claimType),
         getActivePromptVersion(tenantId),
         loadActiveCustomFields(tenantId, claimType),
+        adjuntosDelCaso(caseId, tenantCtx),
       ]);
 
-    return { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields };
+    return { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos };
   }
 }
 
@@ -1590,6 +1671,7 @@ interface LoDelPrompt {
   approvedExamples: ApprovedExample[];
   promptVersion: ActivePromptVersion;
   customFields: AgentCustomField[];
+  adjuntos: AdjuntoDelCaso[];
 }
 /** La consulta sola, para poder mandarla en un lote. Ver `cargarLoDelPrompt`. */
 function consultaKnownPatterns(db: ClienteDatos) {
@@ -1924,7 +2006,20 @@ interface LoadedConversation {
   providerMessageId: string | null;
   /** Falso cuando el último entrante falló SPF/DKIM (E17). */
   remitenteAutenticado: boolean;
+  /** Las filas tal cual: la transcripción rearma la conversación con ellas. */
+  filas: FilaEntrante[];
 }
+
+type FilaEntrante = {
+  id: string;
+  provider_message_id: string | null;
+  body_text: string | null;
+  subject: string | null;
+  from_addr: string | null;
+  profile_name: string | null;
+  received_at: string;
+  headers: unknown;
+};
 
 /**
  * Every inbound message on the case, oldest first, as one document.
@@ -1961,7 +2056,10 @@ export async function loadInboundConversation(
   // Defensive: anything other than a row list means we cannot read the
   // conversation, and the raw-message path is the honest fallback.
   if (!Array.isArray(inbound)) return null;
+  return armarConversacion(inbound as FilaEntrante[]);
+}
 
+export function armarConversacion(inbound: FilaEntrante[]): LoadedConversation | null {
   const latest = inbound[inbound.length - 1];
   if (!latest) return null;
 
@@ -1981,6 +2079,7 @@ export async function loadInboundConversation(
     claimMessageId: latest.id ?? null,
     providerMessageId: latest.provider_message_id ?? null,
     remitenteAutenticado: !autenticacionFallida(latest.headers),
+    filas: inbound,
   };
 }
 

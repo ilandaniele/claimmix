@@ -106,6 +106,49 @@ export const PossiblePolicyMatchSchema = z.object({
 
 export type PossiblePolicyMatch = z.infer<typeof PossiblePolicyMatchSchema>;
 
+/** Los siete tipos de indicio. Cerrados: el panel y el cruce de documentos sólo conocen estos. */
+export const TIPOS_DE_INDICIO = [
+  "timeline_inconsistency",
+  "location_inconsistency",
+  "damage_inconsistency",
+  "documentation_gap",
+  "repeat_claimant",
+  "behavior_signal",
+  "other",
+] as const;
+
+const textoLeido = (max: number) => z.string().max(max).nullable().catch(null);
+
+/**
+ * Lo que dice un documento adjunto (una constancia, un registro, un DNI). No
+ * son campos del caso: se cruzan contra el reclamo y la póliza en
+ * `cruzarDocumentos`, y nada más.
+ */
+export const DocumentoLeidoSchema = z.object({
+  tipo: textoLeido(60),
+  fecha: textoLeido(30),
+  patente: textoLeido(20),
+  dni: textoLeido(20),
+  nombre: textoLeido(200),
+  lugar: textoLeido(200),
+  provincia: textoLeido(60),
+});
+
+export type DocumentoLeido = z.infer<typeof DocumentoLeidoSchema>;
+
+/**
+ * Cada campo se ataja por su cuenta: un resumen largo de un adjunto no puede
+ * tirar lo que el modelo leyó en los otros.
+ */
+export const AdjuntoLeidoSchema = z.object({
+  indice: z.number().int().min(1).max(6),
+  resumen: z.string().max(200).catch(""),
+  util: z.boolean().nullable().catch(null),
+  documento: DocumentoLeidoSchema.nullable().catch(null),
+});
+
+export type AdjuntoLeido = z.infer<typeof AdjuntoLeidoSchema>;
+
 /**
  * Full extraction result returned by any extractor (real or mock).
  * Extended with email-intake fields for the claims workflow.
@@ -240,18 +283,18 @@ export const ExtractedClaimSchema = z.object({
    */
   fraud_indicators: z.array(
     z.object({
-      type: z.enum([
-        "timeline_inconsistency",
-        "location_inconsistency",
-        "damage_inconsistency",
-        "documentation_gap",
-        "repeat_claimant",
-        "behavior_signal",
-        "other",
-      ]),
+      type: z.enum(TIPOS_DE_INDICIO),
       description: z.string().max(500),
     })
   ).default([]),
+
+  /**
+   * Lo que el modelo vio en cada foto o PDF de `<adjunto>`: resumen corto, si
+   * sirve para el reclamo y, si es un documento, sus datos. Nunca sale al
+   * asegurado ni a entrenamiento. Si el modelo lo escribe mal, queda vacío en
+   * vez de tirar la extracción entera.
+   */
+  adjuntos: z.array(AdjuntoLeidoSchema).max(6).default([]).catch([]),
 
   // ── Granular injury severity ──────────────────────────────────────────────
 
@@ -368,10 +411,32 @@ export const RESPUESTA_JSON_SCHEMA = {
           items: {
             type: "object",
             properties: {
-              type: { type: "string" },
+              type: { type: "string", enum: [...TIPOS_DE_INDICIO] },
               description: { type: "string" },
             },
             required: ["type", "description"],
+            additionalProperties: false,
+          },
+        },
+        adjuntos: {
+          type: "array",
+          maxItems: 6,
+          items: {
+            type: "object",
+            properties: {
+              indice: { type: "integer" },
+              resumen: { type: "string", maxLength: 200 },
+              util: { type: "boolean" },
+              documento: {
+                type: ["object", "null"],
+                properties: Object.fromEntries(
+                  Object.keys(DocumentoLeidoSchema.shape).map((k) => [k, { type: ["string", "null"] }])
+                ),
+                required: Object.keys(DocumentoLeidoSchema.shape),
+                additionalProperties: false,
+              },
+            },
+            required: ["indice", "resumen", "util", "documento"],
             additionalProperties: false,
           },
         },
@@ -398,6 +463,7 @@ export const RESPUESTA_JSON_SCHEMA = {
         "suggested_reply",
         "fraud_risk_level",
         "fraud_indicators",
+        "adjuntos",
         "injury_severity",
       ],
       additionalProperties: false,

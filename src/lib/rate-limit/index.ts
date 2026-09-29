@@ -172,6 +172,13 @@ export const RATE_LIMIT_CONFIGS = {
    * un caso cerrado le manda veinte correos a la guardia.
    */
   AVISO_TARDIO_POR_CASO: { limit: 3, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * CLASIFICACION_TARDIA_POR_CASO: 10 llamadas al modelo por día y por caso.
+   * El tope del aviso no frena la clasificación, que va antes: sin esto, quien
+   * escribe cien veces a un caso cerrado gasta el presupuesto de IA del día.
+   */
+  CLASIFICACION_TARDIA_POR_CASO: { limit: 10, windowMs: 24 * 60 * 60_000 },
 } as const;
 
 /**

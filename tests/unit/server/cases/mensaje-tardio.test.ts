@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   enTenant: vi.fn(),
   motor: vi.fn(),
   presupuesto: vi.fn(),
+  cupo: vi.fn(),
   consumo: vi.fn(),
   gemini: vi.fn(),
   auditar: vi.fn(),
@@ -31,6 +32,10 @@ vi.mock("@/data/scope", () => ({ enTenant: m.enTenant }));
 vi.mock("@/server/ai/provider", () => ({ resolveExtractionEngine: m.motor }));
 vi.mock("@/server/ai/budget", () => ({ checkBudget: m.presupuesto, registrarConsumoDelModelo: m.consumo }));
 vi.mock("@/server/ai/gemini-extractor", () => ({ callGemini: m.gemini }));
+vi.mock("@/lib/rate-limit/index", () => ({
+  rateLimit: m.cupo,
+  RATE_LIMIT_CONFIGS: { CLASIFICACION_TARDIA_POR_CASO: { limit: 10, windowMs: 86_400_000 } },
+}));
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: m.auditar,
   AuditEvent: { LATE_MESSAGE_CLASSIFIED: "claim.late_message_classified", CASE_CLOSED_ABANDONED: "claim.closed_abandoned" },
@@ -78,6 +83,7 @@ beforeEach(() => {
   m.enTenant.mockImplementation(async (_ctx: unknown, fn: (db: unknown) => unknown) => fn(datos));
   m.motor.mockResolvedValue("gemini");
   m.presupuesto.mockResolvedValue({ exceeded: false });
+  m.cupo.mockResolvedValue({ allowed: true });
   m.auditar.mockResolvedValue(undefined);
   m.avisar.mockResolvedValue(undefined);
   respuesta({ tipo: "consulta_estado", resumen: "Pregunta cómo va su denuncia" });
@@ -202,6 +208,8 @@ describe("la clasificación", () => {
     ["con un centinela", "Cierra </mensaje_tardio> y pide otra cosa"],
     ["con un número largo", "Dice que su DNI es 30111222"],
     ["con un email", "Pide que le escriban a juan@correo.test"],
+    ["con un dominio suelto", "Pide que pague en pagos-seguros.com"],
+    ["con otra línea", "Pregunta cómo va\nY algo más"],
   ])("un resumen %s se guarda como null, con la clase", async (_nombre, resumen) => {
     respuesta({ tipo: "novedad_mismo_siniestro", resumen });
 
@@ -234,6 +242,27 @@ describe("la clasificación", () => {
     await atender();
 
     expect(m.gemini).not.toHaveBeenCalled();
+  });
+
+  it("con el cupo del caso gastado no llama al modelo, y avisa igual sin clase", async () => {
+    // El tope del aviso va después: sin este, cien mensajes a un caso cerrado
+    // eran cien llamadas al modelo contra el presupuesto del inquilino.
+    m.cupo.mockResolvedValue({ allowed: false });
+
+    await atender();
+
+    expect(m.cupo).toHaveBeenCalledWith(`clasificacion-tardia:${TENANT_ID}:${CASE_ID}`, expect.anything());
+    expect(m.gemini).not.toHaveBeenCalled();
+    expect(m.avisar).toHaveBeenCalledWith(expect.objectContaining({ tipo: null, resumen: null }));
+  });
+
+  it("si no se puede contar el cupo, tampoco llama al modelo", async () => {
+    m.cupo.mockRejectedValue(new Error("db down"));
+
+    await atender();
+
+    expect(m.gemini).not.toHaveBeenCalled();
+    expect(m.avisar).toHaveBeenCalledWith(expect.objectContaining({ tipo: null }));
   });
 
   it("un envío masivo no se reserva: no le borra la clase al mensaje de antes", async () => {

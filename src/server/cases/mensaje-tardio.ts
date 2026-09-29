@@ -21,11 +21,12 @@ import { logger } from "@/lib/observability/logger";
 import { errorCode } from "@/lib/observability/error-code";
 import {
   ClasificacionTardiaSchema,
-  TOPE_RESUMEN_TARDIO,
+  esResumenTardioSeguro,
   promptDelMensajeTardio,
   type TipoMensajeTardio,
 } from "@/core/case/mensaje-tardio";
-import { esResumenSeguro } from "@/core/ai/resumen-seguro";
+import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 import { stripQuotedReply } from "@/core/email/conversation";
 import { isBulkHeader } from "@/server/email/relevance-prefilter";
@@ -89,12 +90,19 @@ async function reservar(tenantId: string, caseId: string) {
  */
 async function clasificar(
   tenantId: string,
+  caseId: string,
   texto: string
 ): Promise<{ tipo: TipoMensajeTardio | null; resumen: string | null }> {
   const nada = { tipo: null, resumen: null };
   if (!texto.trim()) return nada;
   if ((await resolveExtractionEngine(tenantId)) === "mock") return nada;
   if ((await checkBudget(tenantId)).exceeded) return nada;
+  // Sin cupo, o sin poder contarlo, se avisa igual pero sin clase.
+  const cupo = await rateLimit(
+    claveDeCupo("clasificacion-tardia", tenantId, caseId),
+    RATE_LIMIT_CONFIGS.CLASIFICACION_TARDIA_POR_CASO
+  ).catch(() => null);
+  if (!cupo?.allowed) return nada;
 
   const { sistema, usuario } = promptDelMensajeTardio(texto);
   let respuesta: string | null;
@@ -119,7 +127,7 @@ async function clasificar(
   const resumen = parsed.data.resumen.trim();
   return {
     tipo: parsed.data.tipo,
-    resumen: resumen && esResumenSeguro(resumen, [], TOPE_RESUMEN_TARDIO) ? resumen : null,
+    resumen: resumen && esResumenTardioSeguro(resumen) ? resumen : null,
   };
 }
 
@@ -134,7 +142,7 @@ export async function atenderMensajeTardio({
     const mensaje = await reservar(tenantId, caseId);
     if (!mensaje) return;
 
-    const { tipo, resumen } = await clasificar(tenantId, stripQuotedReply(mensaje.body ?? ""));
+    const { tipo, resumen } = await clasificar(tenantId, caseId, stripQuotedReply(mensaje.body ?? ""));
 
     // Si entró otro mensaje en el medio, la reserva es suya y esto no la pisa.
     await enTenant({ tenantId }, (db) =>

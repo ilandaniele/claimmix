@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ClasificacionTardiaSchema,
+  esResumenTardioSeguro,
   TIPOS_MENSAJE_TARDIO,
   promptDelMensajeTardio,
 } from "@/core/case/mensaje-tardio";
@@ -45,5 +46,19 @@ describe("promptDelMensajeTardio", () => {
     const { usuario } = promptDelMensajeTardio("a".repeat(5000));
     const adentro = usuario.slice("<mensaje_tardio>".length, -"</mensaje_tardio>".length);
     expect(adentro).toHaveLength(2000);
+  });
+});
+
+describe("esResumenTardioSeguro", () => {
+  it("deja pasar una línea común, con puntos y siglas", () => {
+    expect(esResumenTardioSeguro("Pregunta si La Segunda S.A. ya respondió. Manda la foto del parte.")).toBe(true);
+  });
+
+  it.each([
+    ["un dominio suelto", "Pide que pague en pagos-seguros.com"],
+    ["un dominio con www", "Dice que entre a www.algo.com.ar"],
+    ["otra línea", "Pregunta cómo va\nY algo más"],
+  ])("rechaza %s: Gmail lo haría enlace o parecería otra línea del aviso", (_nombre, resumen) => {
+    expect(esResumenTardioSeguro(resumen)).toBe(false);
   });
 });

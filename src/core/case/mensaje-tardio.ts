@@ -10,6 +10,7 @@
 
 import { z } from "zod";
 
+import { esResumenSeguro } from "@/core/ai/resumen-seguro";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 
 export const TIPOS_MENSAJE_TARDIO = [
@@ -47,6 +48,14 @@ Devolvé SÓLO este JSON, sin texto alrededor ni markdown:
 
 El resumen no lleva nombres, teléfonos, emails, direcciones, montos, patentes, números de documento ni de póliza,
 ni enlaces. Si no hay nada que resumir, "resumen" va vacío.`;
+
+// Un dominio suelto, sin https://, Gmail lo vuelve enlace en el aviso.
+const DOMINIO_RE = /[a-z0-9-]\.[a-z]{2,}\b/i;
+
+/** El resumen va solo en una línea del aviso por mail: ni otra línea ni un dominio. */
+export function esResumenTardioSeguro(resumen: string): boolean {
+  return !/[\r\n]/.test(resumen) && !DOMINIO_RE.test(resumen) && esResumenSeguro(resumen, [], TOPE_RESUMEN_TARDIO);
+}
 
 /** El prompt del clasificador: el texto recortado y sin poder cerrar el centinela. */
 export function promptDelMensajeTardio(texto: string): { sistema: string; usuario: string } {

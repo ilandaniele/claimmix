@@ -19,7 +19,8 @@ export type AmbitoDeCupo =
   | "re-analyze"
   | "whatsapp"
   | "core-api"
-  | "aviso-tardio";
+  | "aviso-tardio"
+  | "clasificacion-tardia";
 
 export function claveDeCupo(ambito: AmbitoDeCupo, ...partes: string[]): string {
   return [ambito, ...partes.map((p) => p.trim().toLowerCase())].join(":");

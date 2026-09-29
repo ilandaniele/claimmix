@@ -1,11 +1,14 @@
+import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
 import {
   duracionSeg,
   esAudio,
   firmaCoincide,
+  MAX_BYTES_AUDIO,
   normalizarMime,
   paginasPdf,
+  revisarAdjunto,
   seMira,
   vaAlModelo,
 } from "@/core/adjuntos/firma";
@@ -22,18 +25,32 @@ function paginaOgg(granule: bigint, cuerpo = ""): Uint8Array {
   return b;
 }
 
-function wav(segundos: number, byteRate = 16_000): Uint8Array {
-  const datos = segundos * byteRate;
+/** PCM mono de 16 bits a 8 kHz: 16.000 bytes por segundo. */
+function wav(segundos: number): Uint8Array {
+  const datos = segundos * 16_000;
   const b = new Uint8Array(44 + datos);
   const v = new DataView(b.buffer);
   b.set(ascii("RIFF"), 0);
   v.setUint32(4, 36 + datos, true);
   b.set(ascii("WAVEfmt "), 8);
   v.setUint32(16, 16, true);
-  v.setUint32(28, byteRate, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true);
+  v.setUint32(28, 16_000, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
   b.set(ascii("data"), 36);
   v.setUint32(40, datos, true);
   return b;
+}
+
+function pdfConObjStm(filtro: string, cuerpo: Uint8Array): Uint8Array {
+  return con(
+    ascii(`%PDF-1.7\n5 0 obj <</Type /ObjStm /N 12 /Filter ${filtro} /Length ${cuerpo.length}>>stream\n`),
+    cuerpo,
+    ascii("\nendstream\nendobj\n1 0 obj <</Type /Pages /Count 1>>\n")
+  );
 }
 
 describe("normalizarMime", () => {
@@ -127,6 +144,23 @@ describe("paginasPdf", () => {
   it("da null si no encuentra ninguna, como en un PDF con objetos comprimidos", () => {
     expect(paginasPdf(ascii("%PDF-1.7\n<</Type /ObjStm>>stream..."))).toBeNull();
   });
+
+  it("abre los streams de objetos y cuenta las páginas que esconden", () => {
+    const paginas = deflateSync(Buffer.from("<</Type /Page>> ".repeat(12)));
+    expect(paginasPdf(pdfConObjStm("/FlateDecode", paginas))).toBe(12);
+  });
+
+  it("da null si un stream de objetos viene con un filtro que no abre", () => {
+    expect(paginasPdf(pdfConObjStm("/LZWDecode", ascii("<</Type /Page>>")))).toBeNull();
+  });
+
+  it("lee los nombres escritos con escapes", () => {
+    expect(paginasPdf(ascii("%PDF-1.4\n2 0 obj <</T#79pe /Page>>\n3 0 obj <</Type /P#61ge>>\n"))).toBe(2);
+  });
+
+  it("se queda con el /Count más alto si dice más que las páginas sueltas", () => {
+    expect(paginasPdf(ascii("%PDF-1.4\n1 0 obj <</Type /Pages /Count 40>>\n2 0 obj <</Type /Page>>\n"))).toBe(40);
+  });
 });
 
 describe("duracionSeg", () => {
@@ -140,13 +174,40 @@ describe("duracionSeg", () => {
     expect(duracionSeg(vorbis, "audio/ogg")).toBeNull();
   });
 
-  it("mide un WAV por el tamaño de los datos y el byteRate", () => {
+  it("mide un WAV por los bytes que siguen a los datos y el byteRate", () => {
     expect(duracionSeg(wav(3), "audio/wav")).toBe(3);
+  });
+
+  it("no le cree al tamaño que declara el chunk de datos", () => {
+    const w = wav(3);
+    new DataView(w.buffer).setUint32(40, 1, true);
+    expect(duracionSeg(w, "audio/wav")).toBe(3);
+  });
+
+  it("da null si el byteRate no cuadra con canales, frecuencia y bits", () => {
+    const w = wav(3);
+    new DataView(w.buffer).setUint32(28, 16_000_000, true);
+    expect(duracionSeg(w, "audio/wav")).toBeNull();
   });
 
   it("da null para lo que no sabe medir, sin lanzar", () => {
     expect(duracionSeg(ascii("ID3\x04"), "audio/mpeg")).toBeNull();
     expect(duracionSeg(ascii("OggS"), "audio/ogg")).toBeNull();
     expect(duracionSeg(con(ascii("RIFF"), [0, 0, 0, 0], ascii("WAVE")), "audio/wav")).toBeNull();
+  });
+});
+
+describe("revisarAdjunto", () => {
+  it("no manda al modelo un PDF del que no sabe cuantas paginas tiene", () => {
+    expect(revisarAdjunto(ascii("%PDF-1.4\n"), "application/pdf")).toEqual({ ok: false, reason: "pages_unknown" });
+  });
+
+  it("corta un Opus pesado aunque su granule diga que dura poco", () => {
+    const ogg = con(paginaOgg(BigInt(0), "OpusHead"), new Uint8Array(MAX_BYTES_AUDIO), paginaOgg(BigInt(48_000 * 10)));
+    expect(revisarAdjunto(ogg, "audio/ogg")).toEqual({ ok: false, reason: "too_long" });
+  });
+
+  it("un WAV se mide por sus bytes, sin tope de peso aparte", () => {
+    expect(revisarAdjunto(wav(100), "audio/wav")).toEqual({ ok: true, metadatos: { firma: true, segundos: 100 } });
   });
 });

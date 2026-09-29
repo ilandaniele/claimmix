@@ -45,10 +45,12 @@ vi.mock("@/lib/audit/log", () => ({
 import { readFileSync } from "node:fs";
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
   closeAbandonedConversations,
   getAbandonAfterDays,
   ABANDONABLE_STATUSES,
+  leLlegoLaPregunta,
 } from "@/server/intake/close-abandoned";
 import { db } from "@/lib/db";
 import { writeAuditLog } from "@/lib/audit/log";
@@ -267,6 +269,19 @@ describe("el silencio de alguien a quien nunca le preguntamos", () => {
     // dependiendo de eso: sin mensaje, no le preguntamos.
     expect(FUENTE).toContain("coalesce((");
     expect(FUENTE).toContain("), false)");
+  });
+
+  it("un recordatorio que falló no tapa la pregunta que sí llegó", () => {
+    /*
+     * El recordatorio (B4) escribe su propio outbound. Si ése falla y se mira
+     * sólo el último, el caso que ya tenía la pregunta entregada no se cierra
+     * nunca. Desde la primera reserva del ciclo en curso, lo que salga no cuenta.
+     */
+    const { sql } = new PgDialect().sqlToQuery(leLlegoLaPregunta);
+    expect(sql).toContain('select 1 from "case_recordatorios" r');
+    expect(sql).toContain('r.case_id = "cases"."id"');
+    expect(sql).toMatch(/r\.ancla > coalesce\(\s*\(select max\(cm\.received_at\) from claim_messages cm/);
+    expect(sql).toContain('r.created_at <= "outbound_messages"."created_at"');
   });
 
   it("los que quedan abiertos se cuentan, con sus ids", async () => {

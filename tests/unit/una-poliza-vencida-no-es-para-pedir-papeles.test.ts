@@ -42,6 +42,7 @@ vi.mock("@/lib/db/helpers", async (importOriginal) => {
 
 vi.mock("@/server/email/dispatch", () => ({
   dispatchOutboundEmail: vi.fn().mockResolvedValue(undefined),
+  seEntrego: () => true,
 }));
 
 vi.mock("@/lib/audit/log", () => ({

@@ -131,6 +131,11 @@ describe("AuditTimeline", () => {
     ["tomar_el_control", "Tomar el control"],
     ["tope_por_remitente", "Más de 20 mensajes en 10 minutos del mismo número: se guardó y no se leyó."],
     ["devolver_al_agente", "Devolver al agente"],
+    // Los salteos del recordatorio (B4) guardan el motivo de `decidirReenvio` tal cual.
+    ["plantilla_sin_aprobar", "La plantilla para escribirle después de 24 h todavía no está aprobada por Meta"],
+    ["ventana_cerrada", "Pasaron más de 24 h desde su último mensaje de WhatsApp"],
+    ["sin_destinatario", "No sabemos a quién escribirle"],
+    ["nada_pendiente", "No queda nada por pedir"],
   ])("el motivo %s se traduce", (reason, esperado) => {
     render(
       <AuditTimeline

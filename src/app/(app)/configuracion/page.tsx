@@ -200,7 +200,7 @@ export default async function ConfiguracionPage({
         {/* ── Avisos de casos urgentes (E10, sólo admin) ────────────────────── */}
         {admin && (
           <Section title={t("configuracion.alertas.titulo")}>
-            <AlertasPanel inicial={admin.alertas} />
+            <AlertasPanel inicial={admin.alertas} horasIniciales={admin.recordatorioHoras} />
           </Section>
         )}
 

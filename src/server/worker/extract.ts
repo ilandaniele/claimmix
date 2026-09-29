@@ -64,6 +64,7 @@ import { ultimoPedido } from "@/server/confirmations/ultimo-pedido";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
 import { ESTADOS_DE_ARRANQUE, puedeArrancar } from "@/core/case/estados-de-arranque";
 import { marcarParaResponder } from "@/server/cases/para-responder";
+import { atenderMensajeTardio } from "@/server/cases/mensaje-tardio";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
@@ -647,6 +648,8 @@ export async function runEmailExtractionWorker(
         target_id: caseId,
         payload: { status: caseRow.status, motivo: "estado_no_reanudable" },
       });
+      // No lo contesta el agente: sólo se clasifica para quien lo atiende.
+      await atenderMensajeTardio({ tenantId, caseId });
       return;
     }
 

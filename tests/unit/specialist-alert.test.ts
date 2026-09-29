@@ -12,11 +12,12 @@
  * had simply never been told, and it was the one that mattered most.
  */
 
-const { mockSelect, mockGetAccount, mockSend, mockAudit } = vi.hoisted(() => ({
+const { mockSelect, mockGetAccount, mockSend, mockAudit, mockCupo } = vi.hoisted(() => ({
   mockSelect: vi.fn(),
   mockGetAccount: vi.fn(),
   mockSend: vi.fn(),
   mockAudit: vi.fn(),
+  mockCupo: vi.fn(),
 }));
 
 // La capa de datos, corriendo contra el db que este test ya simula.
@@ -43,14 +44,22 @@ vi.mock("@/server/email/gmail/gmail-sender", () => ({
   },
 }));
 
+vi.mock("@/lib/rate-limit/index", async (original) => ({
+  ...(await original<typeof import("@/lib/rate-limit/index")>()),
+  rateLimit: mockCupo,
+}));
+
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: mockAudit,
-  AuditEvent: { SPECIALIST_ALERTED: "claim.specialist_alerted" },
+  AuditEvent: {
+    SPECIALIST_ALERTED: "claim.specialist_alerted",
+    LATE_MESSAGE_ALERTED: "claim.late_message_alerted",
+  },
 }));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { tenants } from "@/lib/db/schema";
-import { alertSpecialists } from "@/server/notify/specialist-alert";
+import { alertSpecialists, avisarMensajeTardio } from "@/server/notify/specialist-alert";
 
 /** El `where` con el que se preguntó «¿ya se avisó?», para poder compilarlo. */
 const condicionesDeYaSeAviso: unknown[] = [];
@@ -581,5 +590,131 @@ describe("la guarda de «ya se avisó» mira si se entregó", () => {
     await alert();
 
     expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * B3: el mensaje que llega a un caso que ya atiende una persona. Mismo canal y
+ * mismos destinatarios que el aviso de escalamiento; su propia marca por mensaje.
+ */
+describe("avisarMensajeTardio", () => {
+  const MSG = "22222222-2222-2222-2222-222222222222";
+  const guardadaSitio = process.env.NEXT_PUBLIC_SITE_URL;
+  afterEach(() => {
+    if (guardadaSitio === undefined) delete process.env.NEXT_PUBLIC_SITE_URL;
+    else process.env.NEXT_PUBLIC_SITE_URL = guardadaSitio;
+  });
+
+  beforeEach(() => {
+    mockCupo.mockResolvedValue({ allowed: true });
+  });
+
+  function tardio(tipo: "consulta_estado" | null = "consulta_estado", resumen: string | null = "Pregunta cuándo le pagan") {
+    return avisarMensajeTardio({ tenantId: TENANT, caseId: CASE, messageId: MSG, tipo, resumen });
+  }
+
+  it("le llega a la lista del tenant y nunca a la dirección vedada", async () => {
+    database({ listaDelTenant: ["guardia@aseguradora.com", "Ilan.Daniele@googlemail.com"] });
+
+    await tardio();
+
+    const para = mockSend.mock.calls[0][0].to as string;
+    expect(para).toContain("guardia@aseguradora.com");
+    expect(para).not.toMatch(/ilan\.?daniele/i);
+  });
+
+  it("la marca es por mensaje: pregunta por late_message_alerted y ese message_id, no por specialist_alerted", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    database({});
+
+    await tardio();
+
+    const { sql, params } = new PgDialect().sqlToQuery(condicionesDeYaSeAviso[0] as never);
+    expect(params).toContain("claim.late_message_alerted");
+    expect(params).not.toContain("claim.specialist_alerted");
+    expect(params).toContain(MSG);
+    expect(sql).toContain("message_id");
+    expect(sql).toContain("delivered");
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("el mismo mensaje ya avisado no se avisa de nuevo", async () => {
+    database({ alreadySent: true });
+
+    await tardio();
+
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("el correo dice qué pide, el resumen y el link, y la auditoría guarda el mensaje sin direcciones", async () => {
+    process.env.NEXT_PUBLIC_SITE_URL = "https://claimmix.vercel.app/";
+    database({ listaDelTenant: ["guardia@aseguradora.com"] });
+
+    await tardio();
+
+    const { subject, textBody } = mockSend.mock.calls[0][0];
+    expect(subject).toContain("Pregunta cómo va");
+    expect(textBody).toContain("Qué pide: Pregunta cómo va");
+    expect(textBody).toContain("Resumen: Pregunta cuándo le pagan");
+    expect(textBody).toContain(`https://claimmix.vercel.app/casos/${CASE}`);
+    const entrada = mockAudit.mock.calls[0][0];
+    expect(entrada.event_type).toBe("claim.late_message_alerted");
+    expect(entrada.payload).toEqual({ message_id: MSG, recipients: 1, delivered: true });
+  });
+
+  it("sin clasificar lo dice, y sin resumen no deja la línea vacía", async () => {
+    database({ listaDelTenant: ["guardia@aseguradora.com"] });
+
+    await tardio(null, null);
+
+    const { textBody } = mockSend.mock.calls[0][0];
+    expect(textBody).toContain("Qué pide: Sin clasificar");
+    expect(textBody).not.toContain("Resumen:");
+  });
+
+  it("no avisa por un caso simulado", async () => {
+    database({ channel: "whatsapp_sim" });
+
+    await tardio();
+
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockAudit).not.toHaveBeenCalled();
+  });
+
+  it("pasado el tope del caso no manda ni audita", async () => {
+    // Veinte mensajes a un caso cerrado no son veinte correos a la guardia.
+    database({ listaDelTenant: ["guardia@aseguradora.com"] });
+    mockCupo.mockResolvedValue({ allowed: false });
+
+    await tardio();
+
+    expect(mockCupo).toHaveBeenCalledWith(`aviso-tardio:${TENANT}:${CASE}`, { limit: 3, windowMs: 24 * 60 * 60_000 });
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockAudit).not.toHaveBeenCalled();
+  });
+
+  it("un mensaje ya avisado no gasta el tope", async () => {
+    database({ alreadySent: true });
+
+    await tardio();
+
+    expect(mockCupo).not.toHaveBeenCalled();
+  });
+
+  // Gastarlo sin mandar dejaba al caso sin avisos el resto del día cuando
+  // alguien cargaba la lista o reconectaba la casilla.
+  it("sin a quién ni desde dónde mandar, no gasta el tope", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    database({ staff: [] });
+    await tardio();
+
+    database({ listaDelTenant: ["guardia@aseguradora.com"] });
+    mockGetAccount.mockResolvedValue(null);
+    await tardio();
+
+    expect(spy.mock.calls.flat().join(" ")).toContain("no_recipients");
+    expect(spy.mock.calls.flat().join(" ")).toContain("no_mailbox");
+    expect(mockCupo).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

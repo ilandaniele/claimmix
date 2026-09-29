@@ -195,9 +195,10 @@ export async function ingestInboundEmail(
   if (existingCaseId) {
     const status = await reabrirSiEraNoRelevante(caseId, tenantId);
     // Un fuera de oficina o una lista en el hilo no es alguien esperando respuesta.
+    // De un `cerrado`, sólo el cierre por silencio con aviso: eso lo decide la base.
     if (
       status &&
-      (ESTADOS_DEL_AGENTE_TERMINADO as readonly string[]).includes(status) &&
+      ((ESTADOS_DEL_AGENTE_TERMINADO as readonly string[]).includes(status) || status === "cerrado") &&
       !isBulkHeader(email.headers ?? [])
     ) {
       // No se tira: el mensaje ya está guardado y el reintento del poller lo

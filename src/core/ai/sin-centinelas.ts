@@ -31,6 +31,7 @@ const CENTINELAS = [
   "email_subject",
   "email_body",
   "claim_text",
+  "mensaje_tardio",
   "memory_hints",
   "approved_examples",
   "agent_rules",

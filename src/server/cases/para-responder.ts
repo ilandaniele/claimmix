@@ -1,10 +1,43 @@
 import "server-only";
 
-import { and, eq, exists, gt, inArray, isNotNull, notExists, notInArray, sql } from "drizzle-orm";
+import { and, eq, exists, gt, inArray, isNotNull, notExists, notInArray, or, sql } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, claimMessages, outboundMessages } from "@/lib/db/schema";
 import { ESTADOS_DEL_AGENTE_TERMINADO } from "@/core/case/para-responder";
+import { ETAPA_AVISO_DE_CIERRE } from "@/core/case/recordatorios";
+import { AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
+
+/**
+ * Lo cerró el barrido por silencio y nadie lo cerró a mano después: el último
+ * cierre auditado es el del barrido.
+ */
+export function cerradoPorSilencio() {
+  return and(
+    eq(cases.status, "cerrado"),
+    sql`exists (select 1 from audit_log a
+          where a.target_type = 'case' and a.target_id = ${cases.id}::text
+            and a.event_type = ${AuditEvent.CASE_CLOSED_ABANDONED}
+            and a.created_at >= ${cases.closed_at})`
+  )!;
+}
+
+/**
+ * El caso puede quedar en «Para responder»: el agente terminó con él, o lo
+ * cerró el silencio, le salió el aviso de cierre (B4) y la persona volvió. Sin
+ * aviso (recordatorios apagados, o un cierre de antes de B4) la respuesta queda
+ * en la auditoría, como antes. Un cierre a mano sigue siendo la última palabra.
+ */
+export function admiteParaResponder() {
+  return or(
+    inArray(cases.status, [...ESTADOS_DEL_AGENTE_TERMINADO]),
+    and(
+      cerradoPorSilencio(),
+      sql`exists (select 1 from case_recordatorios r
+            where r.case_id = ${cases.id} and r.etapa = ${ETAPA_AVISO_DE_CIERRE} and r.resultado = 'enviar')`
+    )
+  )!;
+}
 
 /**
  * Con qué entrante de la persona se marca. Sin esto, con cualquiera.
@@ -21,6 +54,10 @@ function marca() {
   return {
     // Guarda cuándo llegó el primero que nadie contestó.
     para_responder_desde: sql`coalesce(${cases.para_responder_desde}, now())`,
+    // Un episodio nuevo no hereda la clase del anterior; el mismo, la conserva.
+    mensaje_tardio_de: sql`case when ${cases.para_responder_desde} is null then null else ${cases.mensaje_tardio_de} end`,
+    mensaje_tardio_tipo: sql`case when ${cases.para_responder_desde} is null then null else ${cases.mensaje_tardio_tipo} end`,
+    mensaje_tardio_resumen: sql`case when ${cases.para_responder_desde} is null then null else ${cases.mensaje_tardio_resumen} end`,
     // La ventana de siete días de WhatsApp cuenta desde acá.
     updated_at: new Date().toISOString(),
   };
@@ -66,7 +103,7 @@ export async function marcarParaResponder(
         .update(cases)
         .set(marca())
         .where(
-          and(eq(cases.id, caseId), inArray(cases.status, [...ESTADOS_DEL_AGENTE_TERMINADO]), entrante)
+          and(eq(cases.id, caseId), admiteParaResponder(), entrante)
         );
     });
   } catch (err) {

@@ -82,6 +82,16 @@ describe("ingestInboundEmail — «Para responder»", () => {
     expect(mockMarcar).not.toHaveBeenCalled();
   });
 
+  // Si lo cerró el silencio o una persona lo decide la base, no el ingreso.
+  it("una respuesta a un caso cerrado intenta marcarlo", async () => {
+    mockThreadLookup.mockResolvedValue({ existingCaseId: "caso-viejo" });
+    mockReabrir.mockResolvedValue("cerrado");
+
+    await ingestInboundEmail(CORREO);
+
+    expect(mockMarcar).toHaveBeenCalledWith("caso-viejo", TENANT);
+  });
+
   it("una respuesta automática en el hilo no marca el caso", async () => {
     mockThreadLookup.mockResolvedValue({ existingCaseId: "caso-viejo" });
 

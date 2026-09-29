@@ -211,6 +211,7 @@ const mudo: AgentMessenger = {
       { case_id: message.caseId, template: message.template },
       "orchestrate.envio_omitido"
     );
+    return true;
   },
 };
 

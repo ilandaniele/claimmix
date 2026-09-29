@@ -29,6 +29,7 @@ export type MotivoSinReenvio =
   | "sin_destinatario"
   | "ventana_cerrada"
   | "plantilla_sin_aprobar"
+  | "plantilla_sin_respuesta"
   | "nada_pendiente"
   | "reciente"
   | "cierre_no_es_abandono";

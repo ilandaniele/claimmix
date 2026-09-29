@@ -49,6 +49,43 @@ describe("i18n de la bandeja y el shell", () => {
     }
   });
 
+  it("las claves de B3 (tardíos) y B4 (recordatorios) existen en los dos idiomas", () => {
+    for (const key of [
+      "tardio.titulo",
+      "tardio.tipo.novedad_mismo_siniestro",
+      "tardio.tipo.siniestro_nuevo",
+      "tardio.tipo.consulta_estado",
+      "tardio.tipo.otro",
+      "tardio.tipo.sin_clasificar",
+      "tardio.aviso.asunto",
+      "tardio.aviso.cuerpo",
+      "tardio.aviso.quePide",
+      "tardio.aviso.resumen",
+      "tardio.aviso.caso",
+      "tardio.aviso.abrir",
+      "audit.claim.late_message_classified",
+      "audit.claim.late_message_alerted",
+      "audit.claim.reminder_sent",
+      "audit.claim.reminder_skipped",
+      "audit.claim.reminder_failed",
+      "audit.claim.closure_notice_sent",
+      "audit.claim.closure_notice_skipped",
+      "audit.claim.closure_notice_failed",
+      "reenvio.motivo.plantilla_sin_respuesta",
+      "cierre.aviso.asunto",
+      "cierre.aviso.cuerpo",
+      "configuracion.recordatorios.titulo",
+      "configuracion.recordatorios.ayuda",
+      "configuracion.recordatorios.apagado",
+      "configuracion.recordatorios.h48",
+      "configuracion.recordatorios.h48y120",
+      "configuracion.recordatorios.actual",
+    ] as const) {
+      expect(esAR[key], `es-AR le falta '${key}'`).toBeTruthy();
+      expect(enUS[key], `en-US le falta '${key}'`).toBeTruthy();
+    }
+  });
+
   it("ETIQUETA_DE_ROL resuelve en los dos idiomas", () => {
     const tEs = getT("es-AR");
     expect(tEs(ETIQUETA_DE_ROL.owner)).toBe("Owner");

@@ -54,6 +54,11 @@ export interface DispatchResult {
   error?: string;
 }
 
+/** Salió, o era una dirección de prueba y se anotó sin mandar. */
+export function seEntrego(r: DispatchResult): boolean {
+  return !r.error || r.error === "SIMULATED_RECIPIENT_SKIPPED";
+}
+
 /** `"Santiago Jasper <s@gmail.com>"` → `"s@gmail.com"`. */
 function bareAddress(value: string): string {
   const angled = value.match(/<([^>]+)>/);

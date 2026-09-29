@@ -303,6 +303,21 @@ describe("consultaListado — orden de «Para responder»", () => {
     const sql = consultaListado(datos as never, baseQuery).toSQL().sql;
     expect(sql).toContain("select u.full_name from users u");
   });
+
+  it("trae la clase y el resumen del mensaje tardío sólo si el caso está en «Para responder»", async () => {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const datos = drizzle(async () => ({ rows: [] }));
+    const sql = consultaListado(datos as never, baseQuery).toSQL().sql;
+    expect(sql).toContain(
+      'case when "para_responder_desde" is not null then "mensaje_tardio_tipo" end'
+    );
+    expect(sql).toContain(
+      'case when "para_responder_desde" is not null then "mensaje_tardio_resumen" end'
+    );
+    // Ni la reserva ni nada del texto del mensaje salen al listado.
+    expect(sql).not.toContain("mensaje_tardio_de");
+    expect(sql).not.toContain("body_text");
+  });
 });
 
 describe("buildCaseFilters — q", () => {

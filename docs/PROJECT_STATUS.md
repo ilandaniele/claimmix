@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-28. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-29. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -3962,7 +3962,53 @@ punto de cada ítem: `docs/AUDITORIA-2026-09.md` §14.
   streaming.~~ Resuelto en #341: `adjunto-de-8mb.spec.ts` lo prueba en CI,
   por streaming, contra el balde de QA.
 
+### ⏰ Mensajes tardíos y recordatorios de lo que falta (B3 y B4, 2026-09-29)
+
+Dos huecos del informe de Clive del 28/09, en la rama
+`feat/tardios-y-recordatorios-b3-b4`. Van en una sola rama y no en los dos PR
+que pedía el plan.
+
+**B3: qué pide el mensaje que llega tarde.** Cuando alguien escribe a un caso
+que ya terminó, el worker clasifica el mensaje (`novedad_mismo_siniestro`,
+`siniestro_nuevo`, `consulta_estado`, `otro`) y guarda un resumen seguro, sin
+el texto crudo (`src/core/case/mensaje-tardio.ts`,
+`src/server/cases/mensaje-tardio.ts`). La bandeja y el detalle muestran la
+clase. Los especialistas reciben el aviso por el mismo canal y con los mismos
+destinatarios que `alertSpecialists`. Un siniestro nuevo **no abre otro caso**:
+lo decide una persona desde la bandeja. Esto se aparta del plan y lo tiene
+que confirmar el dueño. Migración `0038_mensaje_tardio.sql`, con
+`mensaje_tardio_reservado_en`: dos corridas sobre el mismo mensaje no lo
+clasifican ni avisan dos veces, y una que murió se retoma a los 5 minutos.
+
+**B4: recordatorios.** Si la aseguradora los prende en `/configuracion`
+(apagados, 48 h, o 48 h y 5 días), el barrido nocturno de `reap-stuck` repite
+el pedido de lo que falta a un caso en `info_faltante` que no contestó
+(`src/server/confirmations/recordatorios.ts`). Cada etapa se reserva en
+`case_recordatorios` antes de mandar, así que sale una sola vez aunque el
+barrido corra dos veces. Nunca toca `cases`: el reloj del abandono sigue
+igual. Por WhatsApp, pasadas las 24 h, sólo sale con la plantilla
+`reabrir_denuncia` aprobada. Hoy está PENDING, así que esos recordatorios se
+saltean con `plantilla_sin_aprobar`. Al cerrar un abandonado de un inquilino
+con recordatorios, se manda un aviso de cierre por mail. Por WhatsApp se
+saltea (`ventana_cerrada`). Si contestan ese aviso, el caso cerrado por
+silencio vuelve a «Para responder» y el mensaje se clasifica como en B3. Sin
+aviso (recordatorios apagados, o un cierre de antes de B4) la respuesta queda
+sólo en la auditoría, como antes. Un cierre a mano sigue siendo la última
+palabra. Migración `0039_recordatorios.sql`, con
+`recordatorio_horas` en `'{}'` por defecto.
+
+**Antes del deploy.** La 0038 y la 0039 se aplican a mano en staging, QA y
+producción, en ese orden. Sin ellas, `/api/health` queda en rojo y la bandeja
+falla con 42703. Sin la 0038 además no entra **ningún** caso: Drizzle lista
+todas las columnas del esquema en el INSERT a `cases`, como en la caída de
+0006-0009. El 29/09 ninguna de las dos estaba en la base del ensayo, y el
+check cayó 21 de 22 escenarios en el primer mensaje por eso, no por el código.
+
 ### 🙋 Waiting on you (not code)
+
+- **Aplicar 0038 y 0039 (B3 y B4) antes de desplegar.** A mano en staging, QA
+  y producción. Además, confirmar que un mensaje tardío que cuenta otro
+  siniestro no abra un caso nuevo solo.
 
 - ~~**Qué hacer con la respuesta a un caso ya derivado.**~~ ✅ **RESUELTO
   25/09 en #293 (P6).** `findExistingWhatsAppCase` suma el mensaje al caso en

@@ -13,9 +13,10 @@
  *   `escalado` abren uno nuevo.
  * - En el correo el hilo es la conversación: la respuesta cae en el caso esté
  *   como esté. Va a «Para responder» si el caso está en
- *   `ESTADOS_DEL_AGENTE_TERMINADO`; `no_relevante` se reabre
- *   (`reabrir-no-relevante`), y `cerrado` o `esperando` quedan sólo en la
- *   auditoría, como antes.
+ *   `ESTADOS_DEL_AGENTE_TERMINADO` o si lo cerró el barrido por silencio y le
+ *   salió el aviso de cierre (quien lo contesta); `no_relevante` se reabre
+ *   (`reabrir-no-relevante`), y un `cerrado` a mano o `esperando` quedan sólo
+ *   en la auditoría, como antes.
  *
  * La liquidación (`en_liquidacion`, `pagado`, `rechazado`) cuenta como
  * terminada con respuesta: el traspaso le prometió a la persona que si escribe

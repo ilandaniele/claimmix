@@ -329,6 +329,11 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             status={caseRow.status as CaseStatus}
             caseNumber={caseNumber}
             paraResponder={caseRow.para_responder_desde !== null}
+            mensajeTardio={
+              caseRow.para_responder_desde !== null && caseRow.mensaje_tardio_de !== null
+                ? { tipo: caseRow.mensaje_tardio_tipo, resumen: caseRow.mensaje_tardio_resumen }
+                : null
+            }
             vistoEn={vistoEn}
             puedeMarcar={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
             acciones={acciones}

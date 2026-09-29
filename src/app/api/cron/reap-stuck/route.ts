@@ -21,6 +21,8 @@ import { isInternalRequest } from "@/lib/security/internal-auth";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
+import { avisarCierres, recordarPendientes } from "@/server/confirmations/recordatorios";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
@@ -72,10 +74,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
    */
   const retomados = await retomarExtraccionesPendientes({ hasta });
 
+  // Los recordatorios (B4) van antes del cierre, con a lo sumo un minuto: un
+  // caso que hoy cumple las 48 h no tiene que esperar a que se cierren los
+  // viejos. Si fallan, el cierre corre igual.
+  let recordatorios = { enviados: 0, salteados: 0 };
+  try {
+    recordatorios = await recordarPendientes({ hasta: Math.min(hasta - 60_000, Date.now() + 60_000) });
+  } catch (err) {
+    logger.error({ code: errorCode(err) }, "cron_reap_stuck.recordatorios_fallaron");
+  }
+
   // Same nightly pass, second sweep: conversations the claimant abandoned.
   // Piggybacking rather than adding a cron because the Hobby plan allows one
   // run a day and both jobs want exactly that cadence.
   const abandoned = await closeAbandonedConversations();
+
+  // El aviso de cierre (B4) busca los cierres recientes sin avisar, así que el
+  // que hoy no entra sale mañana. Deja un minuto para la purga y la respuesta.
+  let avisosDeCierre = 0;
+  try {
+    avisosDeCierre = await avisarCierres({ hasta: hasta - 60_000 });
+  } catch (err) {
+    logger.error({ code: errorCode(err) }, "cron_reap_stuck.avisos_de_cierre_fallaron");
+  }
 
   // Third sweep, same reason: the rate limiter writes a row per key per window
   // and none of them mean anything once the window has passed.
@@ -87,6 +108,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ...result,
     retomados: retomados.retomados,
     abandoned_closed: abandoned.closed,
+    recordatorios_enviados: recordatorios.enviados,
+    recordatorios_salteados: recordatorios.salteados,
+    avisos_de_cierre: avisosDeCierre,
     rate_limit_rows_purged: purged,
   });
 }

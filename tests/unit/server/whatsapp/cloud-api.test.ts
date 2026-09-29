@@ -304,10 +304,33 @@ describe("estadoDePlantilla", () => {
     await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("pendiente");
   });
 
-  it("HTTP 500 da no_disponible", async () => {
+  // Un error de Graph es pasajero: no se confunde con «no hay plantilla».
+  it("HTTP 500 da sin_respuesta", async () => {
     globalThis.fetch = vi.fn(async () => new Response("error", { status: 500 })) as unknown as typeof fetch;
 
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("sin_respuesta");
+  });
+
+  it("HTTP 429 da sin_respuesta", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("", { status: 429 })) as unknown as typeof fetch;
+
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("sin_respuesta");
+  });
+
+  // Un token vencido no se arregla reintentando: el recordatorio gasta la etapa
+  // en vez de volver cada noche.
+  it("HTTP 401 da no_disponible", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("", { status: 401 })) as unknown as typeof fetch;
+
     await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("no_disponible");
+  });
+
+  it("un fetch que tira da sin_respuesta", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("ECONNRESET");
+    }) as unknown as typeof fetch;
+
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("sin_respuesta");
   });
 
   it("una segunda llamada dentro del TTL no vuelve a pedir", async () => {

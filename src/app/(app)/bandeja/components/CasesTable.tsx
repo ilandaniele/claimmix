@@ -9,6 +9,7 @@ import { SeverityBadge } from "./SeverityBadge";
 import { SourceBadge } from "./SourceBadge";
 import { ConfidenceBar } from "./ConfidenceBar";
 import { Vacio } from "./Vacio";
+import { ClaseDelTardio } from "./ClaseDelTardio";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import { formatAge, formatDate } from "@/lib/utils";
 import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
@@ -304,8 +305,13 @@ export function CasesTable({
 
           if (paraResponder || !at) {
             return (
-              <span className="inline-flex items-center whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-0.5 text-[12px] font-medium text-amber-700">
-                {t(paraResponder ? "bandeja.paraResponder" : "table.replied.pending")}
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-flex items-center whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-0.5 text-[12px] font-medium text-amber-700">
+                  {t(paraResponder ? "bandeja.paraResponder" : "table.replied.pending")}
+                </span>
+                {paraResponder && row.mensaje_tardio_tipo && (
+                  <ClaseDelTardio tipo={row.mensaje_tardio_tipo} resumen={row.mensaje_tardio_resumen} />
+                )}
               </span>
             );
           }

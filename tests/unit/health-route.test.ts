@@ -79,6 +79,11 @@ beforeEach(() => {
       { table_name: "cases", column_name: "extraction_lease_at" },
       { table_name: "tenants", column_name: "plan" },
       { table_name: "tenants", column_name: "monthly_fee_usd" },
+      { table_name: "cases", column_name: "resumen" },
+      { table_name: "claim_attachments", column_name: "resumen" },
+      { table_name: "claim_attachments", column_name: "util" },
+      { table_name: "claim_attachments", column_name: "datos" },
+      { table_name: "claim_attachments", column_name: "metadatos" },
       { table_name: "billing_invoices", column_name: "id" },
       { table_name: "rate_limit_counters", column_name: "key" },
     ],
@@ -214,6 +219,37 @@ describe("GET /api/health — what it reports", () => {
     const schema = body.checks.find((c: { name: string }) => c.name === "migraciones");
     expect(schema.status).toBe("down");
     expect(schema.detail).toContain("tenants.plan");
+  });
+
+  it("nota que falta la 0037, la de lo que se leyó de los adjuntos", async () => {
+    // Sin estas columnas el worker falla al guardar el resumen y los datos de
+    // cada archivo, y la ficha no tiene qué mostrar.
+    mockExecute.mockResolvedValue({
+      rows: [
+        { table_name: "missing_docs", column_name: "declined_at" },
+        { table_name: "outbound_messages", column_name: "asked_keys" },
+        { table_name: "cases", column_name: "extraction_lease_at" },
+        { table_name: "tenants", column_name: "plan" },
+        { table_name: "tenants", column_name: "monthly_fee_usd" },
+        { table_name: "billing_invoices", column_name: "id" },
+        { table_name: "rate_limit_counters", column_name: "key" },
+      ],
+    });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const body = await res.json();
+
+    const schema = body.checks.find((c: { name: string }) => c.name === "migraciones");
+    expect(schema.status).toBe("down");
+    for (const col of [
+      "cases.resumen",
+      "claim_attachments.resumen",
+      "claim_attachments.util",
+      "claim_attachments.datos",
+      "claim_attachments.metadatos",
+    ]) {
+      expect(schema.detail).toContain(col);
+    }
   });
 
   it("answers 503 when anything is down, so a watcher notices", async () => {

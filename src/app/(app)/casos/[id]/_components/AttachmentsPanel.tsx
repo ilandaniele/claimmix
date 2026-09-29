@@ -30,6 +30,12 @@ interface Attachment {
   disponible: boolean;
   /** Qué documento pedido cerró este adjunto, o `null` si no cerró ninguno. */
   matched_doc_key: string | null;
+  /** Una línea de la IA sobre qué es, o `null` si todavía no lo leyó. */
+  resumen: string | null;
+  /** `false` si la IA lo dio por ajeno al reclamo. */
+  util: boolean | null;
+  /** Mismo contenido que un adjunto anterior del caso. */
+  duplicado: boolean;
 }
 
 interface AttachmentsPanelProps {
@@ -106,6 +112,8 @@ function contentTypeBadge(contentType: string): {
     return { label: "PNG", classes: "bg-indigo-100 text-indigo-700" };
   if (lower.includes("docx") || lower.includes("doc"))
     return { label: "DOC", classes: "bg-sky-100 text-sky-700" };
+  if (lower.startsWith("audio/"))
+    return { label: "Audio", classes: "bg-emerald-50 text-emerald-700" };
   return { label: "FILE", classes: "bg-slate-100 text-slate-600" };
 }
 
@@ -166,6 +174,25 @@ export function AttachmentsPanel({ attachments, caseId, puedeAbrir }: Attachment
                   >
                     {attachment.filename}
                   </span>
+                  {(attachment.duplicado || attachment.util === false) && (
+                    <span className="flex gap-1 mt-0.5">
+                      {attachment.duplicado && (
+                        <span className="rounded px-1.5 py-0.5 text-[11px] font-medium bg-slate-100 text-slate-600">
+                          {t("attachment.duplicado")}
+                        </span>
+                      )}
+                      {attachment.util === false && (
+                        <span className="rounded px-1.5 py-0.5 text-[11px] font-medium bg-amber-100 text-amber-700">
+                          {t("attachment.noSirve")}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {attachment.resumen && (
+                    <span className="block text-xs text-slate-600" title={attachment.resumen}>
+                      {attachment.resumen}
+                    </span>
+                  )}
                   {/* Qué documento pedido cerró este adjunto, si cerró alguno. */}
                   {attachment.matched_doc_key && (
                     <span className="block text-xs text-slate-500 truncate">

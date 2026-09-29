@@ -114,7 +114,15 @@ tests/fixtures/*.jpg
 tests/fixtures/*.jpeg
 tests/fixtures/*.png
 tests/fixtures/*.pdf
+tests/fixtures/*.ogg
+tests/fixtures/*.opus
+tests/fixtures/*.mp3
+tests/fixtures/*.m4a
+tests/fixtures/*.wav
 !tests/fixtures/placeholder.jpg
+# Hechos a mano, sin datos de nadie: un audio mudo y una constancia inventada.
+!tests/fixtures/placeholder.ogg
+!tests/fixtures/sintetico-constancia.pdf
 check.log
 
 # El documento de arquitectura armado para descargar. Se genera a partir de

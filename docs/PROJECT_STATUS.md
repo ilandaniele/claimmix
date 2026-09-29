@@ -3926,6 +3926,24 @@ punto de cada ítem: `docs/AUDITORIA-2026-09.md` §14.
   producción antes del merge, como la 0035. Sin ella el envío queda
   `sin_configurar` (501, sin botón), `/api/v1` da 401 y Configuración avisa;
   `--exigir-al-dia` y «Migraciones aplicadas» dan rojo hasta aplicarla.
+- `feat/documentos-y-voz-b1-b7-b8` (B1, B7 y B8 del informe de Clive, sin
+  commitear ni mergear). B1: la IA lee PDFs y notas de voz (ogg, opus, mpeg,
+  mp3, mp4, x-m4a, aac, wav, x-wav; sin AMR/3GPP), con firma y topes de
+  siempre; el audio se transcribe en el worker, nunca en el webhook, y queda en
+  `body_text` en el lugar del marcador, con `raw_payload.transcripcion`. B7: la
+  misma extracción copia los datos de cada documento y `cruzarDocumentos`
+  (src/core/case/contradicciones.ts) los cruza, junto con la fecha y el GPS del
+  EXIF de las fotos, contra el reclamo y la póliza; los indicios van a
+  `fraud_indicators` y al panel del analista, nunca a la persona. B8:
+  `cases.resumen` sale del resumen de la extracción, sin otra llamada, y cada
+  adjunto tiene su línea; la ficha marca duplicados (mismo hash) y los que no
+  sirven. **La migración 0037 (`cases.resumen` y `claim_attachments.resumen`,
+  `util`, `datos`, `metadatos`) se aplica a mano en staging, QA y producción
+  ANTES del deploy**: la ficha lee todas las columnas de `cases`, y sin ella
+  cada caso da 404; `/api/health` mira las cinco. El ensayo suma
+  `nota-de-voz-y-pdf`: la constancia es un PDF inventado que está en el repo, y
+  la nota de voz es un audio mudo hasta que el dueño deje una de verdad,
+  sintética y sin datos de nadie, como `tests/fixtures/nota-de-voz.ogg`.
 
 **Para decidir.**
 - ~~`src/server/confirmations/messenger.ts` manda el WhatsApp antes de

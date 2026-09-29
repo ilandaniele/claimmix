@@ -42,6 +42,7 @@ import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { diceCuidado } from "@/core/mensajes/derivacion";
 import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { esPlanPro } from "@/core/billing/plan-pro";
+import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 import { AppError } from "@/lib/errors";
 import type { PatchActor } from "@/server/cases/patch";
 import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
@@ -68,6 +69,7 @@ const {
   cases,
   claimAttachments,
   claimFieldConfirmations,
+  claimMessages,
   customers,
   insuredAssets,
   missingDocs,
@@ -107,6 +109,14 @@ interface TurnDicho {
    * behaviour for an image nobody can identify.
    */
   photo?: string | boolean;
+  /**
+   * Un archivo que no es foto: una nota de voz o un PDF, por WhatsApp.
+   *
+   * `fixture` es el nombre en `tests/fixtures/`, con extensión. Si no está en
+   * disco se manda `reemplazo`, que sí está en el repositorio: ejercita el
+   * guardado, la firma y la llamada al modelo, pero no lo que el archivo dice.
+   */
+  adjunto?: { fixture: string; tipo: string; reemplazo?: string };
   /**
    * El asunto, cuando el que inventa el ensayo no sirve.
    *
@@ -204,6 +214,11 @@ interface TurnDicho {
      * que lo que muerde es `pideAlgo`, más ancho que la guarda del redactor.
      */
     sinPedido?: boolean;
+    /**
+     * Que la nota de voz de este turno haya quedado escrita en el mensaje.
+     * Sólo con una nota de verdad en disco: el reemplazo es mudo.
+     */
+    transcribe?: boolean;
   };
 }
 
@@ -257,6 +272,10 @@ interface Scenario {
     docsDeclined?: string[];
     /** Field keys that must have survived to the end with a value. */
     knows?: string[];
+    /** Tipos de indicio que tienen que estar en `cases.fraud_indicators`. */
+    indicios?: string[];
+    /** Cuántos adjuntos tienen que haber quedado leídos (`resumen` escrito). */
+    leidos?: number;
   };
 }
 
@@ -528,6 +547,32 @@ const SCENARIOS: Scenario[] = [
     ],
   },
 
+  {
+    id: "nota-de-voz-y-pdf",
+    what: "Una nota de voz y un PDF se leen, y la fecha del PDF que no coincide queda para el analista",
+    policy: { numero: "POL-6100-D", dni: "27.300.400", nombre: "Lucía Paz" },
+    turns: [
+      {
+        say: "Hola, soy Lucía Paz, DNI 27.300.400, póliza POL-6100-D. Choqué el 12 de septiembre de 2026 en Bahía Blanca.",
+        expect: { replies: 1 },
+      },
+      {
+        // Como lo deja el webhook: un audio sin texto entra con el marcador.
+        say: PLACEHOLDER_AUDIO,
+        adjunto: { fixture: "nota-de-voz.ogg", tipo: "audio/ogg; codecs=opus", reemplazo: "placeholder.ogg" },
+        expect: { attachments: 1, transcribe: true },
+      },
+      {
+        // La constancia dice 15/09/2026: tres días después de lo que contó.
+        say: "Te mando la constancia de la denuncia",
+        adjunto: { fixture: "sintetico-constancia.pdf", tipo: "application/pdf" },
+        // Lo que no coincide no se le dice a la persona.
+        expect: { attachments: 2, avoids: ["no coincide", "inconsisten", "fraude"] },
+      },
+    ],
+    finally: { indicios: ["timeline_inconsistency"], leidos: 2 },
+  },
+
   // ── Email ─────────────────────────────────────────────────────────────────
   //
   // Genuinely different code from here down: threading by subject, a prefilter
@@ -770,11 +815,18 @@ const RUN = Date.now().toString().slice(-8);
  */
 /** Is there a real photograph for this fixture name? */
 function haveRealPhoto(photo: string | boolean): boolean {
-  return typeof photo === "string" && fs.existsSync(fixturePath(photo));
+  return typeof photo === "string" && fs.existsSync(fixturePath(`${photo}.jpg`));
 }
 
-function fixturePath(name: string): string {
-  return path.resolve("tests/fixtures", `${name}.jpg`);
+function fixturePath(archivo: string): string {
+  return path.resolve("tests/fixtures", archivo);
+}
+
+/** El archivo que se manda de verdad: el pedido si está en disco, si no el reemplazo. */
+function archivoDe(adjunto: NonNullable<TurnDicho["adjunto"]>): string {
+  return fs.existsSync(fixturePath(adjunto.fixture)) || !adjunto.reemplazo
+    ? adjunto.fixture
+    : adjunto.reemplazo;
 }
 
 /**
@@ -793,8 +845,8 @@ function fixturePath(name: string): string {
  * See docs/TESTING.md for which files to drop in.
  */
 function imageFor(photo: string | boolean): Buffer {
-  if (haveRealPhoto(photo)) return fs.readFileSync(fixturePath(photo as string));
-  return fs.readFileSync(path.resolve("tests/fixtures/placeholder.jpg"));
+  if (haveRealPhoto(photo)) return fs.readFileSync(fixturePath(`${photo as string}.jpg`));
+  return fs.readFileSync(fixturePath("placeholder.jpg"));
 }
 
 /**
@@ -924,7 +976,16 @@ async function deliverWhatsApp(
             data: imageFor(turn.photo),
           },
         ]
-      : undefined,
+      : turn.adjunto
+        ? [
+            {
+              id: `rehearsal-${RUN}-${i}`,
+              mimeType: turn.adjunto.tipo,
+              filename: archivoDe(turn.adjunto),
+              data: fs.readFileSync(fixturePath(archivoDe(turn.adjunto))),
+            },
+          ]
+        : undefined,
   });
   return result.caseId;
 }
@@ -1308,6 +1369,23 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
           );
         }
       }
+      if (want.transcribe && turn.adjunto) {
+        if (archivoDe(turn.adjunto) !== turn.adjunto.fixture) {
+          unrehearsed.add(turn.adjunto.fixture);
+        } else {
+          const [transcripto] = await db
+            .select({ id: claimMessages.id })
+            .from(claimMessages)
+            .where(
+              and(
+                eq(claimMessages.case_id, active),
+                sql`${claimMessages.raw_payload}->>'transcripcion' = 'true'`
+              )
+            )
+            .limit(1);
+          if (!transcripto) note(scenario.id, i + 1, "la nota de voz no quedó escrita", "transcribe");
+        }
+      }
       await checkStatusYParaResponder(scenario.id, i + 1, active, want);
 
       /*
@@ -1381,7 +1459,10 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
 
     if (caseId && scenario.finally) {
       const want = scenario.finally;
-      const [row] = await db.select({ status: cases.status }).from(cases).where(eq(cases.id, caseId));
+      const [row] = await db
+        .select({ status: cases.status, indicios: cases.fraud_indicators })
+        .from(cases)
+        .where(eq(cases.id, caseId));
       if (want.status && !fotosSinEnsayar && row?.status !== want.status) {
         note(
           scenario.id,
@@ -1430,6 +1511,23 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         const keys = new Set(known.map((k) => k.key));
         for (const key of want.knows) {
           if (!keys.has(key)) note(scenario.id, 0, `perdió el dato ${key}`, `perdio-dato:${key}`);
+        }
+      }
+
+      const tipos = new Set(
+        (Array.isArray(row?.indicios) ? row.indicios : []).map((x) => (x as { type?: unknown })?.type)
+      );
+      for (const tipo of want.indicios ?? []) {
+        if (!tipos.has(tipo)) note(scenario.id, 0, `no marcó el indicio ${tipo}`, `indicio:${tipo}`);
+      }
+
+      if (want.leidos !== undefined) {
+        const leidos = await db
+          .select({ id: claimAttachments.id })
+          .from(claimAttachments)
+          .where(and(eq(claimAttachments.case_id, caseId), isNotNull(claimAttachments.resumen)));
+        if (leidos.length !== want.leidos) {
+          note(scenario.id, 0, `${leidos.length} adjunto(s) leído(s), esperaba ${want.leidos}`, "leidos");
         }
       }
 
@@ -1795,8 +1893,8 @@ if (unrehearsed.size > 0) {
     .map((n) => n.slice("actor:".length));
   if (fotos.length > 0) {
     console.log(
-      "\n⋯ Reconocimiento de documentos NO ensayado: faltan " +
-        fotos.map((n) => `tests/fixtures/${n}.jpg`).join(", ")
+      "\n⋯ Reconocimiento de documentos o notas de voz NO ensayado: faltan " +
+        fotos.map((n) => `tests/fixtures/${n.includes(".") ? n : `${n}.jpg`}`).join(", ")
     );
   }
   if (sinActor.length > 0) {

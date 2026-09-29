@@ -231,6 +231,12 @@ async function checkSchema(): Promise<Check> {
     // 0010: sin esto no se puede dar de alta un cliente ni emitir una factura.
     ["tenants", "plan"],
     ["tenants", "monthly_fee_usd"],
+    // 0037: sin estas el worker no puede guardar lo que leyó de los adjuntos.
+    ["cases", "resumen"],
+    ["claim_attachments", "resumen"],
+    ["claim_attachments", "util"],
+    ["claim_attachments", "datos"],
+    ["claim_attachments", "metadatos"],
   ];
 
   try {

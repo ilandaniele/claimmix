@@ -24,6 +24,8 @@ import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments, missingDocs, requiredDocsConfig } from "@/lib/db/schema";
 import { callGemini, errMeta, esPasajero } from "@/server/ai/gemini-extractor";
+import { sinCentinelas } from "@/core/ai/sin-centinelas";
+import { normalizarMime, seMira } from "@/core/adjuntos/firma";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
@@ -135,14 +137,16 @@ export async function pendingDocKeys(
 
 // ── Recognising what arrived ─────────────────────────────────────────────────
 
-/** Types worth showing a model. A PDF or a heic is not something it can read here. */
-const VIEWABLE = /^image\/(jpeg|png|webp)$/i;
+/** Un archivo más grande que esto se identifica por el nombre, sin mandarlo entero al modelo. */
+const MAX_BYTES_A_LA_VISTA = 8 * 1024 * 1024;
 
 interface AttachmentRow {
   id: string;
   filename: string;
   contentType: string;
   storagePath: string | null;
+  /** No pasó la revisión al recibirlo: se guardó, pero sus bytes no van al modelo. */
+  descartado?: boolean;
 }
 
 /**
@@ -303,6 +307,7 @@ async function unmatchedAttachments(
         filename: claimAttachments.file_name,
         contentType: claimAttachments.content_type,
         storagePath: claimAttachments.storage_path,
+        descartado: sql<boolean>`${claimAttachments.metadatos}->>'descarte' is not null`,
       })
       .from(claimAttachments)
       .where(
@@ -358,7 +363,20 @@ async function unmatchedAttachments(
            * sola, y vale para los otros rechazos también —tipo no permitido,
            * subida fallida—, no sólo para el tamaño.
            */
-          isNull(claimAttachments.rejected_reason)
+          isNull(claimAttachments.rejected_reason),
+          /*
+           * Ni lo que el modelo ya dio por ajeno al reclamo, ni la copia de un
+           * archivo que ya se miró: la misma foto mandada dos veces no es un
+           * documento nuevo, y ofrecerla otra vez es otra llamada de visión
+           * para cerrar, quizás, otro pedido con el mismo papel. De las copias
+           * se ofrece una sola, la más mirada y si no la primera, que es la
+           * que va sumando las miradas del archivo.
+           */
+          sql`${claimAttachments.util} is distinct from false`,
+          sql`not exists (select 1 from claim_attachments o where o.case_id = ${claimAttachments.case_id} and o.content_hash = ${claimAttachments.content_hash} and o.id <> ${claimAttachments.id} and (o.matched_doc_key is not null or o.intentos_de_identificacion > ${claimAttachments.intentos_de_identificacion} or (o.intentos_de_identificacion = ${claimAttachments.intentos_de_identificacion} and o.id < ${claimAttachments.id})))`,
+          // Una nota de voz no es un documento, y sin bytes a la vista sólo
+          // quedaría el nombre, que en un mail lo pone quien manda.
+          sql`coalesce(${claimAttachments.content_type}, '') not ilike 'audio/%'`
         )
       )
       // Tope por corrida, aparte del tope por archivo: una tanda con quince
@@ -372,6 +390,7 @@ async function unmatchedAttachments(
     filename: r.filename ?? "",
     contentType: r.contentType ?? "",
     storagePath: r.storagePath,
+    descartado: r.descartado,
   }));
 }
 
@@ -406,13 +425,13 @@ seguridad, o si es otra cosa, devolvé null. Es preferible no reconocerlo a
 darlo por recibido equivocado: un documento marcado como recibido desaparece
 de la lista del analista y nadie se entera hasta que el reclamo se traba.
 
-Nombre del archivo: ${attachment.filename}
-Tipo: ${attachment.contentType}
+Nombre del archivo: ${sinCentinelas(attachment.filename).slice(0, 120)}
+Tipo: ${sinCentinelas(attachment.contentType).slice(0, 80)}
 
 Devolvé JSON: {"doc_key": "<clave exacta de la lista>" | null}`;
 
   try {
-    const media = VIEWABLE.test(attachment.contentType)
+    const media = seMira(attachment.contentType) && !attachment.descartado
       ? await inlineFor(attachment)
       : undefined;
 
@@ -456,8 +475,8 @@ async function inlineFor(
   try {
     const { readAttachment } = await import("@/server/storage/claim-attachments-bucket");
     const bytes = await readAttachment(attachment.storagePath);
-    if (!bytes) return undefined;
-    return { mimeType: attachment.contentType, data: bytes.toString("base64") };
+    if (!bytes || bytes.length > MAX_BYTES_A_LA_VISTA) return undefined;
+    return { mimeType: normalizarMime(attachment.contentType), data: bytes.toString("base64") };
   } catch {
     // Reading the file back is a nicety, not a requirement: without it the
     // model decides on the filename alone, which is rarely enough — and it

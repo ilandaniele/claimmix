@@ -34,6 +34,9 @@ export const TRAINING_APPROVER_ROLES: UserRole[] = ["owner", "admin", "specialis
  */
 export const CUSTOMER_PII_ROLES: UserRole[] = ["owner", "admin", "specialist"];
 
+/** Quién entrega un caso al Core. La ruta y el botón leen esta lista: si difieren, el botón da 403. */
+export const CORE_SYNC_ROLES: UserRole[] = ["owner", "admin", "specialist"];
+
 /** Roles with admin-level configuration access. */
 export const ADMIN_ROLES: UserRole[] = ["owner", "admin"];
 

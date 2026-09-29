@@ -324,6 +324,55 @@ async function attackSurface(): Promise<void> {
     );
   }
 
+  // ── La API del sistema central (B5), que entra con clave y no con sesión ────
+  console.log("\nLa API del sistema central (/api/v1, con clave):\n");
+
+  /*
+   * Una clave con la forma correcta y el inquilino de verdad adentro, pero
+   * inventada: el formato lleva el tenant en claro, así que armarla es gratis.
+   * Lo que tiene que frenarla es el hash, no el formato. Pocas llamadas y sin
+   * ráfagas: el cupo es por IP y esto también corre contra producción.
+   */
+  const tenantReal = process.env.GMAIL_TENANT_ID || "00000000-0000-0000-0000-000000000000";
+  const ajeno = process.env.DEMO_TENANT_ID || "00000000-0000-0000-0000-000000000001";
+  const forjada = `cmk_${tenantReal}_${"A".repeat(43)}`;
+  const v1 = [
+    { nombre: "/api/v1/cases con Bearer basura", url: "/api/v1/cases", clave: "basura" },
+    ...(soloSuperficie
+      ? []
+      : [
+          { nombre: "/api/v1/cases con una clave forjada", url: "/api/v1/cases", clave: forjada },
+          { nombre: "/api/v1/cases/:id ajeno con una clave forjada", url: `/api/v1/cases/${ajeno}`, clave: forjada },
+        ]),
+  ];
+  if (soloSuperficie) {
+    console.log(
+      "  (--solo-superficie: se saltea la clave forjada, que para rechazarse busca el hash en la base; " +
+        "se sigue comprobando en el post-deploy, contra producción.)"
+    );
+  }
+  for (const s of v1) {
+    const r = await head(`${BASE}${s.url}`, { headers: { Authorization: `Bearer ${s.clave}` } });
+    probe(
+      `${s.nombre} no entra`,
+      [401, 404].includes(r.status) && !/"(data|case_id)"/.test(r.body),
+      "leer la cartera de siniestros de una aseguradora armando la clave a mano",
+      `(${r.status})`
+    );
+  }
+
+  const config = await head(`${BASE}/api/admin/core-sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accion: "rotar-clave" }),
+  });
+  probe(
+    "/api/admin/core-sync no rota la clave sin sesión",
+    [401, 403].includes(config.status) && !config.body.includes("cmk_"),
+    "sacar una clave de lectura válida, o redirigir los casos a un webhook propio",
+    `(${config.status})`
+  );
+
   // ── Cabeceras y aislamiento del navegador ──────────────────────────────────
   console.log("\nEl navegador:\n");
 
@@ -558,11 +607,12 @@ function auditAdminGuards(): void {
 
       const key = `${rel}:${verb}`;
       const body = block.split("\nexport ")[0]!;
-      const gate = /requireRole\(\s*\.\.\.\s*(\w+)/.exec(body)?.[1] ?? null;
+      const gate = /(?:requireRole|entrar)\([^)]*?\.\.\.\s*(\w+)/.exec(body)?.[1] ?? null;
 
       // Qué cuenta como candado de admin, en orden de fuerza:
       //   · requireAdmin()               — el guarda dedicado (owner/admin, 403)
       //   · requireRole(...ADMIN_ROLES)  — lo mismo, deletreado
+      //   · entrar(..., ...ADMIN_ROLES)   — lo mismo, con el cupo en paralelo
       //   · isInternalRequest / CRON_SECRET — ruta interna, secreto compartido
       // getSessionContext sólo prueba que HAY sesión, no de qué rol: no alcanza
       // para algo que modifica.

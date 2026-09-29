@@ -1,34 +1,38 @@
 /**
  * CoreSyncButton — Client Component for AC17.
  *
- * Shown only when cases.status = 'listo_para_core'.
+ * Shown when cases.status = 'listo_para_core', or 'error_core' to retry (force).
  * Calls POST /api/cases/:id/sync-to-core.
- * Shows loading state, success (external ID), and error state.
+ * Shows loading and error states. On success the refreshed page leaves
+ * `listo_para_core` and shows the sent panel with the external ID instead.
  */
 
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useT } from "@/lib/i18n/LocaleContext";
+import { textoDelMotivo } from "@/lib/i18n/motivo-de-core";
 
 interface CoreSyncButtonProps {
   caseId: string;
-  /** Current status — only renders if 'listo_para_core' */
+  /** Current status — only renders if 'listo_para_core' or 'error_core' */
   currentStatus: string;
 }
 
 type SyncState =
   | { type: "idle" }
   | { type: "loading" }
-  | { type: "success"; externalId: string; sentAt: string }
+  | { type: "success" }
   | { type: "error"; message: string };
 
 export function CoreSyncButton({ caseId, currentStatus }: CoreSyncButtonProps) {
   const t = useT();
+  const router = useRouter();
   const [syncState, setSyncState] = useState<SyncState>({ type: "idle" });
 
-  // Only show when case is ready for core sync
-  if (currentStatus !== "listo_para_core" && syncState.type === "idle") {
+  const reintento = currentStatus === "error_core";
+  if (currentStatus !== "listo_para_core" && !reintento && syncState.type === "idle") {
     return null;
   }
 
@@ -38,10 +42,12 @@ export function CoreSyncButton({ caseId, currentStatus }: CoreSyncButtonProps) {
       const res = await fetch(`/api/cases/${caseId}/sync-to-core`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force: false }),
+        body: JSON.stringify({ force: reintento }),
       });
 
       const data = await res.json().catch(() => null);
+      // El estado del caso cambió (o no): la ficha lo vuelve a leer.
+      router.refresh();
 
       if (!res.ok) {
         const msg =
@@ -51,41 +57,22 @@ export function CoreSyncButton({ caseId, currentStatus }: CoreSyncButtonProps) {
         return;
       }
 
-      if (data?.synced === true) {
-        setSyncState({
-          type: "success",
-          externalId: data.externalId ?? "N/A",
-          sentAt: new Date().toLocaleString("es-AR"),
-        });
-      } else {
-        setSyncState({
-          type: "error",
-          message: data?.errorMessage ?? t("case.detail.coreSyncError"),
-        });
-      }
+      setSyncState(
+        data?.synced === true
+          ? { type: "success" }
+          : { type: "error", message: textoDelMotivo(t, data?.errorMessage) }
+      );
     } catch {
-      setSyncState({
-        type: "error",
-        message: "Error de red. Intentá de nuevo.",
-      });
+      setSyncState({ type: "error", message: t("case.detail.coreSyncRed") });
     }
   };
 
+  // Hasta que llega la ficha nueva: ahí este botón desaparece y el panel de enviado muestra el ID.
   if (syncState.type === "success") {
     return (
-      <div
-        role="status"
-        className="rounded-lg border border-green-200 bg-green-50 px-4 py-3"
-      >
-        <p className="text-sm font-medium text-green-800">
-          {t("case.detail.coreSyncSuccess")}
-        </p>
-        <p className="text-xs text-green-600 mt-0.5">
-          ID externo:{" "}
-          <span className="font-mono">{syncState.externalId}</span>
-          {" · "}{syncState.sentAt}
-        </p>
-      </div>
+      <p role="status" className="text-sm font-medium text-green-800">
+        {t("case.detail.coreSyncSuccess")}
+      </p>
     );
   }
 
@@ -103,10 +90,13 @@ export function CoreSyncButton({ caseId, currentStatus }: CoreSyncButtonProps) {
         </div>
         <button
           type="button"
-          onClick={() => setSyncState({ type: "idle" })}
+          onClick={() => {
+            setSyncState({ type: "idle" });
+            router.refresh();
+          }}
           className="text-xs text-slate-500 hover:text-slate-700 underline"
         >
-          Reintentar
+          {t("case.detail.coreSyncReintentarBoton")}
         </button>
       </div>
     );

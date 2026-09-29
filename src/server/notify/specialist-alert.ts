@@ -18,7 +18,7 @@
 import "server-only";
 
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { auditLog, authUsers, cases, claimMessages, tenants, users } from "@/lib/db/schema";
 import { isReservedTestAddress, vedadaParaAlertas } from "@/lib/email/reserved";
 import { isReservedTestNumber } from "@/core/phone/reserved";
@@ -149,16 +149,19 @@ async function isSimulatedCase(tenantId: string, caseId: string): Promise<boolea
   }
 }
 
+/** La consulta de la lista, suelta: /configuracion la mete en su lote. */
+export function consultaDeLaLista(db: ClienteDatos, tenantId: string) {
+  return db
+    .select({ emails: tenants.specialist_alert_emails })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1);
+}
+
 /** La lista que cargó un admin en /configuracion. Vacía si no hay o si no se pudo leer. */
 export async function listaDelTenant(tenantId: string): Promise<string[]> {
   try {
-    const [fila] = await enTenant({ tenantId }, (db) =>
-      db
-        .select({ emails: tenants.specialist_alert_emails })
-        .from(tenants)
-        .where(eq(tenants.id, tenantId))
-        .limit(1)
-    );
+    const [fila] = await enTenant({ tenantId }, (db) => consultaDeLaLista(db, tenantId));
     return fila?.emails ?? [];
   } catch {
     return [];

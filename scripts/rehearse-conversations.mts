@@ -77,7 +77,7 @@ const {
   users,
   tenants,
 } = await import("@/lib/db/schema");
-const { and, eq, asc, inArray, isNotNull, like, lt, or, sql } = await import("drizzle-orm");
+const { and, eq, asc, inArray, isNotNull, isNull, like, lt, or, sql } = await import("drizzle-orm");
 
 // ── What a rehearsal looks like ──────────────────────────────────────────────
 
@@ -1563,6 +1563,9 @@ async function sweepOldRehearsalCases(): Promise<void> {
  * A seed is identified by the exact name, DNI and policy number of a
  * scenario's `policy` block, and only when it is older than an hour, like the
  * case sweep. A seed lives for one scenario, so an hour-old seed is not in use.
+ * A run killed between the two inserts leaves the customer without a policy,
+ * so a customer with no policy at all counts too: on 28/09 one blocked every
+ * later seed through the unique DNI.
  */
 async function sweepOldSeeds(): Promise<void> {
   const semillas = SCENARIOS.flatMap((s) => (s.policy ? [s.policy] : []));
@@ -1571,7 +1574,7 @@ async function sweepOldSeeds(): Promise<void> {
     const stale = await db
       .select({ id: customers.id })
       .from(customers)
-      .innerJoin(policies, eq(policies.customer_id, customers.id))
+      .leftJoin(policies, eq(policies.customer_id, customers.id))
       .where(
         and(
           eq(customers.tenant_id, TENANT_ID!),
@@ -1581,7 +1584,7 @@ async function sweepOldSeeds(): Promise<void> {
               and(
                 eq(customers.full_name, p.nombre),
                 eq(customers.dni, p.dni.replace(/\D/g, "")),
-                eq(policies.policy_number, p.numero)
+                or(eq(policies.policy_number, p.numero), isNull(policies.id))
               )
             )
           )

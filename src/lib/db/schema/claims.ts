@@ -21,6 +21,8 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { LecturaGuardada } from "@/core/case/presupuesto-taller";
+
 import { cases, tenants, users } from "./core";
 
 export const claimMessages = pgTable("claim_messages", {
@@ -102,6 +104,8 @@ export const claimAttachments = pgTable("claim_attachments", {
   util: boolean("util"),
   datos: jsonb("datos"),
   metadatos: jsonb("metadatos"),
+  // Migración 0040: el presupuesto del taller leído y sus alertas.
+  lectura_presupuesto: jsonb("lectura_presupuesto").$type<LecturaGuardada>(),
 });
 
 export const claimFieldConfirmations = pgTable("claim_field_confirmations", {

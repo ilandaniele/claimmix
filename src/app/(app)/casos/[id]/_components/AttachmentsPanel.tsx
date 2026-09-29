@@ -13,9 +13,12 @@
 
 "use client";
 
+import type { LecturaGuardada } from "@/core/case/presupuesto-taller";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { TranslationKey } from "@/lib/i18n";
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
+
+import { PresupuestoDelTaller } from "./PresupuestoDelTaller";
 
 interface Attachment {
   id: string;
@@ -36,12 +39,17 @@ interface Attachment {
   util: boolean | null;
   /** Mismo contenido que un adjunto anterior del caso. */
   duplicado: boolean;
+  /** Si se ofrece leerlo como presupuesto del taller. */
+  esPresupuesto: boolean;
+  lectura_presupuesto: LecturaGuardada | null;
 }
 
 interface AttachmentsPanelProps {
   attachments: Attachment[];
   caseId: string;
   puedeAbrir: boolean;
+  /** El mismo corte que cambiar el estado del caso; sin él, la lectura se ve y no se pide. */
+  puedeLeerPresupuesto?: boolean;
 }
 
 /** Format bytes as human-readable size string (e.g. "1.2 MB") */
@@ -117,7 +125,12 @@ function contentTypeBadge(contentType: string): {
   return { label: "FILE", classes: "bg-slate-100 text-slate-600" };
 }
 
-export function AttachmentsPanel({ attachments, caseId, puedeAbrir }: AttachmentsPanelProps) {
+export function AttachmentsPanel({
+  attachments,
+  caseId,
+  puedeAbrir,
+  puedeLeerPresupuesto = false,
+}: AttachmentsPanelProps) {
   const t = useT();
   if (attachments.length === 0) {
     return (
@@ -201,6 +214,14 @@ export function AttachmentsPanel({ attachments, caseId, puedeAbrir }: Attachment
                         etiquetaDeCampo(attachment.matched_doc_key, t)
                       )}
                     </span>
+                  )}
+                  {(attachment.esPresupuesto || attachment.lectura_presupuesto) && (
+                    <PresupuestoDelTaller
+                      caseId={caseId}
+                      attachmentId={attachment.id}
+                      inicial={attachment.lectura_presupuesto}
+                      puedeLeer={attachment.esPresupuesto && puedeLeerPresupuesto}
+                    />
                   )}
                 </span>
                 {/*

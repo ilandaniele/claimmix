@@ -39,6 +39,7 @@ import {
   InjurySeverityBadge,
 } from "./_components/RiskBadges";
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
+import { CoberturaPanel, VeredictoDeCobertura } from "./_components/CoberturaPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
@@ -152,6 +153,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     attachments,
     messages,
     asignado_nombre,
+    cobertura,
   } = detail;
 
   const isEmailCase =
@@ -515,6 +517,17 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             </PanelSection>
           )}
 
+          {/* Cobertura y monto orientativo (B6, B23): sólo para el equipo. */}
+          {cobertura && (
+            <PanelSection
+              id="coverage"
+              titulo={t("cobertura.titulo")}
+              accesorio={<VeredictoDeCobertura cobertura={cobertura} t={t} />}
+            >
+              <CoberturaPanel cobertura={cobertura} t={t} />
+            </PanelSection>
+          )}
+
           {/* Email-specific sections — only shown for email channel cases */}
           {isEmailCase && (
             <>
@@ -676,6 +689,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               attachments={attachments.map((a) => ({ ...a, resumen: resumenDeLaIA(a.resumen, locale) }))}
               caseId={caseRow.id}
               puedeAbrir={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
+              puedeLeerPresupuesto={puedeCambiarEstadoCaso}
             />
           </PanelSection>
 

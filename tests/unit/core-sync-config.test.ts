@@ -11,7 +11,8 @@ import { QueryBuilder } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 
 import type { ClienteDatos } from "@/data/scope";
-import { codigoPg, consultaDeLaConfig, esFaltaDe0036, vistaDeLaConfig } from "@/server/core-sync/config";
+import { AppError } from "@/lib/errors";
+import { codigoPg, consultaDeLaConfig, esFaltaDe0036, faltaLa0040, vistaDeLaConfig } from "@/server/core-sync/config";
 
 const sinBase = new QueryBuilder() as unknown as ClienteDatos;
 
@@ -74,5 +75,16 @@ describe("codigoPg", () => {
     expect(codigoPg(Object.assign(new Error("Failed query"), { cause: { code: "23514" } }))).toBe("23514");
     expect(codigoPg(new Error("x"))).toBeUndefined();
     expect(codigoPg(null)).toBeUndefined();
+  });
+});
+
+describe("faltaLa0040", () => {
+  it("una columna que falta es la migración pendiente; otro error sigue igual", () => {
+    const sinColumna = Object.assign(new Error("Failed query"), { cause: { code: "42703" } });
+    expect(() => faltaLa0040(sinColumna)).toThrow(expect.objectContaining({ code: "MIGRACION_PENDIENTE" }));
+    expect(() => faltaLa0040(sinColumna)).toThrow(AppError);
+
+    const otro = { code: "23514" };
+    expect(() => faltaLa0040(otro)).toThrow(expect.objectContaining({ code: "23514" }));
   });
 });

@@ -43,6 +43,9 @@ const CENTINELAS = [
   "datos_del_caso",
   // Envuelve cada archivo (foto, PDF, audio) que va al modelo como dato.
   "adjunto",
+  // Las notas que acompañan a las condiciones de una póliza y a un presupuesto.
+  "condiciones_poliza",
+  "presupuesto_taller",
 ] as const;
 
 /** La forma de un centinela: `<tag>` o `</tag>`, con o sin espacios adentro. */

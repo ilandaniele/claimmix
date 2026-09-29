@@ -10,12 +10,13 @@
  *   403  FORBIDDEN_ROLE | PLAN_REQUERIDO
  *   404  NOT_FOUND
  *   409  FSM_INVALID_TRANSITION | RESPUESTA_NO_PERMITIDA
- *   422  AI_OUTPUT_INVALID
+ *   413  ARCHIVO_DEMASIADO_GRANDE
+ *   422  AI_OUTPUT_INVALID | ARCHIVO_NO_VALIDO
  *   429  RATE_LIMITED | AI_BUDGET_EXCEEDED
  *   500  INTERNAL_ERROR
  *   501  NOT_IMPLEMENTED
  *   502  ENVIO_FALLIDO
- *   503  IA_NO_DISPONIBLE
+ *   503  IA_NO_DISPONIBLE | MIGRACION_PENDIENTE
  *
  * NEVER include stack traces or internal error strings in API responses.
  */
@@ -37,6 +38,9 @@ export const ErrorCode = {
   NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
   ENVIO_FALLIDO: "ENVIO_FALLIDO",
   IA_NO_DISPONIBLE: "IA_NO_DISPONIBLE",
+  ARCHIVO_DEMASIADO_GRANDE: "ARCHIVO_DEMASIADO_GRANDE",
+  ARCHIVO_NO_VALIDO: "ARCHIVO_NO_VALIDO",
+  MIGRACION_PENDIENTE: "MIGRACION_PENDIENTE",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -58,6 +62,9 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   NOT_IMPLEMENTED: 501,
   ENVIO_FALLIDO: 502,
   IA_NO_DISPONIBLE: 503,
+  ARCHIVO_DEMASIADO_GRANDE: 413,
+  ARCHIVO_NO_VALIDO: 422,
+  MIGRACION_PENDIENTE: 503,
 };
 
 /** Default es-AR messages for each error code. */
@@ -78,6 +85,9 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_IMPLEMENTED: "Esta función no está disponible en esta versión.",
   ENVIO_FALLIDO: "No se pudo enviar el mensaje por WhatsApp.",
   IA_NO_DISPONIBLE: "El asistente no está disponible en este momento. Probá de nuevo en unos minutos.",
+  ARCHIVO_DEMASIADO_GRANDE: "El archivo es demasiado grande.",
+  ARCHIVO_NO_VALIDO: "El archivo no es del tipo esperado.",
+  MIGRACION_PENDIENTE: "Falta aplicar una migración de la base.",
 };
 
 /** Application error — carries a typed error code and HTTP status. */

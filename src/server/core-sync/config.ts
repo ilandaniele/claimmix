@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 
 import type { ClienteDatos } from "@/data/scope";
 import { coreSyncSettings } from "@/lib/db/schema";
+import { AppError } from "@/lib/errors";
 
 // Sin WHERE tenant_id: la fila la elige RLS, y hay una sola por inquilino
 // porque tenant_id es la clave primaria.
@@ -43,4 +44,10 @@ export function codigoPg(e: unknown): string | undefined {
 export function esFaltaDe0036(e: unknown): boolean {
   const codigo = codigoPg(e);
   return codigo === "42P01" || codigo === "42703";
+}
+
+/** La 0040 sólo agrega columnas: sin ella, una consulta que las toca da 42703. Va en el `.catch` de esa consulta. */
+export function faltaLa0040(e: unknown): never {
+  if (codigoPg(e) === "42703") throw new AppError("MIGRACION_PENDIENTE", "Falta aplicar la migración 0040.");
+  throw e;
 }

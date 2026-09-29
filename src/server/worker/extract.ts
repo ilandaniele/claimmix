@@ -38,6 +38,7 @@ import {
   knownClaimPatterns,
   missingDocs,
   rawMessages,
+  tenants,
 } from "@/lib/db/schema";
 import type { CaseInsert, CaseRow } from "@/lib/db/types";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
@@ -50,6 +51,7 @@ import { errMeta, esPasajero, GeminiExtractionError } from "@/server/ai/gemini-e
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
 import { esResumenSeguro } from "@/core/ai/resumen-seguro";
 import { fusionarIndicadores } from "@/core/case/contradicciones";
+import { estimarMonto } from "@/core/case/monto-estimado";
 import {
   adjuntosDelCaso,
   anotarLecturas,
@@ -614,6 +616,7 @@ export async function runEmailExtractionWorker(
             created_at: cases.created_at,
             fraud_risk_level: cases.fraud_risk_level,
             fraud_indicators: cases.fraud_indicators,
+            rangos_de_monto: sql<unknown>`(select ${tenants.rangos_de_monto} from ${tenants} where ${tenants.id} = ${cases.tenant_id})`,
           })
           .from(cases)
           // Buscar por id sin contexto sería peor que antes: el id de un
@@ -1342,6 +1345,14 @@ export async function runEmailExtractionWorker(
     if (extractedClaim.injury_severity != null) {
       (caseUpdate as Record<string, unknown>).injury_severity = extractedClaim.injury_severity;
     }
+
+    // El monto orientativo va a la ficha y a nada más. Uno que salió de un
+    // presupuesto leído vale más que la tabla, pero sólo mientras el caso siga
+    // con el tipo y la gravedad contra cuyo rango se aceptó: el SET ve la fila
+    // de antes, así que si este UPDATE los cambia, vuelve la tabla.
+    const tipo = caseUpdate.claim_type ?? caseRow.claim_type;
+    const monto = estimarMonto(tipo, finalSeverity, caseRow.rangos_de_monto);
+    (caseUpdate as Record<string, unknown>).monto_estimado = sql`CASE WHEN ${cases.monto_estimado}->>'origen' = 'presupuesto' AND ${cases.claim_type} IS NOT DISTINCT FROM ${tipo} AND ${cases.severity} IS NOT DISTINCT FROM ${finalSeverity} THEN ${cases.monto_estimado} ELSE ${monto ? JSON.stringify(monto) : null}::jsonb END`;
 
     try {
       const filas = await enTenant(tenantCtx, (db) =>

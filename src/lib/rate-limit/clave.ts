@@ -20,7 +20,10 @@ export type AmbitoDeCupo =
   | "whatsapp"
   | "core-api"
   | "aviso-tardio"
-  | "clasificacion-tardia";
+  | "clasificacion-tardia"
+  | "condiciones-poliza"
+  | "subida-condiciones"
+  | "lectura-presupuesto";
 
 export function claveDeCupo(ambito: AmbitoDeCupo, ...partes: string[]): string {
   return [ambito, ...partes.map((p) => p.trim().toLowerCase())].join(":");

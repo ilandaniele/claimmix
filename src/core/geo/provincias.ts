@@ -47,7 +47,7 @@ const CAJAS: Record<string, Caja> = {
 /** Unas diez cuadras de GPS impreciso y bordes redondeados. */
 const MARGEN = 0.1;
 
-function clave(nombre: string): string {
+export function claveDeProvincia(nombre: string): string {
   return nombre
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
@@ -56,6 +56,11 @@ function clave(nombre: string): string {
     .replace(/[^a-z ]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Si el nombre es el de una provincia o la capital, escrito como sea. */
+export function esProvincia(nombre: string): boolean {
+  return Object.hasOwn(CAJAS, claveDeProvincia(nombre));
 }
 
 function adentro([latMin, latMax, lonMin, lonMax]: Caja, lat: number, lon: number): boolean {
@@ -72,6 +77,6 @@ function adentro([latMin, latMax, lonMin, lonMax]: Caja, lat: number, lon: numbe
 export function puedeSerDe(lat: number, lon: number, provincia: string | null): boolean {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return true;
   if (!adentro(ARGENTINA, lat, lon)) return false;
-  const caja = provincia ? CAJAS[clave(provincia)] : undefined;
+  const caja = provincia ? CAJAS[claveDeProvincia(provincia)] : undefined;
   return caja ? adentro(caja, lat, lon) : true;
 }

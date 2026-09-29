@@ -147,3 +147,8 @@ export function formatUsd(value: number, precision: 2 | 4 = 2): string {
     maximumFractionDigits: precision,
   }).format(value);
 }
+
+/** Pesos sin centavos: los montos orientativos de un siniestro (B23). */
+export function formatArs(value: number): string {
+  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
+}

@@ -363,21 +363,15 @@ export interface InlineMedia {
   data: string;
 }
 
-export async function callGemini(
-  systemPrompt: string,
-  userMessage: string,
+async function destinoGemini(
+  metodo: "generateContent" | "countTokens",
   apiKey?: string | null,
-  modelOverride?: string,
-  /** Images or documents to look at alongside the text. */
-  media?: InlineMedia[]
-): Promise<{ text: string | null; usage: GeminiUsage; model: string }> {
+  modelOverride?: string
+): Promise<{ endpoint: string; authHeaders: Record<string, string>; model: string }> {
   const vertex = isVertexTransport();
   // Vertex has its own model catalog (no *-latest aliases) — never forward the
   // AI-Studio-flavoured model name to it, it would 404.
   const model = vertex ? getVertexModel() : (modelOverride ?? getGeminiModel());
-
-  let endpoint: string;
-  let authHeaders: Record<string, string>;
 
   if (vertex) {
     const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
@@ -387,18 +381,51 @@ export async function callGemini(
         "GEMINI_TRANSPORT=vertex requires GOOGLE_CLOUD_PROJECT to be set."
       );
     }
-    endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:generateContent`;
-    authHeaders = { Authorization: `Bearer ${await getVertexToken()}` };
-  } else {
-    const key = apiKey ?? process.env.GEMINI_API_KEY;
-    if (!key) {
-      throw new GeminiExtractionError(
-        "GEMINI_API_KEY is not set. Configure it in Configuración."
-      );
-    }
-    endpoint = `${GEMINI_API_BASE}/${model}:generateContent`;
-    authHeaders = { "x-goog-api-key": key };
+    return {
+      endpoint: `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:${metodo}`,
+      authHeaders: { Authorization: `Bearer ${await getVertexToken()}` },
+      model,
+    };
   }
+  const key = apiKey ?? process.env.GEMINI_API_KEY;
+  if (!key) {
+    throw new GeminiExtractionError(
+      "GEMINI_API_KEY is not set. Configure it in Configuración."
+    );
+  }
+  return { endpoint: `${GEMINI_API_BASE}/${model}:${metodo}`, authHeaders: { "x-goog-api-key": key }, model };
+}
+
+/**
+ * Los tokens que el modelo cobraría por leer este archivo, sin mandárselo:
+ * `countTokens` no cobra ni interpreta nada nuestro. "plazo" si no contestó a
+ * tiempo; null ante cualquier otra falla, incluido un archivo que rechaza.
+ */
+export async function contarTokens(media: InlineMedia, plazoMs: number): Promise<number | "plazo" | null> {
+  try {
+    const { endpoint, authHeaders } = await destinoGemini("countTokens");
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ inlineData: media }] }] }),
+      signal: AbortSignal.timeout(plazoMs),
+    });
+    const total = res.ok ? ((await res.json()) as { totalTokens?: unknown }).totalTokens : null;
+    return typeof total === "number" ? total : null;
+  } catch (err) {
+    return (err as { name?: string })?.name === "TimeoutError" ? "plazo" : null;
+  }
+}
+
+export async function callGemini(
+  systemPrompt: string,
+  userMessage: string,
+  apiKey?: string | null,
+  modelOverride?: string,
+  /** Images or documents to look at alongside the text. */
+  media?: InlineMedia[]
+): Promise<{ text: string | null; usage: GeminiUsage; model: string }> {
+  const { endpoint, authHeaders, model } = await destinoGemini("generateContent", apiKey, modelOverride);
 
   // Modern Gemini models (2.5+, 3.x, and the *-latest aliases) THINK by default.
   // Thinking tokens are billed (often 10-50× the visible output) and add latency

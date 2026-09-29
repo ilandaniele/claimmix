@@ -11,13 +11,13 @@ import "server-only";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { enTenant, enTenantVarias, type ClienteDatos, type TenantContext } from "@/data/scope";
-import { normalizarMime, seMira, type Metadatos } from "@/core/adjuntos/firma";
+import { MAX_PAGINAS_PDF, normalizarMime, seMira, type Metadatos } from "@/core/adjuntos/firma";
 import { esResumenSeguro } from "@/core/ai/resumen-seguro";
 import { cruzarDocumentos, type FotoCruzable, type IndicioDerivado } from "@/core/case/contradicciones";
 import { clavesQueSatisfacen } from "@/core/case/required-fields";
 import { claimAttachments } from "@/lib/db/schema";
 import type { AdjuntoLeido, DocumentoLeido } from "@/lib/schemas/extracted-claim";
-import type { InlineMedia } from "@/server/ai/gemini-extractor";
+import { contarTokens, type InlineMedia } from "@/server/ai/gemini-extractor";
 import type { PolicyMatch } from "@/server/matching/policy-matcher";
 import { readAttachment } from "@/server/storage/claim-attachments-bucket";
 import { errorCode } from "@/lib/observability/error-code";
@@ -42,6 +42,9 @@ const MAX_BYTES = 8 * 1024 * 1024;
 /** Un plazo agotado puede ser Vertex colgado; dos ya son el archivo. */
 const MAX_PLAZOS_AGOTADOS = 2;
 const ESPERA_TRAS_PLAZO_MS = 60 * 60 * 1000;
+/** Gemini cobra 258 tokens por página de PDF y nada por su texto (medido en Vertex el 28/09). */
+const TOPE_TOKENS_PDF = MAX_PAGINAS_PDF * 258;
+const PLAZO_DE_CONTEO_MS = 8_000;
 
 /** La consulta sola, para ir en el lote del prompt. Ver `cargarLoDelPrompt`. */
 export function consultaAdjuntos(db: ClienteDatos, caseId: string) {
@@ -100,7 +103,11 @@ export function esperaPorPlazo(metadatos: Metadatos | null, ahora = Date.now()):
  * cuatro y ocho megas. Se leen de R2 acá, antes de las guardas de tiempo, para
  * que el plazo cuente también la descarga.
  */
-export async function paraElModelo(adjuntos: AdjuntoDelCaso[]): Promise<ParaElModelo> {
+export async function paraElModelo(
+  adjuntos: AdjuntoDelCaso[],
+  caseId: string,
+  tenantCtx: TenantContext
+): Promise<ParaElModelo> {
   const salida: ParaElModelo = { hashes: [], media: [] };
   // Un duplicado que llegó después no vuelve al modelo: su gemelo ya se leyó.
   const vistos = new Set(adjuntos.filter((a) => a.resumen !== null && a.content_hash).map((a) => a.content_hash!));
@@ -127,7 +134,25 @@ export async function paraElModelo(adjuntos: AdjuntoDelCaso[]): Promise<ParaElMo
     salida.hashes.push(hash);
     salida.media.push({ mimeType: normalizarMime(a.content_type), data: leido.toString("base64") });
   }
-  return salida;
+  // El tope de páginas de la subida lee la estructura del PDF, y un PDF puede
+  // esconder páginas de maneras que ningún contador propio ve. Decide lo que
+  // el modelo cobraría por leerlo. Un conteo que no llega no manda el PDF; uno
+  // que agota el plazo lo marca, así no le come el tiempo a cada corrida.
+  const cuentas = await Promise.all(
+    salida.media.map((m) => (m.mimeType === "application/pdf" ? contarTokens(m, PLAZO_DE_CONTEO_MS) : 0))
+  );
+  const estado = cuentas.map((c) => (typeof c !== "number" ? c : c > TOPE_TOKENS_PDF ? "de_mas" : "va"));
+  const con = (e: string) => salida.hashes.filter((_, i) => estado[i] === e);
+  const deMas = con("de_mas");
+  await marcarPlazoAgotado(caseId, tenantCtx, con("plazo"));
+  await marcarArchivos(caseId, tenantCtx, deMas, "email_worker.pdf_descartado", (db) =>
+    db
+      .update(claimAttachments)
+      .set({ metadatos: { descarte: "too_many_pages" } })
+      .where(and(eq(claimAttachments.case_id, caseId), inArray(claimAttachments.content_hash, deMas)))
+  );
+  const va = (_: unknown, i: number) => estado[i] === "va";
+  return { hashes: salida.hashes.filter(va), media: salida.media.filter(va) };
 }
 
 /**
@@ -181,15 +206,27 @@ export function consultaPlazoAgotado(db: ClienteDatos, caseId: string, hashes: s
     .where(and(eq(claimAttachments.case_id, caseId), inArray(claimAttachments.content_hash, hashes)));
 }
 
-/** La extracción con estos archivos agotó el plazo: el reintento va sin ellos. */
-export async function marcarPlazoAgotado(caseId: string, tenantCtx: TenantContext, hashes: string[]): Promise<void> {
+async function marcarArchivos(
+  caseId: string,
+  tenantCtx: TenantContext,
+  hashes: string[],
+  evento: string,
+  consulta: Parameters<typeof enTenant>[1]
+): Promise<void> {
   if (hashes.length === 0) return;
-  logger.warn({ case_id: caseId, archivos: hashes.length }, "email_worker.plazo_agotado");
+  logger.warn({ case_id: caseId, archivos: hashes.length }, evento);
   try {
-    await enTenant(tenantCtx, (db) => consultaPlazoAgotado(db, caseId, hashes));
+    await enTenant(tenantCtx, consulta);
   } catch (err) {
-    logger.error({ case_id: caseId, code: errorCode(err) }, "email_worker.plazo_agotado_error");
+    logger.error({ case_id: caseId, code: errorCode(err) }, `${evento}_error`);
   }
+}
+
+/** La extracción con estos archivos agotó el plazo: el reintento va sin ellos. */
+export function marcarPlazoAgotado(caseId: string, tenantCtx: TenantContext, hashes: string[]): Promise<void> {
+  return marcarArchivos(caseId, tenantCtx, hashes, "email_worker.plazo_agotado", (db) =>
+    consultaPlazoAgotado(db, caseId, hashes)
+  );
 }
 
 /**

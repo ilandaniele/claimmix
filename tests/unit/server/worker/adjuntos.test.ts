@@ -6,10 +6,11 @@
 
 vi.mock("server-only", () => ({}));
 
-const { readAttachment } = vi.hoisted(() => ({ readAttachment: vi.fn() }));
+const { readAttachment, contarTokens } = vi.hoisted(() => ({ readAttachment: vi.fn(), contarTokens: vi.fn() }));
 
 vi.mock("@/data/scope", () => ({ enTenant: vi.fn(), enTenantVarias: vi.fn() }));
 vi.mock("@/server/storage/claim-attachments-bucket", () => ({ readAttachment }));
+vi.mock("@/server/ai/gemini-extractor", () => ({ contarTokens }));
 vi.mock("@/lib/observability/logger", () => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
@@ -18,7 +19,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "@/lib/db/schema";
-import type { ClienteDatos } from "@/data/scope";
+import { enTenant, type ClienteDatos } from "@/data/scope";
 import type { Metadatos } from "@/core/adjuntos/firma";
 import {
   consultaPlazoAgotado,
@@ -33,6 +34,7 @@ import type { DocumentoLeido } from "@/lib/schemas/extracted-claim";
 const AHORA = new Date("2026-09-20T15:00:00Z");
 const HORA = 3_600_000;
 const NADA: ParaElModelo = { hashes: [], media: [] };
+const TENANT = { tenantId: "t-1" } as unknown as Parameters<typeof paraElModelo>[2];
 
 const adjunto = (cambios: Partial<AdjuntoDelCaso> = {}): AdjuntoDelCaso => ({
   id: "adj-1",
@@ -64,6 +66,7 @@ const cruzar = (adjuntos: AdjuntoDelCaso[], campos: Record<string, string> = { a
 beforeEach(() => {
   vi.clearAllMocks();
   readAttachment.mockResolvedValue(Buffer.from("bytes"));
+  contarTokens.mockResolvedValue(2064);
 });
 
 describe("esperaPorPlazo", () => {
@@ -86,18 +89,67 @@ describe("esperaPorPlazo", () => {
 
 describe("paraElModelo", () => {
   it("no manda audios ni lo que espera por un plazo agotado", async () => {
-    const r = await paraElModelo([
-      adjunto({ id: "nota", content_type: "audio/ogg", content_hash: "ha" }),
-      adjunto({
-        id: "colgada",
-        content_hash: "hc",
-        metadatos: { firma: true, plazoAgotado: { veces: 1, en: new Date().toISOString() } },
-      }),
-      adjunto({ id: "pdf", content_type: "application/pdf; name=x.pdf", content_hash: "hp" }),
-    ]);
+    const r = await paraElModelo(
+      [
+        adjunto({ id: "nota", content_type: "audio/ogg", content_hash: "ha" }),
+        adjunto({
+          id: "colgada",
+          content_hash: "hc",
+          metadatos: { firma: true, plazoAgotado: { veces: 1, en: new Date().toISOString() } },
+        }),
+        adjunto({ id: "pdf", content_type: "application/pdf; name=x.pdf", content_hash: "hp" }),
+      ],
+      "caso-1",
+      TENANT
+    );
 
     expect(r.hashes).toEqual(["hp"]);
     expect(r.media[0]!.mimeType).toBe("application/pdf");
+  });
+
+  /** Una foto y dos PDF; el de ruta «grande» es el que el mock de lectura distingue. */
+  const tres = () =>
+    paraElModelo(
+      [
+        adjunto({ id: "foto", content_hash: "hf" }),
+        adjunto({ id: "grande", storage_path: "grande", content_type: "application/pdf", content_hash: "hg" }),
+        adjunto({ id: "chico", content_type: "application/pdf", content_hash: "hc" }),
+      ],
+      "caso-1",
+      TENANT
+    );
+  const sqlMarcado = () => {
+    const db = drizzle(neon("postgres://u:p@h/db"), { schema }) as unknown as ClienteDatos;
+    const consulta = vi.mocked(enTenant).mock.calls[0]![1] as unknown as (d: ClienteDatos) => { toSQL(): { sql: string; params: unknown[] } };
+    return consulta(db).toSQL();
+  };
+
+  it("el PDF que el modelo cobraría de más no va y queda descartado; las fotos no se cuentan", async () => {
+    const grande = Buffer.from("grande").toString("base64");
+    readAttachment.mockImplementation(async (ruta: string) => Buffer.from(ruta));
+    contarTokens.mockImplementation(async (m: { data: string }) => (m.data === grande ? 258_000 : 2064));
+
+    const r = await tres();
+
+    expect(r.hashes).toEqual(["hf", "hc"]);
+    expect(contarTokens).toHaveBeenCalledTimes(2);
+    expect(enTenant).toHaveBeenCalledTimes(1);
+    const { sql, params } = sqlMarcado();
+    expect(sql).toMatch(/set "metadatos" = \$1/);
+    expect(params).toEqual(['{"descarte":"too_many_pages"}', "caso-1", "hg"]);
+  });
+
+  it("un conteo que agota el plazo marca el PDF; uno que falla no lo manda ni lo marca", async () => {
+    contarTokens.mockResolvedValueOnce("plazo").mockResolvedValueOnce(null);
+
+    const r = await tres();
+
+    expect(r.hashes).toEqual(["hf"]);
+    expect(enTenant).toHaveBeenCalledTimes(1);
+    const { sql, params } = sqlMarcado();
+    expect(sql).toMatch(/'plazoAgotado'/);
+    expect(params).toEqual(expect.arrayContaining(["caso-1", "hg"]));
+    expect(params).not.toContain("hc");
   });
 });
 

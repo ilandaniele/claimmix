@@ -842,7 +842,7 @@ export async function runEmailExtractionWorker(
         latestInboundText = conversation?.latestText ?? latestInboundText;
       }
     }
-    if (engine !== "mock") vistos = await paraElModelo(adjuntos);
+    if (engine !== "mock") vistos = await paraElModelo(adjuntos, caseId, tenantCtx);
 
     // ── d2) ¿Queda tiempo para lo caro? ──────────────────────────────────────
     //

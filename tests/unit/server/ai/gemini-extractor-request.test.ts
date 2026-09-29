@@ -13,7 +13,7 @@ vi.mock("@/server/ai/provider", () => ({
   getTenantGeminiKey: vi.fn(async () => null),
 }));
 
-import { callGemini, extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
+import { callGemini, contarTokens, extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
 
 const ORIGINAL_GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -366,5 +366,42 @@ describe("callGemini — tokens de audio", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(geminiJsonResponse()), { status: 200 })));
     const { usage } = await callGemini("sys", "user");
     expect(usage).toEqual({ promptTokens: 10, completionTokens: 20 });
+  });
+});
+
+describe("contarTokens", () => {
+  const PDF = { mimeType: "application/pdf", data: "JVBERi0=" };
+
+  beforeEach(() => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("pide countTokens con el archivo y devuelve el total", async () => {
+    const fetchMock = vi.fn(async (_url?: unknown, _init?: RequestInit) =>
+      new Response(JSON.stringify({ totalTokens: 2580 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await contarTokens(PDF, 1000)).toBe(2580);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toMatch(/:countTokens$/);
+    expect(JSON.parse(String(init?.body))).toEqual({ contents: [{ role: "user", parts: [{ inlineData: PDF }] }] });
+  });
+
+  it("\"plazo\" si no contesta a tiempo", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new DOMException("tarde", "TimeoutError");
+    }));
+    expect(await contarTokens(PDF, 1000)).toBe("plazo");
+  });
+
+  it("null si rechaza el archivo o se corta la red", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 400 })));
+    expect(await contarTokens(PDF, 1000)).toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    }));
+    expect(await contarTokens(PDF, 1000)).toBeNull();
   });
 });

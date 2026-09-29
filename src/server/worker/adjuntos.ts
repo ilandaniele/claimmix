@@ -146,10 +146,7 @@ export async function paraElModelo(
   const deMas = con("de_mas");
   await marcarPlazoAgotado(caseId, tenantCtx, con("plazo"));
   await marcarArchivos(caseId, tenantCtx, deMas, "email_worker.pdf_descartado", (db) =>
-    db
-      .update(claimAttachments)
-      .set({ metadatos: { descarte: "too_many_pages" } })
-      .where(and(eq(claimAttachments.case_id, caseId), inArray(claimAttachments.content_hash, deMas)))
+    consultaDescarte(db, caseId, deMas)
   );
   const va = (_: unknown, i: number) => estado[i] === "va";
   return { hashes: salida.hashes.filter(va), media: salida.media.filter(va) };
@@ -194,6 +191,13 @@ export async function anotarLecturas(
 }
 
 /** Suma un plazo agotado a cada archivo. Ver `esperaPorPlazo`. */
+function consultaDescarte(db: ClienteDatos, caseId: string, hashes: string[]) {
+  return db
+    .update(claimAttachments)
+    .set({ metadatos: { descarte: "too_many_pages" } })
+    .where(and(eq(claimAttachments.case_id, caseId), inArray(claimAttachments.content_hash, hashes)));
+}
+
 export function consultaPlazoAgotado(db: ClienteDatos, caseId: string, hashes: string[]) {
   const m = claimAttachments.metadatos;
   return db

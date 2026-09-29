@@ -22,6 +22,7 @@ import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
 import { formatDate, formatDateOnly, formatAge } from "@/lib/utils";
 import { formatCaseNumber } from "@/core/case/numero";
 import Link from "next/link";
+import { SubirCondiciones } from "./_components/SubirCondiciones";
 import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
 
 interface CustomerDetailPageProps {
@@ -35,6 +36,8 @@ interface Policy {
   status: string;
   start_date: string | null;
   end_date: string | null;
+  condiciones_path: string | null;
+  condiciones_leidas_en: string | null;
 }
 
 interface CustomerCase {
@@ -162,7 +165,7 @@ export default async function CustomerDetailPage({
   const [policiesData, casesData, [casesCountRow]] = await Promise.all([
     enTenant(tenantCtx, (db) =>
       db
-        .select({ id: policies.id, policy_number: policies.policy_number, policy_type: policies.policy_type, status: policies.status, start_date: policies.start_date, end_date: policies.end_date })
+        .select({ id: policies.id, policy_number: policies.policy_number, policy_type: policies.policy_type, status: policies.status, start_date: policies.start_date, end_date: policies.end_date, condiciones_path: policies.condiciones_path, condiciones_leidas_en: policies.condiciones_leidas_en })
         .from(policies)
         .where(eq(policies.customer_id, id))
         .orderBy(desc(policies.created_at))
@@ -282,6 +285,7 @@ export default async function CustomerDetailPage({
                       t("clientes.detail.policyStatus"),
                       t("clientes.detail.validFrom"),
                       t("clientes.detail.validTo"),
+                      t("condiciones.titulo"),
                     ].map((col) => (
                       <th
                         key={col}
@@ -324,6 +328,17 @@ export default async function CustomerDetailPage({
                       </td>
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap last:pr-0">
                         {policy.end_date ? formatDateOnly(policy.end_date, locale) : "—"}
+                      </td>
+                      <td className="py-2.5 px-3 text-xs text-slate-600 last:pr-0">
+                        <p className="mb-1">
+                          {policy.condiciones_leidas_en
+                            ? t("condiciones.leidas").replace(
+                                "{fecha}",
+                                formatDate(policy.condiciones_leidas_en, locale, { hour: undefined, minute: undefined })
+                              )
+                            : t(policy.condiciones_path ? "condiciones.sinLeer" : "condiciones.sinSubir")}
+                        </p>
+                        <SubirCondiciones policyId={policy.id} subido={policy.condiciones_path !== null} />
                       </td>
                     </tr>
                   ))}

@@ -34,18 +34,35 @@ beforeEach(() => {
 });
 
 describe("paraAdmin", () => {
-  it("lee avisos y recordatorios de una sola fila, y la config, en un solo lote", async () => {
-    enTenantVarias.mockResolvedValueOnce([[{ emails: ["a@b.com.ar"], horas: [48, 120] }], [VISTA]]);
+  it("lee avisos, recordatorios y montos de una sola fila, y la config, en un solo lote", async () => {
+    const montos = { choque: { high: { minimo: 1, maximo: 2 } } };
+    enTenantVarias.mockResolvedValueOnce([[{ emails: ["a@b.com.ar"], horas: [48, 120], montos }], [VISTA]]);
 
     await expect(paraAdmin(TENANT)).resolves.toEqual({
       alertas: ["a@b.com.ar"],
       recordatorioHoras: [48, 120],
+      montos,
       core: VISTA,
       migracionPendiente: false,
     });
     expect(enTenantVarias).toHaveBeenCalledOnce();
-    expect(lecturaDelTenant(0)).toContain('select "specialist_alert_emails", "recordatorio_horas" from "tenants"');
+    expect(lecturaDelTenant(0)).toContain(
+      'select "specialist_alert_emails", "recordatorio_horas", "rangos_de_monto" from "tenants"'
+    );
     expect(listaDelTenant).not.toHaveBeenCalled();
+  });
+
+  it("sin la 0040: avisos y recordatorios se ven, los montos no", async () => {
+    enTenantVarias
+      .mockRejectedValueOnce(falta("42703"))
+      .mockResolvedValueOnce([[{ emails: ["a@b.com.ar"], horas: [48] }], [VISTA]]);
+
+    const admin = await paraAdmin(TENANT);
+
+    expect(admin).toMatchObject({ alertas: ["a@b.com.ar"], recordatorioHoras: [48], core: VISTA });
+    expect(admin.montos).toBeUndefined();
+    expect(lecturaDelTenant(1)).toContain("recordatorio_horas");
+    expect(lecturaDelTenant(1)).not.toContain("rangos_de_monto");
   });
 
   // Antes el 42703 de la columna nueva se leía como «falta la 0036» y escondía
@@ -53,17 +70,21 @@ describe("paraAdmin", () => {
   it("sin la 0039: la config del core se ve y los recordatorios no", async () => {
     enTenantVarias
       .mockRejectedValueOnce(falta("42703"))
+      .mockRejectedValueOnce(falta("42703"))
       .mockResolvedValueOnce([[{ emails: ["a@b.com.ar"] }], [VISTA]]);
 
     const admin = await paraAdmin(TENANT);
 
     expect(admin).toMatchObject({ alertas: ["a@b.com.ar"], core: VISTA, migracionPendiente: false });
     expect(admin.recordatorioHoras).toBeUndefined();
-    expect(lecturaDelTenant(1)).not.toContain("recordatorio_horas");
+    expect(lecturaDelTenant(2)).not.toContain("recordatorio_horas");
   });
 
   it("sin la 0036: la lista sola y el aviso de la migración", async () => {
-    enTenantVarias.mockRejectedValueOnce(falta("42P01")).mockRejectedValueOnce(falta("42P01"));
+    enTenantVarias
+      .mockRejectedValueOnce(falta("42P01"))
+      .mockRejectedValueOnce(falta("42P01"))
+      .mockRejectedValueOnce(falta("42P01"));
 
     await expect(paraAdmin(TENANT)).resolves.toEqual({
       alertas: ["ana@aseguradora.com.ar"],

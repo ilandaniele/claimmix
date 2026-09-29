@@ -12,6 +12,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
+  jsonb,
   numeric,
   pgTable,
   smallint,
@@ -19,6 +20,8 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { AmbitoTerritorial, Cobertura } from "@/core/poliza/condiciones";
+
 import { tenants } from "./core";
 
 export const customers = pgTable("customers", {
@@ -74,6 +77,11 @@ export const policies = pgTable("policies", {
     .defaultNow()
     .notNull(),
   updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" }),
+  // Lo que se leyó del PDF de condiciones; NULL = sin leer (migración 0040).
+  coberturas: jsonb("coberturas").$type<Cobertura[]>(),
+  ambito_territorial: jsonb("ambito_territorial").$type<AmbitoTerritorial>(),
+  condiciones_path: text("condiciones_path"),
+  condiciones_leidas_en: timestamp("condiciones_leidas_en", { withTimezone: true, mode: "string" }),
 });
 
 export const insuredAssets = pgTable("insured_assets", {

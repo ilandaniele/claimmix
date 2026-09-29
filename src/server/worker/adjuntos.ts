@@ -38,13 +38,13 @@ export interface AdjuntoDelCaso {
 }
 
 const MAX_ARCHIVOS = 4;
-const MAX_BYTES = 8 * 1024 * 1024;
+export const MAX_BYTES = 8 * 1024 * 1024;
 /** Un plazo agotado puede ser Vertex colgado; dos ya son el archivo. */
 const MAX_PLAZOS_AGOTADOS = 2;
 const ESPERA_TRAS_PLAZO_MS = 60 * 60 * 1000;
 /** Gemini cobra 258 tokens por página de PDF y nada por su texto (medido en Vertex el 28/09). */
-const TOPE_TOKENS_PDF = MAX_PAGINAS_PDF * 258;
-const PLAZO_DE_CONTEO_MS = 8_000;
+export const TOPE_TOKENS_PDF = MAX_PAGINAS_PDF * 258;
+export const PLAZO_DE_CONTEO_MS = 8_000;
 
 /** La consulta sola, para ir en el lote del prompt. Ver `cargarLoDelPrompt`. */
 export function consultaAdjuntos(db: ClienteDatos, caseId: string) {

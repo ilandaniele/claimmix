@@ -24,6 +24,8 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { MontoEstimado, RangosDeMonto } from "@/core/case/monto-estimado";
+
 import { authUsers } from "./auth";
 
 /**
@@ -64,6 +66,8 @@ export const tenants = pgTable("tenants", {
   // Horas sin respuesta a las que se repite el pedido de lo que falta; vacío =
   // apagado (migración 0039).
   recordatorio_horas: integer("recordatorio_horas").array().notNull().default(sql`'{}'::integer[]`),
+  // La tabla de montos propia; NULL = la de por defecto (migración 0040).
+  rangos_de_monto: jsonb("rangos_de_monto").$type<RangosDeMonto>(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
@@ -216,6 +220,8 @@ export const cases = pgTable("cases", {
     withTimezone: true,
     mode: "string",
   }),
+  // Rango orientativo, sólo para el equipo (migración 0040).
+  monto_estimado: jsonb("monto_estimado").$type<MontoEstimado>(),
 });
 
 export const rawMessages = pgTable("raw_messages", {

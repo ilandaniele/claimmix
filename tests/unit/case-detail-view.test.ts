@@ -18,6 +18,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 vi.mock("server-only", () => ({}));
 
@@ -36,6 +38,7 @@ import {
   claimFieldConfirmations,
   extractedFields,
   missingDocs,
+  policies,
   rawMessages,
   users,
 } from "@/lib/db/schema";
@@ -462,5 +465,156 @@ describe("cargarDetalleDeCaso — el nombre de quien tiene el caso", () => {
 
     expect(res).not.toBeNull();
     expect(res!.asignado_nombre).toBeNull();
+  });
+});
+
+describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () => {
+  const MONTO = { minimo: 1_500_000, maximo: 4_000_000, moneda: "ARS", origen: "tabla" };
+  const POLIZA = {
+    status: "active",
+    start_date: "2026-01-01",
+    end_date: "2026-12-31",
+    coberturas: [
+      { codigo: "danio_parcial", suma_asegurada: 10_000_000, franquicia: 100_000 },
+      { codigo: "danio_total", suma_asegurada: 10_000_000, franquicia: null },
+    ],
+    ambito_territorial: { tipo: "nacional", provincias: [] },
+    condiciones_path: "t/polizas/p/condiciones.pdf",
+    condiciones_leidas_en: "2026-09-01T12:00:00Z",
+    patentes: null,
+  };
+  const conPoliza = (
+    poliza: Record<string, unknown> = POLIZA,
+    campos: unknown[] = [{ id: "ef-1", field_key: "accident_date", field_value: "2026-03-10" }]
+  ) =>
+    new Map(TODO)
+      .set(cases, [{ ...CASO_DE_CORREO, policy_id: "pol-1", claim_type: "choque", monto_estimado: MONTO }])
+      .set(extractedFields, campos)
+      .set(policies, [poliza]);
+
+  it("sin póliza en el caso no la pide, y el panel lo dice", async () => {
+    const reg = espiar(TODO);
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(reg.tablas).not.toContain(policies);
+    expect(res!.cobertura).toEqual({
+      resultado: { veredicto: "dudoso", motivos: ["sin_coberturas_cargadas"] },
+      condiciones: "sin_poliza",
+      monto: null,
+    });
+  });
+
+  it("con póliza, la pide en la misma tanda y coteja con la fecha del siniestro", async () => {
+    const reg = espiar(conPoliza());
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(tandas(reg.eventos)).toBe(2);
+    expect(reg.tablas.filter((t) => t === policies)).toHaveLength(1);
+    expect(res!.cobertura).toEqual({
+      resultado: { veredicto: "cubre", motivos: [] },
+      condiciones: "leidas",
+      monto: MONTO,
+    });
+  });
+
+  // El mismo fragmento que el matcher: una sola subconsulta de patentes.
+  it("las patentes salen de una subconsulta atada a la póliza, no de un join", async () => {
+    const reg = espiar(conPoliza());
+
+    await cargarDetalleDeCaso(CTX, CASO);
+
+    const cols = reg.columnas[reg.tablas.indexOf(policies)] ?? {};
+    expect(new PgDialect().sqlToQuery(cols.patentes as SQL).sql).toBe(
+      '(select array_agg("insured_assets"."plate") from "insured_assets" where "insured_assets"."policy_id" = "policies"."id")'
+    );
+  });
+
+  it("un siniestro anterior a la vigencia no cubre, aunque hoy la póliza esté vigente", async () => {
+    espiar(conPoliza({ ...POLIZA, start_date: "2026-04-01" }));
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(res!.cobertura!.resultado).toEqual({ veredicto: "no_cubre", motivos: ["fuera_de_vigencia"] });
+  });
+
+  it("una fecha que no se lee no tapa otra clave que sí tiene una", async () => {
+    espiar(
+      conPoliza({ ...POLIZA, start_date: "2026-04-01" }, [
+        { id: "ef-1", field_key: "accident_date", field_value: "ayer a la tarde" },
+        { id: "ef-2", field_key: "incident_date", field_value: "2026-03-10" },
+      ])
+    );
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(res!.cobertura!.resultado).toEqual({ veredicto: "no_cubre", motivos: ["fuera_de_vigencia"] });
+  });
+
+  it("el PDF subido y sin leer no inventa coberturas", async () => {
+    espiar(conPoliza({ ...POLIZA, coberturas: null, condiciones_leidas_en: null }));
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(res!.cobertura!.condiciones).toBe("sin_leer");
+    expect(res!.cobertura!.resultado).toEqual({ veredicto: "dudoso", motivos: ["sin_coberturas_cargadas"] });
+  });
+
+  it("si la póliza no se pudo leer no hay panel, y el caso se ve igual", async () => {
+    espiar(conPoliza(), new Set([policies]));
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(res).not.toBeNull();
+    expect(res!.cobertura).toBeNull();
+    expect(res!.extracted_fields).not.toEqual([]);
+  });
+
+  it("ofrece leer como presupuesto sólo un documento disponible, no descartado, que lo parece", async () => {
+    const fila = (id: string, filename: string, content_type: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      filename,
+      content_type,
+      size_bytes: 100,
+      external_url: null,
+      uploaded_at: "2026-08-01T10:00:00Z",
+      rejected_reason: null,
+      storage_path: `t/${id}`,
+      matched_doc_key: null,
+      resumen: null,
+      util: null,
+      content_hash: null,
+      tipo: null,
+      descarte: null,
+      lectura_presupuesto: null,
+      ...extra,
+    });
+    const lectura = { leida_en: "2026-09-01T12:00:00Z", items: [], total: 1, moneda: "ARS", alertas: [] };
+    const reg = espiar(
+      new Map(TODO).set(claimAttachments, [
+        fila("a-1", "presupuesto.pdf", "application/pdf", { lectura_presupuesto: lectura }),
+        fila("a-2", "frente.jpg", "image/jpeg"),
+        fila("a-3", "doc.pdf", "application/pdf", { tipo: "presupuesto" }),
+        fila("a-4", "presupuesto.pdf", "application/pdf", { rejected_reason: "too_large", storage_path: null }),
+        // La ruta no lee uno descartado ni una imagen que el modelo no mira.
+        fila("a-5", "presupuesto.pdf", "application/pdf", { descarte: "duplicado" }),
+        fila("a-6", "presupuesto.gif", "image/gif"),
+        fila("a-7", "presupuesto.jpg", "image/jpeg"),
+      ])
+    );
+
+    const res = await cargarDetalleDeCaso(CTX, CASO);
+
+    expect(res!.attachments.map((a) => a.esPresupuesto)).toEqual([true, false, true, false, false, false, true]);
+    expect(res!.attachments[0].lectura_presupuesto).toEqual(lectura);
+    for (const a of res!.attachments) {
+      expect(a).not.toHaveProperty("tipo");
+      expect(a).not.toHaveProperty("descarte");
+    }
+    // Del `datos` del documento sólo viaja el tipo, y dentro de la consulta.
+    const cual = reg.tablas.indexOf(claimAttachments);
+    expect(Object.keys(reg.columnas[cual] ?? {})).toEqual(expect.arrayContaining(["tipo", "lectura_presupuesto"]));
+    expect(Object.keys(reg.columnas[cual] ?? {})).not.toContain("datos");
   });
 });

@@ -244,6 +244,14 @@ async function checkSchema(): Promise<Check> {
     ["cases", "mensaje_tardio_reservado_en"],
     // 0039: sin esto el cron de recordatorios y la configuración de alertas fallan.
     ["tenants", "recordatorio_horas"],
+    // 0040: sin esto el worker no procesa ningún caso y la ficha no abre.
+    ["policies", "coberturas"],
+    ["policies", "ambito_territorial"],
+    ["policies", "condiciones_path"],
+    ["policies", "condiciones_leidas_en"],
+    ["cases", "monto_estimado"],
+    ["tenants", "rangos_de_monto"],
+    ["claim_attachments", "lectura_presupuesto"],
   ];
 
   try {

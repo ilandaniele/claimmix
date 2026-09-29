@@ -10,7 +10,9 @@
 
 import "server-only";
 import { asc, eq, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { tables } from "@/lib/db";
+import { insuredAssets } from "@/lib/db/schema";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { policyNumberEquals } from "@/lib/db/helpers";
 import { normalizarNumeroPoliza } from "@/core/matching/normalizar";
@@ -98,6 +100,10 @@ type FilaDePoliza = {
   plates: Array<string | null> | null;
 };
 
+/** Las patentes de la póliza, como subconsulta de la fila de `policies`. */
+export const patentesDe = (policyId: AnyPgColumn) =>
+  sql<Array<string | null> | null>`(select array_agg(${insuredAssets.plate}) from ${insuredAssets} where ${insuredAssets.policy_id} = ${policyId})`;
+
 /**
  * Las patentes van en una subconsulta y no en un join: una póliza con tres
  * autos sería tres filas, y el `limit` de abajo contaría autos, no pólizas.
@@ -113,7 +119,7 @@ function columnas() {
     end_date: p.end_date,
     customer_full_name: c.full_name,
     customer_dni: c.dni,
-    plates: sql<Array<string | null> | null>`(select array_agg(ia.plate) from insured_assets ia where ia.policy_id = ${p.id})`,
+    plates: patentesDe(p.id),
   };
 }
 

@@ -24,6 +24,8 @@ export interface FilaDeCaso {
   email_thread_id: string | null;
   policyholder_name: string | null;
   policy_number: string | null;
+  /** La tabla de montos del tenant, que el worker lee en el mismo SELECT del caso. */
+  rangos_de_monto?: unknown;
 }
 
 export function filaDeCaso(

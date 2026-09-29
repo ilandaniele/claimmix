@@ -179,6 +179,27 @@ export const RATE_LIMIT_CONFIGS = {
    * escribe cien veces a un caso cerrado gasta el presupuesto de IA del día.
    */
   CLASIFICACION_TARDIA_POR_CASO: { limit: 10, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * CONDICIONES_POR_POLIZA: 5 lecturas del PDF de condiciones por día y por
+   * póliza. Cada una es un PDF entero al modelo: sin tope, subir el mismo
+   * archivo en loop gasta el presupuesto de IA del día.
+   */
+  CONDICIONES_POR_POLIZA: { limit: 5, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * SUBIDA_CONDICIONES_POR_POLIZA: 10 PDF de condiciones guardados por día y
+   * por póliza. El cupo de lectura se cuenta después de subir: sin éste, cada
+   * PDF distinto en loop es un objeto más en el bucket.
+   */
+  SUBIDA_CONDICIONES_POR_POLIZA: { limit: 10, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * LECTURA_PRESUPUESTO_POR_CASO: 5 lecturas del presupuesto del taller por día
+   * y por caso. Va el presupuesto y hasta tres fotos: el botón apretado de más
+   * no puede comerse el presupuesto de IA.
+   */
+  LECTURA_PRESUPUESTO_POR_CASO: { limit: 5, windowMs: 24 * 60 * 60_000 },
 } as const;
 
 /**

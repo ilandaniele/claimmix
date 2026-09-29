@@ -1,6 +1,7 @@
 import "server-only";
 
 import { eq } from "drizzle-orm";
+import type { RangosDeMonto } from "@/core/case/monto-estimado";
 import { enTenantVarias } from "@/data/scope";
 import { tenants } from "@/lib/db/schema";
 import { errorCode } from "@/lib/observability/error-code";
@@ -14,6 +15,8 @@ export interface ParaAdmin {
   recordatorioHoras?: number[];
   /** undefined: no se pudo leer. */
   core?: VistaDeLaConfig | null;
+  /** La tabla propia de montos (B23). null: la de por defecto; undefined: no se pudo leer. */
+  montos?: RangosDeMonto | null;
   migracionPendiente: boolean;
 }
 
@@ -25,13 +28,15 @@ export interface ParaAdmin {
  * no se muestra: en blanco invitaría a generar un secreto encima del que hay.
  */
 export async function paraAdmin(tenantId: string): Promise<ParaAdmin> {
-  // Avisos y horas salen de la misma fila del tenant: una sola lectura.
-  const leer = (conHoras: boolean) =>
-    enTenantVarias<[Array<{ emails: string[]; horas?: number[] }>, VistaDeLaConfig[]]>({ tenantId }, (db) => [
+  // Avisos, horas y montos salen de la misma fila del tenant: una sola lectura.
+  type Fila = { emails: string[]; horas?: number[]; montos?: RangosDeMonto | null };
+  const leer = (conHoras: boolean, conMontos: boolean) =>
+    enTenantVarias<[Fila[], VistaDeLaConfig[]]>({ tenantId }, (db) => [
       db
         .select({
           emails: tenants.specialist_alert_emails,
           ...(conHoras ? { horas: tenants.recordatorio_horas } : {}),
+          ...(conMontos ? { montos: tenants.rangos_de_monto } : {}),
         })
         .from(tenants)
         .where(eq(tenants.id, tenantId))
@@ -39,15 +44,19 @@ export async function paraAdmin(tenantId: string): Promise<ParaAdmin> {
       vistaDeLaConfig(db),
     ]);
   try {
-    // Sin la 0039 falla sólo la columna de las horas: el resto se lee sin ella,
-    // y sin horas el panel de recordatorios no se muestra.
-    const [[fila], [core]] = await leer(true).catch((e) => {
+    // Sin la 0040 falla la columna de los montos y sin la 0039 la de las horas:
+    // el resto se lee sin ellas, y el panel que falta no se muestra.
+    const sinColumna = (e: unknown, otra: () => ReturnType<typeof leer>) => {
       if (!esFaltaDe0036(e)) throw e;
-      return leer(false);
-    });
+      return otra();
+    };
+    const [[fila], [core]] = await leer(true, true)
+      .catch((e) => sinColumna(e, () => leer(true, false)))
+      .catch((e) => sinColumna(e, () => leer(false, false)));
     return {
       alertas: fila?.emails ?? [],
       recordatorioHoras: fila ? fila.horas : [],
+      montos: fila ? fila.montos : null,
       core: core ?? null,
       migracionPendiente: false,
     };

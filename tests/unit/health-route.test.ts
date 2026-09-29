@@ -81,6 +81,14 @@ function esquemaSin(...faltan: string[]) {
     { table_name: "cases", column_name: "mensaje_tardio_reservado_en" },
     { table_name: "tenants", column_name: "recordatorio_horas" },
     { table_name: "case_recordatorios", column_name: "case_id" },
+    // 0040.
+    { table_name: "policies", column_name: "coberturas" },
+    { table_name: "policies", column_name: "ambito_territorial" },
+    { table_name: "policies", column_name: "condiciones_path" },
+    { table_name: "policies", column_name: "condiciones_leidas_en" },
+    { table_name: "cases", column_name: "monto_estimado" },
+    { table_name: "tenants", column_name: "rangos_de_monto" },
+    { table_name: "claim_attachments", column_name: "lectura_presupuesto" },
   ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
 }
 
@@ -265,6 +273,25 @@ describe("GET /api/health — what it reports", () => {
     expect(schema.status).toBe("down");
     expect(schema.detail).toContain("tenants.recordatorio_horas");
     expect(schema.detail).toContain("case_recordatorios");
+  });
+
+  it("nota que falta la 0040: el monto estimado, la cobertura y el presupuesto", async () => {
+    const faltan = [
+      "policies.coberturas",
+      "policies.ambito_territorial",
+      "policies.condiciones_path",
+      "policies.condiciones_leidas_en",
+      "cases.monto_estimado",
+      "tenants.rangos_de_monto",
+      "claim_attachments.lectura_presupuesto",
+    ];
+    mockExecute.mockResolvedValue({ rows: esquemaSin(...faltan) });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    for (const col of faltan) expect(schema.detail).toContain(col);
   });
 
   it("answers 503 when anything is down, so a watcher notices", async () => {

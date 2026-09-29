@@ -4022,11 +4022,67 @@ todas las columnas del esquema en el INSERT a `cases`, como en la caída de
 0006-0009. El 29/09 ninguna de las dos estaba en la base del ensayo, y el
 check cayó 21 de 22 escenarios en el primer mensaje por eso, no por el código.
 
+### 🧾 Cobertura, monto estimado y presupuesto del taller (B6, B23 y B21, 2026-09-29)
+
+Tres huecos del informe de Clive del 28/09, en la rama
+`feat/cobertura-monto-presupuesto-b6-b23-b21`, que sale de la de B3 y B4. Todo
+es para el equipo. Nada sale al asegurado: ni la respuesta del agente, ni su
+prompt, ni sus herramientas, ni las plantillas, ni el aviso por mail al
+especialista. `la-cobertura-no-sale-al-asegurado.test.ts` lo fija recorriendo
+los imports.
+
+**B6: cobertura contra la póliza.** En `/clientes/[id]` se sube el PDF de
+condiciones de cada póliza (`POST /api/policies/[id]/condiciones`, sólo owner,
+admin y specialist). Gemini lo lee una vez y guarda en `policies` las
+coberturas (código, suma asegurada, franquicia) y el ámbito territorial.
+`src/core/case/cobertura.ts` devuelve cubre, no cubre o dudoso, con motivos
+codificados. Compara la fecha del siniestro, nunca la de hoy. El veredicto se
+ve sólo en la ficha del caso. Una póliza que hoy no está activa da «dudoso»,
+porque pudo estarlo el día del siniestro.
+
+**B23: monto estimado.** Es un rango orientativo por tipo y gravedad
+(`src/core/case/monto-estimado.ts`). Hay una tabla por defecto, en pesos de
+septiembre de 2026, que cada aseguradora puede reemplazar en `/configuracion`
+(`PATCH /api/admin/montos`). El worker guarda el rango en
+`cases.monto_estimado` en cada extracción, con `origen: "tabla"`. El tipo
+«otro» no tiene rango.
+
+**B21: presupuesto del taller.** En los adjuntos del caso, un PDF o una foto
+que parece un presupuesto muestra «Leer presupuesto»
+(`POST /api/cases/[id]/attachments/[attachmentId]/presupuesto`). Gemini lee
+los ítems y los importes, y los coteja con las fotos y el relato. La ficha
+marca los ítems sin daño visible, los importes fuera de rango y un total que
+no suma. El monto estimado pasa a `origen: "presupuesto"`.
+
+**Las lecturas del modelo** pasan todas por `src/server/ai/leer-documento.ts`:
+`checkBudget`, `registrarConsumoDelModelo` y un cupo propio por póliza o por
+caso (5 cada 24 h). Sin cupo, sin presupuesto de IA o con una respuesta que no
+valida, la pantalla dice «sin leer» y no se escribe nada. El texto va entre
+centinelas. Lo que vuelve pasa por zod, y el texto libre, por el filtro de
+resumen seguro.
+
+**Antes del deploy.** La 0040 (`0040_cobertura_monto_presupuesto.sql`, siete
+columnas que admiten NULL) se aplica a mano en staging, QA y producción, en ese
+orden, después de la 0038 y la 0039. Sin ella no entra **ningún** caso: Drizzle
+lista todas las columnas del esquema en el INSERT a `cases` y a
+`claim_attachments`. Además la ficha de cada caso da «no existe», `/clientes/[id]`
+falla con 42703 y `/api/health` queda en rojo.
+
+**Para revisar.** Un viewer ve el panel de cobertura y la lectura del
+presupuesto. `GET /api/cases/:id` devuelve `monto_estimado` a todos los roles
+del equipo. Los montos por defecto son una estimación que tiene que validar el
+dueño. Un PDF de condiciones de más de 10 páginas se rechaza.
+
 ### 🙋 Waiting on you (not code)
 
 - **Aplicar 0038 y 0039 (B3 y B4) antes de desplegar.** A mano en staging, QA
   y producción. Además, confirmar que un mensaje tardío que cuenta otro
   siniestro no abra un caso nuevo solo.
+
+- **Aplicar 0040 (B6, B21 y B23) antes de desplegar.** A mano en staging (y la
+  base del E2E, si es otra), QA y producción, después de la 0039. Además,
+  validar la tabla de montos por defecto y decidir si un viewer puede ver
+  cobertura, monto y presupuesto.
 
 - ~~**Qué hacer con la respuesta a un caso ya derivado.**~~ ✅ **RESUELTO
   25/09 en #293 (P6).** `findExistingWhatsAppCase` suma el mensaje al caso en

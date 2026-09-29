@@ -41,6 +41,12 @@ describe("claveDeCupo", () => {
     expect(claveDeCupo("batch-simulate", "u-1")).toBe("batch-simulate:u-1");
   });
 
+  it("las lecturas y subidas de documentos (B6, B21) cuentan por póliza y por caso, no por usuario", () => {
+    expect(claveDeCupo("condiciones-poliza", "T-1", "P-1")).toBe("condiciones-poliza:t-1:p-1");
+    expect(claveDeCupo("lectura-presupuesto", "t-1", "c-1")).toBe("lectura-presupuesto:t-1:c-1");
+    expect(claveDeCupo("subida-condiciones", "T-1", "P-1")).toBe("subida-condiciones:t-1:p-1");
+  });
+
   it("re-analyze es re-analyze:<caseId>:<userId>", () => {
     expect(claveDeCupo("re-analyze", "c-1", "u-1")).toBe("re-analyze:c-1:u-1");
   });

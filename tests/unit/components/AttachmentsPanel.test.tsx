@@ -11,8 +11,10 @@
  * «10.0 MB». Un video de 80 MB se leía como que se pasó por un byte.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 // Sin mock de i18n a propósito: lo que se afirma es el texto que lee una
 // persona. Si mañana alguien cambia la frase del rechazo, este test se entera.
@@ -31,6 +33,8 @@ const GUARDADO = {
   resumen: null,
   util: null,
   duplicado: false,
+  esPresupuesto: false,
+  lectura_presupuesto: null,
 };
 
 const RECHAZADO = {
@@ -47,6 +51,8 @@ const RECHAZADO = {
   resumen: null,
   util: null,
   duplicado: false,
+  esPresupuesto: false,
+  lectura_presupuesto: null,
 };
 
 // Sin `external_url` a propósito: ese branch ya pone su propio «Abrir», y lo
@@ -176,6 +182,43 @@ describe("AttachmentsPanel", () => {
     );
 
     expect(screen.getByText("Audio")).toBeInTheDocument();
+  });
+
+  it("el presupuesto leído muestra ítems, total y alertas; sin permiso no ofrece releerlo", () => {
+    const leido = {
+      ...GUARDADO,
+      filename: "presupuesto.pdf",
+      content_type: "application/pdf",
+      esPresupuesto: true,
+      lectura_presupuesto: {
+        lectura: {
+          items: [
+            { descripcion: "Paragolpes trasero", importe: 350000, danio_visible_en_fotos: true },
+            { descripcion: "Capot", importe: 900000, danio_visible_en_fotos: false },
+          ],
+          total: 1250000,
+          moneda: "ARS" as const,
+        },
+        alertas: [{ codigo: "sin_danio_visible" as const, item: 1 }, { codigo: "total_fuera_de_rango" as const }],
+        leido_en: "2026-09-29T12:00:00Z",
+      },
+    };
+    const { rerender } = render(<AttachmentsPanel attachments={[leido]} caseId="c-1" puedeAbrir={false} />);
+
+    expect(screen.getByText("Capot")).toBeInTheDocument();
+    expect(screen.getByText(/1\.250\.000/)).toBeInTheDocument();
+    expect(screen.getByText(/No se ve daño/i)).toBeInTheDocument();
+    expect(screen.getByText(/fuera del rango/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+
+    rerender(<AttachmentsPanel attachments={[leido]} caseId="c-1" puedeAbrir={false} puedeLeerPresupuesto />);
+    expect(screen.getByRole("button", { name: /Volver a leer/i })).toBeInTheDocument();
+  });
+
+  it("un adjunto que no parece presupuesto no ofrece leerlo", () => {
+    render(<AttachmentsPanel attachments={[GUARDADO]} caseId="c-1" puedeAbrir={false} puedeLeerPresupuesto />);
+
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("sin marcas ni resumen, no pinta nada de más", () => {

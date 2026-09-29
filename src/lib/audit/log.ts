@@ -254,6 +254,25 @@ export const AuditEvent = {
   LATE_MESSAGE_ALERTED: "claim.late_message_alerted",
 
   /**
+   * WORKSHOP_ESTIMATE_READ: alguien del equipo pidió leer el presupuesto de
+   * taller de un adjunto (B21). Payload: { attachment_id, leido, motivo,
+   * alertas } — nunca los ítems ni los importes.
+   */
+  WORKSHOP_ESTIMATE_READ: "claim.workshop_estimate_read",
+
+  /**
+   * POLICY_CONDITIONS_UPLOADED: alguien subió las condiciones de una póliza
+   * (B6). Payload: { policy_id, leido, motivo } — nunca lo que dice el PDF.
+   */
+  POLICY_CONDITIONS_UPLOADED: "policy.conditions_uploaded",
+
+  /**
+   * AMOUNT_RANGES_CHANGED: un admin cambió la tabla de montos orientativos
+   * desde /configuracion (B23). Payload: { por_defecto } — nunca los montos.
+   */
+  AMOUNT_RANGES_CHANGED: "tenant.amount_ranges_changed",
+
+  /**
    * SPECIALIST_ALERT_RECIPIENTS_CHANGED: an admin edited the tenant's list of
    * addresses for urgent-case alerts, from /configuracion.
    * Payload: { count }. Never the addresses themselves.

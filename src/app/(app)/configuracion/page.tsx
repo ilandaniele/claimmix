@@ -27,7 +27,9 @@ import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import packageJson from "../../../../package.json";
 import { ADMIN_ROLES } from "@/lib/auth/require-role";
 import { CoreSyncPanel } from "./CoreSyncPanel";
+import { MontosPanel } from "./MontosPanel";
 import { paraAdmin } from "./para-admin";
+import { MONTOS_POR_DEFECTO } from "@/core/case/monto-estimado";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
@@ -208,6 +210,13 @@ export default async function ConfiguracionPage({
         {admin && admin.core !== undefined && (
           <Section title={t("configuracion.core.titulo")}>
             <CoreSyncPanel inicial={admin.core} migracionPendiente={admin.migracionPendiente} />
+          </Section>
+        )}
+
+        {/* ── Montos orientativos por tipo y gravedad (B23, sólo admin) ─────── */}
+        {admin && admin.montos !== undefined && (
+          <Section title={t("configuracion.montos.titulo")}>
+            <MontosPanel inicial={admin.montos} porDefecto={MONTOS_POR_DEFECTO} />
           </Section>
         )}
 

@@ -63,7 +63,7 @@ const DE_EVENTO = /denuncia|constancia|parte|acta|exposici/i;
 const DE_IDENTIDAD = /dni|documento|licencia|registro|c[eé]dula|p[oó]liza|carnet/i;
 
 /** `AAAA-MM-DD` o `dd/mm/aaaa`; cualquier otra cosa no se compara. */
-function dia(valor: string | null | undefined): number | null {
+export function dia(valor: string | null | undefined): number | null {
   if (!valor) return null;
   const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(valor.trim());
   const ar = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(valor.trim());

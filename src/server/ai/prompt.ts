@@ -513,7 +513,8 @@ Never add a vehicle-type field such as tipo_vehiculo: the plate already identifi
 When one of these is not stated: empty value, confidence 0, and list it in missing_fields.
 
 COLLISION MECHANICS (mecanica):
-Only when two or more vehicles collided. Otherwise mecanica=null. "asegurado" is the sender's vehicle, "tercero" is the other one.
+mecanica has nothing to do with claim_type and never changes it: a crash of a single vehicle (against a post, a wall, a tree, a curb) still gets its claim_type from the DECISIVE TEST and the rules above, and mecanica=null does not mean the claim type is unknown.
+Fill mecanica only when two or more vehicles collided; otherwise mecanica=null. "asegurado" is the sender's vehicle, "tercero" is the other one.
 Fill a field ONLY with what the person says literally; null for everything else. Never infer, never work out who had the right of way, and never say who is at fault.
 - maniobra_asegurado / maniobra_tercero: what each vehicle was doing when they collided: avanzaba_recto, giraba_izquierda, giraba_derecha, retrocedia, cambiaba_carril, estacionado, detenido, otra.
 - semaforo_asegurado / semaforo_tercero: the light each one faced: verde, amarillo, rojo, sin_semaforo (the text says there was no traffic light), no_dice (there was a light and the text does not say the color).

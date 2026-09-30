@@ -506,7 +506,9 @@ const SCENARIOS: Scenario[] = [
     turns: [
       {
         say: "Hola, choqué contra un poste en Alem al 500. Soy Ana Ruiz, DNI 33.221.114.",
-        expect: { replies: 1 },
+        // El tipo ya está dicho: pedirlo era el efecto de un bloque del prompt
+        // que hacía caer el choque contra un poste en `other`.
+        expect: { replies: 1, noAsked: ["claim_type"] },
       },
       // The three-messages-in-ninety-seconds bug: each round was individually
       // correct, and nobody was reading.

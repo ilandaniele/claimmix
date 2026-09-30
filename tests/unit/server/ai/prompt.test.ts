@@ -244,6 +244,12 @@ describe("buildEmailClaimPrompt — collision mechanics (B18) and third-party cl
     expect(PROMPT).toContain("never say who is at fault");
   });
 
+  it("la mecánica no toca el tipo de siniestro: un choque de un solo vehículo sigue clasificándose por las reglas de siempre", () => {
+    expect(PROMPT).toContain("mecanica has nothing to do with claim_type and never changes it");
+    expect(PROMPT).toContain("still gets its claim_type from the DECISIVE TEST");
+    expect(PROMPT).toContain("mecanica=null does not mean the claim type is unknown");
+  });
+
   it("el silencio sobre las excepciones de prioridad es null: false sólo si el texto dice que ninguna rigió", () => {
     expect(PROMPT).toContain("false ONLY if the text explicitly says none of that applied");
     expect(PROMPT).toContain("Silence about it is null, never false");

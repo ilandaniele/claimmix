@@ -132,7 +132,7 @@ import { loadMemoryHints as loadClaimMemoryHints } from "@/server/memory/load";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle";
-import { mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
+import { anclarPolizaAlTexto, mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
 import { autenticacionFallida } from "@/core/email/autenticacion";
@@ -951,6 +951,7 @@ export async function runEmailExtractionWorker(
     // This is a defensive layer — the primary fix is in the prompt (RULE D / RULE F).
     // Ensures fields[] is always the source of truth for DB writes, even if the model
     // populates only one of the two shapes.
+    extractedClaim = anclarPolizaAlTexto(extractedClaim, `${emailSubject} ${emailBody}`);
     const fallbackFields = parseEmailClaimFields({
       subject: emailSubject,
       body: emailBody,

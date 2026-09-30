@@ -134,6 +134,8 @@ const {
   listCases,
 } = await import("@/server/cases/list");
 const { getCaseDetail } = await import("@/server/cases/get");
+const { getTenantKpis } = await import("@/server/metrics/kpis");
+const { getHistorialDeMetricas } = await import("@/server/metrics/historial");
 
 /**
  * El inquilino, como lo recibe la aplicación.
@@ -396,6 +398,33 @@ async function prepararLectura(): Promise<{
       name: "búsqueda por texto",
       run: async () => {
         await listCases(CTX, { ...QUERY, q: "gonzalez" } as never);
+      },
+    },
+    {
+      // El tablero de métricas entero, en un solo viaje a la base: los
+      // contadores del período, el ciclo (recibido a listo y a cierre) y las
+      // estadías por estado leen la auditoría con un cruce lateral por caso,
+      // que es lo que se rompe si el índice parcial de trayecto no se usa.
+      // El período es el de todos los días: el mes en curso.
+      name: "tablero de métricas (mes)",
+      run: async () => {
+        await getTenantKpis(CTX, { periodo: "este_mes" });
+      },
+    },
+    {
+      // El peor caso del tablero: el año entero, más la serie por día y el
+      // resumen de ayer, que suman dos consultas a las once fijas.
+      name: "tablero de métricas (año + serie)",
+      run: async () => {
+        await getTenantKpis(CTX, { periodo: "este_anio", serie: "dia", ayer: true });
+      },
+    },
+    {
+      // Su vista y su CSV, en su propio viaje: recorre la auditoría de doce
+      // meses y es lo más pesado que se le puede pedir a la cartera.
+      name: "historial de métricas (doce meses)",
+      run: async () => {
+        await getHistorialDeMetricas(CTX);
       },
     },
   ];

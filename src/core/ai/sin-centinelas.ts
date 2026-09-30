@@ -46,6 +46,9 @@ const CENTINELAS = [
   // Las notas que acompañan a las condiciones de una póliza y a un presupuesto.
   "condiciones_poliza",
   "presupuesto_taller",
+  // Los turnos anteriores de la conversación del asistente sobre un caso: lo
+  // escribió la persona y lo contestó el modelo, y los dos son datos.
+  "historial_del_hilo",
 ] as const;
 
 /** La forma de un centinela: `<tag>` o `</tag>`, con o sin espacios adentro. */

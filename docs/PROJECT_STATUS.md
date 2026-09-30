@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-29. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-30. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -4219,7 +4219,102 @@ separó `vencimiento-y-banda.ts` para sacarlo. Bajar de 310 obliga a sacar códi
 o a que cada sesión baje sólo el diccionario de su idioma, como ya se anotó en el
 commit que subió el tope de 300 a 310; subir el tope es decisión de quien mergea.
 
+### Pregunta por caso, tablero de cartera, métricas del equipo y revisión de calidad (B12, B14, B15 y B22, 2026-09-30)
+
+Cuatro huecos más del informe de Clive del 28/09, en la rama
+`feat/chat-tablero-metricas-revision-b12-b14-b15-b22`, que sale de la de B9, B10,
+B11 y B13. La migración es la `0043_asistente_y_desvios.sql`: la 0042 ya la usó
+B9 a B13 (el plan de esta tanda daba por libre ese número, y no lo estaba).
+
+**B12: preguntar por un caso al asistente Pro.** `src/server/asistente/pregunta-caso.ts`.
+`POST /api/asistente` con `caseId` contesta sobre ese caso sin pasar por el
+clasificador de intención; sin `caseId` todo sigue como estaba.
+`GET /api/asistente?caseId=` devuelve el hilo guardado. El contexto se arma con
+`cargarDetalleDeCaso` (el mismo que la ficha), y la respuesta se valida con
+`resumenValido` contra los números que constan en el caso antes de mostrarse. El
+hilo vive en `asistente_turnos`: un renglón es de un inquilino Y de una persona
+(RLS forzada por los dos), así que un colega no lee lo que uno le preguntó. Un
+viewer no recibe resúmenes de documentos ni cobertura, y su hilo se vuelve a
+enmascarar con `redactString` al leerlo. El cupo es de 30 preguntas por día, por
+persona y por caso (`ASISTENTE_CASO`); pasado el cupo o el presupuesto de IA
+contesta 200 con `sinLeer` y no guarda nada. Si guardar el turno falla, la
+respuesta igual sale. `sin-centinelas.ts` suma el historial del hilo a lo que
+se trata como dato y no como instrucción. Los ataques están en
+`pnpm pentest` (ver `docs/TESTING.md`).
+
+**B14: tablero de cartera.** `/metricas` elige el período con `?periodo=` (el mes
+en curso por defecto) y las tarjetas y las distribuciones —por situación, por tipo
+y los analistas con más casos— lo siguen; antes eran de todo el histórico. La
+serie de actividad cuenta los casos abiertos cada día por su situación **actual**.
+`?vista=historial` muestra los últimos doce meses mes a mes, y
+`GET /api/metricas/export.csv` los baja, sin datos de personas ni de casos. Las
+consultas leen la auditoría con literales de evento para que use el índice parcial
+`idx_audit_log_trayecto`, y `getTenantKpis` sigue siendo un solo viaje.
+
+**B15: métricas del equipo.** Mediana de horas de recibido a listo y a cierre
+(`ciclo.mediana_horas_listo`), mensajes por caso (los del asegurado más los
+WhatsApp que salieron), completado confirmado por una persona (la tarjeta
+`completitudAuto` pasó a `completadoConfirmado`) y «dónde se quedan los casos»,
+las estadías por situación. La tasa «sin intervención» es una cota inferior: el
+denominador son los reclamos de canal real del período y una intervención cuenta
+si ocurrió antes de `listo`. La primera estadía y las que siguen abiertas no
+entran a las estadísticas, ni el `listo` intermedio de una extracción completa ni
+los cambios de situación que no se aplicaron.
+
+**B22: revisión nocturna de calidad.** `src/core/desvios/reglas.ts` y
+`src/server/desvios/revision-nocturna.ts`. Cuelga del cron de `reap-stuck`, con
+una guarda de 60 s para no comerse la purga y un cupo de una vez por día
+(`REVISION_DE_DESVIOS`: GitHub Actions llama a esa ruta cada 15 min y la revisión
+son cinco `INSERT ... SELECT` sobre toda la auditoría), y cada regla corre aislada: si una
+falla se registra (`desvios.regla_fallo`) y las demás siguen. Cinco reglas, todas
+sobre casos de canal real: **(a)** un documento pedido hace más de 72 h y sin
+recibir en un caso que espera al denunciante; **(b)** un caso cerrado en los
+últimos 30 días que nunca pasó por un estado de completado (salvo el cierre por
+abandono); **(c)** una derivación al equipo de más de 24 h que ninguna persona
+tomó; **(d)** un plazo (`vence_en`, B10) vencido en un caso abierto; **(e)** un
+caso cerrado en los últimos 30 días con pasos manuales del plan (B11) sin hacer.
+Cada hallazgo se guarda en `case_desvios`, con clave (caso, regla, ancla): el
+ancla es el instante del hecho, así que correr dos veces no duplica y un plazo
+recalculado es otro desvío. Un desvío es historia y no se resuelve solo cuando el
+caso se arregla. `/desvios` lista los hallazgos, del más nuevo al más viejo, con
+un enlace al caso por fila; es para `REVISION_ROLES` (owner, admin y specialist,
+porque no existe un rol supervisor) y el resto vuelve a la bandeja. El titular
+sale tapado para quien no ve el padrón (`titularParaElRol`, compartida con la
+agenda). No llama al modelo.
+
+**Antes del deploy.** La 0043 crea `asistente_turnos` y `case_desvios` (las dos con
+RLS forzada, y `case_desvios` de sólo lectura para `claimmix_app`; la escribe el
+barrido con el rol dueño) y el índice parcial `idx_audit_log_trayecto`. Se aplica
+a mano, en este orden y después de la 0042: `ep-proud-resonance` (la viva, que
+es también la de los secretos `DATABASE_URL` del CI), la rama `production` de
+Veltra (`STAGING_DATABASE_URL`) y `ep-wispy-flower` (QA). Identificar cada base
+por su canal de casos, no por su nombre. El índice se crea sin `CONCURRENTLY`
+porque `migrate.mjs` corre cada archivo en una transacción; en una base con mucha
+auditoría conviene crearlo antes a mano, con `CONCURRENTLY`. Es aditiva e
+idempotente. Sin ella `/api/health` da 503 y `pnpm permisos`, `pnpm tenancy` y
+`pnpm capa-datos` necesitan las dos tablas.
+
+**Lo que no se probó.** El SQL de la revisión nocturna nunca corrió contra un
+Postgres (no hay uno local y la migración no está aplicada): se probó su forma.
+Tampoco se midió el p95 del tablero contra una base con meses de auditoría. El
+primer barrido puede marcar hasta 30 días de casos ya cerrados. `cierre_sin_listo`
+sólo mira casos abiertos después de la primera auditoría de un cambio de estado
+del agente (`AUDITORIA_DEL_AGENTE_DESDE`): antes de eso el agente no dejaba rastro
+y un caso viejo saldría como desvío sin serlo.
+
+**Peso del bundle.** Sin cambios: 307 kB contra el tope de 310, medido con
+`pnpm build && pnpm peso`. Los textos nuevos que sólo pinta el servidor viven en
+`es-AR.servidor.ts` y `en-US.servidor.ts`; al navegador sólo llegaron `nav.desvios` y
+las cadenas de la caja del asistente.
+
 ### 🙋 Waiting on you (not code)
+
+- **Aplicar 0043 (B12, B14, B15 y B22) antes de desplegar.** A mano en
+  `ep-proud-resonance`, en la rama `production` de Veltra (`STAGING_DATABASE_URL`)
+  y en QA (`ep-wispy-flower`), en ese orden y después de la 0042. Además, mirar
+  el primer barrido de `/desvios` (puede traer hasta 30 días de cierres viejos) y
+  decidir si hace falta un rol supervisor: hoy la pantalla es de owner, admin y
+  specialist.
 
 - **Aplicar 0038 y 0039 (B3 y B4) antes de desplegar.** A mano en staging, QA
   y producción. Además, confirmar que un mensaje tardío que cuenta otro

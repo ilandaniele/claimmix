@@ -32,6 +32,7 @@ vi.mock("@/server/metrics/kpis", () => ({ getTenantKpis: mockKpis }));
 
 import MetricasPage from "@/app/(app)/metricas/page";
 import type { MetricasData } from "@/server/metrics/kpis";
+import { PERIODO_DEL_MES, RESUMEN_DEL_CICLO } from "../mocks/metricas-datos";
 
 const SIN_USO = { calls: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 };
 
@@ -40,14 +41,16 @@ function datos(porEstado: Record<string, number>): MetricasData {
     summary: {
       total_cases_month: Object.values(porEstado).reduce((a, b) => a + b, 0),
       avg_first_response_minutes: null,
-      auto_completion_rate: 0,
+      completado_confirmado_rate: 0,
       escalated_count: 0,
+      ...RESUMEN_DEL_CICLO,
     },
     by_status: porEstado,
     by_type: {},
     top_analysts: [],
     ai_usage: { month: SIN_USO, all_time: SIN_USO, by_user: [], by_model: [] },
     period: { start: "", end: "" },
+    periodo: PERIODO_DEL_MES,
     serie: null,
   };
 }

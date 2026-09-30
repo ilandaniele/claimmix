@@ -32,6 +32,21 @@ describe("las guardas del asistente, con entradas planas", () => {
   });
 });
 
+describe("resumenValido con montos conocidos", () => {
+  it("un importe corto de la lista pasa aunque digitosConocidos no lo guarde (menos de 6 cifras)", () => {
+    expect(resumenValido("El rango va de $50.000 a $ 80.000.", VALORES)).toBe(false);
+    expect(resumenValido("El rango va de $50.000 a $ 80.000.", VALORES, 1200, [50000, 80000])).toBe(true);
+  });
+
+  it("sólo pasan los importes de la lista: otro monto corto se sigue descartando", () => {
+    expect(resumenValido("Ya cobró $60.000.", VALORES, 1200, [50000, 80000])).toBe(false);
+  });
+
+  it("los decimales del importe no cambian la cifra que se compara", () => {
+    expect(resumenValido("Se estima $12.345,67.", VALORES, 1200, [12345.67])).toBe(true);
+  });
+});
+
 describe("esResumenSeguro", () => {
   it("acepta un resumen neutral con fecha y póliza conocida", () => {
     expect(esResumenSeguro("Choque en rotonda el 15/09/2026, póliza 4455667.", VALORES)).toBe(true);

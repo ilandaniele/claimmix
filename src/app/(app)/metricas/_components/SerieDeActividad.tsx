@@ -2,12 +2,15 @@
  * Reclamos abiertos, WhatsApps y mails atendidos por día, mes o año.
  *
  * Server component sin estado: la unidad viaja en `?serie=` y cambiarla es
- * navegar, así que no hace falta estado en el navegador. Lo único de cliente es
+ * navegar —conservando el período elegido—, así que no hace falta estado en el
+ * navegador. Lo único de cliente es
  * `EnCamino`, la señal mientras el servidor dibuja la unidad nueva.
  */
 
 import Link from "next/link";
 import { mesDeCalendario } from "@/core/fecha/mes-calendario";
+import { hrefDeMetricas } from "@/core/metricas/enlaces";
+import { PERIODO_POR_DEFECTO, type Periodo } from "@/core/metricas/periodo";
 import { UNIDADES, type PuntoSerie, type Unidad } from "@/core/metricas/serie";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
@@ -41,6 +44,9 @@ const SIN_ACTIVIDAD: PuntoSerie = {
   mails: 0,
   reclamos_whatsapp: 0,
   reclamos_mail: 0,
+  escalados: 0,
+  listos: 0,
+  cerrados: 0,
 };
 
 /** La ventana entera sumada en un solo punto. */
@@ -53,20 +59,27 @@ function sumarVentana(serie: PuntoSerie[]): PuntoSerie {
       mails: acc.mails + p.mails,
       reclamos_whatsapp: acc.reclamos_whatsapp + p.reclamos_whatsapp,
       reclamos_mail: acc.reclamos_mail + p.reclamos_mail,
+      escalados: acc.escalados + p.escalados,
+      listos: acc.listos + p.listos,
+      cerrados: acc.cerrados + p.cerrados,
     }),
     SIN_ACTIVIDAD
   );
 }
 
-const SERIES: Array<{
-  campo: "reclamos" | "whatsapps" | "mails";
-  rotulo: TranslationKey;
-  color: string;
-}> = [
+type Campo = "reclamos" | "whatsapps" | "mails" | "escalados" | "listos" | "cerrados";
+
+const SERIES: Array<{ campo: Campo; rotulo: TranslationKey; color: string }> = [
   { campo: "reclamos", rotulo: "metricas.actividad.reclamos", color: "bg-blue-500" },
   { campo: "whatsapps", rotulo: "metricas.actividad.whatsapps", color: "bg-green-500" },
   { campo: "mails", rotulo: "metricas.actividad.mails", color: "bg-purple-500" },
+  { campo: "escalados", rotulo: "metricas.actividad.escalados", color: "bg-red-400" },
+  { campo: "listos", rotulo: "metricas.actividad.listos", color: "bg-emerald-500" },
+  { campo: "cerrados", rotulo: "metricas.actividad.cerrados", color: "bg-slate-400" },
 ];
+
+/** Las tres de situación: van debajo de las de actividad en el resumen. */
+const SERIES_DE_SITUACION = SERIES.slice(3);
 
 function rotuloDe(clave: string, unidad: Unidad, locale: Locale): string {
   if (unidad === "mes") return mesDeCalendario(clave, locale);
@@ -75,7 +88,7 @@ function rotuloDe(clave: string, unidad: Unidad, locale: Locale): string {
 }
 
 /**
- * Una columna del resumen: el período (hoy, o la ventana entera) y sus tres
+ * Una columna del resumen: el período (hoy, o la ventana entera) y sus seis
  * números. El mismo estilo de tile que ya usa la pantalla para el uso de IA.
  */
 function ColumnaResumen({
@@ -127,6 +140,14 @@ function ColumnaResumen({
             {punto.mails}
           </dd>
         </div>
+        {SERIES_DE_SITUACION.map((s) => (
+          <div key={s.campo}>
+            <dt className="text-xs text-slate-600 dark:text-slate-300">{t(s.rotulo)}</dt>
+            <dd className="text-xl font-bold tabular-nums text-slate-900 dark:text-slate-100">
+              {punto[s.campo]}
+            </dd>
+          </div>
+        ))}
       </dl>
     </div>
   );
@@ -136,13 +157,15 @@ export function SerieDeActividad({
   serie,
   unidad,
   locale,
+  periodo = PERIODO_POR_DEFECTO,
 }: {
   serie: PuntoSerie[];
   unidad: Unidad;
   locale: Locale;
+  periodo?: Periodo;
 }) {
   const t = getT(locale);
-  // Una escala para las tres series: así una barra de WhatsApp y una de mail
+  // Una escala para las seis series: así una barra de WhatsApp y una de mail
   // del mismo largo son la misma cantidad.
   const max = Math.max(0, ...serie.flatMap((p) => SERIES.map((s) => p[s.campo])));
   // El resumen de arriba: el último período de la ventana, y la ventana entera
@@ -162,14 +185,14 @@ export function SerieDeActividad({
             {t("metricas.actividad.titulo")}
           </h2>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            {t("metricas.actividad.nota")}
+            {t("metricas.actividad.nota")} {t("metricas.actividad.notaEstados")}
           </p>
         </div>
         <nav className="flex gap-1">
           {UNIDADES.map((u) => (
             <Link
               key={u}
-              href={`/metricas?serie=${u}`}
+              href={hrefDeMetricas({ serie: u, periodo })}
               // La serie está al final de la página: con el scroll por omisión,
               // Next vuelve al encabezado en cada cambio de unidad.
               scroll={false}

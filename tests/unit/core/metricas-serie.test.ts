@@ -25,6 +25,9 @@ const fila = (clave: string, n: number): PuntoSerie => ({
   mails: n,
   reclamos_whatsapp: n,
   reclamos_mail: n,
+  escalados: n,
+  listos: n,
+  cerrados: n,
 });
 
 describe("serie de actividad — la frontera argentina", () => {

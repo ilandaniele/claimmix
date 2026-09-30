@@ -153,6 +153,28 @@ try {
       problemas.push("known_claim_patterns: escritura sobre lo global");
     } else bien("SELECT ve lo global; INSERT, UPDATE y DELETE sólo lo propio");
 
+    // ── 2c. La conversación del asistente es de quien la escribió (0043) ───
+    titulo("asistente_turnos: la lectura y la escritura piden usuario, no sólo inquilino");
+    const turnos = (
+      await cx.query(`
+        SELECT cmd::text, qual, with_check FROM pg_policies
+        WHERE schemaname='public' AND tablename='asistente_turnos' ORDER BY cmd`)
+    ).rows as { cmd: string; qual: string | null; with_check: string | null }[];
+    if (turnos.length === 0) {
+      nota("La tabla todavía no existe en esta base (falta la 0043). Se salta.");
+    } else {
+      const pideUsuario = (cmd: string) =>
+        turnos.some((r) => r.cmd === cmd && /claimmix_current_user_id/.test(`${r.qual ?? ""}${r.with_check ?? ""}`));
+      const sinUsuario = ["SELECT", "INSERT"].filter((c) => !pideUsuario(c));
+      if (turnos.some((r) => r.cmd === "ALL" || r.cmd === "UPDATE" || r.cmd === "DELETE")) {
+        mal("hay una política que permite reescribir o borrar turnos");
+        problemas.push("asistente_turnos con política de UPDATE o DELETE");
+      } else if (sinUsuario.length) {
+        mal(`${sinUsuario.join(" y ")} no piden usuario: otra persona del mismo inquilino leería la conversación`);
+        problemas.push("asistente_turnos legible por otro usuario del inquilino");
+      } else bien("SELECT e INSERT piden inquilino y usuario; no hay política de UPDATE ni DELETE");
+    }
+
     // ── 3. La prueba de verdad ──────────────────────────────────────────────
     titulo("La prueba cruzada: dos aseguradoras, una consulta");
 

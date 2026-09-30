@@ -2,17 +2,25 @@
  * Métricas page — AC16 supplemental pages (W7).
  *
  * Server Component that fetches KPI data and renders:
- *   - 4 summary cards
+ *   - 8 summary cards: las del período y las del ciclo (B14, B15)
+ *   - Dónde se quedan los casos (cuellos de botella)
  *   - Cases by status (visual bar chart — HTML/CSS only, no chart library)
  *   - Cases by type (donut-style percentage bars)
  *   - Top 5 analysts table
  *   - Actividad por día, mes o año (`?serie=`)
+ *   - `?periodo=` elige el rango de las tarjetas y las distribuciones
+ *   - `?vista=historial`: los últimos doce meses mes a mes, con su CSV
  *
  * Los textos salen del diccionario; los números y la moneda quedan en formato
  * es-AR en todo el producto a propósito (ver `formatUsd` en lib/utils.ts).
  */
 
+import Link from "next/link";
 import { nombreDelMesArgentino } from "@/core/fecha/dia-argentino";
+import { mesDeCalendario } from "@/core/fecha/mes-calendario";
+import { COLUMNAS_DEL_HISTORIAL, porcentaje, unDecimal, type FilaDeHistorial } from "@/core/metricas/ciclo";
+import { hrefDeMetricas, VISTAS, vistaDe, type Vista } from "@/core/metricas/enlaces";
+import { PERIODOS_DEL_TABLERO, periodoDe, type Periodo, type PeriodoDelTablero } from "@/core/metricas/periodo";
 import {
   CLAVES_DE_ESTADO,
   contarPorOpcion,
@@ -24,6 +32,7 @@ import { getUserRow } from "@/lib/auth/user-row";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { formatUsd as formatUsdShared } from "@/lib/utils";
+import { getHistorialDeMetricas } from "@/server/metrics/historial";
 import {
   getTenantKpis,
   type MetricasData,
@@ -38,7 +47,8 @@ import { SerieDeActividad } from "./_components/SerieDeActividad";
 import { ResumenDeAyer } from "./_components/ResumenDeAyer";
 
 /*
- * Los números salen de `getTenantKpis`, que también usa /api/metricas.
+ * Los números salen de `getTenantKpis`, que también usa /api/metricas, y el
+ * historial de `getHistorialDeMetricas`, que también usa el CSV.
  *
  * Estaban escritos acá y otra vez en la ruta, con las mismas nueve consultas
  * y la misma agregación, y las dos copias ya habían divergido en cómo tratan
@@ -47,19 +57,27 @@ import { ResumenDeAyer } from "./_components/ResumenDeAyer";
  * Lo que queda acá es lo que de verdad es de la pantalla: resolver quién está
  * mirando, y dibujar.
  */
-async function fetchMetricas(unidad: Unidad): Promise<MetricasData | null> {
+type Metricas = { data: MetricasData | null; historial: FilaDeHistorial[] | null };
+
+const SIN_METRICAS: Metricas = { data: null, historial: null };
+
+async function fetchMetricas(unidad: Unidad, periodo: Periodo, vista: Vista): Promise<Metricas> {
   try {
     await connection();
     const session = await getSessionContext();
-    if (!session?.user) return null;
+    if (!session?.user) return SIN_METRICAS;
 
     // Deduplicada con la del layout: ver lib/auth/user-row.ts.
     const userRow = await getUserRow(session.user.id);
     // El chequeo va ANTES de leerle un campo: estaba al revés, así que una
     // sesión sin perfil reventaba en la línea de abajo en vez de devolver null.
-    if (!userRow) return null;
+    if (!userRow) return SIN_METRICAS;
 
-    return await getTenantKpis({ tenantId: userRow.tenant_id }, { serie: unidad, ayer: true });
+    // El historial recorre la auditoría de todo el año y en su vista no se
+    // dibuja nada del tablero: cada vista pide sólo lo suyo.
+    const tenantCtx = { tenantId: userRow.tenant_id };
+    if (vista === "historial") return { data: null, historial: await getHistorialDeMetricas(tenantCtx) };
+    return { data: await getTenantKpis(tenantCtx, { periodo, serie: unidad, ayer: true }), historial: null };
   } catch (e) {
     unstable_rethrow(e);
     if (e instanceof AppError) throw e;
@@ -67,7 +85,7 @@ async function fetchMetricas(unidad: Unidad): Promise<MetricasData | null> {
       { error_name: e instanceof Error ? e.name : "unknown" },
       "metricas.fetch_error"
     );
-    return null;
+    return SIN_METRICAS;
   }
 }
 
@@ -91,6 +109,29 @@ function formatCurrentMonth(locale: Locale): string {
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("es-AR").format(Math.round(value));
 }
+
+const UN_DECIMAL = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 1 });
+
+const formatDecimal = (value: number | null) => (value === null ? "—" : UN_DECIMAL.format(value));
+
+/** Minutos bajo la hora, horas hasta los dos días y días de ahí en adelante. */
+function formatHoras(horas: number | null): string {
+  if (horas === null) return "—";
+  if (horas < 1) return `${Math.round(horas * 60)} min`;
+  if (horas < 48) return `${formatDecimal(horas)} h`;
+  return `${formatDecimal(horas / 24)} d`;
+}
+
+const ROTULO_PERIODO: Record<PeriodoDelTablero, TranslationKey> = {
+  esta_semana: "metricas.periodo.esta_semana",
+  este_mes: "metricas.periodo.este_mes",
+  mes_pasado: "metricas.periodo.mes_pasado",
+  ultimos_30_dias: "metricas.periodo.ultimos_30_dias",
+  este_anio: "metricas.periodo.este_anio",
+};
+
+/** Cuántos estados se dibujan en «dónde se quedan los casos»: los demás son cola. */
+const CUELLOS_A_MOSTRAR = 6;
 
 // El costo de IA por llamada es de milésimas: con dos decimales todo se ve
 // $0,01. De ahí el 4.
@@ -144,19 +185,23 @@ export default async function MetricasPage({
 }) {
   const locale = await getAccountLocale();
   const t = getT(locale);
-  const unidad = unidadDe((await searchParams).serie);
-  let data: MetricasData | null;
+  const params = await searchParams;
+  const unidad = unidadDe(params.serie);
+  const periodo = periodoDe(params.periodo);
+  const vista = vistaDe(params.vista);
+  const tablero = vista === "tablero";
+  let { data, historial } = SIN_METRICAS;
 
   try {
-    data = await fetchMetricas(unidad);
+    ({ data, historial } = await fetchMetricas(unidad, periodo, vista));
   } catch (e) {
     if (e instanceof AppError && e.code === "MISSING_SESSION") {
       redirect("/login");
     }
-    data = null;
   }
 
   const hasData =
+    tablero &&
     data &&
     (data.summary.total_cases_month > 0 ||
       Object.values(data.by_status).some((v) => v > 0) ||
@@ -175,6 +220,8 @@ export default async function MetricasPage({
     (a, b) => a + b,
     0
   );
+  const cuellos = (data?.summary.cuellos ?? []).slice(0, CUELLOS_A_MOSTRAR);
+  const cuelloMayor = Math.max(0, ...cuellos.map((c) => c.horas_promedio));
 
   return (
     <div className="px-6 py-8 max-w-6xl">
@@ -184,11 +231,38 @@ export default async function MetricasPage({
           {t("metricas.title")}
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          {t("metricas.subtitle")} — {formatCurrentMonth(locale)}
+          {t("metricas.subtitle")} —{" "}
+          {!tablero
+            ? t("metricas.historial.titulo")
+            : periodo === "este_mes"
+              ? formatCurrentMonth(locale)
+              : t(ROTULO_PERIODO[periodo])}
         </p>
+        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+          <Opciones
+            rotulo={t("metricas.title")}
+            actual={vista}
+            opciones={VISTAS.map((v) => ({
+              clave: v,
+              href: hrefDeMetricas({ serie: unidad, periodo, vista: v }),
+              texto: t(`metricas.vista.${v}`),
+            }))}
+          />
+          {tablero && (
+            <Opciones
+              rotulo={t("metricas.periodo.titulo")}
+              actual={periodo}
+              opciones={PERIODOS_DEL_TABLERO.map((p) => ({
+                clave: p,
+                href: hrefDeMetricas({ serie: unidad, periodo: p }),
+                texto: t(ROTULO_PERIODO[p]),
+              }))}
+            />
+          )}
+        </div>
       </div>
 
-      {!hasData && (
+      {tablero && !hasData && (
         <div className="mb-8 rounded-lg border border-slate-200 bg-slate-50 px-6 py-12 text-center">
           <p className="text-sm text-slate-500">
             {t("metricas.emptyPeriod")}
@@ -209,14 +283,46 @@ export default async function MetricasPage({
             accent="slate"
           />
           <SummaryCard
-            label={t("metricas.card.completitudAuto")}
-            value={`${data!.summary.auto_completion_rate}%`}
+            label={t("metricas.card.completadoConfirmado")}
+            value={`${data!.summary.completado_confirmado_rate}%`}
             accent="green"
           />
           <SummaryCard
             label={t("metricas.card.escalados")}
             value={`${data!.summary.escalated_count} ${t("bandeja.claims")}`}
             accent="red"
+          />
+        </div>
+      )}
+
+      {hasData && (
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <SummaryCard
+            label={t("metricas.card.sinIntervencion")}
+            value={
+              data!.summary.sin_intervencion_rate === null
+                ? "—"
+                : `${data!.summary.sin_intervencion_rate}%`
+            }
+            helper={t("metricas.card.sinIntervencionNota")}
+            accent="green"
+          />
+          <SummaryCard
+            label={t("metricas.card.medianaListo")}
+            value={formatHoras(data!.summary.ciclo.mediana_horas_listo)}
+            helper={t("metricas.card.casosMedidos").replace("{n}", String(data!.summary.ciclo.casos_listo))}
+            accent="blue"
+          />
+          <SummaryCard
+            label={t("metricas.card.medianaCierre")}
+            value={formatHoras(data!.summary.ciclo.mediana_horas_cierre)}
+            helper={t("metricas.card.casosMedidos").replace("{n}", String(data!.summary.ciclo.casos_cierre))}
+            accent="slate"
+          />
+          <SummaryCard
+            label={t("metricas.card.mensajesPorCaso")}
+            value={formatDecimal(data!.summary.mensajes_por_caso)}
+            accent="slate"
           />
         </div>
       )}
@@ -231,12 +337,67 @@ export default async function MetricasPage({
           quiere ver, y sale aunque el tenant no tenga historial todavía. */}
       {data?.serie && (
         <div className="mb-8">
-          <SerieDeActividad serie={data.serie} unidad={unidad} locale={locale} />
+          <SerieDeActividad
+            serie={data.serie}
+            unidad={unidad}
+            locale={locale}
+            periodo={periodo}
+          />
+        </div>
+      )}
+
+      {historial && (
+        <div className="mb-8">
+          <TablaDeHistorial filas={historial} locale={locale} />
         </div>
       )}
 
       {hasData && (
         <>
+          {/* ── Dónde se quedan los casos ────────────────────────────────────── */}
+          <section
+            data-testid="cuellos"
+            className="mb-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900/70"
+          >
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-100">
+              {t("metricas.cuellos.titulo")}
+            </h2>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {t("metricas.cuellos.nota")}
+            </p>
+            {cuellos.length === 0 ? (
+              <p className="mt-4 text-sm text-slate-500">{t("metricas.cuellos.vacio")}</p>
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {cuellos.map((c) => {
+                  const label = t(`status.${c.estado}` as TranslationKey);
+                  const pct = cuelloMayor > 0 ? (c.horas_promedio / cuelloMayor) * 100 : 0;
+                  return (
+                    <li key={c.estado}>
+                      <div className="mb-1 flex justify-between text-xs text-slate-600 dark:text-slate-300">
+                        <span>{label}</span>
+                        <span>
+                          {formatHoras(c.horas_promedio)} ·{" "}
+                          {t("metricas.cuellos.estadias").replace("{n}", String(c.estancias))}
+                        </span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                        <div
+                          className={`h-full rounded-full bg-amber-500 ${anchoDeBarra(pct)}`}
+                          role="progressbar"
+                          aria-valuenow={Math.round(pct)}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-label={label}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
           {/* ── Charts row ───────────────────────────────────────────────────── */}
           <section className="mb-8">
             <div className="mb-4">
@@ -529,10 +690,12 @@ function SummaryCard({
   label,
   value,
   accent,
+  helper,
 }: {
   label: string;
   value: string;
   accent: Accent;
+  helper?: string;
 }) {
   return (
     <div
@@ -542,7 +705,96 @@ function SummaryCard({
         {label}
       </p>
       <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+      {helper && <p className="mt-1 text-xs text-slate-500">{helper}</p>}
     </div>
+  );
+}
+
+/** Enlaces de una fila de opciones: elegir una es navegar, sin estado en el navegador. */
+function Opciones({
+  rotulo,
+  actual,
+  opciones,
+}: {
+  rotulo: string;
+  actual: string;
+  opciones: Array<{ clave: string; href: string; texto: string }>;
+}) {
+  return (
+    <nav aria-label={rotulo} className="flex flex-wrap gap-1">
+      {opciones.map((o) => (
+        <Link
+          key={o.clave}
+          href={o.href}
+          aria-current={o.clave === actual ? "page" : undefined}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+            o.clave === actual
+              ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+              : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+          }`}
+        >
+          {o.texto}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** Los doce meses, el más nuevo arriba. Los mismos números que baja el CSV. */
+function TablaDeHistorial({
+  filas,
+  locale,
+}: {
+  filas: FilaDeHistorial[];
+  locale: Locale;
+}) {
+  const t = getT(locale);
+  return (
+    <section data-testid="historial">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-slate-500 dark:text-slate-400">{t("metricas.historial.nota")}</p>
+        <a
+          href="/api/metricas/export.csv"
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+        >
+          {t("metricas.historial.csv")}
+        </a>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400">
+              {COLUMNAS_DEL_HISTORIAL.map((c, i) => (
+                <th key={c} className={`px-4 py-3 ${i === 0 ? "text-left" : "text-right"}`}>
+                  {t(c)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[...filas].reverse().map((f) => {
+              const sinIntervencion = porcentaje(f.sin_intervencion, f.reclamos);
+              return (
+                <tr
+                  key={f.mes}
+                  className="border-b border-slate-50 text-right tabular-nums text-slate-700 last:border-0 dark:border-slate-800 dark:text-slate-200"
+                >
+                  <td className="px-4 py-3 text-left font-medium">{mesDeCalendario(f.mes, locale)}</td>
+                  <td className="px-4 py-3">{f.reclamos}</td>
+                  <td className="px-4 py-3">{f.completados}</td>
+                  <td className="px-4 py-3">{sinIntervencion === null ? "—" : `${sinIntervencion}%`}</td>
+                  <td className="px-4 py-3">{formatDecimal(unDecimal(f.mediana_horas_listo))}</td>
+                  <td className="px-4 py-3">{formatDecimal(unDecimal(f.mediana_horas_cierre))}</td>
+                  <td className="px-4 py-3">{formatDecimal(unDecimal(f.mensajes_por_caso))}</td>
+                  <td className="px-4 py-3">{f.escalados}</td>
+                  <td className="px-4 py-3">{f.cerrados}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

@@ -22,8 +22,11 @@ import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
 import { avisarCierres, recordarPendientes } from "@/server/confirmations/recordatorios";
+import { revisarDesvios } from "@/server/desvios/revision-nocturna";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -98,6 +101,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     logger.error({ code: errorCode(err) }, "cron_reap_stuck.avisos_de_cierre_fallaron");
   }
 
+  // La revisión de calidad (B22) mira lo que quedó después de los barridos de
+  // arriba, así que va después. Es idempotente: lo que hoy no entra, entra
+  // mañana. Con un minuto de margen para la purga, y si falla la purga corre igual.
+  //
+  // Esta ruta la llama GitHub Actions cada quince minutos, pero la revisión es
+  // una por día: un cupo de 24 h la deja pasar sólo a la primera llamada del día.
+  let desviosNuevos = 0;
+  if (Date.now() < hasta - 60_000) {
+    try {
+      const cupo = await rateLimit(claveDeCupo("revision-de-desvios"), RATE_LIMIT_CONFIGS.REVISION_DE_DESVIOS);
+      if (cupo.allowed) desviosNuevos = (await revisarDesvios()).nuevos;
+    } catch (err) {
+      logger.error({ code: errorCode(err) }, "cron_reap_stuck.desvios_fallaron");
+    }
+  }
+
   // Third sweep, same reason: the rate limiter writes a row per key per window
   // and none of them mean anything once the window has passed.
   const { purgeExpiredRateLimits } = await import("@/lib/rate-limit/postgres");
@@ -111,6 +130,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     recordatorios_enviados: recordatorios.enviados,
     recordatorios_salteados: recordatorios.salteados,
     avisos_de_cierre: avisosDeCierre,
+    desvios_nuevos: desviosNuevos,
     rate_limit_rows_purged: purged,
   });
 }

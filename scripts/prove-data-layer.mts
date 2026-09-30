@@ -21,6 +21,11 @@ import { eq, sql } from "drizzle-orm";
 import { consultaDeActividad } from "@/server/metrics/kpis";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import type { PuntoSerie } from "@/core/metricas/serie";
+import {
+  ESTADOS_CERRADOS,
+  ESTADOS_COMPLETADO_SIN_PERSONA,
+  ESTADOS_ESCALADO,
+} from "@/core/case/fsm";
 import { contarCasos, buscarCaso } from "@/server/asistente/herramientas";
 
 neonConfig.webSocketConstructor = globalThis.WebSocket as never;
@@ -155,7 +160,8 @@ bien(`${casos.length} caso(s) y ${docs.length} documento(s) faltante(s), en una 
 // de zona (los casos de 21 a 24) o un filtro mal puesto no cuadran.
 console.log("\n▸ La serie de actividad de /metricas");
 type Cuenta = Omit<PuntoSerie, "clave">;
-type Crudo = { ms: number; is_claim: boolean | null; channel: string };
+type Crudo = { ms: number; is_claim: boolean | null; channel: string; status: string };
+const esDe = (grupo: ReadonlySet<string>, estado: string) => grupo.has(estado);
 const [porDia, crudos] = await enTenantVarias<[PuntoSerie[], Crudo[]]>(
   ctxDe(a),
   (db) => [
@@ -165,6 +171,7 @@ const [porDia, crudos] = await enTenantVarias<[PuntoSerie[], Crudo[]]>(
         ms: sql<number>`(extract(epoch from ${tables.cases.created_at}) * 1000)::float8`,
         is_claim: tables.cases.is_claim,
         channel: tables.cases.channel,
+        status: tables.cases.status,
       })
       .from(tables.cases),
   ]
@@ -182,7 +189,13 @@ for (const c of crudos) {
     mails: 0,
     reclamos_whatsapp: 0,
     reclamos_mail: 0,
+    escalados: 0,
+    listos: 0,
+    cerrados: 0,
   };
+  if (esDe(ESTADOS_ESCALADO, c.status)) n.escalados++;
+  if (esDe(ESTADOS_COMPLETADO_SIN_PERSONA, c.status)) n.listos++;
+  if (esDe(ESTADOS_CERRADOS, c.status)) n.cerrados++;
   if (c.is_claim === true) n.reclamos++;
   if (c.channel === "whatsapp") n.whatsapps++;
   if (c.channel === "email") n.mails++;
@@ -200,7 +213,10 @@ const descuadres = [...new Set([...enJs.keys(), ...enSql.keys()])].filter((dia) 
     s.whatsapps !== j.whatsapps ||
     s.mails !== j.mails ||
     s.reclamos_whatsapp !== j.reclamos_whatsapp ||
-    s.reclamos_mail !== j.reclamos_mail
+    s.reclamos_mail !== j.reclamos_mail ||
+    s.escalados !== j.escalados ||
+    s.listos !== j.listos ||
+    s.cerrados !== j.cerrados
   );
 });
 if (descuadres.length) {

@@ -28,6 +28,7 @@ vi.mock("@/lib/rate-limit/index", () => ({
     CONDICIONES_POR_POLIZA: { limit: 5, windowMs: 1 },
     LECTURA_PRESUPUESTO_POR_CASO: { limit: 5, windowMs: 2 },
     LECTURA_RECLAMO_POR_CASO: { limit: 3, windowMs: 3 },
+    ASISTENTE_CASO: { limit: 30, windowMs: 4 },
   },
 }));
 vi.mock("@/lib/observability/logger", () => ({ logger: { warn: m.warn, error: vi.fn(), info: vi.fn() } }));
@@ -78,6 +79,9 @@ describe("leerDocumento", () => {
 
     await leer({ ambito: "lectura-reclamo" });
     expect(m.rateLimit).toHaveBeenLastCalledWith(`lectura-reclamo:${TENANT}:caso-1`, { limit: 3, windowMs: 3 });
+
+    await leer({ ambito: "asistente-caso", partesDeClave: [TENANT, USUARIO, "caso-1"] });
+    expect(m.rateLimit).toHaveBeenLastCalledWith(`asistente-caso:${TENANT}:${USUARIO}:caso-1`, { limit: 30, windowMs: 4 });
   });
 
   it.each([

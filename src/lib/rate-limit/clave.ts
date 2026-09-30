@@ -24,7 +24,9 @@ export type AmbitoDeCupo =
   | "condiciones-poliza"
   | "subida-condiciones"
   | "lectura-presupuesto"
-  | "lectura-reclamo";
+  | "lectura-reclamo"
+  | "asistente-caso"
+  | "revision-de-desvios";
 
 export function claveDeCupo(ambito: AmbitoDeCupo, ...partes: string[]): string {
   return [ambito, ...partes.map((p) => p.trim().toLowerCase())].join(":");

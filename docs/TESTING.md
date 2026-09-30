@@ -316,6 +316,12 @@ más los contadores por estado, que son un agregado sin límite sobre toda la
 tabla del inquilino. El agregado es justamente lo que se degrada linealmente; el
 listado con LIMIT no.
 
+Desde B14 y B15 mide también **el tablero de métricas** (`getTenantKpis`), en dos
+escenarios: el mes en curso, y el peor caso, el año con el historial de doce
+meses y la serie por día. Leen la auditoría con un cruce lateral por caso, que se
+rompe si no se usa el índice parcial `idx_audit_log_trayecto`, y por eso están
+en la carga y no sólo en los tests de forma.
+
 Sobre esa mitad hay **cuatro formas**, y cada una contesta una pregunta
 distinta. Que sean cuatro y no una repetida con otro nombre es el punto: si las
 cuatro miran el mismo p95 con otra etiqueta, tres son decoración.
@@ -567,6 +573,29 @@ diario del tenant estaba agotado, el agente no contestó nada, y los cuatro
 ataques dieron verde: una respuesta vacía no filtra la patente ni el prompt, así
 que "no filtró nada" era literalmente cierto y completamente vacío. Un pen test
 que aprueba porque el sistema estaba apagado es peor que no correrlo.
+
+**El asistente sobre un caso (B12)** suma dos cosas a las fases de arriba.
+
+- En la pared entre tenants, sin llamar al modelo: preguntar por el caso de otro
+  inquilino vuelve `NOT_FOUND` antes de gastar nada, y el hilo guardado de un
+  caso ajeno vuelve vacío. Además, con un hilo real de TENANT_A como control,
+  quien lo escribió lo lee y otra persona del mismo inquilino no: el hilo es de
+  una persona, no del inquilino. Si TENANT_A no tiene ningún hilo, la sonda por
+  persona se salta y lo dice, porque sin control no encontrar nada no prueba nada.
+- Con `--agent`, tres ataques más: cerrar el bloque de la pregunta para pedir
+  datos de otra póliza, hacerle escribir un enlace para el asegurado, y que el
+  contenido del caso —que escribió el denunciante— mande más que la pregunta. Una
+  respuesta que la guarda de formato descartó cuenta como defensa; cualquier otro
+  motivo para no contestar es rojo.
+
+Sin modelo y sin base corren `tests/unit/server/asistente/pregunta-caso.test.ts`
+(lo que se le manda al modelo, la validación de lo que contesta, el hilo y el
+enmascarado del viewer) y `tests/integration/asistente-caso.test.ts`, que corre
+la ruta entera con el modelo simulado y una tabla en memoria que aplica lo que
+aplica la RLS de `asistente_turnos` (un renglón es de un inquilino Y de una
+persona). Esa tabla prueba que la ruta arma el contexto con la sesión y nunca
+con el pedido; que la política de la base rechaza al resto lo prueban
+`pnpm tenancy` y las sondas de arriba.
 
 ---
 
@@ -923,6 +952,16 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
   ráfaga de un minuto, que es la forma en que llegan las denuncias. Ocho horas
   seguidas de llamadas al modelo no es una prueba, es una factura, y esa
   pregunta se contesta mirándola.
+- **La revisión nocturna de calidad (B22)** contra datos reales. Son cinco
+  sentencias `INSERT … SELECT … ON CONFLICT DO NOTHING` que cuelgan del cron de
+  `reap-stuck`. Sus tests renderizan el SQL con el dialecto de verdad y comprueban
+  su forma —qué tabla llena, qué deja afuera, con qué plazos—, pero no hay
+  Postgres local que las ejecute. La primera vez que corren contra datos reales es
+  el primer cron después de aplicar la migración 0043, y ahí conviene mirar
+  `desvios_nuevos` en la respuesta del cron y la pantalla `/desvios`.
+- **El tablero de métricas contra el volumen real.** Los escenarios de `pnpm load`
+  existen, pero no se corrieron contra una base con meses de auditoría, así que
+  el p95 del tablero del año sigue sin medirse.
 - **La búsqueda por texto del tablero**, que recorre la tabla entera: `ilike
   '%texto%'` no puede usar un índice común. Con los casos de hoy tarda 100ms y
   no vale la pena arreglarlo — un índice trigram cuesta escritura en cada

@@ -20,6 +20,7 @@ import type { RoleContext } from "@/lib/auth/require-role";
 import { checkBudget, registrarConsumoDelModelo } from "@/server/ai/budget";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
+import type { MotivoSinLeer } from "@/core/ai/sin-leer";
 import { resumenValido } from "@/core/ai/resumen-seguro";
 import { IntencionSchema, textoDelConteo, type Intencion } from "@/core/asistente/intencion";
 import { promptIntencion, PROMPT_RESUMEN } from "@/server/asistente/prompts";
@@ -38,9 +39,11 @@ import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
 export interface RespuestaDelAsistente {
   /** Texto plano, sin HTML ni markdown. <= 1500 caracteres. */
   texto: string;
-  herramienta: "contar_casos" | "buscar_caso" | "ninguna";
+  herramienta: "contar_casos" | "buscar_caso" | "pregunta_caso" | "ninguna";
   /** <= 5. */
   casos: CasoEncontrado[];
+  /** Sólo en `pregunta_caso`: por qué no hay respuesta. `texto` trae la frase que corresponde. */
+  sinLeer?: MotivoSinLeer;
 }
 
 const TEXTO_AYUDA =

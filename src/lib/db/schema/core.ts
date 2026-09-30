@@ -350,6 +350,49 @@ export const casePlanPasos = pgTable(
   (t) => [primaryKey({ columns: [t.case_id, t.clave] })],
 );
 
+/**
+ * Un mensaje de la conversación de una persona del equipo con el asistente
+ * sobre un caso (0043). La política de lectura pide inquilino Y usuario: sólo la
+ * lee quien la escribió. Sin UPDATE ni DELETE para `claimmix_app`.
+ */
+export const asistenteTurnos = pgTable("asistente_turnos", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  tenant_id: uuid("tenant_id").notNull(),
+  user_id: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  case_id: uuid("case_id")
+    .notNull()
+    .references(() => cases.id, { onDelete: "cascade" }),
+  rol: text("rol", { enum: ["user", "assistant"] }).notNull(),
+  texto: text("texto").notNull(),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+});
+
+/**
+ * Lo que la revisión nocturna encontró fuera de lo esperado (0043). La clave
+ * primaria (caso, regla, ancla) es la idempotencia. Lo escribe el barrido con el
+ * rol dueño; `claimmix_app` sólo lee.
+ */
+export const caseDesvios = pgTable(
+  "case_desvios",
+  {
+    case_id: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    tenant_id: uuid("tenant_id").notNull(),
+    regla: text("regla").notNull(),
+    ancla: timestamp("ancla", { withTimezone: true, mode: "string" }).notNull(),
+    dato: text("dato"),
+    detectado_en: timestamp("detectado_en", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.case_id, t.regla, t.ancla] })],
+);
+
 export const outboundMessages = pgTable("outbound_messages", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   case_id: uuid("case_id")

@@ -37,6 +37,14 @@ export const CUSTOMER_PII_ROLES: UserRole[] = ["owner", "admin", "specialist"];
 /** Quién entrega un caso al Core. La ruta y el botón leen esta lista: si difieren, el botón da 403. */
 export const CORE_SYNC_ROLES: UserRole[] = ["owner", "admin", "specialist"];
 
+/**
+ * Quién ve los desvíos de la revisión nocturna (B22): quien maneja al equipo.
+ * No hay rol `supervisor`; owner, admin y specialist son los que gestionan.
+ * Constante propia por lo mismo que arriba: leer el padrón y revisar la
+ * calidad del trabajo cambian por razones distintas.
+ */
+export const REVISION_ROLES: UserRole[] = ["owner", "admin", "specialist"];
+
 /** Roles with admin-level configuration access. */
 export const ADMIN_ROLES: UserRole[] = ["owner", "admin"];
 

@@ -153,6 +153,7 @@ vi.mock("@/server/ai/hydrate-fields", () => ({
 vi.mock("@/lib/email/claim-parser", () => ({
   mergeExtractedFields: vi.fn().mockImplementation((a: unknown[], _b: unknown[]) => a),
   parseEmailClaimFields: vi.fn().mockReturnValue([]),
+  anclarPolizaAlTexto: vi.fn().mockImplementation((claim: unknown) => claim),
   sanearContacto: vi.fn().mockImplementation((fields: unknown[]) => fields),
 }));
 

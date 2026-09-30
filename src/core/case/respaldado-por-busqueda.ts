@@ -22,7 +22,7 @@
  */
 
 /** Sólo letras y números, en minúscula. */
-function soloAlfanumerico(texto: string): string {
+export function soloAlfanumerico(texto: string): string {
   return texto.toLowerCase().replace(/[^a-z0-9áéíóúüñ]/g, "");
 }
 

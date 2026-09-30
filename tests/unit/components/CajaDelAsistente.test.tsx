@@ -1,7 +1,9 @@
 /**
  * CajaDelAsistente — chips de sugerencia, historial acotado a 5 y el aviso de
- * resumen con IA. `AsistenteFlotante` se prueba aparte: acá se prueba la caja
- * sola, como vive en `/asistente`.
+ * resumen con IA, y el modo de un caso (B12): pregunta con `caseId`, hilo
+ * guardado que vuelve al abrir el caso y un historial por pantalla.
+ * `AsistenteFlotante` se prueba aparte: acá se prueba la caja sola, como vive
+ * en `/asistente`.
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,6 +11,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createRef } from "react";
 import { CajaDelAsistente } from "../../../src/app/(app)/asistente/_components/CajaDelAsistente";
 
+const CASO = "00000000-0000-0000-0000-0000a1a1a1a1";
 let pathname = "/asistente";
 vi.mock("next/navigation", () => ({
   usePathname: () => pathname,
@@ -87,9 +90,9 @@ describe("CajaDelAsistente", () => {
     expect(screen.queryByText("Resumí este caso")).toBeNull();
   });
 
-  it("en /casos/[id] ofrece «Resumí este caso» y pregunta por su número", async () => {
-    pathname = "/casos/00000000-0000-0000-0000-0000a1a1a1a1";
-    const mockFetch = mockFetchOk({ texto: "Resumen.", herramienta: "buscar_caso", casos: [] });
+  it("en /casos/[id] ofrece «Resumí este caso» y pregunta por su número, con el caso", async () => {
+    pathname = `/casos/${CASO}`;
+    const mockFetch = mockFetchOk({ texto: "Resumen.", herramienta: "pregunta_caso", casos: [] });
     vi.stubGlobal("fetch", mockFetch);
     const user = userEvent.setup();
 
@@ -100,10 +103,153 @@ describe("CajaDelAsistente", () => {
       expect(mockFetch).toHaveBeenCalledWith(
         "/api/asistente",
         expect.objectContaining({
-          body: JSON.stringify({ pregunta: "¿Qué pasó con el caso SIN-A1A1-A1A1?" }),
+          body: JSON.stringify({ pregunta: "¿Qué pasó con el caso SIN-A1A1-A1A1?", caseId: CASO }),
         })
       );
     });
+  });
+
+  it("en un caso, las preguntas del textarea también van con el caseId", async () => {
+    pathname = `/casos/${CASO}`;
+    const mockFetch = mockFetchOk({ texto: "Falta el DNI.", herramienta: "pregunta_caso", casos: [] });
+    vi.stubGlobal("fetch", mockFetch);
+    const user = userEvent.setup();
+
+    render(<CajaDelAsistente />);
+    await user.type(screen.getByLabelText("Tu pregunta"), "¿Qué falta?");
+    await user.click(screen.getByTestId("asistente-submit"));
+
+    expect(await screen.findByText("Falta el DNI.")).toBeInTheDocument();
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/asistente",
+      expect.objectContaining({ body: JSON.stringify({ pregunta: "¿Qué falta?", caseId: CASO }) })
+    );
+  });
+
+  it("en un caso no ofrece las preguntas generales: mandarlas con el caseId las contestaría mal", () => {
+    pathname = `/casos/${CASO}`;
+    render(<CajaDelAsistente />);
+
+    expect(screen.queryByText("¿Cuántos casos hubo este mes?")).toBeNull();
+    expect(screen.queryByText("Buscá el caso de…")).toBeNull();
+    expect(screen.getByPlaceholderText(/Preguntá sobre este caso/)).toBeInTheDocument();
+  });
+
+  it("al abrir el caso pide el hilo guardado y lo muestra", async () => {
+    pathname = `/casos/${CASO}`;
+    const mockFetch = mockFetchOk({
+      turnos: [
+        { rol: "user", texto: "¿Qué falta?" },
+        { rol: "assistant", texto: "Falta el DNI, según el denunciante." },
+      ],
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    render(<CajaDelAsistente />);
+
+    expect(await screen.findByText("Falta el DNI, según el denunciante.")).toBeInTheDocument();
+    expect(screen.getByText("¿Qué falta?")).toBeInTheDocument();
+    expect(mockFetch).toHaveBeenCalledWith(`/api/asistente?caseId=${CASO}`);
+  });
+
+  it("pide el hilo una sola vez por caso, aunque la caja se vuelva a dibujar", async () => {
+    pathname = `/casos/${CASO}`;
+    const mockFetch = mockFetchOk({ turnos: [] });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const { rerender } = render(<CajaDelAsistente />);
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    rerender(<CajaDelAsistente />);
+    rerender(<CajaDelAsistente />);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("si el hilo no se puede pedir, la caja abre igual y se puede preguntar", async () => {
+    pathname = `/casos/${CASO}`;
+    const mockFetch = vi.fn().mockRejectedValueOnce(new Error("sin red"));
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ texto: "Respuesta.", herramienta: "pregunta_caso", casos: [] }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+    const user = userEvent.setup();
+
+    render(<CajaDelAsistente />);
+    await user.click(screen.getByText("Resumí este caso"));
+
+    expect(await screen.findByText("Respuesta.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("un turno suelto o mal formado del hilo no se muestra", async () => {
+    pathname = `/casos/${CASO}`;
+    vi.stubGlobal(
+      "fetch",
+      mockFetchOk({
+        turnos: [
+          { rol: "assistant", texto: "Suelto." },
+          { rol: "user", texto: "Otra." },
+        ],
+      })
+    );
+
+    render(<CajaDelAsistente />);
+    await waitFor(() => expect(screen.getByTestId("asistente-chips")).toBeInTheDocument());
+
+    expect(screen.queryByText("Suelto.")).toBeNull();
+  });
+
+  it("una respuesta sin leer muestra la frase del diccionario y no el aviso de IA", async () => {
+    pathname = `/casos/${CASO}`;
+    vi.stubGlobal(
+      "fetch",
+      mockFetchOk({ texto: "texto del servidor", herramienta: "pregunta_caso", casos: [], sinLeer: "cupo" })
+    );
+    const user = userEvent.setup();
+
+    render(<CajaDelAsistente />);
+    await user.click(screen.getByText("Resumí este caso"));
+
+    expect(await screen.findByText("Sin leer: se llegó al tope de lecturas por hoy.")).toBeInTheDocument();
+    expect(screen.queryByText("texto del servidor")).toBeNull();
+    expect(
+      screen.queryByText("Respuesta generada con IA a partir del caso. Verificala en el caso antes de actuar.")
+    ).toBeNull();
+  });
+
+  it("una respuesta sobre un caso avisa que es de IA", async () => {
+    pathname = `/casos/${CASO}`;
+    vi.stubGlobal("fetch", mockFetchOk({ texto: "Falta el DNI.", herramienta: "pregunta_caso", casos: [] }));
+    const user = userEvent.setup();
+
+    render(<CajaDelAsistente />);
+    await user.click(screen.getByText("Resumí este caso"));
+
+    expect(
+      await screen.findByText("Respuesta generada con IA a partir del caso. Verificala en el caso antes de actuar.")
+    ).toBeInTheDocument();
+  });
+
+  it("cada pantalla lleva su historial: lo hablado en un caso no aparece en otro", async () => {
+    pathname = `/casos/${CASO}`;
+    vi.stubGlobal("fetch", mockFetchOk({ texto: "Del primer caso.", herramienta: "pregunta_caso", casos: [] }));
+    const user = userEvent.setup();
+
+    const { rerender } = render(<CajaDelAsistente />);
+    await user.click(screen.getByText("Resumí este caso"));
+    await screen.findByText("Del primer caso.");
+
+    pathname = "/casos/00000000-0000-0000-0000-0000b2b2b2b2";
+    vi.stubGlobal("fetch", mockFetchOk({ turnos: [] }));
+    rerender(<CajaDelAsistente />);
+
+    expect(screen.queryByText("Del primer caso.")).toBeNull();
+
+    pathname = `/casos/${CASO}`;
+    rerender(<CajaDelAsistente />);
+    expect(screen.getByText("Del primer caso.")).toBeInTheDocument();
   });
 
   it("con un solo caso encontrado, avisa que el resumen es de IA", async () => {

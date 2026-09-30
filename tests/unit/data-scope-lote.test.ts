@@ -174,6 +174,62 @@ describe("varias consultas en un viaje", () => {
   });
 });
 
+describe("varias consultas con el usuario puesto", () => {
+  const USUARIO = { ...CTX, userId: "cccccccc-0000-0000-0000-00000000000c" };
+
+  it("pone inquilino y usuario primero, en ese orden, y después las consultas", async () => {
+    const { enTenantDeUsuarioVarias } = await import("@/data/scope");
+    respuesta = [{}, {}, ["turnos"], ["caso"]];
+
+    await enTenantDeUsuarioVarias(USUARIO, (db) => [db.execute("turnos") as never, db.execute("caso") as never]);
+
+    const [lote] = lotes;
+    expect(lote).toHaveLength(4);
+    expect(textoDe(lote[0])).toContain("claimmix.tenant_id");
+    expect(textoDe(lote[0])).toContain(USUARIO.tenantId);
+    expect(textoDe(lote[1])).toContain("claimmix.user_id");
+    expect(textoDe(lote[1])).toContain(USUARIO.userId);
+    expect((lote[2] as { q: string }).q).toBe("turnos");
+    expect((lote[3] as { q: string }).q).toBe("caso");
+  });
+
+  it("descarta los dos contextos y devuelve el resto alineado", async () => {
+    const { enTenantDeUsuarioVarias } = await import("@/data/scope");
+    respuesta = [{ set_config: "t" }, { set_config: "u" }, ["turnos"], ["caso"]];
+
+    const [turnos, caso] = await enTenantDeUsuarioVarias<[string[], string[]]>(USUARIO, (db) => [
+      db.execute("turnos") as never,
+      db.execute("caso") as never,
+    ]);
+
+    expect(turnos).toEqual(["turnos"]);
+    expect(caso).toEqual(["caso"]);
+  });
+
+  it("no arrastra el usuario de la llamada anterior", async () => {
+    const { enTenantDeUsuarioVarias } = await import("@/data/scope");
+    respuesta = [{}, {}, []];
+    const otro = { ...OTRO, userId: "dddddddd-0000-0000-0000-00000000000d" };
+
+    await enTenantDeUsuarioVarias(USUARIO, (db) => [db.execute("a") as never]);
+    await enTenantDeUsuarioVarias(otro, (db) => [db.execute("b") as never]);
+
+    expect(textoDe(lotes[1][1])).toContain(otro.userId);
+    expect(textoDe(lotes[1][1])).not.toContain(USUARIO.userId);
+  });
+
+  it("revisa TODAS las consultas: una promesa no es una consulta", async () => {
+    const { enTenantDeUsuarioVarias } = await import("@/data/scope");
+
+    await expect(
+      enTenantDeUsuarioVarias(USUARIO, (db) => [
+        db.execute("buena") as never,
+        Promise.resolve(db.execute("mala")).catch(() => []) as never,
+      ])
+    ).rejects.toThrow(/una promesa, no una consulta/);
+  });
+});
+
 describe("el cliente", () => {
   it("se construye una sola vez mientras la cadena no cambie", async () => {
     const { enTenant } = await import("@/data/scope");

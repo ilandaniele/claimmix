@@ -67,6 +67,14 @@ vi.mock("@/server/cases/gap-analyzer", () => ({
   }),
 }));
 
+// El estado, su auditoría y lo del equipo salen en un lote que arma la base:
+// acá se mira qué se le pidió, no el SQL.
+vi.mock("@/server/cases/auditoria-si-quedo", () => ({ auditoriaSiQuedo: vi.fn().mockResolvedValue([]) }));
+vi.mock("@/server/cases/efectos-de-transicion", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/cases/efectos-de-transicion")>()),
+  efectosDeTransicion: vi.fn().mockReturnValue([]),
+}));
+
 // Mock rate-limit to always allow.
 vi.mock("@/lib/rate-limit/index", async () => {
   const actual = await vi.importActual<typeof import("@/lib/rate-limit/index")>(
@@ -90,6 +98,7 @@ import { updateMemoryFromConfirmation } from "@/server/memory/update";
 import { writeAuditLog } from "@/lib/audit/log";
 import { PATCH } from "@/app/api/cases/[id]/confirm-field/route";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
+import { auditoriaSiQuedo } from "@/server/cases/auditoria-si-quedo";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -150,7 +159,10 @@ function selectChain(rows: unknown[]) {
 function updateChain() {
   const chain: any = {
     set: vi.fn().mockReturnThis(),
-    where: vi.fn().mockResolvedValue([]),
+    // El UPDATE del estado pide `returning`: con una fila es «el caso quedó ahí».
+    where: vi
+      .fn()
+      .mockImplementation(() => Object.assign(Promise.resolve([]), { returning: vi.fn().mockResolvedValue([{ id: CASE_ID }]) })),
     then: (resolve: (v: unknown) => void) => resolve([]),
   };
   return chain;
@@ -748,12 +760,16 @@ describe("PATCH /api/cases/:id/confirm-field — de dónde vino la acción", () 
       makeContext()
     );
 
-    const cambioDeEstado = vi
-      .mocked(writeAuditLog)
-      .mock.calls.map((c) => c[0])
-      .find((e) => e.event_type === "case.status_changed");
-    expect(cambioDeEstado).toBeDefined();
-    expect(cambioDeEstado!.ip).toBe("203.0.113.11");
+    // Va en el mismo lote que el UPDATE del estado, no por `writeAuditLog`.
+    expect(auditoriaSiQuedo).toHaveBeenCalledTimes(1);
+    const [, cambioDeEstado, estado] = vi.mocked(auditoriaSiQuedo).mock.calls[0];
+    expect(cambioDeEstado).toMatchObject({
+      eventType: "case.status_changed",
+      ip: "203.0.113.11",
+      ua: "Chrome/140",
+      payload: { from: "confirmacion_pendiente", to: "listo_para_core", trigger: "field_confirmation" },
+    });
+    expect(estado).toBe("listo_para_core");
   });
 
   it("sin cabecera de origen queda null, no una cadena vacía", async () => {

@@ -169,6 +169,9 @@ export async function GET(request: NextRequest) {
     // por fraude aunque la pantalla sí lo estuviera.
     fraude: searchParams.getAll("fraude"),
     channel: searchParams.getAll("channel"),
+    // Sólo filtran: el CSV no lleva columnas de plazo ni de puntaje.
+    vencimiento: searchParams.getAll("vencimiento"),
+    complejidad: searchParams.getAll("complejidad"),
     is_claim: searchParams.get("is_claim") ?? undefined,
     para_responder: searchParams.get("para_responder") ?? undefined,
     customer_id: searchParams.get("customer_id") ?? undefined,
@@ -203,6 +206,8 @@ export async function GET(request: NextRequest) {
       severity: parsed.data.severity,
       fraude: parsed.data.fraude,
       channel: parsed.data.channel,
+      vencimiento: parsed.data.vencimiento,
+      complejidad: parsed.data.complejidad,
       is_claim: parsed.data.is_claim,
       para_responder: parsed.data.para_responder,
       customer_id: parsed.data.customer_id,

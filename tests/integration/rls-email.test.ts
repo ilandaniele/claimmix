@@ -268,6 +268,7 @@ describe("RLS schema-level validation", () => {
       "claim_field_confirmations",
       "claim_memory",
       "known_claim_patterns",
+      "case_plan_pasos",
     ];
 
     // All of these tables should have tenant_id-based RLS.

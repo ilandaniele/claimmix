@@ -273,6 +273,26 @@ export const AuditEvent = {
   AMOUNT_RANGES_CHANGED: "tenant.amount_ranges_changed",
 
   /**
+   * CASE_PLAN_CREATED: el caso recibió su plan de trabajo (B11). Payload:
+   * { pasos, origen } — nunca los títulos.
+   */
+  CASE_PLAN_CREATED: "case.plan_created",
+
+  /**
+   * CASE_PLAN_STEP: un paso del plan se tildó o se destildó (B11). Payload:
+   * { clave, hecho, auto: true } si lo tildó el paso de estado, o
+   * { clave, hecho, origen: "manual" } si lo hizo una persona (el actor va aparte).
+   */
+  CASE_PLAN_STEP: "case.plan_step",
+
+  /**
+   * TENANT_WORK_SETTINGS_UPDATED: un admin cambió cómo trabaja el equipo
+   * (reglas de asignación, plazos, plan o pesos del puntaje) desde /agente.
+   * Payload: { campo, antes, despues }: las configuraciones, no datos de casos.
+   */
+  TENANT_WORK_SETTINGS_UPDATED: "tenant.work_settings_updated",
+
+  /**
    * SPECIALIST_ALERT_RECIPIENTS_CHANGED: an admin edited the tenant's list of
    * addresses for urgent-case alerts, from /configuracion.
    * Payload: { count }. Never the addresses themselves.

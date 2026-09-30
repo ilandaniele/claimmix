@@ -898,6 +898,66 @@ describe("composeReply — lo que acaba de escribir no vuelve como «¿…, corr
 });
 
 /*
+ * Ensayo `silencio`, 30/09: a «choqué contra un poste en Alem al 500» se le
+ * contestó «Entendemos que fue en CABA.» y, en la misma respuesta, se le pidió
+ * la provincia. La calle no dice la provincia: el redactor la inventó, y el
+ * extractor —que tiene la regla— no había escrito ninguna (`knownValues` vacío).
+ */
+describe("composeReply — no afirma la provincia que está pidiendo", () => {
+  const ALEM = "Hola, choqué contra un poste en Alem al 500. Soy Ana Ruiz.";
+  const PIDE = "¿Nos decís en qué provincia ocurrió?";
+  const pideProvincia = (over: Partial<Parameters<typeof composeReply>[0]> = {}) =>
+    base({ fields: ["provincia_siniestro"], lastMessage: ALEM, claimantName: "Ana Ruiz", ...over });
+
+  it.each(["Entendemos que fue en CABA.", "Fue en la Ciudad de Buenos Aires, ¿no?", "Entendemos que fue en Córdoba."])(
+    "rechaza «%s» y el reintento dice por qué",
+    async (afirma) => {
+      replies(`Recibimos tu denuncia del choque. ${afirma} ${PIDE}`);
+
+      expect(await composeReply(pideProvincia())).toBe(FALLBACK);
+      expect(mockCall.mock.calls[1][0] as string).toContain("una calle no la dice");
+    }
+  );
+
+  it("un pedido que no supone ninguna pasa", async () => {
+    replies(`Recibimos tu denuncia del choque contra el poste en Alem al 500. ${PIDE}`);
+
+    expect(await composeReply(pideProvincia())).not.toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    // La dijo la persona o la tenemos: no es inventarla.
+    ["lo dijo en el mensaje", { lastMessage: "Choqué en Córdoba, en Alem al 500." }, "Entendemos que fue en Córdoba. " + PIDE],
+    ["la tenemos como valor", { knownValues: { provincia_siniestro: "Santa Fe" } }, "¿Fue en Santa Fe? Si no, decinos en qué provincia ocurrió."],
+    // El apellido en el saludo no es una provincia.
+    ["es el apellido", { claimantName: "Ana Mendoza" }, `¡Hola, Ana Mendoza! ${PIDE}`],
+  ] as Array<[string, Partial<Parameters<typeof composeReply>[0]>, string]>)(
+    "deja pasar la provincia que %s",
+    async (_caso, over, mensaje) => {
+      replies(mensaje);
+
+      expect(await composeReply(pideProvincia(over))).not.toBe(FALLBACK);
+      expect(mockCall).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("si no pide la provincia, no la mira", async () => {
+    replies("Ya vimos que fue en CABA. Para seguir necesitamos las fotos de los daños.");
+
+    expect(await composeReply(pideProvincia({ fields: ["fotos_danos"] }))).not.toBe(FALLBACK);
+  });
+
+  it("el brief lo prohíbe", async () => {
+    replies(`Recibimos tu denuncia del choque. ${PIDE}`);
+
+    await composeReply(pideProvincia());
+
+    expect(mockCall.mock.calls[0][0] as string).toContain("Una calle no dice la provincia");
+  });
+});
+
+/*
  * incendio-grave, 23/09: la derivación a quien tenía a su señora internada no
  * decía nada de eso. Con `heridos`, el redactor abre con la frase de cuidado y
  * no puede sacarla, como no puede sacar los valores de un conflicto.

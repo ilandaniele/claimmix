@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { cruzarDocumentos, fusionarIndicadores, type IndicioDerivado } from "@/core/case/contradicciones";
 import { enUS } from "@/lib/i18n/en-US";
-import { puedeSerDe } from "@/core/geo/provincias";
+import { provinciasNombradas, puedeSerDe } from "@/core/geo/provincias";
 import type { DocumentoLeido } from "@/lib/schemas/extracted-claim";
 
 const AHORA = new Date("2026-09-20T15:00:00Z");
@@ -138,6 +138,21 @@ describe("puedeSerDe", () => {
   it("una provincia que no reconoce no marca", () => {
     expect(puedeSerDe(-32.89, -68.84, "Narnia")).toBe(true);
     expect(puedeSerDe(-32.89, -68.84, "Córdoba")).toBe(false);
+  });
+});
+
+describe("provinciasNombradas", () => {
+  it("las encuentra escritas como sea, con o sin acento y en cualquier caja", () => {
+    expect(provinciasNombradas("Entendemos que fue en CABA.")).toEqual(["caba"]);
+    expect(provinciasNombradas("en la provincia de Córdoba, cerca de Salta")).toEqual(["cordoba", "salta"]);
+  });
+
+  it("«Ciudad de Buenos Aires» nombra también a «buenos aires»", () => {
+    expect(provinciasNombradas("Ciudad de Buenos Aires")).toEqual(["buenos aires", "ciudad de buenos aires"]);
+  });
+
+  it("una palabra suelta que la contiene no cuenta", () => {
+    expect(provinciasNombradas("Acabamos de recibir tu denuncia en Alem al 500")).toEqual([]);
   });
 });
 

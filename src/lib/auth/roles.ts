@@ -56,3 +56,25 @@ export function puedeCambiarEstado(actor: { role: string; id: string }, assigned
   return (CASE_EDITOR_ROLES as readonly string[]).includes(actor.role)
     && (actor.role !== "analyst" || assignedTo === null || assignedTo === actor.id);
 }
+
+/** Quién le pasa un caso a otra persona: todo el que edita menos el analista, que sólo maneja los suyos. */
+export function asignaATerceros(role: string): boolean {
+  return (CASE_EDITOR_ROLES as readonly string[]).includes(role) && role !== "analyst";
+}
+
+/**
+ * Quién puede pasar un caso de `actual` a `destino` (null = sin asignar).
+ *
+ * Owner, admin y specialist mueven cualquier caso a cualquiera. Un analista sólo
+ * toma un caso libre, se queda con el suyo o lo suelta: no se lo pasa a otro ni
+ * le toca uno ajeno. Que el destino exista, sea del mismo inquilino y edite lo
+ * decide la base dentro del UPDATE (`guardaDeAsignacion`), no esta función.
+ */
+export function puedeAsignar(
+  actor: { role: string; id: string },
+  actual: string | null,
+  destino: string | null
+): boolean {
+  if (asignaATerceros(actor.role)) return true;
+  return actor.role === "analyst" && (actual === null || actual === actor.id) && (destino === null || destino === actor.id);
+}

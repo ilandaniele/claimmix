@@ -22,7 +22,16 @@ import { buildCaseFilters, contarPorEstado, desdeDePeriodo, listCases } from "@/
 import { OPCIONES_DE_ESCENARIO } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
 import { PER_PAGE_OPTIONS } from "./per-page";
-import { CaseStatusSchema, ChannelSchema, ClaimTypeSchema, FraudRiskLevelSchema, PeriodoSchema, SeveritySchema } from "@/lib/schemas/cases";
+import {
+  CaseStatusSchema,
+  ChannelSchema,
+  ClaimTypeSchema,
+  ComplejidadFiltroSchema,
+  FraudRiskLevelSchema,
+  PeriodoSchema,
+  SeveritySchema,
+  VencimientoFiltroSchema,
+} from "@/lib/schemas/cases";
 import type { CaseStatus, ClaimType, FraudRiskLevel, Periodo, Severity } from "@/lib/schemas/cases";
 import { Card } from "../_components/ui";
 import { getT } from "@/lib/i18n";
@@ -45,6 +54,8 @@ export const VALID_SEVERITIES: Severity[] = SeveritySchema.options;
 export const VALID_FRAUDE: FraudRiskLevel[] = FraudRiskLevelSchema.options;
 export const VALID_CHANNELS = ChannelSchema.options;
 const VALID_PERIODOS: Periodo[] = PeriodoSchema.options;
+export const VALID_VENCIMIENTOS = VencimientoFiltroSchema.options;
+export const VALID_COMPLEJIDADES = ComplejidadFiltroSchema.options;
 
 /**
  * Normaliza un parámetro multi-valor (`status`, `type`, `severity`,
@@ -135,6 +146,10 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
 
   const fraude = valores(fraudeParam, VALID_FRAUDE);
 
+  const vencimiento = valores(params["vencimiento"], VALID_VENCIMIENTOS);
+
+  const complejidad = valores(params["complejidad"], VALID_COMPLEJIDADES);
+
   const is_claim =
     isClaimParam === "true" ? true : isClaimParam === "false" ? false : undefined;
 
@@ -190,6 +205,8 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
       channel,
       severity,
       fraude,
+      vencimiento,
+      complejidad,
       is_claim,
       para_responder,
       cola,

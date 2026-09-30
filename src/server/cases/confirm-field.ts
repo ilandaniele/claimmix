@@ -30,7 +30,8 @@ import "server-only";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { isValidTransition } from "@/core/case/fsm";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { camposDelPuntaje, clavesPonderadas, puntajeDelCaso } from "@/core/case/puntaje-complejidad";
+import { enTenant, enTenantVarias, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { redactObject } from "@/lib/audit/redact";
 import { firstRow } from "@/lib/db/helpers";
@@ -42,8 +43,16 @@ import {
 } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
-import type { UserRow } from "@/lib/db/types";
+import type { CaseRow, UserRow } from "@/lib/db/types";
 import type { CaseStatus, ConfirmField } from "@/lib/schemas/cases";
+import { auditoriaSiQuedo } from "@/server/cases/auditoria-si-quedo";
+import {
+  ajusteDeVencimiento,
+  columnasDeTrabajo,
+  criteriosDeTrabajo,
+  efectosDeTransicion,
+  type ConfiguracionGuardada,
+} from "@/server/cases/efectos-de-transicion";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { updateMemoryFromConfirmation } from "@/server/memory/update";
 import { mensajesEntrantes } from "@/server/cases/inbound-messages";
@@ -52,6 +61,13 @@ import { logger } from "@/lib/observability/logger";
 
 /** Quién resuelve: el id para la auditoría, el rol para saber qué le toca. */
 export type ActorDeConfirmacion = Pick<UserRow, "id" | "role">;
+
+/** El caso tal como lo lee la confirmación: lo suyo y lo que el equipo configuró. */
+type CasoLeido = Pick<
+  CaseRow,
+  "id" | "status" | "assigned_to" | "claim_type" | "severity" | "fraud_risk_level" | "injury_severity" | "monto_estimado"
+> &
+  ConfiguracionGuardada & { pesos_puntaje: unknown };
 
 export interface FieldConfirmationResult {
   case_id: string;
@@ -105,12 +121,22 @@ export async function resolveFieldConfirmation(
   }
 
   // ── 1. El caso ────────────────────────────────────────────────────────────
-  let caseRow: { id: string; status: string; assigned_to: string | null } | null;
+  let caseRow: CasoLeido | null;
   try {
     caseRow = firstRow(
       await enTenant(ctx, (db) =>
         db
-          .select({ id: cases.id, status: cases.status, assigned_to: cases.assigned_to })
+          .select({
+            id: cases.id,
+            status: cases.status,
+            assigned_to: cases.assigned_to,
+            claim_type: cases.claim_type,
+            severity: cases.severity,
+            fraud_risk_level: cases.fraud_risk_level,
+            injury_severity: cases.injury_severity,
+            monto_estimado: cases.monto_estimado,
+            ...columnasDeTrabajo,
+          })
           .from(cases)
           .where(eq(cases.id, caseId))
           .limit(1)
@@ -141,6 +167,7 @@ export async function resolveFieldConfirmation(
   }
 
   const currentStatus = caseRow.status as CaseStatus;
+  const caso = caseRow;
   /*
    * El inquilino sale de la sesión, no de la fila.
    *
@@ -214,6 +241,7 @@ export async function resolveFieldConfirmation(
     currentStatus,
     ip,
     ua,
+    caso,
   });
 }
 
@@ -240,9 +268,9 @@ interface ContextoAccion {
  * vuelva a marcar.
  */
 async function confirmar(
-  a: ContextoAccion & { confirmedValue: string; action: "confirm" | "correct" }
+  a: ContextoAccion & { confirmedValue: string; action: "confirm" | "correct"; caso: CasoLeido }
 ): Promise<FieldConfirmationResult> {
-  const { ctx, caseId, fieldKey, confirmedValue, action, confirmationRow, actorId, now, tenantId, currentStatus, ip, ua } = a;
+  const { ctx, caseId, fieldKey, confirmedValue, action, confirmationRow, actorId, now, tenantId, ip, ua, caso } = a;
 
   if (confirmationRow) {
     try {
@@ -340,7 +368,7 @@ async function confirmar(
     ua,
   });
 
-  const newStatus = await reEvaluateStatus(ctx, caseId, currentStatus, actorId, ip, ua);
+  const newStatus = await reEvaluateStatus(ctx, caso, fieldKey, actorId, ip, ua);
 
   return {
     case_id: caseId,
@@ -440,17 +468,27 @@ async function getSenderEmail(
  * distinto, se transiciona — pero sólo si la máquina de estados lo permite. Sin
  * ese chequeo, una confirmación tardía podría mover un caso ya cerrado.
  *
+ * El estado, su auditoría y lo que el equipo espera de ese estado (vencimiento,
+ * asignación, plan) van en un solo lote. Si el lote falla —una columna que
+ * falta, un efecto roto— el estado se aplica igual con el UPDATE de siempre: no
+ * poder armar lo del equipo no es motivo para dejar el caso donde estaba.
+ *
+ * Confirmar un campo que los pesos del puntaje cuentan lo recalcula, con o sin
+ * cambio de estado.
+ *
  * Cualquier error devuelve el estado actual: no poder recalcular el estado no
  * es motivo para deshacer una confirmación que ya se escribió.
  */
 async function reEvaluateStatus(
   ctx: TenantContext,
-  caseId: string,
-  currentStatus: CaseStatus,
+  caso: CasoLeido,
+  fieldKey: string,
   actorId: string,
   ip: string | null,
   ua: string | null
 ): Promise<string> {
+  const caseId = caso.id;
+  const currentStatus = caso.status as CaseStatus;
   try {
     const fields = await enTenant(ctx, (db) =>
       db
@@ -474,37 +512,111 @@ async function reEvaluateStatus(
 
     const gapResult = await analyzeEmailClaimGaps(caseId, currentFields, ctx.tenantId);
     const newStatus = gapResult.status as CaseStatus;
+    const puntaje = puntajeSiCambia(caso, fieldKey, fields);
 
     if (newStatus === currentStatus || !isValidTransition(currentStatus, newStatus)) {
+      if (puntaje !== undefined) await guardarPuntaje(ctx, caseId, puntaje);
       return currentStatus;
     }
 
-    try {
-      await enTenant(ctx, (db) =>
-        db
-          .update(cases)
-          .set({ status: newStatus, updated_at: new Date().toISOString() })
-          .where(eq(cases.id, caseId))
-      );
-    } catch (e) {
-      logger.error({ code: errorCode(e) }, "confirm_field.status_update_error");
-      return currentStatus;
-    }
-
-    await writeAuditLog({
-      tenant_id: ctx.tenantId,
-      actor_id: actorId,
-      event_type: AuditEvent.CASE_STATUS_CHANGED,
-      target_type: "case",
-      target_id: caseId,
-      payload: { from: currentStatus, to: newStatus, trigger: "field_confirmation" },
-      ip,
-      ua,
-    });
-
-    return newStatus;
+    return (await aplicarEstado(ctx, caso, newStatus, puntaje, actorId, ip, ua)) ? newStatus : currentStatus;
   } catch (e) {
     logger.error({ detalle: e instanceof Error ? e.name : "UnknownError" }, "confirm_field.reevaluatestatus_error");
     return currentStatus;
   }
+}
+
+/**
+ * El puntaje nuevo, si el campo que se confirmó es de los que los pesos cuentan;
+ * `undefined` si no. Los valores salen de los campos ya guardados, que incluyen
+ * el que acaba de confirmar la persona.
+ */
+function puntajeSiCambia(
+  caso: CasoLeido,
+  fieldKey: string,
+  fields: { field_key: string; field_value: string | null }[]
+): number | undefined {
+  const claves = clavesPonderadas(caso.pesos_puntaje);
+  const canonica = canonicalFieldKey(fieldKey);
+  if (!claves.some((k) => canonicalFieldKey(k) === canonica)) return undefined;
+  return puntajeDelCaso(caso, camposDelPuntaje(caso.pesos_puntaje, fields), caso.pesos_puntaje);
+}
+
+async function guardarPuntaje(ctx: TenantContext, caseId: string, puntaje: number) {
+  try {
+    await enTenant(ctx, (db) => db.update(cases).set({ puntaje_complejidad: puntaje }).where(eq(cases.id, caseId)));
+  } catch (e) {
+    logger.error({ code: errorCode(e) }, "confirm_field.puntaje_update_error");
+  }
+}
+
+/** Mueve el caso a `hacia`. Devuelve si quedó ahí: `false` si otra mano ya lo había movido o si falló. */
+async function aplicarEstado(
+  ctx: TenantContext,
+  caso: CasoLeido,
+  hacia: CaseStatus,
+  puntaje: number | undefined,
+  actorId: string,
+  ip: string | null,
+  ua: string | null
+): Promise<boolean> {
+  const caseId = caso.id;
+  const desde = caso.status as CaseStatus;
+  const criterios = criteriosDeTrabajo(caso, caso.claim_type);
+  const cambiarEstado = (db: ClienteDatos, ajuste: object = {}) => {
+    return db
+      .update(cases)
+      .set({ status: hacia, updated_at: new Date().toISOString(), ...ajuste })
+      .where(and(eq(cases.id, caseId), eq(cases.status, desde)))
+      .returning({ id: cases.id });
+  };
+
+  try {
+    const [filas] = await enTenantVarias<[{ id: string }[]]>(ctx, (db) => [
+      cambiarEstado(db, {
+        ...ajusteDeVencimiento(hacia, criterios),
+        ...(puntaje === undefined ? {} : { puntaje_complejidad: puntaje }),
+      }),
+      auditoriaSiQuedo(
+        db,
+        {
+          caseId,
+          actorId,
+          eventType: AuditEvent.CASE_STATUS_CHANGED,
+          payload: { from: desde, to: hacia, old_status: desde, new_status: hacia, trigger: "field_confirmation" },
+          ip,
+          ua,
+        },
+        hacia
+      ),
+      ...efectosDeTransicion(db, { caseId, hacia, origen: "agente", actorId: null, criterios }),
+    ]);
+    // El estado no pegó, así que el puntaje que iba en ese UPDATE tampoco: va aparte.
+    if (filas.length === 0 && puntaje !== undefined) await guardarPuntaje(ctx, caseId, puntaje);
+    return filas.length > 0;
+  } catch (e) {
+    logger.warn({ code: errorCode(e), case_id: caseId, status: hacia }, "confirm_field.efectos_fallaron");
+  }
+
+  try {
+    const filas = await enTenant(ctx, (db) => cambiarEstado(db));
+    // El respaldo no toca las columnas nuevas; el puntaje recalculado se guarda aparte, que falle por su cuenta.
+    if (puntaje !== undefined) await guardarPuntaje(ctx, caseId, puntaje);
+    if (filas.length === 0) return false;
+  } catch (e) {
+    logger.error({ code: errorCode(e) }, "confirm_field.status_update_error");
+    return false;
+  }
+
+  await writeAuditLog({
+    tenant_id: ctx.tenantId,
+    actor_id: actorId,
+    event_type: AuditEvent.CASE_STATUS_CHANGED,
+    target_type: "case",
+    target_id: caseId,
+    payload: { from: desde, to: hacia, trigger: "field_confirmation" },
+    ip,
+    ua,
+  });
+  return true;
 }

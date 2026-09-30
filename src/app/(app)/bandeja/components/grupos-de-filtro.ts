@@ -143,6 +143,28 @@ export const GRUPOS_DE_FILTRO: GrupoDeFiltro[] = [
       { clave: "whatsapp_sim", etiqueta: "channel.whatsapp_sim" },
     ],
   },
+  /*
+   * B10 y B13, sólo para el equipo. Los valores son los de `CaseQuerySchema`.
+   * Como en el resto de los grupos, dos opciones marcadas son «cualquiera de las
+   * dos» y ninguna es «todos».
+   */
+  {
+    param: "vencimiento",
+    rotulo: "filter.vencimiento",
+    opciones: [
+      { clave: "vencidos", etiqueta: "vencimiento.vencidos", color: "bg-red-600" },
+      { clave: "por_vencer", etiqueta: "vencimiento.por_vencer", color: "bg-amber-500" },
+    ],
+  },
+  {
+    param: "complejidad",
+    rotulo: "filter.complejidad",
+    opciones: [
+      { clave: "baja", etiqueta: "complejidad.baja" },
+      { clave: "media", etiqueta: "complejidad.media" },
+      { clave: "alta", etiqueta: "complejidad.alta" },
+    ],
+  },
   {
     param: "is_claim",
     rotulo: "filter.isClaim",

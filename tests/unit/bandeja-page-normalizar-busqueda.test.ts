@@ -21,7 +21,14 @@ vi.mock("@/server/cases/list", () => ({
 }));
 vi.mock("@/server/intake/scenarios", () => ({ OPCIONES_DE_ESCENARIO: [] }));
 
-import { normalizarBusqueda, VALID_CHANNELS, VALID_SEVERITIES, VALID_STATUSES } from "@/app/(app)/bandeja/page";
+import {
+  normalizarBusqueda,
+  VALID_CHANNELS,
+  VALID_COMPLEJIDADES,
+  VALID_SEVERITIES,
+  VALID_STATUSES,
+  VALID_VENCIMIENTOS,
+} from "@/app/(app)/bandeja/page";
 
 describe("normalizarBusqueda", () => {
   it("recorta los espacios de los extremos", () => {
@@ -84,6 +91,11 @@ describe("conjuntos válidos de la bandeja", () => {
 
   it("VALID_SEVERITIES es el mismo conjunto de antes", () => {
     expect(new Set(VALID_SEVERITIES)).toEqual(new Set(["low", "medium", "high", "critical"]));
+  });
+
+  it("VALID_VENCIMIENTOS y VALID_COMPLEJIDADES son los del filtro (B10, B13)", () => {
+    expect(new Set(VALID_VENCIMIENTOS)).toEqual(new Set(["vencidos", "por_vencer"]));
+    expect(new Set(VALID_COMPLEJIDADES)).toEqual(new Set(["baja", "media", "alta"]));
   });
 
   it("VALID_CHANNELS es el mismo conjunto de antes", () => {

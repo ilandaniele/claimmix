@@ -180,7 +180,7 @@ function mensajeCrudoInsertado(): Record<string, unknown> | undefined {
 
 /** La fila de `cases` que escribió el simulador. */
 function casoInsertado(): Record<string, unknown> | undefined {
-  return valoresInsertados.find((v) => v && "assigned_to" in v);
+  return valoresInsertados.find((v) => v && v.channel === "email_sim" && "status" in v);
 }
 
 function setupAuthMocks() {
@@ -312,6 +312,16 @@ describe("POST /api/intake/simulate", () => {
     const caso = casoInsertado();
     expect(caso).toBeDefined();
     expect(caso!.claim_type).toBeNull();
+  });
+
+  it("el caso simulado entra sin asignar, como el de un mail real, para que la autoasignación lo tome", async () => {
+    const res = await POST(makeRequest({ scenario_id: "choque-01" }));
+    expect(res.status).toBe(202);
+
+    const caso = casoInsertado();
+    expect(caso).toBeDefined();
+    // `autoasignar` sólo actúa con `assigned_to IS NULL`: asignarlo al que simula la deja sin probar de punta a punta.
+    expect(caso).not.toHaveProperty("assigned_to");
   });
 
   it("returns 400 for invalid case_type with raw_text", async () => {

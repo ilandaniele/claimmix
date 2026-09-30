@@ -16,6 +16,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, like, ne, sql } from "d
 
 import { normalizarMime, seMira } from "@/core/adjuntos/firma";
 import { ajustarConPresupuesto, estimarMonto, rangoPara, type MontoEstimado } from "@/core/case/monto-estimado";
+import { camposDelPuntaje, puntajeDelCaso } from "@/core/case/puntaje-complejidad";
 import {
   esCandidatoAPresupuesto,
   LecturaPresupuestoSchema,
@@ -32,7 +33,7 @@ import { CASE_EDITOR_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
 import { cases, claimAttachments, extractedFields, tenants } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
-import { faltaLa0040 } from "@/server/core-sync/config";
+import { faltaLaMigracion } from "@/server/core-sync/config";
 import { leerDocumento, type Lectura } from "@/server/ai/leer-documento";
 import type { InlineMedia } from "@/server/ai/gemini-extractor";
 import { readAttachment } from "@/server/storage/claim-attachments-bucket";
@@ -50,7 +51,13 @@ const ParamsSchema = z.object({
 const sinDescarte = sql`coalesce(${claimAttachments.metadatos}->>'descarte', '') = ''`;
 
 type Filas = [
-  Array<{ claim_type: string | null; severity: string | null; assigned_to: string | null }>,
+  Array<{
+    claim_type: string | null;
+    severity: string | null;
+    fraud_risk_level: string | null;
+    injury_severity: string | null;
+    assigned_to: string | null;
+  }>,
   Array<{ field_value: string }>,
   Array<{
     content_type: string;
@@ -62,7 +69,8 @@ type Filas = [
     descartado: boolean;
   }>,
   Array<{ storage_path: string | null; content_type: string; size_bytes: number }>,
-  Array<{ rangos: unknown }>,
+  Array<{ rangos: unknown; pesos: unknown }>,
+  Array<{ field_key: string; field_value: string | null }>,
 ];
 
 /** Como en el worker, el tope es de lo que va al modelo junto, no de cada archivo. */
@@ -90,9 +98,15 @@ export async function POST(
     const { userRow } = ctx;
     const tenantId = userRow.tenant_id;
 
-    const [[caso], [relato], [adjunto], fotos, [tenant]] = await enTenantVarias<Filas>({ tenantId }, (db) => [
+    const [[caso], [relato], [adjunto], fotos, [tenant], campos] = await enTenantVarias<Filas>({ tenantId }, (db) => [
       db
-        .select({ claim_type: cases.claim_type, severity: cases.severity, assigned_to: cases.assigned_to })
+        .select({
+          claim_type: cases.claim_type,
+          severity: cases.severity,
+          fraud_risk_level: cases.fraud_risk_level,
+          injury_severity: cases.injury_severity,
+          assigned_to: cases.assigned_to,
+        })
         .from(cases)
         .where(eq(cases.id, caseId))
         .limit(1),
@@ -140,8 +154,17 @@ export async function POST(
         )
         .orderBy(asc(claimAttachments.created_at))
         .limit(MAX_FOTOS),
-      db.select({ rangos: tenants.rangos_de_monto }).from(tenants).where(eq(tenants.id, tenantId)).limit(1),
-    ]).catch(faltaLa0040);
+      db
+        .select({ rangos: tenants.rangos_de_monto, pesos: tenants.pesos_puntaje })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId))
+        .limit(1),
+      // El puntaje cuenta el monto y los campos que la aseguradora pondera: se leen junto con el resto.
+      db
+        .select({ field_key: extractedFields.field_key, field_value: extractedFields.field_value })
+        .from(extractedFields)
+        .where(eq(extractedFields.case_id, caseId)),
+    ]).catch(faltaLaMigracion("0040", "0042"));
 
     // Un caso ajeno o de otro analista no se distingue de uno que no existe.
     if (!caso || !puedeCambiarEstado(userRow, caso.assigned_to)) throw new AppError("NOT_FOUND");
@@ -208,17 +231,27 @@ export async function POST(
             .where(esteArchivo)
             .returning({ id: claimAttachments.id }),
           // Si mientras se leía cambió el tipo, la gravedad o el archivo, el
-          // rango con que se midió ya no es el del caso.
+          // rango con que se midió ya no es el del caso; con el fraude o las
+          // lesiones, el puntaje calculado tampoco.
           ...(nuevoMonto
             ? [
                 db
                   .update(cases)
-                  .set({ monto_estimado: nuevoMonto })
+                  .set({
+                    monto_estimado: nuevoMonto,
+                    puntaje_complejidad: puntajeDelCaso(
+                      { ...caso, monto_estimado: nuevoMonto },
+                      camposDelPuntaje(tenant?.pesos, campos),
+                      tenant?.pesos
+                    ),
+                  })
                   .where(
                     and(
                       eq(cases.id, caseId),
                       sql`${cases.claim_type} IS NOT DISTINCT FROM ${caso.claim_type}`,
                       sql`${cases.severity} IS NOT DISTINCT FROM ${caso.severity}`,
+                      sql`${cases.fraud_risk_level} IS NOT DISTINCT FROM ${caso.fraud_risk_level}`,
+                      sql`${cases.injury_severity} IS NOT DISTINCT FROM ${caso.injury_severity}`,
                       sql`exists (select 1 from ${claimAttachments} where ${esteArchivo})`
                     )
                   )

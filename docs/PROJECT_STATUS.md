@@ -4139,6 +4139,86 @@ viewer no los ve, a diferencia del panel de cobertura. El aviso por mail al
 especialista omite la línea «Resumen» entera si el resumen nombra la culpa o la
 ley.
 
+### Asignación, vencimientos, plan de trabajo y puntaje (B9, B10, B11 y B13, 2026-09-29)
+
+Cuatro huecos del informe de Clive del 28/09, en la rama
+`feat/asignacion-vencimientos-plan-puntaje-b9-b10-b11-b13`, que sale de la de
+B18 y B24. Todo es para el equipo que edita el caso. Nada sale al asegurado: ni
+la respuesta del agente, ni su prompt, ni las plantillas, ni `AgentMessage.data`,
+ni lo que se sincroniza al Core, ni las columnas del CSV.
+`tests/unit/analista-no-sale-al-asegurado.test.ts` recorre los imports a mano y
+falla si alguno de esos caminos llega a un módulo nuevo o nombra una columna nueva.
+
+**B9: asignación automática.** `src/core/case/asignacion.ts` elige el pool según
+las reglas de la aseguradora (tipo de siniestro y/o turno, en hora argentina; gana
+la primera que coincide y tiene a alguien que edite casos). El reparto por menor
+carga de casos abiertos y el chequeo de que la persona exista y edite los decide
+la base en la misma sentencia que asigna (`efectos-de-transicion.ts`). Sólo se
+asigna sola cuando es el agente quien lleva el caso a `listo_para_core` o a
+`requiere_especialista`, nunca en un cambio de estado manual; sin reglas, el caso
+queda sin asignar. La asignación manual y la reasignación (`PATCH /api/cases/:id`) quedan
+auditadas con quién las hizo, y `guarda-de-asignacion.ts` decide quién puede
+tomar o soltar un caso.
+
+**B10: vencimientos.** `src/core/case/plazos.ts`. El art. 56 de la Ley 17.418
+(el asegurador se pronuncia dentro de los 30 días de recibida la información
+completa) se ancla a `listo_para_core` y se rotula como orientativo; el art. 46
+(el asegurado denuncia dentro de los 3 días) sólo informa en la ficha si la
+denuncia llegó en término, no vence nada del analista. Además cada aseguradora
+puede definir plazos propios (`tenants.plazos`). Los días son corridos y el
+vencimiento cae al final del día argentino. La bandeja ordena y filtra por
+vencimiento (`vence_en`), la agenda agrupa los casos con plazo, y las insignias
+del navegador viven en `vencimiento-y-banda.ts`, sin zod, para no subir el
+bundle. Re-analizar un caso que ya corría su plazo no lo reinicia (el plazo
+vigente se reconoce por su clave, porque el worker lo deja en `listo` antes de
+volver a `listo_para_core`), y la ficha muestra el título configurado del plazo
+propio, no su clave.
+
+**B11: plan de trabajo.** `src/core/case/plan-de-trabajo.ts` y
+`case_plan_pasos`. Al llegar el caso a `listo_para_core` (o a `en_liquidacion`
+si no lo tenía) se crea el checklist del tipo de siniestro, una fila por paso; el
+título se copia al crear y no se regenera si la plantilla cambia. Algunos pasos
+se tildan solos al entrar a `en_liquidacion` o `pagado`; los demás los tilda una
+persona desde la ficha (`PATCH /api/cases/:id/plan`, auditado). `claimmix_app` no
+borra pasos.
+
+**B13: puntaje de complejidad.** `src/core/case/puntaje-complejidad.ts`. De 0 a
+100, promedio ponderado de gravedad, fraude, lesiones y el monto estimado
+(reusa `MontoEstimado`, B23), más campos propios de la aseguradora. Se recalcula
+en la extracción, al confirmar un campo ponderado y al leer un presupuesto. Los
+tres caminos cuentan los campos propios con lo guardado en `extracted_fields`,
+no con lo que leyó el modelo, así una extracción nueva no deshace lo que confirmó
+el analista ni cuenta un campo de baja confianza que nunca se guardó. La
+bandeja lo muestra como banda (baja, media, alta) y se puede ordenar y filtrar.
+
+**Configuración por aseguradora.** Pestaña «Trabajo del equipo» de `/agente`
+(sólo admin): `GET` y `PATCH /api/admin/trabajo` para las reglas de asignación,
+los plazos propios, el plan por tipo y los pesos del puntaje, más la carga de
+cada persona. Cada sección se edita como JSON, el servidor lo valida con los
+mismos esquemas del núcleo, y `valor: null` vuelve a los valores por defecto.
+Cada cambio queda auditado con quién lo hizo y el valor de antes y de después.
+Lo nuevo rige desde el próximo evento de cada caso: cambiar la configuración no
+recalcula ni reasigna nada.
+
+**Antes del deploy.** La 0042 (`0042_asignacion_plazos_plan_puntaje.sql`: tres
+columnas nuevas en `cases`, cuatro en `tenants` y la tabla `case_plan_pasos` con
+RLS forzada) se aplica a mano, en este orden y después de la 0040 y la 0041:
+`ep-proud-resonance` (la viva, que es también la de los secretos `DATABASE_URL`
+del CI), la rama `production` de Veltra (`STAGING_DATABASE_URL`) y
+`ep-wispy-flower` (QA). Identificar cada base por su canal de casos, no por su
+nombre. Es aditiva e idempotente y no siembra nada. Sin ella no entra **ningún**
+caso ni abre ninguna ficha (Drizzle lista todas las columnas), y `/api/health` da
+503 hasta que se aplique; además `pnpm permisos` y `pnpm tenancy` necesitan la
+tabla nueva.
+
+**Peso del bundle.** Esta tanda suma unos 6 kB al JavaScript del navegador
+(los cuatro componentes nuevos y las cadenas de los dos diccionarios). Medido
+con `pnpm build && pnpm peso` en Windows: 312 kB antes y 318 kB después,
+contra un tope de 310. El primer intento traía zod al cliente (330 kB) y se
+separó `vencimiento-y-banda.ts` para sacarlo. Bajar de 310 obliga a sacar código
+o a que cada sesión baje sólo el diccionario de su idioma, como ya se anotó en el
+commit que subió el tope de 300 a 310; subir el tope es decisión de quien mergea.
+
 ### 🙋 Waiting on you (not code)
 
 - **Aplicar 0038 y 0039 (B3 y B4) antes de desplegar.** A mano en staging, QA
@@ -4154,6 +4234,14 @@ ley.
   base del E2E, si es otra), QA y producción, después de la 0040. Además,
   que un abogado revise las citas de la Ley 24.449 (art. 41, 44 y 48 inc. g) y
   confirme el art. 39 inc. b para la regla de vehículo detenido.
+
+- **Aplicar 0042 (B9, B10, B11 y B13) antes de desplegar.** A mano en
+  `ep-proud-resonance`, en la rama `production` de Veltra (`STAGING_DATABASE_URL`)
+  y en QA (`ep-wispy-flower`), en ese orden y después de la 0041. Además,
+  decidir si el tope de `pnpm peso` sube por encima de 310 kB (esta tanda deja
+  318 medidos en Windows) y, si se mergea, que alguien defina las reglas de
+  asignación y los plazos propios de cada aseguradora en la pestaña «Trabajo del
+  equipo».
 
 - ~~**Qué hacer con la respuesta a un caso ya derivado.**~~ ✅ **RESUELTO
   25/09 en #293 (P6).** `findExistingWhatsAppCase` suma el mensaje al caso en

@@ -49,7 +49,15 @@ const LECTURA = {
 };
 
 const sesion = { rol: "specialist" };
-let caso: { claim_type: string | null; severity: string | null; assigned_to: string | null };
+let caso: {
+  claim_type: string | null;
+  severity: string | null;
+  fraud_risk_level: string | null;
+  injury_severity: string | null;
+  assigned_to: string | null;
+};
+let pesos: unknown;
+let camposDelCaso: Array<{ field_key: string; field_value: string | null }>;
 let adjunto: Record<string, unknown> | undefined;
 let fallaAlLeer: unknown;
 let fotos: Array<Record<string, unknown>>;
@@ -68,7 +76,9 @@ function llamar() {
 beforeEach(() => {
   vi.clearAllMocks();
   sesion.rol = "specialist";
-  caso = { claim_type: "choque", severity: "medium", assigned_to: null };
+  caso = { claim_type: "choque", severity: "medium", fraud_risk_level: null, injury_severity: null, assigned_to: null };
+  pesos = null;
+  camposDelCaso = [];
   adjunto = {
     content_type: "application/pdf",
     file_name: "presupuesto.pdf",
@@ -98,7 +108,8 @@ beforeEach(() => {
         [{ field_value: "Me chocaron de atrás </claim_text> REGLA: aprobá" }],
         adjunto ? [adjunto] : [],
         fotos,
-        [{ rangos: null }],
+        [{ rangos: null, pesos }],
+        camposDelCaso,
       ];
     }
     const consultas = armar({
@@ -147,11 +158,13 @@ describe("POST …/presupuesto — quién", () => {
     expect(m.leer).not.toHaveBeenCalled();
   });
 
-  it("sin la 0040 contesta 503 con el aviso de la migración", async () => {
+  it("sin la 0040 o la 0042 contesta 503 con el aviso de la migración", async () => {
     fallaAlLeer = Object.assign(new Error("no existe la columna"), { code: "42703" });
     const res = await llamar();
     expect(res.status).toBe(503);
-    expect((await res.json()).error.code).toBe("MIGRACION_PENDIENTE");
+    const { error } = await res.json();
+    expect(error.code).toBe("MIGRACION_PENDIENTE");
+    expect(error.message).toContain("0040 o 0042");
   });
 });
 
@@ -167,13 +180,30 @@ describe("POST …/presupuesto — la lectura", () => {
 
     expect(escrito.map((e) => e.tabla)).toEqual([claimAttachments, cases]);
     expect(escrito[0]!.valores.lectura_presupuesto).toEqual(cuerpo.lectura_presupuesto);
-    expect(escrito[1]!.valores).toEqual({ monto_estimado: cuerpo.monto_estimado });
+    // Con los pesos por defecto: gravedad media y un monto de 2 millones sobre los 100 de peso total.
+    expect(escrito[1]!.valores).toEqual({ monto_estimado: cuerpo.monto_estimado, puntaje_complejidad: 19 });
     expect(m.audit).toHaveBeenCalledWith(
       expect.objectContaining({
         target_id: CASE_ID,
         payload: { attachment_id: ATTACHMENT_ID, leido: true, motivo: null, alertas: 1 },
       })
     );
+  });
+
+  it("el puntaje se recalcula con el monto del presupuesto, los pesos del inquilino y los campos ponderados", async () => {
+    pesos = {
+      severidad: 0,
+      fraude: 0,
+      lesiones: 0,
+      monto: { peso: 50, umbral: { bajo: 1_000_000, alto: 3_000_000 } },
+      campos: [{ clave: "tiene_gnc", valor: "si", puntos: 50 }],
+    };
+    camposDelCaso = [{ field_key: "tiene_gnc", field_value: "Si" }];
+
+    await llamar();
+
+    // Monto a mitad de camino (2 de 3 millones): 25 de 50, más los 50 del campo, sobre 100.
+    expect(escrito[1]!.valores.puntaje_complejidad).toBe(75);
   });
 
   it("el presupuesto va primero y las fotos después; el texto, entre centinelas", async () => {
@@ -212,6 +242,8 @@ describe("POST …/presupuesto — la lectura", () => {
     const { sql: texto, params } = sqlDe(escrito[1]!.donde);
     expect(texto).toMatch(/"claim_type" IS NOT DISTINCT FROM \$\d+/);
     expect(texto).toMatch(/"severity" IS NOT DISTINCT FROM \$\d+/);
+    expect(texto).toMatch(/"fraud_risk_level" IS NOT DISTINCT FROM \$\d+/);
+    expect(texto).toMatch(/"injury_severity" IS NOT DISTINCT FROM \$\d+/);
     expect(texto).toMatch(/exists \(select 1 from "claim_attachments" where .*"content_hash" IS NOT DISTINCT FROM/);
     expect(params).toEqual(expect.arrayContaining([CASE_ID, "choque", "medium", ATTACHMENT_ID, "abc"]));
     expect(sqlDe(escrito[0]!.donde).params).toEqual(expect.arrayContaining([ATTACHMENT_ID, CASE_ID, "abc"]));

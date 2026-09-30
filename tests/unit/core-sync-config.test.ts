@@ -12,7 +12,16 @@ import { describe, expect, it } from "vitest";
 
 import type { ClienteDatos } from "@/data/scope";
 import { AppError } from "@/lib/errors";
-import { codigoPg, consultaDeLaConfig, esFaltaDe0036, faltaLa0040, vistaDeLaConfig } from "@/server/core-sync/config";
+import {
+  codigoPg,
+  consultaDeLaConfig,
+  esFaltaDe0036,
+  faltaLa0040,
+  faltaLa0042,
+  faltaLaMigracion,
+  faltaLaMigracionConTabla,
+  vistaDeLaConfig,
+} from "@/server/core-sync/config";
 
 const sinBase = new QueryBuilder() as unknown as ClienteDatos;
 
@@ -86,5 +95,41 @@ describe("faltaLa0040", () => {
 
     const otro = { code: "23514" };
     expect(() => faltaLa0040(otro)).toThrow(expect.objectContaining({ code: "23514" }));
+  });
+});
+
+describe("faltaLa0042", () => {
+  it.each(["42P01", "42703"])("%s es la migración pendiente y la nombra", (code) => {
+    const falta = Object.assign(new Error("Failed query"), { cause: { code } });
+    expect(() => faltaLa0042(falta)).toThrow(AppError);
+    expect(() => faltaLa0042(falta)).toThrow("Falta aplicar la migración 0042.");
+  });
+
+  it("otro error sigue igual", () => {
+    expect(() => faltaLa0042({ code: "23514" })).toThrow(expect.objectContaining({ code: "23514" }));
+  });
+});
+
+describe("faltaLaMigracion", () => {
+  it("nombra las migraciones que puede estar faltando", () => {
+    const sinColumna = { code: "42703" };
+    expect(() => faltaLaMigracion("0040", "0042")(sinColumna)).toThrow("Falta aplicar la migración 0040 o 0042.");
+    expect(() => faltaLa0040(sinColumna)).toThrow("Falta aplicar la migración 0040.");
+  });
+
+  it("una migración que sólo agrega columnas no toma por pendiente una tabla que falta", () => {
+    const sinTabla = { code: "42P01" };
+    expect(() => faltaLaMigracion("0040")(sinTabla)).toThrow(expect.objectContaining({ code: "42P01" }));
+    expect(() => faltaLaMigracionConTabla("0042")(sinTabla)).toThrow(AppError);
+  });
+
+  it("un error sin código sigue igual", () => {
+    const raro = new Error("boom");
+    expect(() => faltaLaMigracionConTabla("0042")(raro)).toThrow(raro);
+  });
+
+  it("otro error sigue igual", () => {
+    const otro = { code: "23514" };
+    expect(() => faltaLaMigracion("0042")(otro)).toThrow(expect.objectContaining({ code: "23514" }));
   });
 });

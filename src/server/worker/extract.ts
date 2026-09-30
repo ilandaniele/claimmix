@@ -52,6 +52,9 @@ import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-class
 import { esResumenSeguro } from "@/core/ai/resumen-seguro";
 import { fusionarIndicadores } from "@/core/case/contradicciones";
 import { estimarMonto } from "@/core/case/monto-estimado";
+import { vencimientoDeRecibido } from "@/core/case/plazos";
+import { camposDelPuntaje, clavesPonderadas, puntajeDelCaso } from "@/core/case/puntaje-complejidad";
+import { columnasDeTrabajo, criteriosDeTrabajo } from "@/server/cases/efectos-de-transicion";
 import { responsabilidadDelCaso } from "@/core/case/responsabilidad";
 import { atenderCartas, atenderCartasDeUnTardio } from "@/server/cases/lectura-reclamo";
 import {
@@ -635,6 +638,10 @@ export async function runEmailExtractionWorker(
             fraud_risk_level: cases.fraud_risk_level,
             fraud_indicators: cases.fraud_indicators,
             rangos_de_monto: sql<unknown>`(select ${tenants.rangos_de_monto} from ${tenants} where ${tenants.id} = ${cases.tenant_id})`,
+            ...columnasDeTrabajo,
+            severity: cases.severity,
+            injury_severity: cases.injury_severity,
+            monto_estimado: cases.monto_estimado,
           })
           .from(cases)
           // Buscar por id sin contexto sería peor que antes: el id de un
@@ -1380,7 +1387,46 @@ export async function runEmailExtractionWorker(
     );
     if (responsabilidad !== undefined) caseUpdate.responsabilidad = responsabilidad;
     const monto = estimarMonto(tipo, finalSeverity, caseRow.rangos_de_monto);
-    (caseUpdate as Record<string, unknown>).monto_estimado = sql`CASE WHEN ${cases.monto_estimado}->>'origen' = 'presupuesto' AND ${cases.claim_type} IS NOT DISTINCT FROM ${tipo} AND ${cases.severity} IS NOT DISTINCT FROM ${finalSeverity} THEN ${cases.monto_estimado} ELSE ${monto ? JSON.stringify(monto) : null}::jsonb END`;
+    const presupuestoVigente =
+      caseRow.monto_estimado?.origen === "presupuesto" && caseRow.claim_type === tipo && caseRow.severity === finalSeverity;
+    const presupuestoVigenteEnBase = sql`${cases.monto_estimado}->>'origen' = 'presupuesto' AND ${cases.claim_type} IS NOT DISTINCT FROM ${tipo} AND ${cases.severity} IS NOT DISTINCT FROM ${finalSeverity}`;
+    (caseUpdate as Record<string, unknown>).monto_estimado = sql`CASE WHEN ${presupuestoVigenteEnBase} THEN ${cases.monto_estimado} ELSE ${monto ? JSON.stringify(monto) : null}::jsonb END`;
+
+    // Cuán complicado es, para el equipo. Los campos propios cuentan con lo que
+    // quedó GUARDADO, no con lo que leyó el modelo: el upsert de arriba no pisa
+    // lo que confirmó una persona ni guarda lo de baja confianza, y puntuar con
+    // la lectura deshacía la corrección del analista (confirmar y después recibir
+    // un mensaje). Es lo mismo que cuenta una confirmación. El monto es el que
+    // decide el SET de arriba: el del presupuesto mientras siga valiendo. Si
+    // mientras tanto entró o salió un presupuesto y la base ya no ve lo que se
+    // leyó, el puntaje calculado no corresponde al monto que queda: se conserva
+    // el guardado, que la próxima extracción recalcula. Igual si no se pudieron
+    // leer los campos guardados.
+    const guardados = await camposGuardadosDelPuntaje(tenantCtx, caseId, caseRow.pesos_puntaje);
+    if (guardados) {
+      const puntaje = puntajeDelCaso(
+        {
+          severity: finalSeverity,
+          fraud_risk_level: fraude?.nivel ?? caseRow.fraud_risk_level,
+          injury_severity: extractedClaim.injury_severity ?? caseRow.injury_severity,
+          monto_estimado: presupuestoVigente ? caseRow.monto_estimado : monto,
+        },
+        camposDelPuntaje(caseRow.pesos_puntaje, guardados),
+        caseRow.pesos_puntaje
+      );
+      (caseUpdate as Record<string, unknown>).puntaje_complejidad =
+        sql`CASE WHEN coalesce(${presupuestoVigenteEnBase}, false) = ${presupuestoVigente}::boolean THEN ${puntaje}::smallint ELSE ${cases.puntaje_complejidad} END`;
+    }
+
+    // Los plazos propios que corren desde que el caso entró. El vencimiento que
+    // ya tenía el caso se respeta: esto sólo lo fija si no había ninguno.
+    const criterios = criteriosDeTrabajo(caseRow, tipo);
+    const recibido = vencimientoDeRecibido({ creadoEn: new Date(caseRow.created_at), tipo, plazos: criterios.plazos });
+    if (recibido) {
+      const cambios = caseUpdate as Record<string, unknown>;
+      cambios.vence_en = sql`CASE WHEN ${cases.vence_en} IS NULL THEN ${recibido.vence}::timestamptz ELSE ${cases.vence_en} END`;
+      cambios.vence_plazo = sql`CASE WHEN ${cases.vence_en} IS NULL THEN ${recibido.plazo}::text ELSE ${cases.vence_plazo} END`;
+    }
 
     try {
       const filas = await enTenant(tenantCtx, (db) =>
@@ -1448,7 +1494,8 @@ export async function runEmailExtractionWorker(
           preguntadas,
         },
         customerMatches,
-        messengerFor(caseRow.channel)
+        messengerFor(caseRow.channel),
+        criterios
       );
     }
 
@@ -1804,6 +1851,30 @@ async function loadKnownPatterns(tenantCtx: TenantContext): Promise<KnownPattern
  * Upsert extracted_fields rows on the (case_id, field_key) unique constraint
  * (uq_extracted_field in 0001_init.sql). Throws on DB error — callers wrap.
  */
+/**
+ * Los valores guardados de los campos que los pesos del puntaje cuentan. Sin
+ * campos ponderados no consulta y devuelve `[]`; `null` es que la lectura falló.
+ */
+async function camposGuardadosDelPuntaje(
+  tenantCtx: TenantContext,
+  caseId: string,
+  pesos: unknown
+): Promise<{ field_key: string; field_value: string | null }[] | null> {
+  const claves = clavesPonderadas(pesos).map(canonicalFieldKey);
+  if (claves.length === 0) return [];
+  try {
+    return await enTenant(tenantCtx, (db) =>
+      db
+        .select({ field_key: extractedFields.field_key, field_value: extractedFields.field_value })
+        .from(extractedFields)
+        .where(and(eq(extractedFields.case_id, caseId), inArray(extractedFields.field_key, claves)))
+    );
+  } catch (err) {
+    logger.warn({ code: errorCode(err), case_id: caseId }, "email_worker.puntaje_fields_read_error");
+    return null;
+  }
+}
+
 async function upsertExtractedFields(
   caseId: string,
   tenantCtx: TenantContext,

@@ -27,6 +27,7 @@ import { isInternalRequest } from "@/lib/security/internal-auth";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 
 import { db, tables } from "@/lib/db";
+import { filasDe } from "@/lib/db/filas";
 import { gmailAccounts } from "@/lib/db/schema";
 
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
@@ -137,19 +138,10 @@ function why(err: unknown): string {
   return err instanceof Error ? err.message.slice(0, 120) : "error desconocido";
 }
 
-/**
- * The rows from a raw query.
- *
- * `db.execute` hands back the driver's result object, not an array — and code
- * that assumed an array got an empty list, which here meant reporting every
- * migration as missing on a database where all of them were applied.
- */
+/** Las filas de una consulta cruda; `filasDe` explica por qué no alcanza con suponer un arreglo. */
 async function rowsOf<T>(query: SQL): Promise<T[]> {
   // sin-inquilino: Idem: el resultado crudo del driver, no filas de una tabla.
-  const result = (await db.execute(query)) as unknown;
-  if (Array.isArray(result)) return result as T[];
-  const rows = (result as { rows?: unknown })?.rows;
-  return Array.isArray(rows) ? (rows as T[]) : [];
+  return filasDe<T>(await db.execute(query));
 }
 
 // ── The checks ───────────────────────────────────────────────────────────────
@@ -254,6 +246,14 @@ async function checkSchema(): Promise<Check> {
     ["claim_attachments", "lectura_presupuesto"],
     // 0041: sin esto el worker no procesa ningún caso y la ficha no abre.
     ["cases", "responsabilidad"],
+    // 0042: sin esto el worker no procesa ningún caso y ni la ficha ni la bandeja abren.
+    ["cases", "puntaje_complejidad"],
+    ["cases", "vence_en"],
+    ["cases", "vence_plazo"],
+    ["tenants", "reglas_asignacion"],
+    ["tenants", "plazos"],
+    ["tenants", "plan_por_tipo"],
+    ["tenants", "pesos_puntaje"],
   ];
 
   try {
@@ -267,7 +267,7 @@ async function checkSchema(): Promise<Check> {
 
     // 0017 crea una tabla entera; sin ella una factura cerrada se recalcula en
     // cada consulta, que es justo lo que la 0017 existe para impedir.
-    const requiredTables = ["billing_invoices", "rate_limit_counters", "case_recordatorios"];
+    const requiredTables = ["billing_invoices", "rate_limit_counters", "case_recordatorios", "case_plan_pasos"];
     const tablesPresent = new Set(rows.map((r) => r.table_name));
     const missingTables = requiredTables.filter((t) => !tablesPresent.has(t));
     const missing = required

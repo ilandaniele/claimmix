@@ -99,12 +99,16 @@ vi.mock("@/server/intake/reap-stuck", () => ({
 // ── DB mock ───────────────────────────────────────────────────────────────────
 
 let caseInsertSeq = 0;
+/** Lo que se escribió en `cases`, en orden. */
+const casosInsertados: Array<Record<string, unknown>> = [];
 
 function makeAdminDbMock() {
   caseInsertSeq = 0;
+  casosInsertados.length = 0;
   return {
     insert: vi.fn().mockImplementation(() => ({
-      values: vi.fn().mockImplementation(() => {
+      values: vi.fn().mockImplementation((v: Record<string, unknown>) => {
+        casosInsertados.push(v);
         caseInsertSeq++;
         const id = `case-${String(caseInsertSeq).padStart(3, "0")}`;
         return {
@@ -189,6 +193,15 @@ describe("POST /api/admin/batch-simulate", () => {
     const body = await res.json();
     expect(body.case_ids).toHaveLength(3);
     expect(body.case_ids[0]).toMatch(/^case-/);
+  });
+
+  it("crea los casos sin asignar, como un mail real, para que la autoasignación los tome", async () => {
+    await POST(makeRequest({ count: 2 }));
+
+    const casos = casosInsertados.filter((v) => v.status === "procesando");
+    expect(casos).toHaveLength(2);
+    // `autoasignar` sólo actúa con `assigned_to IS NULL`: asignarlos al que simula la deja sin probar de punta a punta.
+    for (const caso of casos) expect(caso).not.toHaveProperty("assigned_to");
   });
 
   it("registers exactly one after() callback", async () => {

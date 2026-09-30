@@ -14,7 +14,9 @@
  *     consultas arrancan antes de que terminen las anteriores.
  *   · Que cada consulta siga degradando SOLA. Es la razón por la que esto no es
  *     un `enTenantVarias`: un lote es una transacción, y un hipo leyendo el
- *     historial de auditoría se llevaría puesta la pantalla entera.
+ *     historial de auditoría se llevaría puesta la pantalla entera. La única
+ *     excepción es el lote del plan, la carga y el nombre del asignado (B9,
+ *     B11), que cae junto pero sin llevarse nada más.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -23,9 +25,12 @@ import { PgDialect } from "drizzle-orm/pg-core";
 
 vi.mock("server-only", () => ({}));
 
-const { mockEnTenant } = vi.hoisted(() => ({ mockEnTenant: vi.fn() }));
+const { mockEnTenant, mockEnTenantVarias } = vi.hoisted(() => ({
+  mockEnTenant: vi.fn(),
+  mockEnTenantVarias: vi.fn(),
+}));
 
-vi.mock("@/data/scope", () => ({ enTenant: mockEnTenant }));
+vi.mock("@/data/scope", () => ({ enTenant: mockEnTenant, enTenantVarias: mockEnTenantVarias }));
 
 import {
   cargarDetalleDeCaso,
@@ -33,6 +38,7 @@ import {
 } from "@/server/cases/detail-view";
 import {
   auditLog,
+  casePlanPasos,
   cases,
   claimAttachments,
   claimFieldConfirmations,
@@ -40,11 +46,14 @@ import {
   missingDocs,
   policies,
   rawMessages,
+  tenants,
   users,
 } from "@/lib/db/schema";
 
 const CTX = { tenantId: "tenant-1" };
 const CASO = "caso-1";
+/** El rol que no pide plan ni carga: deja las consultas de la pantalla como estaban antes de B9 y B11. */
+const SIN_PLAN = "viewer";
 
 const CASO_DE_CORREO = {
   id: CASO,
@@ -53,8 +62,17 @@ const CASO_DE_CORREO = {
   channel: "email",
 };
 
-/** Qué tabla se consultó, y qué se devuelve para cada una. */
-type PorTabla = Map<unknown, unknown[]>;
+/**
+ * Qué se devuelve para cada tabla. Con una función, la respuesta depende de las
+ * columnas pedidas: `users` la consultan la carga del equipo y el nombre suelto.
+ */
+type Respuesta = unknown[] | ((columnas: Record<string, unknown> | undefined) => unknown[]);
+type PorTabla = Map<unknown, Respuesta>;
+
+const respuestaDe = (porTabla: PorTabla, tabla: unknown, columnas: Record<string, unknown> | undefined): unknown[] => {
+  const r = porTabla.get(tabla);
+  return typeof r === "function" ? r(columnas) : (r ?? []);
+};
 
 interface Registro {
   /** `inicio:N` / `fin:N`, en el orden en que ocurrieron. */
@@ -104,7 +122,46 @@ function espiar(porTabla: PorTabla, fallan: Set<unknown> = new Set()): Registro 
     reg.eventos.push(`fin:${propia}`);
 
     if (fallan.has(tabla)) throw new Error("se cayó la base");
-    return porTabla.get(tabla) ?? [];
+    return respuestaDe(porTabla, tabla, columnas);
+  });
+
+  /*
+   * Un lote es UNA espera aunque lleve varias consultas: cada `db.select()`
+   * arma su propia cadena y todas quedan anotadas en el mismo registro, con la
+   * misma forma que las sueltas.
+   */
+  mockEnTenantVarias.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) => {
+    const propia = ++n;
+    reg.eventos.push(`inicio:${propia}`);
+
+    const consultas: Array<{ tabla: unknown; columnas: Record<string, unknown> | undefined }> = [];
+    const db = {
+      select: (columnas?: Record<string, unknown>) => {
+        const consulta: { tabla: unknown; columnas: Record<string, unknown> | undefined } = {
+          tabla: undefined,
+          columnas,
+        };
+        consultas.push(consulta);
+        const cadena: Record<string, unknown> = {};
+        for (const paso of ["where", "orderBy", "limit", "leftJoin", "groupBy"]) cadena[paso] = () => cadena;
+        cadena.from = (t: unknown) => {
+          consulta.tabla = t;
+          return cadena;
+        };
+        return cadena;
+      },
+    };
+    armar(db);
+    for (const c of consultas) {
+      reg.tablas.push(c.tabla);
+      reg.columnas.push(c.columnas);
+    }
+
+    await Promise.resolve();
+    reg.eventos.push(`fin:${propia}`);
+
+    if (consultas.some((c) => fallan.has(c.tabla))) throw new Error("se cayó la base");
+    return consultas.map((c) => respuestaDe(porTabla, c.tabla, c.columnas));
   });
 
   return reg;
@@ -127,7 +184,7 @@ function tandas(eventos: string[]): number {
   return cuenta;
 }
 
-const TODO: PorTabla = new Map<unknown, unknown[]>([
+const TODO: PorTabla = new Map<unknown, Respuesta>([
   [cases, [CASO_DE_CORREO]],
   [extractedFields, [{ id: "ef-1", field_key: "full_name" }]],
   [missingDocs, [{ id: "md-1", doc_key: "foto" }]],
@@ -181,7 +238,7 @@ describe("cargarDetalleDeCaso — las esperas", () => {
   it("son dos tandas: la fila del caso, y después todo lo demás junto", async () => {
     const reg = espiar(TODO);
 
-    await cargarDetalleDeCaso(CTX, CASO);
+    await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     // Lo que se paga no es la cantidad de consultas sino la de esperas.
     expect(tandas(reg.eventos)).toBe(2);
@@ -194,7 +251,7 @@ describe("cargarDetalleDeCaso — las esperas", () => {
   it("la segunda tanda pide las seis juntas", async () => {
     const reg = espiar(TODO);
 
-    await cargarDetalleDeCaso(CTX, CASO);
+    await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(reg.tablas).toEqual([
       cases,
@@ -222,7 +279,7 @@ describe("cargarDetalleDeCaso — las esperas", () => {
     porTabla.set(cases, [{ ...CASO_DE_CORREO, channel: "whatsapp" }]);
     const reg = espiar(porTabla);
 
-    await cargarDetalleDeCaso(CTX, CASO);
+    await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(reg.tablas).not.toContain(claimFieldConfirmations);
     expect(reg.tablas).toContain(claimAttachments);
@@ -241,7 +298,7 @@ describe("cargarDetalleDeCaso — las esperas", () => {
     porTabla.set(cases, [{ ...CASO_DE_CORREO, channel: "whatsapp" }]);
     const reg = espiar(porTabla);
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(reg.tablas).toContain(rawMessages);
     expect(res!.messages).toHaveLength(1);
@@ -253,7 +310,7 @@ describe("cargarDetalleDeCaso — las esperas", () => {
     porTabla.set(cases, []);
     const reg = espiar(porTabla);
 
-    expect(await cargarDetalleDeCaso(CTX, CASO)).toBeNull();
+    expect(await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN)).toBeNull();
     expect(reg.tablas).toEqual([cases]);
   });
 });
@@ -269,7 +326,7 @@ describe("cargarDetalleDeCaso — las fallas no se contagian", () => {
   ])("si falla %s, lo demás llega igual", async (_c, tabla, clave) => {
     espiar(TODO, new Set([tabla]));
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(res).not.toBeNull();
     // Lo que falló, vacío.
@@ -293,7 +350,7 @@ describe("cargarDetalleDeCaso — las fallas no se contagian", () => {
     // error de lectura le mostraría al analista que su propio caso no existe.
     espiar(TODO, new Set([auditLog, extractedFields, claimAttachments]));
 
-    await expect(cargarDetalleDeCaso(CTX, CASO)).resolves.not.toBeNull();
+    await expect(cargarDetalleDeCaso(CTX, CASO, SIN_PLAN)).resolves.not.toBeNull();
   });
 });
 
@@ -301,7 +358,7 @@ describe("cargarDetalleDeCaso — las normalizaciones de borde", () => {
   it("la confianza llega como número, no como texto", async () => {
     espiar(TODO);
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     // Drizzle entrega `numeric` como string; esto se normalizaba en tres
     // lugares distintos de la pantalla.
@@ -310,12 +367,11 @@ describe("cargarDetalleDeCaso — las normalizaciones de borde", () => {
 
   it("un estado desconocido se muestra como pendiente", async () => {
     const porTabla = new Map(TODO);
-    porTabla.set(claimFieldConfirmations, [
-      { ...(TODO.get(claimFieldConfirmations)![0] as object), status: "vaya-a-saber" },
-    ]);
+    const [confirmacion] = TODO.get(claimFieldConfirmations) as unknown[];
+    porTabla.set(claimFieldConfirmations, [{ ...(confirmacion as object), status: "vaya-a-saber" }]);
     espiar(porTabla);
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     // Pendiente es lo único seguro: muestra el campo como sin resolver en vez
     // de darlo por bueno.
@@ -325,7 +381,7 @@ describe("cargarDetalleDeCaso — las normalizaciones de borde", () => {
   it("un adjunto sin URL sale con cadena vacía, no con null", async () => {
     espiar(TODO);
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(res!.attachments[0].external_url).toBe("");
   });
@@ -336,7 +392,7 @@ describe("cargarDetalleDeCaso — las normalizaciones de borde", () => {
     // antes faltaba información y así hay información falsa.
     const reg = espiar(TODO);
 
-    await cargarDetalleDeCaso(CTX, CASO);
+    await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     const cual = reg.tablas.indexOf(claimAttachments);
     expect(Object.keys(reg.columnas[cual] ?? {})).toContain("rejected_reason");
@@ -367,7 +423,7 @@ describe("cargarDetalleDeCaso — las normalizaciones de borde", () => {
       ])
     );
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(res!.attachments.map((a) => a.duplicado)).toEqual([false, true, false, false, false]);
     expect(res!.attachments[0].resumen).toBe("Foto del frente.");
@@ -388,7 +444,7 @@ describe("cargarDetalleDeCaso — las normalizaciones de borde", () => {
 describe("ultimoParaReleer", () => {
   it("con pocos mensajes reusa los que ya se trajeron, sin consultar de nuevo", async () => {
     const reg = espiar(TODO);
-    const detalle = await cargarDetalleDeCaso(CTX, CASO);
+    const detalle = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
     const consultasAntes = reg.tablas.length;
 
     const res = await ultimoParaReleer(CTX, CASO, detalle!);
@@ -412,7 +468,7 @@ describe("ultimoParaReleer", () => {
     porTabla.set(rawMessages, cinco);
     const reg = espiar(porTabla);
 
-    const detalle = await cargarDetalleDeCaso(CTX, CASO);
+    const detalle = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
     expect(detalle!.hayMasMensajes).toBe(true);
 
     const consultasAntes = reg.tablas.length;
@@ -426,7 +482,7 @@ describe("ultimoParaReleer", () => {
     porTabla.set(rawMessages, []);
     espiar(porTabla);
 
-    const detalle = await cargarDetalleDeCaso(CTX, CASO);
+    const detalle = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
     const res = await ultimoParaReleer(CTX, CASO, detalle!);
 
     // El parser recibe esto directo.
@@ -438,7 +494,7 @@ describe("cargarDetalleDeCaso — el nombre de quien tiene el caso", () => {
   it("sin asignado, no pide el nombre", async () => {
     const reg = espiar(TODO);
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(reg.tablas).not.toContain(users);
     expect(res!.asignado_nombre).toBeNull();
@@ -450,7 +506,7 @@ describe("cargarDetalleDeCaso — el nombre de quien tiene el caso", () => {
     porTabla.set(users, [{ n: "Ana Analista" }]);
     const reg = espiar(porTabla);
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(reg.tablas).toContain(users);
     expect(res!.asignado_nombre).toBe("Ana Analista");
@@ -461,10 +517,181 @@ describe("cargarDetalleDeCaso — el nombre de quien tiene el caso", () => {
     porTabla.set(cases, [{ ...CASO_DE_CORREO, assigned_to: "user-1" }]);
     espiar(porTabla, new Set([users]));
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(res).not.toBeNull();
     expect(res!.asignado_nombre).toBeNull();
+  });
+});
+
+describe("cargarDetalleDeCaso — el plan y la carga del equipo (B9, B11)", () => {
+  const PASOS = [
+    {
+      clave: "revisar_documentacion",
+      titulo: "Revisar la documentación",
+      orden: 1,
+      auto: null,
+      hecho_en: "2026-09-29T12:00:00Z",
+    },
+    { clave: "entregar_a_aseguradora", titulo: "Entregar el caso", orden: 2, auto: "en_liquidacion", hecho_en: null },
+  ];
+  const CARGA = [
+    { id: "user-2", full_name: "Beto Bravo", role: "analyst", abiertos: 1 },
+    { id: "user-1", full_name: "Ana Analista", role: "specialist", abiertos: 4 },
+  ];
+  const conAsignado = (): PorTabla => {
+    const porTabla = new Map(TODO);
+    porTabla.set(cases, [{ ...CASO_DE_CORREO, assigned_to: "user-1" }]);
+    porTabla.set(casePlanPasos, PASOS);
+    return porTabla;
+  };
+
+  it("un viewer no pide plan ni carga y ve el plan vacío", async () => {
+    const reg = espiar(conAsignado());
+
+    const res = await cargarDetalleDeCaso(CTX, CASO, "viewer");
+
+    expect(reg.tablas).not.toContain(casePlanPasos);
+    expect(res!.plan).toEqual([]);
+    expect(res!.carga).toEqual([]);
+  });
+
+  it("un analista pide el plan y el nombre, no la carga", async () => {
+    const porTabla = conAsignado();
+    porTabla.set(users, [{ n: "Ana Analista" }]);
+    const reg = espiar(porTabla);
+
+    const res = await cargarDetalleDeCaso(CTX, CASO, "analyst");
+
+    expect(reg.tablas).toContain(casePlanPasos);
+    // La única consulta a `users` es la del nombre: la de la carga cuenta casos abiertos.
+    const deUsers = reg.columnas.filter((_, i) => reg.tablas[i] === users);
+    expect(deUsers).toHaveLength(1);
+    expect(Object.keys(deUsers[0] ?? {})).toEqual(["n"]);
+    expect(res!.carga).toEqual([]);
+    expect(res!.asignado_nombre).toBe("Ana Analista");
+  });
+
+  it("un analista con el caso sin asignar sólo pide el plan", async () => {
+    const porTabla = conAsignado();
+    porTabla.set(cases, [CASO_DE_CORREO]);
+    const reg = espiar(porTabla);
+
+    await cargarDetalleDeCaso(CTX, CASO, "analyst");
+
+    expect(reg.tablas).toContain(casePlanPasos);
+    expect(reg.tablas).not.toContain(users);
+  });
+
+  it.each(["owner", "admin", "specialist"])(
+    "%s pide el plan, la carga y el nombre en el mismo lote",
+    async (rol) => {
+      const porTabla = conAsignado();
+      porTabla.set(users, (columnas) => (columnas && "abiertos" in columnas ? CARGA : [{ n: "Ana Analista" }]));
+      const reg = espiar(porTabla);
+
+      const res = await cargarDetalleDeCaso(CTX, CASO, rol);
+
+      expect(mockEnTenantVarias).toHaveBeenCalledTimes(1);
+      const deUsers = reg.columnas.filter((_, i) => reg.tablas[i] === users);
+      expect(deUsers.map((c) => Object.keys(c ?? {}).includes("abiertos"))).toEqual([true, false]);
+      expect(res!.carga).toEqual(CARGA);
+      expect(res!.asignado_nombre).toBe("Ana Analista");
+      // Sigue siendo la segunda espera: el lote sale junto con las demás consultas.
+      expect(tandas(reg.eventos)).toBe(2);
+    }
+  );
+
+  it("los pasos salen con `hecho` y sin la fecha en que se hicieron", async () => {
+    espiar(conAsignado());
+
+    const res = await cargarDetalleDeCaso(CTX, CASO, "analyst");
+
+    expect(res!.plan).toEqual([
+      { clave: "revisar_documentacion", titulo: "Revisar la documentación", orden: 1, auto: null, hecho: true },
+      { clave: "entregar_a_aseguradora", titulo: "Entregar el caso", orden: 2, auto: "en_liquidacion", hecho: false },
+    ]);
+  });
+
+  it("si quien lo tiene ya no edita, no está en la carga pero su nombre se ve igual", async () => {
+    const porTabla = conAsignado();
+    porTabla.set(cases, [{ ...CASO_DE_CORREO, assigned_to: "user-9" }]);
+    porTabla.set(users, (columnas) => (columnas && "abiertos" in columnas ? [CARGA[0]] : [{ n: "Carla Vieja" }]));
+    espiar(porTabla);
+
+    const res = await cargarDetalleDeCaso(CTX, CASO, "admin");
+
+    expect(res!.carga.map((p) => p.id)).toEqual(["user-2"]);
+    expect(res!.asignado_nombre).toBe("Carla Vieja");
+  });
+
+  it("si falla el lote, la pantalla abre igual con el resto y sin plan ni carga", async () => {
+    espiar(conAsignado(), new Set([casePlanPasos]));
+
+    const res = await cargarDetalleDeCaso(CTX, CASO, "admin");
+
+    expect(res).not.toBeNull();
+    expect(res!.plan).toEqual([]);
+    expect(res!.carga).toEqual([]);
+    expect(res!.asignado_nombre).toBeNull();
+    expect(res!.extracted_fields).toHaveLength(1);
+  });
+
+  describe("el título del plazo propio que corre en el caso (B10)", () => {
+    const PLAZOS = [
+      { clave: "primer_contacto", titulo: "Primer contacto", dias: 2, ancla: "recibido" },
+      { clave: "pago_de_siniestro", titulo: "Pago del siniestro", dias: 15, ancla: "en_liquidacion" },
+    ];
+    const conPlazo = (vence_plazo: string | null, plazos: unknown = PLAZOS): PorTabla => {
+      const porTabla = conAsignado();
+      porTabla.set(cases, [{ ...CASO_DE_CORREO, assigned_to: "user-1", vence_plazo }]);
+      porTabla.set(users, [{ n: "Ana Analista" }]);
+      porTabla.set(tenants, [{ p: plazos }]);
+      return porTabla;
+    };
+
+    it("sale del título que configuró la aseguradora, con el plan y el nombre en el mismo lote", async () => {
+      const reg = espiar(conPlazo("pago_de_siniestro"));
+
+      const res = await cargarDetalleDeCaso(CTX, CASO, "analyst");
+
+      expect(res!.plazo_titulo).toBe("Pago del siniestro");
+      expect(mockEnTenantVarias).toHaveBeenCalledTimes(1);
+      expect(reg.tablas.filter((t) => t === tenants)).toHaveLength(1);
+      expect(res!.asignado_nombre).toBe("Ana Analista");
+      expect(tandas(reg.eventos)).toBe(2);
+    });
+
+    it("el art. 56 tiene su texto: no consulta la configuración", async () => {
+      const reg = espiar(conPlazo("art56"));
+
+      const res = await cargarDetalleDeCaso(CTX, CASO, "analyst");
+
+      expect(reg.tablas).not.toContain(tenants);
+      expect(res!.plazo_titulo).toBeNull();
+    });
+
+    it("sin plazo corriendo, o para quien no edita, no consulta la configuración", async () => {
+      const sinPlazo = espiar(conPlazo(null));
+      await cargarDetalleDeCaso(CTX, CASO, "analyst");
+      expect(sinPlazo.tablas).not.toContain(tenants);
+
+      const viewer = espiar(conPlazo("pago_de_siniestro"));
+      const res = await cargarDetalleDeCaso(CTX, CASO, "viewer");
+      expect(viewer.tablas).not.toContain(tenants);
+      expect(res!.plazo_titulo).toBeNull();
+    });
+
+    it("un plazo que ya no está configurado, o una configuración que no valida, queda sin título", async () => {
+      espiar(conPlazo("borrado"));
+      expect((await cargarDetalleDeCaso(CTX, CASO, "analyst"))!.plazo_titulo).toBeNull();
+
+      espiar(conPlazo("pago_de_siniestro", [{ clave: "pago_de_siniestro", titulo: "" }]));
+      expect((await cargarDetalleDeCaso(CTX, CASO, "analyst"))!.plazo_titulo).toBeNull();
+
+      espiar(conPlazo("pago_de_siniestro", null));
+      expect((await cargarDetalleDeCaso(CTX, CASO, "analyst"))!.plazo_titulo).toBeNull();
+    });
   });
 });
 
@@ -495,7 +722,7 @@ describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () =>
   it("sin póliza en el caso no la pide, y el panel lo dice", async () => {
     const reg = espiar(TODO);
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(reg.tablas).not.toContain(policies);
     expect(res!.cobertura).toEqual({
@@ -508,7 +735,7 @@ describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () =>
   it("con póliza, la pide en la misma tanda y coteja con la fecha del siniestro", async () => {
     const reg = espiar(conPoliza());
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(tandas(reg.eventos)).toBe(2);
     expect(reg.tablas.filter((t) => t === policies)).toHaveLength(1);
@@ -523,7 +750,7 @@ describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () =>
   it("las patentes salen de una subconsulta atada a la póliza, no de un join", async () => {
     const reg = espiar(conPoliza());
 
-    await cargarDetalleDeCaso(CTX, CASO);
+    await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     const cols = reg.columnas[reg.tablas.indexOf(policies)] ?? {};
     expect(new PgDialect().sqlToQuery(cols.patentes as SQL).sql).toBe(
@@ -534,7 +761,7 @@ describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () =>
   it("un siniestro anterior a la vigencia no cubre, aunque hoy la póliza esté vigente", async () => {
     espiar(conPoliza({ ...POLIZA, start_date: "2026-04-01" }));
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(res!.cobertura!.resultado).toEqual({ veredicto: "no_cubre", motivos: ["fuera_de_vigencia"] });
   });
@@ -547,7 +774,7 @@ describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () =>
       ])
     );
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(res!.cobertura!.resultado).toEqual({ veredicto: "no_cubre", motivos: ["fuera_de_vigencia"] });
   });
@@ -555,7 +782,7 @@ describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () =>
   it("el PDF subido y sin leer no inventa coberturas", async () => {
     espiar(conPoliza({ ...POLIZA, coberturas: null, condiciones_leidas_en: null }));
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(res!.cobertura!.condiciones).toBe("sin_leer");
     expect(res!.cobertura!.resultado).toEqual({ veredicto: "dudoso", motivos: ["sin_coberturas_cargadas"] });
@@ -564,7 +791,7 @@ describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () =>
   it("si la póliza no se pudo leer no hay panel, y el caso se ve igual", async () => {
     espiar(conPoliza(), new Set([policies]));
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(res).not.toBeNull();
     expect(res!.cobertura).toBeNull();
@@ -604,7 +831,7 @@ describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () =>
       ])
     );
 
-    const res = await cargarDetalleDeCaso(CTX, CASO);
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(res!.attachments.map((a) => a.esPresupuesto)).toEqual([true, false, true, false, false, false, true]);
     expect(res!.attachments[0].lectura_presupuesto).toEqual(lectura);
@@ -668,31 +895,31 @@ describe("cargarDetalleDeCaso — responsabilidad y carta de un tercero (B18, B2
 
   it("la opinión guardada llega validada; una que no tiene la forma no llega", async () => {
     espiar(conAdjuntos([], { claim_type: "choque", responsabilidad: OPINION }));
-    expect((await cargarDetalleDeCaso(CTX, CASO))!.responsabilidad).toEqual(OPINION);
+    expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.responsabilidad).toEqual(OPINION);
 
     espiar(conAdjuntos([], { claim_type: "choque", responsabilidad: { ...OPINION, responsable: "el vecino" } }));
-    expect((await cargarDetalleDeCaso(CTX, CASO))!.responsabilidad).toBeNull();
+    expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.responsabilidad).toBeNull();
 
     espiar(conAdjuntos([], { claim_type: "choque", responsabilidad: null }));
-    expect((await cargarDetalleDeCaso(CTX, CASO))!.responsabilidad).toBeNull();
+    expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.responsabilidad).toBeNull();
   });
 
   it("un choque donde el asegurado responde ante un tercero (rc) también la muestra", async () => {
     espiar(conAdjuntos([], { claim_type: "rc", responsabilidad: OPINION }));
-    expect((await cargarDetalleDeCaso(CTX, CASO))!.responsabilidad).toEqual(OPINION);
+    expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.responsabilidad).toEqual(OPINION);
   });
 
   it("si el caso ya no es un choque, una opinión que quedó guardada no se muestra", async () => {
     for (const claim_type of ["robo", "other", null]) {
       espiar(conAdjuntos([], { claim_type, responsabilidad: OPINION }));
-      expect((await cargarDetalleDeCaso(CTX, CASO))!.responsabilidad).toBeNull();
+      expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.responsabilidad).toBeNull();
     }
   });
 
   it("la carta leída sale con lo que falta y el cruce con la historia clínica", async () => {
     espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", reclamo: RECLAMO })]));
 
-    const { cartas } = (await cargarDetalleDeCaso(CTX, CASO))!;
+    const { cartas } = (await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!;
 
     expect(cartas).toHaveLength(1);
     expect(cartas[0]).toMatchObject({
@@ -711,7 +938,7 @@ describe("cargarDetalleDeCaso — responsabilidad y carta de un tercero (B18, B2
         fila("hc", { tipo: "historia_clinica", nombre: "Marta Gómez" }),
       ])
     );
-    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]!.cruces).toEqual([]);
+    expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.cartas[0]!.cruces).toEqual([]);
 
     espiar(
       conAdjuntos([
@@ -719,13 +946,13 @@ describe("cargarDetalleDeCaso — responsabilidad y carta de un tercero (B18, B2
         fila("hc", { tipo: "historia_clinica", nombre: "Roberto Sosa" }),
       ])
     );
-    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]!.cruces).toEqual(["historia_de_otra_persona"]);
+    expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.cartas[0]!.cruces).toEqual(["historia_de_otra_persona"]);
   });
 
   it("una carta reconocida y todavía sin leer sale como sin leer, sin inventar nada", async () => {
     espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", reclamo: null })]));
 
-    const { cartas } = (await cargarDetalleDeCaso(CTX, CASO))!;
+    const { cartas } = (await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!;
 
     expect(cartas).toEqual([
       { id: "carta", filename: "carta.pdf", reclamo: null, sinLeer: null, faltantes: [], cruces: [], total: null },
@@ -734,15 +961,15 @@ describe("cargarDetalleDeCaso — responsabilidad y carta de un tercero (B18, B2
 
   it("el motivo por el que una carta no se pudo leer viaja a la pantalla; uno desconocido, no", async () => {
     espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", sin_leer: "paginas" })]));
-    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]).toMatchObject({ reclamo: null, sinLeer: "paginas" });
+    expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.cartas[0]).toMatchObject({ reclamo: null, sinLeer: "paginas" });
 
     espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", sin_leer: "el_vecino" })]));
-    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]).toMatchObject({ reclamo: null, sinLeer: null });
+    expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.cartas[0]).toMatchObject({ reclamo: null, sinLeer: null });
   });
 
   it("una carta ya leída no muestra un motivo viejo", async () => {
     espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", reclamo: RECLAMO, sin_leer: "formato" })]));
-    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]).toMatchObject({ sinLeer: null });
+    expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.cartas[0]).toMatchObject({ sinLeer: null });
   });
 
   it("el mismo archivo mandado dos veces es una carta y un panel", async () => {
@@ -753,14 +980,14 @@ describe("cargarDetalleDeCaso — responsabilidad y carta de un tercero (B18, B2
         fila("otra", { tipo: "carta_reclamo", reclamo: RECLAMO, content_hash: "h2" }),
       ])
     );
-    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas.map((c) => c.id)).toEqual(["carta", "otra"]);
+    expect((await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.cartas.map((c) => c.id)).toEqual(["carta", "otra"]);
   });
 
   describe("el presupuesto que la carta dice adjuntar", () => {
     const sinAdjuntar = { ...RECLAMO, adjunta: [], rubros: [{ rubro: "danio_material", monto: 800_000 }] };
     const faltantes = async (adjuntos: unknown[]) => {
       espiar(conAdjuntos(adjuntos));
-      return (await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]!.faltantes;
+      return (await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!.cartas[0]!.faltantes;
     };
 
     it("lo decide la misma regla que ofrece leer un presupuesto", async () => {
@@ -791,7 +1018,7 @@ describe("cargarDetalleDeCaso — responsabilidad y carta de un tercero (B18, B2
       ])
     );
 
-    const { cartas } = (await cargarDetalleDeCaso(CTX, CASO))!;
+    const { cartas } = (await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!;
 
     expect(cartas.map((c) => [c.id, c.reclamo])).toEqual([["rota", null]]);
   });
@@ -799,7 +1026,7 @@ describe("cargarDetalleDeCaso — responsabilidad y carta de un tercero (B18, B2
   it("los adjuntos no llevan ni el nombre del documento ni la lectura de la carta ni su motivo", async () => {
     const reg = espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", reclamo: RECLAMO, nombre: "Marta Gómez" })]));
 
-    const { attachments } = (await cargarDetalleDeCaso(CTX, CASO))!;
+    const { attachments } = (await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN))!;
 
     expect(attachments[0]).not.toHaveProperty("nombre");
     expect(attachments[0]).not.toHaveProperty("reclamo");

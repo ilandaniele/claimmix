@@ -80,14 +80,15 @@ test.describe("Login page — Spanish UI (AC4)", () => {
   });
 
   test("shows validation error for invalid email", async ({ page }) => {
-    await page.fill('[name="email"]', "not-an-email");
+    // Por la etiqueta: el formulario del SSO de la empresa también tiene un campo «email».
+    const emailInput = page.getByLabel("Correo electrónico");
+    await emailInput.fill("not-an-email");
     await page.fill('[name="password"]', "somepassword");
     await page.click('[type="submit"]');
 
     // HTML5 validation or server-side error.
     // The browser may prevent submission with native validation.
     // Check the email field is invalid.
-    const emailInput = page.locator('[name="email"]');
     const isInvalid =
       (await emailInput.getAttribute("aria-invalid")) === "true" ||
       (await emailInput.evaluate((el: HTMLInputElement) => !el.validity.valid));

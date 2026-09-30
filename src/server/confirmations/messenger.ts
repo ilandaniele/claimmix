@@ -43,6 +43,8 @@ import {
   NO_COINCIDE_CON_EL_TITULAR,
 } from "@/core/mensajes/titular-que-no-coincide";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
+import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
+import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { CUIDADO } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
@@ -93,10 +95,11 @@ export interface AgentMessenger {
 export const emailMessenger: AgentMessenger = {
   async send(message) {
     let cuerpo: string | null = null;
+    let piso: string | null = null;
     try {
-      const piso = renderTemplate(message.template, message.data);
-      const prosa = await writeReply(message, piso.cuerpo, "email");
-      if (prosa !== piso.cuerpo) cuerpo = prosa;
+      piso = renderTemplate(message.template, message.data).cuerpo;
+      const prosa = await writeReply(message, piso, "email");
+      if (prosa !== piso) cuerpo = prosa;
     } catch (err) {
       // Este módulo promete que nada acá tira: una denuncia ya extraída y
       // guardada no se puede perder porque el redactor falló.
@@ -107,11 +110,39 @@ export const emailMessenger: AgentMessenger = {
       }, "email.messenger.compose_failed");
     }
 
+    // El primer mail a una dirección que escribió alguien en un formulario: la frase va siempre.
+    if (piso !== null && message.data.origenWeb === true && message.data.isFollowUp !== true) {
+      cuerpo = [cuerpo ?? piso, SI_NO_FUISTE_VOS].join("\n\n");
+    }
+
     return seEntrego(
       await dispatchOutboundEmail(
         cuerpo === null ? message : { ...message, data: { ...message.data, cuerpo } }
       )
     );
+  },
+};
+
+/**
+ * El formulario web: mismo mail, y el redactor sabe que la persona no escribió uno.
+ *
+ * No hay un segundo camino de envío. La dirección sale de lo que la persona
+ * cargó y la respuesta viaja por la casilla de la aseguradora, igual que la de
+ * un correo. Lo único distinto es cómo le habla el primer mensaje.
+ *
+ * «Primero» es lo que hay en `outbound_messages`, no lo que el orquestador
+ * haya marcado: sólo los pedidos de datos traen `isFollowUp`, así que el
+ * pedido de confirmación o la derivación de un caso que ya venía hablando
+ * repetían la frase y el agradecimiento.
+ */
+export const webMessenger: AgentMessenger = {
+  async send(message) {
+    const isFollowUp =
+      message.data.isFollowUp ?? (await hasPriorOutbound(message.caseId, message.tenantId));
+    return emailMessenger.send({
+      ...message,
+      data: { ...message.data, origenWeb: true, isFollowUp },
+    });
   },
 };
 
@@ -506,6 +537,7 @@ async function writeReply(
       typeof message.data.claimType === "string" ? message.data.claimType : null
     ),
     isFollowUp: message.data.isFollowUp === true,
+    origenWeb: message.data.origenWeb === true,
     claimantName:
       typeof message.data.claimantName === "string" ? message.data.claimantName : null,
     question: typeof message.data.question === "string" ? message.data.question : null,
@@ -764,5 +796,6 @@ export const simulatedWhatsappMessenger: AgentMessenger = {
 export function messengerFor(channel: string): AgentMessenger {
   if (channel === "whatsapp_sim") return simulatedWhatsappMessenger;
   if (channel === "whatsapp") return whatsappMessenger;
+  if (channel === "web") return webMessenger;
   return emailMessenger;
 }

@@ -147,6 +147,16 @@ global (`recordarPendientes`) ni prende `recordatorio_horas` en el tenant, y la
 limpieza borra el caso y, en cascada, sus filas de `case_recordatorios`. Si
 falla con 42703 o 42P01, falta aplicar la 0039 en esa base.
 
+`consorcio-por-mail` (B26) es el ramo nuevo de punta a punta: un administrador
+denuncia una cañería rota en las partes comunes de un edificio, por mail y sin
+fotos. Siembra su póliza de consorcio (sin vehículo) y la borra al terminar.
+Afirma sólo lo que no depende de cómo redacte el modelo: una respuesta, que no
+pida `patente_vehiculo` (`noAsked`), que el número de póliza y el nombre
+sobrevivan (`knows`) y que el caso quede clasificado como `consorcio`
+(`finally.ramo`, lo que hay en `cases.claim_type`). No fija el estado final: el
+consorcio pide fotos y presupuesto, y sin fotos de verdad no hay con qué
+cerrarlos.
+
 También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
 hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún
 turno de la persona habló de heridos. Si no dijo nada, se le pregunta abierto.
@@ -788,7 +798,7 @@ chequeos: el smoke primero, y colgando de él los otros seis.
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
-2. `pnpm rehearse`: las veinticuatro conversaciones enteras contra el agente real.
+2. `pnpm rehearse`: las veinticinco conversaciones enteras contra el agente real.
    Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
 3. `pnpm load --reporte carga.json`: las consultas del tablero con la mesa
@@ -801,11 +811,10 @@ chequeos: el smoke primero, y colgando de él los otros seis.
    extracciones, y borra los casos al terminar.
 5. `pnpm pentest`: cada ruta de la API sin credenciales, las firmas de webhook,
    las cabeceras y lo que cuenta un error. Gratis. Falla si algo quedó abierto.
-6. `pnpm docs-config`: el código y la base tienen que decir lo mismo sobre qué
-   papeles pide cada tipo de siniestro. Sólo le pregunta al catálogo. Antes,
-   que no haya una migración del repo sin registrar en `schema_migrations`
-   (`migrate.mjs --exigir-al-dia`, sólo SELECT); si ésa falla, la paridad
-   corre igual.
+6. Migraciones al día: que no haya una migración del repo sin registrar en
+   `schema_migrations` (`migrate.mjs --exigir-al-dia`, sólo SELECT). La
+   comparación de documentos contra `required_docs_config` se retiró con 0044:
+   la tabla ya no se lee.
 7. `pnpm permisos`: el rol restringido con el que consulta la aplicación puede
    hacer lo que la capa de datos le pide — y en `audit_log`, que es sólo de
    alta desde 0032, comprueba que NO tenga UPDATE ni DELETE. Sólo lee.

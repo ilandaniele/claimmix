@@ -75,6 +75,21 @@ export function policyNumberEquals(col: AnyPgColumn, normalized: string): SQL {
   return sql`upper(replace(${col}, ' ', '')) = ${normalized}`;
 }
 
+/**
+ * `digitsOnlyEquals` contra varios valores a la vez: una sola consulta para
+ * todo un archivo. Con lista vacía no devuelve nada.
+ */
+export function digitsOnlyIn(col: AnyPgColumn, digits: string[]): SQL {
+  if (!digits.length) return sql`false`;
+  return sql`regexp_replace(coalesce(${col}, ''), '[^0-9]', '', 'g') in (${sql.join(digits.map((d) => sql`${d}`), sql`, `)})`;
+}
+
+/** `policyNumberEquals` contra varios números a la vez; con lista vacía no devuelve nada. */
+export function policyNumberIn(col: AnyPgColumn, normalized: string[]): SQL {
+  if (!normalized.length) return sql`false`;
+  return sql`upper(replace(${col}, ' ', '')) in (${sql.join(normalized.map((n) => sql`${n}`), sql`, `)})`;
+}
+
 export async function countRows(
   ctx: TenantContext,
   table: PgTable | SQLWrapper,

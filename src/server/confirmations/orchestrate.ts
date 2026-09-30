@@ -93,6 +93,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { MOTIVO_DEVOLVER } from "@/server/cases/devolver-al-agente";
 import { redactObject } from "@/lib/audit/redact";
 import { errorCode } from "@/lib/observability/error-code";
+import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { logger } from "@/lib/observability/logger";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -2274,29 +2275,6 @@ async function factsLearnedSinceWeLastSpoke(
   } catch (err) {
     // Callarse es la dirección insegura acá: ante la duda, contestar.
     logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_for_new_facts");
-    return false;
-  }
-}
-
-/** Whether anything has already gone out to the claimant on this case. */
-async function hasPriorOutbound(caseId: string, tenantId: string): Promise<boolean> {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
-  try {
-    const rows = await enTenant(tenantCtx, (db) =>
-      db
-        .select({ id: outboundMessages.id })
-        .from(outboundMessages)
-        .where(
-          eq(outboundMessages.case_id, caseId)
-        )
-        .limit(1)
-    );
-    return rows.length > 0;
-  } catch (err) {
-    // Fall back to the first-contact wording: greeting someone twice is a
-    // smaller error than closing a conversation that never happened.
-    logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_prior_outbound");
     return false;
   }
 }

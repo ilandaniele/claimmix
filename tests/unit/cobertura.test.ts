@@ -74,6 +74,14 @@ describe("evaluarCobertura", () => {
     expect(con({ tipo: null }).veredicto).toBe("dudoso");
   });
 
+  it("una clave de ramo propio que coincide con una propiedad de Object no rompe: queda en duda", () => {
+    // «constructor» cumple el formato de clave de ramo y, indexado a secas, devuelve una función.
+    expect(con({ tipo: "constructor" })).toEqual({ veredicto: "dudoso", motivos: ["sin_cobertura_para_el_tipo"] });
+    expect(con({ tipo: "constructor" }, { coberturas: [{ codigo: "rc", suma_asegurada: null, franquicia: null }] }).veredicto).toBe(
+      "dudoso"
+    );
+  });
+
   it("una cobertura que alcanza sólo una parte del tipo deja la duda, no cubre ni descarta", () => {
     const soloTotal = { coberturas: [{ codigo: "danio_total", suma_asegurada: null, franquicia: null }] };
     const soloRc = { coberturas: [{ codigo: "rc", suma_asegurada: null, franquicia: null }] };

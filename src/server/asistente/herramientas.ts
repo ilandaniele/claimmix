@@ -35,7 +35,7 @@ import { conversacionDelCaso, type Conversacion } from "@/server/cases/conversac
 import { mensajesSinPiiSiNoCorresponde, OCULTO } from "@/server/cases/pii";
 import { redactString } from "@/lib/audit/redact";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
-import type { CaseStatus } from "@/lib/schemas/cases";
+import { CANALES_REALES, type CaseStatus } from "@/lib/schemas/cases";
 
 /**
  * `count(*)` de casos, filtrado por período, canal, situación y `is_claim`.
@@ -43,7 +43,7 @@ import type { CaseStatus } from "@/lib/schemas/cases";
  * `canal` compara contra el valor real de la columna: "email" y "whatsapp"
  * son los canales reales, distintos de "email_sim"/"whatsapp_sim" que deja el
  * simulador — a propósito, para que "¿cuántos por WhatsApp?" cuente tráfico
- * real y no ensayos. Sin canal pedido, igual se restringe a los dos reales
+ * real y no ensayos. Sin canal pedido, igual se restringe a los reales
  * (mismo filtro que `consultaDeActividad` en metrics/kpis.ts): si no, un
  * conteo sin filtro incluye los cientos de `email_sim` de batch-simulate y ya
  * no coincide con lo que muestra /metricas.
@@ -55,7 +55,7 @@ export async function contarCasos(
   const { desde, hasta } = rangoDelPeriodo(i.periodo, new Date());
 
   const condiciones = [gte(cases.created_at, desde), lt(cases.created_at, hasta)];
-  condiciones.push(i.canal ? eq(cases.channel, i.canal) : inArray(cases.channel, ["whatsapp", "email"]));
+  condiciones.push(i.canal ? eq(cases.channel, i.canal) : inArray(cases.channel, [...CANALES_REALES]));
   if (i.situacion) condiciones.push(inArray(cases.status, estadosAConsultar(i.situacion)));
   if (i.solo_reclamos) condiciones.push(eq(cases.is_claim, true));
 

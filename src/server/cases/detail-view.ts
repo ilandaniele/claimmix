@@ -520,7 +520,8 @@ export async function cargarDetalleDeCaso(
    * condicionarlos al correo dejaría al acordeón de un caso de WhatsApp
    * diciendo «sin texto original» sobre un caso que sí lo tiene.
    */
-  const esDeCorreo = caseRow.channel === "email" || caseRow.channel === "email_sim";
+  const esDeCorreo =
+    caseRow.channel === "email" || caseRow.channel === "email_sim" || caseRow.channel === "web";
 
   const [extracted_fields, missing_docs, audit_log, confirmations, { adjuntos: attachments, cartas }, messages, trabajo, poliza] =
     await Promise.all([

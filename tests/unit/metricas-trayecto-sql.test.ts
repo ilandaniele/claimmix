@@ -66,7 +66,7 @@ describe("consultaDeCiclo", () => {
   });
 
   it("mide sólo reclamos de canales reales, sin simulaciones", () => {
-    expect(sql).toContain(`"cases"."channel" in ('whatsapp', 'email')`);
+    expect(sql).toContain(`"cases"."channel" in ('whatsapp', 'email', 'web')`);
     expect(sql).toContain(`"cases"."is_claim" is true`);
     expect(sql).not.toMatch(/_sim/);
   });

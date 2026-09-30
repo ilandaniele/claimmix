@@ -4307,7 +4307,46 @@ y un caso viejo saldría como desvío sin serlo.
 `es-AR.servidor.ts` y `en-US.servidor.ts`; al navegador sólo llegaron `nav.desvios` y
 las cadenas de la caja del asistente.
 
+### Padrón por CSV, formulario web público y ramos nuevos (B16, B17 y B26, 2026-09-30)
+
+Tres huecos más del informe de Clive del 28/09, en la rama
+`feat/padron-formulario-ramos-b16-b17-b26`, que sale de la de B12, B14, B15 y B22.
+La migración es la `0044_formulario_web_y_ramos.sql`. Es el único cambio de base.
+
+**B16: padrón.** `src/core/padron/` (puro) y `src/server/padron/`. El CSV de
+clientes y pólizas se sube a `POST /api/padron/vista-previa`, que dice qué filas
+entran, cuáles se actualizan y cuáles traen error, sin escribir nada;
+`POST /api/padron/importar` las aplica de a 500 filas con `enTenantVarias`.
+También hay alta y edición a mano de clientes y pólizas
+(`/api/customers/[id]`, `/api/policies/[id]`). Es cosa de admin y editor.
+
+**B17: formulario web.** `/denuncia/[slug]` es público y lleva al inquilino por su
+`slug`, nunca por el id interno. Nace apagado y se enciende desde `/agente`
+(`FormularioWebPanel`). La página firma un token HMAC derivado por HKDF de
+`BETTER_AUTH_SECRET`; además hay un campo trampa y límites por IP, por slug y por
+correo en el limitador de Postgres. La denuncia entra como canal `web`, pasa por
+el mismo despachador de extracción (`despachar-extraccion.ts`) y el seguimiento
+sigue por correo.
+
+**B26: ramos.** `src/core/case/ramos.ts` suma ART, vida, integral de comercio y
+consorcio a los nativos. Cada aseguradora puede crear tipos propios, con nombre en
+las dos lenguas y sus documentos y datos (`/agente`, pestaña «Tipos de siniestro»;
+tabla `tenant_claim_types`). `cases.claim_type` deja de ser lista cerrada: el
+CHECK sólo exige el formato de la clave.
+
+**Peso del bundle.** 309,8 kB contra el tope de 310, medido con
+`pnpm build && pnpm peso`. Esta tanda traía 310,5: las oraciones de
+`FIELD_LABELS` que sólo lee el servidor pasaron a
+`src/lib/labels/instruccion-de-campo.ts` y dejaron de viajar al navegador.
+
 ### 🙋 Waiting on you (not code)
+
+- **Aplicar 0044 (B16, B17 y B26) antes de desplegar.** A mano en
+  `ep-proud-resonance`, en la rama `production` de Veltra (`STAGING_DATABASE_URL`)
+  y en QA (`ep-wispy-flower`), en ese orden y después de la 0043. Hasta que esté
+  aplicada, `/api/health` da degradado con «migración 0044 pendiente». Además,
+  encender el formulario de un inquilino de prueba y mandar una denuncia real por
+  la web: el ensayo no tiene escenario del canal `web`.
 
 - **Aplicar 0043 (B12, B14, B15 y B22) antes de desplegar.** A mano en
   `ep-proud-resonance`, en la rama `production` de Veltra (`STAGING_DATABASE_URL`)

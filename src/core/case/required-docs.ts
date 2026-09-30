@@ -11,6 +11,7 @@
  *   incendio: informe_bomberos (req), fotos_danos (req), denuncia_policial (req)
  */
 
+import { esRamoNativo } from "@/core/case/ramos";
 import type { ClaimType } from "@/lib/schemas/cases";
 
 export interface RequiredDoc {
@@ -55,9 +56,37 @@ export const REQUIRED_DOCS_CONFIG: Record<ClaimType, readonly RequiredDoc[]> = {
   accidente_personal: [
     { doc_key: "certificado_medico", label_es: "Certificado médico / alta hospitalaria", required: true },
   ],
+  art: [
+    { doc_key: "denuncia_art", label_es: "Denuncia del accidente de trabajo", required: true },
+    { doc_key: "certificado_medico", label_es: "Certificado médico / alta hospitalaria", required: true },
+  ],
+  vida: [
+    { doc_key: "certificado_defuncion", label_es: "Certificado de defunción", required: true },
+    { doc_key: "dni_beneficiario", label_es: "DNI del beneficiario", required: true },
+  ],
+  integral_comercio: [
+    { doc_key: "fotos_danos", label_es: "Fotos de los daños en el comercio", required: true },
+    { doc_key: "inventario_bienes", label_es: "Listado de bienes dañados o robados", required: true },
+    { doc_key: "denuncia_policial", label_es: "Denuncia policial (si hubo robo)", required: false },
+  ],
+  consorcio: [
+    { doc_key: "fotos_danos", label_es: "Fotos de los daños en el edificio", required: true },
+    { doc_key: "presupuesto_reparacion", label_es: "Presupuesto de la reparación", required: true },
+    { doc_key: "denuncia_policial", label_es: "Denuncia policial (si hubo robo o vandalismo)", required: false },
+  ],
   // "other" claim types have no pre-configured required docs — reviewed case by case.
   other: [],
 };
+
+/**
+ * Los documentos que un inquilino puede pedirle a un ramo propio: los que ya
+ * tienen nombre, instrucción y tipo «documento» en `claim-fields.ts`. Un
+ * catálogo cerrado: una clave inventada saldría al asegurado humanizada.
+ */
+export const CATALOGO_DE_DOCUMENTOS: readonly string[] = [
+  ...new Set(Object.values(REQUIRED_DOCS_CONFIG).flatMap((docs) => docs.map((d) => d.doc_key))),
+  "foto_vidrio",
+];
 
 /**
  * Get all required docs for a claim type.
@@ -67,6 +96,13 @@ export function getRequiredDocs(claimType: ClaimType): readonly RequiredDoc[] {
   return (REQUIRED_DOCS_CONFIG[claimType] ?? []).filter((d) => d.required);
 }
 
+/** Las claves de los documentos obligatorios del código para un ramo cualquiera; vacío si no es nativo. */
+export function clavesDeDocumentosObligatorios(claimType: string): string[] {
+  return esRamoNativo(claimType)
+    ? getRequiredDocs(claimType).map((d) => d.doc_key)
+    : [];
+}
+
 /**
  * Get all doc keys (required and optional) for a claim type.
  */
@@ -74,27 +110,15 @@ export function getAllDocKeys(claimType: ClaimType): readonly string[] {
   return (REQUIRED_DOCS_CONFIG[claimType] ?? []).map((d) => d.doc_key);
 }
 
-/** Un ramo sin ninguna regla propia: el agente no sabe qué pedir. */
-export function esRamoSinCalibrar(claimType: ClaimType): boolean {
-  return getRequiredDocs(claimType).length === 0;
-}
-
-export type EstadoDelDocumento = "received" | "declined" | "pending";
-
 /**
- * El estado de una fila de `missing_docs`, tal como lo lee un analista.
- *
- * Vive acá y no en `MissingDocsList.tsx` porque ese archivo es `"use client"`:
- * un componente de servidor no puede llamar a una función exportada por un
- * módulo de cliente.
+ * Un ramo sin ninguna regla propia: el agente no sabe qué pedir. Ni el código
+ * (documentos obligatorios) ni la fila de `tenant_claim_types` con esa clave
+ * —que existe también para `other` y para cualquier ramo del código— le piden algo.
  */
-export function estadoDelDocumento(d: {
-  satisfied_at?: unknown;
-  declined_at?: unknown;
-}): EstadoDelDocumento {
-  if (d.satisfied_at) return "received";
-  // Antes de "pending": el asegurado avisó que no tiene este documento, y un
-  // analista que lee "pendiente" sale a buscar un papel que nadie tiene.
-  if (d.declined_at) return "declined";
-  return "pending";
+export function esRamoSinCalibrar(
+  claimType: string,
+  ramoDelInquilino?: { documentos: readonly string[]; datos: readonly string[] } | null
+): boolean {
+  if (esRamoNativo(claimType) && getRequiredDocs(claimType).length > 0) return false;
+  return !ramoDelInquilino || (ramoDelInquilino.documentos.length === 0 && ramoDelInquilino.datos.length === 0);
 }

@@ -194,3 +194,31 @@ describe("el camino por asunto", () => {
     expect(r.existingCaseId).toBeUndefined();
   });
 });
+
+describe("un caso del formulario web", () => {
+  const CASO_WEB = "3c9c2a1f-0d5e-4b6c-9f70-8b9c0d1e2f3a";
+  const DENUNCIANTE = "ana@example.com";
+
+  beforeEach(() => {
+    tables.cases.push({ id: CASO_WEB, channel: "web", email_thread_id: null });
+    tables.claim_messages.push(
+      { case_id: CASO_WEB, direction: "inbound", provider_message_id: `web:${CASO_WEB}`, from_addr: DENUNCIANTE, to_addr: null },
+      { case_id: CASO_WEB, direction: "outbound", provider_message_id: "out-web-1", from_addr: CASILLA, to_addr: DENUNCIANTE }
+    );
+  });
+
+  it("recibe la respuesta de quien denunció, por el asunto", async () => {
+    const r = await threadLookup(TENANT, "", "", `Re: Recibimos tu reclamo - Caso #${CASO_WEB}`, DENUNCIANTE);
+    expect(r.existingCaseId).toBe(CASO_WEB);
+  });
+
+  it("recibe la respuesta por el mensaje que le mandamos (paso 1)", async () => {
+    const r = await threadLookup(TENANT, "<out-web-1>", "", "Re: consulta", DENUNCIANTE);
+    expect(r.existingCaseId).toBe(CASO_WEB);
+  });
+
+  it("no lo recibe un extraño que cita el número de caso: sólo participa quien escribió en el formulario o recibió el mail", async () => {
+    const r = await threadLookup(TENANT, "", "", `Re: Caso #${CASO_WEB}`, EXTRANO);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+});

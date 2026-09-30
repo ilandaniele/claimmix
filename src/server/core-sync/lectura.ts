@@ -8,6 +8,7 @@ import { and, eq, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { RESERVED_PREFIXES } from "@/core/phone/reserved";
 import type { ClienteDatos } from "@/data/scope";
 import { DOMINIO_RESERVADO } from "@/lib/email/reserved";
+import { CANALES_REALES_SQL } from "@/lib/db/canales-reales";
 import { cases, claimMessages, extractedFields, missingDocs } from "@/lib/db/schema";
 
 /**
@@ -43,7 +44,7 @@ const digitos = sql`regexp_replace(${claimMessages.from_addr}, '\\D', '', 'g')`;
  * `isReservedTestAddress` e `isReservedTestNumber`, que usa el aviso a
  * especialistas.
  */
-export const esCasoReal = sql`(${cases.channel} in ('email', 'whatsapp') and not exists (
+export const esCasoReal = sql`(${cases.channel} in (${CANALES_REALES_SQL}) and not exists (
   select 1 from ${claimMessages}
   where ${claimMessages.case_id} = ${cases.id}
     and ${claimMessages.direction} = 'inbound'

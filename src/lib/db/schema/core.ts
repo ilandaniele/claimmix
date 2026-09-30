@@ -477,3 +477,46 @@ export const coreSyncSettings = pgTable("core_sync_settings", {
     .notNull(),
   updated_by: uuid("updated_by"),
 });
+
+/**
+ * El enlace público del formulario web de cada inquilino (0044). El slug es
+ * propio y nunca el id interno; sin DELETE para `claimmix_app`.
+ */
+export const formularioWeb = pgTable("formulario_web", {
+  tenant_id: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  slug: text("slug").notNull(),
+  activo: boolean("activo").notNull().default(false),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+  updated_by: uuid("updated_by"),
+});
+
+/**
+ * Tipos de siniestro propios de un inquilino (0044): nombre en las dos lenguas y
+ * los documentos y datos que pide. La clave puede ser la de un ramo del código:
+ * la fila entonces sólo le cambia los documentos (gana la fila) y se guarda sin
+ * datos; el nombre y los datos siguen siendo los del código.
+ */
+export const tenantClaimTypes = pgTable(
+  "tenant_claim_types",
+  {
+    tenant_id: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clave: text("clave").notNull(),
+    nombre_es: text("nombre_es").notNull(),
+    nombre_en: text("nombre_en").notNull(),
+    documentos: text("documentos").array().notNull().default(sql`'{}'`),
+    datos: text("datos").array().notNull().default(sql`'{}'`),
+    created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tenant_id, t.clave] })],
+);

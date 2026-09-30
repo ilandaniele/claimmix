@@ -125,6 +125,10 @@ function extractDeclaredDamage(text: string, claimType: ClaimType): ExtractedFie
     rc: ["tercero", "tercer", "responsabilidad", "otro vehículo", "conductor", "daños a"],
     robo_contenido: ["robaron", "me llevaron", "sustrajeron", "bolso", "notebook", "cámara", "objetos"],
     accidente_personal: ["fractura", "lesión", "herida", "hospital", "guardia", "médico", "yeso"],
+    art: ["trabajo", "laboral", "empleador", "lesión", "herida", "hospital", "accidente"],
+    vida: ["falleció", "fallecimiento", "murió", "defunción", "invalidez", "beneficiario"],
+    integral_comercio: ["local", "comercio", "mercadería", "vidriera", "robo", "incendio", "inundación"],
+    consorcio: ["edificio", "consorcio", "administración", "filtración", "ascensor", "humedad", "pérdida de agua"],
     other: [],
   };
 
@@ -308,6 +312,10 @@ const EXTRACTORS: Record<ClaimType, (text: string) => ExtractedField[]> = {
   rc: extractOther,
   robo_contenido: extractOther,
   accidente_personal: extractOther,
+  art: extractOther,
+  vida: extractOther,
+  integral_comercio: extractOther,
+  consorcio: extractOther,
   other: extractOther,
 };
 

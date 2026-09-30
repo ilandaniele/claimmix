@@ -59,7 +59,6 @@ vi.mock("@/lib/audit/log", () => ({
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  seedRequiredDocs,
   pendingDocKeys,
   reconcileAttachments,
   resolveDeclinedDocs,
@@ -180,45 +179,6 @@ beforeEach(() => {
       actualizaciones.push(data);
       return { where: () => Promise.resolve() };
     },
-  });
-});
-
-describe("seedRequiredDocs", () => {
-  it("registers the documents the tenant configured for this claim type", async () => {
-    // The config table has been there all along and nothing read it.
-    queueSelects(
-      [{ doc_key: "fotos_danos" }, { doc_key: "parte_amistoso" }],
-      [] // nothing recorded on the case yet
-    );
-
-    await seedRequiredDocs(CASE, TENANT, "choque");
-
-    expect(inserted).toHaveLength(1);
-    expect(inserted[0]).toEqual([
-      { case_id: CASE, tenant_id: TENANT, doc_key: "fotos_danos", satisfied_at: null },
-      { case_id: CASE, tenant_id: TENANT, doc_key: "parte_amistoso", satisfied_at: null },
-    ]);
-  });
-
-  it("does not resurrect a document already recorded", async () => {
-    // Re-extraction runs on every reply; re-inserting would reopen a request
-    // the claimant already satisfied.
-    queueSelects(
-      [{ doc_key: "fotos_danos" }, { doc_key: "parte_amistoso" }],
-      [{ doc_key: "fotos_danos" }]
-    );
-
-    await seedRequiredDocs(CASE, TENANT, "choque");
-
-    expect(inserted[0]).toEqual([
-      { case_id: CASE, tenant_id: TENANT, doc_key: "parte_amistoso", satisfied_at: null },
-    ]);
-  });
-
-  it("does nothing until the claim type is known", async () => {
-    await seedRequiredDocs(CASE, TENANT, null);
-    expect(db.select).not.toHaveBeenCalled();
-    expect(inserted).toHaveLength(0);
   });
 });
 

@@ -99,6 +99,10 @@ export const esAR = {
   "type.rc": "Resp. Civil",
   "type.robo_contenido": "Robo de contenido",
   "type.accidente_personal": "Accidente personal",
+  "type.art": "ART",
+  "type.vida": "Vida",
+  "type.integral_comercio": "Integral de comercio",
+  "type.consorcio": "Consorcio",
   "type.other": "Otro",
 
   // ── Dashboard tabs ─────────────────────────────────────────────────────────
@@ -256,6 +260,8 @@ export const esAR = {
   "field.driver_license": "Licencia de conducir",
   "field.claim_type": "Tipo de siniestro",
   "field.hay_heridos": "Hay heridos",
+  "field.testigos": "Testigos",
+  "field.numero_denuncia": "Número de denuncia",
   "field.hora_siniestro": "Hora del siniestro",
   "field.provincia_siniestro": "Provincia",
   "field.patente_vehiculo": "Patente del vehículo",
@@ -339,8 +345,15 @@ export const esAR = {
   "docs.licencia_conducir": "Licencia de conducir",
   "docs.denuncia_policial": "Denuncia policial",
   "docs.fotos_lugar": "Fotos del lugar del hecho",
+  "docs.certificado_medico": "Certificado médico",
+  "docs.foto_vidrio": "Foto del vidrio roto",
   "docs.foto_oblea_vtv": "Foto de la oblea VTV",
   "docs.informe_bomberos": "Informe de bomberos",
+  "docs.denuncia_art": "Denuncia del accidente de trabajo",
+  "docs.certificado_defuncion": "Certificado de defunción",
+  "docs.dni_beneficiario": "DNI del beneficiario",
+  "docs.inventario_bienes": "Listado de bienes dañados o robados",
+  "docs.presupuesto_reparacion": "Presupuesto de la reparación",
 
   // ── Confidence thresholds (UI labels) ─────────────────────────────────────
   "confidence.high": "Alta",
@@ -351,6 +364,7 @@ export const esAR = {
   "audit.auth.success": "Inicio de sesión exitoso",
   "audit.auth.rate_limited": "Intentos de acceso bloqueados (rate limit)",
   "audit.case.created": "Caso creado",
+  "audit.case.web_recibida": "Llegó por el formulario web",
   "audit.case.closed": "Caso cerrado",
   "audit.case.status_changed": "Situación actualizada",
   "audit.case.marked_answered": "Marcado como respondido",
@@ -488,6 +502,7 @@ export const esAR = {
   "channel.email_sim": "Simulación",
   "channel.whatsapp": "WhatsApp",
   "channel.whatsapp_sim": "WhatsApp simulado",
+  "channel.web": "Formulario web",
 
   // ── Bandeja filter labels ───────────────────────────────────────────────────
   "filter.channel": "Canal",
@@ -798,6 +813,8 @@ export const esAR = {
   "consola.tab.lote": "Simulación en lote",
   "consola.tab.trabajo": "Trabajo del equipo",
   "consola.pestanas": "Secciones de la consola del agente",
+  "consola.tab.ramos": "Tipos de siniestro",
+  "consola.tab.formulario": "Formulario web",
   "consola.tab.modelos": "Modelos",
   "consola.tab.reglas": "Reglas de prompt",
   "consola.tab.uso": "Uso del proveedor",

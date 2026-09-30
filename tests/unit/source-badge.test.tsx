@@ -124,7 +124,7 @@ describe("SourceBadge", () => {
       )
     );
     const fuente = pinturasDe(
-      (["email", "email_sim"] as const).map(
+      (["email", "email_sim", "web"] as const).map(
         (v) => render(<SourceBadge channel={v} />).container.firstElementChild
       )
     );
@@ -148,6 +148,14 @@ describe("SourceBadge", () => {
         `${nombreA} y ${nombreB} pintan igual: ${chocan.join(" | ")}`
       ).toEqual([]);
     }
+  });
+
+  it("renders the web form badge for channel='web'", () => {
+    const { container } = render(<SourceBadge channel="web" />);
+    const badge = container.firstElementChild as HTMLElement;
+    expect(badge.getAttribute("data-source")).toBe("web");
+    expect(badge.textContent).toBe("Formulario web");
+    expect(badge.getAttribute("aria-label")).toBe("Formulario web");
   });
 
   // Null/undefined → "—" dash

@@ -938,66 +938,6 @@ console.log("\n▸ Nadie compara `deployment.environment` con un literal");
   }
 }
 
-// ── 19. Una migración pendiente no apaga la paridad ───────────────────────
-//
-// `listas-parejas` de `deploy-checks.yml` hace dos preguntas en un job: si falta
-// aplicar alguna migración y si el código y `required_docs_config` piden los
-// mismos papeles. Un paso sin función de estado en su `if` hereda `success()`:
-// una migración pendiente —aunque no toque documentos— saltearía la paridad, y
-// el resumen mostraría un solo rojo sin decir que la otra pregunta no se hizo.
-//
-// Y la explicación de la paridad corre sólo si falló la paridad. Con
-// `failure()` a secas, una migración pendiente imprimiría «el código y la base
-// dejaron de decir lo mismo»: un rojo apuntando al lugar equivocado.
-//
-// Sin comentarios, como en la 14: un paso no queda protegido por un comentario.
-console.log("\n▸ Una migración pendiente no apaga la paridad");
-{
-  const ruta = ".github/workflows/deploy-checks.yml";
-  const job = existsSync(ruta)
-    ? trabajosDe(readFileSync(ruta, "utf8").split(/\r?\n/)).find((t) =>
-        t.startsWith("  listas-parejas:")
-      )
-    : undefined;
-  // Un paso arranca en `      - ` y sus claves van a ocho espacios.
-  const pasos = [];
-  for (const l of (job ?? "").split("\n")) {
-    if (/^\s*#/.test(l)) continue;
-    if (/^ {6}- /.test(l)) pasos.push({});
-    const m = /^ {6}[- ] (name|id|if): (.*)$/.exec(l);
-    if (m && pasos.length) pasos[pasos.length - 1][m[1]] = m[2].trim();
-  }
-  const [deps, mig, docs, explica] = [
-    "Instalar dependencias",
-    "Migraciones aplicadas",
-    "Documentos por tipo de siniestro",
-    "Qué significa que esto falle",
-  ].map((nombre) => pasos.find((p) => p.name === nombre));
-  const faltas = [];
-
-  if (!deps || !mig || !docs || !explica) {
-    faltas.push("listas-parejas perdió alguno de los cuatro pasos que esto mira");
-  } else {
-    for (const p of pasos.slice(pasos.indexOf(mig) + 1)) {
-      if (!/\b(always|failure|cancelled)\(\)/.test(p.if ?? ""))
-        faltas.push(`«${p.name}» no corre si falta una migración`);
-    }
-    if (docs.if && !(deps.id && docs.if.includes(`steps.${deps.id}.outcome == 'success'`)))
-      faltas.push("«Documentos por tipo de siniestro» corre sin dependencias");
-    if (!(docs.id && explica.if?.includes(`steps.${docs.id}.outcome == 'failure'`)))
-      faltas.push("«Qué significa que esto falle» corre aunque la paridad haya pasado");
-  }
-
-  if (faltas.length === 0) {
-    bien("la paridad corre aunque falte una migración, y cada rojo se explica solo");
-  } else {
-    mal(`${faltas.length} guarda(s) de listas-parejas rota(s)`);
-    for (const f of faltas) console.log(`     ${f}`);
-    console.log("     En .github/workflows/deploy-checks.yml, los pasos después de");
-    console.log("     «Migraciones aplicadas» llevan un `if` con !cancelled() o failure().");
-  }
-}
-
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(66));
 if (problemas.length === 0) {

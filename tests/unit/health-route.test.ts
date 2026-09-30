@@ -103,6 +103,10 @@ function esquemaSin(...faltan: string[]) {
     // 0043.
     { table_name: "asistente_turnos", column_name: "id" },
     { table_name: "case_desvios", column_name: "case_id" },
+    // 0044.
+    { table_name: "formulario_web", column_name: "tenant_id" },
+    { table_name: "tenant_claim_types", column_name: "tenant_id" },
+    { table_name: "cases", column_name: "canal_web" },
   ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
 }
 
@@ -230,6 +234,25 @@ describe("GET /api/health — what it reports", () => {
     const schema = body.checks.find((c: { name: string }) => c.name === "migraciones");
     expect(schema.status).toBe("down");
     expect(schema.detail).toContain("missing_docs.declined_at");
+  });
+
+  it("la 0044 sin aplicar da degradado con el motivo, no caído", async () => {
+    for (const falta of [["formulario_web"], ["tenant_claim_types"], ["cases.canal_web"]]) {
+      mockExecute.mockImplementation((q: unknown) =>
+        Promise.resolve(
+          JSON.stringify(q).includes("ai_usage")
+            ? { rows: [{ total: 0 }] }
+            : { rows: esquemaSin(...falta) }
+        )
+      );
+
+      const res = await GET(request(`Bearer ${SECRET}`));
+      const body = await res.json();
+
+      const schema = body.checks.find((c: { name: string }) => c.name === "migraciones");
+      expect(schema.status, falta[0]).toBe("degraded");
+      expect(schema.detail).toContain("migración 0044 pendiente");
+    }
   });
 
   it("nota que falta lo comercial, no sólo lo del camino caliente", async () => {

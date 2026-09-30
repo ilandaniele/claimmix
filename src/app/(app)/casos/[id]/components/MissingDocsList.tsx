@@ -4,7 +4,7 @@ import { useT } from "@/lib/i18n/LocaleContext";
 import type { ClaveDelCliente } from "@/lib/i18n";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
-import { estadoDelDocumento, type EstadoDelDocumento } from "@/core/case/required-docs";
+import { estadoDelDocumento, type EstadoDelDocumento } from "@/core/case/estado-del-documento";
 import type { MissingDocRow } from "@/lib/db/types";
 
 type MissingDoc = MissingDocRow;

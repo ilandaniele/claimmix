@@ -12,13 +12,19 @@ import {
   RangosDeMontoSchema,
   rangoPara,
 } from "@/core/case/monto-estimado";
-import { ClaimTypeSchema, SeveritySchema } from "@/lib/schemas/cases";
+import { ClaimTypeSchema, SeveritySchema, type ClaimType } from "@/lib/schemas/cases";
+
+const SIN_TABLA: readonly ClaimType[] = ["other", "art", "vida", "integral_comercio", "consorcio"];
 
 describe("rangoPara", () => {
-  it("la tabla por defecto tiene todos los tipos menos «other», con mínimo ≤ máximo", () => {
-    // «other» no tiene rango a propósito: no hay de dónde sacar uno.
-    expect(MONTOS_POR_DEFECTO.other).toBeUndefined();
-    for (const tipo of ClaimTypeSchema.options.filter((t) => t !== "other")) {
+  it("la tabla por defecto tiene los tipos de auto y accidente personal, con mínimo ≤ máximo", () => {
+    // «other» y los ramos que no son de auto no tienen rango a propósito: no hay de dónde sacar uno
+    // y un número inventado se leería como dato. Los cubre una persona, o la tabla del tenant.
+    for (const tipo of SIN_TABLA) {
+      expect(MONTOS_POR_DEFECTO[tipo], tipo).toBeUndefined();
+      expect(estimarMonto(tipo, "high", null), tipo).toBeNull();
+    }
+    for (const tipo of ClaimTypeSchema.options.filter((t) => !SIN_TABLA.includes(t))) {
       for (const g of SeveritySchema.options) {
         const r = MONTOS_POR_DEFECTO[tipo]?.[g];
         expect(r, `${tipo}.${g}`).toBeDefined();

@@ -115,16 +115,20 @@ function buildDbMock(inboundRow: Record<string, unknown> | null = null) {
   const dbMock = {
     _inserts: inserts,
     _updates: updates,
+    _wheres: [] as unknown[],
 
     // resolveReplyContext reads the inbound claim_messages row to decide which
     // mailbox answers and which Message-ID to quote.
     select: vi.fn().mockImplementation(() => ({
       from: () => ({
-        where: () => ({
-          orderBy: () => ({
-            limit: () => Promise.resolve(inboundRow ? [inboundRow] : []),
-          }),
-        }),
+        where: (condicion: unknown) => {
+          dbMock._wheres.push(condicion);
+          return {
+            orderBy: () => ({
+              limit: () => Promise.resolve(inboundRow ? [inboundRow] : []),
+            }),
+          };
+        },
       }),
     })),
 
@@ -761,6 +765,28 @@ describe("dispatchOutboundEmail — one subject per conversation", () => {
     // Simulation-created cases have no inbound message.
     const sent = await sendWith(null);
     expect(sent.subject).toContain("Recibimos tu reclamo");
+  });
+
+  it("no toma como asunto del hilo el envío del formulario web", async () => {
+    // Es una fila que arma el sistema: contestarle «Re: Denuncia por formulario
+    // web» a quien nunca escribió eso, y sin «Caso #» para pegar su respuesta.
+    const dbMock = buildDbMock(null);
+    vi.doMock("@/lib/db", () => ({ db: dbMock }));
+    vi.doMock("@/data/scope", () => puenteDeAlcance(() => dbMock));
+    const { dispatchOutboundEmail } = await import("@/server/email/dispatch");
+    await dispatchOutboundEmail({
+      caseId: CASE_ID,
+      tenantId: TENANT_ID,
+      to: TO_ADDR,
+      template: "confirmation_received",
+      data: { caseId: CASE_ID },
+    });
+
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const { sql, params } = new PgDialect().sqlToQuery(dbMock._wheres[0] as never);
+    expect(sql).toContain('"provider" <>');
+    expect(params).toContain("web");
+    expect(gmailMocks.send.mock.calls[0][0].subject).toContain(`Caso #${CASE_ID}`);
   });
 
   it("keeps the template subject when the claimant sent no subject at all", async () => {

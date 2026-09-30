@@ -3,6 +3,7 @@
  *
  * Color palette (IC7 — distinct from StatusBadge and SeverityBadge):
  *   email      → bg-blue-50  / text-blue-700   (Gmail)
+ *   web        → bg-teal-50   / text-teal-700 (Formulario web)
  *   email_sim  → bg-slate-100 / text-slate-600  (Sim — same bg token as Severity.low and
  *                Status.cerrado/no_relevante, but text-slate-600 differs; combined
  *                class string "bg-slate-100 text-slate-600" matches SeverityBadge's low
@@ -34,32 +35,21 @@ interface SourceBadgeProps {
 const BASE =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
 
+const VARIANTES = {
+  email: ["gmail", "bg-blue-50 text-blue-700", "provider.gmail"],
+  email_sim: ["sim", "bg-slate-200 text-slate-600", "provider.sim"],
+  web: ["web", "bg-teal-50 text-teal-700", "channel.web"],
+} as const;
+
 export function SourceBadge({ channel }: SourceBadgeProps) {
   const t = useT();
-  if (channel === "email") {
-    return (
-      <span
-        className={`${BASE} bg-blue-50 text-blue-700`}
-        data-source="gmail"
-        aria-label={t("provider.gmail")}
-      >
-        {t("provider.gmail")}
-      </span>
-    );
-  }
-
-  if (channel === "email_sim") {
-    return (
-      <span
-        className={`${BASE} bg-slate-200 text-slate-600`}
-        data-source="sim"
-        aria-label={t("provider.sim")}
-      >
-        {t("provider.sim")}
-      </span>
-    );
-  }
-
+  const variante = VARIANTES[channel as keyof typeof VARIANTES];
   // Future channels (whatsapp, etc.) and null/undefined → neutral dash
-  return <Vacio />;
+  if (!Array.isArray(variante)) return <Vacio />;
+  const [fuente, colores, clave] = variante;
+  return (
+    <span className={`${BASE} ${colores}`} data-source={fuente} aria-label={t(clave)}>
+      {t(clave)}
+    </span>
+  );
 }

@@ -80,6 +80,10 @@ const COBERTURAS_POR_TIPO: Record<string, readonly CodigoDeCobertura[]> = {
 /** Las que responden por una parte del siniestro: la RC paga lo del tercero en un choque. */
 const EN_PARTE: Record<string, readonly CodigoDeCobertura[]> = { choque: ["rc"] };
 
+// La clave de un ramo propio es texto libre con formato: «constructor» indexado a secas devuelve una función.
+const delTipo = (tabla: Record<string, readonly CodigoDeCobertura[]>, tipo: string) =>
+  Object.hasOwn(tabla, tipo) ? tabla[tipo] : undefined;
+
 // Capital y provincia se nombran de muchas formas; en una lista de ámbito son
 // la misma entrada.
 const MISMA_CAPITAL = new Set(["caba", "capital federal", "ciudad de buenos aires", "ciudad autonoma de buenos aires"]);
@@ -118,11 +122,11 @@ export function evaluarCobertura(c: Cotejo): ResultadoDeCobertura {
 
   const coberturas = coberturasLeidas(p.coberturas);
   const tipo = c.tipo ?? "";
-  const hacenFalta = COBERTURAS_POR_TIPO[tipo];
+  const hacenFalta = delTipo(COBERTURAS_POR_TIPO, tipo);
   const aplicadas = hacenFalta ? coberturas.filter((x) => hacenFalta.includes(x.codigo)) : [];
   if (coberturas.length === 0) dudas.add("sin_coberturas_cargadas");
   else if (!hacenFalta?.every((codigo) => aplicadas.some((x) => x.codigo === codigo))) {
-    const enParte = aplicadas.length > 0 || coberturas.some((x) => EN_PARTE[tipo]?.includes(x.codigo));
+    const enParte = aplicadas.length > 0 || coberturas.some((x) => delTipo(EN_PARTE, tipo)?.includes(x.codigo));
     if (hacenFalta && enParte) dudas.add("cobertura_segun_alcance");
     else {
       // Sin tipo, o con una cobertura que el modelo no supo nombrar, puede

@@ -130,7 +130,9 @@ import { assessTrainability } from "@/server/training/trainability";
 import { logAgentRun, logAgentRunError } from "@/server/training/agent-runs";
 import { loadMemoryHints as loadClaimMemoryHints } from "@/server/memory/load";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
-import { ClaimTypeSchema } from "@/lib/schemas/cases";
+import { esRamoAdmitido, type RamoDelInquilino } from "@/core/case/ramos";
+import { ClaveDeRamoSchema } from "@/lib/schemas/cases";
+import { cargarRamosDelInquilino, consultaRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle";
 import { anclarPolizaAlTexto, mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
 import type { KnownPattern } from "@/server/ai/prompt";
@@ -818,7 +820,7 @@ export async function runEmailExtractionWorker(
     const memoryApplied = memoryHints.length > 0;
 
     // ── c) Todo lo que arma el prompt, en un solo viaje ──────────────────────
-    const { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos } =
+    const { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos, ramosDelInquilino } =
       await cargarLoDelPrompt(tenantId, tenantCtx, caseId, caseRow.claim_type);
 
     const learning = {
@@ -826,6 +828,7 @@ export async function runEmailExtractionWorker(
       approvedExamples: formatApprovedExamples(approvedExamples),
       tenantSystemPrompt: promptVersion.systemPrompt ?? undefined,
       customFields: formatCustomFields(customFields),
+      ramosDelInquilino,
     };
 
     // ── d) Budget check ───────────────────────────────────────────────────────
@@ -1327,8 +1330,8 @@ export async function runEmailExtractionWorker(
     const rawClaimType = aiClaimType;
 
     if (rawClaimType !== null && rawClaimType !== undefined && typeof rawClaimType === "string" && rawClaimType.trim() !== "") {
-      const claimTypeParsed = ClaimTypeSchema.safeParse(rawClaimType.trim());
-      if (claimTypeParsed.success) {
+      const claimTypeParsed = ClaveDeRamoSchema.safeParse(rawClaimType.trim());
+      if (claimTypeParsed.success && esRamoAdmitido(claimTypeParsed.data, ramosDelInquilino)) {
         // AC1: write valid claim_type; AC2: "other" works; AC4: same value is idempotent
         caseUpdate.claim_type = claimTypeParsed.data;
       } else {
@@ -1474,7 +1477,8 @@ export async function runEmailExtractionWorker(
       caseRow.channel === "email" ||
       caseRow.channel === "email_sim" ||
       caseRow.channel === "whatsapp" ||
-      caseRow.channel === "whatsapp_sim"
+      caseRow.channel === "whatsapp_sim" ||
+      caseRow.channel === "web"
     ) {
       await orchestratePostExtraction(
         caseId,
@@ -1731,8 +1735,11 @@ function toPromptMemoryHints(
  * varios de esos `catch` nombran— dejaría de degradar y pasaría a apagar la
  * carga completa.
  *
- * Así que si el lote se cae, se vuelve por el camino de antes. Ocho viajes,
+ * Así que si el lote se cae, se vuelve por el camino de antes. Nueve viajes,
  * pero cada uno con su red. El rápido es el normal; el lento es el raro.
+ *
+ * Con los ramos propios del inquilino (B26) las consultas del lote son nueve;
+ * sin la 0044 esa es la que hace caer el lote y se vuelve por el camino de a uno.
  */
 async function cargarLoDelPrompt(
   tenantId: string,
@@ -1741,7 +1748,7 @@ async function cargarLoDelPrompt(
   claimType: string | null
 ): Promise<LoDelPrompt> {
   try {
-    const [patrones, entrenamiento, reglas, ejemploDelTipo, ejemploRelleno, version, campos, adjuntos] =
+    const [patrones, entrenamiento, reglas, ejemploDelTipo, ejemploRelleno, version, campos, adjuntos, ramos] =
       await enTenantVarias<[
         Parameters<typeof deKnownPatterns>[0],
         FilaDeEntrenamiento[],
@@ -1751,6 +1758,7 @@ async function cargarLoDelPrompt(
         Parameters<typeof dePromptVersion>[0],
         AgentCustomField[],
         unknown,
+        RamoDelInquilino[],
       ]>(tenantCtx, (db) => {
         const ejemplos = consultasDeEjemplos(db, claimType);
         return [
@@ -1762,6 +1770,7 @@ async function cargarLoDelPrompt(
           consultaPromptVersion(db),
           consultaCustomFields(db, claimType),
           consultaAdjuntos(db, caseId),
+          consultaRamosDelInquilino(db),
         ];
       });
 
@@ -1773,6 +1782,7 @@ async function cargarLoDelPrompt(
       promptVersion: dePromptVersion(version),
       customFields: campos,
       adjuntos: deAdjuntos(adjuntos),
+      ramosDelInquilino: ramos,
     };
   } catch (err) {
     logger.error({
@@ -1780,7 +1790,7 @@ async function cargarLoDelPrompt(
         nota: "Se vuelve al camino de a uno, donde cada carga degrada sola.",
       }, "email_worker.lote_del_prompt_fallo");
 
-    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos] =
+    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos, ramosDelInquilino] =
       await Promise.all([
         loadKnownPatterns(tenantCtx),
         loadAgentTraining(tenantId),
@@ -1789,9 +1799,10 @@ async function cargarLoDelPrompt(
         getActivePromptVersion(tenantId),
         loadActiveCustomFields(tenantId, claimType),
         adjuntosDelCaso(caseId, tenantCtx),
+        cargarRamosDelInquilino(tenantId),
       ]);
 
-    return { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos };
+    return { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos, ramosDelInquilino };
   }
 }
 
@@ -1803,6 +1814,7 @@ interface LoDelPrompt {
   promptVersion: ActivePromptVersion;
   customFields: AgentCustomField[];
   adjuntos: AdjuntoDelCaso[];
+  ramosDelInquilino: RamoDelInquilino[];
 }
 /** La consulta sola, para poder mandarla en un lote. Ver `cargarLoDelPrompt`. */
 function consultaKnownPatterns(db: ClienteDatos) {

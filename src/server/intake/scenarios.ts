@@ -2812,8 +2812,8 @@ export function getScenarioById(id: string): SimulationScenario | undefined {
  * Get a random scenario for a given claim type.
  */
 export function getRandomScenario(claimType?: ClaimType): SimulationScenario {
-  const pool = claimType
-    ? SCENARIOS.filter((s) => s.case_type === claimType)
-    : SCENARIOS;
+  const delTipo = claimType ? SCENARIOS.filter((s) => s.case_type === claimType) : SCENARIOS;
+  // Los ramos nuevos (ART, vida, comercio, consorcio) no tienen escenarios de simulación.
+  const pool = delTipo.length > 0 ? delTipo : SCENARIOS;
   return pool[Math.floor(Math.random() * pool.length)]!;
 }

@@ -49,6 +49,8 @@ const CENTINELAS = [
   // Los turnos anteriores de la conversación del asistente sobre un caso: lo
   // escribió la persona y lo contestó el modelo, y los dos son datos.
   "historial_del_hilo",
+  // Los tipos de siniestro que creó la aseguradora: nombres escritos por una persona.
+  "tipos_del_inquilino",
 ] as const;
 
 /** La forma de un centinela: `<tag>` o `</tag>`, con o sin espacios adentro. */

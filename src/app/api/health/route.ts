@@ -257,10 +257,18 @@ async function checkSchema(): Promise<Check> {
   ];
 
   try {
+    // La segunda mitad del union es la 0044: si el CHECK de canal ya nombra
+    // 'web' aparece una fila 'cases.canal_web', y sin ella el formulario público
+    // no puede crear ningún caso. Va en la misma consulta para no pagar otra.
     const rows = await rowsOf<{ table_name: string; column_name: string }>(sql`
       select table_name, column_name
         from information_schema.columns
        where table_schema = 'public'
+      union all
+      select 'cases', 'canal_web'
+        from pg_constraint
+       where conrelid = 'public.cases'::regclass and contype = 'c'
+         and pg_get_constraintdef(oid) ilike '%''web''%'
     `);
 
     const present = new Set(rows.map((r) => `${r.table_name}.${r.column_name}`));
@@ -283,9 +291,17 @@ async function checkSchema(): Promise<Check> {
 
     const gaps = [...missing, ...missingTables];
 
-    return gaps.length === 0
-      ? ok("migraciones", "el esquema tiene lo que el código espera")
-      : down("migraciones", `faltan: ${gaps.join(", ")}`);
+    // La 0044 es aditiva y el resto del producto no la toca: el formulario
+    // público, los tipos propios y el canal 'web' quedan apagados, nada más. Por
+    // eso es degradado con el motivo a la vista y no caído.
+    const pendiente0044 =
+      ["formulario_web", "tenant_claim_types"].some((t) => !tablesPresent.has(t)) ||
+      !present.has("cases.canal_web");
+
+    if (gaps.length > 0) return down("migraciones", `faltan: ${gaps.join(", ")}`);
+    return pendiente0044
+      ? degraded("migraciones", "migración 0044 pendiente (formulario web, tipos propios, canal web)")
+      : ok("migraciones", "el esquema tiene lo que el código espera");
   } catch (err) {
     return degraded("migraciones", `no se pudo verificar: ${why(err)}`);
   }

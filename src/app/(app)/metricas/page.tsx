@@ -38,6 +38,9 @@ import {
   type MetricasData,
 } from "@/server/metrics/kpis";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
+import { esRamoNativo, type RamoDelInquilino } from "@/core/case/ramos";
+import { nombreDeTipo } from "@/lib/i18n/tipos-de-siniestro";
+import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { AppError } from "@/lib/errors";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
@@ -57,9 +60,17 @@ import { ResumenDeAyer } from "./_components/ResumenDeAyer";
  * Lo que queda acá es lo que de verdad es de la pantalla: resolver quién está
  * mirando, y dibujar.
  */
-type Metricas = { data: MetricasData | null; historial: FilaDeHistorial[] | null };
+type Metricas = {
+  data: MetricasData | null;
+  historial: FilaDeHistorial[] | null;
+  /** Los ramos propios de la aseguradora con casos en el período: sólo para ponerles nombre. */
+  ramos: RamoDelInquilino[];
+};
 
-const SIN_METRICAS: Metricas = { data: null, historial: null };
+const SIN_METRICAS: Metricas = { data: null, historial: null, ramos: [] };
+
+/** Los tipos de `by_type` que el código no trae, ordenados por clave. */
+const tiposPropios = (porTipo: Record<string, number>) => Object.keys(porTipo).filter((k) => !esRamoNativo(k)).sort();
 
 async function fetchMetricas(unidad: Unidad, periodo: Periodo, vista: Vista): Promise<Metricas> {
   try {
@@ -76,8 +87,11 @@ async function fetchMetricas(unidad: Unidad, periodo: Periodo, vista: Vista): Pr
     // El historial recorre la auditoría de todo el año y en su vista no se
     // dibuja nada del tablero: cada vista pide sólo lo suyo.
     const tenantCtx = { tenantId: userRow.tenant_id };
-    if (vista === "historial") return { data: null, historial: await getHistorialDeMetricas(tenantCtx) };
-    return { data: await getTenantKpis(tenantCtx, { periodo, serie: unidad, ayer: true }), historial: null };
+    if (vista === "historial") return { ...SIN_METRICAS, historial: await getHistorialDeMetricas(tenantCtx) };
+    const data = await getTenantKpis(tenantCtx, { periodo, serie: unidad, ayer: true });
+    // Los nombres de los ramos propios se leen sólo si alguno tiene casos: los del sistema no pagan la consulta.
+    const ramos = tiposPropios(data.by_type).length > 0 ? await cargarRamosDelInquilino(userRow.tenant_id) : [];
+    return { data, historial: null, ramos };
   } catch (e) {
     unstable_rethrow(e);
     if (e instanceof AppError) throw e;
@@ -190,10 +204,10 @@ export default async function MetricasPage({
   const periodo = periodoDe(params.periodo);
   const vista = vistaDe(params.vista);
   const tablero = vista === "tablero";
-  let { data, historial } = SIN_METRICAS;
+  let { data, historial, ramos } = SIN_METRICAS;
 
   try {
-    ({ data, historial } = await fetchMetricas(unidad, periodo, vista));
+    ({ data, historial, ramos } = await fetchMetricas(unidad, periodo, vista));
   } catch (e) {
     if (e instanceof AppError && e.code === "MISSING_SESSION") {
       redirect("/login");
@@ -593,8 +607,8 @@ export default async function MetricasPage({
                 <p className="text-sm text-slate-500">{t("metricas.sinDatos")}</p>
               ) : (
                 <div className="space-y-3">
-                  {ClaimTypeSchema.options.map((key) => {
-                    const label = t(`type.${key}`);
+                  {[...ClaimTypeSchema.options, ...tiposPropios(data!.by_type)].map((key) => {
+                    const label = nombreDeTipo(key, t, ramos, locale);
                     const count = data!.by_type[key] ?? 0;
                     const pct =
                       totalByType > 0
@@ -610,7 +624,7 @@ export default async function MetricasPage({
                         </div>
                         <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
                           <div
-                            className={`h-full rounded-full transition-all ${TYPE_COLORS[key] ?? "bg-slate-400"} ${anchoDeBarra(pct)}`}
+                            className={`h-full rounded-full transition-all ${(Object.hasOwn(TYPE_COLORS, key) && TYPE_COLORS[key]) || "bg-slate-400"} ${anchoDeBarra(pct)}`}
                                                         aria-valuenow={pct}
                             aria-valuemin={0}
                             aria-valuemax={100}

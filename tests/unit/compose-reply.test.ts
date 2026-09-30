@@ -666,6 +666,17 @@ describe("composeReply — the brief it hands the model", () => {
     await composeReply(base({ intent: "closing" }));
     expect(mockCall.mock.calls[0][0] as string).toContain("primer mensaje");
   });
+
+  it("si el caso entró por el formulario web, el primer mensaje agradece el formulario y no un mail", async () => {
+    replies(`Recibimos tu denuncia, ya quedó registrada. ${AVISO_DE_TRASPASO}`);
+    await composeReply(base({ intent: "closing", origenWeb: true }));
+    expect(mockCall.mock.calls[0][0] as string).toContain("completó el formulario de denuncia");
+
+    vi.clearAllMocks();
+    replies(`Ya tenemos todo lo necesario. ${AVISO_DE_TRASPASO}`);
+    await composeReply(base({ intent: "closing", origenWeb: true, isFollowUp: true }));
+    expect(mockCall.mock.calls[0][0] as string).not.toContain("completó el formulario de denuncia");
+  });
 });
 
 /**

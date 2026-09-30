@@ -37,7 +37,7 @@ import {
   type TenantContext,
 } from "@/data/scope";
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
-import { ClaimTypeSchema } from "@/lib/schemas/cases";
+import { CANALES_REALES, ClaimTypeSchema } from "@/lib/schemas/cases";
 import { completadoConfirmado } from "@/server/cases/listo-confirmado";
 import { consultaDeCiclo, consultaDeCuellos } from "@/server/metrics/trayecto";
 
@@ -139,7 +139,7 @@ function normalizeUsage(row?: {
  *
  * El período se corta en hora argentina, igual que la ventana del mes: en UTC
  * los casos de las 21 a las 24 caerían en el día siguiente. Las cinco series
- * miran sólo WhatsApp y mail reales: batch-simulate crea cientos de `email_sim`
+ * miran sólo los canales reales (WhatsApp, mail y formulario web): batch-simulate crea cientos de `email_sim`
  * que después quedan como reclamo, y un día de escenarios se leía como un día
  * de 108 reclamos sin ningún mensaje atendido.
  *
@@ -163,7 +163,7 @@ export function consultaDeActividad(db: ClienteDatos, unidad: Unidad, desde: str
       cerrados: sql<number>`count(*) filter (where ${esCierre})::int`,
     })
     .from(cases)
-    .where(and(gte(cases.created_at, desde), inArray(cases.channel, ["whatsapp", "email"])))
+    .where(and(gte(cases.created_at, desde), inArray(cases.channel, [...CANALES_REALES])))
     .groupBy(sql`1`)
     .orderBy(sql`1`);
 }
@@ -171,7 +171,7 @@ export function consultaDeActividad(db: ClienteDatos, unidad: Unidad, desde: str
 // Un cierre es `cerrado`, `pagado` o `rechazado`; los tres guardan su fecha en `closed_at`.
 const esCierre = inArray(cases.status, [...ESTADOS_CERRADOS]);
 
-/** Un solo conteo; sólo canales reales (whatsapp, email), como la serie. */
+/** Un solo conteo; sólo canales reales (whatsapp, email, web), como la serie. */
 export function consultaDeAyer(db: ClienteDatos, desde: string, hasta: string) {
   const creadoAyer = and(gte(cases.created_at, desde), lt(cases.created_at, hasta));
   return db
@@ -185,7 +185,7 @@ export function consultaDeAyer(db: ClienteDatos, desde: string, hasta: string) {
       confirmacion_pendiente: sql<number>`count(*) filter (where ${cases.status} = 'confirmacion_pendiente')::int`,
     })
     .from(cases)
-    .where(inArray(cases.channel, ["whatsapp", "email"]));
+    .where(inArray(cases.channel, [...CANALES_REALES]));
 }
 
 /**

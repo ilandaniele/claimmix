@@ -84,6 +84,10 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "type.rc": "Liability",
   "type.robo_contenido": "Content theft",
   "type.accidente_personal": "Personal injury",
+  "type.art": "Workers' comp",
+  "type.vida": "Life",
+  "type.integral_comercio": "Business package",
+  "type.consorcio": "Condominium",
   "type.other": "Other",
 
   // ── Dashboard tabs ─────────────────────────────────────────────────────────
@@ -239,6 +243,8 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "field.driver_license": "Driver's license",
   "field.claim_type": "Claim type",
   "field.hay_heridos": "Injuries",
+  "field.testigos": "Witnesses",
+  "field.numero_denuncia": "Report number",
   "field.hora_siniestro": "Time of the incident",
   "field.provincia_siniestro": "Province",
   "field.patente_vehiculo": "Vehicle plate",
@@ -322,8 +328,15 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "docs.licencia_conducir": "Driver's license",
   "docs.denuncia_policial": "Police report",
   "docs.fotos_lugar": "Scene photos",
+  "docs.certificado_medico": "Medical certificate",
+  "docs.foto_vidrio": "Photo of the broken glass",
   "docs.foto_oblea_vtv": "VTV sticker photo",
   "docs.informe_bomberos": "Fire department report",
+  "docs.denuncia_art": "Workplace accident report",
+  "docs.certificado_defuncion": "Death certificate",
+  "docs.dni_beneficiario": "Beneficiary's ID",
+  "docs.inventario_bienes": "List of damaged or stolen goods",
+  "docs.presupuesto_reparacion": "Repair quote",
 
   // ── Confidence thresholds (UI labels) ─────────────────────────────────────
   "confidence.high": "High",
@@ -334,6 +347,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "audit.auth.success": "Successful sign in",
   "audit.auth.rate_limited": "Access attempts blocked (rate limit)",
   "audit.case.created": "Case created",
+  "audit.case.web_recibida": "Received through the web form",
   "audit.case.closed": "Case closed",
   "audit.case.status_changed": "Status updated",
   "audit.case.marked_answered": "Marked as answered",
@@ -471,6 +485,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "channel.email_sim": "Simulation",
   "channel.whatsapp": "WhatsApp",
   "channel.whatsapp_sim": "WhatsApp simulation",
+  "channel.web": "Web form",
 
   // ── Bandeja filter labels ───────────────────────────────────────────────────
   "filter.channel": "Channel",
@@ -770,6 +785,8 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "consola.tab.lote": "Batch simulation",
   "consola.tab.trabajo": "Team workflow",
   "consola.pestanas": "Agent console sections",
+  "consola.tab.ramos": "Claim types",
+  "consola.tab.formulario": "Web form",
   "consola.tab.modelos": "Models",
   "consola.tab.reglas": "Prompt rules",
   "consola.tab.uso": "Provider usage",

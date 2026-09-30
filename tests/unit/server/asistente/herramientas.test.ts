@@ -92,14 +92,14 @@ describe("contarCasos", () => {
     expect(where).toHaveBeenCalledTimes(1);
   });
 
-  it("sin canal pedido, restringe a whatsapp y email reales (paridad con /metricas)", async () => {
+  it("sin canal pedido, restringe a los canales reales (paridad con /metricas)", async () => {
     const { chain, where } = chainWhereResolves([{ n: 2 }]);
     mockDb.select.mockReturnValue(chain);
 
     await contarCasos(CTX, base);
     const { sql, params } = sqlDe(where.mock.calls[0]?.[0]);
-    expect(sql).toMatch(/"channel" in \(\$\d+, \$\d+\)/);
-    expect(params).toEqual(expect.arrayContaining(["whatsapp", "email"]));
+    expect(sql).toMatch(/"channel" in \(\$\d+, \$\d+, \$\d+\)/);
+    expect(params).toEqual(expect.arrayContaining(["whatsapp", "email", "web"]));
   });
 
   it("con canal pedido, compara ese único canal — no la lista de reales", async () => {

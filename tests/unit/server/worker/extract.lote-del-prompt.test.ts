@@ -75,10 +75,10 @@ async function correr(loteFalla: boolean) {
 }
 
 describe("cargarLoDelPrompt", () => {
-  it("manda las ocho consultas del prompt en un solo lote", async () => {
+  it("manda las nueve consultas del prompt en un solo lote", async () => {
     const { lotes } = await correr(false);
-    // Patrones, entrenamiento, reglas, los DOS de ejemplos, versión, campos y adjuntos.
-    expect(lotes).toContain(8);
+    // Patrones, entrenamiento, reglas, los DOS de ejemplos, versión, campos, adjuntos y los ramos propios del inquilino (B26).
+    expect(lotes).toContain(9);
   });
 
   it("y si el lote se cae, vuelve por el camino de a uno", async () => {

@@ -8,20 +8,20 @@
  * Cliente-safe: nada de imports de servidor.
  */
 
-import { esAR, type TranslationKey } from "@/lib/i18n";
+import { esAR, type ClaveDelCliente } from "@/lib/i18n/es-AR";
 import { canonicalFieldKey, isNameable, labelForField } from "@/lib/labels/claim-fields";
 import { valorLegible } from "@/core/mensajes/valor-legible";
 
-type T = (k: TranslationKey) => string;
+type T = (k: ClaveDelCliente) => string;
 
 /** El nombre que lee una persona; nunca la clave cruda. */
 export function etiquetaDeCampo(key: string, t: T): string {
   const canon = canonicalFieldKey(key);
 
-  const campoKey = `field.${canon}` as TranslationKey;
+  const campoKey = `field.${canon}` as ClaveDelCliente;
   if (campoKey in esAR) return t(campoKey);
 
-  const docKey = `docs.${canon}` as TranslationKey;
+  const docKey = `docs.${canon}` as ClaveDelCliente;
   if (docKey in esAR) return t(docKey);
 
   return labelForField(canon).label;
@@ -31,8 +31,8 @@ export function etiquetaDeCampo(key: string, t: T): string {
 export function tieneEtiqueta(key: string): boolean {
   const canon = canonicalFieldKey(key);
   return (
-    (`field.${canon}` as TranslationKey) in esAR ||
-    (`docs.${canon}` as TranslationKey) in esAR ||
+    (`field.${canon}` as ClaveDelCliente) in esAR ||
+    (`docs.${canon}` as ClaveDelCliente) in esAR ||
     isNameable(key)
   );
 }
@@ -42,7 +42,7 @@ export function valorParaMostrar(key: string, valor: string, t: T, hoy: string):
   const canon = canonicalFieldKey(key);
 
   if (canon === "claim_type") {
-    const tipoKey = `type.${valor}` as TranslationKey;
+    const tipoKey = `type.${valor}` as ClaveDelCliente;
     if (tipoKey in esAR) return t(tipoKey);
   }
 

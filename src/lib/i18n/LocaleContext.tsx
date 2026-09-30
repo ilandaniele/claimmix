@@ -9,13 +9,26 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
-import { getT, type Locale, type TranslationKey } from "./index";
+import { esAR, type ClaveDelCliente } from "./es-AR";
+import { enUS } from "./en-US";
+import type { Locale } from "./index";
 import { LOCALE_COOKIE, SUPPORTED_LOCALES, DEFAULT_LOCALE } from "./locale-shared";
+
+// No importa ./index: esa junta también los textos de servidor y viajarían al navegador.
+const DICCIONARIOS: Record<Locale, Record<ClaveDelCliente, string>> = {
+  "es-AR": esAR,
+  "en-US": enUS,
+};
+
+function getT(locale: Locale): (key: ClaveDelCliente) => string {
+  const map = DICCIONARIOS[locale] ?? esAR;
+  return (key) => map[key] ?? esAR[key];
+}
 
 interface LocaleContextValue {
   locale: Locale;
   setLocale: (locale: Locale) => void;
-  t: (key: TranslationKey) => string;
+  t: (key: ClaveDelCliente) => string;
 }
 
 const LocaleContext = createContext<LocaleContextValue>({

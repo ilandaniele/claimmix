@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 
 type TrainingExample = {
   id: string;
@@ -19,7 +19,7 @@ type TrainingExample = {
  * `status` es `text` en la base, no un enum, asi que un estado que no este aca
  * se muestra crudo: es preferible a dibujar un hueco.
  */
-const ESTADO: Record<string, TranslationKey> = {
+const ESTADO: Record<string, ClaveDelCliente> = {
   approved: "ejemplos.estado.approved",
   rejected: "ejemplos.estado.rejected",
   pending: "ejemplos.estado.pending",

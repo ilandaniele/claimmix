@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { Activity, Brain, CheckCircle2, ClipboardList, ListChecks, Settings2, SlidersHorizontal, Layers } from "lucide-react";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { useTeclasDePestanas } from "@/lib/ui/pestanas";
 
 import { AiProviderPanel } from "../configuracion/AiProviderPanel";
@@ -34,7 +34,7 @@ const TABS = [
   { id: "uso", clave: "consola.tab.uso", icon: Activity },
   { id: "lote", clave: "consola.tab.lote", icon: Layers },
   { id: "trabajo", clave: "consola.tab.trabajo", icon: ClipboardList },
-] as const satisfies readonly { id: TabId; clave: TranslationKey; icon: unknown }[];
+] as const satisfies readonly { id: TabId; clave: ClaveDelCliente; icon: unknown }[];
 
 /** `aria-controls` necesita un id, y el panel es uno solo para todas. */
 const ID_PANEL = "panel-de-la-consola";

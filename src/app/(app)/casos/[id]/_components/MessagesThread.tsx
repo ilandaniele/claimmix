@@ -21,7 +21,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useT, useLocale } from "@/lib/i18n/LocaleContext";
-import type { Locale, TranslationKey } from "@/lib/i18n";
+import type { Locale, ClaveDelCliente } from "@/lib/i18n";
 import type { MensajeDeLaConversacion as Message } from "@/server/cases/conversacion";
 import type { EstadoDeRespuesta } from "@/core/whatsapp/puede-responder";
 import { BloqueoPlanPro } from "@/app/(app)/_components/BloqueoPlanPro";
@@ -51,7 +51,7 @@ const TIMEZONE = "America/Argentina/Buenos_Aires";
  * mail que no terminó de salir: el envío se cortó o no se pudo anotar cómo
  * terminó.
  */
-const ESTADOS: Record<string, { clave: TranslationKey; clase: string }> = {
+const ESTADOS: Record<string, { clave: ClaveDelCliente; clase: string }> = {
   failed: { clave: "messages.thread.no_enviado", clase: "bg-red-50 text-red-700" },
   queued: { clave: "messages.thread.sin_confirmar", clase: "bg-amber-50 text-amber-800" },
   skipped_simulated: { clave: "messages.thread.simulado", clase: "bg-amber-50 text-amber-800" },
@@ -144,7 +144,7 @@ interface MessageCardProps {
 }
 
 /** Por quién firma cada tarjeta saliente: el agente o una persona del equipo (P8). */
-const AUTOR_CLAVE: Record<Message["autor"], TranslationKey> = {
+const AUTOR_CLAVE: Record<Message["autor"], ClaveDelCliente> = {
   denunciante: "messages.thread.denunciante",
   agente: "messages.thread.agente",
   equipo: "messages.thread.equipo",

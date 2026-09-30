@@ -6,9 +6,7 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { esAR } from "@/lib/i18n/es-AR";
-import { enUS } from "@/lib/i18n/en-US";
-import { getT } from "@/lib/i18n";
+import { esAR, enUS, getT } from "@/lib/i18n/index";
 import { ETIQUETA_DE_ROL } from "@/lib/i18n/etiqueta-de-rol";
 import { ToastContainer } from "@/app/(app)/bandeja/components/Toast";
 import { LocaleProvider } from "@/lib/i18n/LocaleContext";

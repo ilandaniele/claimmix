@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { cruzarDocumentos, fusionarIndicadores, type IndicioDerivado } from "@/core/case/contradicciones";
-import { enUS } from "@/lib/i18n/en-US";
+import { enUS } from "@/lib/i18n/index";
 import { provinciasNombradas, puedeSerDe } from "@/core/geo/provincias";
 import type { DocumentoLeido } from "@/lib/schemas/extracted-claim";
 

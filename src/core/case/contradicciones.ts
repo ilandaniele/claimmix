@@ -15,7 +15,7 @@
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { puedeSerDe } from "@/core/geo/provincias";
 import { MINIMO_DNI, normalizarDni, sirveParaBuscar } from "@/core/matching/normalizar";
-import { esAR } from "@/lib/i18n/es-AR";
+import { esAR } from "@/lib/i18n";
 import type { DocumentoLeido, ExtractedClaim } from "@/lib/schemas/extracted-claim";
 
 import { mismaPersona, nombresCompatibles, normalizarPatente } from "./patente";

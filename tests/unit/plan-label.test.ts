@@ -15,8 +15,7 @@ import { describe, it, expect } from "vitest";
 
 import { nombreDePlan } from "@/lib/billing/plan-label";
 import { PLANS } from "@/lib/billing/plans";
-import { esAR } from "@/lib/i18n/es-AR";
-import { enUS } from "@/lib/i18n/en-US";
+import { esAR, enUS } from "@/lib/i18n/index";
 
 const tEs = (k: keyof typeof esAR) => esAR[k];
 const tEn = (k: keyof typeof enUS) => enUS[k];

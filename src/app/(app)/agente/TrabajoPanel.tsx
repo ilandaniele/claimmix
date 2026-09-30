@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import type { CampoDeTrabajo, TrabajoDelEquipo } from "@/server/cases/trabajo-del-equipo";
 
 /*
@@ -28,9 +28,9 @@ function personasDe(reglas: unknown): string[] {
 
 interface SeccionProps {
   campo: CampoDeTrabajo;
-  titulo: TranslationKey;
-  ayuda: TranslationKey;
-  leyenda?: TranslationKey;
+  titulo: ClaveDelCliente;
+  ayuda: ClaveDelCliente;
+  leyenda?: ClaveDelCliente;
   guardado: unknown;
   porDefecto: unknown;
   alGuardar: (valor: unknown) => void;

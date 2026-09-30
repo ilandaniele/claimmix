@@ -6,7 +6,7 @@ import { ADMIN_ROLES, CUSTOMER_PII_ROLES } from "@/lib/auth/roles";
 import { usePathname, useSearchParams } from "next/navigation";
 import { hrefActivo } from "./nav-activo";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import {
   Inbox,
   AlertTriangle,
@@ -47,7 +47,7 @@ export interface NavItemDef {
 export function conCandadoPro(
   items: NavItemDef[],
   esPro: boolean,
-  t: (k: TranslationKey) => string
+  t: (k: ClaveDelCliente) => string
 ): NavItemDef[] {
   if (esPro) return items;
   return items.map((item) =>

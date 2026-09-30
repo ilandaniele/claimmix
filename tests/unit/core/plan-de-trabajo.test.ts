@@ -6,8 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { PLAN_POR_DEFECTO, PlanSchema, claveDeTituloDeFabrica, planPara, type Plan } from "@/core/case/plan-de-trabajo";
-import { enUS } from "@/lib/i18n/en-US";
-import { esAR } from "@/lib/i18n/es-AR";
+import { enUS, esAR } from "@/lib/i18n";
 
 const propio: Plan = {
   porTipo: {

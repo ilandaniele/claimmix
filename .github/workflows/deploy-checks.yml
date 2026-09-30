@@ -597,38 +597,25 @@ jobs:
   # Los ataques al agente (--agent) NO corren acá: gastan tokens del mismo cupo
   # que atiende a los asegurados. Se corren a mano al tocar el agente o los
   # prompts, con `pnpm pentest --agent`.
-  # ── Que el código y la base digan lo mismo ───────────────────────────────────
+  # ── Migraciones al día ───────────────────────────────────────────────────────
   #
-  # El checklist de documentos por tipo de siniestro vive en dos lados: en el
-  # código, que es de donde el agente saca qué papeles pedir, y en
-  # `required_docs_config`, que es de donde el caso saca qué registrar como
-  # pendiente. Nada comparaba las dos listas, y divergieron durante meses: el
-  # código conocía ocho tipos de siniestro y la tabla tenía cuatro.
+  # Una migración del repo sin fila en `schema_migrations` de ESTA base: el
+  # código nuevo ya la espera y el síntoma sería un 42703 a mitad de un pedido.
   #
-  # El síntoma era mudo, que es lo que lo hizo durar. El sembrador se vuelve sin
-  # hacer nada cuando no encuentra filas para el tipo, así que el agente pedía
-  # bien los papeles y el caso no registraba ninguno. Cuarenta y cinco casos de
-  # producción sin seguimiento de documentación, y en la pantalla del analista
-  # se veían completos.
+  # Antes este job también comparaba `required_docs_config` con el código. Desde
+  # 0044 los documentos de cada tipo salen del código (los nativos) o de
+  # `tenant_claim_types` (los propios de cada aseguradora), y la tabla dejó de
+  # leerse: no hay dos listas que comparar. El id del job sigue siendo
+  # `listas-parejas` para no romper los `needs` de los callers.
   #
-  # Una divergencia así se descubre sola cuando ya hizo daño. Preguntarlo
-  # después de cada deploy cuesta unas pocas consultas.
-  #
-  # `pnpm esquemas` —la otra comparación de esta familia, entre los archivos de
-  # migración y el esquema que corre, no el ledger que mira «Migraciones
-  # aplicadas»— NO está acá, y vale decir por qué: necesita
-  # `STAGING_DATABASE_URL`, porque compara staging contra producción, y que
-  # alguien mantenga staging al día. Sin eso se pondría rojo por drift de
-  # staging en vez de por drift de producción, que es justo la clase de rojo que
-  # enseña a no mirar el reporte. Se corre a mano.
-  #
-  # Lo anoto porque lo cableé sin comprobarlo y la CI se puso roja: pasa local
-  # porque la variable está en .env.local, y en el runner no existe. Que un
-  # chequeo pase en mi máquina no dice nada sobre si puede correr allá.
+  # `pnpm esquemas` —la comparación entre los archivos de migración y el
+  # esquema que corre— NO está acá: necesita `STAGING_DATABASE_URL`, y sin
+  # staging al día se pondría rojo por drift de staging, no de producción. Se
+  # corre a mano.
   #
   # Sólo lee.
   listas-parejas:
-    name: Paridad de documentos y migraciones
+    name: Migraciones al día
     runs-on: ubuntu-latest
     needs: [smoke]
     steps:
@@ -654,39 +641,6 @@ jobs:
         run: node scripts/migrate.mjs --url "$BASE_A_MIRAR" --exigir-al-dia
         env:
           BASE_A_MIRAR: ${{ secrets.DATABASE_URL }}
-
-      # Aunque falle la de arriba: una migración pendiente que no toca
-      # documentos no puede tapar una divergencia que sí. Sin dependencias no:
-      # su rojo se leería como una divergencia que no existe.
-      - name: Documentos por tipo de siniestro
-        id: docs
-        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
-        run: pnpm docs-config
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # Ninguno de estos dos entra por la capa de datos —consultan el catálogo
-          # directo— pero la variable va igual: la invariante pide que estén las dos
-          # juntas para que nadie tenga que averiguar cuál necesita cuál.
-          DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
-      # Sólo por la paridad: una migración pendiente ya se explica sola arriba.
-      - name: Qué significa que esto falle
-        if: failure() && steps.docs.outcome == 'failure'
-        run: |
-          echo "::error::El código y la base dejaron de decir lo mismo."
-          echo ""
-          echo "  · 'falta en la base'  → agregaste un tipo de siniestro al código y"
-          echo "                          no escribiste la migración que carga sus"
-          echo "                          filas. El agente va a pedir los papeles y el"
-          echo "                          caso no va a registrar ninguno."
-          echo "  · 'sobra en la base'  → una fila que el agente nunca pide. Queda"
-          echo "                          pendiente para siempre."
-          echo "  · esquema distinto    → una migración sin aplicar, o alguien tocó la"
-          echo "                          base a mano. Que «Migraciones aplicadas» pase"
-          echo "                          no descarta lo primero: mira el ledger, y una"
-          echo "                          fila de --baseline puede mentir (la 0010). Se"
-          echo "                          saca con --forget <versión> y se corre --apply."
-          echo ""
-          echo "Reproducilo con: pnpm docs-config"
 
   # ── Permisos del rol de la aplicación ────────────────────────────────────────
   #
@@ -849,7 +803,7 @@ jobs:
           fila "Ensayo de conversaciones" "$ENSAYO" "correr_ensayo"
           fila "Canales de entrada (Gmail y WhatsApp)" "$TIMBRE" "correr_timbre"
           fila "Pen test (superficie y pared)" "$PENTEST" "correr_pentest"
-          fila "Paridad de documentos y migraciones" "$LISTAS" "-"
+          fila "Migraciones al día" "$LISTAS" "-"
           fila "Permisos del rol" "$PERMISOS" "-"
           fila "Carga de lectura" "$CARGA" "medir_carga"
           {

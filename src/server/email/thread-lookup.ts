@@ -36,6 +36,14 @@ import { logger } from "@/lib/observability/logger";
 /** The channels whose `cases.email_thread_id` is an email thread. */
 const EMAIL_CHANNELS = ["email", "email_sim"];
 
+/**
+ * Los canales donde el asunto «Caso #<uuid>» pega un mail con su caso. Suma
+ * `web`: quien denunció por el formulario sólo tiene nuestro mail para
+ * contestar, y ahí el asunto es lo único que sobrevive si su cliente pierde las
+ * cabeceras. El paso 2 sigue sin `web`: ese caso no tiene hilo de mail propio.
+ */
+const CANALES_PASO_3 = [...EMAIL_CHANNELS, "web"];
+
 export interface ThreadLookupResult {
   existingCaseId?: string;
 }
@@ -153,7 +161,7 @@ export async function threadLookup(
             // Un caso de WhatsApp no tiene hilo de mail: aunque alguien escriba
             // su id en el asunto, no se pega. La guardia de participante ya lo
             // cubre; esto lo dice en la consulta, que es donde se lee.
-            .where(and(eq(cases.id, subjectCaseId), inArray(cases.channel, EMAIL_CHANNELS)))
+            .where(and(eq(cases.id, subjectCaseId), inArray(cases.channel, CANALES_PASO_3)))
             .limit(1)
         )
       );

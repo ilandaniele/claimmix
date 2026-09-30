@@ -98,9 +98,9 @@ describe("conjuntos válidos de la bandeja", () => {
     expect(new Set(VALID_COMPLEJIDADES)).toEqual(new Set(["baja", "media", "alta"]));
   });
 
-  it("VALID_CHANNELS es el mismo conjunto de antes", () => {
+  it("VALID_CHANNELS es el de antes más el formulario web (B17)", () => {
     expect(new Set(VALID_CHANNELS)).toEqual(
-      new Set(["email_sim", "email", "whatsapp_sim", "whatsapp"])
+      new Set(["email_sim", "email", "whatsapp_sim", "whatsapp", "web"])
     );
   });
 });

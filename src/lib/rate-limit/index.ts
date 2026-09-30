@@ -226,6 +226,41 @@ export const RATE_LIMIT_CONFIGS = {
    * después de las 21 h de Argentina.
    */
   REVISION_DE_DESVIOS: { limit: 1, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * PADRON_IMPORTAR: 30 importaciones o vistas previas del padrón por hora y por
+   * persona (las dos comparten el cupo). Cada una lee el archivo entero (hasta
+   * 1000 filas) y consulta el padrón; una planilla corregida varias veces cabe,
+   * un loop no.
+   */
+  PADRON_IMPORTAR: { limit: 30, windowMs: 60 * 60_000 },
+
+  /**
+   * PADRON_ESCRIBIR: 60 altas o ediciones a mano por minuto y por persona, para
+   * el formulario de cliente y de póliza. Una persona cargando a mano no llega.
+   */
+  PADRON_ESCRIBIR: { limit: 60, windowMs: 60_000 },
+
+  /**
+   * DENUNCIA_WEB: 10 denuncias por hora y por IP en el formulario público. Una persona
+   * tarda en escribir un relato; diez cubren una oficina detrás de un NAT.
+   */
+  DENUNCIA_WEB: { limit: 10, windowMs: 60 * 60_000 },
+
+  /**
+   * DENUNCIA_WEB_SLUG: 200 denuncias por hora por formulario, sumadas todas las
+   * IP. Frena a quien rota direcciones: la IP sola no lo ve. Una aseguradora
+   * mediana recibe una fracción de eso en su hora pico.
+   */
+  DENUNCIA_WEB_SLUG: { limit: 200, windowMs: 60 * 60_000 },
+
+  /**
+   * DENUNCIA_WEB_MAIL: 3 denuncias por hora hacia la misma dirección (la clave
+   * es su sha256). El seguimiento sale por mail a la dirección que escribió
+   * quien llenó el formulario: sin este tope, el formulario es una forma de
+   * mandarle correo a un tercero.
+   */
+  DENUNCIA_WEB_MAIL: { limit: 3, windowMs: 60 * 60_000 },
 } as const;
 
 /**

@@ -28,8 +28,6 @@ export type FieldKind = "dato" | "documento";
 export interface FieldLabel {
   /** What the claimant sees, capitalized for a list item. */
   label: string;
-  /** One sentence telling them exactly what to send. */
-  instruction: string;
   kind: FieldKind;
 }
 
@@ -43,186 +41,50 @@ export interface FieldLabel {
  */
 const FIELD_LABELS: Record<string, FieldLabel> = {
   // ── Canonical schema fields ───────────────────────────────────────────────
-  full_name: {
-    label: "Nombre completo",
-    instruction: "Decinos tu nombre y apellido.",
-    kind: "dato",
-  },
-  email: {
-    label: "Correo electrónico",
-    instruction: "Dejanos un correo donde podamos escribirte.",
-    kind: "dato",
-  },
-  phone: {
-    label: "Teléfono de contacto",
-    instruction: "Dejanos un teléfono donde podamos llamarte.",
-    kind: "dato",
-  },
-  email_or_phone: {
-    label: "Un dato de contacto",
-    instruction: "Dejanos un teléfono o un correo donde podamos ubicarte.",
-    kind: "dato",
-  },
-  dni: {
-    label: "DNI del titular",
-    instruction: "Decinos el DNI del titular de la póliza.",
-    kind: "dato",
-  },
-  policy_number: {
-    label: "Número de póliza",
-    instruction: "Decinos el número de póliza (por ejemplo POL-12345).",
-    kind: "dato",
-  },
-  accident_date: {
-    label: "Fecha del siniestro",
-    instruction: "Decinos qué día ocurrió (por ejemplo 15/05/2026).",
-    kind: "dato",
-  },
-  accident_location: {
-    label: "Lugar del siniestro",
-    instruction: "Decinos la dirección o la localidad donde ocurrió.",
-    kind: "dato",
-  },
-  accident_description: {
-    label: "Qué pasó",
-    instruction: "Contanos brevemente cómo ocurrió el siniestro.",
-    kind: "dato",
-  },
-  claim_type: {
-    label: "Tipo de siniestro",
-    instruction: "Decinos qué tipo de siniestro fue: choque, robo, granizo, incendio.",
-    kind: "dato",
-  },
+  full_name: { label: "Nombre completo", kind: "dato" },
+  email: { label: "Correo electrónico", kind: "dato" },
+  phone: { label: "Teléfono de contacto", kind: "dato" },
+  email_or_phone: { label: "Un dato de contacto", kind: "dato" },
+  dni: { label: "DNI del titular", kind: "dato" },
+  policy_number: { label: "Número de póliza", kind: "dato" },
+  accident_date: { label: "Fecha del siniestro", kind: "dato" },
+  accident_location: { label: "Lugar del siniestro", kind: "dato" },
+  accident_description: { label: "Qué pasó", kind: "dato" },
+  claim_type: { label: "Tipo de siniestro", kind: "dato" },
 
   // ── Keys the extractor has invented in production ─────────────────────────
-  nombre_asegurado: {
-    label: "Nombre del asegurado",
-    instruction: "Decinos el nombre y apellido del titular de la póliza.",
-    kind: "dato",
-  },
-  dni_asegurado: {
-    label: "DNI del asegurado",
-    instruction: "Decinos el DNI del titular de la póliza.",
-    kind: "dato",
-  },
-  telefono_contacto: {
-    label: "Teléfono de contacto",
-    instruction: "Dejanos un teléfono donde podamos llamarte.",
-    kind: "dato",
-  },
-  numero_poliza: {
-    label: "Número de póliza",
-    instruction: "Decinos el número de póliza (por ejemplo POL-12345).",
-    kind: "dato",
-  },
-  fecha_siniestro: {
-    label: "Fecha del siniestro",
-    instruction: "Decinos qué día ocurrió.",
-    kind: "dato",
-  },
-  hora_siniestro: {
-    label: "Hora aproximada",
-    instruction: "Decinos más o menos a qué hora fue.",
-    kind: "dato",
-  },
-  lugar_siniestro: {
-    label: "Lugar del siniestro",
-    instruction: "Decinos la dirección o la esquina donde ocurrió.",
-    kind: "dato",
-  },
-  provincia_siniestro: {
-    label: "Provincia",
-    instruction: "Decinos en qué provincia ocurrió.",
-    kind: "dato",
-  },
-  patente_vehiculo: {
-    label: "Patente del vehículo",
-    instruction: "Decinos la patente del vehículo.",
-    kind: "dato",
-  },
-  tipo_vehiculo: {
-    label: "Vehículo involucrado",
-    instruction: "Decinos marca, modelo y patente del vehículo.",
-    kind: "dato",
-  },
-  hay_heridos: {
-    label: "Si hubo personas lastimadas",
-    instruction: "Decinos si alguien resultó lastimado.",
-    kind: "dato",
-  },
-  heridos: {
-    label: "Personas lastimadas",
-    instruction: "Decinos si alguien resultó lastimado y quién.",
-    kind: "dato",
-  },
-  testigos: {
-    label: "Testigos",
-    instruction: "Si hubo testigos, pasanos su nombre y teléfono.",
-    kind: "dato",
-  },
-  partes_relacionadas: {
-    label: "Otros involucrados",
-    instruction: "Decinos quién más participó del hecho y sus datos.",
-    kind: "dato",
-  },
-  numero_denuncia: {
-    label: "Número de denuncia",
-    instruction: "Si hiciste la denuncia, pasanos el número.",
-    kind: "dato",
-  },
+  nombre_asegurado: { label: "Nombre del asegurado", kind: "dato" },
+  dni_asegurado: { label: "DNI del asegurado", kind: "dato" },
+  telefono_contacto: { label: "Teléfono de contacto", kind: "dato" },
+  numero_poliza: { label: "Número de póliza", kind: "dato" },
+  fecha_siniestro: { label: "Fecha del siniestro", kind: "dato" },
+  hora_siniestro: { label: "Hora aproximada", kind: "dato" },
+  lugar_siniestro: { label: "Lugar del siniestro", kind: "dato" },
+  provincia_siniestro: { label: "Provincia", kind: "dato" },
+  patente_vehiculo: { label: "Patente del vehículo", kind: "dato" },
+  tipo_vehiculo: { label: "Vehículo involucrado", kind: "dato" },
+  hay_heridos: { label: "Si hubo personas lastimadas", kind: "dato" },
+  heridos: { label: "Personas lastimadas", kind: "dato" },
+  testigos: { label: "Testigos", kind: "dato" },
+  partes_relacionadas: { label: "Otros involucrados", kind: "dato" },
+  numero_denuncia: { label: "Número de denuncia", kind: "dato" },
 
   // ── Documents (required_docs_config) ──────────────────────────────────────
-  fotos_danos: {
-    label: "Fotos de los daños",
-    instruction: "Mandanos fotos de los daños.",
-    kind: "documento",
-  },
-  fotos_lugar: {
-    label: "Fotos del lugar",
-    instruction: "Mandanos fotos del lugar del hecho.",
-    kind: "documento",
-  },
-  foto_vidrio: {
-    label: "Foto del vidrio roto",
-    instruction: "Mandanos una foto del vidrio dañado.",
-    kind: "documento",
-  },
-  licencia_conducir: {
-    label: "Licencia de conducir",
-    instruction: "Mandanos una foto de la licencia de quien manejaba.",
-    kind: "documento",
-  },
-  parte_amistoso: {
-    label: "Parte amistoso",
-    instruction: "Mandanos el parte amistoso de accidente si lo completaron.",
-    kind: "documento",
-  },
-  denuncia_policial: {
-    label: "Denuncia policial",
-    instruction: "Mandanos una foto de la denuncia policial.",
-    kind: "documento",
-  },
-  informe_bomberos: {
-    label: "Informe de bomberos",
-    instruction: "Mandanos el informe de bomberos.",
-    kind: "documento",
-  },
-  certificado_medico: {
-    label: "Certificado médico",
-    instruction:
-      "Mandanos el certificado médico o el alta hospitalaria de la atención.",
-    kind: "documento",
-  },
-  foto_oblea_vtv: {
-    label: "Oblea de la VTV",
-    instruction: "Mandanos una foto de la oblea de la VTV.",
-    kind: "documento",
-  },
-  vtv: {
-    label: "Oblea de la VTV",
-    instruction: "Mandanos una foto de la oblea de la VTV.",
-    kind: "documento",
-  },
+  fotos_danos: { label: "Fotos de los daños", kind: "documento" },
+  fotos_lugar: { label: "Fotos del lugar", kind: "documento" },
+  foto_vidrio: { label: "Foto del vidrio roto", kind: "documento" },
+  licencia_conducir: { label: "Licencia de conducir", kind: "documento" },
+  parte_amistoso: { label: "Parte amistoso", kind: "documento" },
+  denuncia_policial: { label: "Denuncia policial", kind: "documento" },
+  informe_bomberos: { label: "Informe de bomberos", kind: "documento" },
+  certificado_medico: { label: "Certificado médico", kind: "documento" },
+  foto_oblea_vtv: { label: "Oblea de la VTV", kind: "documento" },
+  vtv: { label: "Oblea de la VTV", kind: "documento" },
+  denuncia_art: { label: "Denuncia del accidente de trabajo", kind: "documento" },
+  certificado_defuncion: { label: "Certificado de defunción", kind: "documento" },
+  dni_beneficiario: { label: "DNI del beneficiario", kind: "documento" },
+  inventario_bienes: { label: "Listado de bienes", kind: "documento" },
+  presupuesto_reparacion: { label: "Presupuesto de la reparación", kind: "documento" },
 };
 
 /**
@@ -292,7 +154,7 @@ function guessKind(fieldKey: string): FieldKind {
 }
 
 /**
- * The label, instruction and kind for a field key — never a raw key.
+ * The label and kind for a field key — never a raw key.
  *
  * `override` is the tenant's own wording from required_docs_config, which wins
  * over ours: an operator who renamed a document knows their book of business
@@ -302,34 +164,10 @@ export function labelForField(fieldKey: string, override?: string | null): Field
   const known = FIELD_LABELS[fieldKey];
 
   if (override && override.trim()) {
-    const trimmed = override.trim();
-    return {
-      label: trimmed,
-      instruction: known?.instruction ?? `Mandanos ${lowerFirst(trimmed)}.`,
-      kind: known?.kind ?? guessKind(fieldKey),
-    };
+    return { label: override.trim(), kind: known?.kind ?? guessKind(fieldKey) };
   }
 
-  if (known) return known;
-
-  const label = humanizeKey(fieldKey);
-  const kind = guessKind(fieldKey);
-  return {
-    label,
-    instruction:
-      kind === "documento"
-        ? `Mandanos ${lowerFirst(label)}.`
-        : `Decinos ${lowerFirst(label)}.`,
-    kind,
-  };
-}
-
-function lowerFirst(s: string): string {
-  // Keep acronyms intact — "DNI del asegurado" must not become "dNI...".
-  if (s.length > 1 && s[0] === s[0].toUpperCase() && s[1] === s[1].toUpperCase()) {
-    return s;
-  }
-  return s.charAt(0).toLowerCase() + s.slice(1);
+  return known ?? { label: humanizeKey(fieldKey), kind: guessKind(fieldKey) };
 }
 
 // ── Field identity ────────────────────────────────────────────────────────────
@@ -563,6 +401,10 @@ const CLAIM_TYPE_LABELS: Record<string, string> = {
   cristales: "rotura de cristales",
   rc: "daños a terceros",
   accidente_personal: "accidente con lesiones",
+  art: "accidente de trabajo",
+  vida: "siniestro de vida",
+  integral_comercio: "siniestro en tu comercio",
+  consorcio: "siniestro en el consorcio",
 };
 
 /**

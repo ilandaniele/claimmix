@@ -50,10 +50,12 @@ import { useNavegacion } from "./navegacion-pendiente";
 import { useFilterParam, useLimpiarFiltros } from "./useFilterParam";
 import { CHIP_BASE, claseChip } from "./chip";
 import {
-  GRUPOS_DE_FILTRO,
   PARAMS_DE_FILTRO,
   alternar,
   filtrosPuestos,
+  gruposConTipos,
+  textoDeFiltro,
+  type TipoPropio,
 } from "./grupos-de-filtro";
 import { useDialogoModal } from "../../_components/dialogo-modal";
 
@@ -75,9 +77,11 @@ const ID_BOTON = "boton-de-filtros";
 function Panel({
   alCerrar,
   cuentas,
+  tipos,
 }: {
   alCerrar: () => void;
   cuentas: Record<string, number>;
+  tipos: readonly TipoPropio[];
 }) {
   const t = useT();
   /*
@@ -92,7 +96,7 @@ function Panel({
   const limpiar = useLimpiarFiltros();
 
   const panelRef = useDialogoModal<HTMLDivElement>(alCerrar);
-  const hayAlguno = filtrosPuestos((p) => paramsVisibles.getAll(p)).length > 0;
+  const hayAlguno = filtrosPuestos((p) => paramsVisibles.getAll(p), tipos).length > 0;
 
   return (
     <div
@@ -123,7 +127,7 @@ function Panel({
       </div>
 
       <div className="space-y-3">
-        {GRUPOS_DE_FILTRO.map((grupo, i) => {
+        {gruposConTipos(tipos).map((grupo, i) => {
           const activos = paramsVisibles.getAll(grupo.param);
 
           return (
@@ -174,7 +178,7 @@ function Panel({
                           : claseChip(puesto)
                       }
                     >
-                      {t(opcion.etiqueta)}
+                      {textoDeFiltro(t, opcion)}
                       {/*
                         * El contador, sólo donde hay uno.
                         *
@@ -225,9 +229,12 @@ function Panel({
  */
 export function BotonDeFiltros({
   cuentas = {},
+  tipos = [],
 }: {
   /** Cuántos casos cae en cada opción. Hoy sólo las de estado tienen. */
   cuentas?: Record<string, number>;
+  /** Los tipos de siniestro propios de la aseguradora, para ofrecerlos como chips. */
+  tipos?: readonly TipoPropio[];
 }) {
   const t = useT();
   const { paramsVisibles } = useNavegacion();
@@ -238,7 +245,7 @@ export function BotonDeFiltros({
 
   const cerrar = useCallback(() => setAbierto(false), []);
 
-  const puestos = filtrosPuestos((p) => paramsVisibles.getAll(p));
+  const puestos = filtrosPuestos((p) => paramsVisibles.getAll(p), tipos);
 
 
   /*
@@ -308,7 +315,7 @@ export function BotonDeFiltros({
               */}
             <span className="sr-only">
               {puestos
-                .map((f) => `${t(f.rotulo)}: ${t(f.etiqueta)}`)
+                .map((f) => `${t(f.rotulo)}: ${textoDeFiltro(t, f)}`)
                 .join(", ")}
             </span>
           </>
@@ -316,7 +323,7 @@ export function BotonDeFiltros({
       </button>
 
 
-      {abierto && <Panel alCerrar={cerrar} cuentas={cuentas} />}
+      {abierto && <Panel alCerrar={cerrar} cuentas={cuentas} tipos={tipos} />}
     </div>
   );
 }
@@ -332,14 +339,14 @@ export function BotonDeFiltros({
  * Sin nada puesto no se renderiza nada: una franja vacía con un borde es una
  * línea de la pantalla gastada en no decir nada, y la lista puede empezar ahí.
  */
-export function MarcasDeFiltros() {
+export function MarcasDeFiltros({ tipos = [] }: { tipos?: readonly TipoPropio[] }) {
   const t = useT();
   const { paramsVisibles } = useNavegacion();
   const setFilter = useFilterParam();
   const limpiar = useLimpiarFiltros();
 
   const franjaRef = useRef<HTMLDivElement>(null);
-  const puestos = filtrosPuestos((p) => paramsVisibles.getAll(p));
+  const puestos = filtrosPuestos((p) => paramsVisibles.getAll(p), tipos);
   // La búsqueda libre no pasa por `GRUPOS_DE_FILTRO` —no es un chip que se
   // combina, es texto— así que se cuenta y se saca aparte.
   const busqueda = paramsVisibles.get("q") ?? "";
@@ -415,7 +422,7 @@ export function MarcasDeFiltros() {
           type="button"
           data-marca={`${f.param}:${f.valor}`}
           onClick={() => sacar(f.param, f.valor, i)}
-          aria-label={`${t("filter.quitar")} ${t(f.rotulo)}: ${t(f.etiqueta)}`}
+          aria-label={`${t("filter.quitar")} ${t(f.rotulo)}: ${textoDeFiltro(t, f)}`}
           className="group inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border border-control bg-white py-1 pl-2.5 pr-2 text-[12.5px] font-medium text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
         >
           {/*
@@ -430,7 +437,7 @@ export function MarcasDeFiltros() {
             />
           )}
           <span aria-hidden="true">
-            {t(f.rotulo)}: {t(f.etiqueta)}
+            {t(f.rotulo)}: {textoDeFiltro(t, f)}
           </span>
           <X
             size={12}

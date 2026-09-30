@@ -45,7 +45,7 @@ export const PlazoPropioSchema = z
     titulo: z.string().trim().min(1).max(80),
     dias: z.number().int().min(1).max(365),
     ancla: z.enum(ANCLAS_DE_PLAZO),
-    tipos: z.array(ClaimTypeSchema).min(1).max(9).optional(),
+    tipos: z.array(ClaimTypeSchema).min(1).max(ClaimTypeSchema.options.length).optional(),
   })
   .strict();
 export type PlazoPropio = z.infer<typeof PlazoPropioSchema>;

@@ -19,6 +19,8 @@ import { redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { buildCaseFilters, contarPorEstado, desdeDePeriodo, listCases } from "@/server/cases/list";
+import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
+import { esRamoNativo, FORMATO_DE_CLAVE_DE_RAMO, nombreDeRamoPropio } from "@/core/case/ramos";
 import { OPCIONES_DE_ESCENARIO } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
 import { PER_PAGE_OPTIONS } from "./per-page";
@@ -106,7 +108,8 @@ interface BandejaPageProps {
 
 async function BandejaContent({ searchParams }: BandejaPageProps) {
   const params = await searchParams;
-  const t = getT(await getAccountLocale());
+  const locale = await getAccountLocale();
+  const t = getT(locale);
 
   const statusParam = params["status"];
   const typeParam = params["type"];
@@ -126,7 +129,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
 
   const status = valores(statusParam, VALID_STATUSES);
 
-  const type = valores(typeParam, VALID_TYPES);
+  // El filtro de tipo se valida más abajo, cuando se sabe qué tipos propios tiene la aseguradora.
 
   const page =
     typeof pageParam === "string" ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
@@ -191,7 +194,19 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
    * que se puede esperar pero que `batch()` no puede armar, y rompió estos
    * mismos contadores en producción. Ver src/lib/db/helpers.ts.
    */
-  const [initialData, porEstado] = await Promise.all([
+  /*
+   * Los tipos propios de la aseguradora salen en paralelo con la lista. Sólo se
+   * espera por ellos ANTES de la lista si la URL pide un tipo que no es del
+   * sistema: para validarlo hay que saber cuáles existen.
+   */
+  const ramosPendientes = cargarRamosDelInquilino(tenantId);
+  const pideTipoPropio = [typeParam ?? []].flat().some((v) => FORMATO_DE_CLAVE_DE_RAMO.test(v) && !esRamoNativo(v));
+  const type = valores(
+    typeParam,
+    pideTipoPropio ? [...VALID_TYPES, ...(await ramosPendientes).map((r) => r.clave)] : VALID_TYPES
+  );
+
+  const [initialData, porEstado, ramosPropios] = await Promise.all([
     listCases({ tenantId }, {
       status,
       type,
@@ -214,6 +229,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     // Contadores de las pestañas: sólo búsqueda y período los mueven, nunca
     // los chips de estado/tipo/severidad — ver `consultaPorEstado`.
     contarPorEstado({ tenantId }, buildCaseFilters({ q, desde })),
+    ramosPendientes,
   ]);
 
   /*
@@ -290,6 +306,13 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
             scenarios={OPCIONES_DE_ESCENARIO}
             allStatusCounts={allStatusCounts}
             vista={vista}
+            // Una fila con la clave de un ramo del código no es un tipo aparte: el filtro ya lo tiene.
+            tiposPropios={ramosPropios
+              .filter((r) => !esRamoNativo(r.clave))
+              .map((r) => ({
+                clave: r.clave,
+                nombre: nombreDeRamoPropio(r.clave, ramosPropios, locale),
+              }))}
           />
         </Card>
       </div>

@@ -34,7 +34,7 @@ export type Turno = z.infer<typeof TurnoSchema>;
 
 const ReglaSchema = z
   .object({
-    tipos: z.array(ClaimTypeSchema).min(1).max(9).optional(),
+    tipos: z.array(ClaimTypeSchema).min(1).max(ClaimTypeSchema.options.length).optional(),
     turno: TurnoSchema.optional(),
     personas: z.array(z.string().uuid()).min(1).max(50),
   })

@@ -35,6 +35,8 @@ import {
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { camposRequeridosDelRamo, clavesQueSatisfacen } from "@/core/case/required-fields";
+import { esRamoNativo } from "@/core/case/ramos";
+import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
@@ -166,10 +168,12 @@ export async function analyzeEmailClaimGaps(
   // `claim_type` está lo bastante firme: con poca confianza no sabemos qué
   // ramo es, y pedir de más sería peor que no pedir todavía.
   const tipo = fieldMap.get("claim_type");
-  const delRamo =
-    tipo && tipo.confidence >= MEDIUM_CONFIDENCE_LOW
-      ? camposRequeridosDelRamo(tipo.field_value)
-      : [];
+  const claveDelRamo = tipo && tipo.confidence >= MEDIUM_CONFIDENCE_LOW ? tipo.field_value : null;
+  // Los ramos propios sólo se leen si el de este caso no es uno del código.
+  const delRamo = camposRequeridosDelRamo(
+    claveDelRamo,
+    claveDelRamo && !esRamoNativo(claveDelRamo) ? await cargarRamosDelInquilino(tenantId) : []
+  );
 
   // ── 3. Determine missing required fields ──────────────────────────────────
   const missingRequiredFields: string[] = [];

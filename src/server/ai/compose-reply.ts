@@ -24,6 +24,7 @@ import { provinciasNombradas } from "@/core/geo/provincias";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
+import { instruccionDeCampo } from "@/lib/labels/instruccion-de-campo";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
 import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
@@ -57,6 +58,8 @@ export interface ComposeReplyInput {
   claimTypeLabel?: string | null;
   /** True when we have already written to this claimant about this case. */
   isFollowUp?: boolean;
+  /** El caso entró por el formulario web: la persona completó un formulario, no escribió un mail. */
+  origenWeb?: boolean;
   /**
    * The claimant's name, when the claim already holds one.
    *
@@ -207,11 +210,11 @@ const TRASPASO =
 
 function buildPrompt(input: ComposeReplyInput): string {
   const items = (input.fields ?? []).map((key) => {
-    const { label, instruction, kind } = labelForField(key);
+    const { label, kind } = labelForField(key);
     const known = input.knownValues?.[key];
     return known
       ? `- ${label}: ya entendimos: ${sinCentinelas(known)}. Preguntá si es correcto con ese mismo valor adentro de la pregunta, sin comillas ni paréntesis, nunca «¿pregunta?: valor» ni «¿pregunta? valor»; no pidas más precisión ni digas que la persona lo escribió así`
-      : `- ${label} — ${instruction} (${kind === "documento" ? "archivo o foto" : "dato"})`;
+      : `- ${label} — ${instruccionDeCampo(key)} (${kind === "documento" ? "archivo o foto" : "dato"})`;
   });
 
   const conflictos = (input.conflicts ?? []).map((c) => {
@@ -267,7 +270,7 @@ ${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${it
 ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de cada uno, copiados tal cual):\n${conflictos.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName)}. Podés llamarla por su nombre de pila.` : ""}
-${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}
+${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}${input.origenWeb && !input.isFollowUp ? "\nLa persona no nos escribió un mail: completó el formulario de denuncia de la aseguradora en la web. Agradecele que lo haya completado y decile que puede contestar este mismo correo." : ""}
 ${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${sinCentinelas(sinNumerosEnteros(input.lastMessage)).slice(0, 600)}"""` : ""}
 
 ${channelBrief}

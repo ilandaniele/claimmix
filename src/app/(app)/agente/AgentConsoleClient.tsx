@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { Activity, Brain, CheckCircle2, ClipboardList, ListChecks, Settings2, SlidersHorizontal, Layers } from "lucide-react";
 
 import { useT } from "@/lib/i18n/LocaleContext";
@@ -17,7 +17,7 @@ import { AgentExportPanel } from "./AgentExportPanel";
 import { ProviderUsagePanel } from "./ProviderUsagePanel";
 import { BatchSimulatePanel } from "./BatchSimulatePanel";
 
-type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento" | "uso" | "lote" | "trabajo";
+type TabId = "modelos" | "campos" | "ramos" | "formulario" | "reglas" | "ejemplos" | "entrenamiento" | "uso" | "lote" | "trabajo";
 
 /**
  * La etiqueta es una CLAVE, no un texto: la lista se arma una sola vez cuando
@@ -28,6 +28,8 @@ type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento" | "u
 const TABS = [
   { id: "modelos", clave: "consola.tab.modelos", icon: Settings2 },
   { id: "campos", clave: "consola.tab.campos", icon: SlidersHorizontal },
+  { id: "ramos", clave: "consola.tab.ramos", icon: ListChecks },
+  { id: "formulario", clave: "consola.tab.formulario", icon: ClipboardList },
   { id: "reglas", clave: "consola.tab.reglas", icon: ListChecks },
   { id: "ejemplos", clave: "consola.tab.ejemplos", icon: CheckCircle2 },
   { id: "entrenamiento", clave: "consola.tab.entrenamiento", icon: Brain },
@@ -51,8 +53,19 @@ const ID_PANEL = "panel-de-la-consola";
  * `FilterTabs` de la bandeja ya tenía el patrón entero. Las teclas ahora viven
  * en `@/lib/ui/pestanas`, compartidas por las dos, para que no terminen siendo
  * dos tablist con teclados distintos.
+ *
+ * `ramos` y `formulario` llegan armados por el servidor: son formularios
+ * nativos que no necesitan estado de cliente, y así no suman JS.
  */
-export function AgentConsoleClient({ role }: { role: string }) {
+export function AgentConsoleClient({
+  role,
+  ramos,
+  formulario,
+}: {
+  role: string;
+  ramos: ReactNode;
+  formulario: ReactNode;
+}) {
   const [tab, setTab] = useState<TabId>("modelos");
   const t = useT();
   const lista = useRef<HTMLDivElement>(null);
@@ -118,6 +131,8 @@ export function AgentConsoleClient({ role }: { role: string }) {
       >
         {tab === "modelos" && <AiProviderPanel />}
         {tab === "campos" && <CustomFieldsPanel />}
+        {tab === "ramos" && ramos}
+        {tab === "formulario" && formulario}
         {tab === "reglas" && <PromptRulesPanel />}
         {tab === "ejemplos" && <TrainingExamplesPanel />}
         {tab === "entrenamiento" && <FineTuneJobsPanel />}

@@ -57,13 +57,14 @@ vi.mock("@/server/ai/gemini-extractor", () => ({ callGemini: vi.fn() }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { db } from "@/lib/db";
-import { emailMessenger } from "@/server/confirmations/messenger";
+import { emailMessenger, messengerFor, webMessenger } from "@/server/confirmations/messenger";
 import { composeReply } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { renderTemplate, type EmailTemplate } from "@/server/email/render";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { CUIDADO, diceCuidado } from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
+import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
@@ -76,16 +77,22 @@ const modelo = callGemini as unknown as ReturnType<typeof vi.fn>;
 
 /** Todo lo que se escribió en `outbound_messages` en esta corrida. */
 let filas: Record<string, unknown>[];
+/** Lo que ya había salido en el caso cuando el mensajero web pregunta «¿es el primero?». */
+let enviosPrevios: { id: string }[];
 
 beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.AGENT_COMPOSE_REPLIES;
   filas = [];
+  enviosPrevios = [];
 
   Object.assign(db, {
     select: () => ({
       from: () => ({
-        where: () => ({ orderBy: () => ({ limit: () => [] }) }),
+        where: () => ({
+          orderBy: () => ({ limit: () => [] }),
+          limit: () => Promise.resolve(enviosPrevios),
+        }),
       }),
     }),
     insert: () => ({
@@ -530,4 +537,103 @@ describe("emailMessenger — la derivación con heridos", () => {
       expect(cuerpoEnviado()).toContain(redactado);
     }
   );
+});
+
+/**
+ * El formulario web (B17): el mismo mail, redactado sabiendo que la persona
+ * completó un formulario. No hay un segundo camino de envío.
+ */
+describe("webMessenger", () => {
+  it("es el mensajero del canal web", () => {
+    expect(messengerFor("web")).toBe(webMessenger);
+    expect(messengerFor("email")).toBe(emailMessenger);
+  });
+
+  it("redacta por correo y le avisa al redactor que la persona no escribió un mail", async () => {
+    escribe("Ana, recibimos tu denuncia por el formulario. Contestá este correo con el número de póliza.");
+
+    await webMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO,
+      template: "missing_information_request",
+      data: PEDIDO,
+    });
+
+    expect(compose).toHaveBeenCalledTimes(1);
+    expect(compose.mock.calls[0][0]).toMatchObject({ channel: "email", origenWeb: true });
+  });
+
+  it("el primer mail lleva siempre «Si no fuiste vos, ignorá este mensaje»", async () => {
+    escribe("Ana, recibimos tu denuncia por el formulario. Contestá este correo con el número de póliza.");
+    await webMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO_RESERVADA,
+      template: "missing_information_request",
+      data: PEDIDO,
+    });
+    expect(cuerpoEnviado()).toContain(SI_NO_FUISTE_VOS);
+  });
+
+  it("la frase va aunque el redactor falle: sale el piso de la plantilla más la frase", async () => {
+    modelo.mockRejectedValue(new Error("sin modelo"));
+    await webMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO_RESERVADA,
+      template: "missing_information_request",
+      data: PEDIDO,
+    });
+    expect(cuerpoEnviado()).toContain(SI_NO_FUISTE_VOS);
+    expect(cuerpoEnviado()).toContain("Número de póliza");
+  });
+
+  it("los mails siguientes no la repiten", async () => {
+    escribe("Ana, gracias por la información. Necesitamos el número de póliza para seguir con tu caso.");
+    await webMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO_RESERVADA,
+      template: "missing_information_request",
+      data: { ...PEDIDO, isFollowUp: true },
+    });
+    expect(cuerpoEnviado()).not.toContain(SI_NO_FUISTE_VOS);
+  });
+
+  it("un mail que no es un pedido de datos, sin isFollowUp, sabe si es el primero por lo que ya salió", async () => {
+    escribe("Ana, te pedimos que confirmes el número de póliza que nos pasaste.");
+    const confirmacion = {
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO_RESERVADA,
+      template: "data_confirmation_request" as const,
+      data: { caseId: CASE, fields: [] },
+    };
+
+    await webMessenger.send(confirmacion);
+    expect(compose.mock.calls[0][0]).toMatchObject({ origenWeb: true, isFollowUp: false });
+    expect(cuerpoEnviado()).toContain(SI_NO_FUISTE_VOS);
+
+    filas = [];
+    compose.mockClear();
+    enviosPrevios = [{ id: "ya-salio-algo" }];
+    await webMessenger.send(confirmacion);
+    expect(compose.mock.calls[0][0]).toMatchObject({ origenWeb: true, isFollowUp: true });
+    expect(cuerpoEnviado()).not.toContain(SI_NO_FUISTE_VOS);
+  });
+
+  it("un mail que no viene del formulario nunca la lleva", async () => {
+    escribe("Ilan, para seguir con tu reclamo necesitamos el número de póliza. Contanos y avanzamos.");
+    await mandar("missing_information_request", PEDIDO, TO_RESERVADA);
+    expect(cuerpoEnviado()).not.toContain(SI_NO_FUISTE_VOS);
+  });
+
+  it("el mensajero de correo no marca el origen web", async () => {
+    escribe("Ilan, para seguir con tu reclamo necesitamos el número de póliza. Contanos y avanzamos.");
+
+    await mandar("missing_information_request", PEDIDO);
+
+    expect(compose.mock.calls[0][0]).toMatchObject({ origenWeb: false });
+  });
 });

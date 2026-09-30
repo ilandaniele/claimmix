@@ -5,6 +5,7 @@
  * Esto lista datos: cosas que la persona puede simplemente contestar.
  */
 
+import { esRamoNativo } from "@/core/case/ramos";
 import type { ClaimType } from "@/lib/schemas/cases";
 
 /**
@@ -21,15 +22,47 @@ export const CAMPOS_REQUERIDOS_POR_RAMO: Record<ClaimType, readonly string[]> = 
   cristales: ["patente_vehiculo", "provincia_siniestro"],
   robo_contenido: ["patente_vehiculo", "provincia_siniestro"],
   accidente_personal: ["provincia_siniestro"],
+  // Sin patente: no son siniestros de auto.
+  art: ["provincia_siniestro"],
+  vida: ["provincia_siniestro"],
+  integral_comercio: ["provincia_siniestro"],
+  consorcio: ["provincia_siniestro"],
   other: ["provincia_siniestro"],
 };
 
-/** Ramo desconocido o vacío: sin campos extra. */
+/**
+ * Los datos que un inquilino puede pedirle a un ramo propio: claves con nombre e
+ * instrucción escritos a mano en `claim-fields.ts`, y que el prompt le enseña a
+ * extraer al modelo (`prompt.ts`, «REQUIRED DATA BY CLAIM TYPE»). Un catálogo
+ * cerrado: una clave inventada saldría al asegurado humanizada y el extractor no
+ * sabría buscarla. `tipo_vehiculo` no está: el prompt le prohíbe al modelo
+ * emitirlo, y un dato que nunca llega se pediría en cada mail.
+ */
+export const CATALOGO_DE_DATOS: readonly string[] = [
+  "patente_vehiculo",
+  "provincia_siniestro",
+  "hora_siniestro",
+  "hay_heridos",
+  "testigos",
+  "numero_denuncia",
+  "accident_location",
+];
+
+/**
+ * Ramo desconocido o vacío: sin campos extra. Los datos del inquilino para ese
+ * ramo se SUMAN a los del código: un ramo propio que repite la clave de uno
+ * nativo no puede dejar de pedir la provincia por un descuido de configuración.
+ */
 export function camposRequeridosDelRamo(
-  claimType: string | null | undefined
+  claimType: string | null | undefined,
+  ramosDelInquilino: ReadonlyArray<{ clave: string; datos: readonly string[] }> = []
 ): readonly string[] {
   if (!claimType) return [];
-  return CAMPOS_REQUERIDOS_POR_RAMO[claimType as ClaimType] ?? [];
+  const delCodigo = esRamoNativo(claimType) ? CAMPOS_REQUERIDOS_POR_RAMO[claimType] : [];
+  const propios = (ramosDelInquilino.find((r) => r.clave === claimType)?.datos ?? []).filter((d) =>
+    CATALOGO_DE_DATOS.includes(d)
+  );
+  return propios.length === 0 ? delCodigo : [...new Set([...delCodigo, ...propios])];
 }
 
 /**

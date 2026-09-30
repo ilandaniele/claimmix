@@ -1,8 +1,8 @@
 /**
  * CSV safe-encoding utilities for ClaimMix.
  *
- * AC13: Formula-injection guard — values that start with =, +, -, @ are
- * prefixed with a single quote (') so spreadsheet applications (Excel,
+ * AC13: Formula-injection guard — values that start with =, +, -, @, a tab or
+ * a carriage return are prefixed with a single quote (') so spreadsheet applications (Excel,
  * Google Sheets, LibreOffice) treat them as text, not formulas.
  *
  * References:
@@ -13,8 +13,13 @@
  * (RFC 4180 compliant).
  */
 
-/** Characters that trigger formula evaluation in spreadsheet applications. */
-const FORMULA_TRIGGER_CHARS = new Set(["=", "+", "-", "@"]);
+/**
+ * Characters that trigger formula evaluation in spreadsheet applications.
+ * El tabulador y el retorno de carro también: OWASP los cuenta, porque hay
+ * planillas que los saltean y evalúan lo que sigue. El padrón trae texto que
+ * escribió una persona, y de ahí a la exportación hay un solo paso.
+ */
+const FORMULA_TRIGGER_CHARS = new Set(["=", "+", "-", "@", "\t", "\r"]);
 
 /**
  * Sanitize a single CSV cell value to prevent formula injection.

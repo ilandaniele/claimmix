@@ -22,7 +22,7 @@
  */
 
 import "server-only";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
@@ -83,6 +83,12 @@ function bareAddress(value: string): string {
  * happened: three separate conversations about one claim. The extraction
  * worker passes inReplyToMessageId as undefined with a comment saying dispatch
  * would look it up — it never did, so the header was never sent.
+ *
+ * El envío del formulario web no cuenta: no es un mail de la persona sino una
+ * fila que arma el sistema, con un asunto fijo y sin Message-ID. Respondería
+ * «Re: Denuncia por formulario web» a quien nunca escribió eso y sacaría el
+ * «Caso #» del asunto, que es lo único que le queda a `thread-lookup` para
+ * pegar la respuesta. Hasta que conteste, el asunto es el de la plantilla.
  */
 async function resolveReplyContext(
   caseId: string,
@@ -113,7 +119,8 @@ async function resolveReplyContext(
           .where(
             and(
               eq(claimMessages.case_id, caseId),
-              eq(claimMessages.direction, "inbound")
+              eq(claimMessages.direction, "inbound"),
+              ne(claimMessages.provider, "web")
             )
           )
           .orderBy(asc(claimMessages.received_at))

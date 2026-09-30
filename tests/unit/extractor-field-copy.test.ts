@@ -157,14 +157,6 @@ vi.mock("@/lib/email/claim-parser", () => ({
   sanearContacto: vi.fn().mockImplementation((fields: unknown[]) => fields),
 }));
 
-vi.mock("@/lib/schemas/cases", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/schemas/cases")>();
-  return {
-    ...actual,
-    ClaimTypeSchema: { safeParse: vi.fn().mockReturnValue({ success: false }) },
-  };
-});
-
 /**
  * Mock the mock-extractor module. extractEmailClaimMock is replaced with a
  * vi.fn() whose implementation is set per-test via mockReturnValue.

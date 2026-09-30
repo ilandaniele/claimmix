@@ -65,3 +65,4 @@ export const faltaLaMigracionConTabla = pendienteSi(["42P01", "42703"]);
 
 export const faltaLa0040 = faltaLaMigracion("0040");
 export const faltaLa0042 = faltaLaMigracionConTabla("0042");
+export const faltaLa0044 = faltaLaMigracionConTabla("0044");

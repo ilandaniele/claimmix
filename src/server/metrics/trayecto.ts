@@ -22,6 +22,7 @@ import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import { EVENTOS_DE_INTERVENCION } from "@/core/metricas/intervencion";
 import { EVENTOS_CON_ESTADO, EXTRACCION_INTERMEDIA } from "@/core/metricas/transiciones";
 import type { ClienteDatos } from "@/data/scope";
+import { CANALES_REALES_SQL } from "@/lib/db/canales-reales";
 import { auditLog, cases, claimMessages, outboundMessages } from "@/lib/db/schema";
 import { completadoConfirmado } from "@/server/cases/listo-confirmado";
 
@@ -52,7 +53,7 @@ export const DEL_CASO = sql`a.target_type = 'case' and a.target_id = ${cases.id}
 
 /** Los reclamos que entraron por un canal real en el rango: los simulados no miden nada. */
 const cohorte = (desde: string, hasta: string): SQL =>
-  sql`${cases.created_at} >= ${desde} and ${cases.created_at} < ${hasta} and ${cases.channel} in ('whatsapp', 'email') and ${cases.is_claim} is true`;
+  sql`${cases.created_at} >= ${desde} and ${cases.created_at} < ${hasta} and ${cases.channel} in (${CANALES_REALES_SQL}) and ${cases.is_claim} is true`;
 
 /**
  * Una fila por caso de la cohorte, con lo que hace falta para medirlo.

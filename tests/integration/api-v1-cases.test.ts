@@ -64,9 +64,13 @@ vi.mock("@/lib/security/compare", async (original) => {
 
 import { enTenant } from "@/data/scope";
 import { rateLimit } from "@/lib/rate-limit/index";
+import { CANALES_REALES } from "@/lib/schemas/cases";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 import { GET as listar } from "@/app/api/v1/cases/route";
 import { GET as detalle } from "@/app/api/v1/cases/[id]/route";
+
+// Los canales de una persona, en el orden en que el código los declara.
+const CANALES_DEL_FILTRO = CANALES_REALES.map((c) => `'${c}'`).join(", ");
 
 const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -204,7 +208,7 @@ describe("GET /api/v1/cases", () => {
   it("deja afuera simulados, contactos reservados y lo que cambió hace menos de dos minutos", async () => {
     await listar(pedir("/api/v1/cases", `Bearer ${clave(A)}`));
     const pagina = h.consultas.find((s) => s.includes("order by"));
-    expect(pagina).toContain(`"cases"."channel" in ('email', 'whatsapp')`);
+    expect(pagina).toContain(`"cases"."channel" in (${CANALES_DEL_FILTRO})`);
     expect(pagina).toMatch(/not exists \(\s*select 1 from "claim_messages"/);
     expect(pagina).toContain(`coalesce("cases"."updated_at", "cases"."created_at") <= now() - interval '2 minutes'`);
   });
@@ -278,7 +282,7 @@ describe("GET /api/v1/cases/:id", () => {
   it("un caso simulado o de prueba da 404: la consulta lleva el mismo filtro que la lista", async () => {
     await detalleDe(CASO_A, `Bearer ${clave(A)}`);
     const caso = h.consultas.find((s) => s.includes('from "cases"'));
-    expect(caso).toContain(`"cases"."channel" in ('email', 'whatsapp')`);
+    expect(caso).toContain(`"cases"."channel" in (${CANALES_DEL_FILTRO})`);
     expect(caso).toMatch(/not exists \(\s*select 1 from "claim_messages"/);
   });
 

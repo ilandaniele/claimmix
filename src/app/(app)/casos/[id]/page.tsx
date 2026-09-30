@@ -61,12 +61,15 @@ import { textoDelMotivo } from "@/lib/i18n/motivo-de-core";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { parseEmailClaimFields } from "@/lib/email/claim-parser";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
-import { estadoDelDocumento, esRamoSinCalibrar } from "@/core/case/required-docs";
+import { estadoDelDocumento } from "@/core/case/estado-del-documento";
+import { esRamoSinCalibrar } from "@/core/case/required-docs";
+import { nombreDeTipo } from "@/lib/i18n/tipos-de-siniestro";
+import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
 import { resumenDeCaso } from "@/lib/labels/resumen-de-caso";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { formatCaseNumber } from "@/core/case/numero";
-import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
+import type { CaseStatus } from "@/lib/schemas/cases";
 import { TIPOS_DE_INDICIO } from "@/lib/schemas/extracted-claim";
 import { resumenDeLaIA, textoDeIndicio } from "@/lib/labels/textos-de-la-ia";
 import Link from "next/link";
@@ -101,18 +104,6 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   const locale = await getAccountLocale();
   const t = getT(locale);
   const hoy = diaArgentino();
-
-  const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
-    choque: t("type.choque"),
-    robo: t("type.robo"),
-    granizo: t("type.granizo"),
-    incendio: t("type.incendio"),
-    cristales: t("type.cristales"),
-    rc: t("type.rc"),
-    robo_contenido: t("type.robo_contenido"),
-    accidente_personal: t("type.accidente_personal"),
-    other: t("type.other"),
-  };
 
   // Resolve session + users row (tenant boundary and role gate in one lookup).
   const session = await getSessionContext();
@@ -173,8 +164,24 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     cartas,
   } = detail;
 
+  /*
+   * Un ramo propio de la aseguradora se nombra y se juzga por su fila de
+   * `tenant_claim_types`; también la de `other` o de un ramo del código, que
+   * puede pedir documentos. Sólo se lee cuando el código solo no lo resuelve:
+   * un ramo del código con reglas propias no paga la consulta.
+   */
+  const claveDelRamo = caseRow.claim_type;
+  const ramoPropio =
+    claveDelRamo && esRamoSinCalibrar(claveDelRamo)
+      ? ((await cargarRamosDelInquilino(tenantId)).find((r) => r.clave === claveDelRamo) ?? null)
+      : null;
+  const nombreDelRamo = !claveDelRamo
+    ? "—"
+    : nombreDeTipo(claveDelRamo, t, ramoPropio ? [ramoPropio] : [], locale);
+  const ramoSinCalibrar = claveDelRamo ? esRamoSinCalibrar(claveDelRamo, ramoPropio) : false;
+
   const isEmailCase =
-    caseRow.channel === "email" || caseRow.channel === "email_sim";
+    caseRow.channel === "email" || caseRow.channel === "email_sim" || caseRow.channel === "web";
   const indicios = Array.isArray(caseRow.fraud_indicators)
     ? (caseRow.fraud_indicators as Array<{ type: string; description: string; clave?: string }>)
     : [];
@@ -226,6 +233,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     email_sim: t("channel.email_sim"),
     whatsapp: t("channel.whatsapp"),
     whatsapp_sim: t("channel.whatsapp_sim"),
+    web: t("channel.web"),
   };
   const channelLabel = CHANNEL_LABELS[caseRow.channel] ?? caseRow.channel;
 
@@ -311,24 +319,17 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 * insignias del mismo peso, y el tipo de siniestro —que no cambia
                 * nunca— competía con el estado, que es lo único que se mira.
                 */}
-              <Pill>
-                {caseRow.claim_type
-                  ? (CLAIM_TYPE_LABELS[caseRow.claim_type as ClaimType] ??
-                    caseRow.claim_type)
-                  : "—"}
-              </Pill>
-              {caseRow.claim_type &&
-                esRamoSinCalibrar(caseRow.claim_type as ClaimType) && (
-                  <Pill tone="espera">{t("case.detail.ramoSinCalibrar")}</Pill>
-                )}
+              <Pill>{nombreDelRamo}</Pill>
+              {ramoSinCalibrar && (
+                <Pill tone="espera">{t("case.detail.ramoSinCalibrar")}</Pill>
+              )}
               <StatusBadge status={caseRow.status as CaseStatus} />
             </div>
-            {caseRow.claim_type &&
-              esRamoSinCalibrar(caseRow.claim_type as ClaimType) && (
-                <p className="mb-3 text-[12.5px] text-slate-500">
-                  {t("case.detail.ramoSinCalibrarAyuda")}
-                </p>
-              )}
+            {ramoSinCalibrar && (
+              <p className="mb-3 text-[12.5px] text-slate-500">
+                {t("case.detail.ramoSinCalibrarAyuda")}
+              </p>
+            )}
 
             <FieldGrid className="sm:grid-cols-3">
               <Field label={t("case.detail.assignedTo")}>

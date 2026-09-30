@@ -216,6 +216,24 @@ describe("runIntakeAgent", () => {
     });
   });
 
+  it("chooses email extraction for web form cases", async () => {
+    setupSelectResults([
+      [{ id: "case-web-001", tenant_id: "tenant-001", channel: "web", status: "recibido" }],
+    ]);
+
+    const result = await runIntakeAgent({
+      caseId: "case-web-001",
+      tenantId: "tenant-001",
+      source: "worker",
+    });
+
+    expect(result.action).toBe("extract_email");
+    expect(result.ok).toBe(true);
+    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-web-001", "tenant-001", null, {
+      retoma: false,
+    });
+  });
+
   it("chooses email extraction for email_sim cases", async () => {
     setupSelectResults([
       [{ id: "case-sim-001", tenant_id: "tenant-001", channel: "email_sim", status: "procesando" }],

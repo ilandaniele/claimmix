@@ -455,7 +455,7 @@ describe("dispatchExtractionWorker — AC6: error isolation", () => {
     logs.restaurar();
 
     // La línea del despacho fallido
-    expect(anotado).toContain("gmail_poller.worker_dispatch_error");
+    expect(anotado).toContain("worker.dispatch_error");
 
     // Should log the error name ("TypeError")
     expect(anotado).toContain("TypeError");

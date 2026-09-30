@@ -41,6 +41,26 @@ export interface AuditLogEntry {
 }
 
 /**
+ * La fila de `audit_log` que corresponde a una entrada. Aparte de
+ * `writeAuditLog` para que quien escribe dentro de una transacción propia (el
+ * padrón importa cientos de filas de un solo viaje) pueda meterla en el mismo
+ * lote en vez de auditar por fuera, donde un fallo dejaría la importación sin
+ * rastro.
+ */
+export function filaDeAuditoria(entry: AuditLogEntry): AuditLogInsert {
+  return {
+    tenant_id: entry.tenant_id,
+    actor_id: entry.actor_id ?? null,
+    event_type: entry.event_type,
+    target_type: entry.target_type ?? null,
+    target_id: entry.target_id ?? null,
+    payload: entry.payload ?? {},
+    ip: ipValida(entry.ip),
+    ua: entry.ua ?? null,
+  };
+}
+
+/**
  * Write an audit log entry.
  *
  * Uses the shared db handle so the write succeeds regardless of
@@ -51,16 +71,7 @@ export interface AuditLogEntry {
  */
 export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
   try {
-    const insertRow: AuditLogInsert = {
-      tenant_id: entry.tenant_id,
-      actor_id: entry.actor_id ?? null,
-      event_type: entry.event_type,
-      target_type: entry.target_type ?? null,
-      target_id: entry.target_id ?? null,
-      payload: entry.payload ?? {},
-      ip: ipValida(entry.ip),
-      ua: entry.ua ?? null,
-    };
+    const insertRow = filaDeAuditoria(entry);
 
     await enTenant({ tenantId: insertRow.tenant_id }, (db) =>
       db.insert(auditLog).values(insertRow)
@@ -516,6 +527,43 @@ export const AuditEvent = {
    * respuesta: son texto libre de quien pregunta y del modelo.
    */
   ASSISTANT_QUERY: "assistant.query",
+
+  /**
+   * RAMO_PROPIO_GUARDADO / RAMO_PROPIO_BORRADO: un admin creó, cambió o borró un
+   * tipo de siniestro propio (B26). Payload: { clave } — nunca los nombres.
+   */
+  RAMO_PROPIO_GUARDADO: "tenant.ramo_guardado",
+  RAMO_PROPIO_BORRADO: "tenant.ramo_borrado",
+
+  /**
+   * FORMULARIO_WEB_CAMBIADO: un admin creó el formulario público o lo encendió
+   * o apagó (B17). El enlace se fija al crearlo y no cambia después. Payload:
+   * { activo } — nunca el enlace.
+   */
+  FORMULARIO_WEB_CAMBIADO: "tenant.formulario_web_cambiado",
+
+  /**
+   * DENUNCIA_WEB_RECIBIDA: llegó una denuncia por el formulario público (B17).
+   * Va sin actor: quien la manda no tiene cuenta. Payload: { canal } — nada de
+   * lo que escribió la persona.
+   */
+  DENUNCIA_WEB_RECIBIDA: "case.web_recibida",
+
+  /**
+   * PADRON_IMPORTADO: alguien confirmó una importación del padrón (B16).
+   * Payload: { clientes: { altas, cambios }, polizas: { altas, cambios } } —
+   * sólo cuántos, nunca una fila.
+   */
+  PADRON_IMPORTADO: "padron.importado",
+  /**
+   * CLIENTE_ALTA / CLIENTE_CAMBIO / POLIZA_ALTA / POLIZA_CAMBIO: alta o edición
+   * manual desde /clientes (B16). Payload: { campos } — los nombres de lo que
+   * cambió, nunca los valores.
+   */
+  CLIENTE_ALTA: "customer.created",
+  CLIENTE_CAMBIO: "customer.updated",
+  POLIZA_ALTA: "policy.created",
+  POLIZA_CAMBIO: "policy.updated",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

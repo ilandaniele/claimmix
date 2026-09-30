@@ -10,7 +10,7 @@
 import { Suspense } from "react";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
+import { CUSTOMER_PII_ROLES, PADRON_EDITOR_ROLES } from "@/lib/auth/require-role";
 import { redirect } from "next/navigation";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
@@ -18,6 +18,7 @@ import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { listCustomers } from "@/server/customers/list";
 import { PAGINA_MAXIMA } from "@/lib/schemas/paginacion";
+import { FormularioDeCliente, ImportarPadron } from "./_components/PanelesDelPadron";
 
 /*
  * La fila la define `listCustomers`, no esta pantalla.
@@ -74,6 +75,7 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
   if (!(CUSTOMER_PII_ROLES as string[]).includes(userRow.role)) redirect("/bandeja");
 
   const tenantId = userRow.tenant_id;
+  const puedeEditar = (PADRON_EDITOR_ROLES as string[]).includes(userRow.role);
 
   /*
    * La búsqueda la hace `listCustomers`, que es de donde también sale
@@ -161,6 +163,18 @@ async function ClientesContent({ searchParams }: ClientesPageProps) {
           )}
         </form>
       </div>
+
+      {puedeEditar && (
+        <div className="space-y-3 px-6 pt-4">
+          <ImportarPadron t={t} />
+          <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+            <summary className="cursor-pointer text-sm font-medium">{t("padron.cliente.nuevo")}</summary>
+            <div className="mt-3">
+              <FormularioDeCliente t={t} />
+            </div>
+          </details>
+        </div>
+      )}
 
       {/* Table */}
       <div className="flex-1 overflow-auto px-6 py-4">

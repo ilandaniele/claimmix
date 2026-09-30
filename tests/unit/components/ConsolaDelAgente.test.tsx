@@ -41,17 +41,21 @@ vi.mock("../../../src/app/(app)/agente/TrabajoPanel", () => panel("TrabajoPanel"
 function montar() {
   return render(
     <LocaleProvider locale="es-AR">
-      <AgentConsoleClient role="owner" />
+      <AgentConsoleClient
+        role="owner"
+        ramos={<div>RamosPanel</div>}
+        formulario={<div>FormularioWebPanel</div>}
+      />
     </LocaleProvider>
   );
 }
 
 describe("la consola del agente es un tablist", () => {
-  it("las ocho son pestañas, no botones sueltos", () => {
+  it("las diez son pestañas, no botones sueltos", () => {
     montar();
 
     expect(screen.getByRole("tablist")).toBeTruthy();
-    expect(screen.getAllByRole("tab")).toHaveLength(8);
+    expect(screen.getAllByRole("tab")).toHaveLength(10);
   });
 
   it("hay exactamente una seleccionada", () => {
@@ -105,7 +109,7 @@ describe("la consola del agente es un tablist", () => {
     fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowLeft" });
 
     const pestanas = screen.getAllByRole("tab");
-    expect(pestanas[7]!.getAttribute("aria-selected")).toBe("true");
+    expect(pestanas[9]!.getAttribute("aria-selected")).toBe("true");
   });
 
   it("Inicio y Fin van a los extremos", () => {
@@ -113,7 +117,7 @@ describe("la consola del agente es un tablist", () => {
     const lista = screen.getByRole("tablist");
 
     fireEvent.keyDown(lista, { key: "End" });
-    expect(screen.getAllByRole("tab")[7]!.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getAllByRole("tab")[9]!.getAttribute("aria-selected")).toBe("true");
 
     fireEvent.keyDown(lista, { key: "Home" });
     expect(screen.getAllByRole("tab")[0]!.getAttribute("aria-selected")).toBe("true");
@@ -130,9 +134,19 @@ describe("la consola del agente es un tablist", () => {
   it("el clic sigue cambiando de panel", () => {
     montar();
 
-    fireEvent.click(screen.getAllByRole("tab")[6]!);
+    fireEvent.click(screen.getAllByRole("tab")[8]!);
 
     expect(screen.getByText("BatchSimulatePanel")).toBeTruthy();
+  });
+
+  it("las pestañas de tipos y de formulario web muestran lo que arma el servidor", () => {
+    montar();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Tipos de siniestro" }));
+    expect(screen.getByText("RamosPanel")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Formulario web" }));
+    expect(screen.getByText("FormularioWebPanel")).toBeTruthy();
   });
 
   it("la pestaña de trabajo del equipo abre su panel", () => {

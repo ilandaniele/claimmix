@@ -116,6 +116,17 @@ export const ES_INTERVENCION: Readonly<Record<AuditEventType, boolean>> = {
   "agent.deliberation_failed": false,
 
   "assistant.query": false,
+
+  // Configuración, padrón y alta desde la web: no es gestionar un caso.
+  "tenant.ramo_guardado": false,
+  "tenant.ramo_borrado": false,
+  "tenant.formulario_web_cambiado": false,
+  "case.web_recibida": false,
+  "padron.importado": false,
+  "customer.created": false,
+  "customer.updated": false,
+  "policy.created": false,
+  "policy.updated": false,
 };
 
 /**

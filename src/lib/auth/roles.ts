@@ -34,6 +34,15 @@ export const TRAINING_APPROVER_ROLES: UserRole[] = ["owner", "admin", "specialis
  */
 export const CUSTOMER_PII_ROLES: UserRole[] = ["owner", "admin", "specialist"];
 
+/**
+ * Quién da de alta y cambia clientes y pólizas: a mano y por importación (B16).
+ * El pedido habla de «admin/editor»; no existe un rol `editor` y no se crea uno:
+ * `specialist` es quien edita en esta aplicación. Constante propia, no
+ * `CUSTOMER_PII_ROLES`: leer el padrón y escribirlo cambian por razones
+ * distintas, y el día que un analista pueda ver datos no debería poder pisarlos.
+ */
+export const PADRON_EDITOR_ROLES: UserRole[] = ["owner", "admin", "specialist"];
+
 /** Quién entrega un caso al Core. La ruta y el botón leen esta lista: si difieren, el botón da 403. */
 export const CORE_SYNC_ROLES: UserRole[] = ["owner", "admin", "specialist"];
 

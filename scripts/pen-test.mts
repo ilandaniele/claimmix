@@ -100,6 +100,10 @@ const INTENTIONALLY_PUBLIC = new Map<string, string>([
   ["/api/demo/public-analyze", "la demo del prospecto; acotada por IP y por presupuesto propio"],
   ["/api/intake/email", "410 Gone, un stub del webhook viejo de Postmark"],
   ["/api/admin/health", "el monitor de uptime la pinga cada 5 minutos; abajo se controla qué dice"],
+  [
+    "/api/denuncia/[slug]",
+    "el formulario web de denuncias: quien denuncia no tiene cuenta; abajo se controla qué la frena (token, tope, cuerpo, inquilino)",
+  ],
 ]);
 
 /**
@@ -290,6 +294,75 @@ async function attackSurface(): Promise<void> {
     "registrar el webhook contra una app de Meta ajena",
     `(${handshake.status})`
   );
+
+  // ── El formulario web público (B17), que no pide sesión por diseño ──────────
+  console.log("\nEl formulario web público (/api/denuncia, sin sesión):\n");
+
+  if (soloSuperficie) {
+    console.log(
+      "  (--solo-superficie: se saltea, porque el tope por IP y el enlace público se resuelven en la base; " +
+        "se sigue comprobando en el post-deploy, contra producción.)"
+    );
+  } else {
+    // Un enlace que no existe, con la forma de un id interno: el id de un inquilino NO abre nada.
+    const inexistente = "00000000-0000-0000-0000-000000000001";
+    const relato = "Me chocaron el auto en la esquina de mi casa esta mañana.";
+
+    /*
+     * Un cuerpo válido con un token inventado y el inquilino en el cuerpo.
+     *
+     * El inquilino sale del enlace y el token va atado a ese enlace: lo que
+     * traiga el cuerpo no cuenta. Tiene que rechazarse sin crear nada, y
+     * el rechazo no puede decir si el enlace existe.
+     */
+    const forjado = await head(`${BASE}/api/denuncia/${inexistente}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nombre: "Prueba de seguridad",
+        email: "pentest@example.invalid",
+        relato,
+        t: "token.inventado",
+        tenant_id: inexistente,
+        tenantId: inexistente,
+      }),
+    });
+    probe(
+      "una denuncia con un token inventado no crea nada",
+      [400, 404, 429].includes(forjado.status) && !/recibida/.test(forjado.body),
+      "abrir denuncias falsas en el padrón de cualquier aseguradora, sin haber pasado por la página",
+      `(${forjado.status})`
+    );
+
+    // Con un enlace de forma válida que no existe: el cuerpo tiene que cortarse antes de leerse.
+    const enorme = await head(`${BASE}/api/denuncia/pentest-sin-formulario`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre: "x".repeat(60_000), email: "a@b.co", relato, t: "x" }),
+    });
+    probe(
+      "un cuerpo de decenas de KB se corta antes de leerse",
+      [400, 413, 429].includes(enorme.status) && !/recibida/.test(enorme.body),
+      "agotar memoria o presupuesto de IA con relatos gigantes",
+      `(${enorme.status})`
+    );
+
+    const leer = await head(`${BASE}/api/denuncia/${inexistente}`);
+    probe(
+      "el enlace no se lee por GET",
+      [404, 405].includes(leer.status) && !/tenant|inquilino/i.test(leer.body),
+      "enumerar aseguradoras por sus enlaces",
+      `(${leer.status})`
+    );
+
+    const pagina = await head(`${BASE}/denuncia/${inexistente}`);
+    probe(
+      "la página de un enlace que no existe es un 404 sin datos",
+      pagina.status === 404 && !/tenant_id|"slug"/.test(pagina.body),
+      "que el id interno de un inquilino sirva de enlace, o que la página cuente si existe",
+      `(${pagina.status})`
+    );
+  }
 
   // ── El header interno, que era un secreto que no era secreto ────────────────
   console.log("\nRutas internas (worker, reproceso, watch):\n");

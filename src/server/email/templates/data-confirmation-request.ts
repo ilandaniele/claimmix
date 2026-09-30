@@ -20,6 +20,7 @@
  */
 
 import { displayFieldValue, labelForField } from "@/lib/labels/claim-fields";
+import { instruccionDeCampo } from "@/lib/labels/instruccion-de-campo";
 import { escapeHtml, enmascararCampo, type OrigenDelValor } from "@/server/email/render";
 import { textoAHtml } from "@/core/email/html";
 import {
@@ -103,8 +104,8 @@ function armarBloque(campo: CampoAConfirmar): BloqueDeCampo {
    * no interpreta marcado, y ahí `&amp;` se leería literal.
    */
   if (abierto) {
-    contextoHtml = `<p>${escapeHtml(field.instruction)}</p>`;
-    contextoText = field.instruction;
+    contextoText = instruccionDeCampo(campo.fieldKey);
+    contextoHtml = `<p>${escapeHtml(contextoText)}</p>`;
   } else if (displayConflict) {
     contextoHtml = `<p>Notamos que el valor que indicaste en tu email (<strong>${escapeHtml(displayValue)}</strong>) difiere del que tenemos registrado en nuestro sistema (<strong>${escapeHtml(displayConflict)}</strong>).</p>`;
     contextoText = `Notamos que el valor que indicaste en tu email (${displayValue}) difiere del que tenemos registrado en nuestro sistema (${displayConflict}).`;

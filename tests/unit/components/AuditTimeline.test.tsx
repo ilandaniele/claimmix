@@ -30,6 +30,10 @@ const PREFIJOS_EXCLUIDOS = [
   "training.prompt_rule_",
   "training.custom_field_",
   "training.finetune_",
+  // Del padrón y de la configuración del inquilino: no cuelgan de un caso, no salen en su historial.
+  "padron.",
+  "customer.",
+  "policy.",
 ];
 const VALORES_EXCLUIDOS = new Set([
   "agent.memory_config_exported",
@@ -39,6 +43,9 @@ const VALORES_EXCLUIDOS = new Set([
   "email.deduplicated",
   "case.deleted",
   "tenant.specialist_alert_recipients_changed",
+  "tenant.ramo_guardado",
+  "tenant.ramo_borrado",
+  "tenant.formulario_web_cambiado",
 ]);
 
 const ADJUNTO_RECHAZADO = {

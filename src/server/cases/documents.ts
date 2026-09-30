@@ -19,11 +19,14 @@
 
 import "server-only";
 
-import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 
 import { enTenant, type TenantContext } from "@/data/scope";
-import { claimAttachments, missingDocs, requiredDocsConfig } from "@/lib/db/schema";
+import { cases, claimAttachments, missingDocs, tenantClaimTypes } from "@/lib/db/schema";
+import { clavesDeDocumentosObligatorios } from "@/core/case/required-docs";
+import { esRamoNativo } from "@/core/case/ramos";
 import { callGemini, errMeta, esPasajero } from "@/server/ai/gemini-extractor";
+import { codigoPg } from "@/server/core-sync/config";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { normalizarMime, seMira } from "@/core/adjuntos/firma";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
@@ -33,14 +36,19 @@ import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 /**
- * Register the documents this kind of claim needs.
+ * Registra los documentos que pide este tipo de siniestro.
  *
- * Tenant configuration, not our table of defaults: an insurer that does not
- * want the friendly accident report should be able to stop asking for it by
- * editing a row, and that only works if this reads the database.
+ * De un ramo del código salen de `required-docs.ts`, salvo que la aseguradora
+ * tenga una fila de `tenant_claim_types` con esa misma clave: esa fila gana para
+ * los documentos (0044). De un ramo propio, siempre de la fila. Es un solo
+ * INSERT ... SELECT con `ON CONFLICT DO NOTHING`: no hay lectura previa que
+ * pueda quedar vieja entre dos extracciones a la vez, y una re-extracción no
+ * resucita un documento que el asegurado ya mandó.
  *
- * Insert-if-absent, so re-extraction does not resurrect a document the
- * claimant already sent.
+ * Sin la tabla (0044 sin aplicar, 42P01) un ramo del código vuelve a sus
+ * documentos del código: esa base no puede tener filas que los cambien.
+ * `required_docs_config` ya no se lee: la copia en la base y la del código
+ * tenían que decir lo mismo, y cuando no lo hacían el caso quedaba sin pedir nada.
  */
 export async function seedRequiredDocs(
   caseId: string,
@@ -51,48 +59,42 @@ export async function seedRequiredDocs(
   const tenantCtx: TenantContext = { tenantId };
   if (!claimType) return;
 
-  try {
-    const configured = await enTenant(tenantCtx, (db) =>
+  const delCodigo = esRamoNativo(claimType)
+    ? sql`array[${sql.join(clavesDeDocumentosObligatorios(claimType).map((d) => sql`${d}`), sql`, `)}]::text[]`
+    : null;
+  const delInquilino = sql`(select ${tenantClaimTypes.documentos} from ${tenantClaimTypes} where ${tenantClaimTypes.clave} = ${claimType})`;
+
+  const sembrar = (claves: SQL) =>
+    enTenant(tenantCtx, (db) =>
       db
-        .select({ doc_key: requiredDocsConfig.doc_key })
-        .from(requiredDocsConfig)
-        .where(
-          and(
-            eq(requiredDocsConfig.claim_type, claimType),
-            // Sólo los obligatorios. Un documento opcional —la denuncia
-            // policial de un cristal roto, que sólo aplica si hubo
-            // vandalismo— no lo pide el agente, porque analyzeGaps filtra por
-            // `required`. Sembrarlo igual dejaba un pendiente que nadie iba a
-            // reclamar nunca y que el analista tenía que descartar a mano en
-            // cada caso.
-            eq(requiredDocsConfig.required, true)
-          )
+        .insert(missingDocs)
+        .select(
+          db
+            .select({
+              id: sql<string>`gen_random_uuid()`.as("id"),
+              case_id: cases.id,
+              tenant_id: cases.tenant_id,
+              doc_key: sql<string>`${claves}`.as("doc_key"),
+              requested_at: sql<string | null>`null::timestamptz`.as("requested_at"),
+              satisfied_at: sql<string | null>`null::timestamptz`.as("satisfied_at"),
+              declined_at: sql<string | null>`null::timestamptz`.as("declined_at"),
+              declined_note: sql<string | null>`null::text`.as("declined_note"),
+            })
+            .from(cases)
+            .where(eq(cases.id, caseId))
         )
+        .onConflictDoNothing()
     );
 
-    if (configured.length === 0) return;
-
-    const existing = await enTenant(tenantCtx, (db) =>
-      db
-        .select({ doc_key: missingDocs.doc_key })
-        .from(missingDocs)
-        .where(eq(missingDocs.case_id, caseId))
-    );
-
-    const known = new Set(existing.map((r) => r.doc_key));
-    const fresh = configured.map((c) => c.doc_key).filter((k) => !known.has(k));
-    if (fresh.length === 0) return;
-
-    await enTenant(tenantCtx, (db) =>
-      db.insert(missingDocs).values(
-        fresh.map((doc_key) => ({
-          case_id: caseId,
-          tenant_id: tenantId,
-          doc_key,
-          satisfied_at: null,
-        }))
-      )
-    );
+  try {
+    if (delCodigo) {
+      await sembrar(sql`unnest(coalesce(${delInquilino}, ${delCodigo}))`).catch((e) => {
+        if (codigoPg(e) !== "42P01") throw e;
+        return sembrar(sql`unnest(${delCodigo})`);
+      });
+    } else {
+      await sembrar(sql`unnest(${delInquilino})`);
+    }
   } catch (err) {
     logger.error({ code: errorCode(err), case_id: caseId }, "documents.seed_failed");
   }

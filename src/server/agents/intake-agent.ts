@@ -36,7 +36,7 @@ function claveDelRemitente(
   return claveDeCupo("whatsapp", huella);
 }
 
-type IntakeChannel = "email" | "email_sim" | "whatsapp" | "whatsapp_sim";
+type IntakeChannel = "email" | "email_sim" | "whatsapp" | "whatsapp_sim" | "web";
 
 export interface IntakeAgentInput {
   caseId: string;
@@ -436,7 +436,8 @@ async function storeWhatsAppMedia(
 }
 
 function chooseAction(channel: IntakeChannel): IntakeAgentResult["action"] {
-  if (channel === "email" || channel === "email_sim") return "extract_email";
+  // El formulario web entra como un mail: el relato es texto y el contacto es una casilla.
+  if (channel === "email" || channel === "email_sim" || channel === "web") return "extract_email";
   if (channel === "whatsapp" || channel === "whatsapp_sim") return "extract_whatsapp";
   return "skip_unsupported_channel";
 }

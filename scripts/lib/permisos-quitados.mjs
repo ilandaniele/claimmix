@@ -16,6 +16,8 @@
  *   borra; se va con el caso o con la persona.
  * - case_desvios (0043): los escribe el barrido con el rol dueño; la app sólo
  *   los lee, así que una falla de la app no puede inventarlos ni tapar uno.
+ * - formulario_web (0044): apagar el formulario es un UPDATE de `activo`; borrar
+ *   la fila liberaría el enlace público sin rastro para que otro lo tome.
  */
 export const PERMISOS_QUITADOS = {
   audit_log: ["UPDATE", "DELETE"],
@@ -24,4 +26,5 @@ export const PERMISOS_QUITADOS = {
   case_plan_pasos: ["DELETE"],
   asistente_turnos: ["UPDATE", "DELETE"],
   case_desvios: ["INSERT", "UPDATE", "DELETE"],
+  formulario_web: ["DELETE"],
 };

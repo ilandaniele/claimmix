@@ -42,6 +42,7 @@ import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { diceCuidado } from "@/core/mensajes/derivacion";
 import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { esPlanPro } from "@/core/billing/plan-pro";
+import { policyTypeDeRamo } from "@/core/case/ramos";
 import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 import { AppError } from "@/lib/errors";
 import { errorCode } from "@/lib/observability/error-code";
@@ -277,7 +278,14 @@ interface Scenario {
    * has none loaded yet. Seeded and deleted per scenario so a rehearsal never
    * leaves an invented customer sitting in the real Clientes screen.
    */
-  policy?: { numero: string; dni: string; nombre: string; vencida?: boolean };
+  policy?: {
+    numero: string;
+    dni: string;
+    nombre: string;
+    vencida?: boolean;
+    /** Ramo de la póliza sembrada; sin él es un auto, con su vehículo. */
+    ramo?: string;
+  };
   /**
    * Que no le devuelva como «¿…, correcto?» lo que la persona acaba de
    * escribir, y que pida la hora siempre de la misma forma (goteo, 23/09).
@@ -304,6 +312,8 @@ interface Scenario {
      * escrita se informa `sin_leer`.
      */
     responsabilidad?: string;
+    /** Ramo con el que quedó clasificado el caso (`cases.claim_type`), B26. */
+    ramo?: string;
   };
 }
 
@@ -727,6 +737,36 @@ const SCENARIOS: Scenario[] = [
   },
 
   {
+    id: "consorcio-por-mail",
+    channel: "email",
+    what: "Un administrador denuncia daños en las partes comunes de un edificio: es un consorcio y no se le pide patente",
+    /*
+     * El ramo nuevo de punta a punta, por el canal que usa un administrador.
+     * Sin fotos: con el marcador no hay nada que reconocer, y el estado final
+     * depende de ellas. Lo que se afirma no depende de cómo redacte el modelo:
+     * que conteste una vez, que no pida la patente de un auto que no existe y
+     * que los datos del mensaje sobrevivan.
+     */
+    policy: { numero: "POL-8810-C", dni: "20.111.222", nombre: "Roberto Acosta", ramo: "consorcio" },
+    turns: [
+      {
+        say: [
+          "Buenas tardes,",
+          "",
+          "Soy Roberto Acosta, administrador del consorcio de Av. Alem 2300, en Bahía Blanca, provincia de Buenos Aires.",
+          "Ayer se rompió una cañería del tanque de agua, se inundó el hall de entrada y el ascensor quedó fuera de servicio.",
+          "La póliza del consorcio es POL-8810-C.",
+          "",
+          "Saludos,",
+          "Roberto",
+        ].join("\n"),
+        expect: { replies: 1, noAsked: ["patente_vehiculo"] },
+      },
+    ],
+    finally: { knows: ["policy_number", "full_name"], ramo: "consorcio" },
+  },
+
+  {
     id: "recordatorio-por-mail",
     channel: "email",
     what: "Queda esperando datos y no contesta: a las 48 h y a los 5 días se le repite el pedido, una sola vez cada uno (B4)",
@@ -1063,11 +1103,14 @@ async function seedPolicyFor(
       tenant_id: TENANT_ID!,
       customer_id: customerId,
       policy_number: policy.numero,
-      policy_type: "auto",
+      policy_type: policyTypeDeRamo(policy.ramo),
       status: "active",
       end_date: policy.vencida ? "2020-03-01" : "2099-01-01",
     })
     .returning({ id: policies.id });
+
+  // Un consorcio o una ART no tienen vehículo: sembrarle uno le haría preguntar por él.
+  if (policy.ramo && policyTypeDeRamo(policy.ramo) !== "auto") return;
 
   await db.insert(insuredAssets).values({
     tenant_id: TENANT_ID!,
@@ -1650,7 +1693,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
     if (caseId && scenario.finally) {
       const want = scenario.finally;
       const [row] = await db
-        .select({ status: cases.status, indicios: cases.fraud_indicators })
+        .select({ status: cases.status, indicios: cases.fraud_indicators, ramo: cases.claim_type })
         .from(cases)
         .where(eq(cases.id, caseId));
       if (want.status && !fotosSinEnsayar && row?.status !== want.status) {
@@ -1709,6 +1752,10 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
       );
       for (const tipo of want.indicios ?? []) {
         if (!tipos.has(tipo)) note(scenario.id, 0, `no marcó el indicio ${tipo}`, `indicio:${tipo}`);
+      }
+
+      if (want.ramo !== undefined && row?.ramo !== want.ramo) {
+        note(scenario.id, 0, `ramo ${row?.ramo ?? "sin clasificar"}, esperaba ${want.ramo}`, "ramo");
       }
 
       if (want.responsabilidad !== undefined) {

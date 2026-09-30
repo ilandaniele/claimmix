@@ -435,9 +435,9 @@ describe("consultaDeActividad — el SQL que arma", () => {
     expect(params).toEqual(expect.arrayContaining(["day", "YYYY-MM-DD"]));
   });
 
-  it("las seis series cuentan sólo WhatsApp y mail reales, sin simulaciones", () => {
-    expect(sql).toMatch(/"cases"\."channel" in \(\$\d+, \$\d+\)/);
-    expect(params).toEqual(expect.arrayContaining(["whatsapp", "email"]));
+  it("las seis series cuentan sólo los canales reales (WhatsApp, mail y web), sin simulaciones", () => {
+    expect(sql).toMatch(/"cases"\."channel" in \(\$\d+, \$\d+, \$\d+\)/);
+    expect(params).toEqual(expect.arrayContaining(["whatsapp", "email", "web"]));
     expect(params.filter((p) => String(p).endsWith("_sim"))).toEqual([]);
   });
 

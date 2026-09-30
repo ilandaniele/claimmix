@@ -168,7 +168,7 @@ describe("buildByType", () => {
   });
 });
 
-describe("byType bars (G33 — métricas muestra los 9 tipos)", () => {
+describe("byType bars (G33 — métricas muestra todos los tipos)", () => {
   const t = getT("es-AR");
 
   it('by_type {cristales:3} renders "Cristales"', () => {
@@ -186,10 +186,12 @@ describe("byType bars (G33 — métricas muestra los 9 tipos)", () => {
     expect(sum).toBe(totalByType);
   });
 
-  it("cubre los 9 tipos, no sólo los 4 de antes", () => {
+  it("cubre todos los tipos del esquema, con la etiqueta de cada uno, no sólo los 4 de antes", () => {
     const bars = buildTypeBars({}, t);
-    expect(bars).toHaveLength(9);
-    expect(bars.map((b) => b.key)).toContain("cristales");
-    expect(bars.map((b) => b.key)).toContain("robo_contenido");
+    expect(bars).toHaveLength(ClaimTypeSchema.options.length);
+    for (const clave of ["cristales", "robo_contenido", "art", "vida", "integral_comercio", "consorcio"]) {
+      expect(bars.map((b) => b.key)).toContain(clave);
+    }
+    for (const b of bars) expect(b.label, b.key).not.toMatch(/^type\./);
   });
 });
